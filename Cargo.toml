@@ -1,0 +1,10 @@
+[package]
+name = "quiche"
+version = "0.1.0"
+authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
+build = "src/build.rs"
+
+[dependencies]
+libc = "0.2"
+ring = { git = "https://github.com/ghedo/ring", branch = "unauthenticated_stream_aes" }
+lazy_static = "1.1"
