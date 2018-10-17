@@ -24,11 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::cmp;
-use std::mem;
-use std::result;
-use std::option::Option;
-
 extern crate core;
 extern crate libc;
 extern crate ring;
@@ -36,13 +31,11 @@ extern crate ring;
 #[macro_use]
 extern crate lazy_static;
 
-pub mod packet;
-pub mod rand;
-
-mod crypto;
-mod frame;
-mod tls;
-mod octets;
+use std::cmp;
+use std::mem;
+use std::result;
+use std::option::Option;
+use std::collections::HashMap;
 
 pub const VERSION_DRAFT14: u32 = 0xff00000e;
 
@@ -54,6 +47,7 @@ pub enum Error {
     UnknownVersion,
     UnknownPacket,
     UnknownFrame,
+    UnknownStream,
     BufferTooShort,
     InvalidPacket,
     InvalidState,
@@ -104,6 +98,8 @@ pub struct Conn {
 
     tls_state: tls::State,
 
+    streams: HashMap<u64, stream::Stream>,
+
     is_server: bool,
 }
 
@@ -134,6 +130,8 @@ impl Conn {
             local_transport_params: config.local_transport_params.clone(),
 
             tls_state: tls,
+
+            streams: HashMap::new(),
 
             is_server,
         });
@@ -268,7 +266,20 @@ impl Conn {
                     ack_only = false;
                 },
 
-                frame::Frame::Stream { .. } => {
+                frame::Frame::Stream { stream_id, offset, data, fin: _ } => {
+                    let stream = {
+                        if !self.streams.contains_key(&stream_id) {
+                            // TODO: enforce stream limits
+                            let stream = stream::Stream::new();
+                            self.streams.insert(stream_id, stream);
+                        }
+
+                        self.streams.get_mut(&stream_id).unwrap()
+                    };
+
+                    // TODO: enforce flow control
+                    stream.push_recv(data.as_ref(), offset as usize)?;
+
                     ack_only = false;
                 },
             }
@@ -338,7 +349,6 @@ impl Conn {
         let pn = space.last_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
 
-        // Determine packet number.
         space.last_pkt_num += 1;
 
         // Calculate remaining available space for the payload, excluding
@@ -413,6 +423,117 @@ impl Conn {
 
         let written = payload_offset + payload_len;
         Ok(written)
+    }
+
+    pub fn stream_recv(&mut self, stream_id: u64, buf: &mut [u8]) -> Result<usize> {
+        let stream = match self.streams.get_mut(&stream_id) {
+            Some(v) => v,
+            None => return Err(Error::UnknownStream),
+        };
+
+        if !stream.can_read() {
+            return Ok(0);
+        }
+
+        stream.pop_recv(buf)
+    }
+
+    pub fn stream_send(&mut self, stream_id: u64, buf: &mut [u8], fin: bool,
+                       out: &mut [u8]) -> Result<usize> {
+        let stream = match self.streams.get_mut(&stream_id) {
+            Some(v) => v,
+            None => return Err(Error::UnknownStream),
+        };
+
+        // TODO: respect peer's flow control
+        let offset = stream.push_send(buf)?;
+
+        // TODO: refactor to avoid duplication with send()
+        if out.is_empty() {
+            return Err(Error::BufferTooShort);
+        }
+
+        if self.state != State::Established {
+            return Err(Error::InvalidState);
+        }
+
+        let max_pkt_len = match self.peer_transport_params {
+            Some(ref v) => v.max_packet_size as usize,
+            None        => return Err(Error::InvalidState),
+        };
+
+        // Cap output buffer to respect peer's max_packet_size.
+        let avail = cmp::min(max_pkt_len, out.len());
+
+        let mut b = octets::Bytes::new(&mut out[..avail]);
+
+        // Select packet number space context depending on whether there is
+        // handshake data to send, or whether there are packets to ACK.
+        let space = &mut self.application;
+
+        let hdr = packet::Header {
+            ty: space.pkt_type,
+            version: self.version,
+            flags: 0,
+            dcid: self.dcid.clone(),
+            scid: self.scid.clone(),
+            token: None,
+        };
+
+        packet::Header::short_to_bytes(&hdr, &mut b)?;
+
+        let pn = space.last_pkt_num;
+        let pn_len = packet::pkt_num_len(pn)?;
+
+        space.last_pkt_num += 1;
+
+        // Calculate remaining available space for the payload, excluding
+        // payload length, pkt num and AEAD oerhead..
+        let left = b.cap() - 4 - pn_len - space.overhead();
+
+        let overhead = space.overhead();
+
+        let stream_len = cmp::min(buf.len(), left);
+        let stream_data = octets::Bytes::new(&mut buf[..stream_len]);
+
+        // Create STREAM frame.
+        let frame = frame::Frame::Stream {
+            stream_id: stream_id,
+            offset: offset as u64,
+            data: stream_data,
+            fin: fin,
+        };
+
+        // Calculate payload length.
+        let length = pn_len + overhead + frame.wire_len();
+
+        packet::encode_pkt_num(pn, &mut b)?;
+
+        let payload_len = length - pn_len;
+
+        let payload_offset = b.off();
+
+        frame.to_bytes(&mut b)?;
+
+        let aead = match space.crypto_seal {
+            Some(ref v) => v,
+            None        => return Err(Error::InvalidState),
+        };
+
+        let (mut header, mut payload) = b.split_at(payload_offset)?;
+
+        let ciphertext = payload.slice(payload_len)?;
+        packet::encrypt_pkt(ciphertext, pn, header.as_ref(), aead)?;
+
+        aead.xor_keystream(&ciphertext[4 - pn_len..16 + (4 - pn_len)],
+                           header.slice_last(pn_len)?)?;
+
+        let written = payload_offset + payload_len;
+        Ok(written)
+    }
+
+    pub fn stream_iter(&mut self) -> stream::StreamIterator {
+        stream::StreamIterator::new(self.streams.iter())
     }
 
     fn do_handshake(&mut self) -> Result<()> {
@@ -701,3 +822,12 @@ mod tests {
         assert_eq!(new_tp.stateless_reset_token, tp.stateless_reset_token);
     }
 }
+
+pub mod packet;
+pub mod rand;
+
+mod crypto;
+mod frame;
+mod stream;
+mod tls;
+mod octets;

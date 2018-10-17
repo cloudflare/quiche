@@ -132,5 +132,28 @@ fn main() {
 
             println!("WRITTEN {}", write);
         }
+
+        let streams: Vec<u64> = conn.stream_iter().collect();
+        for s in streams {
+            let mut stream_data: [u8; 512] = [0; 512];
+
+            let len = match conn.stream_recv(s, &mut stream_data) {
+                Ok(v) => v,
+                Err(e) => panic!("STREAM RECV FAILED {:?}", e),
+            };
+
+            let woot = String::from_utf8_lossy(&stream_data[..len]);
+            println!("RECV {} BYTES FROM STREAM {}: {}", len, s, woot);
+
+            let mut resp: [u8; 25] = *b"WOOOO0000000000000000000T";
+            let write = match conn.stream_send(s, &mut resp, true, &mut out) {
+                Ok(v) => v,
+                Err(e) => panic!("STREAM SEND FAILED {:?}", e),
+            };
+
+            socket.send_to(&out[..write], &src).unwrap();
+
+            println!("STREAM WRITTEN {}", write);
+        }
     }
 }
