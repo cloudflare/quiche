@@ -175,24 +175,23 @@ impl Conn {
             return Err(Error::BufferTooShort);
         }
 
+        // Derive initial secrets
+        if self.state == State::Idle {
+            let (aead_open, aead_seal) =
+                crypto::derive_initial_key_material(&hdr.dcid,
+                                                    self.is_server)?;
+
+            self.dcid.extend_from_slice(&hdr.scid);
+
+            self.initial.crypto_open = Some(aead_open);
+            self.initial.crypto_seal = Some(aead_seal);
+
+            self.state = State::Initial;
+        }
+
         // Select packet number space context.
         let space = match hdr.ty {
-            packet::Type::Initial => {
-                if self.state == State::Idle {
-                    let (aead_open, aead_seal) =
-                        crypto::derive_initial_key_material(&hdr.dcid,
-                                                            self.is_server)?;
-
-                    self.dcid.extend_from_slice(&hdr.scid);
-
-                    self.initial.crypto_open = Some(aead_open);
-                    self.initial.crypto_seal = Some(aead_seal);
-
-                    self.state = State::Initial;
-                }
-
-                &mut self.initial
-            },
+            packet::Type::Initial => &mut self.initial,
 
             packet::Type::Handshake => &mut self.handshake,
 
@@ -256,14 +255,17 @@ impl Conn {
                 frame::Frame::ACK { .. } => (),
 
                 frame::Frame::Crypto { data } => {
+                    // Push the data to the stream so it can be re-ordered.
                     space.crypto_stream.push_recv(data)?;
 
-                    let crypto_level = space.crypto_level;
-
-                    while space.crypto_stream.can_read() {
+                    // Feed crypto data to the TLS state, if there's data
+                    // available at the expected offset.
+                    if space.crypto_stream.can_read() {
                         let buf = space.crypto_stream.pop_recv()?;
+                        let level = space.crypto_level;
 
-                        self.tls_state.provide_data(crypto_level, &buf)
+
+                        self.tls_state.provide_data(level, &buf)
                                       .map_err(|_e| Error::TlsFail)?;
                     }
 
@@ -271,6 +273,7 @@ impl Conn {
                 },
 
                 frame::Frame::Stream { stream_id, data, .. } => {
+                    // Get existing stream or create a new one.
                     let stream = self.streams.entry(stream_id).or_insert_with(|| {
                         // TODO: enforce stream limits
                         stream::Stream::new()
@@ -308,7 +311,7 @@ impl Conn {
             None        => return Err(Error::InvalidState),
         };
 
-        // Cap output buffer to respect peer's max_packet_size.
+        // Cap output buffer to respect peer's max_packet_size limit.
         let avail = cmp::min(max_pkt_len, out.len());
 
         let mut b = octets::Bytes::new(&mut out[..avail]);
@@ -358,7 +361,7 @@ impl Conn {
         let mut length = pn_len + space.overhead();
 
         // Calculate remaining available space for the payload, excluding
-        // payload length, pkt num and AEAD oerhead..
+        // payload length, pkt num and AEAD oerhead.
         let mut left = b.cap() - 4 - length;
 
         let mut frames: Vec<frame::Frame> = Vec::new();
@@ -474,6 +477,7 @@ impl Conn {
         if self.state != State::Established {
             match self.tls_state.do_handshake() {
                 Ok(_)                             => {
+                    // Handshake is complete!
                     self.state = State::Established
                 },
 
