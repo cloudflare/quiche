@@ -25,9 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::ffi;
-use std::option;
 use std::ptr;
-use std::result;
 use std::slice;
 
 use libc;
@@ -36,7 +34,7 @@ use ::Conn;
 
 use crypto;
 
-pub type Result<T> = result::Result<T, Error>;
+pub type Result<T> = ::std::result::Result<T, Error>;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Error {
@@ -256,7 +254,7 @@ impl Drop for State {
     }
 }
 
-fn get_ex_data_from_ptr<'a, T>(ptr: *mut SSL, idx: i32) -> option::Option<&'a mut T> {
+fn get_ex_data_from_ptr<'a, T>(ptr: *mut SSL, idx: i32) -> Option<&'a mut T> {
     unsafe {
         let data = SSL_get_ex_data(ptr, idx);
         if data.is_null() {
