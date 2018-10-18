@@ -259,12 +259,11 @@ impl Conn {
                     space.crypto_stream.push_recv(data.as_ref(), offset as usize)?;
 
                     let crypto_level = space.crypto_level;
-                    let mut crypto_buf: [u8; 128] = [0; 128];
 
                     while space.crypto_stream.can_read() {
-                        space.crypto_stream.pop_recv(&mut crypto_buf)?;
+                        let buf = space.crypto_stream.pop_recv()?;
 
-                        self.tls_state.provide_data(crypto_level, &crypto_buf)
+                        self.tls_state.provide_data(crypto_level, &buf)
                                       .map_err(|_e| Error::TlsFail)?;
                     }
 
@@ -425,17 +424,17 @@ impl Conn {
         Ok(written)
     }
 
-    pub fn stream_recv(&mut self, stream_id: u64, buf: &mut [u8]) -> Result<usize> {
+    pub fn stream_recv(&mut self, stream_id: u64) -> Result<stream::RangeBuf> {
         let stream = match self.streams.get_mut(&stream_id) {
             Some(v) => v,
             None => return Err(Error::UnknownStream),
         };
 
         if !stream.can_read() {
-            return Ok(0);
+            return Ok(stream::RangeBuf::default());
         }
 
-        stream.pop_recv(buf)
+        stream.pop_recv()
     }
 
     pub fn stream_send(&mut self, stream_id: u64, buf: &mut [u8], fin: bool,

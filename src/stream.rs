@@ -30,6 +30,7 @@ use std::cmp;
 use std::collections::hash_map;
 use std::collections::BinaryHeap;
 use std::collections::VecDeque;
+use std::ops::Deref;
 
 #[derive(Default)]
 pub struct Stream {
@@ -46,8 +47,8 @@ impl Stream {
         self.recv.push(data, off)
     }
 
-    pub fn pop_recv(&mut self, data: &mut [u8]) -> Result<usize> {
-        self.recv.pop(data)
+    pub fn pop_recv(&mut self) -> Result<RangeBuf> {
+        self.recv.pop()
     }
 
     pub fn push_send(&mut self, data: &[u8]) -> Result<usize> {
@@ -112,36 +113,22 @@ impl RecvBuf {
         Ok(())
     }
 
-    fn pop(&mut self, out: &mut [u8]) -> Result<usize> {
-        let mut out_len = out.len();
-        let mut out_off = 0;
+    fn pop(&mut self) -> Result<RangeBuf> {
+        let mut out = RangeBuf::default();
 
-        while out_len > 0 && self.ready() {
+        while self.ready() {
             let mut buf = match self.data.pop() {
                 Some(v) => v,
                 None => break,
             };
 
-            if buf.len() > out_len {
-                let new = RangeBuf {
-                    data: buf.data.split_off(out_len),
-                    off: buf.off + out_len,
-                };
-
-                self.data.push(new);
-            }
-
-            let out = &mut out[out_off .. out_off + buf.len()];
-            out.copy_from_slice(&buf.data);
-
-            out_len -= buf.len();
-            out_off += buf.len();
-
             self.off += buf.len();
             self.len -= buf.len();
+
+            out.data.append(&mut buf.data);
         }
 
-        Ok(out_off)
+        Ok(out)
     }
 
     fn ready(&self) -> bool {
@@ -185,15 +172,27 @@ impl SendBuf {
     // }
 }
 
-#[derive(Eq)]
-struct RangeBuf {
+#[derive(Default, Eq)]
+pub struct RangeBuf {
     data: Vec<u8>,
     off: usize,
 }
 
 impl RangeBuf {
+    pub fn off(&self) -> usize {
+        self.off
+    }
+
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+}
+
+impl Deref for RangeBuf {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.data
     }
 }
 
@@ -225,9 +224,8 @@ mod tests {
         let mut buf = RecvBuf::default();
         assert_eq!(buf.len(), 0);
 
-        let mut out: [u8; 10] = [0; 10];
-        let read = buf.pop(&mut out);
-        assert_eq!(read, Ok(0));
+        let read = buf.pop().unwrap();
+        assert_eq!(read.len(), 0);
     }
 
     #[test]
@@ -242,9 +240,8 @@ mod tests {
         assert!(buf.push(&second, 5).is_ok());
         assert_eq!(buf.len(), 10);
 
-        let mut out: [u8; 10] = [0; 10];
-        let read = buf.pop(&mut out);
-        assert_eq!(read, Ok(0));
+        let read = buf.pop().unwrap();
+        assert_eq!(read.len(), 0);
 
         assert!(buf.push(&third, 10).is_ok());
         assert_eq!(buf.len(), 19);
@@ -252,18 +249,17 @@ mod tests {
         assert!(buf.push(&first, 0).is_ok());
         assert_eq!(buf.len(), 19);
 
-        let mut out: [u8; 20] = [0; 20];
-        let read = buf.pop(&mut out);
-        assert_eq!(read, Ok(19));
-        assert_eq!(&out[..19], b"helloworldsomething");
+        let read = buf.pop().unwrap();
+        assert_eq!(read.len(), 19);
+        assert_eq!(&read[..], b"helloworldsomething");
         assert_eq!(buf.len(), 0);
 
-        let read = buf.pop(&mut out);
-        assert_eq!(read, Ok(0));
+        let read = buf.pop().unwrap();
+        assert_eq!(read.len(), 0);
     }
 
     #[test]
-    fn split_read() {
+    fn incomplete_read() {
         let mut buf = RecvBuf::default();
         assert_eq!(buf.len(), 0);
 
@@ -273,19 +269,15 @@ mod tests {
         assert!(buf.push(&second, 9).is_ok());
         assert_eq!(buf.len(), 19);
 
+        let read = buf.pop().unwrap();
+        assert_eq!(read.len(), 0);
+
         assert!(buf.push(&first, 0).is_ok());
         assert_eq!(buf.len(), 19);
 
-        let mut out: [u8; 14] = [0; 14];
-        let read = buf.pop(&mut out);
-        assert_eq!(read, Ok(14));
-        assert_eq!(&out, b"somethinghello");
-        assert_eq!(buf.len(), 5);
-
-        let mut out: [u8; 10] = [0; 10];
-        let read = buf.pop(&mut out);
-        assert_eq!(read, Ok(5));
-        assert_eq!(&out[0..5], b"world");
+        let read = buf.pop().unwrap();
+        assert_eq!(read.len(), 19);
+        assert_eq!(&read[..], b"somethinghelloworld");
         assert_eq!(buf.len(), 0);
     }
 }
