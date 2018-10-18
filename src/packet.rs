@@ -254,35 +254,21 @@ pub fn pkt_num_len(pn: u64) -> Result<usize> {
     Ok(len)
 }
 
-// TODO: make this function not horrible
 pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
                                                     -> Result<(u64,usize)> {
-    let mut plaintext: [u8; 4] = [0; 4];
-    {
-        let in_buf = b.as_ref();
-        plaintext.copy_from_slice(&in_buf[..4]);
-    }
+    let mut pn_and_sample = b.peek_bytes(20)?;
 
-    {
-        let sample = match b.peek_bytes(20) {
-            Ok(mut v) => {
-                // The packet sample used for packet number decryption starts
-                // *after* the packet number itself, so we need to skip the pn
-                // first.
-                v.skip(4)?;
+    let (mut ciphertext, sample) = pn_and_sample.split_at(4).unwrap();
 
-                v
-            },
+    let ciphertext = ciphertext.as_mut();
 
-            Err(_) => return Err(Error::BufferTooShort),
-        };
+    // Decrypt first byte of pkt num into separate buffer to get length.
+    let mut pn_len_ciphertext: [u8; 1] = [0; 1];
+    pn_len_ciphertext.copy_from_slice(&ciphertext[..1]);
 
-        aead.xor_keystream(sample.as_ref(), &mut plaintext)?;
-    }
+    aead.xor_keystream(sample.as_ref(), &mut pn_len_ciphertext)?;
 
-    let mut outb = octets::Bytes::new(&mut plaintext);
-
-    let first = outb.peek_u8()?;
+    let first = pn_len_ciphertext[0];
 
     let len = if first >> 7 == 0 {
         1
@@ -295,25 +281,26 @@ pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
         }
     };
 
-    let yet_another_copy = outb.to_vec();
+    // Decrypt full pkt num in-place.
+    aead.xor_keystream(sample.as_ref(), &mut ciphertext[..len])?;
 
-    {
-        // Mask the 2 most significant bits to remove the encoded length.
-        let vec = outb.as_mut();
-        vec[0] &= 0x3f;
+    let mut plaintext: [u8; 4] = [0; 4];
+    plaintext.copy_from_slice(&ciphertext[..4]);
+
+    // Mask the 2 most significant bits to remove the encoded length.
+    if len > 1 {
+        plaintext[0] &= 0x3f;
     }
 
-    // Extract packet number corresponding to the decoded length, and write
-    // result back to the original packet buffer (this is needed for later
-    // decryption of the packet payload).
+    let mut b = octets::Bytes::new(&mut plaintext);
+
+    // Extract packet number corresponding to the decoded length.
     let out = match len {
-        1 => u64::from(outb.get_u8()?),
-        2 => u64::from(outb.get_u16()?),
-        4 => u64::from(outb.get_u32()?),
+        1 => u64::from(b.get_u8()?),
+        2 => u64::from(b.get_u16()?),
+        4 => u64::from(b.get_u32()?),
         _ => return Err(Error::InvalidPacket),
     };
-
-    b.put_bytes(&yet_another_copy[..len]).unwrap();
 
     // TODO: implement packet number truncation
     Ok((out as u64, len))
@@ -468,6 +455,7 @@ mod tests {
             crypto::derive_initial_key_material(&hdr.dcid, true).unwrap();
 
         let (pn, pn_len) = decrypt_pkt_num(&mut b, &aead_open).unwrap();
+        b.skip(pn_len).unwrap();
 
         let payload_offset = b.off();
 

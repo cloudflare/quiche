@@ -209,6 +209,7 @@ impl Conn {
         };
 
         let (pn, pn_len) = packet::decrypt_pkt_num(&mut b, &aead)?;
+        b.skip(pn_len)?;
 
         let payload_offset = b.off();
 
