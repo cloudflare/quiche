@@ -34,13 +34,14 @@ macro_rules! peek_u {
     ($b:expr, $ty:ty) => ({
         let len = mem::size_of::<$ty>();
 
-        if $b.cap() < len {
+        let src = &$b.buf[$b.off..];
+
+        if src.len() < len {
             return Err(Error::BufferTooShort);
         }
 
         let out = unsafe {
-            let src = (&$b.buf[$b.off..$b.off + len]).as_ptr();
-            ptr::read_unaligned(src as *const $ty)
+            ptr::read_unaligned(src.as_ptr() as *const $ty)
         };
 
         Ok(<$ty>::from_be(out))
@@ -62,19 +63,19 @@ macro_rules! put_u {
     ($b:expr, $ty:ty, $v:expr) => ({
         let len = mem::size_of::<$ty>();
 
-        if $b.cap() < len {
+        let dst = &mut $b.buf[$b.off..];
+
+        if dst.len() < len {
             return Err(Error::BufferTooShort)
         }
 
         unsafe {
-            let src = &$v as *const $ty as *const u8;
-            let dst = (&mut $b.buf[$b.off..$b.off + len]).as_mut_ptr();
-            ptr::copy_nonoverlapping(src, dst, len);
+            ptr::write_unaligned(dst.as_mut_ptr() as *mut $ty, <$ty>::to_be($v));
         }
 
         $b.off += len;
 
-        Ok(&mut $b.buf[$b.off - len..])
+        Ok(dst)
     });
 }
 
@@ -123,7 +124,7 @@ impl<'a> Bytes<'a> {
     }
 
     pub fn put_u16(&mut self, v: u16) -> Result<&mut [u8]> {
-        put_u!(self, u16, v.to_be())
+        put_u!(self, u16, v)
     }
 
     pub fn get_u32(&mut self) -> Result<u32> {
@@ -135,7 +136,7 @@ impl<'a> Bytes<'a> {
     }
 
     pub fn put_u32(&mut self, v: u32) -> Result<&mut [u8]> {
-        put_u!(self, u32, v.to_be())
+        put_u!(self, u32, v)
     }
 
     pub fn get_u64(&mut self) -> Result<u64> {
@@ -143,7 +144,7 @@ impl<'a> Bytes<'a> {
     }
 
     pub fn put_u64(&mut self, v: u64) -> Result<&mut [u8]> {
-        put_u!(self, u64, v.to_be())
+        put_u!(self, u64, v)
     }
 
     pub fn get_varint(&mut self) -> Result<u64> {
