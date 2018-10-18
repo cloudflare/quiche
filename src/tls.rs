@@ -357,7 +357,6 @@ extern fn write_message(ssl: *mut SSL, level: crypto::Level, data: *const u8,
         crypto::Level::Application => &mut conn.application,
     };
 
-    // TODO: use a proper stream data structure once it's implemented.
     let crypto_buf = &mut space.crypto_buf;
     crypto_buf.extend_from_slice(buf);
 

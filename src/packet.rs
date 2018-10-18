@@ -32,6 +32,7 @@ use ::Error;
 use octets;
 use crypto;
 use rand;
+use stream;
 
 const FORM_BIT: u8 = 0x80;
 const KEY_PHASE_BIT: u8 = 0x40;
@@ -379,6 +380,8 @@ pub struct PktNumSpace {
     pub crypto_open: Option<crypto::Open>,
     pub crypto_seal: Option<crypto::Seal>,
 
+    pub crypto_stream: stream::Stream,
+
     pub crypto_offset: usize,
     pub crypto_buf: Vec<u8>,
 }
@@ -398,6 +401,8 @@ impl PktNumSpace {
 
             crypto_open: None,
             crypto_seal: None,
+
+            crypto_stream: stream::Stream::new(),
 
             crypto_offset: 0,
             crypto_buf: Vec::new(),

@@ -255,11 +255,17 @@ impl Conn {
                 // TODO: implement ack and retransmission.
                 frame::Frame::ACK { .. } => (),
 
-                frame::Frame::Crypto { data, .. } => {
-                    match self.tls_state.provide_data(space.crypto_level,
-                                                      data.as_ref()) {
-                        Ok(_)  => (),
-                        Err(_) => return Err(Error::TlsFail),
+                frame::Frame::Crypto { offset, data } => {
+                    space.crypto_stream.push_recv(data.as_ref(), offset as usize)?;
+
+                    let crypto_level = space.crypto_level;
+                    let mut crypto_buf: [u8; 128] = [0; 128];
+
+                    while space.crypto_stream.can_read() {
+                        space.crypto_stream.pop_recv(&mut crypto_buf)?;
+
+                        self.tls_state.provide_data(crypto_level, &crypto_buf)
+                                      .map_err(|_e| Error::TlsFail)?;
                     }
 
                     ack_only = false;
