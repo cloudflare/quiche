@@ -31,6 +31,7 @@ use std::collections::hash_map;
 use std::collections::BinaryHeap;
 use std::collections::VecDeque;
 
+#[derive(Default)]
 pub struct Stream {
     recv: RecvBuf,
     send: SendBuf,
@@ -38,10 +39,7 @@ pub struct Stream {
 
 impl Stream {
     pub fn new() -> Stream {
-        Stream {
-            recv: RecvBuf::new(),
-            send: SendBuf::new(),
-        }
+        Self::default()
     }
 
     pub fn push_recv(&mut self, data: &[u8], off: usize) -> Result<()> {
@@ -93,6 +91,7 @@ impl<'a> Iterator for StreamIterator<'a> {
     }
 }
 
+#[derive(Default)]
 struct RecvBuf {
     data: BinaryHeap<RangeBuf>,
     off: usize,
@@ -100,18 +99,10 @@ struct RecvBuf {
 }
 
 impl RecvBuf {
-    fn new() -> RecvBuf {
-        RecvBuf {
-            data: BinaryHeap::new(),
-            off: 0,
-            len: 0,
-        }
-    }
-
     fn push(&mut self, data: &[u8], off: usize) -> Result<()> {
         let buf = RangeBuf {
             data: Vec::from(data),
-            off: off,
+            off,
         };
 
         self.len = cmp::max(self.len, buf.off + buf.len());
@@ -167,19 +158,13 @@ impl RecvBuf {
     }
 }
 
+#[derive(Default)]
 struct SendBuf {
     data: VecDeque<RangeBuf>,
     off: usize,
 }
 
 impl SendBuf {
-    fn new() -> SendBuf {
-        SendBuf {
-            data: VecDeque::new(),
-            off: 0,
-        }
-    }
-
     fn push(&mut self, data: &[u8]) -> Result<usize> {
         let buf = RangeBuf {
             data: Vec::from(data),
@@ -237,7 +222,7 @@ mod tests {
 
     #[test]
     fn empty_read() {
-        let mut buf = RecvBuf::new();
+        let mut buf = RecvBuf::default();
         assert_eq!(buf.len(), 0);
 
         let mut out: [u8; 10] = [0; 10];
@@ -247,7 +232,7 @@ mod tests {
 
     #[test]
     fn ordered_read() {
-        let mut buf = RecvBuf::new();
+        let mut buf = RecvBuf::default();
         assert_eq!(buf.len(), 0);
 
         let first: [u8; 5] = *b"hello";
@@ -279,7 +264,7 @@ mod tests {
 
     #[test]
     fn split_read() {
-        let mut buf = RecvBuf::new();
+        let mut buf = RecvBuf::default();
         assert_eq!(buf.len(), 0);
 
         let first: [u8; 9] = *b"something";

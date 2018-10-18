@@ -210,7 +210,7 @@ impl<'a> Frame<'a> {
                     ty |= 0x01;
                 }
 
-                b.put_varint(ty as u64)?;
+                b.put_varint(u64::from(ty))?;
 
                 b.put_varint(*stream_id)?;
                 b.put_varint(*offset)?;
@@ -228,7 +228,7 @@ impl<'a> Frame<'a> {
         match self {
             Frame::Padding => 1, // type
 
-            Frame::ConnectionClose { error_code: _, frame_type, reason } => {
+            Frame::ConnectionClose { frame_type, reason, .. } => {
                 1 +                                // frame type
                 2 +                                // error_code
                 octets::varint_len(*frame_type) +  // frame_type
@@ -236,7 +236,7 @@ impl<'a> Frame<'a> {
                 reason.len()                       // reason
             },
 
-            Frame::ApplicationClose { error_code: _, reason } => {
+            Frame::ApplicationClose { reason, .. } => {
                 1 +                                // frame type
                 2 +                                // error_code
                 octets::varint_len(reason.len() as u64) + // reason_len
