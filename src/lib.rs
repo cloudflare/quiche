@@ -255,7 +255,7 @@ impl Conn {
                 // TODO: implement ack and retransmission.
                 frame::Frame::ACK { .. } => (),
 
-                frame::Frame::Crypto { offset: _, data } => {
+                frame::Frame::Crypto { data, .. } => {
                     match self.tls_state.provide_data(space.crypto_level,
                                                       data.as_ref()) {
                         Ok(_)  => (),
@@ -265,7 +265,7 @@ impl Conn {
                     ack_only = false;
                 },
 
-                frame::Frame::Stream { stream_id, offset, data, fin: _ } => {
+                frame::Frame::Stream { stream_id, offset, data, .. } => {
                     let stream = self.streams.entry(stream_id).or_insert_with(|| {
                         // TODO: enforce stream limits
                         stream::Stream::new()
@@ -492,10 +492,10 @@ impl Conn {
 
         // Create STREAM frame.
         let frame = frame::Frame::Stream {
-            stream_id: stream_id,
+            stream_id,
             offset: offset as u64,
             data: stream_data,
-            fin: fin,
+            fin,
         };
 
         // Calculate payload length.
