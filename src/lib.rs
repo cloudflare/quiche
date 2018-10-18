@@ -255,8 +255,8 @@ impl Conn {
                 // TODO: implement ack and retransmission.
                 frame::Frame::ACK { .. } => (),
 
-                frame::Frame::Crypto { offset, data } => {
-                    space.crypto_stream.push_recv(data.as_ref(), offset as usize)?;
+                frame::Frame::Crypto { data } => {
+                    space.crypto_stream.push_recv(data)?;
 
                     let crypto_level = space.crypto_level;
 
@@ -270,14 +270,14 @@ impl Conn {
                     ack_only = false;
                 },
 
-                frame::Frame::Stream { stream_id, offset, data, .. } => {
+                frame::Frame::Stream { stream_id, data, .. } => {
                     let stream = self.streams.entry(stream_id).or_insert_with(|| {
                         // TODO: enforce stream limits
                         stream::Stream::new()
                     });
 
                     // TODO: enforce flow control
-                    stream.push_recv(data.as_ref(), offset as usize)?;
+                    stream.push_recv(data)?;
 
                     ack_only = false;
                 },
@@ -316,13 +316,13 @@ impl Conn {
         // Select packet number space context depending on whether there is
         // handshake data to send, or whether there are packets to ACK.
         let space =
-            if self.initial.pending() > 0 ||
+            if self.initial.crypto_stream.can_write() ||
                self.initial.need_ack.len() > 0 {
                 &mut self.initial
-            } else if self.handshake.pending() > 0 ||
+            } else if self.handshake.crypto_stream.can_write() ||
                       self.handshake.need_ack.len() > 0 {
                 &mut self.handshake
-            } else if (self.application.pending() > 0 ||
+            } else if (self.application.crypto_stream.can_write() ||
                        self.application.need_ack.len() > 0) &&
                       self.state == State::Established {
                 &mut self.application
@@ -369,17 +369,11 @@ impl Conn {
         let overhead = space.overhead();
 
         // Create CRYPTO frame.
-        if space.pending() > 0 {
-            let crypto_len = cmp::min(left, space.pending());
-            let crypto_off = space.crypto_offset;
-
-            space.advance(crypto_len)?;
-
-            let crypto_buf = &mut space.crypto_buf[crypto_off..crypto_len];
+        if space.crypto_stream.can_write() {
+            let crypto_buf = space.crypto_stream.pop_send(left)?;
 
             let frame = frame::Frame::Crypto {
-                offset: crypto_off as u64,
-                data: octets::Bytes::new(crypto_buf),
+                data: crypto_buf,
             };
 
             frames.push(frame);
@@ -493,13 +487,11 @@ impl Conn {
         let overhead = space.overhead();
 
         let stream_len = cmp::min(buf.len(), left);
-        let stream_data = octets::Bytes::new(&mut buf[..stream_len]);
 
         // Create STREAM frame.
         let frame = frame::Frame::Stream {
             stream_id,
-            offset: offset as u64,
-            data: stream_data,
+            data: stream::RangeBuf::from(&buf[..stream_len], offset),
             fin,
         };
 

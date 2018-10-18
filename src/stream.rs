@@ -43,8 +43,8 @@ impl Stream {
         Self::default()
     }
 
-    pub fn push_recv(&mut self, data: &[u8], off: usize) -> Result<()> {
-        self.recv.push(data, off)
+    pub fn push_recv(&mut self, buf: RangeBuf) -> Result<()> {
+        self.recv.push(buf)
     }
 
     pub fn pop_recv(&mut self) -> Result<RangeBuf> {
@@ -55,8 +55,16 @@ impl Stream {
         self.send.push(data)
     }
 
+    pub fn pop_send(&mut self, max_len: usize) -> Result<RangeBuf> {
+        self.send.pop(max_len)
+    }
+
     pub fn can_read(&self) -> bool {
         self.recv.ready()
+    }
+
+    pub fn can_write(&self) -> bool {
+        self.send.ready()
     }
 }
 
@@ -100,12 +108,7 @@ struct RecvBuf {
 }
 
 impl RecvBuf {
-    fn push(&mut self, data: &[u8], off: usize) -> Result<()> {
-        let buf = RangeBuf {
-            data: Vec::from(data),
-            off,
-        };
-
+    fn push(&mut self, buf: RangeBuf) -> Result<()> {
         self.len = cmp::max(self.len, buf.off + buf.len());
 
         self.data.push(buf);
@@ -149,36 +152,64 @@ impl RecvBuf {
 struct SendBuf {
     data: VecDeque<RangeBuf>,
     off: usize,
+    len: usize,
 }
 
 impl SendBuf {
     fn push(&mut self, data: &[u8]) -> Result<usize> {
-        let buf = RangeBuf {
-            data: Vec::from(data),
-            off: self.off,
-        };
+        let buf = RangeBuf::from(data, self.off);
+
+        self.len += buf.len();
 
         self.data.push_back(buf);
 
         Ok(self.off)
     }
 
-    // fn peek(&mut self, out: &mut [u8]) -> Result<usize> {
+    fn pop(&mut self, max_len: usize) -> Result<RangeBuf> {
+        let mut out = RangeBuf::default();
+        let mut out_len = max_len;
 
-    // }
+        while out_len > 0 && self.ready() {
+            let mut buf = match self.data.pop_front() {
+                Some(v) => v,
+                None => break,
+            };
 
-    // fn drop(&mut self, out: &mut [u8]) -> Result<usize> {
+            self.off += buf.len();
+            self.len -= buf.len();
 
-    // }
+            out_len -= buf.len();
+
+            out.data.append(&mut buf.data);
+        }
+
+        Ok(out)
+    }
+
+    fn ready(&self) -> bool {
+        self.len() > 0
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
 }
 
-#[derive(Default, Eq)]
+#[derive(Debug, Default, Eq)]
 pub struct RangeBuf {
     data: Vec<u8>,
     off: usize,
 }
 
 impl RangeBuf {
+    pub fn from(buf: &[u8], off: usize) -> RangeBuf {
+        RangeBuf {
+            data: Vec::from(buf),
+            off,
+        }
+    }
+
     pub fn off(&self) -> usize {
         self.off
     }
@@ -233,20 +264,20 @@ mod tests {
         let mut buf = RecvBuf::default();
         assert_eq!(buf.len(), 0);
 
-        let first: [u8; 5] = *b"hello";
-        let second: [u8; 5] = *b"world";
-        let third: [u8; 9] = *b"something";
+        let first = RangeBuf::from(b"hello", 0);
+        let second = RangeBuf::from(b"world", 5);
+        let third = RangeBuf::from(b"something", 10);
 
-        assert!(buf.push(&second, 5).is_ok());
+        assert!(buf.push(second).is_ok());
         assert_eq!(buf.len(), 10);
 
         let read = buf.pop().unwrap();
         assert_eq!(read.len(), 0);
 
-        assert!(buf.push(&third, 10).is_ok());
+        assert!(buf.push(third).is_ok());
         assert_eq!(buf.len(), 19);
 
-        assert!(buf.push(&first, 0).is_ok());
+        assert!(buf.push(first).is_ok());
         assert_eq!(buf.len(), 19);
 
         let read = buf.pop().unwrap();
@@ -263,21 +294,75 @@ mod tests {
         let mut buf = RecvBuf::default();
         assert_eq!(buf.len(), 0);
 
-        let first: [u8; 9] = *b"something";
-        let second: [u8; 10] = *b"helloworld";
+        let first = RangeBuf::from(b"something", 0);
+        let second = RangeBuf::from(b"helloworld", 9);
 
-        assert!(buf.push(&second, 9).is_ok());
+        assert!(buf.push(second).is_ok());
         assert_eq!(buf.len(), 19);
 
         let read = buf.pop().unwrap();
         assert_eq!(read.len(), 0);
 
-        assert!(buf.push(&first, 0).is_ok());
+        assert!(buf.push(first).is_ok());
         assert_eq!(buf.len(), 19);
 
         let read = buf.pop().unwrap();
         assert_eq!(read.len(), 19);
         assert_eq!(&read[..], b"somethinghelloworld");
+        assert_eq!(buf.len(), 0);
+    }
+
+    #[test]
+    fn empty_write() {
+        let mut buf = RecvBuf::default();
+        assert_eq!(buf.len(), 0);
+
+        let write = buf.pop().unwrap();
+        assert_eq!(write.len(), 0);
+    }
+
+    #[test]
+    fn multi_write() {
+        let mut buf = SendBuf::default();
+        assert_eq!(buf.len(), 0);
+
+        let first: [u8; 9] = *b"something";
+        let second: [u8; 10] = *b"helloworld";
+
+        assert!(buf.push(&first).is_ok());
+        assert_eq!(buf.len(), 9);
+
+        assert!(buf.push(&second).is_ok());
+        assert_eq!(buf.len(), 19);
+
+        let write = buf.pop(128).unwrap();
+        assert_eq!(write.len(), 19);
+        assert_eq!(&write[..], b"somethinghelloworld");
+        assert_eq!(buf.len(), 0);
+    }
+
+    #[test]
+    fn split_write() {
+        let mut buf = SendBuf::default();
+        assert_eq!(buf.len(), 0);
+
+        let first: [u8; 9] = *b"something";
+        let second: [u8; 10] = *b"helloworld";
+
+        assert!(buf.push(&first).is_ok());
+        assert_eq!(buf.len(), 9);
+
+        assert!(buf.push(&second).is_ok());
+        assert_eq!(buf.len(), 19);
+
+        let write = buf.pop(9).unwrap();
+        assert_eq!(write.len(), 9);
+        assert_eq!(&write[..], b"something");
+        assert_eq!(buf.len(), 10);
+
+        let write = buf.pop(10).unwrap();
+        assert_eq!(write.len(), 10);
+        assert_eq!(&write[..], b"helloworld");
         assert_eq!(buf.len(), 0);
     }
 }

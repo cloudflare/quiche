@@ -28,9 +28,10 @@ use ::Result;
 use ::Error;
 
 use octets;
+use stream;
 
 #[derive(PartialEq, Debug)]
-pub enum Frame<'a> {
+pub enum Frame {
     Padding,
 
     ConnectionClose {
@@ -58,20 +59,18 @@ pub enum Frame<'a> {
     },
 
     Crypto {
-        offset: u64,
-        data: octets::Bytes<'a>,
+        data: stream::RangeBuf,
     },
 
     Stream {
         stream_id: u64,
-        offset: u64,
-        data: octets::Bytes<'a>,
+        data: stream::RangeBuf,
         fin: bool,
     },
 }
 
-impl<'a> Frame<'a> {
-    pub fn from_bytes(b: &'a mut octets::Bytes) -> Result<Frame<'a>> {
+impl Frame {
+    pub fn from_bytes(b: &mut octets::Bytes) -> Result<Frame> {
         let frame_type = b.get_varint()?;
 
         // println!("GOT FRAME {:x}", frame_type);
@@ -107,9 +106,11 @@ impl<'a> Frame<'a> {
             0x0d => parse_ack_frame(frame_type, b)?,
 
             0x18 => {
+                let offset = b.get_varint()?;
+                let data = b.get_bytes_with_varint_length()?;
+
                 Frame::Crypto {
-                    offset: b.get_varint()?,
-                    data: b.get_bytes_with_varint_length()?,
+                    data: stream::RangeBuf::from(data.as_ref(), offset as usize),
                 }
             }
 
@@ -187,17 +188,17 @@ impl<'a> Frame<'a> {
                 ()
             },
 
-            Frame::Crypto { offset, data } => {
+            Frame::Crypto { data } => {
                 b.put_varint(0x18)?;
 
-                b.put_varint(*offset)?;
-                b.put_varint(data.cap() as u64)?;
-                b.put_bytes(data.as_ref())?;
+                b.put_varint(data.off() as u64)?;
+                b.put_varint(data.len() as u64)?;
+                b.put_bytes(&data)?;
 
                 ()
             }
 
-            Frame::Stream { stream_id, offset, data, fin } => {
+            Frame::Stream { stream_id, data, fin } => {
                 let mut ty: u8 = 0x10;
 
                 // Always encode offset
@@ -213,8 +214,8 @@ impl<'a> Frame<'a> {
                 b.put_varint(u64::from(ty))?;
 
                 b.put_varint(*stream_id)?;
-                b.put_varint(*offset)?;
-                b.put_varint(data.cap() as u64)?;
+                b.put_varint(data.off() as u64)?;
+                b.put_varint(data.len() as u64)?;
                 b.put_bytes(data.as_ref())?;
 
                 ()
@@ -261,25 +262,25 @@ impl<'a> Frame<'a> {
                 1                                  // first_block
             }
 
-            Frame::Crypto { offset, data } => {
+            Frame::Crypto { data } => {
                 1 +                              // frame type
-                octets::varint_len(*offset) +    // offset
-                octets::varint_len(data.cap() as u64) + // length
-                data.cap()                       // data
+                octets::varint_len(data.off() as u64) + // offset
+                octets::varint_len(data.len() as u64) + // length
+                data.len()                       // data
             }
 
-            Frame::Stream { stream_id, offset, data, .. } => {
+            Frame::Stream { stream_id, data, .. } => {
                 1 +                              // frame type
                 octets::varint_len(*stream_id) + // stream_id
-                octets::varint_len(*offset) +    // offset
-                octets::varint_len(data.cap() as u64) + // length
-                data.cap()                       // data
+                octets::varint_len(data.off() as u64) + // offset
+                octets::varint_len(data.len() as u64) + // length
+                data.len()                       // data
             }
         }
     }
 }
 
-fn parse_ack_frame<'a>(_ty: u64, b: &mut octets::Bytes) -> Result<Frame<'a>> {
+fn parse_ack_frame(_ty: u64, b: &mut octets::Bytes) -> Result<Frame> {
     let largest_ack = b.get_varint()?;
     let ack_delay = b.get_varint()?;
     let block_count = b.get_varint()?;
@@ -297,7 +298,7 @@ fn parse_ack_frame<'a>(_ty: u64, b: &mut octets::Bytes) -> Result<Frame<'a>> {
     })
 }
 
-fn parse_stream_frame<'a>(ty: u64, b: &'a mut octets::Bytes) -> Result<Frame<'a>> {
+fn parse_stream_frame(ty: u64, b: &mut octets::Bytes) -> Result<Frame> {
     let first = ty as u8;
 
     let stream_id = b.get_varint()?;
@@ -320,8 +321,7 @@ fn parse_stream_frame<'a>(ty: u64, b: &'a mut octets::Bytes) -> Result<Frame<'a>
 
     Ok(Frame::Stream {
         stream_id,
-        offset,
-        data,
+        data: stream::RangeBuf::from(data.as_ref(), offset as usize),
         fin,
     })
 }
@@ -465,11 +465,10 @@ mod tests {
     fn crypto() {
         let mut d: [u8; 128] = [42; 128];
 
-        let mut data: [u8; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let data: [u8; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
         let frame = Frame::Crypto {
-            offset: 1230976,
-            data: octets::Bytes::new(&mut data),
+            data: stream::RangeBuf::from(&data, 1230976),
         };
 
         let wire_len = {
@@ -489,12 +488,11 @@ mod tests {
     fn stream() {
         let mut d: [u8; 128] = [42; 128];
 
-        let mut data: [u8; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let data: [u8; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
         let frame = Frame::Stream {
             stream_id: 32,
-            offset: 1230976,
-            data: octets::Bytes::new(&mut data),
+            data: stream::RangeBuf::from(&data, 1230976),
             fin: true
         };
 

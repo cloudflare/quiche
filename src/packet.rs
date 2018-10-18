@@ -381,9 +381,6 @@ pub struct PktNumSpace {
     pub crypto_seal: Option<crypto::Seal>,
 
     pub crypto_stream: stream::Stream,
-
-    pub crypto_offset: usize,
-    pub crypto_buf: Vec<u8>,
 }
 
 impl PktNumSpace {
@@ -403,27 +400,11 @@ impl PktNumSpace {
             crypto_seal: None,
 
             crypto_stream: stream::Stream::new(),
-
-            crypto_offset: 0,
-            crypto_buf: Vec::new(),
         }
-    }
-
-    pub fn pending(&self) -> usize {
-        self.crypto_buf[self.crypto_offset..].len()
     }
 
     pub fn overhead(&self) -> usize {
         self.crypto_seal.as_ref().unwrap().tag_len()
-    }
-
-    pub fn get_buf(&self, len: usize) -> &[u8] {
-        &self.crypto_buf[self.crypto_offset..len]
-    }
-
-    pub fn advance(&mut self, len: usize) -> Result<()> {
-        self.crypto_offset += len;
-        Ok(())
     }
 }
 
