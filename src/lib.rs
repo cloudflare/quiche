@@ -268,15 +268,10 @@ impl Conn {
                 },
 
                 frame::Frame::Stream { stream_id, offset, data, fin: _ } => {
-                    let stream = {
-                        if !self.streams.contains_key(&stream_id) {
-                            // TODO: enforce stream limits
-                            let stream = stream::Stream::new();
-                            self.streams.insert(stream_id, stream);
-                        }
-
-                        self.streams.get_mut(&stream_id).unwrap()
-                    };
+                    let stream = self.streams.entry(stream_id).or_insert_with(|| {
+                        // TODO: enforce stream limits
+                        stream::Stream::new()
+                    });
 
                     // TODO: enforce flow control
                     stream.push_recv(data.as_ref(), offset as usize)?;
