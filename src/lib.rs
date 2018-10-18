@@ -314,7 +314,9 @@ impl Conn {
         let mut b = octets::Bytes::new(&mut out[..avail]);
 
         // Select packet number space context depending on whether there is
-        // handshake data to send, or whether there are packets to ACK.
+        // handshake data to send, whether there are packets to ACK, or in
+        // the case of the application space, whether there are streams that
+        // can be written.
         let space =
             if self.initial.crypto_stream.can_write() ||
                self.initial.need_ack.len() > 0 {
@@ -322,9 +324,11 @@ impl Conn {
             } else if self.handshake.crypto_stream.can_write() ||
                       self.handshake.need_ack.len() > 0 {
                 &mut self.handshake
-            } else if (self.application.crypto_stream.can_write() ||
-                       self.application.need_ack.len() > 0) &&
-                      self.state == State::Established {
+            } else if self.state == State::Established &&
+                      (self.application.crypto_stream.can_write() ||
+                       self.application.need_ack.len() > 0 ||
+                       self.streams.values()
+                                   .fold(false, |acc, s| acc || s.can_write())) {
                 &mut self.application
             } else {
                 return Err(Error::NothingToDo);
@@ -350,9 +354,12 @@ impl Conn {
 
         space.last_pkt_num += 1;
 
+        // Calculate payload length.
+        let mut length = pn_len + space.overhead();
+
         // Calculate remaining available space for the payload, excluding
         // payload length, pkt num and AEAD oerhead..
-        let left = b.cap() - 4 - pn_len - space.overhead();
+        let mut left = b.cap() - 4 - length;
 
         let mut frames: Vec<frame::Frame> = Vec::new();
 
@@ -363,10 +370,11 @@ impl Conn {
                 ack_delay: 0,
             };
 
+            length += frame.wire_len();
+            left -= frame.wire_len();
+
             frames.push(frame);
         }
-
-        let overhead = space.overhead();
 
         // Create CRYPTO frame.
         if space.crypto_stream.can_write() {
@@ -376,14 +384,29 @@ impl Conn {
                 data: crypto_buf,
             };
 
+            length += frame.wire_len();
+            left -= frame.wire_len();
+
             frames.push(frame);
         }
 
-        // Calculate payload length.
-        let mut length = pn_len + overhead;
+        // Create STREAM frame.
+        if self.state == State::Established {
+            for (id, stream) in &mut self.streams {
+                if stream.can_write() {
+                    let buf = stream.pop_send(left)?;
 
-        for frame in &frames {
-            length += frame.wire_len();
+                    let frame = frame::Frame::Stream {
+                        stream_id: *id,
+                        data: buf,
+                    };
+
+                    length += frame.wire_len();
+
+                    frames.push(frame);
+                    break;
+                }
+            }
         }
 
         // Only long header packets have an explicit length field.
@@ -431,96 +454,16 @@ impl Conn {
         stream.pop_recv()
     }
 
-    pub fn stream_send(&mut self, stream_id: u64, buf: &mut [u8], fin: bool,
-                       out: &mut [u8]) -> Result<usize> {
+    pub fn stream_send(&mut self, stream_id: u64, buf: &mut [u8], fin: bool)
+                                                            -> Result<usize> {
         let stream = match self.streams.get_mut(&stream_id) {
             Some(v) => v,
             None => return Err(Error::UnknownStream),
         };
 
         // TODO: respect peer's flow control
-        let offset = stream.push_send(buf)?;
-
-        // TODO: refactor to avoid duplication with send()
-        if out.is_empty() {
-            return Err(Error::BufferTooShort);
-        }
-
-        if self.state != State::Established {
-            return Err(Error::InvalidState);
-        }
-
-        let max_pkt_len = match self.peer_transport_params {
-            Some(ref v) => v.max_packet_size as usize,
-            None        => return Err(Error::InvalidState),
-        };
-
-        // Cap output buffer to respect peer's max_packet_size.
-        let avail = cmp::min(max_pkt_len, out.len());
-
-        let mut b = octets::Bytes::new(&mut out[..avail]);
-
-        // Select packet number space context depending on whether there is
-        // handshake data to send, or whether there are packets to ACK.
-        let space = &mut self.application;
-
-        let hdr = packet::Header {
-            ty: space.pkt_type,
-            version: self.version,
-            flags: 0,
-            dcid: self.dcid.clone(),
-            scid: self.scid.clone(),
-            token: None,
-        };
-
-        packet::Header::short_to_bytes(&hdr, &mut b)?;
-
-        let pn = space.last_pkt_num;
-        let pn_len = packet::pkt_num_len(pn)?;
-
-        space.last_pkt_num += 1;
-
-        // Calculate remaining available space for the payload, excluding
-        // payload length, pkt num and AEAD oerhead..
-        let left = b.cap() - 4 - pn_len - space.overhead();
-
-        let overhead = space.overhead();
-
-        let stream_len = cmp::min(buf.len(), left);
-
-        // Create STREAM frame.
-        let frame = frame::Frame::Stream {
-            stream_id,
-            data: stream::RangeBuf::from(&buf[..stream_len], offset),
-            fin,
-        };
-
-        // Calculate payload length.
-        let length = pn_len + overhead + frame.wire_len();
-
-        packet::encode_pkt_num(pn, &mut b)?;
-
-        let payload_len = length - pn_len;
-
-        let payload_offset = b.off();
-
-        frame.to_bytes(&mut b)?;
-
-        let aead = match space.crypto_seal {
-            Some(ref v) => v,
-            None        => return Err(Error::InvalidState),
-        };
-
-        let (mut header, mut payload) = b.split_at(payload_offset)?;
-
-        let ciphertext = payload.slice(payload_len)?;
-        packet::encrypt_pkt(ciphertext, pn, header.as_ref(), aead)?;
-
-        aead.xor_keystream(&ciphertext[4 - pn_len..16 + (4 - pn_len)],
-                           header.slice_last(pn_len)?)?;
-
-        let written = payload_offset + payload_len;
-        Ok(written)
+        let offset = stream.push_send(buf, fin)?;
+        Ok(offset)
     }
 
     pub fn stream_iter(&mut self) -> stream::StreamIterator {

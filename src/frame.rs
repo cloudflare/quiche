@@ -65,7 +65,6 @@ pub enum Frame {
     Stream {
         stream_id: u64,
         data: stream::RangeBuf,
-        fin: bool,
     },
 }
 
@@ -110,7 +109,9 @@ impl Frame {
                 let data = b.get_bytes_with_varint_length()?;
 
                 Frame::Crypto {
-                    data: stream::RangeBuf::from(data.as_ref(), offset as usize),
+                    data: stream::RangeBuf::from(data.as_ref(),
+                                                 offset as usize,
+                                                 false),
                 }
             }
 
@@ -198,7 +199,7 @@ impl Frame {
                 ()
             }
 
-            Frame::Stream { stream_id, data, fin } => {
+            Frame::Stream { stream_id, data } => {
                 let mut ty: u8 = 0x10;
 
                 // Always encode offset
@@ -207,7 +208,7 @@ impl Frame {
                 // Always encode length
                 ty |= 0x02;
 
-                if *fin {
+                if data.fin() {
                     ty |= 0x01;
                 }
 
@@ -321,8 +322,7 @@ fn parse_stream_frame(ty: u64, b: &mut octets::Bytes) -> Result<Frame> {
 
     Ok(Frame::Stream {
         stream_id,
-        data: stream::RangeBuf::from(data.as_ref(), offset as usize),
-        fin,
+        data: stream::RangeBuf::from(data.as_ref(), offset as usize, fin),
     })
 }
 
@@ -468,7 +468,7 @@ mod tests {
         let data: [u8; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
         let frame = Frame::Crypto {
-            data: stream::RangeBuf::from(&data, 1230976),
+            data: stream::RangeBuf::from(&data, 1230976, false),
         };
 
         let wire_len = {
@@ -492,8 +492,7 @@ mod tests {
 
         let frame = Frame::Stream {
             stream_id: 32,
-            data: stream::RangeBuf::from(&data, 1230976),
-            fin: true
+            data: stream::RangeBuf::from(&data, 1230976, true),
         };
 
         let wire_len = {

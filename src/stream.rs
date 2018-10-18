@@ -51,8 +51,8 @@ impl Stream {
         self.recv.pop()
     }
 
-    pub fn push_send(&mut self, data: &[u8]) -> Result<usize> {
-        self.send.push(data)
+    pub fn push_send(&mut self, data: &[u8], fin: bool) -> Result<usize> {
+        self.send.push(data, fin)
     }
 
     pub fn pop_send(&mut self, max_len: usize) -> Result<RangeBuf> {
@@ -156,8 +156,8 @@ struct SendBuf {
 }
 
 impl SendBuf {
-    fn push(&mut self, data: &[u8]) -> Result<usize> {
-        let buf = RangeBuf::from(data, self.off);
+    fn push(&mut self, data: &[u8], fin: bool) -> Result<usize> {
+        let buf = RangeBuf::from(data, self.off, fin);
 
         self.len += buf.len();
 
@@ -181,6 +181,8 @@ impl SendBuf {
 
             out_len -= buf.len();
 
+            out.fin = out.fin || buf.fin();
+
             out.data.append(&mut buf.data);
         }
 
@@ -200,14 +202,20 @@ impl SendBuf {
 pub struct RangeBuf {
     data: Vec<u8>,
     off: usize,
+    fin: bool,
 }
 
 impl RangeBuf {
-    pub fn from(buf: &[u8], off: usize) -> RangeBuf {
+    pub fn from(buf: &[u8], off: usize, fin: bool) -> RangeBuf {
         RangeBuf {
             data: Vec::from(buf),
             off,
+            fin,
         }
+    }
+
+    pub fn fin(&self) -> bool {
+        self.fin
     }
 
     pub fn off(&self) -> usize {
@@ -264,9 +272,9 @@ mod tests {
         let mut buf = RecvBuf::default();
         assert_eq!(buf.len(), 0);
 
-        let first = RangeBuf::from(b"hello", 0);
-        let second = RangeBuf::from(b"world", 5);
-        let third = RangeBuf::from(b"something", 10);
+        let first = RangeBuf::from(b"hello", 0, false);
+        let second = RangeBuf::from(b"world", 5, false);
+        let third = RangeBuf::from(b"something", 10, false);
 
         assert!(buf.push(second).is_ok());
         assert_eq!(buf.len(), 10);
@@ -294,8 +302,8 @@ mod tests {
         let mut buf = RecvBuf::default();
         assert_eq!(buf.len(), 0);
 
-        let first = RangeBuf::from(b"something", 0);
-        let second = RangeBuf::from(b"helloworld", 9);
+        let first = RangeBuf::from(b"something", 0, false);
+        let second = RangeBuf::from(b"helloworld", 9, false);
 
         assert!(buf.push(second).is_ok());
         assert_eq!(buf.len(), 19);
@@ -329,10 +337,10 @@ mod tests {
         let first: [u8; 9] = *b"something";
         let second: [u8; 10] = *b"helloworld";
 
-        assert!(buf.push(&first).is_ok());
+        assert!(buf.push(&first, false).is_ok());
         assert_eq!(buf.len(), 9);
 
-        assert!(buf.push(&second).is_ok());
+        assert!(buf.push(&second, false).is_ok());
         assert_eq!(buf.len(), 19);
 
         let write = buf.pop(128).unwrap();
@@ -349,10 +357,10 @@ mod tests {
         let first: [u8; 9] = *b"something";
         let second: [u8; 10] = *b"helloworld";
 
-        assert!(buf.push(&first).is_ok());
+        assert!(buf.push(&first, false).is_ok());
         assert_eq!(buf.len(), 9);
 
-        assert!(buf.push(&second).is_ok());
+        assert!(buf.push(&second, false).is_ok());
         assert_eq!(buf.len(), 19);
 
         let write = buf.pop(9).unwrap();
