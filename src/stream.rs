@@ -215,11 +215,7 @@ impl RangeBuf {
 impl Ord for RangeBuf {
     fn cmp(&self, other: &RangeBuf) -> cmp::Ordering {
         // Invert ordering to implement min-heap.
-        match self.off.cmp(&other.off) {
-            cmp::Ordering::Greater => cmp::Ordering::Less,
-            cmp::Ordering::Less => cmp::Ordering::Greater,
-            cmp::Ordering::Equal => cmp::Ordering::Equal,
-        }
+        self.off.cmp(&other.off).reverse()
     }
 }
 
