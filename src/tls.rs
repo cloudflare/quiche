@@ -256,12 +256,8 @@ impl Drop for State {
 
 fn get_ex_data_from_ptr<'a, T>(ptr: *mut SSL, idx: i32) -> Option<&'a mut T> {
     unsafe {
-        let data = SSL_get_ex_data(ptr, idx);
-        if data.is_null() {
-            None
-        } else {
-            Some(&mut *(data as *mut T))
-        }
+        let data = SSL_get_ex_data(ptr, idx) as *mut T;
+        data.as_mut()
     }
 }
 
