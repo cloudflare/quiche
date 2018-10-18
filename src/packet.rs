@@ -25,6 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::option;
+use std::slice;
 
 use ::Result;
 use ::Error;
@@ -263,12 +264,9 @@ pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
     let ciphertext = ciphertext.as_mut();
 
     // Decrypt first byte of pkt num into separate buffer to get length.
-    let mut pn_len_ciphertext: [u8; 1] = [0; 1];
-    pn_len_ciphertext.copy_from_slice(&ciphertext[..1]);
+    let mut first: u8 = ciphertext[0];
 
-    aead.xor_keystream(sample.as_ref(), &mut pn_len_ciphertext)?;
-
-    let first = pn_len_ciphertext[0];
+    aead.xor_keystream(sample.as_ref(), slice::from_mut(&mut first))?;
 
     let len = if first >> 7 == 0 {
         1
