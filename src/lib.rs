@@ -33,13 +33,11 @@ extern crate lazy_static;
 
 use std::cmp;
 use std::mem;
-use std::result;
-use std::option::Option;
 use std::collections::HashMap;
 
 pub const VERSION_DRAFT14: u32 = 0xff00000e;
 
-pub type Result<T> = result::Result<T, Error>;
+pub type Result<T> = ::std::result::Result<T, Error>;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Error {

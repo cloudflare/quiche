@@ -24,7 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::option;
 use std::slice;
 
 use ::Result;
@@ -68,7 +67,7 @@ pub struct Header {
     pub flags: u8,
     pub dcid: Vec<u8>,
     pub scid: Vec<u8>,
-    pub token: option::Option<Vec<u8>>,
+    pub token: Option<Vec<u8>>,
 }
 
 impl Header {
@@ -121,7 +120,7 @@ impl Header {
 
         // End of invariants.
 
-        let mut token: option::Option<Vec<u8>> = None;
+        let mut token: Option<Vec<u8>> = None;
 
         match ty {
             Type::Initial => {
@@ -377,8 +376,8 @@ pub struct PktNumSpace {
 
     pub crypto_level: crypto::Level,
 
-    pub crypto_open: option::Option<crypto::Open>,
-    pub crypto_seal: option::Option<crypto::Seal>,
+    pub crypto_open: Option<crypto::Open>,
+    pub crypto_seal: Option<crypto::Seal>,
 
     pub crypto_offset: usize,
     pub crypto_buf: Vec<u8>,

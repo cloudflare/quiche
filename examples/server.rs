@@ -27,7 +27,6 @@
 extern crate quiche;
 
 use std::net::UdpSocket;
-use std::option;
 
 use quiche::packet;
 use quiche::rand;
@@ -53,7 +52,7 @@ fn main() {
 
     let socket = UdpSocket::bind("127.0.0.1:4433").unwrap();
 
-    let mut conn: option::Option<Box<quiche::Conn>> = None;
+    let mut conn: Option<Box<quiche::Conn>> = None;
 
     loop {
         let (len, src) = socket.recv_from(&mut buf).unwrap();
