@@ -514,7 +514,7 @@ impl Conn {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TransportParams {
     pub idle_timeout: u16,
     pub initial_max_data: u32,
@@ -757,23 +757,7 @@ mod tests {
         let new_tp = TransportParams::decode(&mut raw_params, VERSION_DRAFT15,
                                              false).unwrap();
 
-        assert_eq!(new_tp.idle_timeout, tp.idle_timeout);
-        assert_eq!(new_tp.initial_max_data, tp.initial_max_data);
-        assert_eq!(new_tp.initial_max_bidi_streams, tp.initial_max_bidi_streams);
-        assert_eq!(new_tp.initial_max_uni_streams, tp.initial_max_uni_streams);
-        assert_eq!(new_tp.max_packet_size, tp.max_packet_size);
-        assert_eq!(new_tp.ack_delay_exponent, tp.ack_delay_exponent);
-        assert_eq!(new_tp.disable_migration, tp.disable_migration);
-        assert_eq!(new_tp.max_ack_delay, tp.max_ack_delay);
-        assert_eq!(new_tp.initial_max_stream_data_bidi_local,
-                   tp.initial_max_stream_data_bidi_local);
-        assert_eq!(new_tp.initial_max_stream_data_bidi_remote,
-                   tp.initial_max_stream_data_bidi_remote);
-        assert_eq!(new_tp.initial_max_stream_data_uni,
-                   tp.initial_max_stream_data_uni);
-        assert_eq!(new_tp.stateless_reset_token_present,
-                   tp.stateless_reset_token_present);
-        assert_eq!(new_tp.stateless_reset_token, tp.stateless_reset_token);
+        assert_eq!(new_tp, tp);
     }
 }
 
