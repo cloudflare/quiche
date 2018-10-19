@@ -398,7 +398,7 @@ impl Conn {
         }
 
         // Create STREAM frame.
-        if self.state == State::Established {
+        if space.pkt_type == packet::Type::Application {
             for (id, stream) in &mut self.streams {
                 if stream.can_write() {
                     let buf = stream.pop_send(left)?;
