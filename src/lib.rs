@@ -308,6 +308,10 @@ impl Conn {
             return Err(Error::InvalidState);
         }
 
+        if self.state == State::Draining {
+            return Err(Error::NothingToDo);
+        }
+
         self.do_handshake()?;
 
         let max_pkt_len = match self.peer_transport_params {
