@@ -35,7 +35,7 @@ use std::cmp;
 use std::mem;
 use std::collections::HashMap;
 
-pub const VERSION_DRAFT14: u32 = 0xff00000e;
+pub const VERSION_DRAFT15: u32 = 0xff00000f;
 
 pub type Result<T> = ::std::result::Result<T, Error>;
 
@@ -248,6 +248,10 @@ impl Conn {
                 },
 
                 frame::Frame::NewConnectionId { .. } => {
+                    ack_only = false;
+                },
+
+                frame::Frame::RetireConnectionId { .. } => {
                     ack_only = false;
                 },
 
@@ -515,6 +519,7 @@ pub struct TransportParams {
     pub max_packet_size: u16,
     pub ack_delay_exponent: u8,
     pub disable_migration: bool,
+    pub max_ack_delay: u8,
     pub initial_max_stream_data_bidi_local: u32,
     pub initial_max_stream_data_bidi_remote: u32,
     pub initial_max_stream_data_uni: u32,
@@ -544,6 +549,7 @@ impl TransportParams {
             max_packet_size: 65527,
             ack_delay_exponent: 3,
             disable_migration: false,
+            max_ack_delay: 25,
             initial_max_stream_data_bidi_local: 0,
             initial_max_stream_data_bidi_remote: 0,
             initial_max_stream_data_uni: 0,
@@ -607,6 +613,10 @@ impl TransportParams {
 
                 0x000b => {
                     tp.initial_max_stream_data_uni = val.get_u32()?;
+                },
+
+                0x000c => {
+                    tp.max_ack_delay = val.get_u8()?;
                 },
 
                 // Ignore unknown parameters.
@@ -727,6 +737,7 @@ mod tests {
             max_packet_size: 23421,
             ack_delay_exponent: 123,
             disable_migration: true,
+            max_ack_delay: 25,
             initial_max_stream_data_bidi_local: 154323123,
             initial_max_stream_data_bidi_remote: 6587456,
             initial_max_stream_data_uni: 2461234,
@@ -735,11 +746,11 @@ mod tests {
         };
 
         let mut raw_params: [u8; 256] = [42; 256];
-        let mut raw_params = TransportParams::encode(&tp, VERSION_DRAFT14, true,
+        let mut raw_params = TransportParams::encode(&tp, VERSION_DRAFT15, true,
                                               &mut raw_params).unwrap();
         assert_eq!(raw_params.len(), 96);
 
-        let new_tp = TransportParams::decode(&mut raw_params, VERSION_DRAFT14,
+        let new_tp = TransportParams::decode(&mut raw_params, VERSION_DRAFT15,
                                              false).unwrap();
 
         assert_eq!(new_tp.idle_timeout, tp.idle_timeout);
@@ -749,6 +760,7 @@ mod tests {
         assert_eq!(new_tp.max_packet_size, tp.max_packet_size);
         assert_eq!(new_tp.ack_delay_exponent, tp.ack_delay_exponent);
         assert_eq!(new_tp.disable_migration, tp.disable_migration);
+        assert_eq!(new_tp.max_ack_delay, tp.max_ack_delay);
         assert_eq!(new_tp.initial_max_stream_data_bidi_local,
                    tp.initial_max_stream_data_bidi_local);
         assert_eq!(new_tp.initial_max_stream_data_bidi_remote,

@@ -39,6 +39,7 @@ static TRANSPORT_PARAMS: quiche::TransportParams = quiche::TransportParams {
     max_packet_size: 1500,
     ack_delay_exponent: 3,
     disable_migration: true,
+    max_ack_delay: 25,
     initial_max_stream_data_bidi_local: 1000000,
     initial_max_stream_data_bidi_remote: 1000000,
     initial_max_stream_data_uni: 1000000,
@@ -63,7 +64,7 @@ fn main() {
         if conn.is_none() {
             let hdr = packet::parse_long_header(buf).unwrap();
 
-            if hdr.version != quiche::VERSION_DRAFT14 {
+            if hdr.version != quiche::VERSION_DRAFT15 {
                 println!("VERSION NEGOTIATION");
 
                 let len = packet::negotiate_version(&hdr, &mut out).unwrap();
@@ -82,7 +83,7 @@ fn main() {
             rand::rand_bytes(&mut scid[..]);
 
             let config = quiche::Config {
-                version: quiche::VERSION_DRAFT14,
+                version: quiche::VERSION_DRAFT15,
 
                 local_conn_id: &scid,
 

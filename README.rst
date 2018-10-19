@@ -18,7 +18,7 @@ still in development.
 Status
 ------
 
-* [x] QUIC draft-14
+* [x] QUIC draft-15
 * [x] TLS 1.3 handshake (using BoringSSL)
 * [x] Stream API
 * [ ] Flow control

@@ -53,6 +53,10 @@ pub enum Frame {
         reset_token: Vec<u8>,
     },
 
+    RetireConnectionId {
+        seq_num: u64,
+    },
+
     ACK {
         largest_ack: u64,
         ack_delay: u64,
@@ -102,7 +106,13 @@ impl Frame {
                 }
             }
 
-            0x0d => parse_ack_frame(frame_type, b)?,
+            0x0d => {
+                Frame::RetireConnectionId {
+                    seq_num: b.get_varint()?,
+                }
+            }
+
+            0x1a => parse_ack_frame(frame_type, b)?,
 
             0x18 => {
                 let offset = b.get_varint()?;
@@ -176,10 +186,18 @@ impl Frame {
                 b.put_bytes(reset_token.as_ref())?;
 
                 ()
-            }
+            },
+
+            Frame::RetireConnectionId { seq_num } => {
+                b.put_varint(0x0d)?;
+
+                b.put_varint(*seq_num)?;
+
+                ()
+            },
 
             Frame::ACK { largest_ack, ack_delay } => {
-                b.put_varint(0x0d)?;
+                b.put_varint(0x1a)?;
 
                 b.put_varint(*largest_ack)?;
                 b.put_varint(*ack_delay)?;
@@ -255,20 +273,25 @@ impl Frame {
                 reset_token.len()                  // reset_token
             },
 
+            Frame::RetireConnectionId { seq_num } => {
+                1 +                                // frame type
+                octets::varint_len(*seq_num)       // seq_num
+            },
+
             Frame::ACK { largest_ack, ack_delay } => {
                 1 +                                // frame type
                 octets::varint_len(*largest_ack) + // largest_ack
                 octets::varint_len(*ack_delay) +   // ack_delay
                 1 +                                // block_count
                 1                                  // first_block
-            }
+            },
 
             Frame::Crypto { data } => {
                 1 +                              // frame type
                 octets::varint_len(data.off() as u64) + // offset
                 octets::varint_len(data.len() as u64) + // length
                 data.len()                       // data
-            }
+            },
 
             Frame::Stream { stream_id, data, .. } => {
                 1 +                              // frame type
@@ -276,7 +299,7 @@ impl Frame {
                 octets::varint_len(data.off() as u64) + // offset
                 octets::varint_len(data.len() as u64) + // length
                 data.len()                       // data
-            }
+            },
         }
     }
 }
@@ -432,6 +455,27 @@ mod tests {
         };
 
         assert_eq!(wire_len, 37);
+
+        {
+            let mut b = octets::Bytes::new(&mut d);
+            assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
+        }
+    }
+
+    #[test]
+    fn retire_connection_id() {
+        let mut d: [u8; 128] = [42; 128];
+
+        let frame = Frame::RetireConnectionId {
+            seq_num: 123213,
+        };
+
+        let wire_len = {
+            let mut b = octets::Bytes::new(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 5);
 
         {
             let mut b = octets::Bytes::new(&mut d);
