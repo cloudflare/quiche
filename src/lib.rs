@@ -461,7 +461,7 @@ impl Conn {
         stream.pop_recv()
     }
 
-    pub fn stream_send(&mut self, stream_id: u64, buf: &mut [u8], fin: bool)
+    pub fn stream_send(&mut self, stream_id: u64, buf: &[u8], fin: bool)
                                                             -> Result<usize> {
         let stream = match self.streams.get_mut(&stream_id) {
             Some(v) => v,
