@@ -128,6 +128,8 @@ impl RecvBuf {
             self.off += buf.len();
             self.len -= buf.len();
 
+            out.fin = out.fin || buf.fin();
+
             out.data.append(&mut buf.data);
         }
 

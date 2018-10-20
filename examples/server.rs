@@ -125,8 +125,8 @@ fn main() {
             };
 
             let woot = String::from_utf8_lossy(&stream_data);
-            println!("RECV {} BYTES FROM STREAM {}: {}",
-                     stream_data.len(), s, woot);
+            println!("RECV {} BYTES FROM STREAM {} FIN:{}: {}",
+                     stream_data.len(), s, stream_data.fin(), woot);
 
             let mut resp: [u8; 25] = *b"WOOOO0000000000000000000T";
             let write = match conn.stream_send(s, &mut resp, true) {

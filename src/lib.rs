@@ -276,7 +276,7 @@ impl Conn {
                     ack_only = false;
                 },
 
-                frame::Frame::Stream { stream_id, data, .. } => {
+                frame::Frame::Stream { stream_id, data } => {
                     // Get existing stream or create a new one.
                     let stream = self.streams.entry(stream_id).or_insert_with(|| {
                         // TODO: enforce stream limits

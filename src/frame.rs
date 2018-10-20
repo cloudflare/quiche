@@ -293,7 +293,7 @@ impl Frame {
                 data.len()                       // data
             },
 
-            Frame::Stream { stream_id, data, .. } => {
+            Frame::Stream { stream_id, data } => {
                 1 +                              // frame type
                 octets::varint_len(*stream_id) + // stream_id
                 octets::varint_len(data.off() as u64) + // offset
