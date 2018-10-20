@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+extern crate docopt;
 extern crate quiche;
 
 use std::fs;
@@ -32,8 +33,12 @@ use std::path;
 use std::collections::hash_map;
 use std::collections::HashMap;
 
+use docopt::Docopt;
+
 use quiche::packet;
 use quiche::rand;
+
+const LOCAL_CONN_ID_LEN: usize = 16;
 
 static TRANSPORT_PARAMS: quiche::TransportParams = quiche::TransportParams {
     idle_timeout: 30,
@@ -51,13 +56,26 @@ static TRANSPORT_PARAMS: quiche::TransportParams = quiche::TransportParams {
     stateless_reset_token: [0xba; 16],
 };
 
-const LOCAL_CONN_ID_LEN: usize = 16;
+const USAGE: &'static str = "Usage: server [options]
+
+Options:
+  -h --help         Show this screen.
+  --listen <addr>   Listen on the given IP:port [default: 127.0.0.1:4433]
+  --cert <file>     TLS certificate path [default: examples/cert.crt]
+  --key <file>      TLS certificate key path [default: examples/cert.key]
+  --root <dir>      Root directory [default: examples/root/]
+  --name <str>      Name of the server [default: quic.tech]
+";
 
 fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; 65535];
 
-    let socket = net::UdpSocket::bind("127.0.0.1:4433").unwrap();
+    let args = Docopt::new(USAGE)
+                      .and_then(|dopt| dopt.parse())
+                      .unwrap_or_else(|e| e.exit());
+
+    let socket = net::UdpSocket::bind(args.get_str("--listen")).unwrap();
 
     let mut connections: HashMap<net::SocketAddr, Box<quiche::Conn>> = HashMap::new();
 
@@ -106,9 +124,9 @@ fn main() {
 
                     local_transport_params: &TRANSPORT_PARAMS,
 
-                    tls_server_name: "quic.tech",
-                    tls_certificate: "examples/cert.crt",
-                    tls_certificate_key: "examples/cert.key",
+                    tls_server_name: args.get_str("--name"),
+                    tls_certificate: args.get_str("--cert"),
+                    tls_certificate_key: args.get_str("--key"),
                 };
 
                 println!("Created connection {:x?}", scid);
@@ -137,7 +155,7 @@ fn main() {
         for s in streams {
             println!("Readable stream {}", s);
 
-            handle_stream(conn, s);
+            handle_stream(conn, s, &args);
         }
 
         loop {
@@ -159,7 +177,7 @@ fn main() {
     }
 }
 
-fn handle_stream(conn: &mut quiche::Conn, stream: u64) {
+fn handle_stream(conn: &mut quiche::Conn, stream: u64, args: &docopt::ArgvMap) {
     let stream_data = match conn.stream_recv(stream) {
         Ok(v) => v,
         Err(e) => panic!("STREAM RECV FAILED {:?}", e),
@@ -170,7 +188,7 @@ fn handle_stream(conn: &mut quiche::Conn, stream: u64) {
         let uri = String::from_utf8(uri.to_vec()).unwrap();
         let uri = String::from(uri.lines().next().unwrap());
         let uri = path::Path::new(&uri);
-        let mut path = path::PathBuf::from("/home/ghedo/devel/quiche/examples/root");
+        let mut path = path::PathBuf::from(args.get_str("--root"));
 
         for c in uri.components() {
             match c {

@@ -8,3 +8,6 @@ build = "src/build.rs"
 libc = "0.2"
 ring = { git = "https://github.com/ghedo/ring", branch = "unauthenticated_stream_aes" }
 lazy_static = "1.1"
+
+[dev-dependencies]
+docopt = "1"
