@@ -705,7 +705,7 @@ impl TransportParams {
                 b.put_u32(tp.initial_max_stream_data_uni)?;
             }
 
-            if tp.stateless_reset_token_present {
+            if is_server && tp.stateless_reset_token_present {
                 b.put_u16(0x0006)?;
                 b.put_u16(tp.stateless_reset_token.len() as u16)?;
                 b.put_bytes(&tp.stateless_reset_token)?;
@@ -717,8 +717,9 @@ impl TransportParams {
         let out_len = {
             let mut b = octets::Bytes::new(out);
 
+            b.put_u32(version)?;
+
             if is_server {
-                b.put_u32(version)?;
                 b.put_u8(mem::size_of::<u32>() as u8)?;
                 b.put_u32(version)?;
             };
