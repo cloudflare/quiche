@@ -26,8 +26,9 @@
 
 extern crate quiche;
 
+use std::fs;
 use std::net;
-
+use std::path;
 use std::collections::hash_map;
 use std::collections::HashMap;
 
@@ -136,19 +137,7 @@ fn main() {
         for s in streams {
             println!("Readable stream {}", s);
 
-            let stream_data = match conn.stream_recv(s) {
-                Ok(v) => v,
-                Err(e) => panic!("STREAM RECV FAILED {:?}", e),
-            };
-
-            let woot = String::from_utf8_lossy(&stream_data);
-            println!("RECV {} BYTES FROM STREAM {} FIN:{}: {}",
-                     stream_data.len(), s, stream_data.fin(), woot);
-
-            let mut resp: [u8; 25] = *b"WOOOO0000000000000000000T";
-            if let Err(e) = conn.stream_send(s, &mut resp, true) {
-                panic!("STREAM SEND FAILED {:?}", e);
-            }
+            handle_stream(conn, s);
         }
 
         loop {
@@ -158,6 +147,7 @@ fn main() {
                     println!("DONE WRITING");
                     break;
                 },
+
                 Err(e)  => panic!("SEND FAILED: {:?}", e),
             };
 
@@ -165,6 +155,36 @@ fn main() {
             socket.send_to(&out[..write], &src).unwrap();
 
             println!("WRITTEN {}", write);
+        }
+    }
+}
+
+fn handle_stream(conn: &mut quiche::Conn, stream: u64) {
+    let stream_data = match conn.stream_recv(stream) {
+        Ok(v) => v,
+        Err(e) => panic!("STREAM RECV FAILED {:?}", e),
+    };
+
+    if &stream_data[..4] == b"GET " {
+        let uri = &stream_data[4..stream_data.len()];
+        let uri = String::from_utf8(uri.to_vec()).unwrap();
+        let uri = String::from(uri.lines().next().unwrap());
+        let uri = path::Path::new(&uri);
+        let mut path = path::PathBuf::from("/home/ghedo/devel/quiche/examples/root");
+
+        for c in uri.components() {
+            match c {
+                path::Component::Normal(v) => path.push(v),
+                _ => (),
+            }
+        }
+
+        println!("Got GET request for {:?} on stream {}", path, stream);
+
+        let error = Vec::from(String::from("Not Found!"));
+        let data = fs::read(path.as_path()).unwrap_or(error);
+        if let Err(e) = conn.stream_send(stream, &data, true) {
+            panic!("STREAM SEND FAILED {:?}", e);
         }
     }
 }
