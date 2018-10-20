@@ -37,6 +37,8 @@ use std::collections::HashMap;
 
 pub const VERSION_DRAFT15: u32 = 0xff00000f;
 
+pub const CLIENT_INITIAL_MIN_LEN: usize = 1200;
+
 pub type Result<T> = ::std::result::Result<T, Error>;
 
 #[derive(PartialEq, Clone, Debug)]
@@ -55,16 +57,6 @@ pub enum Error {
     NothingToDo,
 }
 
-#[derive(PartialEq, Copy, Clone, Debug)]
-enum State {
-    Idle,
-    Initial,
-    Handshake,
-    Established,
-    // Closing,
-    Draining,
-}
-
 #[derive(Copy, Clone, Debug)]
 pub struct Config<'a> {
     pub version: u32,
@@ -79,8 +71,6 @@ pub struct Config<'a> {
 }
 
 pub struct Conn {
-    state: State,
-
     version: u32,
 
     dcid: Vec<u8>,
@@ -99,6 +89,20 @@ pub struct Conn {
     streams: HashMap<u64, stream::Stream>,
 
     is_server: bool,
+
+    derived_initial_secrets: bool,
+
+    sent_initial: bool,
+
+    got_peer_first_flight: bool,
+
+    got_peer_conn_id: bool,
+
+    got_peer_transport_params: bool,
+
+    handshake_completed: bool,
+
+    draining: bool,
 }
 
 impl Conn {
@@ -108,9 +112,7 @@ impl Conn {
 
     fn new_with_tls(config: Config, tls: tls::State, is_server: bool)
                                                     -> Result<Box<Conn>> {
-        let conn = Box::new(Conn {
-            state: State::Idle,
-
+        let mut conn = Box::new(Conn {
             version: config.version,
 
             dcid: Vec::new(),
@@ -132,10 +134,42 @@ impl Conn {
             streams: HashMap::new(),
 
             is_server,
+
+            derived_initial_secrets: false,
+
+            sent_initial: false,
+
+            got_peer_first_flight: false,
+
+            got_peer_conn_id: false,
+
+            got_peer_transport_params: false,
+
+            handshake_completed: false,
+
+            draining: false,
         });
 
         conn.tls_state.init_with_conn_extra(&conn, &config)
                       .map_err(|_e| Error::TlsFail)?;
+
+        // Derive initial secrets for the client. We can do this here because
+        // we randomly generate the destination connection ID used in the
+        // secrets derivation.
+        if !is_server {
+            let mut dcid: [u8; 16] = [0; 16];
+            rand::rand_bytes(&mut dcid[..]);
+
+            let (aead_open, aead_seal) =
+                crypto::derive_initial_key_material(&dcid, conn.is_server)?;
+
+            conn.dcid.extend_from_slice(&dcid);
+
+            conn.initial.crypto_open = Some(aead_open);
+            conn.initial.crypto_seal = Some(aead_seal);
+
+            conn.derived_initial_secrets = true;
+        }
 
         Ok(conn)
     }
@@ -144,6 +178,8 @@ impl Conn {
         if buf.is_empty() {
             return Err(Error::BufferTooShort);
         }
+
+        self.do_handshake()?;
 
         let mut b = octets::Bytes::new(buf);
 
@@ -171,18 +207,28 @@ impl Conn {
             return Err(Error::BufferTooShort);
         }
 
-        // Derive initial secrets
-        if self.state == State::Idle {
+        if !self.is_server && !self.got_peer_conn_id {
+            // Replace the randomly generated destination connection ID with
+            // the one supplied by the server.
+            self.dcid.resize(hdr.scid.len(), 0);
+            self.dcid.copy_from_slice(&hdr.scid);
+
+            self.got_peer_conn_id = true;
+        }
+
+        // Derive initial secrets.
+        if !self.derived_initial_secrets {
             let (aead_open, aead_seal) =
                 crypto::derive_initial_key_material(&hdr.dcid,
                                                     self.is_server)?;
 
-            self.dcid.extend_from_slice(&hdr.scid);
-
             self.initial.crypto_open = Some(aead_open);
             self.initial.crypto_seal = Some(aead_seal);
 
-            self.state = State::Initial;
+            self.derived_initial_secrets = true;
+
+            self.dcid.extend_from_slice(&hdr.scid);
+            self.got_peer_conn_id = true;
         }
 
         // Select packet number space context.
@@ -230,13 +276,13 @@ impl Conn {
                 frame::Frame::ConnectionClose { .. } => {
                     ack_only = false;
 
-                    self.state = State::Draining;
+                    self.draining = true;
                 },
 
                 frame::Frame::ApplicationClose { .. } => {
                     ack_only = false;
 
-                    self.state = State::Draining;
+                    self.draining = true;
                 },
 
                 frame::Frame::MaxData { .. } => {
@@ -304,11 +350,7 @@ impl Conn {
             return Err(Error::BufferTooShort);
         }
 
-        if self.state == State::Idle {
-            return Err(Error::InvalidState);
-        }
-
-        if self.state == State::Draining {
+        if self.draining {
             return Err(Error::NothingToDo);
         }
 
@@ -332,7 +374,7 @@ impl Conn {
             } else if self.handshake.crypto_stream.can_write() ||
                       self.handshake.need_ack.len() > 0 {
                 &mut self.handshake
-            } else if self.state == State::Established &&
+            } else if self.handshake_completed &&
                       (self.application.crypto_stream.can_write() ||
                        self.application.need_ack.len() > 0 ||
                        self.streams.values().any(|s| s.can_write())) {
@@ -396,6 +438,20 @@ impl Conn {
             left -= frame.wire_len();
 
             frames.push(frame);
+        }
+
+        // Pad the client's initial packet.
+        if !self.is_server && !self.sent_initial {
+            while length < CLIENT_INITIAL_MIN_LEN && left > 0 {
+                let frame = frame::Frame::Padding;
+
+                length += frame.wire_len();
+                left -= frame.wire_len();
+
+                frames.push(frame);
+            }
+
+            self.sent_initial = true;
         }
 
         // Create STREAM frame.
@@ -482,15 +538,15 @@ impl Conn {
     }
 
     pub fn is_established(&self) -> bool {
-        self.state == State::Established
+        self.handshake_completed
     }
 
     fn do_handshake(&mut self) -> Result<()> {
-        if self.state != State::Established {
+        if !self.handshake_completed {
             match self.tls_state.do_handshake() {
                 Ok(_)                             => {
                     // Handshake is complete!
-                    self.state = State::Established
+                    self.handshake_completed = true;
                 },
 
                 Err(tls::Error::TlsFail)          => return Err(Error::TlsFail),
@@ -501,7 +557,7 @@ impl Conn {
             }
         }
 
-        if self.state == State::Initial {
+        if !self.got_peer_transport_params && self.got_peer_first_flight {
             let mut raw_params = self.tls_state.get_quic_transport_params()
                                                .map_err(|_e| Error::TlsFail)?;
 
@@ -511,7 +567,7 @@ impl Conn {
 
             self.peer_transport_params = peer_params;
 
-            self.state = State::Handshake;
+            self.got_peer_transport_params = true;
         }
 
         Ok(())
@@ -769,6 +825,70 @@ mod tests {
                                              false).unwrap();
 
         assert_eq!(new_tp, tp);
+    }
+
+    fn create_conn(is_server: bool) -> Box<Conn> {
+        let tp = TransportParams::default();
+
+        let mut scid: [u8; 16] = [0; 16];
+        rand::rand_bytes(&mut scid[..]);
+
+        let config = Config {
+            version: VERSION_DRAFT15,
+
+            local_conn_id: &scid,
+
+            local_transport_params: &tp,
+
+            tls_server_name: "quic.tech",
+            tls_certificate: "examples/cert.crt",
+            tls_certificate_key: "examples/cert.key",
+        };
+
+        Conn::new(config, is_server).unwrap()
+    }
+
+    fn recv_send(conn: &mut Conn, buf: &mut [u8], len: usize) -> usize {
+        let mut left = len;
+
+        while left > 0 {
+            let read = conn.recv(&mut buf[len - left..len]).unwrap();
+
+            left -= read;
+        }
+
+        let mut off = 0;
+
+        while off < buf.len() {
+            let write = match conn.send(&mut buf[off..]) {
+                Ok(v)   => v,
+
+                Err(Error::NothingToDo) => { break; },
+
+                Err(e)  => panic!("SEND FAILED: {:?}", e),
+            };
+
+            off += write;
+        }
+
+        off
+    }
+
+    #[test]
+    fn self_handshake() {
+        let mut buf = [0; 65535];
+
+        let mut cln = create_conn(false);
+        let mut srv = create_conn(true);
+
+        let mut len = cln.send(&mut buf).unwrap();
+
+        while !cln.is_established() && !srv.is_established() {
+            len = recv_send(&mut srv, &mut buf, len);
+            len = recv_send(&mut cln, &mut buf, len);
+        }
+
+        assert!(true);
     }
 }
 
