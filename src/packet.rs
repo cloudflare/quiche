@@ -56,11 +56,6 @@ pub fn has_long_header(b: u8) -> bool {
     b & FORM_BIT != 0
 }
 
-pub fn parse_long_header(buf: &mut [u8]) -> Result<Header> {
-    let mut b = octets::Bytes::new(buf);
-    Header::long_from_bytes(&mut b)
-}
-
 #[derive(Clone, Debug)]
 pub struct Header {
     pub ty: Type,
@@ -72,6 +67,16 @@ pub struct Header {
 }
 
 impl Header {
+    pub fn decode_long(buf: &mut [u8]) -> Result<Header> {
+        let mut b = octets::Bytes::new(buf);
+        Header::long_from_bytes(&mut b)
+    }
+
+    pub fn decode_short(buf: &mut [u8], dcil: usize) -> Result<Header> {
+        let mut b = octets::Bytes::new(buf);
+        Header::short_from_bytes(&mut b, dcil)
+    }
+
     pub fn long_from_bytes(b: &mut octets::Bytes) -> Result<Header> {
         let first = b.get_u8()?;
 

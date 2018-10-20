@@ -101,11 +101,11 @@ pub struct Conn {
     is_server: bool,
 }
 
-pub fn accept(config: Config) -> Result<Box<Conn>> {
-    Conn::new(config, true)
-}
-
 impl Conn {
+    pub fn new(config: Config, is_server: bool) -> Result<Box<Conn>> {
+        Conn::new_with_tls(config, tls::State::new(), is_server)
+    }
+
     fn new_with_tls(config: Config, tls: tls::State, is_server: bool)
                                                     -> Result<Box<Conn>> {
         let conn = Box::new(Conn {
@@ -138,10 +138,6 @@ impl Conn {
                       .map_err(|_e| Error::TlsFail)?;
 
         Ok(conn)
-    }
-
-    fn new(config: Config, is_server: bool) -> Result<Box<Conn>> {
-        Conn::new_with_tls(config, tls::State::new(), is_server)
     }
 
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {

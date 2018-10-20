@@ -26,7 +26,10 @@
 
 extern crate quiche;
 
-use std::net::UdpSocket;
+use std::net;
+
+use std::collections::hash_map;
+use std::collections::HashMap;
 
 use quiche::packet;
 use quiche::rand;
@@ -47,13 +50,15 @@ static TRANSPORT_PARAMS: quiche::TransportParams = quiche::TransportParams {
     stateless_reset_token: [0xba; 16],
 };
 
+const LOCAL_CONN_ID_LEN: usize = 16;
+
 fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; 65535];
 
-    let socket = UdpSocket::bind("127.0.0.1:4433").unwrap();
+    let socket = net::UdpSocket::bind("127.0.0.1:4433").unwrap();
 
-    let mut conn: Option<Box<quiche::Conn>> = None;
+    let mut connections: HashMap<net::SocketAddr, Box<quiche::Conn>> = HashMap::new();
 
     loop {
         let (len, src) = socket.recv_from(&mut buf).unwrap();
@@ -61,48 +66,58 @@ fn main() {
 
         let buf = &mut buf[..len];
 
-        if conn.is_none() {
-            let hdr = packet::parse_long_header(buf).unwrap();
+        let hdr = if packet::has_long_header(buf[0]) {
+            packet::Header::decode_long(buf)
+        } else {
+            packet::Header::decode_short(buf, LOCAL_CONN_ID_LEN)
+        };
 
-            if hdr.version != quiche::VERSION_DRAFT15 {
-                println!("VERSION NEGOTIATION");
+        let hdr = match hdr {
+            Ok(v) => v,
 
-                let len = packet::negotiate_version(&hdr, &mut out).unwrap();
-                let out = &out[..len];
+            Err(e) => panic!("PARSING HEADER FAILED: {:?}", e),
+        };
 
-                socket.send_to(out, &src).unwrap();
-                continue;
-            }
+        let conn = match connections.entry(src) {
+            hash_map::Entry::Vacant(v) =>{
+                if hdr.version != quiche::VERSION_DRAFT15 {
+                    println!("VERSION NEGOTIATION");
 
-            if hdr.ty != packet::Type::Initial {
-                println!("NOT INITIAL PACKET");
-                continue;
-            }
+                    let len = packet::negotiate_version(&hdr, &mut out).unwrap();
+                    let out = &out[..len];
 
-            let mut scid: [u8; 16] = [0; 16];
-            rand::rand_bytes(&mut scid[..]);
+                    socket.send_to(out, &src).unwrap();
+                    continue;
+                }
 
-            let config = quiche::Config {
-                version: quiche::VERSION_DRAFT15,
+                if hdr.ty != packet::Type::Initial {
+                    println!("NOT INITIAL PACKET");
+                    continue;
+                }
 
-                local_conn_id: &scid,
+                let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
+                rand::rand_bytes(&mut scid[..]);
 
-                local_transport_params: &TRANSPORT_PARAMS,
+                let config = quiche::Config {
+                    version: quiche::VERSION_DRAFT15,
 
-                tls_server_name: "quic.tech",
-                tls_certificate: "examples/cert.crt",
-                tls_certificate_key: "examples/cert.key",
-            };
+                    local_conn_id: &scid,
 
-            conn = quiche::accept(config).ok();
-        }
+                    local_transport_params: &TRANSPORT_PARAMS,
 
-        let conn = match conn {
-            Some(ref mut v) => v,
-            None => {
-                println!("CONNECTION IS NOT INITIALIZED");
-                break;
+                    tls_server_name: "quic.tech",
+                    tls_certificate: "examples/cert.crt",
+                    tls_certificate_key: "examples/cert.key",
+                };
+
+                println!("Created connection {:x?}", scid);
+
+                let conn = quiche::Conn::new(config, true).unwrap();
+
+                v.insert(conn)
             },
+
+            hash_map::Entry::Occupied(v) => v.into_mut(),
         };
 
         let mut left = len;
@@ -119,6 +134,8 @@ fn main() {
 
         let streams: Vec<u64> = conn.stream_iter().collect();
         for s in streams {
+            println!("Readable stream {}", s);
+
             let stream_data = match conn.stream_recv(s) {
                 Ok(v) => v,
                 Err(e) => panic!("STREAM RECV FAILED {:?}", e),
