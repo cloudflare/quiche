@@ -9,6 +9,9 @@ the IETF_. It provides a low level API for processing QUIC packets and
 handling connection state, while leaving I/O (including dealing with sockets)
 to the application.
 
+A live QUIC server based on quiche is available at ``https://quic.tech:4433/``
+to be used for experimentation.
+
 Note that it is very experimental and unstable software, and many features are
 still in development.
 
