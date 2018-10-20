@@ -48,6 +48,10 @@ pub enum Frame {
         reason: Vec<u8>,
     },
 
+    MaxData {
+        max: u64,
+    },
+
     Ping,
 
     NewConnectionId {
@@ -96,6 +100,12 @@ impl Frame {
                 Frame::ApplicationClose {
                     error_code: b.get_u16()?,
                     reason: b.get_bytes_with_varint_length()?.to_vec(),
+                }
+            },
+
+            0x04 => {
+                Frame::MaxData {
+                    max: b.get_varint()?,
                 }
             },
 
@@ -170,6 +180,14 @@ impl Frame {
                 b.put_u16(*error_code)?;
                 b.put_varint(reason.len() as u64)?;
                 b.put_bytes(reason.as_ref())?;
+
+                ()
+            },
+
+            Frame::MaxData { max } => {
+                b.put_varint(0x04)?;
+
+                b.put_varint(*max)?;
 
                 ()
             },
@@ -264,6 +282,11 @@ impl Frame {
                 2 +                                // error_code
                 octets::varint_len(reason.len() as u64) + // reason_len
                 reason.len()                       // reason
+            },
+
+            Frame::MaxData { max } => {
+                1 +                                // frame type
+                octets::varint_len(*max)           // max
             },
 
             Frame::Ping => 1, // type
@@ -415,6 +438,27 @@ mod tests {
         };
 
         assert_eq!(wire_len, 16);
+
+        {
+            let mut b = octets::Bytes::new(&mut d);
+            assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
+        }
+    }
+
+    #[test]
+    fn max_data() {
+        let mut d: [u8; 128] = [42; 128];
+
+        let frame = Frame::MaxData {
+            max: 128318273,
+        };
+
+        let wire_len = {
+            let mut b = octets::Bytes::new(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 5);
 
         {
             let mut b = octets::Bytes::new(&mut d);

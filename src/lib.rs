@@ -239,6 +239,10 @@ impl Conn {
                     self.state = State::Draining;
                 },
 
+                frame::Frame::MaxData { .. } => {
+                    ack_only = false;
+                },
+
                 frame::Frame::Ping => {
                     ack_only = false;
                 },
