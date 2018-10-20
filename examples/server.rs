@@ -40,7 +40,7 @@ use quiche::rand;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
 
-static TRANSPORT_PARAMS: quiche::TransportParams = quiche::TransportParams {
+const TRANSPORT_PARAMS: quiche::TransportParams = quiche::TransportParams {
     idle_timeout: 30,
     initial_max_data: 10000000,
     initial_max_bidi_streams: 100,
@@ -68,8 +68,8 @@ Options:
 ";
 
 fn main() {
-    let mut buf = [0; 65535];
-    let mut out = [0; 65535];
+    let mut buf = [0; TRANSPORT_PARAMS.max_packet_size as usize];
+    let mut out = [0; TRANSPORT_PARAMS.max_packet_size as usize];
 
     let args = Docopt::new(USAGE)
                       .and_then(|dopt| dopt.parse())
