@@ -484,6 +484,10 @@ impl Conn {
         stream::StreamIterator::new(self.streams.iter())
     }
 
+    pub fn is_established(&self) -> bool {
+        self.state == State::Established
+    }
+
     fn do_handshake(&mut self) -> Result<()> {
         if self.state != State::Established {
             match self.tls_state.do_handshake() {
