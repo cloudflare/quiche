@@ -262,9 +262,15 @@ pub fn pkt_num_len(pn: u64) -> Result<usize> {
 
 pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
                                                     -> Result<(u64,usize)> {
-    let mut pn_and_sample = b.peek_bytes(20)?;
+    let max_pn_len = if b.cap() < aead.nonce_len() + 4 + 4 {
+        b.cap() - aead.nonce_len() - 4
+    } else {
+        4
+    };
 
-    let (mut ciphertext, sample) = pn_and_sample.split_at(4).unwrap();
+    let mut pn_and_sample = b.peek_bytes(max_pn_len + aead.nonce_len() + 4)?;
+
+    let (mut ciphertext, sample) = pn_and_sample.split_at(max_pn_len).unwrap();
 
     let ciphertext = ciphertext.as_mut();
 
@@ -287,8 +293,8 @@ pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
     // Decrypt full pkt num in-place.
     aead.xor_keystream(sample.as_ref(), &mut ciphertext[..len])?;
 
-    let mut plaintext: [u8; 4] = [0; 4];
-    plaintext.copy_from_slice(&ciphertext[..4]);
+    let mut plaintext = Vec::with_capacity(len);
+    plaintext.extend_from_slice(&ciphertext[..len]);
 
     // Mask the 2 most significant bits to remove the encoded length.
     if len > 1 {
