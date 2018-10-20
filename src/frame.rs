@@ -30,6 +30,9 @@ use ::Error;
 use octets;
 use stream;
 
+pub const MAX_CRYPTO_OVERHEAD: usize = 8;
+pub const MAX_STREAM_OVERHEAD: usize = 12;
+
 #[derive(PartialEq, Debug)]
 pub enum Frame {
     Padding,

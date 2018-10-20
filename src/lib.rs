@@ -384,7 +384,8 @@ impl Conn {
 
         // Create CRYPTO frame.
         if space.crypto_stream.can_write() {
-            let crypto_buf = space.crypto_stream.pop_send(left)?;
+            let crypto_len = left - frame::MAX_CRYPTO_OVERHEAD;
+            let crypto_buf = space.crypto_stream.pop_send(crypto_len)?;
 
             let frame = frame::Frame::Crypto {
                 data: crypto_buf,
@@ -400,11 +401,12 @@ impl Conn {
         if space.pkt_type == packet::Type::Application {
             for (id, stream) in &mut self.streams {
                 if stream.can_write() {
-                    let buf = stream.pop_send(left)?;
+                    let stream_len = left - frame::MAX_STREAM_OVERHEAD;
+                    let stream_buf = stream.pop_send(stream_len)?;
 
                     let frame = frame::Frame::Stream {
                         stream_id: *id,
-                        data: buf,
+                        data: stream_buf,
                     };
 
                     length += frame.wire_len();
