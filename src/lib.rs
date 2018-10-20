@@ -90,7 +90,7 @@ pub struct Conn {
     handshake: packet::PktNumSpace,
     application: packet::PktNumSpace,
 
-    peer_transport_params: Option<TransportParams>,
+    peer_transport_params: TransportParams,
 
     local_transport_params: TransportParams,
 
@@ -123,7 +123,7 @@ impl Conn {
             application: packet::PktNumSpace::new(packet::Type::Application,
                                                   crypto::Level::Application),
 
-            peer_transport_params: None,
+            peer_transport_params: TransportParams::default(),
 
             local_transport_params: config.local_transport_params.clone(),
 
@@ -314,10 +314,7 @@ impl Conn {
 
         self.do_handshake()?;
 
-        let max_pkt_len = match self.peer_transport_params {
-            Some(ref v) => v.max_packet_size as usize,
-            None        => return Err(Error::InvalidState),
-        };
+        let max_pkt_len = self.peer_transport_params.max_packet_size as usize;
 
         // Cap output buffer to respect peer's max_packet_size limit.
         let avail = cmp::min(max_pkt_len, out.len());
@@ -512,7 +509,7 @@ impl Conn {
                                                       self.version,
                                                       self.is_server)?;
 
-            self.peer_transport_params = Some(peer_params);
+            self.peer_transport_params = peer_params;
 
             self.state = State::Handshake;
         }
@@ -552,21 +549,7 @@ impl TransportParams {
             b.get_bytes_with_u8_length()?;
         }
 
-        let mut tp = TransportParams {
-            idle_timeout: 0,
-            initial_max_data: 0,
-            initial_max_bidi_streams: 0,
-            initial_max_uni_streams: 0,
-            max_packet_size: 65527,
-            ack_delay_exponent: 3,
-            disable_migration: false,
-            max_ack_delay: 25,
-            initial_max_stream_data_bidi_local: 0,
-            initial_max_stream_data_bidi_remote: 0,
-            initial_max_stream_data_uni: 0,
-            stateless_reset_token_present: false,
-            stateless_reset_token: [0; 16],
-        };
+        let mut tp = TransportParams::default();
 
         let mut params = b.get_bytes_with_u16_length()?;
 
@@ -731,6 +714,26 @@ impl TransportParams {
         };
 
         Ok(&mut out[..out_len])
+    }
+}
+
+impl Default for TransportParams {
+    fn default() -> TransportParams {
+        TransportParams {
+            idle_timeout: 0,
+            initial_max_data: 0,
+            initial_max_bidi_streams: 0,
+            initial_max_uni_streams: 0,
+            max_packet_size: 1205,
+            ack_delay_exponent: 3,
+            disable_migration: false,
+            max_ack_delay: 25,
+            initial_max_stream_data_bidi_local: 0,
+            initial_max_stream_data_bidi_remote: 0,
+            initial_max_stream_data_uni: 0,
+            stateless_reset_token_present: false,
+            stateless_reset_token: [0; 16],
+        }
     }
 }
 
