@@ -129,7 +129,10 @@ fn main() {
                     tls_certificate_key: args.get_str("--key"),
                 };
 
-                println!("Created connection {:x?}", scid);
+                println!("New connection: dcid={} scid={} lcid={}",
+                         hex_dump(&hdr.dcid),
+                         hex_dump(&hdr.scid),
+                         hex_dump(&scid));
 
                 let conn = quiche::Conn::new(config, true).unwrap();
 
@@ -153,14 +156,14 @@ fn main() {
 
         let streams: Vec<u64> = conn.stream_iter().collect();
         for s in streams {
-            println!("Readable stream {}", s);
-
+            println!("Stream {} is readable", s);
             handle_stream(conn, s, &args);
         }
 
         loop {
             let write = match conn.send(&mut out) {
                 Ok(v)   => v,
+
                 Err(quiche::Error::NothingToDo) => {
                     println!("DONE WRITING");
                     break;
@@ -172,7 +175,7 @@ fn main() {
             // TODO: coalesce packets.
             socket.send_to(&out[..write], &src).unwrap();
 
-            println!("WRITTEN {}", write);
+            println!("Written {}", write);
         }
     }
 }
@@ -205,4 +208,12 @@ fn handle_stream(conn: &mut quiche::Conn, stream: u64, args: &docopt::ArgvMap) {
             panic!("STREAM SEND FAILED {:?}", e);
         }
     }
+}
+
+fn hex_dump(buf: &[u8]) -> String {
+    let vec: Vec<String> = buf.iter()
+                              .map(|b| format!("{:02x}", b))
+                              .collect();
+
+    vec.join("")
 }
