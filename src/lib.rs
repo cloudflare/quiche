@@ -473,8 +473,10 @@ impl Conn {
         };
 
         // TODO: respect peer's flow control
-        let offset = stream.push_send(buf, fin)?;
-        Ok(offset)
+
+        stream.push_send(buf, fin)?;
+
+        Ok(buf.len())
     }
 
     pub fn stream_iter(&mut self) -> stream::StreamIterator {

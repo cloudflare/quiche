@@ -129,12 +129,9 @@ fn main() {
                      stream_data.len(), s, stream_data.fin(), woot);
 
             let mut resp: [u8; 25] = *b"WOOOO0000000000000000000T";
-            let write = match conn.stream_send(s, &mut resp, true) {
-                Ok(v) => v,
-                Err(e) => panic!("STREAM SEND FAILED {:?}", e),
-            };
-
-            println!("STREAM {} AT OFFSET {}", s, write);
+            if let Err(e) = conn.stream_send(s, &mut resp, true) {
+                panic!("STREAM SEND FAILED {:?}", e);
+            }
         }
 
         loop {

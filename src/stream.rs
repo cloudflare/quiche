@@ -51,7 +51,7 @@ impl Stream {
         self.recv.pop()
     }
 
-    pub fn push_send(&mut self, data: &[u8], fin: bool) -> Result<usize> {
+    pub fn push_send(&mut self, data: &[u8], fin: bool) -> Result<()> {
         self.send.push(data, fin)
     }
 
@@ -158,14 +158,14 @@ struct SendBuf {
 }
 
 impl SendBuf {
-    fn push(&mut self, data: &[u8], fin: bool) -> Result<usize> {
+    fn push(&mut self, data: &[u8], fin: bool) -> Result<()> {
         let buf = RangeBuf::from(data, self.off, fin);
 
         self.len += buf.len();
 
         self.data.push_back(buf);
 
-        Ok(self.off)
+        Ok(())
     }
 
     fn pop(&mut self, max_len: usize) -> Result<RangeBuf> {
