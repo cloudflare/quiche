@@ -334,8 +334,7 @@ impl Conn {
             } else if self.state == State::Established &&
                       (self.application.crypto_stream.can_write() ||
                        self.application.need_ack.len() > 0 ||
-                       self.streams.values()
-                                   .fold(false, |acc, s| acc || s.can_write())) {
+                       self.streams.values().any(|s| s.can_write())) {
                 &mut self.application
             } else {
                 return Err(Error::NothingToDo);
