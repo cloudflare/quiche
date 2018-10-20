@@ -69,6 +69,10 @@ pub enum Frame {
         ack_delay: u64,
     },
 
+    NewToken {
+        token: Vec<u8>,
+    },
+
     Crypto {
         data: stream::RangeBuf,
     },
@@ -117,13 +121,13 @@ impl Frame {
                     conn_id: b.get_bytes_with_u8_length()?.to_vec(),
                     reset_token: b.get_bytes(16)?.to_vec(),
                 }
-            }
+            },
 
             0x0d => {
                 Frame::RetireConnectionId {
                     seq_num: b.get_varint()?,
                 }
-            }
+            },
 
             0x1a => parse_ack_frame(frame_type, b)?,
 
@@ -136,7 +140,13 @@ impl Frame {
                                                  offset as usize,
                                                  false),
                 }
-            }
+            },
+
+            0x19 => {
+                Frame::NewToken {
+                    token: b.get_bytes_with_varint_length()?.to_vec(),
+                }
+            },
 
             0x10 => parse_stream_frame(frame_type, b)?,
             0x11 => parse_stream_frame(frame_type, b)?,
@@ -228,6 +238,15 @@ impl Frame {
                 ()
             },
 
+            Frame::NewToken { token } => {
+                b.put_varint(0x19)?;
+
+                b.put_varint(token.len() as u64)?;
+                b.put_bytes(&token)?;
+
+                ()
+            },
+
             Frame::Crypto { data } => {
                 b.put_varint(0x18)?;
 
@@ -310,6 +329,12 @@ impl Frame {
                 octets::varint_len(*ack_delay) +   // ack_delay
                 1 +                                // block_count
                 1                                  // first_block
+            },
+
+            Frame::NewToken { token } =>  {
+                1 +                              // frame type
+                octets::varint_len(token.len() as u64) + // token length
+                token.len()                      // token
             },
 
             Frame::Crypto { data } => {
@@ -545,6 +570,27 @@ mod tests {
         };
 
         assert_eq!(wire_len, 15);
+
+        {
+            let mut b = octets::Bytes::new(&mut d);
+            assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
+        }
+    }
+
+    #[test]
+    fn new_token() {
+        let mut d: [u8; 128] = [42; 128];
+
+        let frame = Frame::NewToken {
+            token: Vec::from("this is a token"),
+        };
+
+        let wire_len = {
+            let mut b = octets::Bytes::new(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 17);
 
         {
             let mut b = octets::Bytes::new(&mut d);

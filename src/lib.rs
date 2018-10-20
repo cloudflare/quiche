@@ -304,6 +304,11 @@ impl Conn {
                 // TODO: implement ack and retransmission.
                 frame::Frame::ACK { .. } => (),
 
+                // TODO: implement stateless retry
+                frame::Frame::NewToken { .. } => {
+                    ack_only = false;
+                },
+
                 frame::Frame::Crypto { data } => {
                     // Push the data to the stream so it can be re-ordered.
                     space.crypto_stream.push_recv(data)?;
