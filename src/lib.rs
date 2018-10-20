@@ -289,6 +289,10 @@ impl Conn {
                     ack_only = false;
                 },
 
+                frame::Frame::MaxStreamId { .. } => {
+                    ack_only = false;
+                },
+
                 frame::Frame::Ping => {
                     ack_only = false;
                 },

@@ -52,6 +52,10 @@ pub enum Frame {
         max: u64,
     },
 
+    MaxStreamId {
+        max: u64,
+    },
+
     Ping,
 
     NewConnectionId {
@@ -109,6 +113,12 @@ impl Frame {
 
             0x04 => {
                 Frame::MaxData {
+                    max: b.get_varint()?,
+                }
+            },
+
+            0x06 => {
+                Frame::MaxStreamId {
                     max: b.get_varint()?,
                 }
             },
@@ -196,6 +206,14 @@ impl Frame {
 
             Frame::MaxData { max } => {
                 b.put_varint(0x04)?;
+
+                b.put_varint(*max)?;
+
+                ()
+            },
+
+            Frame::MaxStreamId { max } => {
+                b.put_varint(0x06)?;
 
                 b.put_varint(*max)?;
 
@@ -304,6 +322,11 @@ impl Frame {
             },
 
             Frame::MaxData { max } => {
+                1 +                                // frame type
+                octets::varint_len(*max)           // max
+            },
+
+            Frame::MaxStreamId { max } => {
                 1 +                                // frame type
                 octets::varint_len(*max)           // max
             },
@@ -475,6 +498,27 @@ mod tests {
         let mut d: [u8; 128] = [42; 128];
 
         let frame = Frame::MaxData {
+            max: 128318273,
+        };
+
+        let wire_len = {
+            let mut b = octets::Bytes::new(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 5);
+
+        {
+            let mut b = octets::Bytes::new(&mut d);
+            assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
+        }
+    }
+
+    #[test]
+    fn max_stream_id() {
+        let mut d: [u8; 128] = [42; 128];
+
+        let frame = Frame::MaxStreamId {
             max: 128318273,
         };
 
