@@ -468,10 +468,10 @@ impl Conn {
 
     pub fn stream_send(&mut self, stream_id: u64, buf: &[u8], fin: bool)
                                                             -> Result<usize> {
-        let stream = match self.streams.get_mut(&stream_id) {
-            Some(v) => v,
-            None => return Err(Error::UnknownStream),
-        };
+        let stream = self.streams.entry(stream_id).or_insert_with(|| {
+            // TODO: enforce stream limits
+            stream::Stream::new()
+        });
 
         // TODO: respect peer's flow control
 
