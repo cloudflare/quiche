@@ -161,6 +161,7 @@ impl SendBuf {
     fn push(&mut self, data: &[u8], fin: bool) -> Result<()> {
         let buf = RangeBuf::from(data, self.off, fin);
 
+        self.off += buf.len();
         self.len += buf.len();
 
         self.data.push_back(buf);
@@ -178,7 +179,22 @@ impl SendBuf {
                 None => break,
             };
 
-            self.off += buf.len();
+            if buf.len() > out_len {
+                let new_buf = RangeBuf {
+                    data: buf.data.split_off(out_len),
+                    off: buf.off + out_len,
+                    fin: buf.fin,
+                };
+
+                buf.fin = false;
+
+                self.data.push_front(new_buf);
+            }
+
+            if out.len() == 0 {
+                out.off = buf.off;
+            }
+
             self.len -= buf.len();
 
             out_len -= buf.len();
@@ -362,17 +378,25 @@ mod tests {
         assert!(buf.push(&first, false).is_ok());
         assert_eq!(buf.len(), 9);
 
-        assert!(buf.push(&second, false).is_ok());
+        assert!(buf.push(&second, true).is_ok());
         assert_eq!(buf.len(), 19);
 
-        let write = buf.pop(9).unwrap();
-        assert_eq!(write.len(), 9);
-        assert_eq!(&write[..], b"something");
-        assert_eq!(buf.len(), 10);
+        let write = buf.pop(10).unwrap();
+        assert_eq!(write.off(), 0);
+        assert_eq!(write.len(), 10);
+        assert_eq!(&write[..], b"somethingh");
+        assert_eq!(buf.len(), 9);
+
+        let write = buf.pop(5).unwrap();
+        assert_eq!(write.off(), 10);
+        assert_eq!(write.len(), 5);
+        assert_eq!(&write[..], b"ellow");
+        assert_eq!(buf.len(), 4);
 
         let write = buf.pop(10).unwrap();
-        assert_eq!(write.len(), 10);
-        assert_eq!(&write[..], b"helloworld");
+        assert_eq!(write.off(), 15);
+        assert_eq!(write.len(), 4);
+        assert_eq!(&write[..], b"orld");
         assert_eq!(buf.len(), 0);
     }
 }
