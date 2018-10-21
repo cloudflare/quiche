@@ -94,11 +94,7 @@ pub struct Conn {
 
     sent_initial: bool,
 
-    got_peer_first_flight: bool,
-
     got_peer_conn_id: bool,
-
-    got_peer_transport_params: bool,
 
     handshake_completed: bool,
 
@@ -139,11 +135,7 @@ impl Conn {
 
             sent_initial: false,
 
-            got_peer_first_flight: false,
-
             got_peer_conn_id: false,
-
-            got_peer_transport_params: false,
 
             handshake_completed: false,
 
@@ -553,9 +545,19 @@ impl Conn {
     fn do_handshake(&mut self) -> Result<()> {
         if !self.handshake_completed {
             match self.tls_state.do_handshake() {
-                Ok(_)                             => {
+                Ok(_) => {
                     // Handshake is complete!
                     self.handshake_completed = true;
+
+                    let mut raw_params =
+                        self.tls_state.get_quic_transport_params()
+                                      .map_err(|_e| Error::TlsFail)?;
+
+                    let peer_params = TransportParams::decode(&mut raw_params,
+                                                              self.version,
+                                                              self.is_server)?;
+
+                    self.peer_transport_params = peer_params;
                 },
 
                 Err(tls::Error::TlsFail)          => return Err(Error::TlsFail),
@@ -564,19 +566,6 @@ impl Conn {
                 Err(tls::Error::SyscallFail)      => return Err(Error::TlsFail),
                 Err(tls::Error::PendingOperation) => return Err(Error::Again),
             }
-        }
-
-        if !self.got_peer_transport_params && self.got_peer_first_flight {
-            let mut raw_params = self.tls_state.get_quic_transport_params()
-                                               .map_err(|_e| Error::TlsFail)?;
-
-            let peer_params = TransportParams::decode(&mut raw_params,
-                                                      self.version,
-                                                      self.is_server)?;
-
-            self.peer_transport_params = peer_params;
-
-            self.got_peer_transport_params = true;
         }
 
         Ok(())
