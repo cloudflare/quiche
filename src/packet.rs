@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::fmt;
 use std::slice;
 
 use ::Result;
@@ -56,7 +57,7 @@ pub fn has_long_header(b: u8) -> bool {
     b & FORM_BIT != 0
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Header {
     pub ty: Type,
     pub version: u32,
@@ -241,6 +242,32 @@ impl Header {
 
         out.put_u8(first)?;
         out.put_bytes(&hdr.dcid)?;
+
+        Ok(())
+    }
+}
+
+impl fmt::Debug for Header {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self.ty);
+
+        if self.ty != Type::Application {
+            write!(f, " vers={:x}", self.version);
+        }
+
+        let vec: Vec<String> = self.dcid.iter()
+                                        .map(|b| format!("{:02x}", b))
+                                        .collect();
+
+        write!(f, " dcid={}", vec.join(""));
+
+        if self.ty != Type::Application {
+            let vec: Vec<String> = self.scid.iter()
+                                            .map(|b| format!("{:02x}", b))
+                                            .collect();
+
+            write!(f, " scid={}", vec.join(""));
+        }
 
         Ok(())
     }
