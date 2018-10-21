@@ -88,12 +88,25 @@ static QUICHE_STREAM_METHOD: SSL_STREAM_METHOD = SSL_STREAM_METHOD {
     send_alert,
 };
 
+const SSL_OP_NO_TICKET: u32 = 0x00004000;
+const SSL_OP_CIPHER_SERVER_PREFERENCE: u32 = 0x00400000;
+const SSL_OP_NO_TLSV1: u32 = 0x04000000;
+const SSL_OP_NO_TLSV1_1: u32 = 0x10000000;
+const SSL_OP_NO_TLSV1_2: u32 = 0x08000000;
+
 pub struct State(*mut SSL);
 
 impl State {
     pub fn new() -> State {
         unsafe {
             let ctx = SSL_CTX_new(TLS_method());
+            // TODO: enable session tickets (debug problem with quant)
+            SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET |
+                                     SSL_OP_CIPHER_SERVER_PREFERENCE |
+                                     SSL_OP_NO_TLSV1 |
+                                     SSL_OP_NO_TLSV1_1 |
+                                     SSL_OP_NO_TLSV1_2);
+
             let ssl = SSL_new(ctx);
             SSL_CTX_free(ctx);
 
@@ -437,15 +450,17 @@ extern {
     fn TLS_method() -> *const SSL_METHOD;
 
     // SSL_CTX
-    fn SSL_CTX_new(method: *const SSL_METHOD) -> *const SSL_CTX;
-    fn SSL_CTX_free(ctx: *const SSL_CTX);
+    fn SSL_CTX_new(method: *const SSL_METHOD) -> *mut SSL_CTX;
+    fn SSL_CTX_free(ctx: *mut SSL_CTX);
+
+    fn SSL_CTX_set_options(ctx: *mut SSL_CTX, options: u32) -> u32;
 
     // SSL
     fn SSL_get_ex_new_index(argl: libc::c_long, argp: *const libc::c_void,
         unused: *const libc::c_void, dup_unused: *const libc::c_void,
         free_func: *const libc::c_void) -> i32;
 
-    fn SSL_new(ctx: *const SSL_CTX) -> *mut SSL;
+    fn SSL_new(ctx: *mut SSL_CTX) -> *mut SSL;
 
     fn SSL_get_error(ssl: *mut SSL, ret_code: i32) -> i32;
 
