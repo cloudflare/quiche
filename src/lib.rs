@@ -555,7 +555,7 @@ impl Conn {
         stream::StreamIterator::new(self.streams.iter())
     }
 
-    pub fn local_conn_id<'a>(&'a self) -> &'a [u8] {
+    pub fn local_conn_id(&self) -> &[u8] {
         self.scid.as_slice()
     }
 
