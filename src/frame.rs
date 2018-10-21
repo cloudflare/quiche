@@ -35,7 +35,9 @@ pub const MAX_STREAM_OVERHEAD: usize = 12;
 
 #[derive(PartialEq, Debug)]
 pub enum Frame {
-    Padding,
+    Padding {
+        len: usize,
+    },
 
     ConnectionClose {
         error_code: u16,
@@ -94,7 +96,19 @@ impl Frame {
         // println!("GOT FRAME {:x}", frame_type);
 
         let frame = match frame_type {
-            0x00 => Frame::Padding,
+            0x00 => {
+                let mut len = 1;
+
+                while b.peek_u8() == Ok(0x00) {
+                    b.get_u8()?;
+
+                    len += 1;
+                }
+
+                Frame::Padding {
+                    len,
+                }
+            },
 
             0x02 => {
                 Frame::ConnectionClose {
@@ -177,8 +191,14 @@ impl Frame {
         let before = b.cap();
 
         match self {
-            Frame::Padding => {
-                b.put_varint(0x00)?;
+            Frame::Padding { len } => {
+                let mut left = *len;
+
+                while left > 0 {
+                    b.put_varint(0x00)?;
+
+                    left -= 1;
+                }
 
                 ()
             },
@@ -304,7 +324,9 @@ impl Frame {
 
     pub fn wire_len(&self) -> usize {
         match self {
-            Frame::Padding => 1, // type
+            Frame::Padding { len } => {
+                *len
+            },
 
             Frame::ConnectionClose { frame_type, reason, .. } => {
                 1 +                                // frame type
@@ -432,15 +454,16 @@ mod tests {
     fn padding() {
         let mut d: [u8; 128] = [42; 128];
 
-        let frame = Frame::Padding;
+        let frame = Frame::Padding {
+            len: 128,
+        };
 
         let wire_len = {
             let mut b = octets::Bytes::new(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
-        assert_eq!(wire_len, 1);
-        assert_eq!(&d[..wire_len], [0 as u8]);
+        assert_eq!(wire_len, 128);
 
         {
             let mut b = octets::Bytes::new(&mut d);

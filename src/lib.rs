@@ -263,7 +263,7 @@ impl Conn {
             let frame = frame::Frame::from_bytes(&mut payload)?;
 
             match frame {
-                frame::Frame::Padding => (),
+                frame::Frame::Padding { .. } => (),
 
                 frame::Frame::ConnectionClose { .. } => {
                     ack_only = false;
@@ -443,14 +443,16 @@ impl Conn {
 
         // Pad the client's initial packet.
         if !self.is_server && !self.sent_initial {
-            while length < CLIENT_INITIAL_MIN_LEN && left > 0 {
-                let frame = frame::Frame::Padding;
+            let len: usize = cmp::min(CLIENT_INITIAL_MIN_LEN - length, left);
 
-                length += frame.wire_len();
-                left -= frame.wire_len();
+            let frame = frame::Frame::Padding {
+                len,
+            };
 
-                frames.push(frame);
-            }
+            length += frame.wire_len();
+            left -= frame.wire_len();
+
+            frames.push(frame);
 
             self.sent_initial = true;
         }
