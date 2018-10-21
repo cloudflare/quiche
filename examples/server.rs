@@ -156,18 +156,17 @@ fn main() {
         while left > 0 {
             let read = match conn.recv(&mut buf[len - left..len]) {
                 Ok(v)  => v,
-                Err(e) => panic!("{} recv failed: {:?}",
-                                 conn.local_conn_id_hex(), e),
+                Err(e) => panic!("{} recv failed: {:?}", conn.trace_id(), e),
             };
 
             left -= read;
 
-            debug!("{} read {} bytes", conn.local_conn_id_hex(), read);
+            debug!("{} read {} bytes", conn.trace_id(), read);
         }
 
         let streams: Vec<u64> = conn.stream_iter().collect();
         for s in streams {
-            info!("{} stream {} is readable", conn.local_conn_id_hex(), s);
+            info!("{} stream {} is readable", conn.trace_id(), s);
             handle_stream(conn, s, &args);
         }
 
@@ -176,18 +175,18 @@ fn main() {
                 Ok(v) => v,
 
                 Err(quiche::Error::NothingToDo) => {
-                    debug!("{} done writing", conn.local_conn_id_hex());
+                    debug!("{} done writing", conn.trace_id());
                     break;
                 },
 
                 Err(e) => panic!("{} socket send failed: {:?}",
-                                 conn.local_conn_id_hex(), e),
+                                 conn.trace_id(), e),
             };
 
             // TODO: coalesce packets.
             socket.send_to(&out[..write], &src).unwrap();
 
-            debug!("{} written {} bytes", conn.local_conn_id_hex(), write);
+            debug!("{} written {} bytes", conn.trace_id(), write);
         }
     }
 }
@@ -196,7 +195,7 @@ fn handle_stream(conn: &mut quiche::Conn, stream: u64, args: &docopt::ArgvMap) {
     let stream_data = match conn.stream_recv(stream) {
         Ok(v) => v,
         Err(e) => panic!("{} stream recv failed {:?}",
-                         conn.local_conn_id_hex(), e),
+                         conn.trace_id(), e),
     };
 
     if &stream_data[..4] == b"GET " {
@@ -214,18 +213,17 @@ fn handle_stream(conn: &mut quiche::Conn, stream: u64, args: &docopt::ArgvMap) {
         }
 
         info!("{} got GET request for {:?} on stream {}",
-              conn.local_conn_id_hex(), path, stream);
+              conn.trace_id(), path, stream);
 
         let data = fs::read(path.as_path()).unwrap_or(
             Vec::from(String::from("Not Found!"))
         );
 
         info!("{} sending response of size {} on stream {}",
-              conn.local_conn_id_hex(), data.len(), stream);
+              conn.trace_id(), data.len(), stream);
 
         if let Err(e) = conn.stream_send(stream, &data, true) {
-            panic!("{} stream send failed {:?}",
-                   conn.local_conn_id_hex(), e);
+            panic!("{} stream send failed {:?}", conn.trace_id(), e);
         }
     }
 }

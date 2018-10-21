@@ -225,7 +225,7 @@ impl Conn {
             self.got_peer_conn_id = true;
         }
 
-        let hex_conn_id = self.local_conn_id_hex();
+        let trace_id = self.trace_id();
 
         // Select packet number space context.
         let space = match hdr.ty {
@@ -246,7 +246,7 @@ impl Conn {
         let (pn, pn_len) = packet::decrypt_pkt_num(&mut b, &aead)?;
         b.skip(pn_len)?;
 
-        trace!("{} rx pkt {:?} len={} pn={}", hex_conn_id, hdr, payload_len, pn);
+        trace!("{} rx pkt {:?} len={} pn={}", trace_id, hdr, payload_len, pn);
 
         let payload_offset = b.off();
 
@@ -268,7 +268,7 @@ impl Conn {
         while payload.cap() > 0 {
             let frame = frame::Frame::from_bytes(&mut payload)?;
 
-            trace!("{} rx frm {:?}", hex_conn_id, frame);
+            trace!("{} rx frm {:?}", trace_id, frame);
 
             match frame {
                 frame::Frame::Padding { .. } => (),
@@ -372,7 +372,7 @@ impl Conn {
 
         let mut b = octets::Bytes::new(&mut out[..avail]);
 
-        let hex_conn_id = self.local_conn_id_hex();
+        let trace_id = self.trace_id();
 
         // Select packet number space context depending on whether there is
         // handshake data to send, whether there are packets to ACK, or in
@@ -496,12 +496,12 @@ impl Conn {
 
         let payload_len = length - pn_len;
 
-        trace!("{} tx pkt {:?} len={} pn={}", hex_conn_id, hdr, payload_len, pn);
+        trace!("{} tx pkt {:?} len={} pn={}", trace_id, hdr, payload_len, pn);
 
         let payload_offset = b.off();
 
         for frame in &frames {
-            trace!("{} tx frm {:?}", hex_conn_id, frame);
+            trace!("{} tx frm {:?}", trace_id, frame);
 
             frame.to_bytes(&mut b)?;
         }
@@ -558,7 +558,7 @@ impl Conn {
         self.scid.as_slice()
     }
 
-    pub fn local_conn_id_hex(&self) -> String {
+    pub fn trace_id(&self) -> String {
         let cid = self.local_conn_id();
 
         let vec: Vec<String> = cid.iter()
@@ -590,8 +590,7 @@ impl Conn {
                     self.peer_transport_params = peer_params;
 
                     trace!("{} connection established: cipher={:?}",
-                           self.local_conn_id_hex(),
-                           self.application.cipher());
+                           self.trace_id(), self.application.cipher());
                 },
 
                 Err(tls::Error::TlsFail)          => return Err(Error::TlsFail),

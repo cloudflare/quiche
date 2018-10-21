@@ -92,21 +92,20 @@ fn main() {
     let mut conn = quiche::Conn::new(config, false).unwrap();
 
     let write = match conn.send(&mut out) {
-        Ok(v)   => v,
+        Ok(v) => v,
 
-        Err(e)  => panic!("{} initial send failed: {:?}",
-                          conn.local_conn_id_hex(), e),
+        Err(e) => panic!("{} initial send failed: {:?}", conn.trace_id(), e),
     };
 
     socket.send(&out[..write]).unwrap();
 
-    debug!("{} written {}", conn.local_conn_id_hex(), write);
+    debug!("{} written {}", conn.trace_id(), write);
 
     let mut req_sent = false;
 
     loop {
         let len = socket.recv(&mut buf).unwrap();
-        debug!("{} got {} bytes", conn.local_conn_id_hex(), len);
+        debug!("{} got {} bytes", conn.trace_id(), len);
 
         let buf = &mut buf[..len];
 
@@ -116,15 +115,14 @@ fn main() {
         while left > 0 {
             let read = match conn.recv(&mut buf[len - left..len]) {
                 Ok(v)  => v,
-                Err(e) => panic!("{} recv failed: {:?}",
-                                 conn.local_conn_id_hex(), e),
+                Err(e) => panic!("{} recv failed: {:?}", conn.trace_id(), e),
             };
 
             left -= read;
         }
 
         if conn.is_established() && !req_sent {
-            info!("{} sending HTTP request", conn.local_conn_id_hex());
+            info!("{} sending HTTP request", conn.trace_id());
 
             let req = b"GET /index.html\r\n";
             conn.stream_send(4, &req[..], true).unwrap();
@@ -137,7 +135,7 @@ fn main() {
             let data = conn.stream_recv(s).unwrap();
 
             info!("{} stream {} has {} bytes (fin? {})",
-                  conn.local_conn_id_hex(), s, data.len(), data.fin());
+                  conn.trace_id(), s, data.len(), data.fin());
         }
 
         loop {
@@ -145,18 +143,17 @@ fn main() {
                 Ok(v) => v,
 
                 Err(quiche::Error::NothingToDo) => {
-                    debug!("{} done writing", conn.local_conn_id_hex());
+                    debug!("{} done writing", conn.trace_id());
                     break;
                 },
 
-                Err(e) => panic!("{} send failed: {:?}",
-                                 conn.local_conn_id_hex(), e),
+                Err(e) => panic!("{} send failed: {:?}", conn.trace_id(), e),
             };
 
             // TODO: coalesce packets.
             socket.send(&out[..write]).unwrap();
 
-            debug!("{} written {}", conn.local_conn_id_hex(), write);
+            debug!("{} written {}", conn.trace_id(), write);
         }
     }
 }
