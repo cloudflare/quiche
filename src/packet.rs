@@ -139,7 +139,7 @@ impl Header {
             },
 
             Type::VersionNegotiation => {
-                panic!("Retry not supported");
+                panic!("Version negotiation not supported");
             },
 
             _ => (),
