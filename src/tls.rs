@@ -99,6 +99,8 @@ pub struct State(*mut SSL);
 impl State {
     pub fn new() -> State {
         unsafe {
+            // TODO: expose SSL_CTX to applications so we don't need to parse
+            // certificates for each connection.
             let ctx = SSL_CTX_new(TLS_method());
             // TODO: enable session tickets (debug problem with quant)
             SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET |
@@ -244,6 +246,7 @@ impl State {
 
     pub fn use_certificate_file(&self, file: &str) -> Result<()> {
         let cstr = ffi::CString::new(file).map_err(|_e| Error::TlsFail)?;
+        // TODO: support parsing and configuring full chain
         map_result_ssl(self, unsafe {
             SSL_use_certificate_file(self.as_ptr(), cstr.as_ptr(), 1)
         })
