@@ -43,7 +43,7 @@ const TYPE_MASK: u8 = 0x7f;
 
 const MAX_CID_LEN: u8 = 18;
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Type {
     Initial,
     Retry,
@@ -438,6 +438,13 @@ impl PktNumSpace {
             crypto_seal: None,
 
             crypto_stream: stream::Stream::new(),
+        }
+    }
+
+    pub fn cipher(&self) -> crypto::Algorithm {
+        match self.crypto_open {
+            Some(ref v) => v.algorithm(),
+            None => crypto::Algorithm::Null,
         }
     }
 

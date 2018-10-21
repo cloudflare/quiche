@@ -24,6 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#[macro_use]
+extern crate log;
 extern crate core;
 extern crate libc;
 extern crate ring;
@@ -41,7 +43,7 @@ pub const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 
 pub type Result<T> = ::std::result::Result<T, Error>;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     WrongForm,
     UnknownVersion,
@@ -57,7 +59,7 @@ pub enum Error {
     NothingToDo,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Config<'a> {
     pub version: u32,
 
@@ -223,6 +225,8 @@ impl Conn {
             self.got_peer_conn_id = true;
         }
 
+        let hex_conn_id = self.local_conn_id_hex();
+
         // Select packet number space context.
         let space = match hdr.ty {
             packet::Type::Initial => &mut self.initial,
@@ -241,6 +245,8 @@ impl Conn {
 
         let (pn, pn_len) = packet::decrypt_pkt_num(&mut b, &aead)?;
         b.skip(pn_len)?;
+
+        trace!("{} rx pkt {:?} len={} pn={}", hex_conn_id, hdr, payload_len, pn);
 
         let payload_offset = b.off();
 
@@ -261,6 +267,8 @@ impl Conn {
         // Process packet payload.
         while payload.cap() > 0 {
             let frame = frame::Frame::from_bytes(&mut payload)?;
+
+            trace!("{} rx frm {:?}", hex_conn_id, frame);
 
             match frame {
                 frame::Frame::Padding { .. } => (),
@@ -363,6 +371,8 @@ impl Conn {
         let avail = cmp::min(max_pkt_len, out.len());
 
         let mut b = octets::Bytes::new(&mut out[..avail]);
+
+        let hex_conn_id = self.local_conn_id_hex();
 
         // Select packet number space context depending on whether there is
         // handshake data to send, whether there are packets to ACK, or in
@@ -486,9 +496,13 @@ impl Conn {
 
         let payload_len = length - pn_len;
 
+        trace!("{} tx pkt {:?} len={} pn={}", hex_conn_id, hdr, payload_len, pn);
+
         let payload_offset = b.off();
 
         for frame in &frames {
+            trace!("{} tx frm {:?}", hex_conn_id, frame);
+
             frame.to_bytes(&mut b)?;
         }
 
@@ -540,6 +554,20 @@ impl Conn {
         stream::StreamIterator::new(self.streams.iter())
     }
 
+    pub fn local_conn_id<'a>(&'a self) -> &'a [u8] {
+        self.scid.as_slice()
+    }
+
+    pub fn local_conn_id_hex(&self) -> String {
+        let cid = self.local_conn_id();
+
+        let vec: Vec<String> = cid.iter()
+                                  .map(|b| format!("{:02x}", b))
+                                  .collect();
+
+        vec.join("")
+    }
+
     pub fn is_established(&self) -> bool {
         self.handshake_completed
     }
@@ -560,6 +588,10 @@ impl Conn {
                                                               self.is_server)?;
 
                     self.peer_transport_params = peer_params;
+
+                    trace!("{} connection established: cipher={:?}",
+                           self.local_conn_id_hex(),
+                           self.application.cipher());
                 },
 
                 Err(tls::Error::TlsFail)          => return Err(Error::TlsFail),

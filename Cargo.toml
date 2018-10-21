@@ -5,9 +5,11 @@ authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
 build = "src/build.rs"
 
 [dependencies]
+log = "0.4"
 libc = "0.2"
 ring = { git = "https://github.com/ghedo/ring", branch = "unauthenticated_stream_aes" }
 lazy_static = "1.1"
 
 [dev-dependencies]
 docopt = "1"
+env_logger = "0.5"

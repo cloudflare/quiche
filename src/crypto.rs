@@ -43,7 +43,7 @@ const INITIAL_SALT: [u8; 20] = [
 ];
 
 #[repr(C)]
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Level {
     Initial = 0,
     ZeroRTT = 1,
@@ -51,8 +51,10 @@ pub enum Level {
     Application = 3,
 }
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Algorithm {
+    Null,
+
     #[allow(non_camel_case_types)]
     AES128_GCM,
 
@@ -69,6 +71,7 @@ impl Algorithm {
             Algorithm::AES128_GCM => &aead::AES_128_GCM,
             Algorithm::AES256_GCM => &aead::AES_256_GCM,
             Algorithm::ChaCha20_Poly1305 => &aead::CHACHA20_POLY1305,
+            Algorithm::Null => panic!("Not a valid AEAD"),
         }
     }
 
@@ -77,6 +80,7 @@ impl Algorithm {
             Algorithm::AES128_GCM => &unauthenticated_stream::AES_128_CTR,
             Algorithm::AES256_GCM => &unauthenticated_stream::AES_256_CTR,
             Algorithm::ChaCha20_Poly1305 => &unauthenticated_stream::CHACHA20,
+            Algorithm::Null => panic!("Not a valid AEAD"),
         }
     }
 
@@ -85,6 +89,7 @@ impl Algorithm {
             Algorithm::AES128_GCM => &digest::SHA256,
             Algorithm::AES256_GCM => &digest::SHA384,
             Algorithm::ChaCha20_Poly1305 => &digest::SHA256,
+            Algorithm::Null => panic!("Not a valid AEAD"),
         }
     }
 

@@ -24,8 +24,11 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#[macro_use]
+extern crate log;
 extern crate docopt;
 extern crate quiche;
+extern crate env_logger;
 
 use std::net;
 
@@ -62,6 +65,8 @@ fn main() {
     let mut buf = [0; TRANSPORT_PARAMS.max_packet_size as usize];
     let mut out = [0; TRANSPORT_PARAMS.max_packet_size as usize];
 
+    env_logger::init();
+
     let args = Docopt::new(USAGE)
                       .and_then(|dopt| dopt.parse())
                       .unwrap_or_else(|e| e.exit());
@@ -89,18 +94,19 @@ fn main() {
     let write = match conn.send(&mut out) {
         Ok(v)   => v,
 
-        Err(e)  => panic!("SEND FAILED: {:?}", e),
+        Err(e)  => panic!("{} initial send failed: {:?}",
+                          conn.local_conn_id_hex(), e),
     };
 
     socket.send(&out[..write]).unwrap();
 
-    println!("Written {}", write);
+    debug!("{} written {}", conn.local_conn_id_hex(), write);
 
     let mut req_sent = false;
 
     loop {
         let len = socket.recv(&mut buf).unwrap();
-        println!("Got {} bytes", len);
+        debug!("{} got {} bytes", conn.local_conn_id_hex(), len);
 
         let buf = &mut buf[..len];
 
@@ -110,14 +116,15 @@ fn main() {
         while left > 0 {
             let read = match conn.recv(&mut buf[len - left..len]) {
                 Ok(v)  => v,
-                Err(e) => panic!("RECV FAILED: {:?}", e),
+                Err(e) => panic!("{} recv failed: {:?}",
+                                 conn.local_conn_id_hex(), e),
             };
 
             left -= read;
         }
 
         if conn.is_established() && !req_sent {
-            println!("Sending HTTP request");
+            info!("{} sending HTTP request", conn.local_conn_id_hex());
 
             let req = b"GET /index.html\r\n";
             conn.stream_send(4, &req[..], true).unwrap();
@@ -129,28 +136,27 @@ fn main() {
         for s in streams {
             let data = conn.stream_recv(s).unwrap();
 
-            println!("Stream {} has {} bytes (fin? {})",
-                     s, data.len(), data.fin());
-
-            println!("{:?}", data);
+            info!("{} stream {} has {} bytes (fin? {})",
+                  conn.local_conn_id_hex(), s, data.len(), data.fin());
         }
 
         loop {
             let write = match conn.send(&mut out) {
-                Ok(v)   => v,
+                Ok(v) => v,
 
                 Err(quiche::Error::NothingToDo) => {
-                    println!("DONE WRITING");
+                    debug!("{} done writing", conn.local_conn_id_hex());
                     break;
                 },
 
-                Err(e)  => panic!("SEND FAILED: {:?}", e),
+                Err(e) => panic!("{} send failed: {:?}",
+                                 conn.local_conn_id_hex(), e),
             };
 
             // TODO: coalesce packets.
             socket.send(&out[..write]).unwrap();
 
-            println!("Written {}", write);
+            debug!("{} written {}", conn.local_conn_id_hex(), write);
         }
     }
 }

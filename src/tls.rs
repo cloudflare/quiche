@@ -36,7 +36,7 @@ use crypto;
 
 pub type Result<T> = ::std::result::Result<T, Error>;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     TlsFail,
     WantRead,

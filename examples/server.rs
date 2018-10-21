@@ -24,8 +24,11 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#[macro_use]
+extern crate log;
 extern crate docopt;
 extern crate quiche;
+extern crate env_logger;
 
 use std::fs;
 use std::net;
@@ -71,6 +74,8 @@ fn main() {
     let mut buf = [0; TRANSPORT_PARAMS.max_packet_size as usize];
     let mut out = [0; TRANSPORT_PARAMS.max_packet_size as usize];
 
+    env_logger::init();
+
     let args = Docopt::new(USAGE)
                       .and_then(|dopt| dopt.parse())
                       .unwrap_or_else(|e| e.exit());
@@ -81,7 +86,7 @@ fn main() {
 
     loop {
         let (len, src) = socket.recv_from(&mut buf).unwrap();
-        println!("Got {} bytes from {}", len, src);
+        debug!("Got {} bytes from {}", len, src);
 
         let buf = &mut buf[..len];
 
@@ -94,13 +99,16 @@ fn main() {
         let hdr = match hdr {
             Ok(v) => v,
 
-            Err(e) => panic!("PARSING HEADER FAILED: {:?}", e),
+            Err(e) => {
+                error!("Parsing packet header failed: {:?}", e);
+                continue
+            }
         };
 
         let conn = match connections.entry(src) {
             hash_map::Entry::Vacant(v) =>{
                 if hdr.version != quiche::VERSION_DRAFT15 {
-                    println!("VERSION NEGOTIATION");
+                    warn!("Doing version negotiation");
 
                     let len = packet::negotiate_version(&hdr, &mut out).unwrap();
                     let out = &out[..len];
@@ -110,7 +118,7 @@ fn main() {
                 }
 
                 if hdr.ty != packet::Type::Initial {
-                    println!("NOT INITIAL PACKET");
+                    error!("Packet is not Initial");
                     continue;
                 }
 
@@ -129,10 +137,10 @@ fn main() {
                     tls_certificate_key: args.get_str("--key"),
                 };
 
-                println!("New connection: dcid={} scid={} lcid={}",
-                         hex_dump(&hdr.dcid),
-                         hex_dump(&hdr.scid),
-                         hex_dump(&scid));
+                debug!("New connection: dcid={} scid={} lcid={}",
+                       hex_dump(&hdr.dcid),
+                       hex_dump(&hdr.scid),
+                       hex_dump(&scid));
 
                 let conn = quiche::Conn::new(config, true).unwrap();
 
@@ -148,34 +156,38 @@ fn main() {
         while left > 0 {
             let read = match conn.recv(&mut buf[len - left..len]) {
                 Ok(v)  => v,
-                Err(e) => panic!("RECV FAILED: {:?}", e),
+                Err(e) => panic!("{} recv failed: {:?}",
+                                 conn.local_conn_id_hex(), e),
             };
 
             left -= read;
+
+            debug!("{} read {} bytes", conn.local_conn_id_hex(), read);
         }
 
         let streams: Vec<u64> = conn.stream_iter().collect();
         for s in streams {
-            println!("Stream {} is readable", s);
+            info!("{} stream {} is readable", conn.local_conn_id_hex(), s);
             handle_stream(conn, s, &args);
         }
 
         loop {
             let write = match conn.send(&mut out) {
-                Ok(v)   => v,
+                Ok(v) => v,
 
                 Err(quiche::Error::NothingToDo) => {
-                    println!("DONE WRITING");
+                    debug!("{} done writing", conn.local_conn_id_hex());
                     break;
                 },
 
-                Err(e)  => panic!("SEND FAILED: {:?}", e),
+                Err(e) => panic!("{} socket send failed: {:?}",
+                                 conn.local_conn_id_hex(), e),
             };
 
             // TODO: coalesce packets.
             socket.send_to(&out[..write], &src).unwrap();
 
-            println!("Written {}", write);
+            debug!("{} written {} bytes", conn.local_conn_id_hex(), write);
         }
     }
 }
@@ -183,7 +195,8 @@ fn main() {
 fn handle_stream(conn: &mut quiche::Conn, stream: u64, args: &docopt::ArgvMap) {
     let stream_data = match conn.stream_recv(stream) {
         Ok(v) => v,
-        Err(e) => panic!("STREAM RECV FAILED {:?}", e),
+        Err(e) => panic!("{} stream recv failed {:?}",
+                         conn.local_conn_id_hex(), e),
     };
 
     if &stream_data[..4] == b"GET " {
@@ -200,12 +213,19 @@ fn handle_stream(conn: &mut quiche::Conn, stream: u64, args: &docopt::ArgvMap) {
             }
         }
 
-        println!("Got GET request for {:?} on stream {}", path, stream);
+        info!("{} got GET request for {:?} on stream {}",
+              conn.local_conn_id_hex(), path, stream);
 
-        let error = Vec::from(String::from("Not Found!"));
-        let data = fs::read(path.as_path()).unwrap_or(error);
+        let data = fs::read(path.as_path()).unwrap_or(
+            Vec::from(String::from("Not Found!"))
+        );
+
+        info!("{} sending response of size {} on stream {}",
+              conn.local_conn_id_hex(), data.len(), stream);
+
         if let Err(e) = conn.stream_send(stream, &data, true) {
-            panic!("STREAM SEND FAILED {:?}", e);
+            panic!("{} stream send failed {:?}",
+                   conn.local_conn_id_hex(), e);
         }
     }
 }

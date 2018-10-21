@@ -79,7 +79,7 @@ macro_rules! put_u {
     });
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Bytes<'a> {
     buf: &'a mut [u8],
     off: usize,
