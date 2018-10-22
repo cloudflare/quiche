@@ -629,4 +629,111 @@ mod tests {
         assert_eq!(last.off(), 0);
         assert_eq!(last.as_ref(), b"world");
     }
+
+    #[test]
+    fn split_at() {
+        let mut d: [u8; 10] = *b"helloworld";
+
+        {
+            let mut b = Bytes::new(&mut d);
+            let (first, second) = b.split_at(5).unwrap();
+
+            let mut exp1: [u8; 5] = *b"hello";
+            assert_eq!(first.as_ref(), &mut exp1[..]);
+
+            let mut exp2: [u8; 5] = *b"world";
+            assert_eq!(second.as_ref(), &mut exp2[..]);
+        }
+
+        {
+            let mut b = Bytes::new(&mut d);
+            let (first, second) = b.split_at(10).unwrap();
+
+            let mut exp1: [u8; 10] = *b"helloworld";
+            assert_eq!(first.as_ref(), &mut exp1[..]);
+
+            let mut exp2: [u8; 0] = *b"";
+            assert_eq!(second.as_ref(), &mut exp2[..]);
+        }
+
+        {
+            let mut b = Bytes::new(&mut d);
+            let (first, second) = b.split_at(9).unwrap();
+
+            let mut exp1: [u8; 9] = *b"helloworl";
+            assert_eq!(first.as_ref(), &mut exp1[..]);
+
+            let mut exp2: [u8; 1] = *b"d";
+            assert_eq!(second.as_ref(), &mut exp2[..]);
+        }
+
+        {
+            let mut b = Bytes::new(&mut d);
+            assert!(b.split_at(11).is_err());
+        }
+    }
+
+    #[test]
+    fn slice() {
+        let mut d: [u8; 10] = *b"helloworld";
+
+        {
+            let mut b = Bytes::new(&mut d);
+            let mut exp: [u8; 5] = *b"hello";
+            assert_eq!(b.slice(5), Ok(&mut exp[..]));
+        }
+
+        {
+            let mut b = Bytes::new(&mut d);
+            let mut exp: [u8; 0] = *b"";
+            assert_eq!(b.slice(0), Ok(&mut exp[..]));
+        }
+
+        {
+            let mut b = Bytes::new(&mut d);
+            b.skip(5).unwrap();
+
+            let mut exp: [u8; 5] = *b"world";
+            assert_eq!(b.slice(5), Ok(&mut exp[..]));
+        }
+
+        {
+            let mut b = Bytes::new(&mut d);
+            assert!(b.slice(11).is_err());
+        }
+    }
+
+    #[test]
+    fn slice_last() {
+        let mut d: [u8; 10] = *b"helloworld";
+
+        {
+            let mut b = Bytes::new(&mut d);
+            let mut exp: [u8; 4] = *b"orld";
+            assert_eq!(b.slice_last(4), Ok(&mut exp[..]));
+        }
+
+        {
+            let mut b = Bytes::new(&mut d);
+            let mut exp: [u8; 1] = *b"d";
+            assert_eq!(b.slice_last(1), Ok(&mut exp[..]));
+        }
+
+        {
+            let mut b = Bytes::new(&mut d);
+            let mut exp: [u8; 0] = *b"";
+            assert_eq!(b.slice_last(0), Ok(&mut exp[..]));
+        }
+
+        {
+            let mut b = Bytes::new(&mut d);
+            let mut exp: [u8; 10] = *b"helloworld";
+            assert_eq!(b.slice_last(10), Ok(&mut exp[..]));
+        }
+
+        {
+            let mut b = Bytes::new(&mut d);
+            assert!(b.slice_last(11).is_err());
+        }
+    }
 }
