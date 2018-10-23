@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::cmp;
 use std::fmt;
 use std::slice;
 
@@ -287,13 +288,9 @@ pub fn pkt_num_len(pn: u64) -> Result<usize> {
 
 pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
                                                     -> Result<(u64,usize)> {
-    let max_pn_len = if b.cap() < aead.nonce_len() + 4 + 4 {
-        b.cap() - aead.nonce_len() - 4
-    } else {
-        4
-    };
+    let max_pn_len = cmp::min(b.cap() - aead.pn_nonce_len(), 4);
 
-    let mut pn_and_sample = b.peek_bytes(max_pn_len + aead.nonce_len() + 4)?;
+    let mut pn_and_sample = b.peek_bytes(max_pn_len + aead.pn_nonce_len())?;
 
     let (mut ciphertext, sample) = pn_and_sample.split_at(max_pn_len).unwrap();
 
