@@ -255,18 +255,16 @@ impl fmt::Debug for Header {
             write!(f, " vers={:x}", self.version)?;
         }
 
-        let vec: Vec<String> = self.dcid.iter()
-                                        .map(|b| format!("{:02x}", b))
-                                        .collect();
-
-        write!(f, " dcid={}", vec.join(""))?;
+        write!(f, " dcid=")?;
+        for b in &self.dcid {
+            write!(f, "{:02x}", b)?;
+        }
 
         if self.ty != Type::Application {
-            let vec: Vec<String> = self.scid.iter()
-                                            .map(|b| format!("{:02x}", b))
-                                            .collect();
-
-            write!(f, " scid={}", vec.join(""))?;
+            write!(f, " scid=")?;
+            for b in &self.scid {
+                write!(f, "{:02x}", b)?;
+            }
         }
 
         Ok(())
