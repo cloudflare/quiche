@@ -406,54 +406,54 @@ impl fmt::Debug for Frame {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Frame::Padding { len } => {
-                write!(f, "PADDING len={}", len);
+                write!(f, "PADDING len={}", len)?;
             },
 
             Frame::ConnectionClose { error_code, frame_type, reason } => {
                 write!(f, "CONNECTION_CLOSE err={:x} frame={:x} reason={:x?}",
-                       error_code, frame_type, reason);
+                       error_code, frame_type, reason)?;
             },
 
             Frame::ApplicationClose { error_code, reason } => {
                 write!(f, "APPLICATION_CLOSE err={:x} reason={:x?}",
-                       error_code, reason);
+                       error_code, reason)?;
             },
 
             Frame::MaxData { max } => {
-                write!(f, "MAX_DATA max={}", max);
+                write!(f, "MAX_DATA max={}", max)?;
             },
 
             Frame::MaxStreamId { max } => {
-                write!(f, "MAX_STREAM_ID max={}", max);
+                write!(f, "MAX_STREAM_ID max={}", max)?;
             },
 
             Frame::Ping => {
-                write!(f, "PING");
+                write!(f, "PING")?;
             },
 
             Frame::NewConnectionId { .. } => {
-                write!(f, "NEW_CONNECTION_ID (TODO)");
+                write!(f, "NEW_CONNECTION_ID (TODO)")?;
             },
 
             Frame::RetireConnectionId { .. } => {
-                write!(f, "RETIRE_CONNECTION_ID (TODO)");
+                write!(f, "RETIRE_CONNECTION_ID (TODO)")?;
             },
 
             Frame::ACK { .. } => {
-                write!(f, "ACK (TODO)");
+                write!(f, "ACK (TODO)")?;
             },
 
             Frame::NewToken { .. } => {
-                write!(f, "NEW_TOKEN (TODO)");
+                write!(f, "NEW_TOKEN (TODO)")?;
             },
 
             Frame::Crypto { data } => {
-                write!(f, "CRYPTO off={} len={}", data.off(), data.len());
+                write!(f, "CRYPTO off={} len={}", data.off(), data.len())?;
             },
 
             Frame::Stream { stream_id, data } => {
                 write!(f, "STREAM id={} off={} len={} fin={}",
-                       stream_id, data.off(), data.len(), data.fin());
+                       stream_id, data.off(), data.len(), data.fin())?;
             },
         }
 
