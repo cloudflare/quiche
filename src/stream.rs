@@ -36,11 +36,20 @@ use std::ops::Deref;
 pub struct Stream {
     recv: RecvBuf,
     send: SendBuf,
+
+    pub tx_data: usize,
+    pub max_tx_data: usize,
 }
 
 impl Stream {
-    pub fn new() -> Stream {
-        Self::default()
+    pub fn new(max_data: usize) -> Stream {
+        Stream {
+            recv: RecvBuf::default(),
+            send: SendBuf::default(),
+
+            tx_data: 0,
+            max_tx_data: max_data,
+        }
     }
 
     pub fn push_recv(&mut self, buf: RangeBuf) -> Result<()> {

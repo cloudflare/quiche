@@ -88,6 +88,10 @@ pub struct Conn {
 
     tls_state: tls::State,
 
+    tx_data: usize,
+
+    max_tx_data: usize,
+
     streams: HashMap<u64, stream::Stream>,
 
     is_server: bool,
@@ -128,6 +132,10 @@ impl Conn {
             local_transport_params: config.local_transport_params.clone(),
 
             tls_state: tls,
+
+            tx_data: 0,
+
+            max_tx_data: config.local_transport_params.initial_max_data as usize,
 
             streams: HashMap::new(),
 
@@ -285,7 +293,22 @@ impl Conn {
                     self.draining = true;
                 },
 
-                frame::Frame::MaxData { .. } => {
+                frame::Frame::MaxData { max } => {
+                    self.max_tx_data = cmp::max(self.max_tx_data,
+                                                max as usize);
+
+                    ack_only = false;
+                },
+
+                frame::Frame::MaxStreamData { stream_id, max } => {
+                    let stream = match self.streams.get_mut(&stream_id) {
+                        Some(v) => v,
+                        None => return Err(Error::UnknownStream),
+                    };
+
+                    stream.max_tx_data = cmp::max(stream.max_tx_data,
+                                                  max as usize);
+
                     ack_only = false;
                 },
 
@@ -332,10 +355,12 @@ impl Conn {
                 },
 
                 frame::Frame::Stream { stream_id, data } => {
+                    let max_data = self.peer_transport_params
+                                       .initial_max_stream_data_bidi_local as usize;
+
                     // Get existing stream or create a new one.
                     let stream = self.streams.entry(stream_id).or_insert_with(|| {
-                        // TODO: enforce stream limits
-                        stream::Stream::new()
+                        stream::Stream::new(max_data)
                     });
 
                     // TODO: enforce flow control
@@ -469,10 +494,25 @@ impl Conn {
         }
 
         // Create STREAM frame.
-        if space.pkt_type == packet::Type::Application {
+        if space.pkt_type == packet::Type::Application &&
+           self.tx_data != self.max_tx_data {
             for (id, stream) in &mut self.streams {
                 if stream.can_write() {
-                    let stream_len = left - frame::MAX_STREAM_OVERHEAD;
+                    if stream.tx_data == stream.max_tx_data {
+                        trace!("{} stream {} is blocked", trace_id, id);
+                        continue;
+                    }
+
+                    let max_tx_data = cmp::min(self.max_tx_data - self.tx_data,
+                                               stream.max_tx_data - stream.tx_data);
+
+                    let stream_len = cmp::min(max_tx_data,
+                                              left - frame::MAX_STREAM_OVERHEAD);
+
+                    if stream_len == 0 {
+                        continue;
+                    }
+
                     let stream_buf = stream.pop_send(stream_len)?;
 
                     let frame = frame::Frame::Stream {
@@ -482,10 +522,17 @@ impl Conn {
 
                     length += frame.wire_len();
 
+                    self.tx_data += stream_len;
+                    stream.tx_data += stream_len;
+
                     frames.push(frame);
                     break;
                 }
             }
+        }
+
+        if frames.len() == 0 {
+            return Err(Error::NothingToDo);
         }
 
         // Only long header packets have an explicit length field.
@@ -517,8 +564,9 @@ impl Conn {
         let ciphertext = payload.slice(payload_len)?;
         packet::encrypt_pkt(ciphertext, pn, header.as_ref(), aead)?;
 
-        aead.xor_keystream(&ciphertext[4 - pn_len..16 + (4 - pn_len)],
-                           header.slice_last(pn_len)?)?;
+        let sample = &ciphertext[4 - pn_len..16 + (4 - pn_len)];
+        let pn_ciphertext = header.slice_last(pn_len)?;
+        aead.xor_keystream(sample, pn_ciphertext)?;
 
         let written = payload_offset + payload_len;
         Ok(written)
@@ -539,9 +587,11 @@ impl Conn {
 
     pub fn stream_send(&mut self, stream_id: u64, buf: &[u8], fin: bool)
                                                             -> Result<usize> {
+        let max_data = self.peer_transport_params
+                           .initial_max_stream_data_bidi_remote as usize;
+
         let stream = self.streams.entry(stream_id).or_insert_with(|| {
-            // TODO: enforce stream limits
-            stream::Stream::new()
+            stream::Stream::new(max_data)
         });
 
         // TODO: respect peer's flow control

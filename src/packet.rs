@@ -435,7 +435,7 @@ impl PktNumSpace {
             crypto_open: None,
             crypto_seal: None,
 
-            crypto_stream: stream::Stream::new(),
+            crypto_stream: stream::Stream::default(),
         }
     }
 

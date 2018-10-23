@@ -56,6 +56,11 @@ pub enum Frame {
         max: u64,
     },
 
+    MaxStreamData {
+        stream_id: u64,
+        max: u64,
+    },
+
     MaxStreamId {
         max: u64,
     },
@@ -129,6 +134,13 @@ impl Frame {
 
             0x04 => {
                 Frame::MaxData {
+                    max: b.get_varint()?,
+                }
+            },
+
+            0x05 => {
+                Frame::MaxStreamData {
+                    stream_id: b.get_varint()?,
                     max: b.get_varint()?,
                 }
             },
@@ -223,6 +235,13 @@ impl Frame {
             Frame::MaxData { max } => {
                 b.put_varint(0x04)?;
 
+                b.put_varint(*max)?;
+            },
+
+            Frame::MaxStreamData { stream_id, max } => {
+                b.put_varint(0x05)?;
+
+                b.put_varint(*stream_id)?;
                 b.put_varint(*max)?;
             },
 
@@ -326,6 +345,12 @@ impl Frame {
                 octets::varint_len(*max)           // max
             },
 
+            Frame::MaxStreamData { stream_id, max } => {
+                1 +                                // frame type
+                octets::varint_len(*stream_id) +   // stream_id
+                octets::varint_len(*max)           // max
+            },
+
             Frame::MaxStreamId { max } => {
                 1 +                                // frame type
                 octets::varint_len(*max)           // max
@@ -397,6 +422,10 @@ impl fmt::Debug for Frame {
 
             Frame::MaxData { max } => {
                 write!(f, "MAX_DATA max={}", max)?;
+            },
+
+            Frame::MaxStreamData { stream_id, max } => {
+                write!(f, "MAX_STREAM_DATA stream={} max={}", stream_id, max)?;
             },
 
             Frame::MaxStreamId { max } => {
@@ -567,6 +596,28 @@ mod tests {
         };
 
         assert_eq!(wire_len, 5);
+
+        {
+            let mut b = octets::Bytes::new(&mut d);
+            assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
+        }
+    }
+
+    #[test]
+    fn max_stream_data() {
+        let mut d: [u8; 128] = [42; 128];
+
+        let frame = Frame::MaxStreamData {
+            stream_id: 12321,
+            max: 128318273,
+        };
+
+        let wire_len = {
+            let mut b = octets::Bytes::new(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 7);
 
         {
             let mut b = octets::Bytes::new(&mut d);
