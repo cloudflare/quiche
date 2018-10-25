@@ -286,6 +286,17 @@ pub fn pkt_num_len(pn: u64) -> Result<usize> {
     Ok(len)
 }
 
+pub fn pkt_num_bits(len: usize) -> Result<usize> {
+    let bits = match len {
+        1 => 7,
+        2 => 14,
+        4 => 30,
+        _ => return Err(Error::InvalidPacket),
+    };
+
+    Ok(bits)
+}
+
 pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
                                                     -> Result<(u64,usize)> {
     let max_pn_len = cmp::min(b.cap() - aead.pn_nonce_len(), 4);
@@ -333,8 +344,26 @@ pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
         _ => return Err(Error::InvalidPacket),
     };
 
-    // TODO: implement packet number truncation
     Ok((out as u64, len))
+}
+
+pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize) -> Result<u64> {
+    let pn_nbits     = pkt_num_bits(pn_len)?;
+    let expected_pn  = largest_pn + 1;
+    let pn_win       = 1 << pn_nbits;
+    let pn_hwin      = pn_win / 2;
+    let pn_mask      = pn_win - 1;
+    let candidate_pn = (expected_pn & !pn_mask) | truncated_pn;
+
+    if candidate_pn + pn_hwin <= expected_pn {
+         return Ok(candidate_pn + pn_win);
+    }
+
+    if candidate_pn > expected_pn + pn_hwin && candidate_pn > pn_win {
+        return Ok(candidate_pn - pn_win);
+    }
+
+    Ok(candidate_pn)
 }
 
 pub fn encode_pkt_num(pn: u64, b: &mut octets::Bytes) -> Result<()> {
@@ -402,7 +431,7 @@ pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
 pub struct PktNumSpace {
     pub pkt_type: Type,
 
-    pub expected_pkt_num: u64,
+    pub largest_rx_pkt_num: u64,
 
     pub last_pkt_num: u64,
 
@@ -421,7 +450,7 @@ impl PktNumSpace {
         PktNumSpace {
             pkt_type: ty,
 
-            expected_pkt_num: 0,
+            largest_rx_pkt_num: 0,
 
             last_pkt_num: 0,
 

@@ -254,6 +254,8 @@ impl Conn {
         let (pn, pn_len) = packet::decrypt_pkt_num(&mut b, &aead)?;
         b.skip(pn_len)?;
 
+        let pn = packet::decode_pkt_num(space.largest_rx_pkt_num, pn, pn_len)?;
+
         trace!("{} rx pkt {:?} len={} pn={}", trace_id, hdr, payload_len, pn);
 
         let payload_offset = b.off();
@@ -374,6 +376,8 @@ impl Conn {
         if !ack_only {
             space.need_ack.push(pn);
         }
+
+        space.largest_rx_pkt_num = cmp::max(space.largest_rx_pkt_num, pn);
 
         let read = payload_offset + payload_len + aead.tag_len();
         Ok(read)
