@@ -201,8 +201,6 @@ impl Frame {
 
                     left -= 1;
                 }
-
-                ()
             },
 
             Frame::ConnectionClose { error_code, frame_type, reason } => {
@@ -212,8 +210,6 @@ impl Frame {
                 b.put_varint(*frame_type)?;
                 b.put_varint(reason.len() as u64)?;
                 b.put_bytes(reason.as_ref())?;
-
-                ()
             },
 
             Frame::ApplicationClose { error_code, reason } => {
@@ -222,30 +218,22 @@ impl Frame {
                 b.put_u16(*error_code)?;
                 b.put_varint(reason.len() as u64)?;
                 b.put_bytes(reason.as_ref())?;
-
-                ()
             },
 
             Frame::MaxData { max } => {
                 b.put_varint(0x04)?;
 
                 b.put_varint(*max)?;
-
-                ()
             },
 
             Frame::MaxStreamId { max } => {
                 b.put_varint(0x06)?;
 
                 b.put_varint(*max)?;
-
-                ()
             },
 
             Frame::Ping => {
                 b.put_varint(0x07)?;
-
-                ()
             },
 
             Frame::NewConnectionId { seq_num, conn_id, reset_token } => {
@@ -255,16 +243,12 @@ impl Frame {
                 b.put_u8(conn_id.len() as u8)?;
                 b.put_bytes(conn_id.as_ref())?;
                 b.put_bytes(reset_token.as_ref())?;
-
-                ()
             },
 
             Frame::RetireConnectionId { seq_num } => {
                 b.put_varint(0x0d)?;
 
                 b.put_varint(*seq_num)?;
-
-                ()
             },
 
             Frame::ACK { largest_ack, ack_delay } => {
@@ -274,8 +258,6 @@ impl Frame {
                 b.put_varint(*ack_delay)?;
                 b.put_varint(0)?;
                 b.put_varint(0)?;
-
-                ()
             },
 
             Frame::NewToken { token } => {
@@ -283,8 +265,6 @@ impl Frame {
 
                 b.put_varint(token.len() as u64)?;
                 b.put_bytes(&token)?;
-
-                ()
             },
 
             Frame::Crypto { data } => {
@@ -293,8 +273,6 @@ impl Frame {
                 b.put_varint(data.off() as u64)?;
                 b.put_varint(data.len() as u64)?;
                 b.put_bytes(&data)?;
-
-                ()
             }
 
             Frame::Stream { stream_id, data } => {
@@ -316,8 +294,6 @@ impl Frame {
                 b.put_varint(data.off() as u64)?;
                 b.put_varint(data.len() as u64)?;
                 b.put_bytes(data.as_ref())?;
-
-                ()
             }
         }
 
