@@ -146,6 +146,10 @@ impl RecvBuf {
     }
 
     fn ready(&self) -> bool {
+        if self.len() == 0 {
+            return false;
+        }
+
         let buf = match self.data.peek() {
             Some(v) => v,
             None => return false,
