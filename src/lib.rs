@@ -284,14 +284,10 @@ impl Conn {
                 frame::Frame::Padding { .. } => (),
 
                 frame::Frame::ConnectionClose { .. } => {
-                    ack_only = false;
-
                     self.draining = true;
                 },
 
                 frame::Frame::ApplicationClose { .. } => {
-                    ack_only = false;
-
                     self.draining = true;
                 },
 
