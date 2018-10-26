@@ -265,7 +265,7 @@ impl<'a> Bytes<'a> {
     }
 
     pub fn split_at(&mut self, off: usize) -> Result<(Bytes, Bytes)> {
-        if self.cap() + self.off < off {
+        if self.len() < off {
             return Err(Error::BufferTooShort);
         }
 
