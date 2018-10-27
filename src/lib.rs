@@ -370,7 +370,7 @@ impl Conn {
         }
 
         if !ack_only {
-            space.need_ack.push(pn);
+            space.recv_pkt_num.push(pn);
         }
 
         space.largest_rx_pkt_num = cmp::max(space.largest_rx_pkt_num, pn);
@@ -405,14 +405,14 @@ impl Conn {
         // can be written.
         let space =
             if self.initial.crypto_stream.can_write() ||
-               self.initial.need_ack.len() > 0 {
+               self.initial.recv_pkt_num.len() > 0 {
                 &mut self.initial
             } else if self.handshake.crypto_stream.can_write() ||
-                      self.handshake.need_ack.len() > 0 {
+                      self.handshake.recv_pkt_num.len() > 0 {
                 &mut self.handshake
             } else if self.handshake_completed &&
                       (self.application.crypto_stream.can_write() ||
-                       self.application.need_ack.len() > 0 ||
+                       self.application.recv_pkt_num.len() > 0 ||
                        self.streams.values().any(|s| s.can_write())) {
                 &mut self.application
             } else {
@@ -449,10 +449,10 @@ impl Conn {
         let mut frames: Vec<frame::Frame> = Vec::new();
 
         // Create ACK frame.
-        if space.need_ack.len() > 0 {
+        if space.recv_pkt_num.len() > 0 {
             // TODO: ACK multiple packets in single frame
             let frame = frame::Frame::ACK {
-                largest_ack: space.need_ack.pop().unwrap(),
+                largest_ack: space.recv_pkt_num.pop().unwrap(),
                 ack_delay: 0,
             };
 

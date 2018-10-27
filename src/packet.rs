@@ -28,6 +28,8 @@ use std::cmp;
 use std::fmt;
 use std::slice;
 
+use std::collections::BinaryHeap;
+
 use ::Result;
 use ::Error;
 
@@ -435,7 +437,7 @@ pub struct PktNumSpace {
 
     pub last_pkt_num: u64,
 
-    pub need_ack: Vec<u64>,
+    pub recv_pkt_num: BinaryHeap<u64>,
 
     pub crypto_level: crypto::Level,
 
@@ -454,7 +456,7 @@ impl PktNumSpace {
 
             last_pkt_num: 0,
 
-            need_ack: Vec::new(),
+            recv_pkt_num: BinaryHeap::new(),
 
             crypto_level,
 
