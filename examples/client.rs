@@ -59,6 +59,7 @@ const USAGE: &'static str = "Usage: client [options]
 Options:
   -h --help          Show this screen.
   --connect <addr>   Connect to the given IP:port [default: 127.0.0.1:4433]
+  --path <path>      Request the given file [default: /index.html]
 ";
 
 fn main() {
@@ -122,10 +123,11 @@ fn main() {
         }
 
         if conn.is_established() && !req_sent {
-            info!("{} sending HTTP request", conn.trace_id());
+            info!("{} sending HTTP request for {}",
+                  conn.trace_id(), args.get_str("--path"));
 
-            let req = b"GET /index.html\r\n";
-            conn.stream_send(4, &req[..], true).unwrap();
+            let req = format!("GET {}\r\n", args.get_str("--path"));
+            conn.stream_send(4, req.as_bytes(), true).unwrap();
 
             req_sent = true;
         }
