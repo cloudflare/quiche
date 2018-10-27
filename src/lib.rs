@@ -370,9 +370,15 @@ impl Conn {
                         stream::Stream::new(max_rx_data, max_tx_data)
                     });
 
-                    stream.rx_data = cmp::max(stream.rx_data, data.off());
+                    stream.rx_data += data.len();
 
                     if stream.tx_data > stream.max_rx_data {
+                        return Err(Error::FlowControl);
+                    }
+
+                    self.rx_data += data.len();
+
+                    if self.tx_data > self.max_rx_data {
                         return Err(Error::FlowControl);
                     }
 
