@@ -370,7 +370,7 @@ impl Conn {
         }
 
         if !ack_only {
-            space.recv_pkt_num.push(pn);
+            space.recv_pkt_num.push_item(pn);
         }
 
         space.largest_rx_pkt_num = cmp::max(space.largest_rx_pkt_num, pn);
@@ -450,11 +450,12 @@ impl Conn {
 
         // Create ACK frame.
         if space.recv_pkt_num.len() > 0 {
-            // TODO: ACK multiple packets in single frame
             let frame = frame::Frame::ACK {
-                largest_ack: space.recv_pkt_num.pop().unwrap(),
                 ack_delay: 0,
+                ranges: space.recv_pkt_num.clone(),
             };
+
+            space.recv_pkt_num.clear();
 
             length += frame.wire_len();
             left -= frame.wire_len();
@@ -982,3 +983,4 @@ mod frame;
 mod stream;
 mod tls;
 mod octets;
+mod ranges;

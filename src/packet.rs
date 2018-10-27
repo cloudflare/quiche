@@ -28,14 +28,13 @@ use std::cmp;
 use std::fmt;
 use std::slice;
 
-use std::collections::BinaryHeap;
-
 use ::Result;
 use ::Error;
 
 use octets;
 use crypto;
 use rand;
+use ranges;
 use stream;
 
 const FORM_BIT: u8 = 0x80;
@@ -437,7 +436,7 @@ pub struct PktNumSpace {
 
     pub last_pkt_num: u64,
 
-    pub recv_pkt_num: BinaryHeap<u64>,
+    pub recv_pkt_num: ranges::RangeSet,
 
     pub crypto_level: crypto::Level,
 
@@ -456,7 +455,7 @@ impl PktNumSpace {
 
             last_pkt_num: 0,
 
-            recv_pkt_num: BinaryHeap::new(),
+            recv_pkt_num: ranges::RangeSet::default(),
 
             crypto_level,
 

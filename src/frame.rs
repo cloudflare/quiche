@@ -30,6 +30,7 @@ use ::Result;
 use ::Error;
 
 use octets;
+use ranges;
 use stream;
 
 pub const MAX_CRYPTO_OVERHEAD: usize = 8;
@@ -78,8 +79,8 @@ pub enum Frame {
     },
 
     ACK {
-        largest_ack: u64,
         ack_delay: u64,
+        ranges: ranges::RangeSet,
     },
 
     NewToken {
@@ -270,13 +271,30 @@ impl Frame {
                 b.put_varint(*seq_num)?;
             },
 
-            Frame::ACK { largest_ack, ack_delay } => {
+            Frame::ACK { ack_delay, ranges } => {
                 b.put_varint(0x1a)?;
 
-                b.put_varint(*largest_ack)?;
+                let mut it = ranges.iter().rev();
+
+                let first = it.next().unwrap();
+                let ack_block = (first.end - 1) - first.start;
+
+                b.put_varint(first.end - 1)?;
                 b.put_varint(*ack_delay)?;
-                b.put_varint(0)?;
-                b.put_varint(0)?;
+                b.put_varint(it.len() as u64)?;
+                b.put_varint(ack_block)?;
+
+                let mut smallest_ack = first.start;
+
+                for block in it {
+                    let gap = smallest_ack - block.end - 1;
+                    let ack_block = (block.end - 1) - block.start;
+
+                    b.put_varint(gap)?;
+                    b.put_varint(ack_block)?;
+
+                    smallest_ack = block.start;
+                }
             },
 
             Frame::NewToken { token } => {
@@ -371,12 +389,32 @@ impl Frame {
                 octets::varint_len(*seq_num)       // seq_num
             },
 
-            Frame::ACK { largest_ack, ack_delay } => {
-                1 +                                // frame type
-                octets::varint_len(*largest_ack) + // largest_ack
-                octets::varint_len(*ack_delay) +   // ack_delay
-                1 +                                // block_count
-                1                                  // first_block
+            Frame::ACK { ack_delay, ranges } => {
+                let mut it = ranges.iter().rev();
+
+                let first = it.next().unwrap();
+                let ack_block = (first.end - 1) - first.start;
+
+                let mut len =
+                    1 +                                   // frame type
+                    octets::varint_len(first.end - 1) +   // largest_ack
+                    octets::varint_len(*ack_delay) +      // ack_delay
+                    octets::varint_len(it.len() as u64) + // block_count
+                    octets::varint_len(ack_block);        // first_block
+
+                let mut smallest_ack = first.start;
+
+                for block in it {
+                    let gap = smallest_ack - block.end - 1;
+                    let ack_block = (block.end - 1) - block.start;
+
+                    len += octets::varint_len(gap as u64) + // gap
+                           octets::varint_len(ack_block);   // ack_block
+
+                    smallest_ack = block.start;
+                }
+
+                len
             },
 
             Frame::NewToken { token } =>  {
@@ -444,8 +482,8 @@ impl fmt::Debug for Frame {
                 write!(f, "RETIRE_CONNECTION_ID (TODO)")?;
             },
 
-            Frame::ACK { .. } => {
-                write!(f, "ACK (TODO)")?;
+            Frame::ACK { ack_delay, ranges } => {
+                write!(f, "ACK delay={} blocks={:?}", ack_delay, ranges)?;
             },
 
             Frame::NewToken { .. } => {
@@ -470,17 +508,25 @@ fn parse_ack_frame(_ty: u64, b: &mut octets::Bytes) -> Result<Frame> {
     let largest_ack = b.get_varint()?;
     let ack_delay = b.get_varint()?;
     let block_count = b.get_varint()?;
-    let _first_block = b.get_varint()?;
+    let ack_block = b.get_varint()?;
 
-    // TODO: properly store ACK blocks
+    let mut smallest_ack = largest_ack - ack_block;
+
+    let mut ranges = ranges::RangeSet::default();
+    ranges.insert(smallest_ack..largest_ack + 1);
+
     for _i in 0..block_count {
-        let _gap = b.get_varint()?;
-        let _ack = b.get_varint()?;
+        let gap = b.get_varint()?;
+        let largest_ack = (smallest_ack - gap) - 2;
+        let ack_block = b.get_varint()?;
+
+        smallest_ack = largest_ack - ack_block;
+        ranges.insert(smallest_ack..largest_ack + 1);
     }
 
     Ok(Frame::ACK {
-        largest_ack,
         ack_delay,
+        ranges,
     })
 }
 
@@ -714,9 +760,15 @@ mod tests {
     fn ack() {
         let mut d: [u8; 128] = [42; 128];
 
+        let mut ranges = ranges::RangeSet::default();
+        ranges.insert(4..7);
+        ranges.insert(9..12);
+        ranges.insert(15..19);
+        ranges.insert(3000..5000);
+
         let frame = Frame::ACK {
-            largest_ack: 2163721632,
-            ack_delay: 874656534
+            ack_delay: 874656534,
+            ranges,
         };
 
         let wire_len = {
@@ -724,7 +776,7 @@ mod tests {
             frame.to_bytes(&mut b).unwrap()
         };
 
-        assert_eq!(wire_len, 15);
+        assert_eq!(wire_len, 17);
 
         {
             let mut b = octets::Bytes::new(&mut d);
