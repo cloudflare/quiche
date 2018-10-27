@@ -272,7 +272,7 @@ impl Conn {
         // To avoid sending an ACK in response to an ACK-only packet, we need
         // to keep track of whether this packet contains any frame other than
         // ACK.
-        let mut ack_only = true;
+        let mut do_ack = false;
 
         // Process packet payload.
         while payload.cap() > 0 {
@@ -295,7 +295,7 @@ impl Conn {
                     self.max_tx_data = cmp::max(self.max_tx_data,
                                                 max as usize);
 
-                    ack_only = false;
+                    do_ack = true;
                 },
 
                 frame::Frame::MaxStreamData { stream_id, max } => {
@@ -307,23 +307,23 @@ impl Conn {
                     stream.max_tx_data = cmp::max(stream.max_tx_data,
                                                   max as usize);
 
-                    ack_only = false;
+                    do_ack = true;
                 },
 
                 frame::Frame::MaxStreamId { .. } => {
-                    ack_only = false;
+                    do_ack = true;
                 },
 
                 frame::Frame::Ping => {
-                    ack_only = false;
+                    do_ack = true;
                 },
 
                 frame::Frame::NewConnectionId { .. } => {
-                    ack_only = false;
+                    do_ack = true;
                 },
 
                 frame::Frame::RetireConnectionId { .. } => {
-                    ack_only = false;
+                    do_ack = true;
                 },
 
                 // TODO: implement ack and retransmission.
@@ -331,7 +331,7 @@ impl Conn {
 
                 // TODO: implement stateless retry
                 frame::Frame::NewToken { .. } => {
-                    ack_only = false;
+                    do_ack = true;
                 },
 
                 frame::Frame::Crypto { data } => {
@@ -349,7 +349,7 @@ impl Conn {
                                       .map_err(|_e| Error::TlsFail)?;
                     }
 
-                    ack_only = false;
+                    do_ack = true;
                 },
 
                 frame::Frame::Stream { stream_id, data } => {
@@ -364,14 +364,13 @@ impl Conn {
                     // TODO: enforce flow control
                     stream.push_recv(data)?;
 
-                    ack_only = false;
+                    do_ack = true;
                 },
             }
         }
 
-        if !ack_only {
-            space.recv_pkt_num.push_item(pn);
-        }
+        space.recv_pkt_num.push_item(pn);
+        space.do_ack = cmp::max(space.do_ack, do_ack);
 
         space.largest_rx_pkt_num = cmp::max(space.largest_rx_pkt_num, pn);
 
@@ -405,14 +404,14 @@ impl Conn {
         // can be written.
         let space =
             if self.initial.crypto_stream.can_write() ||
-               self.initial.recv_pkt_num.len() > 0 {
+               self.initial.do_ack {
                 &mut self.initial
             } else if self.handshake.crypto_stream.can_write() ||
-                      self.handshake.recv_pkt_num.len() > 0 {
+                      self.handshake.do_ack {
                 &mut self.handshake
             } else if self.handshake_completed &&
                       (self.application.crypto_stream.can_write() ||
-                       self.application.recv_pkt_num.len() > 0 ||
+                       self.application.do_ack ||
                        self.streams.values().any(|s| s.can_write())) {
                 &mut self.application
             } else {
@@ -449,13 +448,14 @@ impl Conn {
         let mut frames: Vec<frame::Frame> = Vec::new();
 
         // Create ACK frame.
-        if space.recv_pkt_num.len() > 0 {
+        if space.do_ack {
             let frame = frame::Frame::ACK {
                 ack_delay: 0,
                 ranges: space.recv_pkt_num.clone(),
             };
 
             space.recv_pkt_num.clear();
+            space.do_ack = false;
 
             length += frame.wire_len();
             left -= frame.wire_len();

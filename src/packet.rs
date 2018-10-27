@@ -438,6 +438,8 @@ pub struct PktNumSpace {
 
     pub recv_pkt_num: ranges::RangeSet,
 
+    pub do_ack: bool,
+
     pub crypto_level: crypto::Level,
 
     pub crypto_open: Option<crypto::Open>,
@@ -456,6 +458,8 @@ impl PktNumSpace {
             last_pkt_num: 0,
 
             recv_pkt_num: ranges::RangeSet::default(),
+
+            do_ack: false,
 
             crypto_level,
 
