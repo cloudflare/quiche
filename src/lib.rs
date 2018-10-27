@@ -595,7 +595,7 @@ impl Conn {
             stream::Stream::new(max_data)
         });
 
-        // TODO: respect peer's flow control
+        // TODO: implement backpressure based on peer's flow control
 
         stream.push_send(buf, fin)?;
 
