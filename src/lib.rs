@@ -512,13 +512,14 @@ impl Conn {
         // Create MAX_DATA frame.
         if space.pkt_type == packet::Type::Application {
             if self.rx_data + 2 * MAX_PKT_LEN > self.max_rx_data {
-                let max: usize = self.rx_data + 2 * MAX_PKT_LEN;
+                let max = self.rx_data as u64 +
+                          self.local_transport_params.initial_max_data as u64;
 
                 let frame = frame::Frame::MaxData {
                     max: max as u64,
                 };
 
-                self.max_rx_data = max;
+                self.max_rx_data = max as usize;
 
                 length += frame.wire_len();
                 left -= frame.wire_len();
@@ -531,14 +532,16 @@ impl Conn {
         if space.pkt_type == packet::Type::Application {
             for (id, stream) in &mut self.streams {
                 if stream.more_credit() {
-                    let max: usize = stream.rx_data + 2 * MAX_PKT_LEN;
+                    let max = stream.rx_data as u64 +
+                              self.local_transport_params
+                                  .initial_max_stream_data_bidi_local as u64;
 
                     let frame = frame::Frame::MaxStreamData {
                         stream_id: *id,
                         max: max as u64,
                     };
 
-                    stream.max_rx_data = max;
+                    stream.max_rx_data = max as usize;
 
                     length += frame.wire_len();
                     left -= frame.wire_len();
