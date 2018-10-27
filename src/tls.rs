@@ -308,6 +308,9 @@ extern fn set_encryption_secret(ssl: *mut SSL, level: crypto::Level, is_write: i
         Err(_) => return 0,
     };
 
+    trace!("{} tls set encryption secret lvl={:?} write={}",
+           conn.trace_id(), level, is_write);
+
     let key_len = aead.key_len();
     let nonce_len = aead.nonce_len();
 
@@ -363,6 +366,8 @@ extern fn write_message(ssl: *mut SSL, level: crypto::Level, data: *const u8,
         None    => return 0,
     };
 
+    trace!("{} tls write message lvl={:?} len={}", conn.trace_id(), level, len);
+
     let buf = unsafe { slice::from_raw_parts(data, len) };
 
     let space = match level {
@@ -388,12 +393,13 @@ extern fn flush_flight(_ssl: *mut SSL) -> i32 {
 }
 
 extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> i32 {
-    let _conn = match get_ex_data_from_ptr::<Conn>(ssl, *QUICHE_EX_DATA_INDEX) {
+    let conn = match get_ex_data_from_ptr::<Conn>(ssl, *QUICHE_EX_DATA_INDEX) {
         Some(v) => v,
         None    => return 0,
     };
 
-    println!("TLS SENDING ALERT {} LVL:{:?}", alert, level);
+    trace!("{} tls send alert lvl={:?} alert={:x}",
+           conn.trace_id(), level, alert);
 
     1
 }
