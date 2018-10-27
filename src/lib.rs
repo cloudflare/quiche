@@ -41,6 +41,8 @@ pub const VERSION_DRAFT15: u32 = 0xff00000f;
 
 pub const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 
+const MAX_PKT_LEN: usize = 1252;
+
 pub type Result<T> = ::std::result::Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -57,6 +59,7 @@ pub enum Error {
     TlsFail,
     Again,
     NothingToDo,
+    FlowControl,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -88,8 +91,10 @@ pub struct Conn {
 
     tls_state: tls::State,
 
-    tx_data: usize,
+    rx_data: usize,
+    max_rx_data: usize,
 
+    tx_data: usize,
     max_tx_data: usize,
 
     streams: HashMap<u64, stream::Stream>,
@@ -133,9 +138,11 @@ impl Conn {
 
             tls_state: tls,
 
-            tx_data: 0,
+            rx_data: 0,
+            max_rx_data: config.local_transport_params.initial_max_data as usize,
 
-            max_tx_data: config.local_transport_params.initial_max_data as usize,
+            tx_data: 0,
+            max_tx_data: 0,
 
             streams: HashMap::new(),
 
@@ -353,15 +360,22 @@ impl Conn {
                 },
 
                 frame::Frame::Stream { stream_id, data } => {
-                    let max_data = self.peer_transport_params
-                                       .initial_max_stream_data_bidi_local as usize;
+                    let max_rx_data = self.local_transport_params
+                                          .initial_max_stream_data_bidi_local as usize;
+                    let max_tx_data = self.peer_transport_params
+                                          .initial_max_stream_data_bidi_remote as usize;
 
                     // Get existing stream or create a new one.
                     let stream = self.streams.entry(stream_id).or_insert_with(|| {
-                        stream::Stream::new(max_data)
+                        stream::Stream::new(max_rx_data, max_tx_data)
                     });
 
-                    // TODO: enforce flow control
+                    stream.rx_data = cmp::max(stream.rx_data, data.off());
+
+                    if stream.tx_data > stream.max_rx_data {
+                        return Err(Error::FlowControl);
+                    }
+
                     stream.push_recv(data)?;
 
                     do_ack = true;
@@ -401,7 +415,7 @@ impl Conn {
         // Select packet number space context depending on whether there is
         // handshake data to send, whether there are packets to ACK, or in
         // the case of the application space, whether there are streams that
-        // can be written.
+        // can be written or that needs to increase flow control credit.
         let space =
             if self.initial.crypto_stream.can_write() ||
                self.initial.do_ack {
@@ -412,7 +426,8 @@ impl Conn {
             } else if self.handshake_completed &&
                       (self.application.crypto_stream.can_write() ||
                        self.application.do_ack ||
-                       self.streams.values().any(|s| s.can_write())) {
+                       self.streams.values().any(|s| s.can_write()) ||
+                       self.streams.values().any(|s| s.more_credit())) {
                 &mut self.application
             } else {
                 return Err(Error::NothingToDo);
@@ -492,6 +507,45 @@ impl Conn {
             frames.push(frame);
 
             self.sent_initial = true;
+        }
+
+        // Create MAX_DATA frame.
+        if space.pkt_type == packet::Type::Application {
+            if self.rx_data + 2 * MAX_PKT_LEN > self.max_rx_data {
+                let max: usize = self.rx_data + 2 * MAX_PKT_LEN;
+
+                let frame = frame::Frame::MaxData {
+                    max: max as u64,
+                };
+
+                self.max_rx_data = max;
+
+                length += frame.wire_len();
+                left -= frame.wire_len();
+
+                frames.push(frame);
+            }
+        }
+
+        // Create MAX_STREAM_DATA frame.
+        if space.pkt_type == packet::Type::Application {
+            for (id, stream) in &mut self.streams {
+                if stream.more_credit() {
+                    let max: usize = stream.rx_data + 2 * MAX_PKT_LEN;
+
+                    let frame = frame::Frame::MaxStreamData {
+                        stream_id: *id,
+                        max: max as u64,
+                    };
+
+                    stream.max_rx_data = max;
+
+                    length += frame.wire_len();
+                    left -= frame.wire_len();
+
+                    frames.push(frame);
+                }
+            }
         }
 
         // Create STREAM frame.
@@ -588,11 +642,13 @@ impl Conn {
 
     pub fn stream_send(&mut self, stream_id: u64, buf: &[u8], fin: bool)
                                                             -> Result<usize> {
-        let max_data = self.peer_transport_params
-                           .initial_max_stream_data_bidi_remote as usize;
+        let max_rx_data = self.local_transport_params
+                              .initial_max_stream_data_bidi_local as usize;
+        let max_tx_data = self.peer_transport_params
+                              .initial_max_stream_data_bidi_remote as usize;
 
         let stream = self.streams.entry(stream_id).or_insert_with(|| {
-            stream::Stream::new(max_data)
+            stream::Stream::new(max_rx_data, max_tx_data)
         });
 
         // TODO: implement backpressure based on peer's flow control
@@ -640,6 +696,9 @@ impl Conn {
                                                               self.is_server)?;
 
                     self.peer_transport_params = peer_params;
+
+                    self.max_tx_data =
+                        self.peer_transport_params.initial_max_data as usize;
 
                     trace!("{} connection established: cipher={:?}",
                            self.trace_id(), self.application.cipher());

@@ -39,16 +39,22 @@ pub struct Stream {
 
     pub tx_data: usize,
     pub max_tx_data: usize,
+
+    pub rx_data: usize,
+    pub max_rx_data: usize,
 }
 
 impl Stream {
-    pub fn new(max_data: usize) -> Stream {
+    pub fn new(max_rx_data: usize, max_tx_data: usize) -> Stream {
         Stream {
             recv: RecvBuf::default(),
             send: SendBuf::default(),
 
+            rx_data: 0,
+            max_rx_data: max_rx_data,
+
             tx_data: 0,
-            max_tx_data: max_data,
+            max_tx_data: max_tx_data,
         }
     }
 
@@ -74,6 +80,10 @@ impl Stream {
 
     pub fn can_write(&self) -> bool {
         self.send.ready()
+    }
+
+    pub fn more_credit(&self) -> bool {
+        self.rx_data + 2 * ::MAX_PKT_LEN > self.max_rx_data
     }
 }
 

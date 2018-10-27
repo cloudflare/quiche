@@ -24,7 +24,7 @@ Status
 * [x] QUIC draft-15
 * [x] TLS 1.3 handshake (using BoringSSL)
 * [x] Stream API
-* [ ] Flow control
+* [x] Flow control
 * [ ] Loss detection and recovery
 * [ ] Congestion control
 * [ ] Connection close
