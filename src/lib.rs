@@ -188,6 +188,8 @@ impl Conn {
             return Err(Error::BufferTooShort);
         }
 
+        let trace_id = self.trace_id();
+
         self.do_handshake()?;
 
         let mut b = octets::Bytes::new(buf);
@@ -196,6 +198,39 @@ impl Conn {
             packet::Header::short_from_bytes(&mut b, self.scid.len())?
         } else {
             let hdr = packet::Header::long_from_bytes(&mut b)?;
+
+            if hdr.ty == packet::Type::VersionNegotiation {
+                if self.is_server {
+                    return Err(Error::InvalidPacket);
+                }
+
+                trace!("{} rx pkt {:?}", trace_id, hdr);
+
+                let versions = match hdr.versions {
+                    Some(ref v) => v,
+                    None => return Err(Error::InvalidPacket),
+                };
+
+                let mut new_version = 0;
+                for v in versions.iter() {
+                    if *v == VERSION_DRAFT15 {
+                        new_version = *v;
+                    }
+                }
+
+                if new_version == 0 {
+                    return Err(Error::UnknownVersion);
+                }
+
+                self.version = new_version;
+                self.sent_initial = false;
+                self.got_peer_conn_id = false;
+                self.initial.clear();
+                self.tls_state.clear()
+                    .map_err(|_e| Error::TlsFail)?;
+
+                return Ok(b.off());
+            }
 
             if hdr.version != self.version {
                 return Err(Error::UnknownVersion);
@@ -239,8 +274,6 @@ impl Conn {
             self.dcid.extend_from_slice(&hdr.scid);
             self.got_peer_conn_id = true;
         }
-
-        let trace_id = self.trace_id();
 
         // Select packet number space context.
         let space = match hdr.ty {
@@ -351,7 +384,6 @@ impl Conn {
                         let buf = space.crypto_stream.pop_recv()?;
                         let level = space.crypto_level;
 
-
                         self.tls_state.provide_data(level, &buf)
                                       .map_err(|_e| Error::TlsFail)?;
                     }
@@ -446,6 +478,7 @@ impl Conn {
             dcid: self.dcid.clone(),
             scid: self.scid.clone(),
             token: None,
+            versions: None,
         };
 
         if space.pkt_type == packet::Type::Application {

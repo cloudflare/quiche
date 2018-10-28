@@ -79,7 +79,7 @@ fn main() {
     rand::rand_bytes(&mut scid[..]);
 
     let config = quiche::Config {
-        version: quiche::VERSION_DRAFT15,
+        version: 0xbabababa,
 
         local_conn_id: &scid,
 

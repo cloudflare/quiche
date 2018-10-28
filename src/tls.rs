@@ -259,6 +259,12 @@ impl State {
         })
     }
 
+    pub fn clear(&mut self) -> Result<()> {
+        map_result_ssl(self, unsafe {
+            SSL_clear(self.as_ptr())
+        })
+    }
+
     fn as_ptr(&self) -> *mut SSL {
         self.0
     }
@@ -507,6 +513,8 @@ extern {
 
     fn SSL_use_PrivateKey_file(ssl: *mut SSL, file: *const libc::c_char,
                                 ty: libc::c_int) -> libc::c_int;
+
+    fn SSL_clear(ssl: *mut SSL) -> i32;
 
     fn SSL_free(ssl: *mut SSL);
 

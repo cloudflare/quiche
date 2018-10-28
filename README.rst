@@ -22,6 +22,7 @@ Status
 ------
 
 * [x] QUIC draft-15
+* [x] Version Negotiation
 * [x] TLS 1.3 handshake (using BoringSSL)
 * [x] Stream API
 * [x] Flow control

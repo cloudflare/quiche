@@ -105,6 +105,11 @@ fn main() {
             }
         };
 
+        if hdr.ty == packet::Type::VersionNegotiation {
+            error!("Version negotiation invalid on the server");
+            continue;
+        }
+
         let conn = match connections.entry(src) {
             hash_map::Entry::Vacant(v) =>{
                 if hdr.version != quiche::VERSION_DRAFT15 {

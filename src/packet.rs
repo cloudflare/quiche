@@ -67,6 +67,7 @@ pub struct Header {
     pub dcid: Vec<u8>,
     pub scid: Vec<u8>,
     pub token: Option<Vec<u8>>,
+    pub versions: Option<Vec<u32>>,
 }
 
 impl Header {
@@ -130,6 +131,7 @@ impl Header {
         // End of invariants.
 
         let mut token: Option<Vec<u8>> = None;
+        let mut versions: Option<Vec<u32>> = None;
 
         match ty {
             Type::Initial => {
@@ -141,7 +143,14 @@ impl Header {
             },
 
             Type::VersionNegotiation => {
-                panic!("Version negotiation not supported");
+                let mut list: Vec<u32> = Vec::new();
+
+                while b.cap() > 0 {
+                    let version = b.get_u32()?;
+                    list.push(version);
+                }
+
+                versions = Some(list);
             },
 
             _ => (),
@@ -154,6 +163,7 @@ impl Header {
             dcid,
             scid,
             token,
+            versions,
         })
     }
 
@@ -221,6 +231,7 @@ impl Header {
             dcid: dcid.to_vec(),
             scid: Vec::new(),
             token: None,
+            versions: None,
         })
     }
 
@@ -266,6 +277,12 @@ impl fmt::Debug for Header {
             write!(f, " scid=")?;
             for b in &self.scid {
                 write!(f, "{:02x}", b)?;
+            }
+        }
+
+        if self.ty == Type::VersionNegotiation {
+            if let Some(ref versions) = self.versions {
+                write!(f, " versions={:x?}", versions)?;
             }
         }
 
@@ -468,6 +485,11 @@ impl PktNumSpace {
 
             crypto_stream: stream::Stream::default(),
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.last_pkt_num = 0;
+        self.crypto_stream = stream::Stream::default();
     }
 
     pub fn cipher(&self) -> crypto::Algorithm {
