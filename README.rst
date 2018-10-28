@@ -29,7 +29,7 @@ Status
 * [ ] Unidirectional streams
 * [ ] Loss detection and recovery
 * [ ] Congestion control
-* [ ] Connection close
+* [x] Connection close
 * [ ] Stateless retry
 * [ ] 0-RTT
 

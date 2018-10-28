@@ -47,6 +47,7 @@ pub type Result<T> = ::std::result::Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
+    NoError,
     WrongForm,
     UnknownVersion,
     UnknownPacket,
@@ -99,6 +100,9 @@ pub struct Conn {
 
     streams: HashMap<u64, stream::Stream>,
 
+    app_error: Option<u16>,
+    app_reason: Vec<u8>,
+
     is_server: bool,
 
     derived_initial_secrets: bool,
@@ -145,6 +149,9 @@ impl Conn {
             max_tx_data: 0,
 
             streams: HashMap::new(),
+
+            app_error: None,
+            app_reason: Vec::new(),
 
             is_server,
 
@@ -517,37 +524,6 @@ impl Conn {
             frames.push(frame);
         }
 
-        // Create CRYPTO frame.
-        if space.crypto_stream.can_write() {
-            let crypto_len = left - frame::MAX_CRYPTO_OVERHEAD;
-            let crypto_buf = space.crypto_stream.pop_send(crypto_len)?;
-
-            let frame = frame::Frame::Crypto {
-                data: crypto_buf,
-            };
-
-            length += frame.wire_len();
-            left -= frame.wire_len();
-
-            frames.push(frame);
-        }
-
-        // Pad the client's initial packet.
-        if !self.is_server && !self.sent_initial {
-            let len: usize = cmp::min(CLIENT_INITIAL_MIN_LEN - length, left);
-
-            let frame = frame::Frame::Padding {
-                len,
-            };
-
-            length += frame.wire_len();
-            left -= frame.wire_len();
-
-            frames.push(frame);
-
-            self.sent_initial = true;
-        }
-
         // Create MAX_DATA frame.
         if space.pkt_type == packet::Type::Application {
             if self.rx_data + 2 * MAX_PKT_LEN > self.max_rx_data {
@@ -588,6 +564,54 @@ impl Conn {
                     frames.push(frame);
                 }
             }
+        }
+
+        // TODO: send CONNECTION_CLOSE on error
+
+        // Create APPLICAtiON_CLOSE frame.
+        if let Some(err) = self.app_error {
+            let frame = frame::Frame::ApplicationClose {
+                error_code: err,
+                reason: self.app_reason.clone(),
+            };
+
+            length += frame.wire_len();
+            left -= frame.wire_len();
+
+            frames.push(frame);
+
+            self.draining = true;
+        }
+
+        // Create CRYPTO frame.
+        if space.crypto_stream.can_write() {
+            let crypto_len = left - frame::MAX_CRYPTO_OVERHEAD;
+            let crypto_buf = space.crypto_stream.pop_send(crypto_len)?;
+
+            let frame = frame::Frame::Crypto {
+                data: crypto_buf,
+            };
+
+            length += frame.wire_len();
+            left -= frame.wire_len();
+
+            frames.push(frame);
+        }
+
+        // Pad the client's initial packet.
+        if !self.is_server && !self.sent_initial {
+            let len: usize = cmp::min(CLIENT_INITIAL_MIN_LEN - length, left);
+
+            let frame = frame::Frame::Padding {
+                len,
+            };
+
+            length += frame.wire_len();
+            left -= frame.wire_len();
+
+            frames.push(frame);
+
+            self.sent_initial = true;
         }
 
         // Create STREAM frame.
@@ -704,6 +728,21 @@ impl Conn {
         stream::StreamIterator::new(self.streams.iter())
     }
 
+    pub fn close(&mut self, err: u16, reason: &[u8]) -> Result<()> {
+        if self.draining {
+            return Err(Error::NothingToDo);
+        }
+
+        if self.app_error.is_some() {
+            return Err(Error::NothingToDo);
+        }
+
+        self.app_error = Some(err);
+        self.app_reason.extend_from_slice(reason);
+
+        Ok(())
+    }
+
     pub fn local_conn_id(&self) -> &[u8] {
         self.scid.as_slice()
     }
@@ -720,6 +759,11 @@ impl Conn {
 
     pub fn is_established(&self) -> bool {
         self.handshake_completed
+    }
+
+    pub fn is_closed(&self) -> bool {
+        // TODO: implement draining period
+        self.draining
     }
 
     fn do_handshake(&mut self) -> Result<()> {

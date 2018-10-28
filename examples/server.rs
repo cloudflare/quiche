@@ -85,6 +85,17 @@ fn main() {
     let mut connections: HashMap<net::SocketAddr, Box<quiche::Conn>> = HashMap::new();
 
     loop {
+        // Garbage collect closed connections.
+        connections.retain(|_, ref mut c| {
+            debug!("Collecting garbage");
+
+            if c.is_closed() {
+                debug!("{} connection collected", c.trace_id());
+            }
+
+            !c.is_closed()
+        });
+
         let (len, src) = socket.recv_from(&mut buf).unwrap();
         debug!("Got {} bytes from {}", len, src);
 

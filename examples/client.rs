@@ -38,6 +38,8 @@ use quiche::rand;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
 
+const HTTP_REQ_STREAM_ID: u64 = 4;
+
 const TRANSPORT_PARAMS: quiche::TransportParams = quiche::TransportParams {
     idle_timeout: 30,
     initial_max_data: 10_000_000,
@@ -122,12 +124,17 @@ fn main() {
             left -= read;
         }
 
+        if conn.is_closed() {
+            debug!("{} connection closed", conn.trace_id());
+            break;
+        }
+
         if conn.is_established() && !req_sent {
             info!("{} sending HTTP request for {}",
                   conn.trace_id(), args.get_str("--path"));
 
             let req = format!("GET {}\r\n", args.get_str("--path"));
-            conn.stream_send(4, req.as_bytes(), true).unwrap();
+            conn.stream_send(HTTP_REQ_STREAM_ID, req.as_bytes(), true).unwrap();
 
             req_sent = true;
         }
@@ -138,6 +145,10 @@ fn main() {
 
             info!("{} stream {} has {} bytes (fin? {})",
                   conn.trace_id(), s, data.len(), data.fin());
+
+            if s == HTTP_REQ_STREAM_ID && data.fin() {
+                conn.close(0x00, b"kthxbye").unwrap();
+            }
         }
 
         loop {
@@ -156,6 +167,11 @@ fn main() {
             socket.send(&out[..write]).unwrap();
 
             debug!("{} written {}", conn.trace_id(), write);
+        }
+
+        if conn.is_closed() {
+            debug!("{} connection closed", conn.trace_id());
+            break;
         }
     }
 }
