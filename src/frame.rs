@@ -589,7 +589,7 @@ mod tests {
 
         let frame = Frame::ConnectionClose {
             error_code: 0xbeef,
-            frame_type: 523423,
+            frame_type: 523_423,
             reason: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         };
 
@@ -633,7 +633,7 @@ mod tests {
         let mut d: [u8; 128] = [42; 128];
 
         let frame = Frame::MaxData {
-            max: 128318273,
+            max: 128_318_273,
         };
 
         let wire_len = {
@@ -654,8 +654,8 @@ mod tests {
         let mut d: [u8; 128] = [42; 128];
 
         let frame = Frame::MaxStreamData {
-            stream_id: 12321,
-            max: 128318273,
+            stream_id: 12_321,
+            max: 128_318_273,
         };
 
         let wire_len = {
@@ -676,7 +676,7 @@ mod tests {
         let mut d: [u8; 128] = [42; 128];
 
         let frame = Frame::MaxStreamId {
-            max: 128318273,
+            max: 128_318_273,
         };
 
         let wire_len = {
@@ -717,7 +717,7 @@ mod tests {
         let mut d: [u8; 128] = [42; 128];
 
         let frame = Frame::NewConnectionId {
-            seq_num: 123213,
+            seq_num: 123_213,
             conn_id: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             reset_token: vec![0x42; 16],
         };
@@ -740,7 +740,7 @@ mod tests {
         let mut d: [u8; 128] = [42; 128];
 
         let frame = Frame::RetireConnectionId {
-            seq_num: 123213,
+            seq_num: 123_213,
         };
 
         let wire_len = {
@@ -767,7 +767,7 @@ mod tests {
         ranges.insert(3000..5000);
 
         let frame = Frame::ACK {
-            ack_delay: 874656534,
+            ack_delay: 874_656_534,
             ranges,
         };
 

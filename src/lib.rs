@@ -986,16 +986,16 @@ mod tests {
     fn transport_params() {
         let tp = TransportParams {
             idle_timeout: 30,
-            initial_max_data: 424645563,
-            initial_max_bidi_streams: 12231,
-            initial_max_uni_streams: 18473,
-            max_packet_size: 23421,
+            initial_max_data: 424_645_563,
+            initial_max_bidi_streams: 12_231,
+            initial_max_uni_streams: 18_473,
+            max_packet_size: 23_421,
             ack_delay_exponent: 123,
             disable_migration: true,
             max_ack_delay: 25,
-            initial_max_stream_data_bidi_local: 154323123,
-            initial_max_stream_data_bidi_remote: 6587456,
-            initial_max_stream_data_uni: 2461234,
+            initial_max_stream_data_bidi_local: 154_323_123,
+            initial_max_stream_data_bidi_remote: 6_587_456,
+            initial_max_stream_data_uni: 2_461_234,
             stateless_reset_token_present: true,
             stateless_reset_token: [0xba; 16],
         };

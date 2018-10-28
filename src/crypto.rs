@@ -120,13 +120,13 @@ pub struct Open {
 }
 
 impl Open {
-    pub fn new(alg: Algorithm, key: Vec<u8>, iv: Vec<u8>, pn_key: Vec<u8>)
+    pub fn new(alg: Algorithm, key: &[u8], iv: &[u8], pn_key: &[u8])
                                                             -> Result<Open> {
         Ok(Open {
             pn_key: unauthenticated_stream::DecryptingKey::new(
                             alg.get_ring_stream(), &pn_key).unwrap(),
             key: aead::OpeningKey::new(alg.get_ring_aead(), &key).unwrap(),
-            nonce: iv,
+            nonce: Vec::from(iv),
             alg,
         })
     }
@@ -194,13 +194,13 @@ pub struct Seal {
 }
 
 impl Seal {
-    pub fn new(alg: Algorithm, key: Vec<u8>, iv: Vec<u8>, pn_key: Vec<u8>)
+    pub fn new(alg: Algorithm, key: &[u8], iv: &[u8], pn_key: &[u8])
                                                             -> Result<Seal> {
         Ok(Seal {
             pn_key: unauthenticated_stream::EncryptingKey::new(
                             alg.get_ring_stream(), &pn_key).unwrap(),
             key: aead::SealingKey::new(alg.get_ring_aead(), &key).unwrap(),
-            nonce: iv,
+            nonce: Vec::from(iv),
             alg,
         })
     }
@@ -292,11 +292,11 @@ pub fn derive_initial_key_material(cid: &[u8], is_server: bool)
     derive_pkt_num_key(aead, &secret, &mut server_pn_key)?;
 
     let (open, seal) = if is_server {
-        (Open::new(aead, client_key, client_iv, client_pn_key)?,
-         Seal::new(aead, server_key, server_iv, server_pn_key)?)
+        (Open::new(aead, &client_key, &client_iv, &client_pn_key)?,
+         Seal::new(aead, &server_key, &server_iv, &server_pn_key)?)
     } else {
-        (Open::new(aead, server_key, server_iv, server_pn_key)?,
-         Seal::new(aead, client_key, client_iv, client_pn_key)?)
+        (Open::new(aead, &server_key, &server_iv, &server_pn_key)?,
+         Seal::new(aead, &client_key, &client_iv, &client_pn_key)?)
     };
 
     Ok((open, seal))

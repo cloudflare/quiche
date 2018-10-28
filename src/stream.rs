@@ -51,10 +51,10 @@ impl Stream {
             send: SendBuf::default(),
 
             rx_data: 0,
-            max_rx_data: max_rx_data,
+            max_rx_data,
 
             tx_data: 0,
-            max_tx_data: max_tx_data,
+            max_tx_data,
         }
     }
 

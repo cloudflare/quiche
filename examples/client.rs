@@ -40,21 +40,21 @@ const LOCAL_CONN_ID_LEN: usize = 16;
 
 const TRANSPORT_PARAMS: quiche::TransportParams = quiche::TransportParams {
     idle_timeout: 30,
-    initial_max_data: 10000000,
+    initial_max_data: 10_000_000,
     initial_max_bidi_streams: 100,
     initial_max_uni_streams: 100,
     max_packet_size: 1500,
     ack_delay_exponent: 3,
     disable_migration: true,
     max_ack_delay: 25,
-    initial_max_stream_data_bidi_local: 1000000,
-    initial_max_stream_data_bidi_remote: 1000000,
-    initial_max_stream_data_uni: 1000000,
+    initial_max_stream_data_bidi_local: 1_000_000,
+    initial_max_stream_data_bidi_remote: 1_000_000,
+    initial_max_stream_data_uni: 1_000_000,
     stateless_reset_token_present: true,
     stateless_reset_token: [0xba; 16],
 };
 
-const USAGE: &'static str = "Usage: client [options]
+const USAGE: &str = "Usage: client [options]
 
 Options:
   -h --help          Show this screen.

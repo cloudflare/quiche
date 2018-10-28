@@ -347,14 +347,14 @@ extern fn set_encryption_secret(ssl: *mut SSL, level: crypto::Level, is_write: i
     };
 
     if is_write == 1 {
-        let seal = match crypto::Seal::new(aead, key, iv, pn_key) {
+        let seal = match crypto::Seal::new(aead, &key, &iv, &pn_key) {
             Ok(v)  => v,
             Err(_) => return 0,
         };
 
         space.crypto_seal = Some(seal);
     } else {
-        let open = match crypto::Open::new(aead, key, iv, pn_key) {
+        let open = match crypto::Open::new(aead, &key, &iv, &pn_key) {
             Ok(v)  => v,
             Err(_) => return 0,
         };
