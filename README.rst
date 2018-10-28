@@ -26,6 +26,7 @@ Status
 * [x] TLS 1.3 handshake (using BoringSSL)
 * [x] Stream API
 * [x] Flow control
+* [ ] Unidirectional streams
 * [ ] Loss detection and recovery
 * [ ] Congestion control
 * [ ] Connection close
