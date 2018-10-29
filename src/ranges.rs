@@ -130,7 +130,7 @@ impl RangeSet {
     }
 
     fn prev_to(&self, item: u64) -> Option<Range<u64>> {
-        match self.inner.range((Unbounded, Included(item))).rev().next() {
+        match self.inner.range((Unbounded, Included(item))).next_back() {
             Some((start, end)) => Some(*start..*end),
             None => None,
         }
