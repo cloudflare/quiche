@@ -186,8 +186,7 @@ fn main() {
             handle_stream(conn, s, &args);
         }
 
-        let mut written = 0;
-        while written < buf.len() * 10 {
+        loop {
             let write = match conn.send(&mut out) {
                 Ok(v) => v,
 
@@ -202,7 +201,6 @@ fn main() {
 
             // TODO: coalesce packets.
             socket.send_to(&out[..write], &src).unwrap();
-            written += write;
 
             debug!("{} written {} bytes", conn.trace_id(), write);
         }
