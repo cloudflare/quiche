@@ -187,7 +187,7 @@ fn main() {
         }
 
         let mut written = 0;
-        while written < buf.len() {
+        while written < buf.len() * 10 {
             let write = match conn.send(&mut out) {
                 Ok(v) => v,
 
