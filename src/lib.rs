@@ -724,8 +724,8 @@ impl Conn {
         Ok(buf.len())
     }
 
-    pub fn stream_iter(&mut self) -> stream::StreamIterator {
-        stream::StreamIterator::new(self.streams.iter())
+    pub fn stream_iter(&mut self) -> stream::Readable {
+        stream::Readable::new(self.streams.iter())
     }
 
     pub fn close(&mut self, err: u16, reason: &[u8]) -> Result<()> {

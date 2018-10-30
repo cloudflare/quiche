@@ -87,19 +87,19 @@ impl Stream {
     }
 }
 
-pub struct StreamIterator<'a> {
+pub struct Readable<'a> {
     streams: hash_map::Iter<'a, u64, Stream>,
 }
 
-impl<'a> StreamIterator<'a> {
-    pub fn new(streams: hash_map::Iter<'a, u64, Stream>) -> StreamIterator {
-        StreamIterator {
+impl<'a> Readable<'a> {
+    pub fn new(streams: hash_map::Iter<'a, u64, Stream>) -> Readable {
+        Readable {
             streams,
         }
     }
 }
 
-impl<'a> Iterator for StreamIterator<'a> {
+impl<'a> Iterator for Readable<'a> {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
