@@ -805,8 +805,10 @@ impl Connection {
                     self.max_tx_data =
                         self.peer_transport_params.initial_max_data as usize;
 
-                    trace!("{} connection established: cipher={:?}",
-                           self.trace_id(), self.application.cipher());
+                    trace!("{} connection established: cipher={:?} params={:?}",
+                           self.trace_id(),
+                           self.application.cipher(),
+                           self.peer_transport_params);
                 },
 
                 Err(tls::Error::TlsFail)          => (), // continue
