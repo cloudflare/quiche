@@ -371,6 +371,10 @@ impl Connection {
                     do_ack = true;
                 },
 
+                frame::Frame::StopSending { .. } => {
+                    do_ack = true;
+                },
+
                 // TODO: implement ack and retransmission.
                 frame::Frame::ACK { .. } => (),
 

@@ -78,6 +78,11 @@ pub enum Frame {
         seq_num: u64,
     },
 
+    StopSending {
+        stream_id: u64,
+        error_code: u16,
+    },
+
     ACK {
         ack_delay: u64,
         ranges: ranges::RangeSet,
@@ -165,6 +170,13 @@ impl Frame {
             0x0d => {
                 Frame::RetireConnectionId {
                     seq_num: b.get_varint()?,
+                }
+            },
+
+            0x0c => {
+                Frame::StopSending {
+                    stream_id: b.get_varint()?,
+                    error_code: b.get_u16()?,
                 }
             },
 
@@ -269,6 +281,13 @@ impl Frame {
                 b.put_varint(0x0d)?;
 
                 b.put_varint(*seq_num)?;
+            },
+
+            Frame::StopSending { stream_id, error_code } => {
+                b.put_varint(0x0c)?;
+
+                b.put_varint(*stream_id)?;
+                b.put_u16(*error_code)?;
             },
 
             Frame::ACK { ack_delay, ranges } => {
@@ -389,6 +408,12 @@ impl Frame {
                 octets::varint_len(*seq_num)       // seq_num
             },
 
+            Frame::StopSending { stream_id, .. } => {
+                1 +                                // frame type
+                octets::varint_len(*stream_id) +   // stream_id
+                2                                  // error_code
+            },
+
             Frame::ACK { ack_delay, ranges } => {
                 let mut it = ranges.iter().rev();
 
@@ -480,6 +505,11 @@ impl fmt::Debug for Frame {
 
             Frame::RetireConnectionId { .. } => {
                 write!(f, "RETIRE_CONNECTION_ID (TODO)")?;
+            },
+
+            Frame::StopSending { stream_id, error_code } => {
+                write!(f, "STOP_SENDING stream={} err={:x}",
+                       stream_id, error_code)?;
             },
 
             Frame::ACK { ack_delay, ranges } => {
@@ -749,6 +779,28 @@ mod tests {
         };
 
         assert_eq!(wire_len, 5);
+
+        {
+            let mut b = octets::Bytes::new(&mut d);
+            assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
+        }
+    }
+
+    #[test]
+    fn stop_sending() {
+        let mut d: [u8; 128] = [42; 128];
+
+        let frame = Frame::StopSending {
+            stream_id: 123_213,
+            error_code: 15_352
+        };
+
+        let wire_len = {
+            let mut b = octets::Bytes::new(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 7);
 
         {
             let mut b = octets::Bytes::new(&mut d);
