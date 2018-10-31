@@ -75,11 +75,11 @@ impl Stream {
         self.send.pop(max_len)
     }
 
-    pub fn can_read(&self) -> bool {
+    pub fn readable(&self) -> bool {
         self.recv.ready()
     }
 
-    pub fn can_write(&self) -> bool {
+    pub fn writable(&self) -> bool {
         self.send.ready()
     }
 
@@ -105,7 +105,7 @@ impl<'a> Iterator for Readable<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         for (id, s) in &mut self.streams {
-            if s.can_read() {
+            if s.readable() {
                 return Some(*id);
             }
         }

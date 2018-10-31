@@ -385,7 +385,7 @@ impl Conn {
 
                     // Feed crypto data to the TLS state, if there's data
                     // available at the expected offset.
-                    if space.crypto_stream.can_read() {
+                    if space.crypto_stream.readable() {
                         let buf = space.crypto_stream.pop_recv()?;
                         let level = space.crypto_level;
 
@@ -460,16 +460,16 @@ impl Conn {
         // the case of the application space, whether there are streams that
         // can be written or that needs to increase flow control credit.
         let space =
-            if self.initial.crypto_stream.can_write() ||
+            if self.initial.crypto_stream.writable() ||
                self.initial.do_ack {
                 &mut self.initial
-            } else if self.handshake.crypto_stream.can_write() ||
+            } else if self.handshake.crypto_stream.writable() ||
                       self.handshake.do_ack {
                 &mut self.handshake
             } else if self.handshake_completed &&
-                      (self.application.crypto_stream.can_write() ||
+                      (self.application.crypto_stream.writable() ||
                        self.application.do_ack ||
-                       self.streams.values().any(|s| s.can_write()) ||
+                       self.streams.values().any(|s| s.writable()) ||
                        self.streams.values().any(|s| s.more_credit())) {
                 &mut self.application
             } else {
@@ -578,7 +578,7 @@ impl Conn {
         }
 
         // Create CRYPTO frame.
-        if space.crypto_stream.can_write() {
+        if space.crypto_stream.writable() {
             let crypto_len = left - frame::MAX_CRYPTO_OVERHEAD;
             let crypto_buf = space.crypto_stream.pop_send(crypto_len)?;
 
@@ -612,7 +612,7 @@ impl Conn {
         if space.pkt_type == packet::Type::Application &&
            self.tx_data != self.max_tx_data {
             for (id, stream) in &mut self.streams {
-                if stream.can_write() {
+                if stream.writable() {
                     if stream.tx_data == stream.max_tx_data {
                         trace!("{} stream {} is blocked", trace_id, id);
                         continue;
@@ -693,7 +693,7 @@ impl Conn {
             None => return Err(Error::UnknownStream),
         };
 
-        if !stream.can_read() {
+        if !stream.readable() {
             return Ok(stream::RangeBuf::default());
         }
 
