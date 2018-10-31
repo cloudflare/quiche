@@ -737,16 +737,10 @@ impl Conn {
         Ok(())
     }
 
-    pub fn local_conn_id(&self) -> &[u8] {
-        self.scid.as_slice()
-    }
-
     pub fn trace_id(&self) -> String {
-        let cid = self.local_conn_id();
-
-        let vec: Vec<String> = cid.iter()
-                                  .map(|b| format!("{:02x}", b))
-                                  .collect();
+        let vec: Vec<String> = self.scid.as_slice().iter()
+                                   .map(|b| format!("{:02x}", b))
+                                   .collect();
 
         vec.join("")
     }
