@@ -439,6 +439,8 @@ pub struct PktNumSpace {
     pub crypto_open: Option<crypto::Open>,
     pub crypto_seal: Option<crypto::Seal>,
 
+    pub crypto_fail: bool,
+
     pub crypto_stream: stream::Stream,
 }
 
@@ -459,6 +461,8 @@ impl PktNumSpace {
 
             crypto_open: None,
             crypto_seal: None,
+
+            crypto_fail: false,
 
             crypto_stream: stream::Stream::default(),
         }

@@ -100,6 +100,8 @@ pub struct Connection {
 
     streams: HashMap<u64, stream::Stream>,
 
+    error: Option<u16>,
+
     app_error: Option<u16>,
     app_reason: Vec<u8>,
 
@@ -153,6 +155,8 @@ impl Connection {
             max_tx_data: 0,
 
             streams: HashMap::new(),
+
+            error: None,
 
             app_error: None,
             app_reason: Vec::new(),
@@ -448,7 +452,11 @@ impl Connection {
             return Err(Error::NothingToDo);
         }
 
-        self.do_handshake()?;
+        let is_closing = self.error.is_some() || self.app_error.is_some();
+
+        if !is_closing {
+            self.do_handshake()?;
+        }
 
         let max_pkt_len = self.peer_transport_params.max_packet_size as usize;
 
@@ -465,13 +473,16 @@ impl Connection {
         // can be written or that needs to increase flow control credit.
         let space =
             if self.initial.crypto_stream.writable() ||
+               self.initial.crypto_fail ||
                self.initial.do_ack {
                 &mut self.initial
             } else if self.handshake.crypto_stream.writable() ||
+                      self.handshake.crypto_fail ||
                       self.handshake.do_ack {
                 &mut self.handshake
             } else if self.handshake_completed &&
                       (self.application.crypto_stream.writable() ||
+                       self.application.crypto_fail ||
                        self.application.do_ack ||
                        self.streams.values().any(|s| s.writable()) ||
                        self.streams.values().any(|s| s.more_credit())) {
@@ -523,7 +534,7 @@ impl Connection {
         }
 
         // Create MAX_DATA frame.
-        if space.pkt_type == packet::Type::Application {
+        if space.pkt_type == packet::Type::Application && !is_closing {
             if self.rx_data + 2 * MAX_PKT_LEN > self.max_rx_data {
                 let max = self.rx_data as u64 +
                           self.local_transport_params.initial_max_data as u64;
@@ -542,7 +553,7 @@ impl Connection {
         }
 
         // Create MAX_STREAM_DATA frame.
-        if space.pkt_type == packet::Type::Application {
+        if space.pkt_type == packet::Type::Application && !is_closing {
             for (id, stream) in &mut self.streams {
                 if stream.more_credit() {
                     let max = stream.rx_data as u64 +
@@ -564,7 +575,22 @@ impl Connection {
             }
         }
 
-        // TODO: send CONNECTION_CLOSE on error
+        // TODO: propagate all errors
+        // Create CONNECTION_CLOSE frame.
+        if let Some(err) = self.error {
+            let frame = frame::Frame::ConnectionClose {
+                error_code: err,
+                frame_type: 0,
+                reason: Vec::new(),
+            };
+
+            length += frame.wire_len();
+            left -= frame.wire_len();
+
+            frames.push(frame);
+
+            self.draining = true;
+        }
 
         // Create APPLICAtiON_CLOSE frame.
         if let Some(err) = self.app_error {
@@ -582,7 +608,7 @@ impl Connection {
         }
 
         // Create CRYPTO frame.
-        if space.crypto_stream.writable() {
+        if space.crypto_stream.writable() && !is_closing {
             let crypto_len = left - frame::MAX_CRYPTO_OVERHEAD;
             let crypto_buf = space.crypto_stream.pop_send(crypto_len)?;
 
@@ -597,7 +623,7 @@ impl Connection {
         }
 
         // Pad the client's initial packet.
-        if !self.is_server && !self.sent_initial {
+        if !self.is_server && !self.sent_initial && !is_closing {
             let len: usize = cmp::min(CLIENT_INITIAL_MIN_LEN - length, left);
 
             let frame = frame::Frame::Padding {
@@ -613,8 +639,9 @@ impl Connection {
         }
 
         // Create STREAM frame.
-        if space.pkt_type == packet::Type::Application &&
-           self.tx_data != self.max_tx_data {
+        if space.pkt_type == packet::Type::Application
+            && self.tx_data != self.max_tx_data && !is_closing
+        {
             for (id, stream) in &mut self.streams {
                 if stream.writable() {
                     if stream.tx_data == stream.max_tx_data {
@@ -782,7 +809,7 @@ impl Connection {
                            self.trace_id(), self.application.cipher());
                 },
 
-                Err(tls::Error::TlsFail)          => return Err(Error::TlsFail),
+                Err(tls::Error::TlsFail)          => (), // continue
                 Err(tls::Error::WantRead)         => (), // continue
                 Err(tls::Error::WantWrite)        => (), // continue
                 Err(tls::Error::SyscallFail)      => return Err(Error::TlsFail),

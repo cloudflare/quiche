@@ -118,7 +118,11 @@ fn main() {
         while left > 0 {
             let read = match conn.recv(&mut buf[len - left..len]) {
                 Ok(v)  => v,
-                Err(e) => panic!("{} recv failed: {:?}", conn.trace_id(), e),
+
+                Err(e) => {
+                    error!("{} recv failed: {:?}", conn.trace_id(), e);
+                    break;
+                },
             };
 
             left -= read;
@@ -160,7 +164,10 @@ fn main() {
                     break;
                 },
 
-                Err(e) => panic!("{} send failed: {:?}", conn.trace_id(), e),
+                Err(e) => {
+                    error!("{} send failed: {:?}", conn.trace_id(), e);
+                    break;
+                },
             };
 
             // TODO: coalesce packets.

@@ -46,6 +46,7 @@ pub enum Error {
 }
 
 const TLS1_3_VERSION: u16 = 0x0304;
+const TLS_ALERT_ERROR: u16 = 0x100;
 
 #[allow(non_camel_case_types)]
 enum SSL_METHOD {}
@@ -406,6 +407,19 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> i32 {
 
     trace!("{} tls send alert lvl={:?} alert={:x}",
            conn.trace_id(), level, alert);
+
+    let error: u16 = TLS_ALERT_ERROR + u16::from(alert);
+    conn.error = Some(error);
+
+    let space = match level {
+        crypto::Level::Initial     => &mut conn.initial,
+        // TODO: implement 0-RTT
+        crypto::Level::ZeroRTT     => panic!("0-RTT not implemented"),
+        crypto::Level::Handshake   => &mut conn.handshake,
+        crypto::Level::Application => &mut conn.application,
+    };
+
+    space.crypto_fail = true;
 
     1
 }
