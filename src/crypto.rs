@@ -165,23 +165,7 @@ impl Open {
         Ok(plain.len())
     }
 
-    pub fn key_len(&self) -> usize {
-        self.alg.key_len()
-    }
-
-    pub fn tag_len(&self) -> usize {
-        self.alg.tag_len()
-    }
-
-    pub fn nonce_len(&self) -> usize {
-        self.alg.nonce_len()
-    }
-
-    pub fn pn_nonce_len(&self) -> usize {
-        self.alg.pn_nonce_len()
-    }
-
-    pub fn algorithm(&self) -> Algorithm {
+    pub fn alg(&self) -> Algorithm {
         self.alg
     }
 }
@@ -206,7 +190,7 @@ impl Seal {
     }
 
     pub fn seal(&self, nonce: &[u8], ad: &[u8], buf: &mut [u8]) -> Result<usize> {
-        let cipher = aead::seal_in_place(&self.key, nonce, ad, buf, self.tag_len())
+        let cipher = aead::seal_in_place(&self.key, nonce, ad, buf, self.alg().tag_len())
                           .map_err(|_e| Error::CryptoFail)?;
 
         Ok(cipher)
@@ -239,23 +223,7 @@ impl Seal {
         Ok(plain)
     }
 
-    pub fn key_len(&self) -> usize {
-        self.alg.key_len()
-    }
-
-    pub fn tag_len(&self) -> usize {
-        self.alg.tag_len()
-    }
-
-    pub fn nonce_len(&self) -> usize {
-        self.alg.nonce_len()
-    }
-
-    pub fn pn_nonce_len(&self) -> usize {
-        self.alg.pn_nonce_len()
-    }
-
-    pub fn algorithm(&self) -> Algorithm {
+    pub fn alg(&self) -> Algorithm {
         self.alg
     }
 }

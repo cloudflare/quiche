@@ -431,7 +431,7 @@ impl Conn {
 
         space.largest_rx_pkt_num = cmp::max(space.largest_rx_pkt_num, pn);
 
-        let read = payload_offset + payload_len + aead.tag_len();
+        let read = payload_offset + payload_len + aead.alg().tag_len();
         Ok(read)
     }
 

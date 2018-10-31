@@ -304,9 +304,9 @@ pub fn pkt_num_bits(len: usize) -> Result<usize> {
 
 pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
                                                     -> Result<(u64,usize)> {
-    let max_pn_len = cmp::min(b.cap() - aead.pn_nonce_len(), 4);
+    let max_pn_len = cmp::min(b.cap() - aead.alg().pn_nonce_len(), 4);
 
-    let mut pn_and_sample = b.peek_bytes(max_pn_len + aead.pn_nonce_len())?;
+    let mut pn_and_sample = b.peek_bytes(max_pn_len + aead.alg().pn_nonce_len())?;
 
     let (mut ciphertext, sample) = pn_and_sample.split_at(max_pn_len).unwrap();
 
@@ -471,13 +471,13 @@ impl PktNumSpace {
 
     pub fn cipher(&self) -> crypto::Algorithm {
         match self.crypto_open {
-            Some(ref v) => v.algorithm(),
+            Some(ref v) => v.alg(),
             None => crypto::Algorithm::Null,
         }
     }
 
     pub fn overhead(&self) -> usize {
-        self.crypto_seal.as_ref().unwrap().tag_len()
+        self.crypto_seal.as_ref().unwrap().alg().tag_len()
     }
 }
 
