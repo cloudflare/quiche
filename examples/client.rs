@@ -26,6 +26,7 @@
 
 #[macro_use]
 extern crate log;
+extern crate rand;
 extern crate docopt;
 extern crate quiche;
 extern crate env_logger;
@@ -33,8 +34,7 @@ extern crate env_logger;
 use std::net;
 
 use docopt::Docopt;
-
-use quiche::rand;
+use rand::Rng;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
 
@@ -78,7 +78,7 @@ fn main() {
     socket.connect(args.get_str("--connect")).unwrap();
 
     let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
-    rand::rand_bytes(&mut scid[..]);
+    rand::thread_rng().fill(&mut scid[..]);
 
     let config = quiche::Config {
         version: 0xbabababa,

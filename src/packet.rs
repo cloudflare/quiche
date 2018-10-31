@@ -55,10 +55,6 @@ pub enum Type {
     Application,
 }
 
-pub fn has_long_header(b: u8) -> bool {
-    b & FORM_BIT != 0
-}
-
 #[derive(Clone)]
 pub struct Header {
     pub ty: Type,
@@ -71,21 +67,26 @@ pub struct Header {
 }
 
 impl Header {
-    pub fn decode_long(buf: &mut [u8]) -> Result<Header> {
+    pub fn from_slice(buf: &mut [u8], dcil: usize) -> Result<Header> {
         let mut b = octets::Bytes::new(buf);
-        Header::long_from_bytes(&mut b)
+        Header::from_bytes(&mut b, dcil)
     }
 
-    pub fn decode_short(buf: &mut [u8], dcil: usize) -> Result<Header> {
-        let mut b = octets::Bytes::new(buf);
-        Header::short_from_bytes(&mut b, dcil)
-    }
-
-    pub fn long_from_bytes(b: &mut octets::Bytes) -> Result<Header> {
+    pub(crate) fn from_bytes(b: &mut octets::Bytes, dcil: usize) -> Result<Header> {
         let first = b.get_u8()?;
 
-        if !has_long_header(first) {
-            return Err(Error::WrongForm);
+        if !Header::is_long(first) {
+            let dcid = b.get_bytes(dcil)?;
+
+            return Ok(Header {
+                ty: Type::Application,
+                flags: first & FORM_BIT,
+                version: 0,
+                dcid: dcid.to_vec(),
+                scid: Vec::new(),
+                token: None,
+                versions: None,
+            });
         }
 
         let version = b.get_u32()?;
@@ -167,8 +168,34 @@ impl Header {
         })
     }
 
-    pub fn long_to_bytes(hdr: &Header, out: &mut octets::Bytes) -> Result<()> {
-        let ty: u8 = match hdr.ty {
+    pub(crate) fn to_bytes(&self, out: &mut octets::Bytes) -> Result<()> {
+        // Encode short header.
+        if self.ty == Type::Application {
+            let mut first = rand::rand_u8();
+
+            // Unset form bit for short header.
+            first &= !FORM_BIT;
+
+            // TODO: support key update
+            first &= !KEY_PHASE_BIT;
+
+            // "The third bit (0x20) of octet 0 is set to 1."
+            first |= 0x20;
+
+            // "The fourth bit (0x10) of octet 0 is set to 1."
+            first |= 0x10;
+
+            // Clear Google QUIC demultiplexing bit
+            first &= !DEMUX_BIT;
+
+            out.put_u8(first)?;
+            out.put_bytes(&self.dcid)?;
+
+            return Ok(());
+        }
+
+        // Encode long header.
+        let ty: u8 = match self.ty {
                 Type::Initial   => 0x7f,
                 Type::Retry     => 0x7e,
                 Type::Handshake => 0x7d,
@@ -181,26 +208,26 @@ impl Header {
 
         out.put_u8(first)?;
 
-        out.put_u32(hdr.version)?;
+        out.put_u32(self.version)?;
 
         let mut cil: u8 = 0;
 
-        if hdr.dcid.len() > 0 {
-            cil |= ((hdr.dcid.len() - 3) as u8) << 4;
+        if self.dcid.len() > 0 {
+            cil |= ((self.dcid.len() - 3) as u8) << 4;
         }
 
-        if hdr.scid.len() > 0 {
-            cil |= ((hdr.scid.len() - 3) as u8) & 0xf;
+        if self.scid.len() > 0 {
+            cil |= ((self.scid.len() - 3) as u8) & 0xf;
         }
 
         out.put_u8(cil)?;
 
-        out.put_bytes(&hdr.dcid)?;
-        out.put_bytes(&hdr.scid)?;
+        out.put_bytes(&self.dcid)?;
+        out.put_bytes(&self.scid)?;
 
         // Only Initial packet have a token.
-        if hdr.ty == Type::Initial {
-            match hdr.token {
+        if self.ty == Type::Initial {
+            match self.token {
                 Some(ref v) => {
                     out.put_bytes(v)?;
                 },
@@ -215,48 +242,8 @@ impl Header {
         Ok(())
     }
 
-    pub fn short_from_bytes(b: &mut octets::Bytes, dcil: usize) -> Result<Header> {
-        let first = b.get_u8()?;
-
-        if has_long_header(first) {
-            return Err(Error::WrongForm);
-        }
-
-        let dcid = b.get_bytes(dcil)?;
-
-        Ok(Header {
-            ty: Type::Application,
-            flags: first & FORM_BIT,
-            version: 0,
-            dcid: dcid.to_vec(),
-            scid: Vec::new(),
-            token: None,
-            versions: None,
-        })
-    }
-
-    pub fn short_to_bytes(hdr: &Header, out: &mut octets::Bytes) -> Result<()> {
-        let mut first = rand::rand_u8();
-
-        // Unset form bit for short header.
-        first &= !FORM_BIT;
-
-        // TODO: support key update
-        first &= !KEY_PHASE_BIT;
-
-        // "The third bit (0x20) of octet 0 is set to 1."
-        first |= 0x20;
-
-        // "The fourth bit (0x10) of octet 0 is set to 1."
-        first |= 0x10;
-
-        // Clear Google QUIC demultiplexing bit
-        first &= !DEMUX_BIT;
-
-        out.put_u8(first)?;
-        out.put_bytes(&hdr.dcid)?;
-
-        Ok(())
+    pub fn is_long(b: u8) -> bool {
+        b & FORM_BIT != 0
     }
 }
 
@@ -526,7 +513,7 @@ mod tests {
 
         let mut b = octets::Bytes::new(&mut buf);
 
-        let hdr = Header::long_from_bytes(&mut b).unwrap();
+        let hdr = Header::from_bytes(&mut b, 0).unwrap();
 
         let payload_len = b.get_varint().unwrap() as usize;
 

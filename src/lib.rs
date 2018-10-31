@@ -39,7 +39,7 @@ use std::collections::HashMap;
 
 pub const VERSION_DRAFT15: u32 = 0xff00000f;
 
-pub const CLIENT_INITIAL_MIN_LEN: usize = 1200;
+const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 
 const MAX_PKT_LEN: usize = 1252;
 
@@ -117,6 +117,10 @@ pub struct Conn {
 }
 
 impl Conn {
+    pub fn negotiate_version(hdr: &packet::Header, out: &mut [u8]) -> Result<usize> {
+        packet::negotiate_version(hdr, out)
+    }
+
     pub fn new(config: Config, is_server: bool) -> Result<Box<Conn>> {
         Conn::new_with_tls(config, tls::State::new(), is_server)
     }
@@ -201,50 +205,44 @@ impl Conn {
 
         let mut b = octets::Bytes::new(buf);
 
-        let hdr = if !packet::has_long_header(b.peek_u8()?) {
-            packet::Header::short_from_bytes(&mut b, self.scid.len())?
-        } else {
-            let hdr = packet::Header::long_from_bytes(&mut b)?;
+        let hdr = packet::Header::from_bytes(&mut b, self.scid.len())?;
 
-            if hdr.ty == packet::Type::VersionNegotiation {
-                if self.is_server {
-                    return Err(Error::InvalidPacket);
-                }
-
-                trace!("{} rx pkt {:?}", trace_id, hdr);
-
-                let versions = match hdr.versions {
-                    Some(ref v) => v,
-                    None => return Err(Error::InvalidPacket),
-                };
-
-                let mut new_version = 0;
-                for v in versions.iter() {
-                    if *v == VERSION_DRAFT15 {
-                        new_version = *v;
-                    }
-                }
-
-                if new_version == 0 {
-                    return Err(Error::UnknownVersion);
-                }
-
-                self.version = new_version;
-                self.sent_initial = false;
-                self.got_peer_conn_id = false;
-                self.initial.clear();
-                self.tls_state.clear()
-                    .map_err(|_e| Error::TlsFail)?;
-
-                return Ok(b.off());
+        if hdr.ty == packet::Type::VersionNegotiation {
+            if self.is_server {
+                return Err(Error::InvalidPacket);
             }
 
-            if hdr.version != self.version {
+            trace!("{} rx pkt {:?}", trace_id, hdr);
+
+            let versions = match hdr.versions {
+                Some(ref v) => v,
+                None => return Err(Error::InvalidPacket),
+            };
+
+            let mut new_version = 0;
+            for v in versions.iter() {
+                if *v == VERSION_DRAFT15 {
+                    new_version = *v;
+                }
+            }
+
+            if new_version == 0 {
                 return Err(Error::UnknownVersion);
             }
 
-            hdr
-        };
+            self.version = new_version;
+            self.sent_initial = false;
+            self.got_peer_conn_id = false;
+            self.initial.clear();
+            self.tls_state.clear()
+                .map_err(|_e| Error::TlsFail)?;
+
+            return Ok(b.off());
+        }
+
+        if hdr.ty != packet::Type::Application && hdr.version != self.version {
+            return Err(Error::UnknownVersion);
+        }
 
         // Long header packets have an explicit payload length, but short
         // packets don't so just use the remaining capacity in the buffer.
@@ -488,11 +486,7 @@ impl Conn {
             versions: None,
         };
 
-        if space.pkt_type == packet::Type::Application {
-            packet::Header::short_to_bytes(&hdr, &mut b)?;
-        } else {
-            packet::Header::long_to_bytes(&hdr, &mut b)?;
-        }
+        hdr.to_bytes(&mut b)?;
 
         let pn = space.last_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
@@ -724,7 +718,7 @@ impl Conn {
         Ok(buf.len())
     }
 
-    pub fn stream_iter(&mut self) -> stream::Readable {
+    pub fn stream_iter(&mut self) -> Readable {
         stream::Readable::new(self.streams.iter())
     }
 
@@ -1120,8 +1114,13 @@ mod tests {
     }
 }
 
-pub mod packet;
-pub mod rand;
+pub use stream::RangeBuf;
+pub use stream::Readable;
+pub use packet::Header;
+pub use packet::Type;
+
+mod packet;
+mod rand;
 
 mod crypto;
 mod frame;

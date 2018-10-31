@@ -26,6 +26,7 @@
 
 #[macro_use]
 extern crate log;
+extern crate rand;
 extern crate docopt;
 extern crate quiche;
 extern crate env_logger;
@@ -37,9 +38,7 @@ use std::collections::hash_map;
 use std::collections::HashMap;
 
 use docopt::Docopt;
-
-use quiche::packet;
-use quiche::rand;
+use rand::Rng;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
 
@@ -101,13 +100,7 @@ fn main() {
 
         let buf = &mut buf[..len];
 
-        let hdr = if packet::has_long_header(buf[0]) {
-            packet::Header::decode_long(buf)
-        } else {
-            packet::Header::decode_short(buf, LOCAL_CONN_ID_LEN)
-        };
-
-        let hdr = match hdr {
+        let hdr = match quiche::Header::from_slice(buf, LOCAL_CONN_ID_LEN) {
             Ok(v) => v,
 
             Err(e) => {
@@ -116,7 +109,7 @@ fn main() {
             }
         };
 
-        if hdr.ty == packet::Type::VersionNegotiation {
+        if hdr.ty == quiche::Type::VersionNegotiation {
             error!("Version negotiation invalid on the server");
             continue;
         }
@@ -126,20 +119,21 @@ fn main() {
                 if hdr.version != quiche::VERSION_DRAFT15 {
                     warn!("Doing version negotiation");
 
-                    let len = packet::negotiate_version(&hdr, &mut out).unwrap();
+                    let len = quiche::Conn::negotiate_version(&hdr, &mut out)
+                                           .unwrap();
                     let out = &out[..len];
 
                     socket.send_to(out, &src).unwrap();
                     continue;
                 }
 
-                if hdr.ty != packet::Type::Initial {
+                if hdr.ty != quiche::Type::Initial {
                     error!("Packet is not Initial");
                     continue;
                 }
 
                 let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
-                rand::rand_bytes(&mut scid[..]);
+                rand::thread_rng().fill(&mut scid[..]);
 
                 let config = quiche::Config {
                     version: quiche::VERSION_DRAFT15,
