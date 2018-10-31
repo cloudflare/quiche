@@ -119,20 +119,12 @@ impl<'a> Bytes<'a> {
         get_u!(self, u16)
     }
 
-    pub fn peek_u16(&mut self) -> Result<u16> {
-        peek_u!(self, u16)
-    }
-
     pub fn put_u16(&mut self, v: u16) -> Result<&mut [u8]> {
         put_u!(self, u16, v)
     }
 
     pub fn get_u32(&mut self) -> Result<u32> {
         get_u!(self, u32)
-    }
-
-    pub fn peek_u32(&mut self) -> Result<u32> {
-        peek_u!(self, u32)
     }
 
     pub fn put_u32(&mut self, v: u32) -> Result<&mut [u8]> {
