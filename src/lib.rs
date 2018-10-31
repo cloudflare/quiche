@@ -719,7 +719,7 @@ impl Conn {
     }
 
     pub fn stream_iter(&mut self) -> Readable {
-        stream::Readable::new(self.streams.iter())
+        stream::Readable::new(&self.streams)
     }
 
     pub fn close(&mut self, err: u16, reason: &[u8]) -> Result<()> {

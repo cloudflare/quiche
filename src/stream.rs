@@ -28,6 +28,7 @@ use ::Result;
 
 use std::cmp;
 use std::collections::hash_map;
+use std::collections::HashMap;
 use std::collections::BinaryHeap;
 use std::collections::VecDeque;
 use std::ops::Deref;
@@ -92,9 +93,9 @@ pub struct Readable<'a> {
 }
 
 impl<'a> Readable<'a> {
-    pub fn new(streams: hash_map::Iter<'a, u64, Stream>) -> Readable {
+    pub(crate) fn new(streams: &HashMap<u64, Stream>) -> Readable {
         Readable {
-            streams,
+            streams: streams.iter(),
         }
     }
 }
@@ -103,19 +104,13 @@ impl<'a> Iterator for Readable<'a> {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match self.streams.next() {
-                Some((k, s)) => {
-                    if !s.can_read() {
-                        continue;
-                    }
-
-                    return Some(*k);
-                },
-
-                None => return None,
+        for (id, s) in &mut self.streams {
+            if s.can_read() {
+                return Some(*id);
             }
         }
+
+        None
     }
 }
 
