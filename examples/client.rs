@@ -121,6 +121,7 @@ fn main() {
 
                 Err(e) => {
                     error!("{} recv failed: {:?}", conn.trace_id(), e);
+                    conn.close(false, 0xa, b"fail").unwrap();
                     break;
                 },
             };
@@ -151,7 +152,7 @@ fn main() {
                   conn.trace_id(), s, data.len(), data.fin());
 
             if s == HTTP_REQ_STREAM_ID && data.fin() {
-                conn.close(0x00, b"kthxbye").unwrap();
+                conn.close(true, 0x00, b"kthxbye").unwrap();
             }
         }
 
@@ -166,6 +167,7 @@ fn main() {
 
                 Err(e) => {
                     error!("{} send failed: {:?}", conn.trace_id(), e);
+                    conn.close(false, 0xa, b"fail").unwrap();
                     break;
                 },
             };

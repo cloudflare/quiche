@@ -575,7 +575,6 @@ impl Connection {
             }
         }
 
-        // TODO: propagate all errors
         // Create CONNECTION_CLOSE frame.
         if let Some(err) = self.error {
             let frame = frame::Frame::ConnectionClose {
@@ -753,17 +752,21 @@ impl Connection {
         stream::Readable::new(&self.streams)
     }
 
-    pub fn close(&mut self, err: u16, reason: &[u8]) -> Result<()> {
+    pub fn close(&mut self, app: bool, err: u16, reason: &[u8]) -> Result<()> {
         if self.draining {
             return Err(Error::NothingToDo);
         }
 
-        if self.app_error.is_some() {
+        if self.error.is_some() || self.app_error.is_some() {
             return Err(Error::NothingToDo);
         }
 
-        self.app_error = Some(err);
-        self.app_reason.extend_from_slice(reason);
+        if app {
+            self.app_error = Some(err);
+            self.app_reason.extend_from_slice(reason);
+        } else {
+            self.error = Some(err);
+        }
 
         Ok(())
     }
