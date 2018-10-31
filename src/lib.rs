@@ -76,7 +76,7 @@ pub struct Config<'a> {
     pub tls_certificate_key: &'a str,
 }
 
-pub struct Conn {
+pub struct Connection {
     version: u32,
 
     dcid: Vec<u8>,
@@ -116,18 +116,18 @@ pub struct Conn {
     draining: bool,
 }
 
-impl Conn {
+impl Connection {
     pub fn negotiate_version(hdr: &packet::Header, out: &mut [u8]) -> Result<usize> {
         packet::negotiate_version(hdr, out)
     }
 
-    pub fn new(config: Config, is_server: bool) -> Result<Box<Conn>> {
-        Conn::new_with_tls(config, tls::State::new(), is_server)
+    pub fn new(config: Config, is_server: bool) -> Result<Box<Connection>> {
+        Connection::new_with_tls(config, tls::State::new(), is_server)
     }
 
     fn new_with_tls(config: Config, tls: tls::State, is_server: bool)
-                                                    -> Result<Box<Conn>> {
-        let mut conn = Box::new(Conn {
+                                                    -> Result<Box<Connection>> {
+        let mut conn = Box::new(Connection {
             version: config.version,
 
             dcid: Vec::new(),
@@ -1043,7 +1043,7 @@ mod tests {
         assert_eq!(new_tp, tp);
     }
 
-    fn create_conn(is_server: bool) -> Box<Conn> {
+    fn create_conn(is_server: bool) -> Box<Connection> {
         let tp = TransportParams::default();
 
         let mut scid: [u8; 16] = [0; 16];
@@ -1061,10 +1061,10 @@ mod tests {
             tls_certificate_key: "examples/cert.key",
         };
 
-        Conn::new(config, is_server).unwrap()
+        Connection::new(config, is_server).unwrap()
     }
 
-    fn recv_send(conn: &mut Conn, buf: &mut [u8], len: usize) -> usize {
+    fn recv_send(conn: &mut Connection, buf: &mut [u8], len: usize) -> usize {
         let mut left = len;
 
         while left > 0 {

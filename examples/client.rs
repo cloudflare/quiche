@@ -92,7 +92,7 @@ fn main() {
         tls_certificate_key: "",
     };
 
-    let mut conn = quiche::Conn::new(config, false).unwrap();
+    let mut conn = quiche::Connection::new(config, false).unwrap();
 
     let write = match conn.send(&mut out) {
         Ok(v) => v,

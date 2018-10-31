@@ -81,7 +81,7 @@ fn main() {
 
     let socket = net::UdpSocket::bind(args.get_str("--listen")).unwrap();
 
-    let mut connections: HashMap<net::SocketAddr, Box<quiche::Conn>> = HashMap::new();
+    let mut connections: HashMap<net::SocketAddr, Box<quiche::Connection>> = HashMap::new();
 
     loop {
         // Garbage collect closed connections.
@@ -119,7 +119,7 @@ fn main() {
                 if hdr.version != quiche::VERSION_DRAFT15 {
                     warn!("Doing version negotiation");
 
-                    let len = quiche::Conn::negotiate_version(&hdr, &mut out)
+                    let len = quiche::Connection::negotiate_version(&hdr, &mut out)
                                            .unwrap();
                     let out = &out[..len];
 
@@ -152,7 +152,7 @@ fn main() {
                        hex_dump(&hdr.scid),
                        hex_dump(&scid));
 
-                let conn = quiche::Conn::new(config, true).unwrap();
+                let conn = quiche::Connection::new(config, true).unwrap();
 
                 v.insert(conn)
             },
@@ -201,7 +201,7 @@ fn main() {
     }
 }
 
-fn handle_stream(conn: &mut quiche::Conn, stream: u64, args: &docopt::ArgvMap) {
+fn handle_stream(conn: &mut quiche::Connection, stream: u64, args: &docopt::ArgvMap) {
     let stream_data = match conn.stream_recv(stream) {
         Ok(v) => v,
         Err(e) => panic!("{} stream recv failed {:?}",

@@ -30,7 +30,7 @@ use std::slice;
 
 use libc;
 
-use ::Conn;
+use ::Connection;
 
 use crypto;
 
@@ -122,7 +122,7 @@ impl State {
         }
     }
 
-    pub fn init_with_conn(&self, conn: &::Conn) -> Result<()> {
+    pub fn init_with_conn(&self, conn: &::Connection) -> Result<()> {
         self.set_state(conn.is_server);
 
         self.set_ex_data(*QUICHE_EX_DATA_INDEX, conn)?;
@@ -146,7 +146,7 @@ impl State {
         Ok(())
     }
 
-    pub fn init_with_conn_extra(&self, conn: &::Conn, config: &::Config)
+    pub fn init_with_conn_extra(&self, conn: &::Connection, config: &::Config)
                                                             -> Result<()> {
         self.init_with_conn(conn)?;
 
@@ -304,7 +304,7 @@ fn get_pending_cipher_from_ptr(ptr: *mut SSL) -> Result<crypto::Algorithm> {
 
 extern fn set_encryption_secret(ssl: *mut SSL, level: crypto::Level, is_write: i32,
                                 secret: *const u8, secret_len: usize) -> i32 {
-    let conn = match get_ex_data_from_ptr::<Conn>(ssl, *QUICHE_EX_DATA_INDEX) {
+    let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
         Some(v) => v,
         None    => return 0,
     };
@@ -367,7 +367,7 @@ extern fn set_encryption_secret(ssl: *mut SSL, level: crypto::Level, is_write: i
 
 extern fn write_message(ssl: *mut SSL, level: crypto::Level, data: *const u8,
                         len: usize) -> i32 {
-    let conn = match get_ex_data_from_ptr::<Conn>(ssl, *QUICHE_EX_DATA_INDEX) {
+    let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
         Some(v) => v,
         None    => return 0,
     };
@@ -399,7 +399,7 @@ extern fn flush_flight(_ssl: *mut SSL) -> i32 {
 }
 
 extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> i32 {
-    let conn = match get_ex_data_from_ptr::<Conn>(ssl, *QUICHE_EX_DATA_INDEX) {
+    let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
         Some(v) => v,
         None    => return 0,
     };
