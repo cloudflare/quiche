@@ -397,16 +397,6 @@ pub fn encode_pkt_num(pn: u64, b: &mut octets::Bytes) -> Result<()> {
     Ok(())
 }
 
-pub fn decrypt_pkt(payload: &mut [u8], pn: u64, ad: &[u8], aead: &crypto::Open)
-                                                            -> Result<usize> {
-    aead.open_with_u64_counter(pn, ad, payload)
-}
-
-pub fn encrypt_pkt(payload: &mut [u8], pn: u64, ad: &[u8], aead: &crypto::Seal)
-                                                            -> Result<usize> {
-    aead.seal_with_u64_counter(pn, ad, payload)
-}
-
 pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
     let mut b = octets::Bytes::new(out);
 
@@ -517,17 +507,17 @@ mod tests {
 
         let payload_len = b.get_varint().unwrap() as usize;
 
-        let (aead_open, _) =
+        let (aead, _) =
             crypto::derive_initial_key_material(&hdr.dcid, true).unwrap();
 
-        let (pn, pn_len) = decrypt_pkt_num(&mut b, &aead_open).unwrap();
+        let (pn, pn_len) = decrypt_pkt_num(&mut b, &aead).unwrap();
         b.skip(pn_len).unwrap();
 
         let payload_offset = b.off();
 
         let (header, mut payload) = b.split_at(payload_offset).unwrap();
 
-        decrypt_pkt(payload.slice(payload_len - pn_len).unwrap(),
-                    pn, header.as_ref(), &aead_open).unwrap();
+        let ciphertext = payload.slice(payload_len - pn_len).unwrap();
+        aead.open_with_u64_counter(pn, header.as_ref(), ciphertext).unwrap();
     }
 }

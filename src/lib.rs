@@ -309,7 +309,7 @@ impl Conn {
 
         let payload_len = {
             let mut ciphertext = payload.peek_bytes(payload_len - pn_len)?;
-            packet::decrypt_pkt(ciphertext.as_mut(), pn, header.as_ref(), &aead)?
+            aead.open_with_u64_counter(pn, header.as_ref(), ciphertext.as_mut())?
         };
 
         let mut payload = payload.get_bytes(payload_len)?;
@@ -677,7 +677,7 @@ impl Conn {
         let (mut header, mut payload) = b.split_at(payload_offset)?;
 
         let ciphertext = payload.slice(payload_len)?;
-        packet::encrypt_pkt(ciphertext, pn, header.as_ref(), aead)?;
+        aead.seal_with_u64_counter(pn, header.as_ref(), ciphertext)?;
 
         let sample = &ciphertext[4 - pn_len..16 + (4 - pn_len)];
         let pn_ciphertext = header.slice_last(pn_len)?;
