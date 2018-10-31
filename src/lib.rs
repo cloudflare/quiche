@@ -406,9 +406,9 @@ impl Connection {
 
                 frame::Frame::Stream { stream_id, data } => {
                     let max_rx_data = self.local_transport_params
-                                          .initial_max_stream_data_bidi_local as usize;
-                    let max_tx_data = self.peer_transport_params
                                           .initial_max_stream_data_bidi_remote as usize;
+                    let max_tx_data = self.peer_transport_params
+                                          .initial_max_stream_data_bidi_local as usize;
 
                     // Get existing stream or create a new one.
                     let stream = self.streams.entry(stream_id).or_insert_with(|| {
