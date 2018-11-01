@@ -49,16 +49,20 @@ const TLS1_3_VERSION: u16 = 0x0304;
 const TLS_ALERT_ERROR: u16 = 0x100;
 
 #[allow(non_camel_case_types)]
-enum SSL_METHOD {}
+#[repr(transparent)]
+struct SSL_METHOD(c_void);
 
 #[allow(non_camel_case_types)]
-enum SSL_CTX {}
+#[repr(transparent)]
+struct SSL_CTX(c_void);
 
 #[allow(non_camel_case_types)]
-enum SSL {}
+#[repr(transparent)]
+struct SSL(c_void);
 
 #[allow(non_camel_case_types)]
-enum SSL_CIPHER {}
+#[repr(transparent)]
+struct SSL_CIPHER(c_void);
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
