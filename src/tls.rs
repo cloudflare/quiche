@@ -28,7 +28,7 @@ use std::ffi;
 use std::ptr;
 use std::slice;
 
-use libc;
+use libc::c_void;
 
 use ::Connection;
 
@@ -178,7 +178,7 @@ impl State {
 
     pub fn set_ex_data<T>(&self, idx: i32, data: &T) -> Result<()> {
         map_result(unsafe {
-            let ptr = data as *const T as *const libc::c_void;
+            let ptr = data as *const T as *const c_void;
             SSL_set_ex_data(self.as_ptr(), idx, ptr)
         })
     }
@@ -485,9 +485,9 @@ extern {
     fn SSL_CTX_set_options(ctx: *mut SSL_CTX, options: u32) -> u32;
 
     // SSL
-    fn SSL_get_ex_new_index(argl: libc::c_long, argp: *const libc::c_void,
-        unused: *const libc::c_void, dup_unused: *const libc::c_void,
-        free_func: *const libc::c_void) -> i32;
+    fn SSL_get_ex_new_index(argl: libc::c_long, argp: *const c_void,
+        unused: *const c_void, dup_unused: *const c_void,
+        free_func: *const c_void) -> i32;
 
     fn SSL_new(ctx: *mut SSL_CTX) -> *mut SSL;
 
@@ -496,8 +496,8 @@ extern {
     fn SSL_set_accept_state(ssl: *mut SSL);
     fn SSL_set_connect_state(ssl: *mut SSL);
 
-    fn SSL_set_ex_data(ssl: *mut SSL, idx: i32, ptr: *const libc::c_void) -> i32;
-    fn SSL_get_ex_data(ssl: *mut SSL, idx: i32) -> *mut libc::c_void;
+    fn SSL_set_ex_data(ssl: *mut SSL, idx: i32, ptr: *const c_void) -> i32;
+    fn SSL_get_ex_data(ssl: *mut SSL, idx: i32) -> *mut c_void;
 
     fn SSL_get_pending_cipher(ssl: *mut SSL) -> *const SSL_CIPHER;
 
