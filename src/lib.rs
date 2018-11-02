@@ -351,9 +351,25 @@ impl Connection {
                 },
 
                 frame::Frame::MaxStreamData { stream_id, max } => {
-                    let stream = match self.streams.get_mut(&stream_id) {
-                        Some(v) => v,
-                        None => return Err(Error::InvalidStreamState),
+                    let max_rx_data = self.local_transport_params
+                                          .initial_max_stream_data_bidi_remote as usize;
+                    let max_tx_data = self.peer_transport_params
+                                          .initial_max_stream_data_bidi_local as usize;
+
+                    // Get existing stream or create a new one.
+                    let stream = match self.streams.entry(stream_id) {
+                        hash_map::Entry::Vacant(v) => {
+                            if stream::is_local(stream_id, self.is_server) {
+                                return Err(Error::InvalidStreamState);
+                            }
+
+                            // TODO: check max stream ID
+
+                            let s = stream::Stream::new(max_rx_data, max_tx_data);
+                            v.insert(s)
+                        },
+
+                        hash_map::Entry::Occupied(v) => v.into_mut(),
                     };
 
                     stream.max_tx_data = cmp::max(stream.max_tx_data,
