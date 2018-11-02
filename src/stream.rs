@@ -89,7 +89,11 @@ impl Stream {
 }
 
 pub fn is_local(id: u64, is_server: bool) -> bool {
-    (id & 1) == (is_server as u64)
+    (id & 0x1) == (is_server as u64)
+}
+
+pub fn is_bidi(id: u64) -> bool {
+    (id & 0x2) == 0
 }
 
 pub struct Readable<'a> {

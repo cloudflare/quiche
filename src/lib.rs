@@ -757,7 +757,7 @@ impl Connection {
         };
 
         if !stream.readable() {
-            return Ok(stream::RangeBuf::default());
+            return Err(Error::NothingToDo);
         }
 
         stream.pop_recv()
@@ -765,6 +765,11 @@ impl Connection {
 
     pub fn stream_send(&mut self, stream_id: u64, buf: &[u8], fin: bool)
                                                             -> Result<usize> {
+        if !stream::is_bidi(stream_id) &&
+           !stream::is_local(stream_id, self.is_server) {
+            return Err(Error::InvalidStreamState);
+        }
+
         let max_rx_data = self.local_transport_params
                               .initial_max_stream_data_bidi_local as usize;
         let max_tx_data = self.peer_transport_params

@@ -213,6 +213,9 @@ fn main() {
 fn handle_stream(conn: &mut quiche::Connection, stream: u64, args: &docopt::ArgvMap) {
     let stream_data = match conn.stream_recv(stream) {
         Ok(v) => v,
+
+        Err(quiche::Error::NothingToDo) => return,
+
         Err(e) => panic!("{} stream recv failed {:?}",
                          conn.trace_id(), e),
     };
@@ -240,7 +243,7 @@ fn handle_stream(conn: &mut quiche::Connection, stream: u64, args: &docopt::Argv
               conn.trace_id(), data.len(), stream);
 
         if let Err(e) = conn.stream_send(stream, &data, true) {
-            panic!("{} stream send failed {:?}", conn.trace_id(), e);
+            error!("{} stream send failed {:?}", conn.trace_id(), e);
         }
     }
 }
