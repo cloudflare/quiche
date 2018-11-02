@@ -178,7 +178,7 @@ impl Connection {
         });
 
         conn.tls_state.init_with_conn_extra(&conn, &config)
-                      .map_err(|_e| Error::TlsFail)?;
+                      .map_err(|_| Error::TlsFail)?;
 
         // Derive initial secrets for the client. We can do this here because
         // we randomly generate the destination connection ID used in the
@@ -242,7 +242,7 @@ impl Connection {
             self.got_peer_conn_id = false;
             self.initial.clear();
             self.tls_state.clear()
-                .map_err(|_e| Error::TlsFail)?;
+                .map_err(|_| Error::TlsFail)?;
 
             return Ok(b.off());
         }
@@ -401,7 +401,7 @@ impl Connection {
                         let level = space.crypto_level;
 
                         self.tls_state.provide_data(level, &buf)
-                                      .map_err(|_e| Error::TlsFail)?;
+                                      .map_err(|_| Error::TlsFail)?;
                     }
 
                     do_ack = true;
@@ -823,7 +823,7 @@ impl Connection {
 
                     let mut raw_params =
                         self.tls_state.get_quic_transport_params()
-                                      .map_err(|_e| Error::TlsFail)?;
+                                      .map_err(|_| Error::TlsFail)?;
 
                     let peer_params = TransportParams::decode(&mut raw_params,
                                                               self.version,

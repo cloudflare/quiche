@@ -144,7 +144,7 @@ impl State {
         let raw_params = ::TransportParams::encode(&conn.local_transport_params,
                                                    conn.version, conn.is_server,
                                                    &mut raw_params)
-                                           .map_err(|_e| Error::TlsFail)?;
+                                           .map_err(|_| Error::TlsFail)?;
 
         self.set_quic_transport_params(raw_params)?;
 
@@ -206,7 +206,7 @@ impl State {
     }
 
     pub fn set_server_name(&self, name: &str) -> Result<()> {
-        let cstr = ffi::CString::new(name).map_err(|_e| Error::TlsFail)?;
+        let cstr = ffi::CString::new(name).map_err(|_| Error::TlsFail)?;
         map_result_ssl(self, unsafe {
             SSL_set_tlsext_host_name(self.as_ptr(), cstr.as_ptr())
         })
@@ -244,7 +244,7 @@ impl State {
     }
 
     pub fn use_certificate_file(&self, file: &str) -> Result<()> {
-        let cstr = ffi::CString::new(file).map_err(|_e| Error::TlsFail)?;
+        let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
         // TODO: support parsing and configuring full chain
         map_result_ssl(self, unsafe {
             SSL_use_certificate_file(self.as_ptr(), cstr.as_ptr(), 1)
@@ -252,7 +252,7 @@ impl State {
     }
 
     pub fn use_privkey_file(&self, file: &str) -> Result<()> {
-        let cstr = ffi::CString::new(file).map_err(|_e| Error::TlsFail)?;
+        let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
         map_result_ssl(self, unsafe {
             SSL_use_PrivateKey_file(self.as_ptr(), cstr.as_ptr(), 1)
         })

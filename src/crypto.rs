@@ -133,7 +133,7 @@ impl Open {
 
     pub fn open(&self, nonce: &[u8], ad: &[u8], buf: &mut [u8]) -> Result<usize> {
         let plain = aead::open_in_place(&self.key, nonce, ad, 0, buf)
-                         .map_err(|_e| Error::CryptoFail)?;
+                         .map_err(|_| Error::CryptoFail)?;
 
         Ok(plain.len())
     }
@@ -160,7 +160,7 @@ impl Open {
 
     pub fn xor_keystream(&self, nonce: &[u8], buf: &mut [u8]) -> Result<usize> {
         let plain = unauthenticated_stream::decrypt_in_place(&self.pn_key,
-                        nonce, buf).map_err(|_e| Error::CryptoFail)?;
+                        nonce, buf).map_err(|_| Error::CryptoFail)?;
 
         Ok(plain.len())
     }
@@ -191,7 +191,7 @@ impl Seal {
 
     pub fn seal(&self, nonce: &[u8], ad: &[u8], buf: &mut [u8]) -> Result<usize> {
         let cipher = aead::seal_in_place(&self.key, nonce, ad, buf, self.alg().tag_len())
-                          .map_err(|_e| Error::CryptoFail)?;
+                          .map_err(|_| Error::CryptoFail)?;
 
         Ok(cipher)
     }
@@ -218,7 +218,7 @@ impl Seal {
 
     pub fn xor_keystream(&self, nonce: &[u8], buf: &mut [u8]) -> Result<usize> {
         let plain = unauthenticated_stream::encrypt_in_place(&self.pn_key,
-                        nonce, buf).map_err(|_e| Error::CryptoFail)?;
+                        nonce, buf).map_err(|_| Error::CryptoFail)?;
 
         Ok(plain)
     }
