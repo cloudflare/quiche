@@ -63,6 +63,22 @@ pub enum Error {
     FlowControl,
 }
 
+impl Error {
+    pub fn to_wire(&self) -> u16 {
+        match self {
+            Error::NoError => 0x0,
+            Error::UnknownFrame => 0x7,
+            Error::InvalidStreamState => 0x5,
+            Error::CryptoFail => 0x100,
+            Error::TlsFail => 0x100,
+            Error::Again => 0x0,
+            Error::NothingToDo => 0x0,
+            Error::FlowControl => 0x3,
+            _ => 0xa,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Config<'a> {
     pub version: u32,
