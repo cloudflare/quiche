@@ -54,7 +54,6 @@ pub enum Error {
     UnknownVersion,
     UnknownPacket,
     UnknownFrame,
-    UnknownStream,
     BufferTooShort,
     InvalidPacket,
     InvalidState,
@@ -354,7 +353,7 @@ impl Connection {
                 frame::Frame::MaxStreamData { stream_id, max } => {
                     let stream = match self.streams.get_mut(&stream_id) {
                         Some(v) => v,
-                        None => return Err(Error::UnknownStream),
+                        None => return Err(Error::InvalidStreamState),
                     };
 
                     stream.max_tx_data = cmp::max(stream.max_tx_data,
@@ -738,7 +737,7 @@ impl Connection {
     pub fn stream_recv(&mut self, stream_id: u64) -> Result<stream::RangeBuf> {
         let stream = match self.streams.get_mut(&stream_id) {
             Some(v) => v,
-            None => return Err(Error::UnknownStream),
+            None => return Err(Error::InvalidStreamState),
         };
 
         if !stream.readable() {
