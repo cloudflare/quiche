@@ -26,12 +26,14 @@
 
 #[macro_use]
 extern crate log;
+extern crate mio;
 extern crate rand;
 extern crate docopt;
 extern crate quiche;
 extern crate env_logger;
 
 use std::fs;
+use std::io;
 use std::net;
 use std::path;
 
@@ -39,6 +41,7 @@ use std::collections::hash_map;
 use std::collections::HashMap;
 
 use docopt::Docopt;
+
 use rand::Rng;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
@@ -82,7 +85,16 @@ fn main() {
 
     let socket = net::UdpSocket::bind(args.get_str("--listen")).unwrap();
 
-    let mut connections: HashMap<net::SocketAddr, Box<quiche::Connection>> = HashMap::new();
+    let poll = mio::Poll::new().unwrap();
+    let mut events = mio::Events::with_capacity(1024);
+
+    let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
+    poll.register(&socket, mio::Token(0),
+                  mio::Ready::readable(),
+                  mio::PollOpt::edge()).unwrap();
+
+    let mut connections: HashMap<net::SocketAddr, Box<quiche::Connection>> =
+        HashMap::new();
 
     loop {
         // Garbage collect closed connections.
@@ -96,116 +108,132 @@ fn main() {
             !c.is_closed()
         });
 
-        let (len, src) = socket.recv_from(&mut buf).unwrap();
-        debug!("Got {} bytes from {}", len, src);
+        poll.poll(&mut events, None).unwrap();
 
-        let buf = &mut buf[..len];
-
-        let hdr = match quiche::Header::from_slice(buf, LOCAL_CONN_ID_LEN) {
-            Ok(v) => v,
-
-            Err(e) => {
-                error!("Parsing packet header failed: {:?}", e);
-                continue
-            }
-        };
-
-        if hdr.ty == quiche::Type::VersionNegotiation {
-            error!("Version negotiation invalid on the server");
-            continue;
-        }
-
-        let conn = match connections.entry(src) {
-            hash_map::Entry::Vacant(v) => {
-                if hdr.version != quiche::VERSION_DRAFT15 {
-                    warn!("Doing version negotiation");
-
-                    let len = quiche::Connection::negotiate_version(&hdr, &mut out)
-                                           .unwrap();
-                    let out = &out[..len];
-
-                    socket.send_to(out, &src).unwrap();
-                    continue;
-                }
-
-                if hdr.ty != quiche::Type::Initial {
-                    error!("Packet is not Initial");
-                    continue;
-                }
-
-                let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
-                rand::thread_rng().fill(&mut scid[..]);
-
-                let config = quiche::Config {
-                    version: quiche::VERSION_DRAFT15,
-
-                    local_conn_id: &scid,
-
-                    local_transport_params: &TRANSPORT_PARAMS,
-
-                    tls_server_name: args.get_str("--name"),
-                    tls_certificate: args.get_str("--cert"),
-                    tls_certificate_key: args.get_str("--key"),
-                };
-
-                debug!("New connection: dcid={} scid={} lcid={}",
-                       hex_dump(&hdr.dcid),
-                       hex_dump(&hdr.scid),
-                       hex_dump(&scid));
-
-                let conn = quiche::Connection::new(config, true).unwrap();
-
-                v.insert(conn)
-            },
-
-            hash_map::Entry::Occupied(v) => v.into_mut(),
-        };
-
-        let mut left = len;
-
-        // Process potentially coalesced packets.
-        while left > 0 {
-            let read = match conn.recv(&mut buf[len - left..len]) {
-                Ok(v)  => v,
-
-                Err(e) => {
-                    error!("{} recv failed: {:?}", conn.trace_id(), e);
-                    conn.close(false, 0xa, b"fail").unwrap();
-                    break;
-                },
-            };
-
-            left -= read;
-
-            debug!("{} read {} bytes", conn.trace_id(), read);
-        }
-
-        let streams: Vec<u64> = conn.stream_iter().collect();
-        for s in streams {
-            info!("{} stream {} is readable", conn.trace_id(), s);
-            handle_stream(conn, s, &args);
-        }
-
-        loop {
-            let write = match conn.send(&mut out) {
+        'read: loop {
+            let (len, src) = match socket.recv_from(&mut buf) {
                 Ok(v) => v,
 
-                Err(quiche::Error::NothingToDo) => {
-                    debug!("{} done writing", conn.trace_id());
-                    break;
-                },
+                 Err(e) => {
+                    if e.kind() == io::ErrorKind::WouldBlock {
+                        warn!("recv() would block");
+                        break 'read;
+                    }
 
-                Err(e) => {
-                    error!("{} send failed: {:?}", conn.trace_id(), e);
-                    conn.close(false, 0xa, b"fail").unwrap();
-                    break;
+                    panic!("recv() failed: {:?}", e);
                 },
             };
 
-            // TODO: coalesce packets.
-            socket.send_to(&out[..write], &src).unwrap();
+            let buf = &mut buf[..len];
 
-            debug!("{} written {} bytes", conn.trace_id(), write);
+            let hdr = match quiche::Header::from_slice(buf, LOCAL_CONN_ID_LEN) {
+                Ok(v) => v,
+
+                Err(e) => {
+                    error!("Parsing packet header failed: {:?}", e);
+                    continue
+                }
+            };
+
+            if hdr.ty == quiche::Type::VersionNegotiation {
+                error!("Version negotiation invalid on the server");
+                continue;
+            }
+
+            let conn = match connections.entry(src) {
+                hash_map::Entry::Vacant(v) => {
+                    if hdr.version != quiche::VERSION_DRAFT15 {
+                        warn!("Doing version negotiation");
+
+                        let len = quiche::Connection::negotiate_version(&hdr, &mut out)
+                                               .unwrap();
+                        let out = &out[..len];
+
+                        socket.send_to(out, &src).unwrap();
+                        continue;
+                    }
+
+                    if hdr.ty != quiche::Type::Initial {
+                        error!("Packet is not Initial");
+                        continue;
+                    }
+
+                    let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
+                    rand::thread_rng().fill(&mut scid[..]);
+
+                    let config = quiche::Config {
+                        version: quiche::VERSION_DRAFT15,
+
+                        local_conn_id: &scid,
+
+                        local_transport_params: &TRANSPORT_PARAMS,
+
+                        tls_server_name: args.get_str("--name"),
+                        tls_certificate: args.get_str("--cert"),
+                        tls_certificate_key: args.get_str("--key"),
+                    };
+
+                    debug!("New connection: dcid={} scid={} lcid={}",
+                           hex_dump(&hdr.dcid),
+                           hex_dump(&hdr.scid),
+                           hex_dump(&scid));
+
+                    let conn = quiche::Connection::new(config, true).unwrap();
+
+                    v.insert(conn)
+                },
+
+                hash_map::Entry::Occupied(v) => v.into_mut(),
+            };
+
+            let mut left = len;
+
+            // Process potentially coalesced packets.
+            while left > 0 {
+                let read = match conn.recv(&mut buf[len - left..len]) {
+                    Ok(v)  => v,
+
+                    Err(e) => {
+                        error!("{} recv failed: {:?}", conn.trace_id(), e);
+                        conn.close(false, 0xa, b"fail").unwrap();
+                        break 'read;
+                    },
+                };
+
+                left -= read;
+
+                debug!("{} read {} bytes", conn.trace_id(), read);
+            }
+
+            let streams: Vec<u64> = conn.stream_iter().collect();
+            for s in streams {
+                info!("{} stream {} is readable", conn.trace_id(), s);
+                handle_stream(conn, s, &args);
+            }
+        }
+
+        for (src, conn) in &mut connections {
+            loop {
+                let write = match conn.send(&mut out) {
+                    Ok(v) => v,
+
+                    Err(quiche::Error::NothingToDo) => {
+                        debug!("{} done writing", conn.trace_id());
+                        break;
+                    },
+
+                    Err(e) => {
+                        error!("{} send failed: {:?}", conn.trace_id(), e);
+                        conn.close(false, 0xa, b"fail").unwrap();
+                        break;
+                    },
+                };
+
+                // TODO: coalesce packets.
+                socket.send_to(&out[..write], &src).unwrap();
+
+                debug!("{} written {} bytes", conn.trace_id(), write);
+            }
         }
     }
 }

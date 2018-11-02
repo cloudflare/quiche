@@ -26,14 +26,17 @@
 
 #[macro_use]
 extern crate log;
+extern crate mio;
 extern crate rand;
 extern crate docopt;
 extern crate quiche;
 extern crate env_logger;
 
+use std::io;
 use std::net;
 
 use docopt::Docopt;
+
 use rand::Rng;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
@@ -77,6 +80,14 @@ fn main() {
     let socket = net::UdpSocket::bind("0.0.0.0:0").unwrap();
     socket.connect(args.get_str("--connect")).unwrap();
 
+    let poll = mio::Poll::new().unwrap();
+    let mut events = mio::Events::with_capacity(1024);
+
+    let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
+    poll.register(&socket, mio::Token(0),
+                  mio::Ready::readable(),
+                  mio::PollOpt::edge()).unwrap();
+
     let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
     rand::thread_rng().fill(&mut scid[..]);
 
@@ -107,26 +118,42 @@ fn main() {
     let mut req_sent = false;
 
     loop {
-        let len = socket.recv(&mut buf).unwrap();
-        debug!("{} got {} bytes", conn.trace_id(), len);
+        poll.poll(&mut events, None).unwrap();
 
-        let buf = &mut buf[..len];
+        'read: loop {
+            let len = match socket.recv(&mut buf) {
+                Ok(v) => v,
 
-        let mut left = len;
+                 Err(e) => {
+                    if e.kind() == io::ErrorKind::WouldBlock {
+                        warn!("recv() would block");
+                        break 'read;
+                    }
 
-        // Process potentially coalesced packets.
-        while left > 0 {
-            let read = match conn.recv(&mut buf[len - left..len]) {
-                Ok(v)  => v,
-
-                Err(e) => {
-                    error!("{} recv failed: {:?}", conn.trace_id(), e);
-                    conn.close(false, 0xa, b"fail").unwrap();
-                    break;
+                    panic!("recv() failed: {:?}", e);
                 },
             };
 
-            left -= read;
+            debug!("{} got {} bytes", conn.trace_id(), len);
+
+            let buf = &mut buf[..len];
+
+            let mut left = len;
+
+            // Process potentially coalesced packets.
+            while left > 0 {
+                let read = match conn.recv(&mut buf[len - left..len]) {
+                    Ok(v)  => v,
+
+                    Err(e) => {
+                        error!("{} recv failed: {:?}", conn.trace_id(), e);
+                        conn.close(false, 0xa, b"fail").unwrap();
+                        break 'read;
+                    },
+                };
+
+                left -= read;
+            }
         }
 
         if conn.is_closed() {
