@@ -412,7 +412,13 @@ impl Connection {
                     do_ack = true;
                 },
 
-                frame::Frame::StopSending { .. } => {
+                frame::Frame::StopSending { stream_id, .. } => {
+                    // STOP_SENDING on a receive-only stream is a fatal error.
+                    if !stream::is_local(stream_id, self.is_server) &&
+                       !stream::is_bidi(stream_id) {
+                        return Err(Error::InvalidPacket);
+                    }
+
                     do_ack = true;
                 },
 
