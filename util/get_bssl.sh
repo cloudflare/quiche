@@ -10,12 +10,6 @@ INSTALL_DIR="$PWD/boringssl/.openssl"
 
 if [ ! -d "$GIT_DIR" ]; then
     git clone $REPO
-
-    # https://boringssl-review.googlesource.com/c/boringssl/+/31744
-    cd boringssl/
-    git fetch $REPO refs/changes/44/31744/4
-    git checkout FETCH_HEAD
-    cd ..
 fi
 
 cd boringssl/

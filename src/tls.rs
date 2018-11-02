@@ -66,12 +66,12 @@ struct SSL_CIPHER(c_void);
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
-struct SSL_STREAM_METHOD {
-    set_encryption_secret:
-        extern fn(ssl: *mut SSL, level: crypto::Level, is_write: i32,
-           secret: *const u8, secret_len: usize) -> i32,
+struct SSL_QUIC_METHOD {
+    set_encryption_secrets:
+        extern fn(ssl: *mut SSL, level: crypto::Level, read_secret: *const u8,
+                  write_secret: *const u8, secret_len: usize) -> i32,
 
-    write_message:
+    add_handshake_data:
         extern fn(ssl: *mut SSL, level: crypto::Level, data: *const u8,
                   len: usize) -> i32,
 
@@ -86,9 +86,9 @@ lazy_static! {
     };
 }
 
-static QUICHE_STREAM_METHOD: SSL_STREAM_METHOD = SSL_STREAM_METHOD {
-    set_encryption_secret,
-    write_message,
+static QUICHE_STREAM_METHOD: SSL_QUIC_METHOD = SSL_QUIC_METHOD {
+    set_encryption_secrets,
+    add_handshake_data,
     flush_flight,
     send_alert,
 };
@@ -102,7 +102,7 @@ const SSL_OP_NO_TLSV1_2: u32 = 0x08000000;
 pub struct State(*mut SSL);
 
 impl State {
-    pub fn new() -> State {
+    pub fn new() -> Result<State> {
         unsafe {
             // TODO: expose SSL_CTX to applications so we don't need to parse
             // certificates for each connection.
@@ -114,10 +114,12 @@ impl State {
                                      SSL_OP_NO_TLSV1_1 |
                                      SSL_OP_NO_TLSV1_2);
 
+            map_result(SSL_CTX_set_quic_method(ctx, &QUICHE_STREAM_METHOD))?;
+
             let ssl = SSL_new(ctx);
             SSL_CTX_free(ctx);
 
-            State(ssl)
+            Ok(State(ssl))
         }
     }
 
@@ -136,8 +138,6 @@ impl State {
         self.set_max_proto_version(TLS1_3_VERSION);
 
         self.set_quiet_shutdown(true);
-
-        self.set_custom_stream_method()?;
 
         let mut raw_params: [u8; 128] = [0; 128];
 
@@ -231,15 +231,9 @@ impl State {
         Ok(unsafe { slice::from_raw_parts_mut(ptr, len) })
     }
 
-    pub fn set_custom_stream_method(&self) -> Result<()> {
-        map_result_ssl(self, unsafe {
-            SSL_set_custom_stream_method(self.as_ptr(), &QUICHE_STREAM_METHOD)
-        })
-    }
-
     pub fn provide_data(&self, level: crypto::Level, buf: &[u8]) -> Result<()> {
         map_result_ssl(self, unsafe {
-            SSL_provide_data(self.as_ptr(), level, buf.as_ptr(), buf.len())
+            SSL_provide_quic_data(self.as_ptr(), level, buf.as_ptr(), buf.len())
         })
     }
 
@@ -307,20 +301,29 @@ fn get_pending_cipher_from_ptr(ptr: *mut SSL) -> Result<crypto::Algorithm> {
     Ok(alg)
 }
 
-extern fn set_encryption_secret(ssl: *mut SSL, level: crypto::Level, is_write: i32,
-                                secret: *const u8, secret_len: usize) -> i32 {
+extern fn set_encryption_secrets(ssl: *mut SSL, level: crypto::Level,
+                                 read_secret: *const u8,
+                                 write_secret: *const u8,
+                                 secret_len: usize) -> i32 {
     let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
         Some(v) => v,
         None    => return 0,
+    };
+
+    trace!("{} tls set encryption secret lvl={:?}", conn.trace_id(), level);
+
+    let space = match level {
+        crypto::Level::Initial     => &mut conn.initial,
+        // TODO: implement 0-RTT
+        crypto::Level::ZeroRTT     => panic!("0-RTT not implemented"),
+        crypto::Level::Handshake   => &mut conn.handshake,
+        crypto::Level::Application => &mut conn.application,
     };
 
     let aead = match get_pending_cipher_from_ptr(ssl) {
         Ok(v)  => v,
         Err(_) => return 0,
     };
-
-    trace!("{} tls set encryption secret lvl={:?} write={}",
-           conn.trace_id(), level, is_write);
 
     let key_len = aead.key_len();
     let nonce_len = aead.nonce_len();
@@ -329,7 +332,7 @@ extern fn set_encryption_secret(ssl: *mut SSL, level: crypto::Level, is_write: i
     let mut iv = vec![0; nonce_len];
     let mut pn_key = vec![0; key_len];
 
-    let secret = unsafe { slice::from_raw_parts(secret, secret_len) };
+    let secret = unsafe { slice::from_raw_parts(read_secret, secret_len) };
 
     if crypto::derive_pkt_key(aead, &secret, &mut key).is_err() {
         return 0;
@@ -343,35 +346,39 @@ extern fn set_encryption_secret(ssl: *mut SSL, level: crypto::Level, is_write: i
         return 0;
     }
 
-    let space = match level {
-        crypto::Level::Initial     => &mut conn.initial,
-        // TODO: implement 0-RTT
-        crypto::Level::ZeroRTT     => panic!("0-RTT not implemented"),
-        crypto::Level::Handshake   => &mut conn.handshake,
-        crypto::Level::Application => &mut conn.application,
+    let open = match crypto::Open::new(aead, &key, &iv, &pn_key) {
+        Ok(v)  => v,
+        Err(_) => return 0,
     };
 
-    if is_write == 1 {
-        let seal = match crypto::Seal::new(aead, &key, &iv, &pn_key) {
-            Ok(v)  => v,
-            Err(_) => return 0,
-        };
+    space.crypto_open = Some(open);
 
-        space.crypto_seal = Some(seal);
-    } else {
-        let open = match crypto::Open::new(aead, &key, &iv, &pn_key) {
-            Ok(v)  => v,
-            Err(_) => return 0,
-        };
+    let secret = unsafe { slice::from_raw_parts(write_secret, secret_len) };
 
-        space.crypto_open = Some(open);
+    if crypto::derive_pkt_key(aead, &secret, &mut key).is_err() {
+        return 0;
     }
+
+    if crypto::derive_pkt_iv(aead, &secret, &mut iv).is_err() {
+        return 0;
+    }
+
+    if crypto::derive_pkt_num_key(aead, &secret, &mut pn_key).is_err() {
+        return 0;
+    }
+
+    let seal = match crypto::Seal::new(aead, &key, &iv, &pn_key) {
+        Ok(v)  => v,
+        Err(_) => return 0,
+    };
+
+    space.crypto_seal = Some(seal);
 
     1
 }
 
-extern fn write_message(ssl: *mut SSL, level: crypto::Level, data: *const u8,
-                        len: usize) -> i32 {
+extern fn add_handshake_data(ssl: *mut SSL, level: crypto::Level,
+                             data: *const u8, len: usize) -> i32 {
     let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
         Some(v) => v,
         None    => return 0,
@@ -488,6 +495,9 @@ extern {
 
     fn SSL_CTX_set_options(ctx: *mut SSL_CTX, options: u32) -> u32;
 
+    fn SSL_CTX_set_quic_method(ctx: *mut SSL_CTX,
+        quic_method: *const SSL_QUIC_METHOD) -> i32;
+
     // SSL
     fn SSL_get_ex_new_index(argl: libc::c_long, argp: *const c_void,
         unused: *const c_void, dup_unused: *const c_void,
@@ -518,10 +528,7 @@ extern {
     fn SSL_get_peer_quic_transport_params(ssl: *mut SSL,
         out_params: *mut *mut u8, out_params_len: *mut usize);
 
-    fn SSL_set_custom_stream_method(ssl: *mut SSL,
-        stream_method: *const SSL_STREAM_METHOD) -> i32;
-
-    fn SSL_provide_data(ssl: *mut SSL, level: crypto::Level,
+    fn SSL_provide_quic_data(ssl: *mut SSL, level: crypto::Level,
         data: *const u8, len: usize) -> i32;
 
     fn SSL_do_handshake(ssl: *mut SSL) -> i32;
@@ -530,7 +537,7 @@ extern {
                                 ty: libc::c_int) -> libc::c_int;
 
     fn SSL_use_PrivateKey_file(ssl: *mut SSL, file: *const libc::c_char,
-                                ty: libc::c_int) -> libc::c_int;
+                               ty: libc::c_int) -> libc::c_int;
 
     fn SSL_clear(ssl: *mut SSL) -> i32;
 

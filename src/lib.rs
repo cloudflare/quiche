@@ -124,7 +124,8 @@ impl Connection {
     }
 
     pub fn new(config: Config, is_server: bool) -> Result<Box<Connection>> {
-        Connection::new_with_tls(config, tls::State::new(), is_server)
+        let tls = tls::State::new().map_err(|_| Error::TlsFail)?;
+        Connection::new_with_tls(config, tls, is_server)
     }
 
     fn new_with_tls(config: Config, tls: tls::State, is_server: bool)
