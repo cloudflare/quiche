@@ -265,7 +265,7 @@ fn handle_stream(conn: &mut quiche::Connection, stream: u64, args: &docopt::Argv
               conn.trace_id(), path, stream);
 
         let data = fs::read(path.as_path())
-                      .unwrap_or_else(|_| Vec::from(String::from("Not Found!")));
+                      .unwrap_or_else(|_| Vec::from(String::from("Not Found!\r\n")));
 
         info!("{} sending response of size {} on stream {}",
               conn.trace_id(), data.len(), stream);
