@@ -43,6 +43,7 @@ pub struct Stream {
 
     pub rx_data: usize,
     pub max_rx_data: usize,
+    pub new_max_rx_data: usize,
 }
 
 impl Stream {
@@ -53,6 +54,7 @@ impl Stream {
 
             rx_data: 0,
             max_rx_data,
+            new_max_rx_data: max_rx_data,
 
             tx_data: 0,
             max_tx_data,
@@ -84,7 +86,10 @@ impl Stream {
     }
 
     pub fn more_credit(&self) -> bool {
-        self.rx_data + 2 * ::MAX_PKT_LEN > self.max_rx_data
+        // Send MAX_STREAM_DATA when the new limit is at least double the
+        // amount of data that can be received before blocking.
+        self.new_max_rx_data != self.max_rx_data &&
+        self.new_max_rx_data / 2 > self.max_rx_data - self.rx_data
     }
 }
 

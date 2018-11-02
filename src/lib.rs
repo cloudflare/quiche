@@ -43,8 +43,6 @@ pub const VERSION_DRAFT15: u32 = 0xff00000f;
 
 const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 
-const MAX_PKT_LEN: usize = 1252;
-
 pub type Result<T> = ::std::result::Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -96,6 +94,7 @@ pub struct Connection {
 
     rx_data: usize,
     max_rx_data: usize,
+    new_max_rx_data: usize,
 
     tx_data: usize,
     max_tx_data: usize,
@@ -132,6 +131,8 @@ impl Connection {
 
     fn new_with_tls(config: Config, tls: tls::State, is_server: bool)
                                                     -> Result<Box<Connection>> {
+        let max_rx_data = config.local_transport_params.initial_max_data;
+
         let mut conn = Box::new(Connection {
             version: config.version,
 
@@ -152,7 +153,8 @@ impl Connection {
             tls_state: tls,
 
             rx_data: 0,
-            max_rx_data: config.local_transport_params.initial_max_data as usize,
+            max_rx_data: max_rx_data as usize,
+            new_max_rx_data: max_rx_data as usize,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -566,18 +568,17 @@ impl Connection {
             frames.push(frame);
         }
 
-        // Create MAX_DATA frame.
+        // Create MAX_DATA frame, when the new limit is at least double the
+        // amount of data that can be received before blocking.
         if space.pkt_type == packet::Type::Application && !is_closing
-            && self.rx_data + 2 * MAX_PKT_LEN > self.max_rx_data
+            && (self.new_max_rx_data != self.max_rx_data &&
+                self.new_max_rx_data / 2 > self.max_rx_data - self.rx_data)
         {
-            let max = self.rx_data as u64 +
-                      self.local_transport_params.initial_max_data as u64;
-
             let frame = frame::Frame::MaxData {
-                max: max as u64,
+                max: self.new_max_rx_data as u64,
             };
 
-            self.max_rx_data = max as usize;
+            self.max_rx_data = self.new_max_rx_data;
 
             length += frame.wire_len();
             left -= frame.wire_len();
@@ -589,16 +590,12 @@ impl Connection {
         if space.pkt_type == packet::Type::Application && !is_closing {
             for (id, stream) in self.streams.iter_mut()
                                             .filter(|(_, s)| s.more_credit()) {
-                let max = stream.rx_data as u64 +
-                          self.local_transport_params
-                              .initial_max_stream_data_bidi_local as u64;
-
                 let frame = frame::Frame::MaxStreamData {
                     stream_id: *id,
-                    max: max as u64,
+                    max: stream.new_max_rx_data as u64,
                 };
 
-                stream.max_rx_data = max as usize;
+                stream.max_rx_data = stream.new_max_rx_data;
 
                 length += frame.wire_len();
                 left -= frame.wire_len();
@@ -760,7 +757,12 @@ impl Connection {
             return Err(Error::NothingToDo);
         }
 
-        stream.pop_recv()
+        let buf = stream.pop_recv()?;
+
+        self.new_max_rx_data = self.max_rx_data + buf.len();
+        stream.new_max_rx_data = stream.max_rx_data + buf.len();
+
+        Ok(buf)
     }
 
     pub fn stream_send(&mut self, stream_id: u64, buf: &[u8], fin: bool)
