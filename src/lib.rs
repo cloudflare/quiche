@@ -551,8 +551,8 @@ impl Connection {
         }
 
         // Create MAX_DATA frame.
-        if space.pkt_type == packet::Type::Application && !is_closing &&
-           self.rx_data + 2 * MAX_PKT_LEN > self.max_rx_data
+        if space.pkt_type == packet::Type::Application && !is_closing
+            && self.rx_data + 2 * MAX_PKT_LEN > self.max_rx_data
         {
             let max = self.rx_data as u64 +
                       self.local_transport_params.initial_max_data as u64;
@@ -656,19 +656,21 @@ impl Connection {
         // Create STREAM frame.
         if space.pkt_type == packet::Type::Application && !is_closing
             && self.tx_data != self.max_tx_data
+            && left > frame::MAX_STREAM_OVERHEAD
         {
             for (id, stream) in self.streams.iter_mut()
                                             .filter(|(_, s)| s.writable()) {
                 if stream.tx_data == stream.max_tx_data {
+                    // TODO: create STREAM_DATA_BLOCKED
                     trace!("{} stream {} is blocked", trace_id, id);
                     continue;
                 }
 
-                let max_tx_data = cmp::min(self.max_tx_data - self.tx_data,
-                                           stream.max_tx_data - stream.tx_data);
+                let max_tx_data = cmp::min(stream.max_tx_data - stream.tx_data,
+                                           self.max_tx_data - self.tx_data);
 
-                let stream_len = cmp::min(max_tx_data,
-                                          left - frame::MAX_STREAM_OVERHEAD);
+                let stream_len = cmp::min(left - frame::MAX_STREAM_OVERHEAD,
+                                          max_tx_data);
 
                 if stream_len == 0 {
                     continue;
