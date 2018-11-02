@@ -76,6 +76,7 @@ impl Header {
         let first = b.get_u8()?;
 
         if !Header::is_long(first) {
+            // Decode short header.
             let dcid = b.get_bytes(dcil)?;
 
             return Ok(Header {
@@ -89,6 +90,7 @@ impl Header {
             });
         }
 
+        // Decode long header.
         let version = b.get_u32()?;
 
         let ty = if version == 0 {
@@ -136,6 +138,7 @@ impl Header {
 
         match ty {
             Type::Initial => {
+                // Only Initial packet have a token.
                 token = Some(b.get_bytes_with_varint_length()?.to_vec());
             },
 

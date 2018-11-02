@@ -136,10 +136,6 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn negotiate_version(hdr: &packet::Header, out: &mut [u8]) -> Result<usize> {
-        packet::negotiate_version(hdr, out)
-    }
-
     pub fn new(config: Config, is_server: bool) -> Result<Box<Connection>> {
         let tls = tls::State::new().map_err(|_| Error::TlsFail)?;
         Connection::new_with_tls(config, tls, is_server)
@@ -199,8 +195,7 @@ impl Connection {
                       .map_err(|_| Error::TlsFail)?;
 
         // Derive initial secrets for the client. We can do this here because
-        // we randomly generate the destination connection ID used in the
-        // secrets derivation.
+        // we already generated the random destination connection ID.
         if !is_server {
             let mut dcid: [u8; 16] = [0; 16];
             rand::rand_bytes(&mut dcid[..]);
@@ -233,6 +228,7 @@ impl Connection {
         let hdr = packet::Header::from_bytes(&mut b, self.scid.len())?;
 
         if hdr.ty == packet::Type::VersionNegotiation {
+            // Version negotiation packet can only be sent by the server.
             if self.is_server {
                 return Err(Error::InvalidPacket);
             }
@@ -251,11 +247,14 @@ impl Connection {
                 }
             }
 
+            // We don't support any of the versions offfered.
             if new_version == 0 {
                 return Err(Error::UnknownVersion);
             }
 
             self.version = new_version;
+
+            // Reset connection state to force sending another Initial packet.
             self.sent_initial = false;
             self.got_peer_conn_id = false;
             self.initial.clear();
@@ -290,7 +289,7 @@ impl Connection {
             self.got_peer_conn_id = true;
         }
 
-        // Derive initial secrets.
+        // Derive initial secrets on the server.
         if !self.derived_initial_secrets {
             let (aead_open, aead_seal) =
                 crypto::derive_initial_key_material(&hdr.dcid,
@@ -305,7 +304,7 @@ impl Connection {
             self.got_peer_conn_id = true;
         }
 
-        // Select packet number space context.
+        // Select packet number space context basaed on the input packet type.
         let space = match hdr.ty {
             packet::Type::Initial => &mut self.initial,
 
@@ -377,6 +376,7 @@ impl Connection {
                     // Get existing stream or create a new one.
                     let stream = match self.streams.entry(stream_id) {
                         hash_map::Entry::Vacant(v) => {
+                            // Peer is not supposed to create this stream.
                             if stream::is_local(stream_id, self.is_server) {
                                 return Err(Error::InvalidStreamState);
                             }
@@ -456,6 +456,7 @@ impl Connection {
                     // Get existing stream or create a new one.
                     let stream = match self.streams.entry(stream_id) {
                         hash_map::Entry::Vacant(v) => {
+                            // Peer is not supposed to create this stream.
                             if stream::is_local(stream_id, self.is_server) {
                                 return Err(Error::InvalidStreamState);
                             }
@@ -469,6 +470,7 @@ impl Connection {
                         hash_map::Entry::Occupied(v) => v.into_mut(),
                     };
 
+                    // Calculate maximum buffer offset received.
                     stream.rx_data = cmp::max(stream.rx_data, data.max_off());
 
                     if stream.rx_data > stream.max_rx_data {
@@ -581,6 +583,7 @@ impl Connection {
                 ranges: space.recv_pkt_num.clone(),
             };
 
+            // TODO: resend ACK until ACKed
             space.recv_pkt_num.clear();
             space.do_ack = false;
 
@@ -608,7 +611,7 @@ impl Connection {
             frames.push(frame);
         }
 
-        // Create MAX_STREAM_DATA frame.
+        // Create MAX_STREAM_DATA frames as needed.
         if space.pkt_type == packet::Type::Application && !is_closing {
             for (id, stream) in self.streams.iter_mut()
                                             .filter(|(_, s)| s.more_credit()) {
@@ -688,7 +691,7 @@ impl Connection {
             self.sent_initial = true;
         }
 
-        // Create STREAM frame.
+        // Create a single STREAM frame for the first stream that is writable.
         if space.pkt_type == packet::Type::Application && !is_closing
             && self.tx_data != self.max_tx_data
             && left > frame::MAX_STREAM_OVERHEAD
@@ -701,9 +704,12 @@ impl Connection {
                     continue;
                 }
 
+                // Calculate maximum possible buffer length based on peer's
+                // flow control limits.
                 let max_tx_data = cmp::min(stream.max_tx_data - stream.tx_data,
                                            self.max_tx_data - self.tx_data);
 
+                // Make sure we can fit the data in the packet.
                 let stream_len = cmp::min(left - frame::MAX_STREAM_OVERHEAD,
                                           max_tx_data);
 
@@ -741,10 +747,11 @@ impl Connection {
 
         let payload_len = length - pn_len;
 
-        trace!("{} tx pkt {:?} len={} pn={}", trace_id, hdr, payload_len, pn);
-
         let payload_offset = b.off();
 
+        trace!("{} tx pkt {:?} len={} pn={}", trace_id, hdr, payload_len, pn);
+
+        // Encode frames into the output packet.
         for frame in &frames {
             trace!("{} tx frm {:?}", trace_id, frame);
 
@@ -758,9 +765,11 @@ impl Connection {
 
         let (mut header, mut payload) = b.split_at(payload_offset)?;
 
+        // Encrypt + authenticate payload.
         let ciphertext = payload.slice(payload_len)?;
         aead.seal_with_u64_counter(pn, header.as_ref(), ciphertext)?;
 
+        // Encrypt packet number.
         let sample = &ciphertext[4 - pn_len..16 + (4 - pn_len)];
         let pn_ciphertext = header.slice_last(pn_len)?;
         aead.xor_keystream(sample, pn_ciphertext)?;
@@ -789,6 +798,7 @@ impl Connection {
 
     pub fn stream_send(&mut self, stream_id: u64, buf: &[u8], fin: bool)
                                                             -> Result<usize> {
+        // We can't write on the peer's unidirectional streams.
         if !stream::is_bidi(stream_id) &&
            !stream::is_local(stream_id, self.is_server) {
             return Err(Error::InvalidStreamState);
@@ -799,6 +809,7 @@ impl Connection {
         let max_tx_data = self.peer_transport_params
                               .initial_max_stream_data_bidi_remote as usize;
 
+        // Get existing stream or create a new one.
         let stream = match self.streams.entry(stream_id) {
             hash_map::Entry::Vacant(v) => {
                 if !stream::is_local(stream_id, self.is_server) {
@@ -861,6 +872,10 @@ impl Connection {
         self.draining
     }
 
+    pub fn negotiate_version(hdr: &packet::Header, out: &mut [u8]) -> Result<usize> {
+        packet::negotiate_version(hdr, out)
+    }
+
     fn do_handshake(&mut self) -> Result<()> {
         if !self.handshake_completed {
             match self.tls_state.do_handshake() {
@@ -887,7 +902,14 @@ impl Connection {
                            self.peer_transport_params);
                 },
 
-                Err(tls::Error::TlsFail)          => (), // continue
+                Err(tls::Error::TlsFail) => {
+                    // If we have an error to send (e.g. a TLS alert), ignore
+                    // the error so we send a CONNECTION_CLOSE to the peer.
+                    if self.error.is_none() {
+                        return Err(Error::TlsFail);
+                    }
+                },
+
                 Err(tls::Error::WantRead)         => (), // continue
                 Err(tls::Error::WantWrite)        => (), // continue
                 Err(tls::Error::SyscallFail)      => return Err(Error::TlsFail),
