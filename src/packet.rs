@@ -483,6 +483,10 @@ impl PktNumSpace {
     pub fn overhead(&self) -> usize {
         self.crypto_seal.as_ref().unwrap().alg().tag_len()
     }
+
+    pub fn ready(&self) -> bool {
+        self.crypto_stream.writable() || self.crypto_fail || self.do_ack
+    }
 }
 
 

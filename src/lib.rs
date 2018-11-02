@@ -487,18 +487,12 @@ impl Connection {
         // the case of the application space, whether there are streams that
         // can be written or that needs to increase flow control credit.
         let space =
-            if self.initial.crypto_stream.writable() ||
-               self.initial.crypto_fail ||
-               self.initial.do_ack {
+            if self.initial.ready() {
                 &mut self.initial
-            } else if self.handshake.crypto_stream.writable() ||
-                      self.handshake.crypto_fail ||
-                      self.handshake.do_ack {
+            } else if self.handshake.ready() {
                 &mut self.handshake
             } else if self.handshake_completed &&
-                      (self.application.crypto_stream.writable() ||
-                       self.application.crypto_fail ||
-                       self.application.do_ack ||
+                      (self.application.ready() ||
                        self.streams.values().any(|s| s.writable()) ||
                        self.streams.values().any(|s| s.more_credit())) {
                 &mut self.application
