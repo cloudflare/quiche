@@ -34,6 +34,7 @@ extern crate env_logger;
 use std::fs;
 use std::net;
 use std::path;
+
 use std::collections::hash_map;
 use std::collections::HashMap;
 
@@ -115,7 +116,7 @@ fn main() {
         }
 
         let conn = match connections.entry(src) {
-            hash_map::Entry::Vacant(v) =>{
+            hash_map::Entry::Vacant(v) => {
                 if hdr.version != quiche::VERSION_DRAFT15 {
                     warn!("Doing version negotiation");
 

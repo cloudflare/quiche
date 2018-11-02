@@ -88,6 +88,10 @@ impl Stream {
     }
 }
 
+pub fn is_local(id: u64, is_server: bool) -> bool {
+    (id & 1) == (is_server as u64)
+}
+
 pub struct Readable<'a> {
     streams: hash_map::Iter<'a, u64, Stream>,
 }

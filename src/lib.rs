@@ -35,6 +35,8 @@ extern crate lazy_static;
 
 use std::cmp;
 use std::mem;
+
+use std::collections::hash_map;
 use std::collections::HashMap;
 
 pub const VERSION_DRAFT15: u32 = 0xff00000f;
@@ -56,6 +58,7 @@ pub enum Error {
     BufferTooShort,
     InvalidPacket,
     InvalidState,
+    InvalidStreamState,
     CryptoFail,
     TlsFail,
     Again,
@@ -412,9 +415,20 @@ impl Connection {
                                           .initial_max_stream_data_bidi_local as usize;
 
                     // Get existing stream or create a new one.
-                    let stream = self.streams.entry(stream_id).or_insert_with(|| {
-                        stream::Stream::new(max_rx_data, max_tx_data)
-                    });
+                    let stream = match self.streams.entry(stream_id) {
+                        hash_map::Entry::Vacant(v) => {
+                            if stream::is_local(stream_id, self.is_server) {
+                                return Err(Error::InvalidStreamState);
+                            }
+
+                            // TODO: check max stream ID
+
+                            let s = stream::Stream::new(max_rx_data, max_tx_data);
+                            v.insert(s)
+                        },
+
+                        hash_map::Entry::Occupied(v) => v.into_mut(),
+                    };
 
                     stream.rx_data += data.len();
 
@@ -738,9 +752,20 @@ impl Connection {
         let max_tx_data = self.peer_transport_params
                               .initial_max_stream_data_bidi_remote as usize;
 
-        let stream = self.streams.entry(stream_id).or_insert_with(|| {
-            stream::Stream::new(max_rx_data, max_tx_data)
-        });
+        let stream = match self.streams.entry(stream_id) {
+            hash_map::Entry::Vacant(v) => {
+                if !stream::is_local(stream_id, self.is_server) {
+                    return Err(Error::InvalidStreamState);
+                }
+
+                // TODO: check max stream ID
+
+                let s = stream::Stream::new(max_rx_data, max_tx_data);
+                v.insert(s)
+            },
+
+            hash_map::Entry::Occupied(v) => v.into_mut(),
+        };
 
         // TODO: implement backpressure based on peer's flow control
 
