@@ -429,9 +429,9 @@ impl Connection {
                         hash_map::Entry::Occupied(v) => v.into_mut(),
                     };
 
-                    stream.rx_data += data.len();
+                    stream.rx_data = cmp::max(stream.rx_data, data.max_off());
 
-                    if stream.tx_data > stream.max_rx_data {
+                    if stream.rx_data > stream.max_rx_data {
                         return Err(Error::FlowControl);
                     }
 

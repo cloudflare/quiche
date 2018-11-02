@@ -127,6 +127,7 @@ struct RecvBuf {
 
 impl RecvBuf {
     fn push(&mut self, buf: RangeBuf) -> Result<()> {
+        // TODO: discard duplicated data (e.g. using RangeSet)
         self.len = cmp::max(self.len, buf.off + buf.len());
 
         self.data.push(buf);
@@ -260,6 +261,10 @@ impl RangeBuf {
 
     pub fn off(&self) -> usize {
         self.off
+    }
+
+    pub fn max_off(&self) -> usize {
+        self.off() + self.len()
     }
 
     pub fn len(&self) -> usize {
