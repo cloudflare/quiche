@@ -258,6 +258,12 @@ impl State {
         })
     }
 
+    pub fn get_write_level(&mut self) -> crypto::Level {
+        unsafe {
+            SSL_quic_write_level(self.as_ptr())
+        }
+    }
+
     pub fn clear(&mut self) -> Result<()> {
         map_result_ssl(self, unsafe {
             SSL_clear(self.as_ptr())
@@ -422,16 +428,6 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> i32 {
     let error: u16 = TLS_ALERT_ERROR + u16::from(alert);
     conn.error = Some(error);
 
-    let space = match level {
-        crypto::Level::Initial     => &mut conn.initial,
-        // TODO: implement 0-RTT
-        crypto::Level::ZeroRTT     => panic!("0-RTT not implemented"),
-        crypto::Level::Handshake   => &mut conn.handshake,
-        crypto::Level::Application => &mut conn.application,
-    };
-
-    space.crypto_fail = true;
-
     1
 }
 
@@ -538,6 +534,8 @@ extern {
 
     fn SSL_use_PrivateKey_file(ssl: *mut SSL, file: *const libc::c_char,
                                ty: libc::c_int) -> libc::c_int;
+
+    fn SSL_quic_write_level(ssl: *mut SSL) -> crypto::Level;
 
     fn SSL_clear(ssl: *mut SSL) -> i32;
 

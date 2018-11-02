@@ -487,7 +487,16 @@ impl Connection {
         // the case of the application space, whether there are streams that
         // can be written or that needs to increase flow control credit.
         let space =
-            if self.initial.ready() {
+            // On error, send packet in the latest space available.
+            if self.error.is_some() {
+                match self.tls_state.get_write_level() {
+                    crypto::Level::Initial     => &mut self.initial,
+                    // TODO: implement 0-RTT
+                    crypto::Level::ZeroRTT     => panic!("0-RTT not implemented"),
+                    crypto::Level::Handshake   => &mut self.handshake,
+                    crypto::Level::Application => &mut self.application,
+                }
+            } else if self.initial.ready() {
                 &mut self.initial
             } else if self.handshake.ready() {
                 &mut self.handshake
