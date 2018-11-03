@@ -116,7 +116,7 @@ fn main() {
 
                  Err(e) => {
                     if e.kind() == io::ErrorKind::WouldBlock {
-                        warn!("recv() would block");
+                        debug!("recv() would block");
                         break 'read;
                     }
 
