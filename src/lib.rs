@@ -304,7 +304,7 @@ impl Connection {
             self.got_peer_conn_id = true;
         }
 
-        // Select packet number space context basaed on the input packet type.
+        // Select packet number space context based on the input packet type.
         let space = match hdr.ty {
             packet::Type::Initial => &mut self.initial,
 
@@ -396,6 +396,7 @@ impl Connection {
                     do_ack = true;
                 },
 
+                // TODO: implement stream count limits
                 frame::Frame::MaxStreamId { .. } => {
                     do_ack = true;
                 },
@@ -404,10 +405,12 @@ impl Connection {
                     do_ack = true;
                 },
 
+                // TODO: implement connection migration
                 frame::Frame::NewConnectionId { .. } => {
                     do_ack = true;
                 },
 
+                // TODO: implement connection migration
                 frame::Frame::RetireConnectionId { .. } => {
                     do_ack = true;
                 },
