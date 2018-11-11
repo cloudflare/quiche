@@ -248,7 +248,10 @@ fn handle_stream(conn: &mut quiche::Connection, stream: u64, args: &docopt::Argv
                          conn.trace_id(), e),
     };
 
-    if &stream_data[..4] == b"GET " {
+    info!("{} stream {} has {} bytes (fin? {})", conn.trace_id(),
+          stream, stream_data.len(), stream_data.fin());
+
+    if stream_data.len() > 4 && &stream_data[..4] == b"GET " {
         let uri = &stream_data[4..stream_data.len()];
         let uri = String::from_utf8(uri.to_vec()).unwrap();
         let uri = String::from(uri.lines().next().unwrap());
