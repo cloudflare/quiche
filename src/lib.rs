@@ -126,8 +126,6 @@ pub struct Connection {
 
     derived_initial_secrets: bool,
 
-    sent_initial: bool,
-
     got_peer_conn_id: bool,
 
     handshake_completed: bool,
@@ -181,8 +179,6 @@ impl Connection {
             is_server,
 
             derived_initial_secrets: false,
-
-            sent_initial: false,
 
             got_peer_conn_id: false,
 
@@ -255,7 +251,6 @@ impl Connection {
             self.version = new_version;
 
             // Reset connection state to force sending another Initial packet.
-            self.sent_initial = false;
             self.got_peer_conn_id = false;
             self.initial.clear();
             self.tls_state.clear()
@@ -679,7 +674,7 @@ impl Connection {
         }
 
         // Pad the client's initial packet.
-        if !self.is_server && !self.sent_initial && !is_closing {
+        if !self.is_server && space.pkt_type == packet::Type::Initial {
             let len: usize = cmp::min(CLIENT_INITIAL_MIN_LEN - length, left);
 
             let frame = frame::Frame::Padding {
@@ -690,8 +685,6 @@ impl Connection {
             left -= frame.wire_len();
 
             frames.push(frame);
-
-            self.sent_initial = true;
         }
 
         // Create a single STREAM frame for the first stream that is writable.
