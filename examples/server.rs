@@ -97,17 +97,6 @@ fn main() {
         HashMap::new();
 
     loop {
-        // Garbage collect closed connections.
-        connections.retain(|_, ref mut c| {
-            debug!("Collecting garbage");
-
-            if c.is_closed() {
-                debug!("{} connection collected", c.trace_id());
-            }
-
-            !c.is_closed()
-        });
-
         poll.poll(&mut events, None).unwrap();
 
         'read: loop {
@@ -235,6 +224,17 @@ fn main() {
                 debug!("{} written {} bytes", conn.trace_id(), write);
             }
         }
+
+        // Garbage collect closed connections.
+        connections.retain(|_, ref mut c| {
+            debug!("Collecting garbage");
+
+            if c.is_closed() {
+                debug!("{} connection collected", c.trace_id());
+            }
+
+            !c.is_closed()
+        });
     }
 }
 
