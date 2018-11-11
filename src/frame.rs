@@ -160,9 +160,11 @@ impl Frame {
             0x07 => Frame::Ping,
 
             0x0b => {
+                let len = b.get_u8()?;
+
                 Frame::NewConnectionId {
                     seq_num: b.get_varint()?,
-                    conn_id: b.get_bytes_with_u8_length()?.to_vec(),
+                    conn_id: b.get_bytes(len as usize)?.to_vec(),
                     reset_token: b.get_bytes(16)?.to_vec(),
                 }
             },
@@ -271,8 +273,8 @@ impl Frame {
             Frame::NewConnectionId { seq_num, conn_id, reset_token } => {
                 b.put_varint(0x0b)?;
 
-                b.put_varint(*seq_num)?;
                 b.put_u8(conn_id.len() as u8)?;
+                b.put_varint(*seq_num)?;
                 b.put_bytes(conn_id.as_ref())?;
                 b.put_bytes(reset_token.as_ref())?;
             },
