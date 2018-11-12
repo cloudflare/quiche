@@ -468,7 +468,6 @@ impl PktNumSpace {
     }
 
     pub fn clear(&mut self) {
-        self.last_pkt_num = 0;
         self.crypto_stream = stream::Stream::default();
     }
 
