@@ -56,6 +56,7 @@ pub enum Error {
     InvalidPacket,
     InvalidState,
     InvalidStreamState,
+    InvalidTransportParam,
     CryptoFail,
     TlsFail,
     Again,
@@ -69,6 +70,7 @@ impl Error {
             Error::NoError => 0x0,
             Error::UnknownFrame => 0x7,
             Error::InvalidStreamState => 0x5,
+            Error::InvalidTransportParam => 0x8,
             Error::CryptoFail => 0x100,
             Error::TlsFail => 0x100,
             Error::Again => 0x0,
@@ -957,6 +959,8 @@ impl TransportParams {
 
             let mut val = params.get_bytes_with_u16_length()?;
 
+            // TODO: forbid duplicated param
+
             match id {
                 0x0000 => {
                     tp.initial_max_stream_data_bidi_local = val.get_u32()?;
@@ -975,6 +979,10 @@ impl TransportParams {
                 },
 
                 0x0004 => {
+                    if is_server {
+                        return Err(Error::InvalidTransportParam);
+                    }
+
                     // TODO: parse preferred_address
                 },
 
@@ -983,6 +991,10 @@ impl TransportParams {
                 },
 
                 0x0006 => {
+                    if is_server {
+                        return Err(Error::InvalidTransportParam);
+                    }
+
                     let token = val.get_bytes(16)?;
                     tp.stateless_reset_token.copy_from_slice(token.as_ref());
                     tp.stateless_reset_token_present = true;
@@ -1010,6 +1022,14 @@ impl TransportParams {
 
                 0x000c => {
                     tp.max_ack_delay = val.get_u8()?;
+                },
+
+                0x000d => {
+                    if is_server {
+                        return Err(Error::InvalidTransportParam);
+                    }
+
+                    // TODO: implement address validation
                 },
 
                 // Ignore unknown parameters.
