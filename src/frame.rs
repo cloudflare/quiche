@@ -210,7 +210,7 @@ impl Frame {
             0x16 => parse_stream_frame(frame_type, b)?,
             0x17 => parse_stream_frame(frame_type, b)?,
 
-            _    => return Err(Error::UnknownFrame),
+            _    => return Err(Error::InvalidFrame),
         };
 
         Ok(frame)
@@ -542,6 +542,10 @@ fn parse_ack_frame(_ty: u64, b: &mut octets::Bytes) -> Result<Frame> {
     let block_count = b.get_varint()?;
     let ack_block = b.get_varint()?;
 
+    if largest_ack < ack_block {
+        return Err(Error::InvalidFrame);
+    }
+
     let mut smallest_ack = largest_ack - ack_block;
 
     let mut ranges = ranges::RangeSet::default();
@@ -549,8 +553,17 @@ fn parse_ack_frame(_ty: u64, b: &mut octets::Bytes) -> Result<Frame> {
 
     for _i in 0..block_count {
         let gap = b.get_varint()?;
+
+        if smallest_ack - gap < 2 {
+            return Err(Error::InvalidFrame);
+        }
+
         let largest_ack = (smallest_ack - gap) - 2;
         let ack_block = b.get_varint()?;
+
+        if largest_ack < ack_block {
+            return Err(Error::InvalidFrame);
+        }
 
         smallest_ack = largest_ack - ack_block;
         ranges.insert(smallest_ack..largest_ack + 1);

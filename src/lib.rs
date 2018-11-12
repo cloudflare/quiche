@@ -51,8 +51,8 @@ pub enum Error {
     WrongForm,
     UnknownVersion,
     UnknownPacket,
-    UnknownFrame,
     BufferTooShort,
+    InvalidFrame,
     InvalidPacket,
     InvalidState,
     InvalidStreamState,
@@ -68,7 +68,7 @@ impl Error {
     pub fn to_wire(&self) -> u16 {
         match self {
             Error::NoError => 0x0,
-            Error::UnknownFrame => 0x7,
+            Error::InvalidFrame => 0x7,
             Error::InvalidStreamState => 0x5,
             Error::InvalidTransportParam => 0x8,
             Error::CryptoFail => 0x100,
