@@ -101,7 +101,7 @@ impl Header {
                 0x7e => Type::Retry,
                 0x7d => Type::Handshake,
                 0x7c => Type::ZeroRTT,
-                _    => return Err(Error::UnknownPacket),
+                _    => return Err(Error::InvalidPacket),
             }
         };
 
@@ -204,7 +204,7 @@ impl Header {
                 Type::Handshake => 0x7d,
                 Type::ZeroRTT   => 0x7c,
                 // TODO: unify handling of version negotiation
-                _               => return Err(Error::UnknownPacket),
+                _               => return Err(Error::InvalidPacket),
         };
 
         let first = FORM_BIT | ty;

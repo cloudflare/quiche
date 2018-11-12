@@ -50,7 +50,6 @@ pub enum Error {
     NoError,
     WrongForm,
     UnknownVersion,
-    UnknownPacket,
     BufferTooShort,
     InvalidFrame,
     InvalidPacket,
