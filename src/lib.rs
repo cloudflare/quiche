@@ -48,7 +48,6 @@ pub type Result<T> = ::std::result::Result<T, Error>;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     NoError,
-    WrongForm,
     UnknownVersion,
     BufferTooShort,
     InvalidFrame,
