@@ -35,6 +35,7 @@ extern crate lazy_static;
 
 use std::cmp;
 use std::mem;
+use std::time;
 
 use std::collections::hash_map;
 use std::collections::HashMap;
@@ -421,7 +422,16 @@ impl Connection {
                 },
 
                 // TODO: implement ack and retransmission.
-                frame::Frame::ACK { .. } => (),
+                frame::Frame::ACK { ranges, .. } => {
+                    for pn in ranges.flatten().rev() {
+                        trace!("{} acked {}", trace_id, pn);
+
+                        if let None = space.sent_pkt.remove(&pn) {
+                            trace!("{} acked packet {} was not sent",
+                                   trace_id, pn);
+                        }
+                    }
+                },
 
                 // TODO: implement stateless retry
                 frame::Frame::NewToken { .. } => {
@@ -591,6 +601,9 @@ impl Connection {
             frames.push(frame);
         }
 
+        let mut ack_only = true;
+        let mut is_crypto = false;
+
         // Create MAX_DATA frame, when the new limit is at least double the
         // amount of data that can be received before blocking.
         if space.pkt_type == packet::Type::Application && !is_closing
@@ -607,6 +620,8 @@ impl Connection {
             left -= frame.wire_len();
 
             frames.push(frame);
+
+            ack_only = false;
         }
 
         // Create MAX_STREAM_DATA frames as needed.
@@ -625,6 +640,8 @@ impl Connection {
 
                 frames.push(frame);
             }
+
+            ack_only = false;
         }
 
         // Create CONNECTION_CLOSE frame.
@@ -671,6 +688,9 @@ impl Connection {
             left -= frame.wire_len();
 
             frames.push(frame);
+
+            ack_only = false;
+            is_crypto = true;
         }
 
         // Pad the client's initial packet.
@@ -726,6 +746,8 @@ impl Connection {
                 stream.tx_data += stream_len;
 
                 frames.push(frame);
+
+                ack_only = false;
                 break;
             }
         }
@@ -771,6 +793,19 @@ impl Connection {
         aead.xor_keystream(sample, pn_ciphertext)?;
 
         let written = payload_offset + payload_len;
+
+        let pkt = packet::Packet {
+            hdr,
+            frames,
+            timestamp: time::Instant::now(),
+            sent_bytes: written,
+            ack_only,
+            in_flight: true,
+            is_crypto,
+        };
+
+        space.sent_pkt.insert(pn, pkt);
+
         Ok(written)
     }
 
