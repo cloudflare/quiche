@@ -187,6 +187,21 @@ impl<'a> Iterator for Flatten<'a> {
     }
 }
 
+impl<'a> DoubleEndedIterator for Flatten<'a> {
+    fn next_back(&mut self) -> Option<u64> {
+        if self.next == self.end {
+            let (&start, &end) = self.inner.next_back()?;
+
+            self.next = start;
+            self.end = end;
+        }
+
+        self.end -= 1;
+
+        Some(self.end)
+    }
+}
+
 fn range_contains(r: &Range<u64>, item: u64) -> bool {
     (match Included(r.start) {
         Included(start) => start <= item,
@@ -379,5 +394,23 @@ mod tests {
         assert_eq!(r.inner.len(), 1);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(),
                    &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    }
+
+    #[test]
+    fn flatten_rev() {
+        let mut r = RangeSet::default();
+        assert_eq!(r.inner.len(), 0);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[]);
+
+        r.insert(4..7);
+        assert_eq!(r.inner.len(), 1);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6]);
+        assert_eq!(&r.flatten().rev().collect::<Vec<u64>>(), &[6, 5, 4]);
+
+        r.insert(9..12);
+        assert_eq!(r.inner.len(), 2);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6, 9, 10, 11]);
+        assert_eq!(&r.flatten().rev().collect::<Vec<u64>>(),
+                   &[11, 10, 9, 6, 5, 4]);
     }
 }
