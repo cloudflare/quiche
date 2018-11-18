@@ -570,10 +570,8 @@ impl Connection {
 
         hdr.to_bytes(&mut b)?;
 
-        let pn = space.last_pkt_num;
+        let pn = space.next_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
-
-        space.last_pkt_num += 1;
 
         // Calculate payload length.
         let mut length = pn_len + space.overhead();
@@ -805,6 +803,8 @@ impl Connection {
         };
 
         space.sent_pkt.insert(pn, pkt);
+
+        space.next_pkt_num += 1;
 
         Ok(written)
     }

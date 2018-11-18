@@ -451,7 +451,7 @@ pub struct PktNumSpace {
 
     pub largest_rx_pkt_num: u64,
 
-    pub last_pkt_num: u64,
+    pub next_pkt_num: u64,
 
     pub recv_pkt_num: ranges::RangeSet,
 
@@ -474,7 +474,7 @@ impl PktNumSpace {
 
             largest_rx_pkt_num: 0,
 
-            last_pkt_num: 0,
+            next_pkt_num: 0,
 
             recv_pkt_num: ranges::RangeSet::default(),
 
