@@ -131,6 +131,11 @@ fn main() {
 
             let conn = match connections.entry(src) {
                 hash_map::Entry::Vacant(v) => {
+                    if hdr.ty != quiche::Type::Initial {
+                        error!("Packet is not Initial");
+                        continue;
+                    }
+
                     if hdr.version != quiche::VERSION_DRAFT15 {
                         warn!("Doing version negotiation");
 
@@ -139,11 +144,6 @@ fn main() {
                         let out = &out[..len];
 
                         socket.send_to(out, &src).unwrap();
-                        continue;
-                    }
-
-                    if hdr.ty != quiche::Type::Initial {
-                        error!("Packet is not Initial");
                         continue;
                     }
 
