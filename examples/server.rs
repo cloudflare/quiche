@@ -103,7 +103,7 @@ fn main() {
             let (len, src) = match socket.recv_from(&mut buf) {
                 Ok(v) => v,
 
-                 Err(e) => {
+                Err(e) => {
                     if e.kind() == io::ErrorKind::WouldBlock {
                         debug!("recv() would block");
                         break 'read;
