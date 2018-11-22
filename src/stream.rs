@@ -30,7 +30,6 @@ use std::cmp;
 use std::collections::hash_map;
 use std::collections::HashMap;
 use std::collections::BinaryHeap;
-use std::collections::VecDeque;
 use std::ops::Deref;
 
 #[derive(Default)]
@@ -70,11 +69,15 @@ impl Stream {
     }
 
     pub fn push_send(&mut self, data: &[u8], fin: bool) -> Result<()> {
-        self.send.push(data, fin)
+        self.send.push_slice(data, fin)
     }
 
     pub fn pop_send(&mut self, max_len: usize) -> Result<RangeBuf> {
         self.send.pop(max_len)
+    }
+
+    pub fn resend(&mut self, buf: RangeBuf) -> Result<()> {
+        self.send.push(buf)
     }
 
     pub fn readable(&self) -> bool {
@@ -184,19 +187,26 @@ impl RecvBuf {
 
 #[derive(Default)]
 struct SendBuf {
-    data: VecDeque<RangeBuf>,
+    data: BinaryHeap<RangeBuf>,
     off: usize,
     len: usize,
 }
 
 impl SendBuf {
-    fn push(&mut self, data: &[u8], fin: bool) -> Result<()> {
+    fn push_slice(&mut self, data: &[u8], fin: bool) -> Result<()> {
         let buf = RangeBuf::from(data, self.off, fin);
+        self.push(buf)?;
 
-        self.off += buf.len();
+        self.off += data.len();
+
+        Ok(())
+    }
+
+    fn push(&mut self, buf: RangeBuf) -> Result<()> {
+        self.off = cmp::min(self.off, buf.off());
         self.len += buf.len();
 
-        self.data.push_back(buf);
+        self.data.push(buf);
 
         Ok(())
     }
@@ -206,7 +216,7 @@ impl SendBuf {
         let mut out_len = max_len;
 
         while out_len > 0 && self.ready() {
-            let mut buf = match self.data.pop_front() {
+            let mut buf = match self.data.pop() {
                 Some(v) => v,
                 None => break,
             };
@@ -220,7 +230,7 @@ impl SendBuf {
 
                 buf.fin = false;
 
-                self.data.push_front(new_buf);
+                self.data.push(new_buf);
             }
 
             if out.len() == 0 {
@@ -391,10 +401,10 @@ mod tests {
         let first: [u8; 9] = *b"something";
         let second: [u8; 10] = *b"helloworld";
 
-        assert!(buf.push(&first, false).is_ok());
+        assert!(buf.push_slice(&first, false).is_ok());
         assert_eq!(buf.len(), 9);
 
-        assert!(buf.push(&second, false).is_ok());
+        assert!(buf.push_slice(&second, false).is_ok());
         assert_eq!(buf.len(), 19);
 
         let write = buf.pop(128).unwrap();
@@ -411,10 +421,10 @@ mod tests {
         let first: [u8; 9] = *b"something";
         let second: [u8; 10] = *b"helloworld";
 
-        assert!(buf.push(&first, false).is_ok());
+        assert!(buf.push_slice(&first, false).is_ok());
         assert_eq!(buf.len(), 9);
 
-        assert!(buf.push(&second, true).is_ok());
+        assert!(buf.push_slice(&second, true).is_ok());
         assert_eq!(buf.len(), 19);
 
         let write = buf.pop(10).unwrap();

@@ -34,6 +34,7 @@ extern crate env_logger;
 
 use std::io;
 use std::net;
+use std::time;
 
 use docopt::Docopt;
 
@@ -118,9 +119,33 @@ fn main() {
     let mut req_sent = false;
 
     loop {
-        poll.poll(&mut events, None).unwrap();
+        let now = time::Instant::now();
+
+        let timeout = match conn.timeout() {
+            Some(v) => {
+                let timeout = if v < now {
+                    time::Duration::new(0, 0)
+                } else {
+                    v.duration_since(now)
+                };
+
+                Some(timeout)
+            },
+
+            None => None,
+        };
+
+        poll.poll(&mut events, timeout).unwrap();
 
         'read: loop {
+            if events.is_empty() {
+                debug!("timed out");
+
+                conn.on_timeout();
+
+                break 'read;
+            }
+
             let len = match socket.recv(&mut buf) {
                 Ok(v) => v,
 

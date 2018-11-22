@@ -28,8 +28,6 @@ use std::cmp;
 use std::fmt;
 use std::slice;
 
-use std::collections::BTreeMap;
-
 use ::Result;
 use ::Error;
 
@@ -438,7 +436,7 @@ pub struct PktNumSpace {
 
     pub recv_pkt_num: ranges::RangeSet,
 
-    pub sent_pkt: BTreeMap<u64, recovery::Sent>,
+    pub flight: recovery::InFlight,
 
     pub do_ack: bool,
 
@@ -461,7 +459,7 @@ impl PktNumSpace {
 
             recv_pkt_num: ranges::RangeSet::default(),
 
-            sent_pkt: BTreeMap::new(),
+            flight: recovery::InFlight::default(),
 
             do_ack: false,
 
@@ -475,6 +473,7 @@ impl PktNumSpace {
     }
 
     pub fn clear(&mut self) {
+        self.flight = recovery::InFlight::default();
         self.crypto_stream = stream::Stream::default();
     }
 
@@ -490,7 +489,7 @@ impl PktNumSpace {
     }
 
     pub fn ready(&self) -> bool {
-        self.crypto_stream.writable() || self.do_ack
+        self.crypto_stream.writable() || self.flight.lost.len() > 0 || self.do_ack
     }
 }
 

@@ -429,7 +429,7 @@ impl Connection {
                         ack_delay << self.peer_transport_params.ack_delay_exponent;
 
                     self.recovery.on_ack_received(&ranges, ack_delay,
-                                                  &mut space.sent_pkt,
+                                                  &mut space.flight,
                                                   &trace_id);
                 },
 
@@ -558,6 +558,40 @@ impl Connection {
                 return Err(Error::NothingToDo);
             };
 
+        for acked in space.flight.acked.drain(..) {
+            match acked {
+                frame::Frame::ACK { ranges, .. } => {
+                    let largest_acked = ranges.largest().unwrap();
+                    space.recv_pkt_num.remove_until(largest_acked);
+                },
+
+                _ => (),
+            }
+        }
+
+        for lost in space.flight.lost.drain(..) {
+            match lost {
+                frame::Frame::Crypto { data } => {
+                    space.crypto_stream.resend(data)?;
+                },
+
+                frame::Frame::Stream { stream_id, data } => {
+                    let stream = match self.streams.get_mut(&stream_id) {
+                        Some(v) => v,
+                        None => continue,
+                    };
+
+                    stream.resend(data)?;
+                },
+
+                frame::Frame::ACK { .. } => {
+                    space.do_ack = true;
+                },
+
+                _ => (),
+            }
+        }
+
         let hdr = packet::Header {
             ty: space.pkt_type,
             version: self.version,
@@ -589,8 +623,6 @@ impl Connection {
                 ranges: space.recv_pkt_num.clone(),
             };
 
-            // TODO: resend ACK until ACKed
-            space.recv_pkt_num.clear();
             space.do_ack = false;
 
             length += frame.wire_len();
@@ -599,7 +631,7 @@ impl Connection {
             frames.push(frame);
         }
 
-        let mut ack_only = true;
+        let mut retransmittable = false;
         let mut is_crypto = false;
 
         // Create MAX_DATA frame, when the new limit is at least double the
@@ -619,7 +651,7 @@ impl Connection {
 
             frames.push(frame);
 
-            ack_only = false;
+            retransmittable = true;
         }
 
         // Create MAX_STREAM_DATA frames as needed.
@@ -639,7 +671,7 @@ impl Connection {
                 frames.push(frame);
             }
 
-            ack_only = false;
+            retransmittable = true;
         }
 
         // Create CONNECTION_CLOSE frame.
@@ -687,7 +719,7 @@ impl Connection {
 
             frames.push(frame);
 
-            ack_only = false;
+            retransmittable = true;
             is_crypto = true;
         }
 
@@ -712,9 +744,11 @@ impl Connection {
         {
             for (id, stream) in self.streams.iter_mut()
                                             .filter(|(_, s)| s.writable()) {
+                // TODO: flow control should be based on max stream offset
                 if stream.tx_data == stream.max_tx_data {
                     // TODO: create STREAM_DATA_BLOCKED
-                    trace!("{} stream {} is blocked", trace_id, id);
+                    trace!("{} stream {} is blocked tx={} max={}",
+                           trace_id, id, stream.tx_data, stream.max_tx_data);
                     continue;
                 }
 
@@ -745,7 +779,7 @@ impl Connection {
 
                 frames.push(frame);
 
-                ack_only = false;
+                retransmittable = true;
                 break;
             }
         }
@@ -792,8 +826,10 @@ impl Connection {
 
         let written = payload_offset + payload_len;
 
-        self.recovery.on_packet_sent(pn, frames, written, ack_only, is_crypto,
-                                     &mut space.sent_pkt);
+        let sent = recovery::Sent::new(pn, frames, written, retransmittable,
+                                       is_crypto);
+
+        self.recovery.on_packet_sent(sent, &mut space.flight, &trace_id);
 
         space.next_pkt_num += 1;
 
@@ -856,6 +892,33 @@ impl Connection {
 
     pub fn stream_iter(&mut self) -> Readable {
         stream::Readable::new(&self.streams)
+    }
+
+    pub fn timeout(&self) -> Option<std::time::Instant> {
+        self.recovery.loss_detection_timer()
+    }
+
+    pub fn on_timeout(&mut self) {
+        if !self.recovery.expired() {
+            return;
+        }
+
+        let trace_id = self.trace_id();
+
+        if self.initial.flight.sent.len() > 0 {
+            self.recovery.on_loss_detection_timer(&mut self.initial.flight,
+                                                  &trace_id);
+        }
+
+        if self.handshake.flight.sent.len() > 0 {
+            self.recovery.on_loss_detection_timer(&mut self.handshake.flight,
+                                                  &trace_id);
+        }
+
+        if self.application.flight.sent.len() > 0 {
+            self.recovery.on_loss_detection_timer(&mut self.application.flight,
+                                                  &trace_id);
+        }
     }
 
     pub fn close(&mut self, app: bool, err: u16, reason: &[u8]) -> Result<()> {
@@ -1288,7 +1351,6 @@ mod crypto;
 mod frame;
 mod octets;
 mod packet;
-mod polyfill;
 mod rand;
 mod ranges;
 mod recovery;

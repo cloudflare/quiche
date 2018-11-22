@@ -36,6 +36,7 @@ use std::fs;
 use std::io;
 use std::net;
 use std::path;
+use std::time;
 
 use std::collections::hash_map;
 use std::collections::HashMap;
@@ -97,9 +98,38 @@ fn main() {
         HashMap::new();
 
     loop {
-        poll.poll(&mut events, None).unwrap();
+        let now = time::Instant::now();
+
+        // TODO: use event loop that properly supports timers
+        let timeout = connections.values()
+                                 .filter_map(|c| c.timeout())
+                                 .min();
+
+        let timeout = match timeout {
+            Some(v) => {
+                let timeout = if v < now {
+                    time::Duration::new(0, 0)
+                } else {
+                    v.duration_since(now)
+                };
+
+                Some(timeout)
+            },
+
+            None => None,
+        };
+
+        poll.poll(&mut events, timeout).unwrap();
 
         'read: loop {
+            if events.is_empty() {
+                debug!("timed out");
+
+                connections.values_mut().for_each(|c| c.on_timeout());
+
+                break 'read;
+            }
+
             let (len, src) = match socket.recv_from(&mut buf) {
                 Ok(v) => v,
 
@@ -112,6 +142,8 @@ fn main() {
                     panic!("recv() failed: {:?}", e);
                 },
             };
+
+            debug!("got {} bytes", len);
 
             let buf = &mut buf[..len];
 

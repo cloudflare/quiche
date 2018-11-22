@@ -88,6 +88,24 @@ impl RangeSet {
         self.inner.insert(start, end);
     }
 
+    pub fn remove_until(&mut self, largest: u64) {
+        let ranges: Vec<(u64, u64)> =
+            self.inner
+                .range((Included(&0), Included(&largest)))
+                .into_iter()
+                .map(|(s, e)| (*s, *e))
+                .collect();
+
+        for (start, end) in ranges {
+            self.inner.remove(&start);
+
+            if end > largest + 1 {
+                let start = largest + 1;
+                self.insert(Range { start: start, end: end });
+            }
+        }
+    }
+
     pub fn push_item(&mut self, item: u64) {
         let r = Range {
             start: item,
@@ -95,6 +113,14 @@ impl RangeSet {
         };
 
         self.insert(r);
+    }
+
+    pub fn smallest(&self) -> Option<u64> {
+        self.flatten().next()
+    }
+
+    pub fn largest(&self) -> Option<u64> {
+        self.flatten().next_back()
     }
 
     pub fn iter(&self) -> Iter {
@@ -412,5 +438,40 @@ mod tests {
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6, 9, 10, 11]);
         assert_eq!(&r.flatten().rev().collect::<Vec<u64>>(),
                    &[11, 10, 9, 6, 5, 4]);
+    }
+
+    #[test]
+    fn remove_largest() {
+        let mut r = RangeSet::default();
+
+        r.insert(3..6);
+        r.insert(9..11);
+        r.insert(13..14);
+        r.insert(16..20);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(),
+                   &[3, 4, 5, 9, 10, 13, 16, 17, 18, 19]);
+
+        r.remove_until(2);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(),
+                   &[3, 4, 5, 9, 10, 13, 16, 17, 18, 19]);
+
+        r.remove_until(4);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(),
+                   &[5, 9, 10, 13, 16, 17, 18, 19]);
+
+        r.remove_until(6);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(),
+                   &[9, 10, 13, 16, 17, 18, 19]);
+
+        r.remove_until(10);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(),
+                   &[13, 16, 17, 18, 19]);
+
+        r.remove_until(17);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(),
+                   &[18, 19]);
+
+        r.remove_until(20);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[]);
     }
 }
