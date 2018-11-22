@@ -34,13 +34,10 @@ extern crate ring;
 extern crate lazy_static;
 
 use std::cmp;
-use std::fmt;
 use std::mem;
-use std::time;
 
 use std::collections::hash_map;
 use std::collections::HashMap;
-use std::collections::BTreeMap;
 
 pub const VERSION_DRAFT15: u32 = 0xff00000f;
 
@@ -111,7 +108,7 @@ pub struct Connection {
 
     tls_state: tls::State,
 
-    recovery: Recovery,
+    recovery: recovery::Recovery,
 
     rx_data: usize,
     max_rx_data: usize,
@@ -167,7 +164,7 @@ impl Connection {
 
             tls_state: tls,
 
-            recovery: Recovery::default(),
+            recovery: recovery::Recovery::default(),
 
             rx_data: 0,
             max_rx_data: max_rx_data as usize,
@@ -795,16 +792,8 @@ impl Connection {
 
         let written = payload_offset + payload_len;
 
-        let pkt = packet::Packet {
-            pkt_num: pn,
-            frames,
-            timestamp: time::Instant::now(),
-            sent_bytes: written,
-            ack_only,
-            is_crypto,
-        };
-
-        space.sent_pkt.insert(pn, pkt);
+        self.recovery.on_packet_sent(pn, frames, written, ack_only, is_crypto,
+                                     &mut space.sent_pkt);
 
         space.next_pkt_num += 1;
 
@@ -951,91 +940,6 @@ impl Connection {
         }
 
         Ok(())
-    }
-}
-
-struct Recovery {
-    latest_rtt: u64,
-
-    smoothed_rtt: u64,
-
-    min_rtt: u64,
-
-    rttvar: u64,
-}
-
-impl Recovery {
-    // TODO: OnPacketSent
-
-    fn on_ack_received(&mut self, ranges: &ranges::RangeSet, ack_delay: u64,
-                       sent_pkt: &mut BTreeMap<u64, packet::Packet>,
-                       trace_id: &str)
-    {
-        if ranges.iter().len() == 0 {
-            return;
-        }
-
-        let largest_acked = ranges.flatten().next_back().unwrap();
-
-        if let Some(pkt) = sent_pkt.get(&largest_acked) {
-            let latest_rtt = pkt.timestamp.elapsed();
-
-            self.latest_rtt = polyfill::duration_as_micros(&latest_rtt);
-            self.update_rtt(ack_delay);
-        }
-
-        for pn in ranges.flatten().rev() {
-            trace!("{} acked {}", trace_id, pn);
-
-            if let None = sent_pkt.remove(&pn) {
-                trace!("{} acked packet {} was not sent", trace_id, pn);
-            }
-        }
-
-        // TODO: DetectLostPackets
-        // TODO: SetLossDetectionTimer
-
-        trace!("{} {:?}", trace_id, self);
-    }
-
-    fn update_rtt(&mut self, ack_delay: u64) {
-        self.min_rtt = cmp::min(self.min_rtt, self.latest_rtt);
-
-        if self.latest_rtt - self.min_rtt > ack_delay {
-            self.latest_rtt -= ack_delay;
-        }
-
-        if self.smoothed_rtt == 0 {
-            self.smoothed_rtt = self.latest_rtt;
-            self.rttvar = self.latest_rtt / 2;
-        } else {
-            let rttvar_sample = polyfill::sub_abs(self.smoothed_rtt,
-                                                  self.latest_rtt);
-
-            self.rttvar = ((3 * self.rttvar) + rttvar_sample) / 4;
-            self.smoothed_rtt = ((7 * self.smoothed_rtt) + self.latest_rtt) / 8;
-        }
-    }
-}
-
-impl Default for Recovery {
-    fn default() -> Recovery {
-        Recovery {
-            latest_rtt: 0,
-
-            smoothed_rtt: 0,
-
-            min_rtt: std::u64::MAX,
-
-            rttvar: 0,
-        }
-    }
-}
-
-impl fmt::Debug for Recovery {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "updated rtt: latest={} smoothed={} min={} var={}",
-               self.latest_rtt, self.smoothed_rtt, self.min_rtt, self.rttvar)
     }
 }
 
@@ -1387,5 +1291,6 @@ mod packet;
 mod polyfill;
 mod rand;
 mod ranges;
+mod recovery;
 mod stream;
 mod tls;

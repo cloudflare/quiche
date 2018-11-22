@@ -27,18 +27,17 @@
 use std::cmp;
 use std::fmt;
 use std::slice;
-use std::time;
 
 use std::collections::BTreeMap;
 
 use ::Result;
 use ::Error;
 
-use octets;
 use crypto;
-use frame;
+use octets;
 use rand;
 use ranges;
+use recovery;
 use stream;
 
 const FORM_BIT: u8 = 0x80;
@@ -430,20 +429,6 @@ pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
     Ok(b.off())
 }
 
-pub struct Packet {
-    pub pkt_num: u64,
-
-    pub frames: Vec<frame::Frame>,
-
-    pub timestamp: time::Instant,
-
-    pub sent_bytes: usize,
-
-    pub ack_only: bool,
-
-    pub is_crypto: bool,
-}
-
 pub struct PktNumSpace {
     pub pkt_type: Type,
 
@@ -453,7 +438,7 @@ pub struct PktNumSpace {
 
     pub recv_pkt_num: ranges::RangeSet,
 
-    pub sent_pkt: BTreeMap<u64, Packet>,
+    pub sent_pkt: BTreeMap<u64, recovery::Sent>,
 
     pub do_ack: bool,
 
