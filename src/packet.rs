@@ -431,7 +431,7 @@ pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
 }
 
 pub struct Packet {
-    pub hdr: Header,
+    pub pkt_num: u64,
 
     pub frames: Vec<frame::Frame>,
 
@@ -440,8 +440,6 @@ pub struct Packet {
     pub sent_bytes: usize,
 
     pub ack_only: bool,
-
-    pub in_flight: bool,
 
     pub is_crypto: bool,
 }

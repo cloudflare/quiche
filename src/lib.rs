@@ -34,11 +34,13 @@ extern crate ring;
 extern crate lazy_static;
 
 use std::cmp;
+use std::fmt;
 use std::mem;
 use std::time;
 
 use std::collections::hash_map;
 use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub const VERSION_DRAFT15: u32 = 0xff00000f;
 
@@ -109,6 +111,8 @@ pub struct Connection {
 
     tls_state: tls::State,
 
+    recovery: Recovery,
+
     rx_data: usize,
     max_rx_data: usize,
     new_max_rx_data: usize,
@@ -162,6 +166,8 @@ impl Connection {
             local_transport_params: config.local_transport_params.clone(),
 
             tls_state: tls,
+
+            recovery: Recovery::default(),
 
             rx_data: 0,
             max_rx_data: max_rx_data as usize,
@@ -421,16 +427,13 @@ impl Connection {
                     do_ack = true;
                 },
 
-                // TODO: implement ack and retransmission.
-                frame::Frame::ACK { ranges, .. } => {
-                    for pn in ranges.flatten().rev() {
-                        trace!("{} acked {}", trace_id, pn);
+                frame::Frame::ACK { ranges, ack_delay } => {
+                    let ack_delay =
+                        ack_delay << self.peer_transport_params.ack_delay_exponent;
 
-                        if let None = space.sent_pkt.remove(&pn) {
-                            trace!("{} acked packet {} was not sent",
-                                   trace_id, pn);
-                        }
-                    }
+                    self.recovery.on_ack_received(&ranges, ack_delay,
+                                                  &mut space.sent_pkt,
+                                                  &trace_id);
                 },
 
                 // TODO: implement stateless retry
@@ -793,12 +796,11 @@ impl Connection {
         let written = payload_offset + payload_len;
 
         let pkt = packet::Packet {
-            hdr,
+            pkt_num: pn,
             frames,
             timestamp: time::Instant::now(),
             sent_bytes: written,
             ack_only,
-            in_flight: true,
             is_crypto,
         };
 
@@ -949,6 +951,91 @@ impl Connection {
         }
 
         Ok(())
+    }
+}
+
+struct Recovery {
+    latest_rtt: u64,
+
+    smoothed_rtt: u64,
+
+    min_rtt: u64,
+
+    rttvar: u64,
+}
+
+impl Recovery {
+    // TODO: OnPacketSent
+
+    fn on_ack_received(&mut self, ranges: &ranges::RangeSet, ack_delay: u64,
+                       sent_pkt: &mut BTreeMap<u64, packet::Packet>,
+                       trace_id: &str)
+    {
+        if ranges.iter().len() == 0 {
+            return;
+        }
+
+        let largest_acked = ranges.flatten().next_back().unwrap();
+
+        if let Some(pkt) = sent_pkt.get(&largest_acked) {
+            let latest_rtt = pkt.timestamp.elapsed();
+
+            self.latest_rtt = polyfill::duration_as_micros(&latest_rtt);
+            self.update_rtt(ack_delay);
+        }
+
+        for pn in ranges.flatten().rev() {
+            trace!("{} acked {}", trace_id, pn);
+
+            if let None = sent_pkt.remove(&pn) {
+                trace!("{} acked packet {} was not sent", trace_id, pn);
+            }
+        }
+
+        // TODO: DetectLostPackets
+        // TODO: SetLossDetectionTimer
+
+        trace!("{} {:?}", trace_id, self);
+    }
+
+    fn update_rtt(&mut self, ack_delay: u64) {
+        self.min_rtt = cmp::min(self.min_rtt, self.latest_rtt);
+
+        if self.latest_rtt - self.min_rtt > ack_delay {
+            self.latest_rtt -= ack_delay;
+        }
+
+        if self.smoothed_rtt == 0 {
+            self.smoothed_rtt = self.latest_rtt;
+            self.rttvar = self.latest_rtt / 2;
+        } else {
+            let rttvar_sample = polyfill::sub_abs(self.smoothed_rtt,
+                                                  self.latest_rtt);
+
+            self.rttvar = ((3 * self.rttvar) + rttvar_sample) / 4;
+            self.smoothed_rtt = ((7 * self.smoothed_rtt) + self.latest_rtt) / 8;
+        }
+    }
+}
+
+impl Default for Recovery {
+    fn default() -> Recovery {
+        Recovery {
+            latest_rtt: 0,
+
+            smoothed_rtt: 0,
+
+            min_rtt: std::u64::MAX,
+
+            rttvar: 0,
+        }
+    }
+}
+
+impl fmt::Debug for Recovery {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "updated rtt: latest={} smoothed={} min={} var={}",
+               self.latest_rtt, self.smoothed_rtt, self.min_rtt, self.rttvar)
     }
 }
 
@@ -1293,12 +1380,12 @@ pub use stream::Readable;
 pub use packet::Header;
 pub use packet::Type;
 
-mod packet;
-mod rand;
-
 mod crypto;
 mod frame;
+mod octets;
+mod packet;
+mod polyfill;
+mod rand;
+mod ranges;
 mod stream;
 mod tls;
-mod octets;
-mod ranges;
