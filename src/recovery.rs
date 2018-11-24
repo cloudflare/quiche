@@ -33,6 +33,7 @@ use std::collections::BTreeMap;
 use frame;
 use ranges;
 
+// Loss Recovery
 const INITIAL_RTT: time::Duration = time::Duration::from_millis(100);
 
 const MIN_TLP_TIMEOUT: time::Duration = time::Duration::from_millis(10);
@@ -43,14 +44,20 @@ const MAX_TLP_COUNT: u32 = 2;
 
 const REORDERING_THRESHOLD: u64 = 3;
 
+// Congestion Control
+const MAX_DATAGRAM_SIZE: usize = 1460;
+
+const INITIAL_WINDOW: usize = 10 * MAX_DATAGRAM_SIZE;
+const MINIMUM_WINDOW: usize = 2 * MAX_DATAGRAM_SIZE;
+
 pub struct Sent {
     pkt_num: u64,
 
     pub frames: Vec<frame::Frame>,
 
-    timestamp: time::Instant,
+    time: time::Instant,
 
-    sent_bytes: usize,
+    size: usize,
 
     retransmittable: bool,
 
@@ -67,8 +74,8 @@ impl Sent {
         Sent {
             pkt_num,
             frames,
-            timestamp: now,
-            sent_bytes,
+            time: now,
+            size: sent_bytes,
             retransmittable,
             is_crypto,
         }
@@ -100,13 +107,13 @@ pub struct Recovery {
 
     rto_count: u32,
 
+    largest_sent_before_rto: u64,
+
     time_of_last_sent_retransmittable_packet: time::Instant,
 
     time_of_last_sent_crypto_packet: time::Instant,
 
     largest_sent_pkt: u64,
-
-    largest_sent_before_rto: u64,
 
     largest_acked: u64,
 
@@ -114,15 +121,21 @@ pub struct Recovery {
 
     smoothed_rtt: Option<time::Duration>,
 
-    min_rtt: time::Duration,
-
     rttvar: time::Duration,
+
+    min_rtt: time::Duration,
 
     max_ack_delay: time::Duration,
 
+    loss_time: Option<time::Instant>,
+
+    cwnd: usize,
+
     bytes_in_flight: usize,
 
-    loss_time: Option<time::Instant>,
+    recovery_start_time: Option<time::Instant>,
+
+    ssthresh: usize,
 }
 
 impl Recovery {
@@ -131,7 +144,7 @@ impl Recovery {
         let pkt_num = pkt.pkt_num;
         let retransmittable = pkt.retransmittable;
         let is_crypto = pkt.is_crypto;
-        let sent_bytes = pkt.sent_bytes;
+        let sent_bytes = pkt.size;
 
         self.largest_sent_pkt = pkt_num;
 
@@ -146,6 +159,7 @@ impl Recovery {
 
             self.time_of_last_sent_retransmittable_packet = now;
 
+            // OnPacketSentCC
             self.bytes_in_flight += sent_bytes;
 
             self.set_loss_detection_timer(flight);
@@ -160,28 +174,34 @@ impl Recovery {
 
         if let Some(pkt) = flight.sent.get(&largest_acked) {
             self.largest_acked = cmp::max(self.largest_acked, largest_acked);
-            self.latest_rtt = pkt.timestamp.elapsed();
+            self.latest_rtt = pkt.time.elapsed();
             self.update_rtt(ack_delay);
         }
 
         for pn in ranges.flatten().rev() {
-            match flight.sent.remove(&pn) {
-                Some(mut p) => {
-                    if p.retransmittable {
-                        self.bytes_in_flight -= p.sent_bytes;
-                    }
-
-                    flight.acked.append(&mut p.frames);
-                },
-
-                None => (),
-            }
+            self.on_packet_acked(pn, flight);
         }
 
         let smallest_acked = ranges.smallest().unwrap();
 
         if self.rto_count > 0 && smallest_acked > self.largest_sent_before_rto {
-            // TODO: OnRetransmissionTimeoutVerified
+            // OnRetransmissionTimeoutVerified
+            self.cwnd = MINIMUM_WINDOW;
+
+            let mut lost_pkt: Vec<u64> = Vec::new();
+
+            for p in flight.sent.values().filter(|p| p.pkt_num < smallest_acked) {
+                error!("{} packet lost {}", trace_id, p.pkt_num);
+
+                lost_pkt.push(p.pkt_num);
+            }
+
+            for lost in lost_pkt {
+                let mut p = flight.sent.remove(&lost).unwrap();
+
+                self.bytes_in_flight -= p.size;
+                flight.lost.append(&mut p.frames);
+            }
         }
 
         self.crypto_count = 0;
@@ -225,7 +245,12 @@ impl Recovery {
 
         self.set_loss_detection_timer(flight);
 
-        self.on_packets_lost(lost_pkt, flight);
+        for lost in lost_pkt {
+            let mut p = flight.sent.remove(&lost).unwrap();
+
+            self.bytes_in_flight -= p.size;
+            flight.lost.append(&mut p.frames);
+        }
 
         trace!("{} {:?}", trace_id, self);
     }
@@ -243,6 +268,14 @@ impl Recovery {
         }
 
         return false;
+    }
+
+    pub fn cwnd(&self) -> usize {
+        if self.bytes_in_flight > self.cwnd {
+            return 0;
+        }
+
+        self.cwnd - self.bytes_in_flight
     }
 
     fn update_rtt(&mut self, ack_delay: u64) {
@@ -334,7 +367,7 @@ impl Recovery {
         let mut lost_pkt: Vec<u64> = Vec::new();
 
         for unacked in flight.sent.values().filter(|p| p.pkt_num < largest_acked) {
-            let time_since_sent = unacked.timestamp.elapsed();
+            let time_since_sent = unacked.time.elapsed();
             let delat = largest_acked - unacked.pkt_num;
 
             if time_since_sent > delay_until_lost || delat > REORDERING_THRESHOLD {
@@ -348,14 +381,63 @@ impl Recovery {
             }
         }
 
-        self.on_packets_lost(lost_pkt, flight);
+        if lost_pkt.len() > 0 {
+            self.on_packets_lost(lost_pkt, flight);
+        }
+    }
+
+    fn in_recovery(&self, sent_time: time::Instant) -> bool {
+        match self.recovery_start_time {
+            Some(recovery_start_time) => sent_time <= recovery_start_time,
+            None => false,
+        }
+    }
+
+    fn on_packet_acked(&mut self, pkt_num: u64, flight: &mut InFlight) {
+        if let Some(mut p) = flight.sent.remove(&pkt_num) {
+            flight.acked.append(&mut p.frames);
+
+            if p.retransmittable {
+                // OnPacketAckedCC
+                self.bytes_in_flight -= p.size;
+
+                if self.in_recovery(p.time) {
+                    return;
+                }
+
+                if self.cwnd < self.ssthresh {
+                    self.cwnd += p.size;
+                } else {
+                    self.cwnd = (MAX_DATAGRAM_SIZE * p.size) / self.cwnd;
+                }
+            }
+        }
     }
 
     fn on_packets_lost(&mut self, lost_pkt: Vec<u64>, flight: &mut InFlight) {
+        let now = time::Instant::now();
+
+        let mut largest_lost_packet = 0;
+        let mut largest_lost_packet_sent_time = now;
+
         for lost in lost_pkt {
             let mut p = flight.sent.remove(&lost).unwrap();
-            self.bytes_in_flight -= p.sent_bytes;
+
+            self.bytes_in_flight -= p.size;
             flight.lost.append(&mut p.frames);
+
+            if lost > largest_lost_packet {
+                largest_lost_packet = lost;
+                largest_lost_packet_sent_time = p.time;
+            }
+        }
+
+        if !self.in_recovery(largest_lost_packet_sent_time) {
+            self.recovery_start_time = Some(now);
+
+            self.cwnd /= 2;
+            self.cwnd = cmp::max(self.cwnd, MINIMUM_WINDOW);
+            self.ssthresh = self.cwnd;
         }
     }
 }
@@ -394,9 +476,15 @@ impl Default for Recovery {
             // TODO: use value from peer transport params
             max_ack_delay: time::Duration::from_millis(25),
 
+            loss_time: None,
+
+            cwnd: INITIAL_WINDOW,
+
             bytes_in_flight: 0,
 
-            loss_time: None,
+            recovery_start_time: None,
+
+            ssthresh: std::usize::MAX,
         }
     }
 }
@@ -408,8 +496,8 @@ impl fmt::Debug for Recovery {
             None => time::Duration::new(0, 0),
         };
 
-        write!(f, "latest_rtt={:?} srtt={:?} min_rtt={:?} rttvar={:?}",
-               self.latest_rtt, smoothed_rtt, self.min_rtt, self.rttvar)
+        write!(f, "cwnd={:?} latest_rtt={:?} srtt={:?} min_rtt={:?} rttvar={:?}",
+               self.cwnd, self.latest_rtt, smoothed_rtt, self.min_rtt, self.rttvar)
     }
 }
 

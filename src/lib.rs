@@ -602,6 +602,9 @@ impl Connection {
             versions: None,
         };
 
+        // Calculate available space in the packet based on congestion window.
+        let mut left = cmp::min(self.recovery.cwnd(), b.cap());
+
         hdr.to_bytes(&mut b)?;
 
         let pn = space.next_pkt_num;
@@ -610,9 +613,11 @@ impl Connection {
         // Calculate payload length.
         let mut length = pn_len + space.overhead();
 
-        // Calculate remaining available space for the payload, excluding
-        // payload length, pkt num and AEAD oerhead.
-        let mut left = b.cap() - 4 - length;
+        if left < b.off() + length + 4 {
+            return Err(Error::NothingToDo);
+        }
+
+        left -= b.off() + length + 4;
 
         let mut frames: Vec<frame::Frame> = Vec::new();
 
