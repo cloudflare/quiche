@@ -140,6 +140,11 @@ struct RecvBuf {
 impl RecvBuf {
     fn push(&mut self, buf: RangeBuf) -> Result<()> {
         // TODO: discard duplicated data (e.g. using RangeSet)
+        if self.off >= buf.off() + buf.len() {
+            // Data is fully duplicate.
+            return Ok(());
+        }
+
         self.len = cmp::max(self.len, buf.off + buf.len());
 
         self.data.push(buf);
