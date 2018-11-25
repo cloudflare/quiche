@@ -498,6 +498,17 @@ impl Connection {
             }
         }
 
+        for acked in space.flight.acked.drain(..) {
+            match acked {
+                frame::Frame::ACK { ranges, .. } => {
+                    let largest_acked = ranges.largest().unwrap();
+                    space.recv_pkt_num.remove_until(largest_acked);
+                },
+
+                _ => (),
+            }
+        }
+
         space.recv_pkt_num.push_item(pn);
         space.do_ack = cmp::max(space.do_ack, do_ack);
 
@@ -536,8 +547,8 @@ impl Connection {
         // the case of the application space, whether there are streams that
         // can be written or that needs to increase flow control credit.
         let space =
-            // On error, send packet in the latest space available.
-            if self.error.is_some() {
+            // On error or probe, send packet in the latest space available.
+            if self.error.is_some() || self.recovery.probes > 0 {
                 match self.tls_state.get_write_level() {
                     crypto::Level::Initial     => &mut self.initial,
                     // TODO: implement 0-RTT
@@ -557,17 +568,6 @@ impl Connection {
             } else {
                 return Err(Error::NothingToDo);
             };
-
-        for acked in space.flight.acked.drain(..) {
-            match acked {
-                frame::Frame::ACK { ranges, .. } => {
-                    let largest_acked = ranges.largest().unwrap();
-                    space.recv_pkt_num.remove_until(largest_acked);
-                },
-
-                _ => (),
-            }
-        }
 
         for lost in space.flight.lost.drain(..) {
             match lost {
@@ -677,6 +677,27 @@ impl Connection {
             }
 
             retransmittable = true;
+        }
+
+        // Create PING and PADDING for TLP.
+        if self.recovery.probes > 0 {
+            let frame = frame::Frame::Ping;
+
+            length += frame.wire_len();
+            left -= frame.wire_len();
+
+            frames.push(frame);
+
+            let frame = frame::Frame::Padding {
+                len: 3,
+            };
+
+            length += frame.wire_len();
+            left -= frame.wire_len();
+
+            frames.push(frame);
+
+            self.recovery.probes -= 1;
         }
 
         // Create CONNECTION_CLOSE frame.

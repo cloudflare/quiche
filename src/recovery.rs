@@ -50,6 +50,7 @@ const MAX_DATAGRAM_SIZE: usize = 1460;
 const INITIAL_WINDOW: usize = 10 * MAX_DATAGRAM_SIZE;
 const MINIMUM_WINDOW: usize = 2 * MAX_DATAGRAM_SIZE;
 
+#[derive(Debug)]
 pub struct Sent {
     pkt_num: u64,
 
@@ -136,6 +137,8 @@ pub struct Recovery {
     recovery_start_time: Option<time::Instant>,
 
     ssthresh: usize,
+
+    pub probes: usize,
 }
 
 impl Recovery {
@@ -191,7 +194,7 @@ impl Recovery {
             let mut lost_pkt: Vec<u64> = Vec::new();
 
             for p in flight.sent.values().filter(|p| p.pkt_num < smallest_acked) {
-                error!("{} packet lost {}", trace_id, p.pkt_num);
+                error!("{} packet detected lost {}", trace_id, p.pkt_num);
 
                 lost_pkt.push(p.pkt_num);
             }
@@ -222,7 +225,7 @@ impl Recovery {
             self.crypto_count += 1;
 
             for p in flight.sent.values().filter(|p| p.is_crypto) {
-                error!("{} packet lost {}", trace_id, p.pkt_num);
+                error!("{} crypto packet lost {}", trace_id, p.pkt_num);
 
                 lost_pkt.push(p.pkt_num);
             }
@@ -232,7 +235,7 @@ impl Recovery {
         } else if self.tlp_count < MAX_TLP_COUNT {
             self.tlp_count += 1;
 
-            // TODO: send TLP
+            self.probes = 1;
         } else {
             if self.rto_count == 0 {
                 self.largest_sent_before_rto = self.largest_sent_pkt;
@@ -240,10 +243,8 @@ impl Recovery {
 
             self.rto_count += 1;
 
-            // TODO: resend packet
+            self.probes = 2;
         }
-
-        self.set_loss_detection_timer(flight);
 
         for lost in lost_pkt {
             let mut p = flight.sent.remove(&lost).unwrap();
@@ -251,6 +252,8 @@ impl Recovery {
             self.bytes_in_flight -= p.size;
             flight.lost.append(&mut p.frames);
         }
+
+        self.set_loss_detection_timer(flight);
 
         trace!("{} {:?}", trace_id, self);
     }
@@ -358,24 +361,26 @@ impl Recovery {
         self.loss_time = None;
 
         // TODO: do time loss detection
-        let delay_until_lost = if largest_acked == self.largest_sent_pkt {
-             (cmp::max(self.latest_rtt, self.smoothed_rtt.unwrap()) * 9) / 8
-        } else {
-            time::Duration::from_secs(std::u64::MAX)
-        };
+        let mut delay_until_lost = time::Duration::from_secs(std::u64::MAX);
+
+        if largest_acked == self.largest_sent_pkt {
+             delay_until_lost = 
+                cmp::max(self.latest_rtt, self.smoothed_rtt.unwrap()) * 9 / 8;
+        }
 
         let mut lost_pkt: Vec<u64> = Vec::new();
 
         for unacked in flight.sent.values().filter(|p| p.pkt_num < largest_acked) {
             let time_since_sent = unacked.time.elapsed();
-            let delat = largest_acked - unacked.pkt_num;
+            let delta = largest_acked - unacked.pkt_num;
 
-            if time_since_sent > delay_until_lost || delat > REORDERING_THRESHOLD {
-                error!("{} packet lost {}", trace_id, unacked.pkt_num);
+            if time_since_sent > delay_until_lost || delta > REORDERING_THRESHOLD {
+                if unacked.retransmittable {
+                    error!("{} packet lost {}", trace_id, unacked.pkt_num);
+                }
 
                 lost_pkt.push(unacked.pkt_num);
-            } else if self.loss_time.is_none() &&
-                      delay_until_lost.as_secs() != std::u64::MAX {
+            } else if delay_until_lost.as_secs() != std::u64::MAX {
                 let now = time::Instant::now();
                 self.loss_time = Some(now + delay_until_lost - time_since_sent);
             }
@@ -422,6 +427,10 @@ impl Recovery {
 
         for lost in lost_pkt {
             let mut p = flight.sent.remove(&lost).unwrap();
+
+            if !p.retransmittable {
+                continue;
+            }
 
             self.bytes_in_flight -= p.size;
             flight.lost.append(&mut p.frames);
@@ -485,6 +494,8 @@ impl Default for Recovery {
             recovery_start_time: None,
 
             ssthresh: std::usize::MAX,
+
+            probes: 0,
         }
     }
 }
@@ -494,6 +505,23 @@ impl fmt::Debug for Recovery {
         let smoothed_rtt = match self.smoothed_rtt {
             Some(v) => v,
             None => time::Duration::new(0, 0),
+        };
+
+        match self.loss_detection_timer {
+            Some(v) => {
+                let now = time::Instant::now();
+
+                if v > now {
+                    let d = v.duration_since(now);
+                    write!(f, "timer={:?} ", d)?;
+                } else {
+                    write!(f, "timer=exp")?;
+                }
+            },
+
+            None => {
+                write!(f, "timer=none ")?;
+            },
         };
 
         write!(f, "cwnd={:?} latest_rtt={:?} srtt={:?} min_rtt={:?} rttvar={:?}",
