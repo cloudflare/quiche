@@ -137,10 +137,6 @@ impl RangeSet {
         }
     }
 
-    pub fn clear(&mut self) {
-        self.inner = BTreeMap::new();
-    }
-
     fn prev_to(&self, item: u64) -> Option<Range<u64>> {
         match self.inner.range((Unbounded, Included(item))).next_back() {
             Some((start, end)) => Some(*start..*end),
