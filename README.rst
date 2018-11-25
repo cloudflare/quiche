@@ -27,8 +27,8 @@ Status
 * [x] Stream API
 * [x] Flow control
 * [ ] Unidirectional streams
-* [ ] Loss detection and recovery
-* [ ] Congestion control
+* [x] Loss detection and recovery
+* [x] Congestion control
 * [x] Connection close
 * [ ] Stateless retry
 * [ ] 0-RTT
