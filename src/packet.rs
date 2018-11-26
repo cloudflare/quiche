@@ -216,11 +216,11 @@ impl Header {
 
         let mut cil: u8 = 0;
 
-        if self.dcid.len() > 0 {
+        if !self.dcid.is_empty() {
             cil |= ((self.dcid.len() - 3) as u8) << 4;
         }
 
-        if self.scid.len() > 0 {
+        if !self.scid.is_empty() {
             cil |= ((self.scid.len() - 3) as u8) & 0xf;
         }
 
@@ -411,11 +411,11 @@ pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
 
     // Invert client's scid and dcid.
     let mut cil: u8 = 0;
-    if hdr.scid.len() > 0 {
+    if !hdr.scid.is_empty() {
         cil |= ((hdr.scid.len() - 3) as u8) << 4;
     }
 
-    if hdr.dcid.len() > 0 {
+    if !hdr.dcid.is_empty() {
         cil |= ((hdr.dcid.len() - 3) as u8) & 0xf;
     }
 
@@ -489,7 +489,7 @@ impl PktNumSpace {
     }
 
     pub fn ready(&self) -> bool {
-        self.crypto_stream.writable() || self.flight.lost.len() > 0 || self.do_ack
+        self.crypto_stream.writable() || !self.flight.lost.is_empty() || self.do_ack
     }
 }
 

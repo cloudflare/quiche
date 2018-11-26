@@ -92,7 +92,6 @@ impl RangeSet {
         let ranges: Vec<(u64, u64)> =
             self.inner
                 .range((Included(&0), Included(&largest)))
-                .into_iter()
                 .map(|(s, e)| (*s, *e))
                 .collect();
 
@@ -101,7 +100,7 @@ impl RangeSet {
 
             if end > largest + 1 {
                 let start = largest + 1;
-                self.insert(Range { start: start, end: end });
+                self.insert(Range { start, end });
             }
         }
     }

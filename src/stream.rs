@@ -238,7 +238,7 @@ impl SendBuf {
                 self.data.push(new_buf);
             }
 
-            if out.len() == 0 {
+            if out.is_empty() {
                 out.off = buf.off;
             }
 
@@ -293,6 +293,10 @@ impl RangeBuf {
 
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 

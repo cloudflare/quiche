@@ -40,7 +40,7 @@ use std::time;
 use std::collections::hash_map;
 use std::collections::HashMap;
 
-pub const VERSION_DRAFT15: u32 = 0xff00000f;
+pub const VERSION_DRAFT15: u32 = 0xff00_000f;
 
 const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 
@@ -811,7 +811,7 @@ impl Connection {
             }
         }
 
-        if frames.len() == 0 {
+        if frames.is_empty() {
             return Err(Error::NothingToDo);
         }
 
@@ -932,17 +932,17 @@ impl Connection {
 
         let trace_id = self.trace_id();
 
-        if self.initial.flight.sent.len() > 0 {
+        if !self.initial.flight.sent.is_empty() {
             self.recovery.on_loss_detection_timer(&mut self.initial.flight,
                                                   &trace_id);
         }
 
-        if self.handshake.flight.sent.len() > 0 {
+        if !self.handshake.flight.sent.is_empty() {
             self.recovery.on_loss_detection_timer(&mut self.handshake.flight,
                                                   &trace_id);
         }
 
-        if self.application.flight.sent.len() > 0 {
+        if !self.application.flight.sent.is_empty() {
             self.recovery.on_loss_detection_timer(&mut self.application.flight,
                                                   &trace_id);
         }
@@ -1005,8 +1005,9 @@ impl Connection {
 
                     self.max_tx_data = peer_params.initial_max_data as usize;
 
+                    let max_ack_delay = u64::from(peer_params.max_ack_delay);
                     self.recovery.max_ack_delay =
-                        time::Duration::from_millis(peer_params.max_ack_delay as u64);
+                        time::Duration::from_millis(max_ack_delay);
 
                     self.peer_transport_params = peer_params;
 

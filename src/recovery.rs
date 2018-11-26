@@ -270,7 +270,7 @@ impl Recovery {
             }
         }
 
-        return false;
+        false
     }
 
     pub fn cwnd(&self) -> usize {
@@ -361,12 +361,11 @@ impl Recovery {
         self.loss_time = None;
 
         // TODO: do time loss detection
-        let mut delay_until_lost = time::Duration::from_secs(std::u64::MAX);
-
-        if largest_acked == self.largest_sent_pkt {
-             delay_until_lost = 
-                cmp::max(self.latest_rtt, self.smoothed_rtt.unwrap()) * 9 / 8;
-        }
+        let delay_until_lost = if largest_acked == self.largest_sent_pkt {
+            cmp::max(self.latest_rtt, self.smoothed_rtt.unwrap()) * 9 / 8
+        } else {
+            time::Duration::from_secs(std::u64::MAX)
+        };
 
         let mut lost_pkt: Vec<u64> = Vec::new();
 
@@ -386,7 +385,7 @@ impl Recovery {
             }
         }
 
-        if lost_pkt.len() > 0 {
+        if !lost_pkt.is_empty() {
             self.on_packets_lost(lost_pkt, flight);
         }
     }

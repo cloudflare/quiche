@@ -93,11 +93,11 @@ static QUICHE_STREAM_METHOD: SSL_QUIC_METHOD = SSL_QUIC_METHOD {
     send_alert,
 };
 
-const SSL_OP_NO_TICKET: u32 = 0x00004000;
-const SSL_OP_CIPHER_SERVER_PREFERENCE: u32 = 0x00400000;
-const SSL_OP_NO_TLSV1: u32 = 0x04000000;
-const SSL_OP_NO_TLSV1_1: u32 = 0x10000000;
-const SSL_OP_NO_TLSV1_2: u32 = 0x08000000;
+const SSL_OP_NO_TICKET: u32 = 0x0000_4000;
+const SSL_OP_CIPHER_SERVER_PREFERENCE: u32 = 0x0040_0000;
+const SSL_OP_NO_TLSV1: u32 = 0x0400_0000;
+const SSL_OP_NO_TLSV1_1: u32 = 0x1000_0000;
+const SSL_OP_NO_TLSV1_2: u32 = 0x0800_0000;
 
 pub struct State(*mut SSL);
 
@@ -155,15 +155,15 @@ impl State {
                                                             -> Result<()> {
         self.init_with_conn(conn)?;
 
-        if config.tls_server_name.len() > 0 {
+        if !config.tls_server_name.is_empty() {
             self.set_server_name(config.tls_server_name)?;
         }
 
-        if config.tls_certificate.len() > 0 {
+        if !config.tls_certificate.is_empty() {
             self.use_certificate_file(config.tls_certificate)?;
         }
 
-        if config.tls_certificate_key.len() > 0 {
+        if !config.tls_certificate_key.is_empty() {
             self.use_privkey_file(config.tls_certificate_key)?;
         }
 
