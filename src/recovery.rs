@@ -274,6 +274,11 @@ impl Recovery {
     }
 
     pub fn cwnd(&self) -> usize {
+        // Ignore cwnd when sending probe packets.
+        if self.probes > 0 {
+            return std::usize::MAX;
+        }
+
         if self.bytes_in_flight > self.cwnd {
             return 0;
         }
@@ -522,8 +527,9 @@ impl fmt::Debug for Recovery {
             },
         };
 
-        write!(f, "cwnd={:?} latest_rtt={:?} srtt={:?} min_rtt={:?} rttvar={:?}",
-               self.cwnd, self.latest_rtt, smoothed_rtt, self.min_rtt, self.rttvar)
+        write!(f, "cwnd={:?} latest_rtt={:?} srtt={:?} min_rtt={:?} rttvar={:?} probes={}",
+               self.cwnd, self.latest_rtt, smoothed_rtt, self.min_rtt,
+               self.rttvar, self.probes)
     }
 }
 
