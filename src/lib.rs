@@ -35,6 +35,7 @@ extern crate lazy_static;
 
 use std::cmp;
 use std::mem;
+use std::time;
 
 use std::collections::hash_map;
 use std::collections::HashMap;
@@ -1002,10 +1003,12 @@ impl Connection {
                                                               self.version,
                                                               self.is_server)?;
 
-                    self.peer_transport_params = peer_params;
+                    self.max_tx_data = peer_params.initial_max_data as usize;
 
-                    self.max_tx_data =
-                        self.peer_transport_params.initial_max_data as usize;
+                    self.recovery.max_ack_delay =
+                        time::Duration::from_millis(peer_params.max_ack_delay as u64);
+
+                    self.peer_transport_params = peer_params;
 
                     trace!("{} connection established: cipher={:?} params={:?}",
                            self.trace_id(),

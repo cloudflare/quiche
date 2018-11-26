@@ -126,7 +126,7 @@ pub struct Recovery {
 
     min_rtt: time::Duration,
 
-    max_ack_delay: time::Duration,
+    pub max_ack_delay: time::Duration,
 
     loss_time: Option<time::Instant>,
 
@@ -482,7 +482,6 @@ impl Default for Recovery {
 
             rttvar: time::Duration::new(0, 0),
 
-            // TODO: use value from peer transport params
             max_ack_delay: time::Duration::from_millis(25),
 
             loss_time: None,
