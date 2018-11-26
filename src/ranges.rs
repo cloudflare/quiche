@@ -436,6 +436,18 @@ mod tests {
     }
 
     #[test]
+    fn flatten_one() {
+        let mut r = RangeSet::default();
+        assert_eq!(r.inner.len(), 0);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[]);
+
+        r.insert(0..1);
+        assert_eq!(r.inner.len(), 1);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[0]);
+        assert_eq!(&r.flatten().rev().collect::<Vec<u64>>(), &[0]);
+    }
+
+    #[test]
     fn remove_largest() {
         let mut r = RangeSet::default();
 
