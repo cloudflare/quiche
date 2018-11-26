@@ -441,12 +441,12 @@ impl Connection {
 
                 frame::Frame::Crypto { data } => {
                     // Push the data to the stream so it can be re-ordered.
-                    space.crypto_stream.push_recv(data)?;
+                    space.crypto_stream.recv_push(data)?;
 
                     // Feed crypto data to the TLS state, if there's data
                     // available at the expected offset.
                     if space.crypto_stream.readable() {
-                        let buf = space.crypto_stream.pop_recv()?;
+                        let buf = space.crypto_stream.recv_pop()?;
                         let level = space.crypto_level;
 
                         self.tls_state.provide_data(level, &buf)
@@ -492,7 +492,7 @@ impl Connection {
                         return Err(Error::FlowControl);
                     }
 
-                    stream.push_recv(data)?;
+                    stream.recv_push(data)?;
 
                     do_ack = true;
                 },
@@ -573,7 +573,7 @@ impl Connection {
         for lost in space.flight.lost.drain(..) {
             match lost {
                 frame::Frame::Crypto { data } => {
-                    space.crypto_stream.resend(data)?;
+                    space.crypto_stream.send_push_front(data)?;
                 },
 
                 frame::Frame::Stream { stream_id, data } => {
@@ -582,7 +582,7 @@ impl Connection {
                         None => continue,
                     };
 
-                    stream.resend(data)?;
+                    stream.send_push_front(data)?;
                 },
 
                 frame::Frame::ACK { .. } => {
@@ -735,7 +735,7 @@ impl Connection {
         // Create CRYPTO frame.
         if space.crypto_stream.writable() && !is_closing {
             let crypto_len = left - frame::MAX_CRYPTO_OVERHEAD;
-            let crypto_buf = space.crypto_stream.pop_send(crypto_len)?;
+            let crypto_buf = space.crypto_stream.send_pop(crypto_len)?;
 
             let frame = frame::Frame::Crypto {
                 data: crypto_buf,
@@ -792,7 +792,7 @@ impl Connection {
                     continue;
                 }
 
-                let stream_buf = stream.pop_send(stream_len)?;
+                let stream_buf = stream.send_pop(stream_len)?;
 
                 let frame = frame::Frame::Stream {
                     stream_id: *id,
@@ -873,7 +873,7 @@ impl Connection {
             return Err(Error::NothingToDo);
         }
 
-        let buf = stream.pop_recv()?;
+        let buf = stream.recv_pop()?;
 
         self.new_max_rx_data = self.max_rx_data + buf.len();
         stream.new_max_rx_data = stream.max_rx_data + buf.len();
@@ -912,7 +912,7 @@ impl Connection {
 
         // TODO: implement backpressure based on peer's flow control
 
-        stream.push_send(buf, fin)?;
+        stream.send_push(buf, fin)?;
 
         Ok(buf.len())
     }

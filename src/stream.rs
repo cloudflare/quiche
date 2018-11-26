@@ -60,23 +60,23 @@ impl Stream {
         }
     }
 
-    pub fn push_recv(&mut self, buf: RangeBuf) -> Result<()> {
+    pub fn recv_push(&mut self, buf: RangeBuf) -> Result<()> {
         self.recv.push(buf)
     }
 
-    pub fn pop_recv(&mut self) -> Result<RangeBuf> {
+    pub fn recv_pop(&mut self) -> Result<RangeBuf> {
         self.recv.pop()
     }
 
-    pub fn push_send(&mut self, data: &[u8], fin: bool) -> Result<()> {
+    pub fn send_push(&mut self, data: &[u8], fin: bool) -> Result<()> {
         self.send.push_slice(data, fin)
     }
 
-    pub fn pop_send(&mut self, max_len: usize) -> Result<RangeBuf> {
+    pub fn send_pop(&mut self, max_len: usize) -> Result<RangeBuf> {
         self.send.pop(max_len)
     }
 
-    pub fn resend(&mut self, buf: RangeBuf) -> Result<()> {
+    pub fn send_push_front(&mut self, buf: RangeBuf) -> Result<()> {
         self.send.push(buf)
     }
 
