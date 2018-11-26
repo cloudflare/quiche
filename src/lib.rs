@@ -699,6 +699,8 @@ impl Connection {
             frames.push(frame);
 
             self.recovery.probes -= 1;
+
+            retransmittable = true;
         }
 
         // Create CONNECTION_CLOSE frame.
@@ -776,6 +778,7 @@ impl Connection {
                     // TODO: create STREAM_DATA_BLOCKED
                     trace!("{} stream {} is blocked tx={} max={}",
                            trace_id, id, stream.tx_data, stream.max_tx_data);
+
                     continue;
                 }
 
