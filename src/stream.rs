@@ -86,7 +86,7 @@ impl Stream {
     }
 
     pub fn writable(&self) -> bool {
-        self.send.ready()
+        self.send.ready() && self.send.off() <= self.max_tx_data
     }
 
     pub fn more_credit(&self) -> bool {
@@ -209,7 +209,6 @@ impl SendBuf {
     }
 
     fn push(&mut self, buf: RangeBuf) -> Result<()> {
-        self.off = cmp::min(self.off, buf.off());
         self.len += buf.len();
 
         self.data.push(buf);
@@ -220,8 +219,11 @@ impl SendBuf {
     fn pop(&mut self, max_len: usize) -> Result<RangeBuf> {
         let mut out = RangeBuf::default();
         let mut out_len = max_len;
+        let mut out_off = self.data
+                              .peek()
+                              .map_or_else(|| 0, |d| d.off());
 
-        while out_len > 0 && self.ready() {
+        while out_len > 0 && self.ready() && self.off() == out_off {
             let mut buf = match self.data.pop() {
                 Some(v) => v,
                 None => break,
@@ -246,6 +248,7 @@ impl SendBuf {
             self.len -= buf.len();
 
             out_len -= buf.len();
+            out_off = buf.off() + buf.len();
 
             out.fin = out.fin || buf.fin();
 
@@ -257,6 +260,14 @@ impl SendBuf {
 
     fn ready(&self) -> bool {
         self.len() > 0
+    }
+
+    fn off(&self) -> usize {
+        match self.data.peek() {
+            Some(v) => v.off(),
+
+            None => self.off,
+        }
     }
 
     fn len(&self) -> usize {
@@ -454,5 +465,64 @@ mod tests {
         assert_eq!(write.len(), 4);
         assert_eq!(&write[..], b"orld");
         assert_eq!(buf.len(), 0);
+    }
+
+    #[test]
+    fn resend() {
+        let mut buf = SendBuf::default();
+        assert_eq!(buf.len(), 0);
+        assert_eq!(buf.off(), 0);
+
+        let first: [u8; 9] = *b"something";
+        let second: [u8; 10] = *b"helloworld";
+
+        assert!(buf.push_slice(&first, false).is_ok());
+        assert_eq!(buf.off(), 0);
+
+        assert!(buf.push_slice(&second, true).is_ok());
+        assert_eq!(buf.off(), 0);
+
+        let write1 = buf.pop(4).unwrap();
+        assert_eq!(write1.off(), 0);
+        assert_eq!(write1.len(), 4);
+        assert_eq!(&write1[..], b"some");
+        assert_eq!(buf.len(), 15);
+        assert_eq!(buf.off(), 4);
+
+        let write2 = buf.pop(5).unwrap();
+        assert_eq!(write2.off(), 4);
+        assert_eq!(write2.len(), 5);
+        assert_eq!(&write2[..], b"thing");
+        assert_eq!(buf.len(), 10);
+        assert_eq!(buf.off(), 9);
+
+        let write3 = buf.pop(5).unwrap();
+        assert_eq!(write3.off(), 9);
+        assert_eq!(write3.len(), 5);
+        assert_eq!(&write3[..], b"hello");
+        assert_eq!(buf.len(), 5);
+        assert_eq!(buf.off(), 14);
+
+        buf.push(write2).unwrap();
+        assert_eq!(buf.len(), 10);
+        assert_eq!(buf.off(), 4);
+
+        buf.push(write1).unwrap();
+        assert_eq!(buf.len(), 14);
+        assert_eq!(buf.off(), 0);
+
+        let write4 = buf.pop(11).unwrap();
+        assert_eq!(write4.off(), 0);
+        assert_eq!(write4.len(), 9);
+        assert_eq!(&write4[..], b"something");
+        assert_eq!(buf.len(), 5);
+        assert_eq!(buf.off(), 14);
+
+        let write5 = buf.pop(11).unwrap();
+        assert_eq!(write5.off(), 14);
+        assert_eq!(write5.len(), 5);
+        assert_eq!(&write5[..], b"world");
+        assert_eq!(buf.len(), 0);
+        assert_eq!(buf.off(), 19);
     }
 }
