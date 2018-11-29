@@ -69,7 +69,9 @@ the directory containing ``libcrypto.a`` and ``libssl.a`` with the
 Copyright
 ---------
 
-Copyright (C) 2018 Alessandro Ghedini <alessandro@ghedini.me>
+Copyright (C) 2018, Cloudflare, Inc.
+
+Copyright (C) 2018, Alessandro Ghedini
 
 See COPYING_ for the license.
 
