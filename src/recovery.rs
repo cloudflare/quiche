@@ -315,8 +315,8 @@ impl Recovery {
             return;
         }
 
+        // Crypto retransmission timer.
         if flight.sent.values().any(|p| p.is_crypto) {
-            // Crypto retransmission timer.
             let mut timeout = match self.smoothed_rtt {
                 None => INITIAL_RTT * 2,
                 Some(smoothed_rtt) => smoothed_rtt * 2,
@@ -331,32 +331,28 @@ impl Recovery {
             return;
         }
 
-        let timeout = match self.loss_time {
-            // Early retransmit timer or time loss detection.
-            Some(loss_time) =>
-                loss_time - self.time_of_last_sent_retransmittable_packet,
+        // Early retransmit timer or time loss detection.
+        if self.loss_time.is_some() {
+            self.loss_detection_timer = self.loss_time;
+            return;
+        }
 
-            // RTO or TLP timer.
-            None => {
-                let mut timeout = self.smoothed_rtt.unwrap() +
-                                  self.rttvar * 4 +
-                                  self.max_ack_delay;
+        // RTO or TLP timer.
+        let mut timeout = self.smoothed_rtt.unwrap() +
+                          self.rttvar * 4 +
+                          self.max_ack_delay;
 
-                timeout = cmp::max(timeout, MIN_RTO_TIMEOUT);
-                timeout *= 2 ^ self.rto_count as u32;
+        timeout = cmp::max(timeout, MIN_RTO_TIMEOUT);
+        timeout *= 2 ^ self.rto_count as u32;
 
-                if self.tlp_count < MAX_TLP_COUNT {
-                    let tlp_timeout = cmp::max(
-                        (self.smoothed_rtt.unwrap() * 3) / 2 + self.max_ack_delay,
-                        MIN_TLP_TIMEOUT
-                    );
+        if self.tlp_count < MAX_TLP_COUNT {
+            let tlp_timeout = cmp::max(
+                self.smoothed_rtt.unwrap() * 3/2 + self.max_ack_delay,
+                MIN_TLP_TIMEOUT
+            );
 
-                    timeout = cmp::min(timeout, tlp_timeout);
-                }
-
-                timeout
-            },
-        };
+            timeout = cmp::min(timeout, tlp_timeout);
+        }
 
         self.loss_detection_timer =
             Some(self.time_of_last_sent_retransmittable_packet + timeout);
