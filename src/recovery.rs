@@ -343,7 +343,7 @@ impl Recovery {
                           self.max_ack_delay;
 
         timeout = cmp::max(timeout, MIN_RTO_TIMEOUT);
-        timeout *= 2 ^ self.rto_count as u32;
+        timeout *= 2_u32.pow(self.rto_count);
 
         if self.tlp_count < MAX_TLP_COUNT {
             let tlp_timeout = cmp::max(
