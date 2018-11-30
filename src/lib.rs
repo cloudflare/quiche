@@ -130,6 +130,8 @@ pub struct Connection {
 
     derived_initial_secrets: bool,
 
+    did_version_negotiation: bool,
+
     got_peer_conn_id: bool,
 
     handshake_completed: bool,
@@ -186,6 +188,8 @@ impl Connection {
 
             derived_initial_secrets: false,
 
+            did_version_negotiation: false,
+
             got_peer_conn_id: false,
 
             handshake_completed: false,
@@ -235,6 +239,11 @@ impl Connection {
                 return Err(Error::InvalidPacket);
             }
 
+            // Forbid duplicate version negotiation.
+            if self.did_version_negotiation {
+                return Err(Error::InvalidState);
+            }
+
             trace!("{} rx pkt {:?}", trace_id, hdr);
 
             let versions = match hdr.versions {
@@ -255,6 +264,7 @@ impl Connection {
             }
 
             self.version = new_version;
+            self.did_version_negotiation = true;
 
             // Reset connection state to force sending another Initial packet.
             self.got_peer_conn_id = false;
