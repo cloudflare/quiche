@@ -515,7 +515,7 @@ impl fmt::Debug for Recovery {
                     let d = v.duration_since(now);
                     write!(f, "timer={:?} ", d)?;
                 } else {
-                    write!(f, "timer=exp")?;
+                    write!(f, "timer=exp ")?;
                 }
             },
 
