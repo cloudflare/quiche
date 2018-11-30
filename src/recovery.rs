@@ -121,7 +121,7 @@ pub struct Recovery {
 
     latest_rtt: time::Duration,
 
-    smoothed_rtt: Option<time::Duration>,
+    smoothed_rtt: time::Duration,
 
     rttvar: time::Duration,
 
@@ -288,6 +288,8 @@ impl Recovery {
     }
 
     fn update_rtt(&mut self, ack_delay: u64) {
+        let zero = time::Duration::new(0, 0);
+
         let ack_delay = time::Duration::from_micros(ack_delay);
 
         self.min_rtt = cmp::min(self.min_rtt, self.latest_rtt);
@@ -296,20 +298,22 @@ impl Recovery {
             self.latest_rtt -= ack_delay;
         }
 
-        if let Some(smoothed_rtt) = self.smoothed_rtt {
-            let rttvar_sample = sub_abs(smoothed_rtt, self.latest_rtt);
-
-            self.rttvar = ((self.rttvar * 3) + rttvar_sample) / 4;
-
-            self.smoothed_rtt = Some(((smoothed_rtt * 7) + self.latest_rtt) / 8);
-        } else {
+        if self.smoothed_rtt == zero {
             self.rttvar = self.latest_rtt / 2;
 
-            self.smoothed_rtt = Some(self.latest_rtt);
+            self.smoothed_rtt = self.latest_rtt;
+        } else {
+            let rttvar_sample = sub_abs(self.smoothed_rtt, self.latest_rtt);
+
+            self.rttvar = self.rttvar * (3/4) + rttvar_sample * (1/4);
+
+            self.smoothed_rtt = self.smoothed_rtt * (7/8) + self.latest_rtt * (1/8);
         }
     }
 
     fn set_loss_detection_timer(&mut self, flight: &InFlight) {
+        let zero = time::Duration::new(0, 0);
+
         if self.bytes_in_flight == 0 {
             self.loss_detection_timer = None;
             return;
@@ -317,7 +321,12 @@ impl Recovery {
 
         // Crypto retransmission timer.
         if flight.sent.values().any(|p| p.is_crypto) {
-            let mut timeout = self.smoothed_rtt.unwrap_or(INITIAL_RTT) * 2;
+            let mut timeout = if self.smoothed_rtt == zero {
+                INITIAL_RTT * 2
+            } else {
+                self.smoothed_rtt * 2
+            };
+
             timeout = cmp::max(timeout, MIN_TLP_TIMEOUT);
             timeout *= 2_u32.pow(self.crypto_count);
 
@@ -334,8 +343,8 @@ impl Recovery {
         }
 
         // RTO or TLP timer.
-        let mut timeout = self.smoothed_rtt.unwrap() +
-                          self.rttvar * 4 +
+        let mut timeout = self.smoothed_rtt +
+                          (self.rttvar * 4) +
                           self.max_ack_delay;
 
         timeout = cmp::max(timeout, MIN_RTO_TIMEOUT);
@@ -343,11 +352,11 @@ impl Recovery {
 
         if self.tlp_count < MAX_TLP_COUNT {
             let tlp_timeout = cmp::max(
-                self.smoothed_rtt.unwrap() * 3/2 + self.max_ack_delay,
+                self.smoothed_rtt * (3/2) + self.max_ack_delay,
                 MIN_TLP_TIMEOUT
             );
 
-            timeout = cmp::min(timeout, tlp_timeout);
+            timeout = cmp::min(tlp_timeout, timeout);
         }
 
         self.loss_detection_timer =
@@ -360,7 +369,7 @@ impl Recovery {
 
         // TODO: do time loss detection
         let delay_until_lost = if largest_acked == self.largest_sent_pkt {
-            cmp::max(self.latest_rtt, self.smoothed_rtt.unwrap()) * 9 / 8
+            cmp::max(self.latest_rtt, self.smoothed_rtt) * (9/8)
         } else {
             time::Duration::from_secs(std::u64::MAX)
         };
@@ -473,7 +482,7 @@ impl Default for Recovery {
 
             latest_rtt: time::Duration::new(0, 0),
 
-            smoothed_rtt: None,
+            smoothed_rtt: time::Duration::new(0, 0),
 
             min_rtt: time::Duration::from_secs(std::u64::MAX),
 
@@ -498,11 +507,6 @@ impl Default for Recovery {
 
 impl fmt::Debug for Recovery {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let smoothed_rtt = match self.smoothed_rtt {
-            Some(v) => v,
-            None => time::Duration::new(0, 0),
-        };
-
         match self.loss_detection_timer {
             Some(v) => {
                 let now = time::Instant::now();
@@ -521,7 +525,7 @@ impl fmt::Debug for Recovery {
         };
 
         write!(f, "cwnd={:?} latest_rtt={:?} srtt={:?} min_rtt={:?} rttvar={:?} probes={}",
-               self.cwnd, self.latest_rtt, smoothed_rtt, self.min_rtt,
+               self.cwnd, self.latest_rtt, self.smoothed_rtt, self.min_rtt,
                self.rttvar, self.probes)
     }
 }
