@@ -317,11 +317,7 @@ impl Recovery {
 
         // Crypto retransmission timer.
         if flight.sent.values().any(|p| p.is_crypto) {
-            let mut timeout = match self.smoothed_rtt {
-                None => INITIAL_RTT * 2,
-                Some(smoothed_rtt) => smoothed_rtt * 2,
-            };
-
+            let mut timeout = self.smoothed_rtt.unwrap_or(INITIAL_RTT) * 2;
             timeout = cmp::max(timeout, MIN_TLP_TIMEOUT);
             timeout *= 2_u32.pow(self.crypto_count);
 
