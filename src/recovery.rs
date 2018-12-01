@@ -204,6 +204,7 @@ impl Recovery {
         }
 
         for pn in ranges.flatten().rev() {
+            trace!("{} packet acked {}", trace_id, pn);
             self.on_packet_acked(pn, flight);
         }
 
