@@ -946,20 +946,10 @@ impl Connection {
 
         let trace_id = self.trace_id();
 
-        if !self.initial.flight.sent.is_empty() {
-            self.recovery.on_loss_detection_timer(&mut self.initial.flight,
-                                                  &trace_id);
-        }
-
-        if !self.handshake.flight.sent.is_empty() {
-            self.recovery.on_loss_detection_timer(&mut self.handshake.flight,
-                                                  &trace_id);
-        }
-
-        if !self.application.flight.sent.is_empty() {
-            self.recovery.on_loss_detection_timer(&mut self.application.flight,
-                                                  &trace_id);
-        }
+        self.recovery.on_loss_detection_timer(&mut self.initial.flight,
+                                              &mut self.handshake.flight,
+                                              &mut self.application.flight,
+                                              &trace_id);
     }
 
     pub fn close(&mut self, app: bool, err: u16, reason: &[u8]) -> Result<()> {

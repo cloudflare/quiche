@@ -90,6 +90,22 @@ pub struct InFlight {
     pub acked: Vec<frame::Frame>,
 }
 
+impl InFlight {
+    pub fn retransmit_unacked_crypto(&mut self) {
+        for (_, p) in &mut self.sent {
+            p.frames.retain(|f|
+                match f {
+                    frame::Frame::Crypto { .. } => true,
+                    _ => false,
+                });
+
+            self.lost.append(&mut p.frames);
+        }
+
+        self.sent.clear();
+    }
+}
+
 impl Default for InFlight {
     fn default() -> InFlight {
         InFlight {
@@ -217,18 +233,16 @@ impl Recovery {
         trace!("{} {:?}", trace_id, self);
     }
 
-    pub fn on_loss_detection_timer(&mut self, flight: &mut InFlight,
+    pub fn on_loss_detection_timer(&mut self,
+                                   in_flight: &mut InFlight,
+                                   hs_flight: &mut InFlight,
+                                   flight: &mut InFlight,
                                    trace_id: &str) {
-        let mut lost_pkt: Vec<u64> = Vec::new();
-
-        if flight.sent.values().any(|p| p.is_crypto) {
+        if !in_flight.sent.is_empty() || !hs_flight.sent.is_empty() {
             self.crypto_count += 1;
 
-            for p in flight.sent.values().filter(|p| p.is_crypto) {
-                error!("{} crypto packet lost {}", trace_id, p.pkt_num);
-
-                lost_pkt.push(p.pkt_num);
-            }
+            in_flight.retransmit_unacked_crypto();
+            hs_flight.retransmit_unacked_crypto();
         } else if self.loss_time.is_some() {
             let largest_acked = self.largest_acked;
             self.detect_lost_packets(largest_acked, flight, trace_id);
@@ -244,13 +258,6 @@ impl Recovery {
             self.rto_count += 1;
 
             self.probes = 2;
-        }
-
-        for lost in lost_pkt {
-            let mut p = flight.sent.remove(&lost).unwrap();
-
-            self.bytes_in_flight -= p.size;
-            flight.lost.append(&mut p.frames);
         }
 
         self.set_loss_detection_timer(flight);
