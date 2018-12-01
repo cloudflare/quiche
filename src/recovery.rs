@@ -299,7 +299,9 @@ impl Recovery {
         let ack_delay = time::Duration::from_micros(ack_delay);
 
         self.min_rtt = cmp::min(self.min_rtt, self.latest_rtt);
-        self.latest_rtt = cmp::max(latest_rtt - ack_delay, self.min_rtt);
+        self.latest_rtt = cmp::max(latest_rtt.checked_sub(ack_delay)
+                                             .unwrap_or(zero),
+                                   self.min_rtt);
 
         if self.smoothed_rtt == zero {
             self.rttvar = self.latest_rtt / 2;
