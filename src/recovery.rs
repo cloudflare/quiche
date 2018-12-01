@@ -91,7 +91,9 @@ pub struct InFlight {
 }
 
 impl InFlight {
-    pub fn retransmit_unacked_crypto(&mut self) {
+    pub fn retransmit_unacked_crypto(&mut self) -> usize {
+        let mut unacked_bytes = 0;
+
         for p in &mut self.sent.values_mut() {
             p.frames.retain(|f|
                 match f {
@@ -99,10 +101,14 @@ impl InFlight {
                     _ => false,
                 });
 
+            unacked_bytes += p.size;
+
             self.lost.append(&mut p.frames);
         }
 
         self.sent.clear();
+
+        unacked_bytes
     }
 }
 
@@ -241,8 +247,8 @@ impl Recovery {
         if !in_flight.sent.is_empty() || !hs_flight.sent.is_empty() {
             self.crypto_count += 1;
 
-            in_flight.retransmit_unacked_crypto();
-            hs_flight.retransmit_unacked_crypto();
+            self.bytes_in_flight -= in_flight.retransmit_unacked_crypto();
+            self.bytes_in_flight -= hs_flight.retransmit_unacked_crypto();
         } else if self.loss_time.is_some() {
             let largest_acked = self.largest_acked;
             self.detect_lost_packets(largest_acked, flight, trace_id);
