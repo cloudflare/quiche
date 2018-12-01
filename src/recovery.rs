@@ -524,9 +524,15 @@ impl fmt::Debug for Recovery {
             },
         };
 
-        write!(f, "cwnd={:?} latest_rtt={:?} srtt={:?} min_rtt={:?} rttvar={:?} probes={}",
-               self.cwnd, self.latest_rtt, self.smoothed_rtt, self.min_rtt,
-               self.rttvar, self.probes)
+        write!(f, "inflight={} ", self.bytes_in_flight)?;
+        write!(f, "cwnd={} ", self.cwnd)?;
+        write!(f, "latest_rtt={:?} ", self.latest_rtt)?;
+        write!(f, "srtt={:?} ", self.smoothed_rtt)?;
+        write!(f, "min_rtt={:?} ", self.min_rtt)?;
+        write!(f, "rttvar={:?} ", self.rttvar)?;
+        write!(f, "probes={} ", self.probes)?;
+
+        Ok(())
     }
 }
 
