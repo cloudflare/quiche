@@ -422,7 +422,7 @@ impl Recovery {
                 if self.cwnd < self.ssthresh {
                     self.cwnd += p.size;
                 } else {
-                    self.cwnd = (MAX_DATAGRAM_SIZE * p.size) / self.cwnd;
+                    self.cwnd += (MAX_DATAGRAM_SIZE * p.size) / self.cwnd;
                 }
             }
         }
