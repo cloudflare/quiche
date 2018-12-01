@@ -475,7 +475,8 @@ impl PktNumSpace {
 
     pub fn clear(&mut self) {
         self.flight = recovery::InFlight::default();
-        self.crypto_stream = stream::Stream::default();
+        self.crypto_stream = stream::Stream::new(std::usize::MAX,
+                                                 std::usize::MAX);
     }
 
     pub fn cipher(&self) -> crypto::Algorithm {

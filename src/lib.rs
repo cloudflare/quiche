@@ -401,8 +401,7 @@ impl Connection {
                         hash_map::Entry::Occupied(v) => v.into_mut(),
                     };
 
-                    stream.max_tx_data = cmp::max(stream.max_tx_data,
-                                                  max as usize);
+                    stream.send_max_data(max as usize);
 
                     do_ack = true;
                 },
@@ -489,13 +488,6 @@ impl Connection {
 
                         hash_map::Entry::Occupied(v) => v.into_mut(),
                     };
-
-                    // Calculate maximum buffer offset received.
-                    stream.rx_data = cmp::max(stream.rx_data, data.max_off());
-
-                    if stream.rx_data > stream.max_rx_data {
-                        return Err(Error::FlowControl);
-                    }
 
                     self.rx_data += data.len();
 
@@ -677,10 +669,8 @@ impl Connection {
                                             .filter(|(_, s)| s.more_credit()) {
                 let frame = frame::Frame::MaxStreamData {
                     stream_id: *id,
-                    max: stream.new_max_rx_data as u64,
+                    max: stream.recv_update_max_data() as u64,
                 };
-
-                stream.max_rx_data = stream.new_max_rx_data;
 
                 length += frame.wire_len();
                 left -= frame.wire_len();
@@ -779,34 +769,20 @@ impl Connection {
 
         // Create a single STREAM frame for the first stream that is writable.
         if space.pkt_type == packet::Type::Application && !is_closing
-            && self.tx_data != self.max_tx_data
             && left > frame::MAX_STREAM_OVERHEAD
         {
+            // TODO: enforce connection-level flow contro
             for (id, stream) in self.streams.iter_mut()
                                             .filter(|(_, s)| s.writable()) {
-                // TODO: flow control should be based on max stream offset
-                if stream.tx_data == stream.max_tx_data {
-                    // TODO: create STREAM_DATA_BLOCKED
-                    trace!("{} stream {} is blocked tx={} max={}",
-                           trace_id, id, stream.tx_data, stream.max_tx_data);
-
-                    continue;
-                }
-
-                // Calculate maximum possible buffer length based on peer's
-                // flow control limits.
-                let max_tx_data = cmp::min(stream.max_tx_data - stream.tx_data,
-                                           self.max_tx_data - self.tx_data);
-
                 // Make sure we can fit the data in the packet.
-                let stream_len = cmp::min(left - frame::MAX_STREAM_OVERHEAD,
-                                          max_tx_data);
+                let stream_len = left - frame::MAX_STREAM_OVERHEAD;
+                let stream_buf = stream.send_pop(stream_len)?;
 
-                if stream_len == 0 {
+                if stream_buf.len() == 0 {
                     continue;
                 }
 
-                let stream_buf = stream.send_pop(stream_len)?;
+                self.tx_data += stream_len;
 
                 let frame = frame::Frame::Stream {
                     stream_id: *id,
@@ -814,9 +790,6 @@ impl Connection {
                 };
 
                 length += frame.wire_len();
-
-                self.tx_data += stream_len;
-                stream.tx_data += stream_len;
 
                 frames.push(frame);
 
@@ -890,7 +863,6 @@ impl Connection {
         let buf = stream.recv_pop()?;
 
         self.new_max_rx_data = self.max_rx_data + buf.len();
-        stream.new_max_rx_data = stream.max_rx_data + buf.len();
 
         Ok(buf)
     }
