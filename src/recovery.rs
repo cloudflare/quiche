@@ -178,8 +178,7 @@ impl Recovery {
 
         if let Some(pkt) = flight.sent.get(&largest_acked) {
             self.largest_acked = cmp::max(self.largest_acked, largest_acked);
-            self.latest_rtt = pkt.time.elapsed();
-            self.update_rtt(ack_delay);
+            self.update_rtt(pkt.time.elapsed(), ack_delay);
         }
 
         for pn in ranges.flatten().rev() {
@@ -287,16 +286,13 @@ impl Recovery {
         self.cwnd - self.bytes_in_flight
     }
 
-    fn update_rtt(&mut self, ack_delay: u64) {
+    fn update_rtt(&mut self, latest_rtt: time::Duration, ack_delay: u64) {
         let zero = time::Duration::new(0, 0);
 
         let ack_delay = time::Duration::from_micros(ack_delay);
 
         self.min_rtt = cmp::min(self.min_rtt, self.latest_rtt);
-
-        if self.latest_rtt - self.min_rtt > ack_delay {
-            self.latest_rtt -= ack_delay;
-        }
+        self.latest_rtt = cmp::max(latest_rtt - ack_delay, self.min_rtt);
 
         if self.smoothed_rtt == zero {
             self.rttvar = self.latest_rtt / 2;
@@ -305,9 +301,9 @@ impl Recovery {
         } else {
             let rttvar_sample = sub_abs(self.smoothed_rtt, self.latest_rtt);
 
-            self.rttvar = self.rttvar * (3/4) + rttvar_sample * (1/4);
+            self.rttvar = (self.rttvar * 3 + rttvar_sample) / 4;
 
-            self.smoothed_rtt = self.smoothed_rtt * (7/8) + self.latest_rtt * (1/8);
+            self.smoothed_rtt = (self.smoothed_rtt * 7 + self.latest_rtt) / 8;
         }
     }
 
