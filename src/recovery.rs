@@ -92,7 +92,7 @@ pub struct InFlight {
 
 impl InFlight {
     pub fn retransmit_unacked_crypto(&mut self) {
-        for (_, p) in &mut self.sent {
+        for p in &mut self.sent.values_mut() {
             p.frames.retain(|f|
                 match f {
                     frame::Frame::Crypto { .. } => true,
@@ -357,7 +357,7 @@ impl Recovery {
 
         if self.tlp_count < MAX_TLP_COUNT {
             let tlp_timeout = cmp::max(
-                self.smoothed_rtt * (3/2) + self.max_ack_delay,
+                (self.smoothed_rtt * 3) / 2 + self.max_ack_delay,
                 MIN_TLP_TIMEOUT
             );
 
@@ -374,7 +374,7 @@ impl Recovery {
 
         // TODO: do time loss detection
         let delay_until_lost = if largest_acked == self.largest_sent_pkt {
-            cmp::max(self.latest_rtt, self.smoothed_rtt) * (9/8)
+            cmp::max(self.latest_rtt * 9, self.smoothed_rtt * 9) / 8
         } else {
             time::Duration::from_secs(std::u64::MAX)
         };

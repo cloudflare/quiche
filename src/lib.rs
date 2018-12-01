@@ -778,7 +778,7 @@ impl Connection {
                 let stream_len = left - frame::MAX_STREAM_OVERHEAD;
                 let stream_buf = stream.send_pop(stream_len)?;
 
-                if stream_buf.len() == 0 {
+                if stream_buf.is_empty() {
                     continue;
                 }
 
