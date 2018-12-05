@@ -136,7 +136,7 @@ pub struct Connection {
 
     local_transport_params: TransportParams,
 
-    tls_state: tls::State,
+    tls_state: tls::Handshake,
 
     recovery: recovery::Recovery,
 
@@ -169,7 +169,7 @@ pub struct Connection {
 
 impl Connection {
     pub fn new(scid: &[u8], config: &mut Config) -> Result<Box<Connection>> {
-        let tls = config.tls_ctx.new_state().map_err(|_| Error::TlsFail)?;
+        let tls = config.tls_ctx.new_handshake().map_err(|_| Error::TlsFail)?;
 
         let max_rx_data = config.local_transport_params.initial_max_data;
 

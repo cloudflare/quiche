@@ -120,10 +120,10 @@ impl Context {
         }
     }
 
-    pub fn new_state(&mut self) -> Result<State> {
+    pub fn new_handshake(&mut self) -> Result<Handshake> {
         unsafe {
             let ssl = SSL_new(self.as_ptr());
-            Ok(State(ssl))
+            Ok(Handshake(ssl))
         }
     }
 
@@ -152,9 +152,9 @@ impl Drop for Context {
     }
 }
 
-pub struct State(*mut SSL);
+pub struct Handshake(*mut SSL);
 
-impl State {
+impl Handshake {
     pub fn get_error(&self, ret_code: i32) -> i32 {
         unsafe {
             SSL_get_error(self.as_ptr(), ret_code)
@@ -273,7 +273,7 @@ impl State {
     }
 }
 
-impl Drop for State {
+impl Drop for Handshake {
     fn drop(&mut self) {
         unsafe { SSL_free(self.as_ptr()) }
     }
@@ -443,7 +443,7 @@ fn map_result_ptr<'a, T>(bssl_result: *const T) -> Result<&'a T> {
     }
 }
 
-fn map_result_ssl(ssl: &State, bssl_result: i32) -> Result<()> {
+fn map_result_ssl(ssl: &Handshake, bssl_result: i32) -> Result<()> {
     match bssl_result {
         1 => Ok(()),
         _ => {
