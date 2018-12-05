@@ -85,14 +85,12 @@ impl Error {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Role {
+enum Role {
     Accept,
     Connect,
 }
 
 pub struct Config {
-    role: Role,
-
     local_transport_params: TransportParams,
 
     version: u32,
@@ -101,15 +99,10 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(role: Role, version: u32, tp: &TransportParams) -> Result<Config> {
-        let mut tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
-
-        if role == Role::Connect {
-            tls_ctx.set_verify(true);
-        }
+    pub fn new(version: u32, tp: &TransportParams) -> Result<Config> {
+        let tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
 
         Ok(Config {
-            role,
             local_transport_params: tp.clone(),
             version,
             tls_ctx,
@@ -183,12 +176,12 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(scid: &[u8], config: &mut Config) -> Result<Box<Connection>> {
+    fn new(scid: &[u8], config: &mut Config, role: Role) -> Result<Box<Connection>> {
         let tls = config.tls_ctx.new_handshake().map_err(|_| Error::TlsFail)?;
 
         let max_rx_data = config.local_transport_params.initial_max_data;
 
-        let is_server = config.role == Role::Accept;
+        let is_server = role == Role::Accept;
 
         let mut conn = Box::new(Connection {
             version: config.version,
@@ -1057,20 +1050,12 @@ impl Connection {
         vec.join("")
     }
 
-    pub fn set_host_name(&mut self, name: &str) -> Result<()> {
-        self.tls_state.set_host_name(name).map_err(|_| Error::TlsFail)
-    }
-
     pub fn is_established(&self) -> bool {
         self.handshake_completed
     }
 
     pub fn is_closed(&self) -> bool {
         self.closed
-    }
-
-    pub fn negotiate_version(hdr: &packet::Header, out: &mut [u8]) -> Result<usize> {
-        packet::negotiate_version(hdr, out)
     }
 
     fn do_handshake(&mut self) -> Result<()> {
@@ -1119,6 +1104,28 @@ impl Connection {
 
         Ok(())
     }
+}
+
+pub fn accept(scid: &[u8], config: &mut Config) -> Result<Box<Connection>> {
+    let conn = Connection::new(scid, config, Role::Accept)?;
+
+    Ok(conn)
+}
+
+pub fn connect(server_name: Option<&str>, scid: &[u8], config: &mut Config)
+                                                -> Result<Box<Connection>> {
+    let conn = Connection::new(scid, config, Role::Connect)?;
+
+    if server_name.is_some() {
+        conn.tls_state.set_host_name(server_name.unwrap())
+                      .map_err(|_| Error::TlsFail)?;
+    }
+
+    Ok(conn)
+}
+
+pub fn negotiate_version(hdr: &packet::Header, out: &mut [u8]) -> Result<usize> {
+    packet::negotiate_version(hdr, out)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1404,12 +1411,12 @@ mod tests {
             Role::Connect
         };
 
-        let mut config = Config::new(role, VERSION_DRAFT15, &tp).unwrap();
+        let mut config = Config::new(VERSION_DRAFT15, &tp).unwrap();
         config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
         config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
         config.verify_peer(false);
 
-        Connection::new(&scid, &mut config).unwrap()
+        Connection::new(&scid, &mut config, role).unwrap()
     }
 
     fn recv_send(conn: &mut Connection, buf: &mut [u8], len: usize) -> usize {

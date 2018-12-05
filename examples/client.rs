@@ -97,18 +97,14 @@ fn main() {
     let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
     rand::thread_rng().fill(&mut scid[..]);
 
-    let mut config = quiche::Config::new(quiche::Role::Connect, 0xbabababa,
-                                         &TRANSPORT_PARAMS).unwrap();
+    let mut config = quiche::Config::new(0xbabababa, &TRANSPORT_PARAMS).unwrap();
+    config.verify_peer(true);
 
     if args.get_bool("--no-verify") {
         config.verify_peer(false);
     }
 
-    let mut conn = quiche::Connection::new(&scid, &mut config).unwrap();
-
-    if url.domain().is_some() {
-        conn.set_host_name(url.domain().unwrap()).unwrap();
-    }
+    let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
 
     let write = match conn.send(&mut out) {
         Ok(v) => v,
