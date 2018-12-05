@@ -28,6 +28,7 @@
 #[macro_use]
 extern crate log;
 extern crate mio;
+extern crate url;
 extern crate rand;
 extern crate docopt;
 extern crate quiche;
@@ -40,6 +41,8 @@ use std::time;
 use docopt::Docopt;
 
 use rand::Rng;
+
+use url::Url;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
 
@@ -61,12 +64,11 @@ const TRANSPORT_PARAMS: quiche::TransportParams = quiche::TransportParams {
     stateless_reset_token: [0xba; 16],
 };
 
-const USAGE: &str = "Usage: client [options]
+const USAGE: &str = "Usage: client [options] URL
 
 Options:
   -h --help          Show this screen.
-  --connect <addr>   Connect to the given IP:port [default: 127.0.0.1:4433]
-  --path <path>      Request the given file [default: /index.html]
+  --no-verify        Don't verify server's certificate.
 ";
 
 fn main() {
@@ -79,8 +81,10 @@ fn main() {
                       .and_then(|dopt| dopt.parse())
                       .unwrap_or_else(|e| e.exit());
 
+    let url = Url::parse(args.get_str("URL")).unwrap();
+
     let socket = net::UdpSocket::bind("0.0.0.0:0").unwrap();
-    socket.connect(args.get_str("--connect")).unwrap();
+    socket.connect(&url).unwrap();
 
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
@@ -96,7 +100,15 @@ fn main() {
     let mut config = quiche::Config::new(quiche::Role::Connect, 0xbabababa,
                                          &TRANSPORT_PARAMS).unwrap();
 
+    if args.get_bool("--no-verify") {
+        config.verify_peer(false);
+    }
+
     let mut conn = quiche::Connection::new(&scid, &mut config).unwrap();
+
+    if url.domain().is_some() {
+        conn.set_host_name(url.domain().unwrap()).unwrap();
+    }
 
     let write = match conn.send(&mut out) {
         Ok(v) => v,
@@ -162,6 +174,11 @@ fn main() {
                 let read = match conn.recv(&mut buf[len - left..len]) {
                     Ok(v)  => v,
 
+                    Err(quiche::Error::NothingToDo) => {
+                        debug!("{} done reading", conn.trace_id());
+                        break;
+                    },
+
                     Err(e) => {
                         error!("{} recv failed: {:?}", conn.trace_id(), e);
                         conn.close(false, e.to_wire(), b"fail").unwrap();
@@ -179,10 +196,9 @@ fn main() {
         }
 
         if conn.is_established() && !req_sent {
-            info!("{} sending HTTP request for {}",
-                  conn.trace_id(), args.get_str("--path"));
+            info!("{} sending HTTP request for {}", conn.trace_id(), url.path());
 
-            let req = format!("GET {}\r\n", args.get_str("--path"));
+            let req = format!("GET {}\r\n", url.path());
             conn.stream_send(HTTP_REQ_STREAM_ID, req.as_bytes(), true).unwrap();
 
             req_sent = true;
