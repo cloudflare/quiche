@@ -1407,6 +1407,7 @@ mod tests {
         let mut config = Config::new(role, VERSION_DRAFT15, &tp).unwrap();
         config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
         config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+        config.verify_peer(false);
 
         Connection::new(&scid, &mut config).unwrap()
     }
