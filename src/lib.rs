@@ -163,6 +163,8 @@ pub struct Connection {
     app_error: Option<u16>,
     app_reason: Vec<u8>,
 
+    idle_timer: Option<time::Instant>,
+
     draining_timer: Option<time::Instant>,
 
     is_server: bool,
@@ -222,6 +224,8 @@ impl Connection {
 
             app_error: None,
             app_reason: Vec::new(),
+
+            idle_timer: None,
 
             draining_timer: None,
 
@@ -573,6 +577,10 @@ impl Connection {
         space.do_ack = cmp::max(space.do_ack, do_ack);
 
         space.largest_rx_pkt_num = cmp::max(space.largest_rx_pkt_num, pn);
+
+        self.idle_timer =
+            Some(now + time::Duration::from_secs(self.local_transport_params
+                                                     .idle_timeout as u64));
 
         let read = payload_offset + payload_len + aead.alg().tag_len();
         Ok(read)
@@ -976,7 +984,15 @@ impl Connection {
             return self.draining_timer;
         }
 
-        self.recovery.loss_detection_timer()
+        if self.recovery.loss_detection_timer().is_some() {
+            return self.recovery.loss_detection_timer();
+        }
+
+        if self.idle_timer.is_some() {
+            return self.idle_timer;
+        }
+
+        None
     }
 
     pub fn on_timeout(&mut self) {
@@ -988,6 +1004,11 @@ impl Connection {
                    self.closed = true;
             }
 
+            return;
+        }
+
+        if self.idle_timer.is_some() && self.idle_timer.unwrap() <= now {
+            self.closed = true;
             return;
         }
 
