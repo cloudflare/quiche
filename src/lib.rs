@@ -998,31 +998,36 @@ impl Connection {
     pub fn on_timeout(&mut self) {
         let now = time::Instant::now();
 
+        let trace_id = self.trace_id();
+
         if self.draining {
-            if self.draining_timer.is_some() && 
+            if self.draining_timer.is_some() &&
                self.draining_timer.unwrap() <= now {
-                   self.closed = true;
+                trace!("{} draining timeout expired", trace_id);
+
+                self.closed = true;
             }
 
             return;
         }
 
         if self.idle_timer.is_some() && self.idle_timer.unwrap() <= now {
+            trace!("{} idle timeout expired", trace_id);
+
             self.closed = true;
             return;
         }
 
         if self.recovery.loss_detection_timer().is_some() &&
-           self.recovery.loss_detection_timer().unwrap() > now {
+           self.recovery.loss_detection_timer().unwrap() <= now {
+            trace!("{} loss detection timeout expired", trace_id);
+
+            self.recovery.on_loss_detection_timer(&mut self.initial.flight,
+                                                  &mut self.handshake.flight,
+                                                  &mut self.application.flight,
+                                                  &trace_id);
             return;
         }
-
-        let trace_id = self.trace_id();
-
-        self.recovery.on_loss_detection_timer(&mut self.initial.flight,
-                                              &mut self.handshake.flight,
-                                              &mut self.application.flight,
-                                              &trace_id);
     }
 
     pub fn close(&mut self, app: bool, err: u16, reason: &[u8]) -> Result<()> {
