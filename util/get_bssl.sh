@@ -16,7 +16,7 @@ cd boringssl/
 
 cmake -DCMAKE_C_FLAGS="-fPIC" -DCMAKE_CXX_FLAGS="-fPIC" .
 
-make VERBOSE=1 -j`nproc`
+make VERBOSE=1 -j`nproc` bssl
 
 mkdir -p "$INSTALL_DIR/lib"
 
