@@ -276,17 +276,6 @@ impl Recovery {
         self.loss_detection_timer
     }
 
-    pub fn expired(&self) -> bool {
-        if let Some(timer) = self.loss_detection_timer {
-            let now = time::Instant::now();
-            if now >= timer {
-                return true;
-            }
-        }
-
-        false
-    }
-
     pub fn cwnd(&self) -> usize {
         // Ignore cwnd when sending probe packets.
         if self.probes > 0 {

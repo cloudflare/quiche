@@ -45,6 +45,9 @@ pub const VERSION_DRAFT15: u32 = 0xff00_000f;
 
 const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 
+// TODO: calculate draining timer as 3 * RTO
+const DRAINING_TIMEOUT: time::Duration = time::Duration::from_millis(200);
+
 pub type Result<T> = ::std::result::Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -160,6 +163,8 @@ pub struct Connection {
     app_error: Option<u16>,
     app_reason: Vec<u8>,
 
+    draining_timer: Option<time::Instant>,
+
     is_server: bool,
 
     derived_initial_secrets: bool,
@@ -171,6 +176,8 @@ pub struct Connection {
     handshake_completed: bool,
 
     draining: bool,
+
+    closed: bool,
 }
 
 impl Connection {
@@ -216,6 +223,8 @@ impl Connection {
             app_error: None,
             app_reason: Vec::new(),
 
+            draining_timer: None,
+
             is_server,
 
             derived_initial_secrets: false,
@@ -227,6 +236,8 @@ impl Connection {
             handshake_completed: false,
 
             draining: false,
+
+            closed: false,
         });
 
         conn.tls_state.init(&conn).map_err(|_| Error::TlsFail)?;
@@ -252,6 +263,8 @@ impl Connection {
     }
 
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
+        let now = time::Instant::now();
+
         if buf.is_empty() {
             return Err(Error::BufferTooShort);
         }
@@ -406,10 +419,12 @@ impl Connection {
 
                 frame::Frame::ConnectionClose { .. } => {
                     self.draining = true;
+                    self.draining_timer = Some(now + DRAINING_TIMEOUT);
                 },
 
                 frame::Frame::ApplicationClose { .. } => {
                     self.draining = true;
+                    self.draining_timer = Some(now + DRAINING_TIMEOUT);
                 },
 
                 frame::Frame::MaxData { max } => {
@@ -564,6 +579,8 @@ impl Connection {
     }
 
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
+        let now = time::Instant::now();
+
         if out.is_empty() {
             return Err(Error::BufferTooShort);
         }
@@ -759,6 +776,7 @@ impl Connection {
             frames.push(frame);
 
             self.draining = true;
+            self.draining_timer = Some(now + DRAINING_TIMEOUT);
         }
 
         // Create APPLICAtiON_CLOSE frame.
@@ -774,6 +792,7 @@ impl Connection {
             frames.push(frame);
 
             self.draining = true;
+            self.draining_timer = Some(now + DRAINING_TIMEOUT);
         }
 
         // Create CRYPTO frame.
@@ -949,11 +968,31 @@ impl Connection {
     }
 
     pub fn timeout(&self) -> Option<std::time::Instant> {
+        if self.closed {
+            return None;
+        }
+
+        if self.draining {
+            return self.draining_timer;
+        }
+
         self.recovery.loss_detection_timer()
     }
 
     pub fn on_timeout(&mut self) {
-        if !self.recovery.expired() {
+        let now = time::Instant::now();
+
+        if self.draining {
+            if self.draining_timer.is_some() && 
+               self.draining_timer.unwrap() <= now {
+                   self.closed = true;
+            }
+
+            return;
+        }
+
+        if self.recovery.loss_detection_timer().is_some() &&
+           self.recovery.loss_detection_timer().unwrap() > now {
             return;
         }
 
@@ -1001,8 +1040,7 @@ impl Connection {
     }
 
     pub fn is_closed(&self) -> bool {
-        // TODO: implement draining period
-        self.draining
+        self.closed
     }
 
     pub fn negotiate_version(hdr: &packet::Header, out: &mut [u8]) -> Result<usize> {
