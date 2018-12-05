@@ -81,17 +81,45 @@ impl Error {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Config<'a> {
-    pub version: u32,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Role {
+    Accept,
+    Connect,
+}
 
-    pub local_conn_id: &'a [u8],
+pub struct Config {
+    role: Role,
 
-    pub local_transport_params: &'a TransportParams,
+    local_transport_params: TransportParams,
 
-    pub tls_server_name: &'a str,
-    pub tls_certificate: &'a str,
-    pub tls_certificate_key: &'a str,
+    version: u32,
+
+    tls_ctx: tls::Context,
+}
+
+impl Config {
+    pub fn new(role: Role, version: u32, tp: &TransportParams) -> Result<Config> {
+        let tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
+
+        Ok(Config {
+            role,
+            local_transport_params: tp.clone(),
+            version,
+            tls_ctx,
+        })
+    }
+
+    pub fn load_cert_chain_from_pem_file(&mut self, file: &str) -> Result<()> {
+        self.tls_ctx.use_certificate_chain_file(file)
+                    .map_err(|_| Error::TlsFail)?;
+        Ok(())
+    }
+
+    pub fn load_priv_key_from_pem_file(&mut self, file: &str) -> Result<()> {
+        self.tls_ctx.use_privkey_file(file)
+                    .map_err(|_| Error::TlsFail)?;
+        Ok(())
+    }
 }
 
 pub struct Connection {
@@ -140,20 +168,18 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(config: Config, is_server: bool) -> Result<Box<Connection>> {
-        let tls = tls::State::new().map_err(|_| Error::TlsFail)?;
-        Connection::new_with_tls(config, tls, is_server)
-    }
+    pub fn new(scid: &[u8], config: &mut Config) -> Result<Box<Connection>> {
+        let tls = config.tls_ctx.new_state().map_err(|_| Error::TlsFail)?;
 
-    fn new_with_tls(config: Config, tls: tls::State, is_server: bool)
-                                                    -> Result<Box<Connection>> {
         let max_rx_data = config.local_transport_params.initial_max_data;
+
+        let is_server = config.role == Role::Accept;
 
         let mut conn = Box::new(Connection {
             version: config.version,
 
             dcid: Vec::new(),
-            scid: config.local_conn_id.to_vec(),
+            scid: scid.to_vec(),
 
             initial: packet::PktNumSpace::new(packet::Type::Initial,
                                               crypto::Level::Initial),
@@ -197,8 +223,7 @@ impl Connection {
             draining: false,
         });
 
-        conn.tls_state.init_with_conn_extra(&conn, &config)
-                      .map_err(|_| Error::TlsFail)?;
+        conn.tls_state.init(&conn).map_err(|_| Error::TlsFail)?;
 
         // Derive initial secrets for the client. We can do this here because
         // we already generated the random destination connection ID.
@@ -1289,19 +1314,17 @@ mod tests {
         let mut scid: [u8; 16] = [0; 16];
         rand::rand_bytes(&mut scid[..]);
 
-        let config = Config {
-            version: VERSION_DRAFT15,
-
-            local_conn_id: &scid,
-
-            local_transport_params: &tp,
-
-            tls_server_name: "quic.tech",
-            tls_certificate: "examples/cert.crt",
-            tls_certificate_key: "examples/cert.key",
+        let role = if is_server {
+            Role::Accept
+        } else {
+            Role::Connect
         };
 
-        Connection::new(config, is_server).unwrap()
+        let mut config = Config::new(role, VERSION_DRAFT15, &tp).unwrap();
+        config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
+        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+
+        Connection::new(&scid, &mut config).unwrap()
     }
 
     fn recv_send(conn: &mut Connection, buf: &mut [u8], len: usize) -> usize {

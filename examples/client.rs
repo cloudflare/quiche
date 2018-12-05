@@ -93,19 +93,10 @@ fn main() {
     let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
     rand::thread_rng().fill(&mut scid[..]);
 
-    let config = quiche::Config {
-        version: 0xbabababa,
+    let mut config = quiche::Config::new(quiche::Role::Connect, 0xbabababa,
+                                         &TRANSPORT_PARAMS).unwrap();
 
-        local_conn_id: &scid,
-
-        local_transport_params: &TRANSPORT_PARAMS,
-
-        tls_server_name: "",
-        tls_certificate: "",
-        tls_certificate_key: "",
-    };
-
-    let mut conn = quiche::Connection::new(config, false).unwrap();
+    let mut conn = quiche::Connection::new(&scid, &mut config).unwrap();
 
     let write = match conn.send(&mut out) {
         Ok(v) => v,

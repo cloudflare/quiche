@@ -100,14 +100,13 @@ const SSL_OP_NO_TLSV1: u32 = 0x0400_0000;
 const SSL_OP_NO_TLSV1_1: u32 = 0x1000_0000;
 const SSL_OP_NO_TLSV1_2: u32 = 0x0800_0000;
 
-pub struct State(*mut SSL);
+pub struct Context(*mut SSL_CTX);
 
-impl State {
-    pub fn new() -> Result<State> {
+impl Context {
+    pub fn new() -> Result<Context> {
         unsafe {
-            // TODO: expose SSL_CTX to applications so we don't need to parse
-            // certificates for each connection.
             let ctx = SSL_CTX_new(TLS_method());
+
             // TODO: enable session tickets (debug problem with quant)
             SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET |
                                      SSL_OP_CIPHER_SERVER_PREFERENCE |
@@ -117,20 +116,52 @@ impl State {
 
             map_result(SSL_CTX_set_quic_method(ctx, &QUICHE_STREAM_METHOD))?;
 
-            let ssl = SSL_new(ctx);
-            SSL_CTX_free(ctx);
+            Ok(Context(ctx))
+        }
+    }
 
+    pub fn new_state(&mut self) -> Result<State> {
+        unsafe {
+            let ssl = SSL_new(self.as_ptr());
             Ok(State(ssl))
         }
     }
 
+    pub fn use_certificate_chain_file(&mut self, file: &str) -> Result<()> {
+        let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
+        map_result(unsafe {
+            SSL_CTX_use_certificate_chain_file(self.as_ptr(), cstr.as_ptr())
+        })
+    }
+
+    pub fn use_privkey_file(&mut self, file: &str) -> Result<()> {
+        let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
+        map_result(unsafe {
+            SSL_CTX_use_PrivateKey_file(self.as_ptr(), cstr.as_ptr(), 1)
+        })
+    }
+
+    fn as_ptr(&self) -> *mut SSL_CTX {
+        self.0
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        unsafe { SSL_CTX_free(self.as_ptr()) }
+    }
+}
+
+pub struct State(*mut SSL);
+
+impl State {
     pub fn get_error(&self, ret_code: i32) -> i32 {
         unsafe {
             SSL_get_error(self.as_ptr(), ret_code)
         }
     }
 
-    pub fn init_with_conn(&self, conn: &::Connection) -> Result<()> {
+    pub fn init(&self, conn: &::Connection) -> Result<()> {
         self.set_state(conn.is_server);
 
         self.set_ex_data(*QUICHE_EX_DATA_INDEX, conn)?;
@@ -148,25 +179,6 @@ impl State {
                                            .map_err(|_| Error::TlsFail)?;
 
         self.set_quic_transport_params(raw_params)?;
-
-        Ok(())
-    }
-
-    pub fn init_with_conn_extra(&self, conn: &::Connection, config: &::Config)
-                                                            -> Result<()> {
-        self.init_with_conn(conn)?;
-
-        if !config.tls_server_name.is_empty() {
-            self.set_server_name(config.tls_server_name)?;
-        }
-
-        if !config.tls_certificate.is_empty() {
-            self.use_certificate_file(config.tls_certificate)?;
-        }
-
-        if !config.tls_certificate_key.is_empty() {
-            self.use_privkey_file(config.tls_certificate_key)?;
-        }
 
         Ok(())
     }
@@ -241,21 +253,6 @@ impl State {
     pub fn do_handshake(&self) -> Result<()> {
         map_result_ssl(self, unsafe {
             SSL_do_handshake(self.as_ptr())
-        })
-    }
-
-    pub fn use_certificate_file(&self, file: &str) -> Result<()> {
-        let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
-        // TODO: support parsing and configuring full chain
-        map_result_ssl(self, unsafe {
-            SSL_use_certificate_file(self.as_ptr(), cstr.as_ptr(), 1)
-        })
-    }
-
-    pub fn use_privkey_file(&self, file: &str) -> Result<()> {
-        let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
-        map_result_ssl(self, unsafe {
-            SSL_use_PrivateKey_file(self.as_ptr(), cstr.as_ptr(), 1)
         })
     }
 
@@ -495,6 +492,14 @@ extern {
     fn SSL_CTX_set_quic_method(ctx: *mut SSL_CTX,
         quic_method: *const SSL_QUIC_METHOD) -> i32;
 
+    fn SSL_CTX_use_certificate_chain_file(ctx: *mut SSL_CTX,
+                                          file: *const libc::c_char)
+                                                    -> libc::c_int;
+
+    fn SSL_CTX_use_PrivateKey_file(ctx: *mut SSL_CTX,
+                                   file: *const libc::c_char,
+                                   ty: libc::c_int) -> libc::c_int;
+
     // SSL
     fn SSL_get_ex_new_index(argl: libc::c_long, argp: *const c_void,
         unused: *const c_void, dup_unused: *const c_void,
@@ -529,12 +534,6 @@ extern {
         data: *const u8, len: usize) -> i32;
 
     fn SSL_do_handshake(ssl: *mut SSL) -> i32;
-
-    fn SSL_use_certificate_file(ssl: *mut SSL, file: *const libc::c_char,
-                                ty: libc::c_int) -> libc::c_int;
-
-    fn SSL_use_PrivateKey_file(ssl: *mut SSL, file: *const libc::c_char,
-                               ty: libc::c_int) -> libc::c_int;
 
     fn SSL_quic_write_level(ssl: *mut SSL) -> crypto::Level;
 

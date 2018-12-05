@@ -98,6 +98,13 @@ fn main() {
     let mut connections: HashMap<net::SocketAddr, Box<quiche::Connection>> =
         HashMap::new();
 
+    let mut config = quiche::Config::new(quiche::Role::Accept,
+                                         quiche::VERSION_DRAFT15,
+                                         &TRANSPORT_PARAMS).unwrap();
+
+    config.load_cert_chain_from_pem_file(args.get_str("--cert")).unwrap();
+    config.load_priv_key_from_pem_file(args.get_str("--key")).unwrap();
+
     loop {
         let now = time::Instant::now();
 
@@ -183,24 +190,13 @@ fn main() {
                     let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
                     rand::thread_rng().fill(&mut scid[..]);
 
-                    let config = quiche::Config {
-                        version: quiche::VERSION_DRAFT15,
-
-                        local_conn_id: &scid,
-
-                        local_transport_params: &TRANSPORT_PARAMS,
-
-                        tls_server_name: args.get_str("--name"),
-                        tls_certificate: args.get_str("--cert"),
-                        tls_certificate_key: args.get_str("--key"),
-                    };
-
                     debug!("New connection: dcid={} scid={} lcid={}",
                            hex_dump(&hdr.dcid),
                            hex_dump(&hdr.scid),
                            hex_dump(&scid));
 
-                    let conn = quiche::Connection::new(config, true).unwrap();
+                    let conn = quiche::Connection::new(&scid, &mut config)
+                                                  .unwrap();
 
                     v.insert(conn)
                 },
