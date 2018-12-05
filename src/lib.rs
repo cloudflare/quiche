@@ -99,7 +99,11 @@ pub struct Config {
 
 impl Config {
     pub fn new(role: Role, version: u32, tp: &TransportParams) -> Result<Config> {
-        let tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
+        let mut tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
+
+        if role == Role::Connect {
+            tls_ctx.set_verify(true);
+        }
 
         Ok(Config {
             role,
@@ -111,14 +115,16 @@ impl Config {
 
     pub fn load_cert_chain_from_pem_file(&mut self, file: &str) -> Result<()> {
         self.tls_ctx.use_certificate_chain_file(file)
-                    .map_err(|_| Error::TlsFail)?;
-        Ok(())
+                    .map_err(|_| Error::TlsFail)
     }
 
     pub fn load_priv_key_from_pem_file(&mut self, file: &str) -> Result<()> {
         self.tls_ctx.use_privkey_file(file)
-                    .map_err(|_| Error::TlsFail)?;
-        Ok(())
+                    .map_err(|_| Error::TlsFail)
+    }
+
+    pub fn verify_peer(&mut self, verify: bool) {
+        self.tls_ctx.set_verify(verify);
     }
 }
 
@@ -250,9 +256,19 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
+        if self.draining {
+            return Err(Error::NothingToDo);
+        }
+
         let trace_id = self.trace_id();
 
         self.do_handshake()?;
+
+        let is_closing = self.error.is_some() || self.app_error.is_some();
+
+        if is_closing {
+            return Err(Error::NothingToDo);
+        }
 
         let mut b = octets::Bytes::new(buf);
 
@@ -974,6 +990,10 @@ impl Connection {
                                    .collect();
 
         vec.join("")
+    }
+
+    pub fn set_host_name(&mut self, name: &str) -> Result<()> {
+        self.tls_state.set_host_name(name).map_err(|_| Error::TlsFail)
     }
 
     pub fn is_established(&self) -> bool {

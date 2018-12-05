@@ -65,6 +65,10 @@ struct SSL(c_void);
 #[repr(transparent)]
 struct SSL_CIPHER(c_void);
 
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
+struct X509_VERIFY_PARAM(c_void);
+
 #[repr(C)]
 #[allow(non_camel_case_types)]
 struct SSL_QUIC_METHOD {
@@ -114,6 +118,8 @@ impl Context {
                                      SSL_OP_NO_TLSV1_1 |
                                      SSL_OP_NO_TLSV1_2);
 
+            map_result(SSL_CTX_set_default_verify_paths(ctx))?;
+
             map_result(SSL_CTX_set_quic_method(ctx, &QUICHE_STREAM_METHOD))?;
 
             Ok(Context(ctx))
@@ -139,6 +145,18 @@ impl Context {
         map_result(unsafe {
             SSL_CTX_use_PrivateKey_file(self.as_ptr(), cstr.as_ptr(), 1)
         })
+    }
+
+    pub fn set_verify(&mut self, verify: bool) {
+        let mode = if verify {
+            0x02 // SSL_VERIFY_FAIL_IF_NO_PEER_CERT 
+        } else {
+            0x00 // SSL_VERIFY_NONE
+        };
+
+        unsafe {
+            SSL_CTX_set_verify(self.as_ptr(), mode, ptr::null());
+        }
     }
 
     fn as_ptr(&self) -> *mut SSL_CTX {
@@ -218,10 +236,18 @@ impl Handshake {
         }
     }
 
-    pub fn set_server_name(&self, name: &str) -> Result<()> {
+    pub fn set_host_name(&self, name: &str) -> Result<()> {
         let cstr = ffi::CString::new(name).map_err(|_| Error::TlsFail)?;
         map_result_ssl(self, unsafe {
             SSL_set_tlsext_host_name(self.as_ptr(), cstr.as_ptr())
+        })?;
+
+        let param = unsafe {
+            SSL_get0_param(self.as_ptr())
+        };
+
+        map_result(unsafe {
+            X509_VERIFY_PARAM_set1_host(param, cstr.as_ptr(), name.len())
         })
     }
 
@@ -500,6 +526,10 @@ extern {
                                    file: *const libc::c_char,
                                    ty: libc::c_int) -> libc::c_int;
 
+    fn SSL_CTX_set_default_verify_paths(ctx: *mut SSL_CTX) -> libc::c_int;
+
+    fn SSL_CTX_set_verify(ctx: *mut SSL_CTX, mode: i32, cb: *const c_void,);
+
     // SSL
     fn SSL_get_ex_new_index(argl: libc::c_long, argp: *const c_void,
         unused: *const c_void, dup_unused: *const c_void,
@@ -511,6 +541,8 @@ extern {
 
     fn SSL_set_accept_state(ssl: *mut SSL);
     fn SSL_set_connect_state(ssl: *mut SSL);
+
+    fn SSL_get0_param(ssl: *mut SSL) -> *mut X509_VERIFY_PARAM;
 
     fn SSL_set_ex_data(ssl: *mut SSL, idx: i32, ptr: *const c_void) -> i32;
     fn SSL_get_ex_data(ssl: *mut SSL, idx: i32) -> *mut c_void;
@@ -543,4 +575,9 @@ extern {
 
     // SSL_CIPHER
     fn SSL_CIPHER_get_id(cipher: *const SSL_CIPHER) -> u32;
+
+    // X509_VERIFY_PARAM
+    fn X509_VERIFY_PARAM_set1_host(param: *mut X509_VERIFY_PARAM,
+                                   name: *const libc::c_char,
+                                   namelen: libc::size_t) -> i32;
 }
