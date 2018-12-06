@@ -28,8 +28,8 @@
 use std::mem;
 use std::ptr;
 
-use ::Result;
-use ::Error;
+use crate::Result;
+use crate::Error;
 
 macro_rules! peek_u {
     ($b:expr, $ty:ty) => ({

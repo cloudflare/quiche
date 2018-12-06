@@ -35,9 +35,10 @@ use libc::c_void;
 
 use std::io::prelude::*;
 
-use ::Connection;
+use crate::Connection;
+use crate::TransportParams;
 
-use crypto;
+use crate::crypto;
 
 pub type Result<T> = ::std::result::Result<T, Error>;
 
@@ -189,7 +190,7 @@ impl Handshake {
         }
     }
 
-    pub fn init(&self, conn: &::Connection) -> Result<()> {
+    pub fn init(&self, conn: &Connection) -> Result<()> {
         self.set_state(conn.is_server);
 
         self.set_ex_data(*QUICHE_EX_DATA_INDEX, conn)?;
@@ -201,9 +202,9 @@ impl Handshake {
 
         let mut raw_params: [u8; 128] = [0; 128];
 
-        let raw_params = ::TransportParams::encode(&conn.local_transport_params,
-                                                   conn.version, conn.is_server,
-                                                   &mut raw_params)
+        let raw_params = TransportParams::encode(&conn.local_transport_params,
+                                                 conn.version, conn.is_server,
+                                                 &mut raw_params)
                                            .map_err(|_| Error::TlsFail)?;
 
         self.set_quic_transport_params(raw_params)?;

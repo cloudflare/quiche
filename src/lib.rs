@@ -84,7 +84,7 @@ impl Error {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Role {
     Accept,
     Connect,
@@ -1467,10 +1467,10 @@ mod tests {
     }
 }
 
-pub use stream::RangeBuf;
-pub use stream::Readable;
-pub use packet::Header;
-pub use packet::Type;
+pub use crate::stream::RangeBuf;
+pub use crate::stream::Readable;
+pub use crate::packet::Header;
+pub use crate::packet::Type;
 
 mod crypto;
 mod frame;

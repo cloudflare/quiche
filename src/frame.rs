@@ -27,12 +27,12 @@
 
 use std::fmt;
 
-use ::Result;
-use ::Error;
+use crate::Result;
+use crate::Error;
 
-use octets;
-use ranges;
-use stream;
+use crate::octets;
+use crate::ranges;
+use crate::stream;
 
 pub const MAX_CRYPTO_OVERHEAD: usize = 8;
 pub const MAX_STREAM_OVERHEAD: usize = 12;

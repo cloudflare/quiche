@@ -25,8 +25,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use ::Result;
-use ::Error;
+use crate::Result;
+use crate::Error;
 
 use std::cmp;
 use std::collections::hash_map;

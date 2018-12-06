@@ -29,15 +29,15 @@ use std::cmp;
 use std::fmt;
 use std::slice;
 
-use ::Result;
-use ::Error;
+use crate::Result;
+use crate::Error;
 
-use crypto;
-use octets;
-use rand;
-use ranges;
-use recovery;
-use stream;
+use crate::crypto;
+use crate::octets;
+use crate::rand;
+use crate::ranges;
+use crate::recovery;
+use crate::stream;
 
 const FORM_BIT: u8 = 0x80;
 const KEY_PHASE_BIT: u8 = 0x40;
@@ -381,18 +381,18 @@ pub fn encode_pkt_num(pn: u64, b: &mut octets::Bytes) -> Result<()> {
 
     match len {
         1 => {
-            let mut buf = b.put_u8(pn as u8)?;
+            let buf = b.put_u8(pn as u8)?;
             buf[0] &= !0x80;
         },
 
         2 => {
-            let mut buf = b.put_u16(pn as u16)?;
+            let buf = b.put_u16(pn as u16)?;
             buf[0] &= !0xc0;
             buf[0] |= 0x80;
         },
 
         4 => {
-            let mut buf = b.put_u32(pn as u32)?;
+            let buf = b.put_u32(pn as u32)?;
             buf[0] |= 0xc0;
         },
 
@@ -423,7 +423,7 @@ pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
     b.put_u8(cil)?;
     b.put_bytes(&hdr.scid)?;
     b.put_bytes(&hdr.dcid)?;
-    b.put_u32(::VERSION_DRAFT15)?;
+    b.put_u32(crate::VERSION_DRAFT15)?;
 
     Ok(b.off())
 }

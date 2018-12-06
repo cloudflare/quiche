@@ -33,10 +33,10 @@ use ring::hkdf;
 use ring::hmac;
 use ring::unauthenticated_stream;
 
-use ::Result;
-use ::Error;
+use crate::Result;
+use crate::Error;
 
-use octets;
+use crate::octets;
 
 const INITIAL_SALT: [u8; 20] = [
     0x9c, 0x10, 0x8f, 0x98, 0x52, 0x0a, 0x5c, 0x5c, 0x32, 0x96,
