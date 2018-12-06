@@ -208,7 +208,7 @@ fn main() {
                 let read = match conn.recv(&mut buf[len - left..len]) {
                     Ok(v)  => v,
 
-                    Err(quiche::Error::NothingToDo) => {
+                    Err(quiche::Error::Done) => {
                         debug!("{} done reading", conn.trace_id());
                         break;
                     },
@@ -237,7 +237,7 @@ fn main() {
                 let write = match conn.send(&mut out) {
                     Ok(v) => v,
 
-                    Err(quiche::Error::NothingToDo) => {
+                    Err(quiche::Error::Done) => {
                         debug!("{} done writing", conn.trace_id());
                         break;
                     },
@@ -273,7 +273,7 @@ fn handle_stream(conn: &mut quiche::Connection, stream: u64, args: &docopt::Argv
     let stream_data = match conn.stream_recv(stream) {
         Ok(v) => v,
 
-        Err(quiche::Error::NothingToDo) => return,
+        Err(quiche::Error::Done) => return,
 
         Err(e) => panic!("{} stream recv failed {:?}",
                          conn.trace_id(), e),

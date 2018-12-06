@@ -175,7 +175,7 @@ fn main() {
                 let read = match conn.recv(&mut buf[len - left..len]) {
                     Ok(v)  => v,
 
-                    Err(quiche::Error::NothingToDo) => {
+                    Err(quiche::Error::Done) => {
                         debug!("{} done reading", conn.trace_id());
                         break;
                     },
@@ -221,7 +221,7 @@ fn main() {
             let write = match conn.send(&mut out) {
                 Ok(v) => v,
 
-                Err(quiche::Error::NothingToDo) => {
+                Err(quiche::Error::Done) => {
                     debug!("{} done writing", conn.trace_id());
                     break;
                 },

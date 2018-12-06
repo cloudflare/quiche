@@ -53,8 +53,10 @@ pub type Result<T> = ::std::result::Result<T, Error>;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     NoError,
-    UnknownVersion,
+    Again,
+    Done,
     BufferTooShort,
+    UnknownVersion,
     InvalidFrame,
     InvalidPacket,
     InvalidState,
@@ -62,8 +64,6 @@ pub enum Error {
     InvalidTransportParam,
     CryptoFail,
     TlsFail,
-    Again,
-    NothingToDo,
     FlowControl,
 }
 
@@ -77,7 +77,7 @@ impl Error {
             Error::CryptoFail => 0x100,
             Error::TlsFail => 0x100,
             Error::Again => 0x0,
-            Error::NothingToDo => 0x0,
+            Error::Done => 0x0,
             Error::FlowControl => 0x3,
             _ => 0xa,
         }
@@ -271,7 +271,7 @@ impl Connection {
         }
 
         if self.draining {
-            return Err(Error::NothingToDo);
+            return Err(Error::Done);
         }
 
         let trace_id = self.trace_id();
@@ -281,7 +281,7 @@ impl Connection {
         let is_closing = self.error.is_some() || self.app_error.is_some();
 
         if is_closing {
-            return Err(Error::NothingToDo);
+            return Err(Error::Done);
         }
 
         let mut b = octets::Bytes::new(buf);
@@ -591,7 +591,7 @@ impl Connection {
         }
 
         if self.draining {
-            return Err(Error::NothingToDo);
+            return Err(Error::Done);
         }
 
         let is_closing = self.error.is_some() || self.app_error.is_some();
@@ -633,7 +633,7 @@ impl Connection {
                        self.streams.values().any(|s| s.more_credit())) {
                 &mut self.application
             } else {
-                return Err(Error::NothingToDo);
+                return Err(Error::Done);
             };
 
         for lost in space.flight.lost.drain(..) {
@@ -681,7 +681,7 @@ impl Connection {
         let mut length = pn_len + space.overhead();
 
         if left < b.off() + length + 4 {
-            return Err(Error::NothingToDo);
+            return Err(Error::Done);
         }
 
         left -= b.off() + length + 4;
@@ -864,7 +864,7 @@ impl Connection {
         }
 
         if frames.is_empty() {
-            return Err(Error::NothingToDo);
+            return Err(Error::Done);
         }
 
         // Only long header packets have an explicit length field.
@@ -922,7 +922,7 @@ impl Connection {
         };
 
         if !stream.readable() {
-            return Err(Error::NothingToDo);
+            return Err(Error::Done);
         }
 
         let buf = stream.recv_pop()?;
@@ -1029,11 +1029,11 @@ impl Connection {
 
     pub fn close(&mut self, app: bool, err: u16, reason: &[u8]) -> Result<()> {
         if self.draining {
-            return Err(Error::NothingToDo);
+            return Err(Error::Done);
         }
 
         if self.error.is_some() || self.app_error.is_some() {
-            return Err(Error::NothingToDo);
+            return Err(Error::Done);
         }
 
         if app {
@@ -1438,7 +1438,7 @@ mod tests {
             let write = match conn.send(&mut buf[off..]) {
                 Ok(v)   => v,
 
-                Err(Error::NothingToDo) => { break; },
+                Err(Error::Done) => { break; },
 
                 Err(e)  => panic!("SEND FAILED: {:?}", e),
             };
