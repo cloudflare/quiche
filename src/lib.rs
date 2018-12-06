@@ -122,6 +122,10 @@ impl Config {
     pub fn verify_peer(&mut self, verify: bool) {
         self.tls_ctx.set_verify(verify);
     }
+
+    pub fn log_keys(&mut self) {
+        self.tls_ctx.enable_keylog();
+    }
 }
 
 pub struct Connection {

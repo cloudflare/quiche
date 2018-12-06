@@ -25,11 +25,15 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::fs;
+use std::env;
 use std::ffi;
 use std::ptr;
 use std::slice;
 
 use libc::c_void;
+
+use std::io::prelude::*;
 
 use ::Connection;
 
@@ -156,6 +160,12 @@ impl Context {
 
         unsafe {
             SSL_CTX_set_verify(self.as_ptr(), mode, ptr::null());
+        }
+    }
+
+    pub fn enable_keylog(&mut self) {
+        unsafe {
+            SSL_CTX_set_keylog_callback(self.as_ptr(), keylog);
         }
     }
 
@@ -455,6 +465,23 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> i32 {
     1
 }
 
+extern fn keylog(_: *mut SSL, line: *const libc::c_char) {
+    if let Some(path) = env::var_os("SSLKEYLOGFILE") {
+        match fs::OpenOptions::new().create(true).append(true).open(path) {
+            Ok(mut file) => {
+                let data = unsafe {
+                    ffi::CStr::from_ptr(line).to_bytes()
+                };
+
+                file.write_all(data).unwrap_or(());
+                file.write_all(b"\n").unwrap_or(());
+            },
+
+            Err(e) => error!("LOOOL {:?}", e),
+        }
+    }
+}
+
 fn map_result(bssl_result: i32) -> Result<()> {
     match bssl_result {
         1 => Ok(()),
@@ -529,6 +556,9 @@ extern {
     fn SSL_CTX_set_default_verify_paths(ctx: *mut SSL_CTX) -> libc::c_int;
 
     fn SSL_CTX_set_verify(ctx: *mut SSL_CTX, mode: i32, cb: *const c_void,);
+
+    fn SSL_CTX_set_keylog_callback(ctx: *mut SSL_CTX,
+                    cb: extern fn(ssl: *mut SSL, line: *const libc::c_char));
 
     // SSL
     fn SSL_get_ex_new_index(argl: libc::c_long, argp: *const c_void,

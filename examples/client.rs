@@ -35,6 +35,7 @@ extern crate quiche;
 extern crate env_logger;
 
 use std::io;
+use std::env;
 use std::net;
 use std::time;
 
@@ -102,6 +103,10 @@ fn main() {
 
     if args.get_bool("--no-verify") {
         config.verify_peer(false);
+    }
+
+    if env::var_os("SSLKEYLOGFILE").is_some() {
+        config.log_keys();
     }
 
     let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
