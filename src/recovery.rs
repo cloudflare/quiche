@@ -68,9 +68,7 @@ pub struct Sent {
 
 impl Sent {
     pub fn new(pkt_num: u64, frames: Vec<frame::Frame>, sent_bytes: usize,
-               retransmittable: bool, is_crypto: bool) -> Sent {
-        let now = time::Instant::now();
-
+               retransmittable: bool, is_crypto: bool, now: time::Instant) -> Sent {
         let sent_bytes = if retransmittable { sent_bytes } else { 0 };
 
         Sent {
@@ -166,7 +164,7 @@ pub struct Recovery {
 
 impl Recovery {
     pub fn on_packet_sent(&mut self, pkt: Sent, flight: &mut InFlight,
-                          trace_id: &str) {
+                          now: time::Instant, trace_id: &str) {
         let pkt_num = pkt.pkt_num;
         let retransmittable = pkt.retransmittable;
         let is_crypto = pkt.is_crypto;
@@ -177,8 +175,6 @@ impl Recovery {
         flight.sent.insert(pkt_num, pkt);
 
         if retransmittable {
-            let now = time::Instant::now();
-
             if is_crypto {
                 self.time_of_last_sent_crypto_packet = now;
             }
@@ -195,7 +191,7 @@ impl Recovery {
     }
 
     pub fn on_ack_received(&mut self, ranges: &ranges::RangeSet, ack_delay: u64,
-                           flight: &mut InFlight, trace_id: &str) {
+                           flight: &mut InFlight, now: time::Instant, trace_id: &str) {
         let largest_acked = ranges.largest().unwrap();
 
         if let Some(pkt) = flight.sent.get(&largest_acked) {
@@ -234,7 +230,7 @@ impl Recovery {
         self.tlp_count = 0;
         self.rto_count = 0;
 
-        self.detect_lost_packets(largest_acked, flight, trace_id);
+        self.detect_lost_packets(largest_acked, flight, now, trace_id);
         self.set_loss_detection_timer(flight);
 
         trace!("{} {:?}", trace_id, self);
@@ -244,6 +240,7 @@ impl Recovery {
                                    in_flight: &mut InFlight,
                                    hs_flight: &mut InFlight,
                                    flight: &mut InFlight,
+                                   now: time::Instant,
                                    trace_id: &str) {
         if !in_flight.sent.is_empty() || !hs_flight.sent.is_empty() {
             self.crypto_count += 1;
@@ -252,7 +249,7 @@ impl Recovery {
             self.bytes_in_flight -= hs_flight.retransmit_unacked_crypto();
         } else if self.loss_time.is_some() {
             let largest_acked = self.largest_acked;
-            self.detect_lost_packets(largest_acked, flight, trace_id);
+            self.detect_lost_packets(largest_acked, flight, now, trace_id);
         } else if self.tlp_count < MAX_TLP_COUNT {
             self.tlp_count += 1;
 
@@ -365,7 +362,7 @@ impl Recovery {
     }
 
     fn detect_lost_packets(&mut self, largest_acked: u64, flight: &mut InFlight,
-                           trace_id: &str) {
+                           now: time::Instant, trace_id: &str) {
         self.loss_time = None;
 
         // TODO: do time loss detection
@@ -388,13 +385,12 @@ impl Recovery {
 
                 lost_pkt.push(unacked.pkt_num);
             } else if delay_until_lost.as_secs() != std::u64::MAX {
-                let now = time::Instant::now();
                 self.loss_time = Some(now + delay_until_lost - time_since_sent);
             }
         }
 
         if !lost_pkt.is_empty() {
-            self.on_packets_lost(lost_pkt, flight);
+            self.on_packets_lost(lost_pkt, flight, now);
         }
     }
 
@@ -426,9 +422,8 @@ impl Recovery {
         }
     }
 
-    fn on_packets_lost(&mut self, lost_pkt: Vec<u64>, flight: &mut InFlight) {
-        let now = time::Instant::now();
-
+    fn on_packets_lost(&mut self, lost_pkt: Vec<u64>, flight: &mut InFlight,
+                       now: time::Instant) {
         let mut largest_lost_packet = 0;
         let mut largest_lost_packet_sent_time = now;
 

@@ -498,7 +498,7 @@ impl Connection {
 
                     self.recovery.on_ack_received(&ranges, ack_delay,
                                                   &mut space.flight,
-                                                  &trace_id);
+                                                  now, &trace_id);
                 },
 
                 // TODO: implement stateless retry
@@ -906,9 +906,9 @@ impl Connection {
         let written = payload_offset + payload_len;
 
         let sent = recovery::Sent::new(pn, frames, written, retransmittable,
-                                       is_crypto);
+                                       is_crypto, now);
 
-        self.recovery.on_packet_sent(sent, &mut space.flight, &trace_id);
+        self.recovery.on_packet_sent(sent, &mut space.flight, now, &trace_id);
 
         space.next_pkt_num += 1;
 
@@ -1022,7 +1022,7 @@ impl Connection {
             self.recovery.on_loss_detection_timer(&mut self.initial.flight,
                                                   &mut self.handshake.flight,
                                                   &mut self.application.flight,
-                                                  &trace_id);
+                                                  now, &trace_id);
             return;
         }
     }
