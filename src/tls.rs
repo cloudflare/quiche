@@ -149,7 +149,7 @@ impl Context {
 
     pub fn set_verify(&mut self, verify: bool) {
         let mode = if verify {
-            0x02 // SSL_VERIFY_FAIL_IF_NO_PEER_CERT 
+            0x01 // SSL_VERIFY_PEER
         } else {
             0x00 // SSL_VERIFY_NONE
         };
