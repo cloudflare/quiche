@@ -27,7 +27,9 @@
 
 use std::cmp;
 use std::fmt;
-use std::time;
+
+use std::time::Duration;
+use std::time::Instant;
 
 use std::collections::BTreeMap;
 
@@ -35,11 +37,11 @@ use crate::frame;
 use crate::ranges;
 
 // Loss Recovery
-const INITIAL_RTT: time::Duration = time::Duration::from_millis(100);
+const INITIAL_RTT: Duration = Duration::from_millis(100);
 
-const MIN_TLP_TIMEOUT: time::Duration = time::Duration::from_millis(10);
+const MIN_TLP_TIMEOUT: Duration = Duration::from_millis(10);
 
-const MIN_RTO_TIMEOUT: time::Duration = time::Duration::from_millis(200);
+const MIN_RTO_TIMEOUT: Duration = Duration::from_millis(200);
 
 const MAX_TLP_COUNT: u32 = 2;
 
@@ -57,7 +59,7 @@ pub struct Sent {
 
     pub frames: Vec<frame::Frame>,
 
-    time: time::Instant,
+    time: Instant,
 
     size: usize,
 
@@ -68,7 +70,7 @@ pub struct Sent {
 
 impl Sent {
     pub fn new(pkt_num: u64, frames: Vec<frame::Frame>, sent_bytes: usize,
-               retransmittable: bool, is_crypto: bool, now: time::Instant) -> Sent {
+               retransmittable: bool, is_crypto: bool, now: Instant) -> Sent {
         let sent_bytes = if retransmittable { sent_bytes } else { 0 };
 
         Sent {
@@ -121,7 +123,7 @@ impl Default for InFlight {
 }
 
 pub struct Recovery {
-    loss_detection_timer: Option<time::Instant>,
+    loss_detection_timer: Option<Instant>,
 
     crypto_count: u32,
 
@@ -131,31 +133,31 @@ pub struct Recovery {
 
     largest_sent_before_rto: u64,
 
-    time_of_last_sent_retransmittable_packet: time::Instant,
+    time_of_last_sent_retransmittable_packet: Instant,
 
-    time_of_last_sent_crypto_packet: time::Instant,
+    time_of_last_sent_crypto_packet: Instant,
 
     largest_sent_pkt: u64,
 
     largest_acked: u64,
 
-    latest_rtt: time::Duration,
+    latest_rtt: Duration,
 
-    smoothed_rtt: time::Duration,
+    smoothed_rtt: Duration,
 
-    rttvar: time::Duration,
+    rttvar: Duration,
 
-    min_rtt: time::Duration,
+    min_rtt: Duration,
 
-    pub max_ack_delay: time::Duration,
+    pub max_ack_delay: Duration,
 
-    loss_time: Option<time::Instant>,
+    loss_time: Option<Instant>,
 
     cwnd: usize,
 
     bytes_in_flight: usize,
 
-    recovery_start_time: Option<time::Instant>,
+    recovery_start_time: Option<Instant>,
 
     ssthresh: usize,
 
@@ -164,7 +166,7 @@ pub struct Recovery {
 
 impl Recovery {
     pub fn on_packet_sent(&mut self, pkt: Sent, flight: &mut InFlight,
-                          now: time::Instant, trace_id: &str) {
+                          now: Instant, trace_id: &str) {
         let pkt_num = pkt.pkt_num;
         let retransmittable = pkt.retransmittable;
         let is_crypto = pkt.is_crypto;
@@ -191,7 +193,7 @@ impl Recovery {
     }
 
     pub fn on_ack_received(&mut self, ranges: &ranges::RangeSet, ack_delay: u64,
-                           flight: &mut InFlight, now: time::Instant, trace_id: &str) {
+                           flight: &mut InFlight, now: Instant, trace_id: &str) {
         let largest_acked = ranges.largest().unwrap();
 
         if let Some(pkt) = flight.sent.get(&largest_acked) {
@@ -240,8 +242,7 @@ impl Recovery {
                                    in_flight: &mut InFlight,
                                    hs_flight: &mut InFlight,
                                    flight: &mut InFlight,
-                                   now: time::Instant,
-                                   trace_id: &str) {
+                                   now: Instant, trace_id: &str) {
         if !in_flight.sent.is_empty() || !hs_flight.sent.is_empty() {
             self.crypto_count += 1;
 
@@ -269,7 +270,7 @@ impl Recovery {
         trace!("{} {:?}", trace_id, self);
     }
 
-    pub fn loss_detection_timer(&self) -> Option<time::Instant> {
+    pub fn loss_detection_timer(&self) -> Option<Instant> {
         self.loss_detection_timer
     }
 
@@ -286,10 +287,10 @@ impl Recovery {
         self.cwnd - self.bytes_in_flight
     }
 
-    fn update_rtt(&mut self, latest_rtt: time::Duration, ack_delay: u64) {
-        let zero = time::Duration::new(0, 0);
+    fn update_rtt(&mut self, latest_rtt: Duration, ack_delay: u64) {
+        let zero = Duration::new(0, 0);
 
-        let ack_delay = time::Duration::from_micros(ack_delay);
+        let ack_delay = Duration::from_micros(ack_delay);
 
         self.min_rtt = cmp::min(self.min_rtt, self.latest_rtt);
         self.latest_rtt = cmp::max(latest_rtt.checked_sub(ack_delay)
@@ -310,7 +311,7 @@ impl Recovery {
     }
 
     fn set_loss_detection_timer(&mut self, flight: &InFlight) {
-        let zero = time::Duration::new(0, 0);
+        let zero = Duration::new(0, 0);
 
         if self.bytes_in_flight == 0 {
             self.loss_detection_timer = None;
@@ -362,14 +363,14 @@ impl Recovery {
     }
 
     fn detect_lost_packets(&mut self, largest_acked: u64, flight: &mut InFlight,
-                           now: time::Instant, trace_id: &str) {
+                           now: Instant, trace_id: &str) {
         self.loss_time = None;
 
         // TODO: do time loss detection
         let delay_until_lost = if largest_acked == self.largest_sent_pkt {
             cmp::max(self.latest_rtt * 9, self.smoothed_rtt * 9) / 8
         } else {
-            time::Duration::from_secs(std::u64::MAX)
+            Duration::from_secs(std::u64::MAX)
         };
 
         let mut lost_pkt: Vec<u64> = Vec::new();
@@ -394,7 +395,7 @@ impl Recovery {
         }
     }
 
-    fn in_recovery(&self, sent_time: time::Instant) -> bool {
+    fn in_recovery(&self, sent_time: Instant) -> bool {
         match self.recovery_start_time {
             Some(recovery_start_time) => sent_time <= recovery_start_time,
             None => false,
@@ -423,7 +424,7 @@ impl Recovery {
     }
 
     fn on_packets_lost(&mut self, lost_pkt: Vec<u64>, flight: &mut InFlight,
-                       now: time::Instant) {
+                       now: Instant) {
         let mut largest_lost_packet = 0;
         let mut largest_lost_packet_sent_time = now;
 
@@ -455,7 +456,7 @@ impl Recovery {
 
 impl Default for Recovery {
     fn default() -> Recovery {
-        let now = time::Instant::now();
+        let now = Instant::now();
 
         Recovery {
             loss_detection_timer: None,
@@ -476,15 +477,15 @@ impl Default for Recovery {
 
             largest_acked: 0,
 
-            latest_rtt: time::Duration::new(0, 0),
+            latest_rtt: Duration::new(0, 0),
 
-            smoothed_rtt: time::Duration::new(0, 0),
+            smoothed_rtt: Duration::new(0, 0),
 
-            min_rtt: time::Duration::from_secs(std::u64::MAX),
+            min_rtt: Duration::from_secs(std::u64::MAX),
 
-            rttvar: time::Duration::new(0, 0),
+            rttvar: Duration::new(0, 0),
 
-            max_ack_delay: time::Duration::from_millis(25),
+            max_ack_delay: Duration::from_millis(25),
 
             loss_time: None,
 
@@ -505,7 +506,7 @@ impl fmt::Debug for Recovery {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.loss_detection_timer {
             Some(v) => {
-                let now = time::Instant::now();
+                let now = Instant::now();
 
                 if v > now {
                     let d = v.duration_since(now);
@@ -532,7 +533,7 @@ impl fmt::Debug for Recovery {
     }
 }
 
-fn sub_abs(lhs: time::Duration, rhs: time::Duration) -> time::Duration {
+fn sub_abs(lhs: Duration, rhs: Duration) -> Duration {
     if lhs > rhs {
         lhs - rhs
     } else {
