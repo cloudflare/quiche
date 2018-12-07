@@ -1,13 +1,17 @@
 language: rust
 
+dist: xenial
+
 rust:
  - stable
  - beta
  - nightly
 
-install:
- - sudo apt-get update
- - sudo apt-get install cmake golang-go
+addons:
+  apt:
+    packages:
+     - cmake
+     - golang-go
 
 script:
  - cargo build --verbose --all --examples
