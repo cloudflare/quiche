@@ -648,6 +648,8 @@ impl Connection {
                         None => continue,
                     };
 
+                    self.tx_data -= data.len();
+
                     stream.send_push_front(data)?;
                 },
 
@@ -834,20 +836,22 @@ impl Connection {
 
         // Create a single STREAM frame for the first stream that is writable.
         if space.pkt_type == packet::Type::Application && !is_closing
+            && self.max_tx_data > self.tx_data
             && left > frame::MAX_STREAM_OVERHEAD
         {
-            // TODO: enforce connection-level flow contro
             for (id, stream) in self.streams.iter_mut()
                                             .filter(|(_, s)| s.writable()) {
                 // Make sure we can fit the data in the packet.
-                let stream_len = left - frame::MAX_STREAM_OVERHEAD;
+                let stream_len = cmp::min(left - frame::MAX_STREAM_OVERHEAD,
+                                          self.max_tx_data - self.tx_data);
+
                 let stream_buf = stream.send_pop(stream_len)?;
 
                 if stream_buf.is_empty() {
                     continue;
                 }
 
-                self.tx_data += stream_len;
+                self.tx_data += stream_buf.len();
 
                 let frame = frame::Frame::Stream {
                     stream_id: *id,
