@@ -9,9 +9,6 @@ install:
  - sudo apt-get update
  - sudo apt-get install cmake golang-go
 
-before_script:
- - ./util/get_bssl.sh
-
 script:
  - cargo build --verbose --all --examples
  - cargo test --verbose --all

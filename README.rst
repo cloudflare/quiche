@@ -40,15 +40,7 @@ Status
 Building
 --------
 
-quiche uses BoringSSL_ to implement QUIC's cryptographic handshake based on
-TLS. To download and build it you can use the ``get_bssl.sh`` script provided
-in the repository:
-
-.. code-block:: bash
-
-   $ util/get_bssl.sh
-
-You can now build quiche using cargo:
+You can build quiche using cargo:
 
 .. code-block:: bash
 
@@ -59,6 +51,10 @@ As well as run its tests:
 .. code-block:: bash
 
    $ cargo test
+
+Note that BoringSSL_, used to implement QUIC's cryptographic handshake based on
+TLS, needs to be built and linked to quiche. This is done automatically when
+building quiche using cargo.
 
 In alternative you can use your own custom build of BoringSSL by configuring
 the directory containing ``libcrypto.a`` and ``libssl.a`` with the
