@@ -27,12 +27,6 @@
 
 #[macro_use]
 extern crate log;
-extern crate core;
-extern crate libc;
-extern crate ring;
-
-#[macro_use]
-extern crate lazy_static;
 
 use std::cmp;
 use std::mem;
@@ -48,7 +42,7 @@ const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 // TODO: calculate draining timer as 3 * RTO
 const DRAINING_TIMEOUT: time::Duration = time::Duration::from_millis(200);
 
-pub type Result<T> = ::std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {

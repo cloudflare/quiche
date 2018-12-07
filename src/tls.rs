@@ -25,22 +25,23 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::fs;
-use std::env;
 use std::ffi;
 use std::ptr;
 use std::slice;
 
+use std::io::prelude::*;
+
+use libc::c_char;
 use libc::c_void;
 
-use std::io::prelude::*;
+use lazy_static;
 
 use crate::Connection;
 use crate::TransportParams;
 
 use crate::crypto;
 
-pub type Result<T> = ::std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
@@ -90,7 +91,7 @@ struct SSL_QUIC_METHOD {
     send_alert: extern fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> i32,
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref QUICHE_EX_DATA_INDEX: i32 = unsafe {
         SSL_get_ex_new_index(0, ptr::null(), ptr::null(), ptr::null(), ptr::null())
     };
@@ -466,9 +467,9 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> i32 {
     1
 }
 
-extern fn keylog(_: *mut SSL, line: *const libc::c_char) {
-    if let Some(path) = env::var_os("SSLKEYLOGFILE") {
-        match fs::OpenOptions::new().create(true).append(true).open(path) {
+extern fn keylog(_: *mut SSL, line: *const c_char) {
+    if let Some(path) = std::env::var_os("SSLKEYLOGFILE") {
+        match std::fs::OpenOptions::new().create(true).append(true).open(path) {
             Ok(mut file) => {
                 let data = unsafe {
                     ffi::CStr::from_ptr(line).to_bytes()
@@ -478,7 +479,7 @@ extern fn keylog(_: *mut SSL, line: *const libc::c_char) {
                 file.write_all(b"\n").unwrap_or(());
             },
 
-            Err(e) => error!("LOOOL {:?}", e),
+            _ => (),
         }
     }
 }
@@ -547,19 +548,17 @@ extern {
         quic_method: *const SSL_QUIC_METHOD) -> i32;
 
     fn SSL_CTX_use_certificate_chain_file(ctx: *mut SSL_CTX,
-                                          file: *const libc::c_char)
-                                                    -> libc::c_int;
+        file: *const c_char) -> i32;
 
     fn SSL_CTX_use_PrivateKey_file(ctx: *mut SSL_CTX,
-                                   file: *const libc::c_char,
-                                   ty: libc::c_int) -> libc::c_int;
+        file: *const c_char, ty: i32) -> i32;
 
-    fn SSL_CTX_set_default_verify_paths(ctx: *mut SSL_CTX) -> libc::c_int;
+    fn SSL_CTX_set_default_verify_paths(ctx: *mut SSL_CTX) -> i32;
 
     fn SSL_CTX_set_verify(ctx: *mut SSL_CTX, mode: i32, cb: *const c_void,);
 
     fn SSL_CTX_set_keylog_callback(ctx: *mut SSL_CTX,
-                    cb: extern fn(ssl: *mut SSL, line: *const libc::c_char));
+        cb: extern fn(ssl: *mut SSL, line: *const c_char));
 
     // SSL
     fn SSL_get_ex_new_index(argl: libc::c_long, argp: *const c_void,
@@ -585,7 +584,7 @@ extern {
 
     fn SSL_set_quiet_shutdown(ssl: *mut SSL, mode: i32);
 
-    fn SSL_set_tlsext_host_name(ssl: *mut SSL, name: *const libc::c_char) -> i32;
+    fn SSL_set_tlsext_host_name(ssl: *mut SSL, name: *const c_char) -> i32;
 
     fn SSL_set_quic_transport_params(ssl: *mut SSL, params: *const u8,
         params_len: usize) -> i32;
@@ -609,6 +608,5 @@ extern {
 
     // X509_VERIFY_PARAM
     fn X509_VERIFY_PARAM_set1_host(param: *mut X509_VERIFY_PARAM,
-                                   name: *const libc::c_char,
-                                   namelen: libc::size_t) -> i32;
+        name: *const c_char, namelen: libc::size_t) -> i32;
 }

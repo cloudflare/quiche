@@ -25,15 +25,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::mem;
-use std::ptr;
-
 use crate::Result;
 use crate::Error;
 
 macro_rules! peek_u {
     ($b:expr, $ty:ty) => ({
-        let len = mem::size_of::<$ty>();
+        let len = std::mem::size_of::<$ty>();
 
         let src = &$b.buf[$b.off..];
 
@@ -42,7 +39,7 @@ macro_rules! peek_u {
         }
 
         let out = unsafe {
-            ptr::read_unaligned(src.as_ptr() as *const $ty)
+            std::ptr::read_unaligned(src.as_ptr() as *const $ty)
         };
 
         Ok(<$ty>::from_be(out))
@@ -51,7 +48,7 @@ macro_rules! peek_u {
 
 macro_rules! get_u {
     ($b:expr, $ty:ty) => ({
-        let len = mem::size_of::<$ty>();
+        let len = std::mem::size_of::<$ty>();
         let out = peek_u!($b, $ty);
 
         $b.off += len;
@@ -62,7 +59,7 @@ macro_rules! get_u {
 
 macro_rules! put_u {
     ($b:expr, $ty:ty, $v:expr) => ({
-        let len = mem::size_of::<$ty>();
+        let len = std::mem::size_of::<$ty>();
 
         let dst = &mut $b.buf[$b.off..];
 
@@ -71,7 +68,7 @@ macro_rules! put_u {
         }
 
         unsafe {
-            ptr::write_unaligned(dst.as_mut_ptr() as *mut $ty, <$ty>::to_be($v));
+            std::ptr::write_unaligned(dst.as_mut_ptr() as *mut $ty, <$ty>::to_be($v));
         }
 
         $b.off += len;
@@ -247,9 +244,8 @@ impl<'a> Bytes<'a> {
         }
 
         unsafe {
-            ptr::copy_nonoverlapping(v as *const [u8] as *const u8,
-                                     self.as_mut().as_mut_ptr(),
-                                     len);
+            std::ptr::copy_nonoverlapping(v as *const [u8] as *const u8,
+                                          self.as_mut().as_mut_ptr(), len);
         }
 
         self.off += len;

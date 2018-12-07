@@ -25,10 +25,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::cmp;
-use std::fmt;
-use std::slice;
-
 use crate::Result;
 use crate::Error;
 
@@ -252,8 +248,8 @@ impl Header {
     }
 }
 
-impl fmt::Debug for Header {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Debug for Header {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", self.ty)?;
 
         if self.ty != Type::Application {
@@ -309,7 +305,7 @@ pub fn pkt_num_bits(len: usize) -> Result<usize> {
 
 pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
                                                     -> Result<(u64,usize)> {
-    let max_pn_len = cmp::min(b.cap() - aead.alg().pn_nonce_len(), 4);
+    let max_pn_len = std::cmp::min(b.cap() - aead.alg().pn_nonce_len(), 4);
 
     let mut pn_and_sample = b.peek_bytes(max_pn_len + aead.alg().pn_nonce_len())?;
 
@@ -320,7 +316,7 @@ pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
     // Decrypt first byte of pkt num into separate buffer to get length.
     let mut first: u8 = ciphertext[0];
 
-    aead.xor_keystream(sample.as_ref(), slice::from_mut(&mut first))?;
+    aead.xor_keystream(sample.as_ref(), std::slice::from_mut(&mut first))?;
 
     let len = if first >> 7 == 0 {
         1

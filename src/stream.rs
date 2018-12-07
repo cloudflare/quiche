@@ -25,14 +25,14 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use crate::Result;
-use crate::Error;
-
 use std::cmp;
+
 use std::collections::hash_map;
 use std::collections::HashMap;
 use std::collections::BinaryHeap;
-use std::ops::Deref;
+
+use crate::Result;
+use crate::Error;
 
 #[derive(Default)]
 pub struct Stream {
@@ -334,7 +334,7 @@ impl RangeBuf {
     }
 }
 
-impl Deref for RangeBuf {
+impl std::ops::Deref for RangeBuf {
     type Target = [u8];
 
     fn deref(&self) -> &[u8] {

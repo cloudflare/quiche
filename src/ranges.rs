@@ -25,8 +25,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::cmp;
-use std::fmt;
 use std::ops::Range;
 
 use std::collections::Bound::{Excluded, Included, Unbounded};
@@ -51,12 +49,12 @@ impl RangeSet {
 
             if range_contains(&r, start) && !range_contains(&r, end) {
                 self.inner.remove(&r.start);
-                start = cmp::min(start, r.start);
+                start = std::cmp::min(start, r.start);
             }
 
             if !range_contains(&r, start) && range_contains(&r, end) {
                 self.inner.remove(&r.start);
-                end = cmp::max(end, r.end);
+                end = std::cmp::max(end, r.end);
             }
         }
 
@@ -73,12 +71,12 @@ impl RangeSet {
 
             if range_contains(&r, start) && !range_contains(&r, end) {
                 self.inner.remove(&r.start);
-                start = cmp::min(start, r.start);
+                start = std::cmp::min(start, r.start);
             }
 
             if !range_contains(&r, start) && range_contains(&r, end) {
                 self.inner.remove(&r.start);
-                end = cmp::max(end, r.end);
+                end = std::cmp::max(end, r.end);
             }
 
             if !range_contains(&r, start) && !range_contains(&r, end) {
@@ -152,8 +150,8 @@ impl RangeSet {
     }
 }
 
-impl fmt::Debug for RangeSet {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Debug for RangeSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", self.iter().map(|mut r| { r.end -= 1; r })
                                      .collect::<Vec<Range<u64>>>())
     }

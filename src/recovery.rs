@@ -26,7 +26,6 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::cmp;
-use std::fmt;
 
 use std::time::Duration;
 use std::time::Instant;
@@ -502,8 +501,8 @@ impl Default for Recovery {
     }
 }
 
-impl fmt::Debug for Recovery {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Debug for Recovery {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self.loss_detection_timer {
             Some(v) => {
                 let now = Instant::now();

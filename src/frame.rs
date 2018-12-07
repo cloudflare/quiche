@@ -25,8 +25,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::fmt;
-
 use crate::Result;
 use crate::Error;
 
@@ -469,8 +467,8 @@ impl Frame {
     }
 }
 
-impl fmt::Debug for Frame {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Debug for Frame {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Frame::Padding { len } => {
                 write!(f, "PADDING len={}", len)?;

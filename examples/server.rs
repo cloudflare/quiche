@@ -27,22 +27,11 @@
 
 #[macro_use]
 extern crate log;
-extern crate mio;
-extern crate rand;
-extern crate docopt;
-extern crate quiche;
-extern crate env_logger;
 
-use std::fs;
-use std::io;
 use std::net;
-use std::path;
-use std::time;
 
 use std::collections::hash_map;
 use std::collections::HashMap;
-
-use docopt::Docopt;
 
 use rand::Rng;
 
@@ -81,7 +70,7 @@ fn main() {
 
     env_logger::init();
 
-    let args = Docopt::new(USAGE)
+    let args = docopt::Docopt::new(USAGE)
                       .and_then(|dopt| dopt.parse())
                       .unwrap_or_else(|e| e.exit());
 
@@ -105,7 +94,7 @@ fn main() {
     config.load_priv_key_from_pem_file(args.get_str("--key")).unwrap();
 
     loop {
-        let now = time::Instant::now();
+        let now = std::time::Instant::now();
 
         // TODO: use event loop that properly supports timers
         let timeout = connections.values()
@@ -115,7 +104,7 @@ fn main() {
         let timeout = match timeout {
             Some(v) => {
                 let timeout = if v < now {
-                    time::Duration::new(0, 0)
+                    std::time::Duration::new(0, 0)
                 } else {
                     v.duration_since(now)
                 };
@@ -141,7 +130,7 @@ fn main() {
                 Ok(v) => v,
 
                 Err(e) => {
-                    if e.kind() == io::ErrorKind::WouldBlock {
+                    if e.kind() == std::io::ErrorKind::WouldBlock {
                         debug!("recv() would block");
                         break 'read;
                     }
@@ -286,11 +275,11 @@ fn handle_stream(conn: &mut quiche::Connection, stream: u64, args: &docopt::Argv
         let uri = &stream_data[4..stream_data.len()];
         let uri = String::from_utf8(uri.to_vec()).unwrap();
         let uri = String::from(uri.lines().next().unwrap());
-        let uri = path::Path::new(&uri);
-        let mut path = path::PathBuf::from(args.get_str("--root"));
+        let uri = std::path::Path::new(&uri);
+        let mut path = std::path::PathBuf::from(args.get_str("--root"));
 
         for c in uri.components() {
-            if let path::Component::Normal(v) = c {
+            if let std::path::Component::Normal(v) = c {
                 path.push(v)
             }
         }
@@ -298,8 +287,8 @@ fn handle_stream(conn: &mut quiche::Connection, stream: u64, args: &docopt::Argv
         info!("{} got GET request for {:?} on stream {}",
               conn.trace_id(), path, stream);
 
-        let data = fs::read(path.as_path())
-                      .unwrap_or_else(|_| Vec::from(String::from("Not Found!\r\n")));
+        let data = std::fs::read(path.as_path())
+                    .unwrap_or_else(|_| Vec::from(String::from("Not Found!\r\n")));
 
         info!("{} sending response of size {} on stream {}",
               conn.trace_id(), data.len(), stream);

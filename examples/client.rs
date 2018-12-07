@@ -27,23 +27,8 @@
 
 #[macro_use]
 extern crate log;
-extern crate mio;
-extern crate url;
-extern crate rand;
-extern crate docopt;
-extern crate quiche;
-extern crate env_logger;
-
-use std::io;
-use std::env;
-use std::net;
-use std::time;
-
-use docopt::Docopt;
 
 use rand::Rng;
-
-use url::Url;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
 
@@ -78,13 +63,13 @@ fn main() {
 
     env_logger::init();
 
-    let args = Docopt::new(USAGE)
+    let args = docopt::Docopt::new(USAGE)
                       .and_then(|dopt| dopt.parse())
                       .unwrap_or_else(|e| e.exit());
 
-    let url = Url::parse(args.get_str("URL")).unwrap();
+    let url = url::Url::parse(args.get_str("URL")).unwrap();
 
-    let socket = net::UdpSocket::bind("0.0.0.0:0").unwrap();
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
     socket.connect(&url).unwrap();
 
     let poll = mio::Poll::new().unwrap();
@@ -105,7 +90,7 @@ fn main() {
         config.verify_peer(false);
     }
 
-    if env::var_os("SSLKEYLOGFILE").is_some() {
+    if std::env::var_os("SSLKEYLOGFILE").is_some() {
         config.log_keys();
     }
 
@@ -124,12 +109,12 @@ fn main() {
     let mut req_sent = false;
 
     loop {
-        let now = time::Instant::now();
+        let now = std::time::Instant::now();
 
         let timeout = match conn.timeout() {
             Some(v) => {
                 let timeout = if v < now {
-                    time::Duration::new(0, 0)
+                    std::time::Duration::new(0, 0)
                 } else {
                     v.duration_since(now)
                 };
@@ -155,7 +140,7 @@ fn main() {
                 Ok(v) => v,
 
                 Err(e) => {
-                    if e.kind() == io::ErrorKind::WouldBlock {
+                    if e.kind() == std::io::ErrorKind::WouldBlock {
                         debug!("recv() would block");
                         break 'read;
                     }

@@ -25,8 +25,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::mem;
-
 use ring::aead;
 use ring::digest;
 use ring::hkdf;
@@ -231,7 +229,7 @@ impl Seal {
 
 pub fn derive_initial_key_material(cid: &[u8], is_server: bool)
                                                     -> Result<(Open, Seal)> {
-    let mut secret: [u8; 32] =  unsafe { mem::uninitialized() };
+    let mut secret: [u8; 32] =  unsafe { std::mem::uninitialized() };
 
     let aead = Algorithm::AES128_GCM;
 
@@ -332,7 +330,7 @@ fn hkdf_expand_label(prk: &hmac::SigningKey, label: &[u8],  out: &mut [u8])
                                                             -> Result<()> {
     const LABEL_PREFIX: &[u8] = b"quic ";
 
-    let mut info: [u8; 256] = unsafe { mem::uninitialized() };
+    let mut info: [u8; 256] = unsafe { std::mem::uninitialized() };
 
     let info_len = {
         let mut b = octets::Bytes::new(&mut info);
