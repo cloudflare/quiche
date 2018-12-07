@@ -13,4 +13,3 @@ make -C $BUILD_DIR VERBOSE=1 -j`nproc` bssl
 mkdir -p "$INSTALL_DIR/lib"
 
 cp "$BUILD_DIR/crypto/libcrypto.a" "$BUILD_DIR/ssl/libssl.a" "$INSTALL_DIR/lib/"
-ln -f -s "$SOURCE_DIR/include" "$INSTALL_DIR"
