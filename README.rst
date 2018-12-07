@@ -26,12 +26,16 @@ Status
 * [x] TLS 1.3 handshake (using BoringSSL)
 * [x] Stream API
 * [x] Flow control
-* [ ] Unidirectional streams
+* [x] Connection close
 * [x] Loss detection and recovery
 * [x] Congestion control
-* [x] Connection close
+* [ ] Key update
 * [ ] Stateless retry
+* [ ] Unidirectional streams
+* [ ] Session resumption
 * [ ] 0-RTT
+* [ ] Stateless reset
+* [ ] Connection migration
 
 Building
 --------
