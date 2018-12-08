@@ -34,6 +34,8 @@ use std::collections::BinaryHeap;
 use crate::Result;
 use crate::Error;
 
+const MAX_WRITE_SIZE: usize = 1000;
+
 #[derive(Default)]
 pub struct Stream {
     recv: RecvBuf,
@@ -220,10 +222,21 @@ struct SendBuf {
 
 impl SendBuf {
     fn push_slice(&mut self, data: &[u8], fin: bool) -> Result<()> {
-        let buf = RangeBuf::from(data, self.off, fin);
-        self.push(buf)?;
+        let mut len = 0;
 
-        self.off += data.len();
+        // Split the input buffer into multiple RangeBufs. Otherwise a big
+        // buffer would need to be split later on when popping data, which
+        // would cause a partial copy of the buffer.
+        for chunk in data.chunks(MAX_WRITE_SIZE) {
+            len += chunk.len();
+
+            let fin = len == data.len() && fin;
+
+            let buf = RangeBuf::from(chunk, self.off, fin);
+            self.push(buf)?;
+
+            self.off += chunk.len();
+        }
 
         Ok(())
     }
