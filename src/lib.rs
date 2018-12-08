@@ -691,12 +691,14 @@ impl Connection {
                 ranges: space.recv_pkt_num.clone(),
             };
 
-            space.do_ack = false;
+            if frame.wire_len() <= left {
+                space.do_ack = false;
 
-            length += frame.wire_len();
-            left -= frame.wire_len();
+                length += frame.wire_len();
+                left -= frame.wire_len();
 
-            frames.push(frame);
+                frames.push(frame);
+            }
         }
 
         let mut retransmittable = false;
@@ -712,14 +714,16 @@ impl Connection {
                 max: self.new_max_rx_data as u64,
             };
 
-            self.max_rx_data = self.new_max_rx_data;
+            if frame.wire_len() <= left {
+                self.max_rx_data = self.new_max_rx_data;
 
-            length += frame.wire_len();
-            left -= frame.wire_len();
+                length += frame.wire_len();
+                left -= frame.wire_len();
 
-            frames.push(frame);
+                frames.push(frame);
 
-            retransmittable = true;
+                retransmittable = true;
+            }
         }
 
         // Create MAX_STREAM_DATA frames as needed.
@@ -731,17 +735,21 @@ impl Connection {
                     max: stream.recv_update_max_data() as u64,
                 };
 
+                if frame.wire_len() > left {
+                    break;
+                }
+
                 length += frame.wire_len();
                 left -= frame.wire_len();
 
                 frames.push(frame);
-            }
 
-            retransmittable = true;
+                retransmittable = true;
+            }
         }
 
         // Create PING and PADDING for TLP.
-        if self.recovery.probes > 0 {
+        if self.recovery.probes > 0 && left >= 4 {
             let frame = frame::Frame::Ping;
 
             length += frame.wire_len();
