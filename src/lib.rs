@@ -93,6 +93,7 @@ pub struct Config {
 }
 
 impl Config {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(version: u32, tp: &TransportParams) -> Result<Config> {
         let tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
 
@@ -176,6 +177,7 @@ pub struct Connection {
 }
 
 impl Connection {
+    #[allow(clippy::new_ret_no_self)]
     fn new(scid: &[u8], config: &mut Config, role: Role) -> Result<Box<Connection>> {
         let tls = config.tls_ctx.new_handshake().map_err(|_| Error::TlsFail)?;
 
@@ -566,6 +568,8 @@ impl Connection {
                     space.recv_pkt_num.remove_until(largest_acked);
                 },
 
+                frame::Frame::Ping => (),
+
                 _ => (),
             }
         }
@@ -576,8 +580,8 @@ impl Connection {
         space.largest_rx_pkt_num = cmp::max(space.largest_rx_pkt_num, pn);
 
         self.idle_timer =
-            Some(now + time::Duration::from_secs(self.local_transport_params
-                                                     .idle_timeout as u64));
+            Some(now + time::Duration::from_secs(
+                u64::from(self.local_transport_params.idle_timeout)));
 
         let read = payload_offset + payload_len + aead.alg().tag_len();
         Ok(read)

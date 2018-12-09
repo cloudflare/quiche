@@ -39,6 +39,7 @@ macro_rules! peek_u {
         }
 
         let out = unsafe {
+            #[allow(clippy::cast_ptr_alignment)]
             std::ptr::read_unaligned(src.as_ptr() as *const $ty)
         };
 
@@ -68,6 +69,7 @@ macro_rules! put_u {
         }
 
         unsafe {
+            #[allow(clippy::cast_ptr_alignment)]
             std::ptr::write_unaligned(dst.as_mut_ptr() as *mut $ty, <$ty>::to_be($v));
         }
 

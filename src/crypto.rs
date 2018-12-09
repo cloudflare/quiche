@@ -119,6 +119,7 @@ pub struct Open {
 }
 
 impl Open {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(alg: Algorithm, key: &[u8], iv: &[u8], pn_key: &[u8])
                                                             -> Result<Open> {
         Ok(Open {
@@ -177,6 +178,7 @@ pub struct Seal {
 }
 
 impl Seal {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(alg: Algorithm, key: &[u8], iv: &[u8], pn_key: &[u8])
                                                             -> Result<Seal> {
         Ok(Seal {

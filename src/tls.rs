@@ -113,6 +113,7 @@ const SSL_OP_NO_TLSV1_2: u32 = 0x0800_0000;
 pub struct Context(*mut SSL_CTX);
 
 impl Context {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> Result<Context> {
         unsafe {
             let ctx = SSL_CTX_new(TLS_method());
@@ -469,17 +470,16 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> i32 {
 
 extern fn keylog(_: *mut SSL, line: *const c_char) {
     if let Some(path) = std::env::var_os("SSLKEYLOGFILE") {
-        match std::fs::OpenOptions::new().create(true).append(true).open(path) {
-            Ok(mut file) => {
-                let data = unsafe {
-                    ffi::CStr::from_ptr(line).to_bytes()
-                };
+        let file = std::fs::OpenOptions::new().create(true)
+                                              .append(true)
+                                              .open(path);
+        if let Ok(mut file) = file {
+            let data = unsafe {
+                ffi::CStr::from_ptr(line).to_bytes()
+            };
 
-                file.write_all(data).unwrap_or(());
-                file.write_all(b"\n").unwrap_or(());
-            },
-
-            _ => (),
+            file.write_all(data).unwrap_or(());
+            file.write_all(b"\n").unwrap_or(());
         }
     }
 }
