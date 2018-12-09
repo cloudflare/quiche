@@ -431,7 +431,9 @@ pub struct PktNumSpace {
 
     pub next_pkt_num: u64,
 
-    pub recv_pkt_num: ranges::RangeSet,
+    pub recv_pkt_need_ack: ranges::RangeSet,
+
+    pub recv_pkt_num: PktNumWindow,
 
     pub flight: recovery::InFlight,
 
@@ -454,7 +456,9 @@ impl PktNumSpace {
 
             next_pkt_num: 0,
 
-            recv_pkt_num: ranges::RangeSet::default(),
+            recv_pkt_need_ack: ranges::RangeSet::default(),
+
+            recv_pkt_num: PktNumWindow::default(),
 
             flight: recovery::InFlight::default(),
 
@@ -488,5 +492,164 @@ impl PktNumSpace {
 
     pub fn ready(&self) -> bool {
         self.crypto_stream.writable() || !self.flight.lost.is_empty() || self.do_ack
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct PktNumWindow {
+    lower: u64,
+    window: u128,
+}
+
+impl PktNumWindow {
+    pub fn insert(&mut self, seq: u64) {
+        // Packet is on the left end of the window.
+        if seq < self.lower {
+            return;
+        }
+
+        // Packet is on the right end of the window.
+        if seq > self.upper() {
+            let diff = seq - self.upper();
+            self.lower += diff;
+
+            self.window = self.window.checked_shl(diff as u32)
+                                     .unwrap_or(0);
+        }
+
+        let mask = 1_u128 << (self.upper() - seq);
+        self.window |= mask;
+    }
+
+    pub fn contains(&mut self, seq: u64) -> bool {
+        // Packet is on the right end of the window.
+        if seq > self.upper() {
+            return false;
+        }
+
+        // Packet is on the left end of the window.
+        if seq < self.lower {
+            return true;
+        }
+
+        let mask = 1_u128 << (self.upper() - seq);
+        self.window & mask != 0
+    }
+
+    fn upper(&self) -> u64 {
+        self.lower.checked_add(std::mem::size_of::<u128>() as u64 * 8)
+                  .unwrap_or(std::u64::MAX) - 1
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pkt_num_window() {
+        let mut win = PktNumWindow::default();
+        assert_eq!(win.lower, 0);
+        assert!(!win.contains(0));
+        assert!(!win.contains(1));
+
+        win.insert(0);
+        assert_eq!(win.lower, 0);
+        assert!(win.contains(0));
+        assert!(!win.contains(1));
+
+        win.insert(1);
+        assert_eq!(win.lower, 0);
+        assert!(win.contains(0));
+        assert!(win.contains(1));
+
+        win.insert(3);
+        assert_eq!(win.lower, 0);
+        assert!(win.contains(0));
+        assert!(win.contains(1));
+        assert!(!win.contains(2));
+        assert!(win.contains(3));
+
+        win.insert(10);
+        assert_eq!(win.lower, 0);
+        assert!(win.contains(0));
+        assert!(win.contains(1));
+        assert!(!win.contains(2));
+        assert!(win.contains(3));
+        assert!(!win.contains(4));
+        assert!(!win.contains(5));
+        assert!(!win.contains(6));
+        assert!(!win.contains(7));
+        assert!(!win.contains(8));
+        assert!(!win.contains(9));
+        assert!(win.contains(10));
+
+        win.insert(132);
+        assert_eq!(win.lower, 5);
+        assert!(win.contains(0));
+        assert!(win.contains(1));
+        assert!(win.contains(2));
+        assert!(win.contains(3));
+        assert!(win.contains(4));
+        assert!(!win.contains(5));
+        assert!(!win.contains(6));
+        assert!(!win.contains(7));
+        assert!(!win.contains(8));
+        assert!(!win.contains(9));
+        assert!(win.contains(10));
+        assert!(!win.contains(128));
+        assert!(!win.contains(130));
+        assert!(!win.contains(131));
+        assert!(win.contains(132));
+
+        win.insert(1024);
+        assert_eq!(win.lower, 897);
+        assert!(win.contains(0));
+        assert!(win.contains(1));
+        assert!(win.contains(2));
+        assert!(win.contains(3));
+        assert!(win.contains(4));
+        assert!(win.contains(5));
+        assert!(win.contains(6));
+        assert!(win.contains(7));
+        assert!(win.contains(8));
+        assert!(win.contains(9));
+        assert!(win.contains(10));
+        assert!(win.contains(128));
+        assert!(win.contains(130));
+        assert!(win.contains(132));
+        assert!(win.contains(896));
+        assert!(!win.contains(897));
+        assert!(!win.contains(1022));
+        assert!(!win.contains(1023));
+        assert!(win.contains(1024));
+        assert!(!win.contains(1025));
+        assert!(!win.contains(1026));
+
+        win.insert(std::u64::MAX - 1);
+        assert!(win.contains(0));
+        assert!(win.contains(1));
+        assert!(win.contains(2));
+        assert!(win.contains(3));
+        assert!(win.contains(4));
+        assert!(win.contains(5));
+        assert!(win.contains(6));
+        assert!(win.contains(7));
+        assert!(win.contains(8));
+        assert!(win.contains(9));
+        assert!(win.contains(10));
+        assert!(win.contains(128));
+        assert!(win.contains(130));
+        assert!(win.contains(132));
+        assert!(win.contains(896));
+        assert!(win.contains(897));
+        assert!(win.contains(1022));
+        assert!(win.contains(1023));
+        assert!(win.contains(1024));
+        assert!(win.contains(1025));
+        assert!(win.contains(1026));
+        assert!(!win.contains(std::u64::MAX - 2));
+        assert!(win.contains(std::u64::MAX - 1));
     }
 }

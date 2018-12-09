@@ -404,6 +404,11 @@ impl Connection {
             aead.open_with_u64_counter(pn, header.as_ref(), ciphertext.as_mut())?
         };
 
+        if space.recv_pkt_num.contains(pn) {
+            trace!("{} ignored duplicate packet {}", self.trace_id, pn);
+            return Err(Error::Done);
+        }
+
         let mut payload = payload.get_bytes(payload_len)?;
 
         // To avoid sending an ACK in response to an ACK-only packet, we need
@@ -565,7 +570,7 @@ impl Connection {
             match acked {
                 frame::Frame::ACK { ranges, .. } => {
                     let largest_acked = ranges.largest().unwrap();
-                    space.recv_pkt_num.remove_until(largest_acked);
+                    space.recv_pkt_need_ack.remove_until(largest_acked);
                 },
 
                 frame::Frame::Ping => (),
@@ -574,7 +579,9 @@ impl Connection {
             }
         }
 
-        space.recv_pkt_num.push_item(pn);
+        space.recv_pkt_num.insert(pn);
+
+        space.recv_pkt_need_ack.push_item(pn);
         space.do_ack = cmp::max(space.do_ack, do_ack);
 
         space.largest_rx_pkt_num = cmp::max(space.largest_rx_pkt_num, pn);
@@ -696,7 +703,7 @@ impl Connection {
         if space.do_ack {
             let frame = frame::Frame::ACK {
                 ack_delay: 0,
-                ranges: space.recv_pkt_num.clone(),
+                ranges: space.recv_pkt_need_ack.clone(),
             };
 
             if frame.wire_len() <= left {
