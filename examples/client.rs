@@ -28,7 +28,7 @@
 #[macro_use]
 extern crate log;
 
-use rand::Rng;
+use ring::rand::*;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
 
@@ -81,7 +81,7 @@ fn main() {
                   mio::PollOpt::edge()).unwrap();
 
     let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
-    rand::thread_rng().fill(&mut scid[..]);
+    SystemRandom::new().fill(&mut scid[..]).unwrap();
 
     let mut config = quiche::Config::new(0xbabababa, &TRANSPORT_PARAMS).unwrap();
     config.verify_peer(true);

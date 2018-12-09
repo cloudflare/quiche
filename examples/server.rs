@@ -33,7 +33,7 @@ use std::net;
 use std::collections::hash_map;
 use std::collections::HashMap;
 
-use rand::Rng;
+use ring::rand::*;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
 
@@ -175,7 +175,7 @@ fn main() {
                     }
 
                     let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
-                    rand::thread_rng().fill(&mut scid[..]);
+                    SystemRandom::new().fill(&mut scid[..]).unwrap();
 
                     debug!("New connection: dcid={} scid={} lcid={}",
                            hex_dump(&hdr.dcid),
