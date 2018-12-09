@@ -1270,7 +1270,6 @@ impl TransportParams {
 
     fn encode<'a>(tp: &TransportParams, version: u32, is_server: bool,
                   out: &'a mut [u8]) -> Result<&'a mut [u8]> {
-        // TODO: implement put_with_length API for octets::Bytes to avoid this copy
         let mut params: [u8; 128] = [0; 128];
 
         let params_len = {

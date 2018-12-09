@@ -318,6 +318,7 @@ impl Recovery {
         }
 
         // Crypto retransmission timer.
+        // TODO: avoid looping over every packet
         if flight.sent.values().any(|p| p.is_crypto) {
             let mut timeout = if self.smoothed_rtt == zero {
                 INITIAL_RTT * 2
@@ -374,6 +375,7 @@ impl Recovery {
 
         let mut lost_pkt: Vec<u64> = Vec::new();
 
+        // TODO: avoid looping over every packet
         for unacked in flight.sent.values().filter(|p| p.pkt_num < largest_acked) {
             let time_since_sent = unacked.time.elapsed();
             let delta = largest_acked - unacked.pkt_num;

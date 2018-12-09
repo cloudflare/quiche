@@ -201,7 +201,6 @@ impl Header {
                 Type::Retry     => 0x7e,
                 Type::Handshake => 0x7d,
                 Type::ZeroRTT   => 0x7c,
-                // TODO: unify handling of version negotiation
                 _               => return Err(Error::InvalidPacket),
         };
 
