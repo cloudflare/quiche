@@ -214,7 +214,7 @@ impl Recovery {
             let mut lost_pkt: Vec<u64> = Vec::new();
 
             for p in flight.sent.values().filter(|p| p.pkt_num < smallest_acked) {
-                error!("{} packet detected lost {}", trace_id, p.pkt_num);
+                trace!("{} packet detected lost {}", trace_id, p.pkt_num);
 
                 lost_pkt.push(p.pkt_num);
             }
@@ -380,7 +380,7 @@ impl Recovery {
 
             if time_since_sent > delay_until_lost || delta > REORDERING_THRESHOLD {
                 if unacked.retransmittable {
-                    error!("{} packet lost {}", trace_id, unacked.pkt_num);
+                    trace!("{} packet lost {}", trace_id, unacked.pkt_num);
                 }
 
                 lost_pkt.push(unacked.pkt_num);
