@@ -27,8 +27,7 @@
 
 use std::ops::Range;
 
-use std::collections::Bound::{Excluded, Included, Unbounded};
-
+use std::collections::Bound;
 use std::collections::btree_map;
 use std::collections::BTreeMap;
 
@@ -42,75 +41,58 @@ impl RangeSet {
         let mut start = item.start;
         let mut end = item.end;
 
+        // Check if preceding existing range overlaps with the new one.
         if let Some(r) = self.prev_to(start) {
-            if range_contains(&r, start) && range_contains(&r, end) {
-                return;
-            }
-
-            if range_contains(&r, start) && !range_contains(&r, end) {
+            // New range overlaps with existing range in the set, merge them.
+            if range_overlaps(&r, &item) {
                 self.inner.remove(&r.start);
+
                 start = std::cmp::min(start, r.start);
-            }
-
-            if !range_contains(&r, start) && range_contains(&r, end) {
-                self.inner.remove(&r.start);
                 end = std::cmp::max(end, r.end);
             }
         }
 
+        // Check if following existing ranges overlap with the new one.
         while let Some(r) = self.next_to(start) {
-            if range_contains(&r, start) && range_contains(&r, end) {
-                return;
-            }
-
-            if range_contains(&item, r.start) &&
-               range_contains(&item, r.end) {
+            // Existing range is fully contained in the new range, remove it.
+            if range_contains(&item, r.start) && range_contains(&item, r.end) {
                 self.inner.remove(&r.start);
                 continue;
             }
 
-            if range_contains(&r, start) && !range_contains(&r, end) {
-                self.inner.remove(&r.start);
-                start = std::cmp::min(start, r.start);
-            }
-
-            if !range_contains(&r, start) && range_contains(&r, end) {
-                self.inner.remove(&r.start);
-                end = std::cmp::max(end, r.end);
-            }
-
-            if !range_contains(&r, start) && !range_contains(&r, end) {
+            // New range doesn't overlap anymore, we are done.
+            if !range_overlaps(&r, &item) {
                 break;
             }
+
+            // New range overlaps with existing range in the set, merge them.
+            self.inner.remove(&r.start);
+
+            start = std::cmp::min(start, r.start);
+            end = std::cmp::max(end, r.end);
         }
 
         self.inner.insert(start, end);
     }
 
     pub fn remove_until(&mut self, largest: u64) {
-        let ranges: Vec<(u64, u64)> =
-            self.inner
-                .range((Included(&0), Included(&largest)))
-                .map(|(s, e)| (*s, *e))
-                .collect();
+        let ranges: Vec<Range<u64>> =
+            self.inner.range((Bound::Unbounded, Bound::Included(&largest)))
+                      .map(|(&s, &e)| (s..e))
+                      .collect();
 
-        for (start, end) in ranges {
-            self.inner.remove(&start);
+        for r in ranges {
+            self.inner.remove(&r.start);
 
-            if end > largest + 1 {
+            if r.end > largest + 1 {
                 let start = largest + 1;
-                self.insert(Range { start, end });
+                self.insert(start..r.end);
             }
         }
     }
 
     pub fn push_item(&mut self, item: u64) {
-        let r = Range {
-            start: item,
-            end: item + 1,
-        };
-
-        self.insert(r);
+        self.insert(item..item + 1);
     }
 
     pub fn smallest(&self) -> Option<u64> {
@@ -136,17 +118,15 @@ impl RangeSet {
     }
 
     fn prev_to(&self, item: u64) -> Option<Range<u64>> {
-        match self.inner.range((Unbounded, Included(item))).next_back() {
-            Some((start, end)) => Some(*start..*end),
-            None => None,
-        }
+        self.inner.range((Bound::Unbounded, Bound::Included(item)))
+                  .map(|(&s, &e)| (s..e))
+                  .next_back()
     }
 
     fn next_to(&self, item: u64) -> Option<Range<u64>> {
-        match self.inner.range((Included(item), Unbounded)).next() {
-            Some((start, end)) => Some(*start..*end),
-            None => None,
-        }
+        self.inner.range((Bound::Included(item), Bound::Unbounded))
+                  .map(|(&s, &e)| (s..e))
+                  .next()
     }
 }
 
@@ -223,17 +203,12 @@ impl<'a> DoubleEndedIterator for Flatten<'a> {
 }
 
 fn range_contains(r: &Range<u64>, item: u64) -> bool {
-    (match Included(r.start) {
-        Included(start) => start <= item,
-        Excluded(start) => start < item,
-        Unbounded => true,
-    })
-    &&
-    (match Included(r.end) {
-        Included(end) => item <= end,
-        Excluded(end) => item < end,
-        Unbounded => true,
-    })
+    r.start <= item && item <= r.end
+}
+
+fn range_overlaps(r: &Range<u64>, other: &Range<u64>) -> bool {
+    other.start >= r.start && other.start <= r.end ||
+    other.end >= r.start && other.end <= r.end
 }
 
 
@@ -476,6 +451,10 @@ mod tests {
         r.remove_until(17);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(),
                    &[18, 19]);
+
+        r.remove_until(18);
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(),
+                   &[19]);
 
         r.remove_until(20);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[]);
