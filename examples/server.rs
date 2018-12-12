@@ -94,26 +94,10 @@ fn main() {
     config.load_priv_key_from_pem_file(args.get_str("--key")).unwrap();
 
     loop {
-        let now = std::time::Instant::now();
-
         // TODO: use event loop that properly supports timers
         let timeout = connections.values()
                                  .filter_map(|c| c.timeout())
                                  .min();
-
-        let timeout = match timeout {
-            Some(v) => {
-                let timeout = if v < now {
-                    std::time::Duration::new(0, 0)
-                } else {
-                    v.duration_since(now)
-                };
-
-                Some(timeout)
-            },
-
-            None => None,
-        };
 
         poll.poll(&mut events, timeout).unwrap();
 

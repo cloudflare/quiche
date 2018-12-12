@@ -993,21 +993,29 @@ impl Connection {
         stream::Readable::new(&self.streams)
     }
 
-    pub fn timeout(&self) -> Option<std::time::Instant> {
+    pub fn timeout(&self) -> Option<std::time::Duration> {
         if self.closed {
             return None;
         }
 
-        if self.draining {
-            return self.draining_timer;
-        }
+        let timeout = if self.draining {
+            self.draining_timer
+        } else if self.recovery.loss_detection_timer().is_some() {
+            self.recovery.loss_detection_timer()
+        } else if self.idle_timer.is_some() {
+            self.idle_timer
+        } else {
+            None
+        };
 
-        if self.recovery.loss_detection_timer().is_some() {
-            return self.recovery.loss_detection_timer();
-        }
+        if let Some(timeout) = timeout {
+            let now = time::Instant::now();
 
-        if self.idle_timer.is_some() {
-            return self.idle_timer;
+            if timeout <= now {
+                return Some(std::time::Duration::new(0, 0));
+            }
+
+            return Some(timeout.duration_since(now));
         }
 
         None

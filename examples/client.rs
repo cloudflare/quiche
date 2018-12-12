@@ -109,23 +109,7 @@ fn main() {
     let mut req_sent = false;
 
     loop {
-        let now = std::time::Instant::now();
-
-        let timeout = match conn.timeout() {
-            Some(v) => {
-                let timeout = if v < now {
-                    std::time::Duration::new(0, 0)
-                } else {
-                    v.duration_since(now)
-                };
-
-                Some(timeout)
-            },
-
-            None => None,
-        };
-
-        poll.poll(&mut events, timeout).unwrap();
+        poll.poll(&mut events, conn.timeout()).unwrap();
 
         'read: loop {
             if events.is_empty() {
