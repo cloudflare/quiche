@@ -95,10 +95,6 @@ impl RangeSet {
         self.insert(item..item + 1);
     }
 
-    pub fn smallest(&self) -> Option<u64> {
-        self.flatten().next()
-    }
-
     pub fn largest(&self) -> Option<u64> {
         self.flatten().next_back()
     }
