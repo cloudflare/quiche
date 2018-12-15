@@ -716,7 +716,7 @@ impl Connection {
             }
         }
 
-        let mut retransmittable = false;
+        let mut ack_eliciting = false;
         let mut is_crypto = false;
 
         // Create MAX_DATA frame, when the new limit is at least double the
@@ -737,7 +737,7 @@ impl Connection {
 
                 frames.push(frame);
 
-                retransmittable = true;
+                ack_eliciting = true;
             }
         }
 
@@ -759,7 +759,7 @@ impl Connection {
 
                 frames.push(frame);
 
-                retransmittable = true;
+                ack_eliciting = true;
             }
         }
 
@@ -783,7 +783,7 @@ impl Connection {
 
             self.recovery.probes -= 1;
 
-            retransmittable = true;
+            ack_eliciting = true;
         }
 
         // Create CONNECTION_CLOSE frame.
@@ -833,7 +833,7 @@ impl Connection {
 
             frames.push(frame);
 
-            retransmittable = true;
+            ack_eliciting = true;
             is_crypto = true;
         }
 
@@ -879,7 +879,7 @@ impl Connection {
 
                 frames.push(frame);
 
-                retransmittable = true;
+                ack_eliciting = true;
                 break;
             }
         }
@@ -926,7 +926,7 @@ impl Connection {
 
         let written = payload_offset + payload_len;
 
-        let sent = recovery::Sent::new(pn, frames, written, retransmittable,
+        let sent = recovery::Sent::new(pn, frames, written, ack_eliciting,
                                        is_crypto, now);
 
         self.recovery.on_packet_sent(sent, &mut space.flight, now, &self.trace_id);

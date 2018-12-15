@@ -36,21 +36,19 @@ use crate::frame;
 use crate::ranges;
 
 // Loss Recovery
+const PACKET_THRESHOLD: u64 = 3;
+
+const GRANULARITY: Duration = Duration::from_millis(1);
+
 const INITIAL_RTT: Duration = Duration::from_millis(100);
-
-const MIN_TLP_TIMEOUT: Duration = Duration::from_millis(10);
-
-const MIN_RTO_TIMEOUT: Duration = Duration::from_millis(200);
-
-const MAX_TLP_COUNT: u32 = 2;
-
-const REORDERING_THRESHOLD: u64 = 3;
 
 // Congestion Control
 const MAX_DATAGRAM_SIZE: usize = 1460;
 
 const INITIAL_WINDOW: usize = 10 * MAX_DATAGRAM_SIZE;
 const MINIMUM_WINDOW: usize = 2 * MAX_DATAGRAM_SIZE;
+
+const PERSISTENT_CONGESTION_THRESHOLD: u32 = 2;
 
 #[derive(Debug)]
 pub struct Sent {
@@ -62,22 +60,22 @@ pub struct Sent {
 
     size: usize,
 
-    retransmittable: bool,
+    ack_eliciting: bool,
 
     is_crypto: bool,
 }
 
 impl Sent {
     pub fn new(pkt_num: u64, frames: Vec<frame::Frame>, sent_bytes: usize,
-               retransmittable: bool, is_crypto: bool, now: Instant) -> Sent {
-        let sent_bytes = if retransmittable { sent_bytes } else { 0 };
+               ack_eliciting: bool, is_crypto: bool, now: Instant) -> Sent {
+        let sent_bytes = if ack_eliciting { sent_bytes } else { 0 };
 
         Sent {
             pkt_num,
             frames,
             time: now,
             size: sent_bytes,
-            retransmittable,
+            ack_eliciting,
             is_crypto,
         }
     }
@@ -126,19 +124,15 @@ pub struct Recovery {
 
     crypto_count: u32,
 
-    tlp_count: u32,
+    pto_count: u32,
 
-    rto_count: u32,
-
-    largest_sent_before_rto: u64,
-
-    time_of_last_sent_retransmittable_packet: Instant,
+    time_of_last_sent_ack_eliciting_packet: Instant,
 
     time_of_last_sent_crypto_packet: Instant,
 
     largest_sent_pkt: u64,
 
-    largest_acked: u64,
+    largest_acked_pkt: u64,
 
     latest_rtt: Duration,
 
@@ -152,9 +146,9 @@ pub struct Recovery {
 
     loss_time: Option<Instant>,
 
-    cwnd: usize,
-
     bytes_in_flight: usize,
+
+    cwnd: usize,
 
     recovery_start_time: Option<Instant>,
 
@@ -167,7 +161,7 @@ impl Recovery {
     pub fn on_packet_sent(&mut self, pkt: Sent, flight: &mut InFlight,
                           now: Instant, trace_id: &str) {
         let pkt_num = pkt.pkt_num;
-        let retransmittable = pkt.retransmittable;
+        let ack_eliciting = pkt.ack_eliciting;
         let is_crypto = pkt.is_crypto;
         let sent_bytes = pkt.size;
 
@@ -175,12 +169,12 @@ impl Recovery {
 
         flight.sent.insert(pkt_num, pkt);
 
-        if retransmittable {
+        if ack_eliciting {
             if is_crypto {
                 self.time_of_last_sent_crypto_packet = now;
             }
 
-            self.time_of_last_sent_retransmittable_packet = now;
+            self.time_of_last_sent_ack_eliciting_packet = now;
 
             // OnPacketSentCC
             self.bytes_in_flight += sent_bytes;
@@ -196,8 +190,10 @@ impl Recovery {
         let largest_acked = ranges.largest().unwrap();
 
         if let Some(pkt) = flight.sent.get(&largest_acked) {
-            self.largest_acked = cmp::max(self.largest_acked, largest_acked);
-            self.update_rtt(pkt.time.elapsed(), ack_delay);
+            if pkt.ack_eliciting {
+                let ack_delay = Duration::from_micros(ack_delay);
+                self.update_rtt(pkt.time.elapsed(), ack_delay);
+            }
         }
 
         for pn in ranges.flatten().rev() {
@@ -205,31 +201,8 @@ impl Recovery {
             self.on_packet_acked(pn, flight);
         }
 
-        let smallest_acked = ranges.smallest().unwrap();
-
-        if self.rto_count > 0 && smallest_acked > self.largest_sent_before_rto {
-            // OnRetransmissionTimeoutVerified
-            self.cwnd = MINIMUM_WINDOW;
-
-            let mut lost_pkt: Vec<u64> = Vec::new();
-
-            for p in flight.sent.values().filter(|p| p.pkt_num < smallest_acked) {
-                trace!("{} packet detected lost {}", trace_id, p.pkt_num);
-
-                lost_pkt.push(p.pkt_num);
-            }
-
-            for lost in lost_pkt {
-                let mut p = flight.sent.remove(&lost).unwrap();
-
-                self.bytes_in_flight -= p.size;
-                flight.lost.append(&mut p.frames);
-            }
-        }
-
         self.crypto_count = 0;
-        self.tlp_count = 0;
-        self.rto_count = 0;
+        self.pto_count = 0;
 
         self.detect_lost_packets(largest_acked, flight, now, trace_id);
         self.set_loss_detection_timer(flight);
@@ -242,25 +215,18 @@ impl Recovery {
                                    hs_flight: &mut InFlight,
                                    flight: &mut InFlight,
                                    now: Instant, trace_id: &str) {
-        if !in_flight.sent.is_empty() || !hs_flight.sent.is_empty() {
+        // TODO: avoid looping over every packet
+        if in_flight.sent.values().any(|p| p.is_crypto) ||
+           hs_flight.sent.values().any(|p| p.is_crypto) {
             self.crypto_count += 1;
 
             self.bytes_in_flight -= in_flight.retransmit_unacked_crypto();
             self.bytes_in_flight -= hs_flight.retransmit_unacked_crypto();
         } else if self.loss_time.is_some() {
-            let largest_acked = self.largest_acked;
+            let largest_acked = self.largest_acked_pkt;
             self.detect_lost_packets(largest_acked, flight, now, trace_id);
-        } else if self.tlp_count < MAX_TLP_COUNT {
-            self.tlp_count += 1;
-
-            self.probes = 1;
         } else {
-            if self.rto_count == 0 {
-                self.largest_sent_before_rto = self.largest_sent_pkt;
-            }
-
-            self.rto_count += 1;
-
+            self.pto_count += 1;
             self.probes = 2;
         }
 
@@ -286,15 +252,16 @@ impl Recovery {
         self.cwnd - self.bytes_in_flight
     }
 
-    fn update_rtt(&mut self, latest_rtt: Duration, ack_delay: u64) {
+    fn update_rtt(&mut self, latest_rtt: Duration, ack_delay: Duration) {
         let zero = Duration::new(0, 0);
 
-        let ack_delay = Duration::from_micros(ack_delay);
+        let ack_delay = cmp::min(self.max_ack_delay, ack_delay);
 
         self.min_rtt = cmp::min(self.min_rtt, self.latest_rtt);
-        self.latest_rtt = cmp::max(latest_rtt.checked_sub(ack_delay)
-                                             .unwrap_or(zero),
-                                   self.min_rtt);
+
+        if latest_rtt - self.min_rtt > ack_delay {
+            self.latest_rtt = latest_rtt - ack_delay;
+        }
 
         if self.smoothed_rtt == zero {
             self.rttvar = self.latest_rtt / 2;
@@ -317,16 +284,16 @@ impl Recovery {
             return;
         }
 
-        // Crypto retransmission timer.
         // TODO: avoid looping over every packet
         if flight.sent.values().any(|p| p.is_crypto) {
+            // Crypto retransmission timer.
             let mut timeout = if self.smoothed_rtt == zero {
                 INITIAL_RTT * 2
             } else {
                 self.smoothed_rtt * 2
             };
 
-            timeout = cmp::max(timeout, MIN_TLP_TIMEOUT);
+            timeout = cmp::max(timeout, GRANULARITY);
             timeout *= 2_u32.pow(self.crypto_count);
 
             self.loss_detection_timer =
@@ -335,59 +302,51 @@ impl Recovery {
             return;
         }
 
-        // Early retransmit timer or time loss detection.
         if self.loss_time.is_some() {
+            // Time threshold loss detection.
             self.loss_detection_timer = self.loss_time;
             return;
         }
 
-        // RTO or TLP timer.
+        // PTO timer.
         let mut timeout = self.smoothed_rtt +
                           (self.rttvar * 4) +
                           self.max_ack_delay;
 
-        timeout = cmp::max(timeout, MIN_RTO_TIMEOUT);
-        timeout *= 2_u32.pow(self.rto_count);
-
-        if self.tlp_count < MAX_TLP_COUNT {
-            let tlp_timeout = cmp::max(
-                (self.smoothed_rtt * 3) / 2 + self.max_ack_delay,
-                MIN_TLP_TIMEOUT
-            );
-
-            timeout = cmp::min(tlp_timeout, timeout);
-        }
+        timeout = cmp::max(timeout, GRANULARITY);
+        timeout *= 2_u32.pow(self.pto_count);
 
         self.loss_detection_timer =
-            Some(self.time_of_last_sent_retransmittable_packet + timeout);
+            Some(self.time_of_last_sent_ack_eliciting_packet + timeout);
     }
 
     fn detect_lost_packets(&mut self, largest_acked: u64, flight: &mut InFlight,
                            now: Instant, trace_id: &str) {
-        self.loss_time = None;
-
-        // TODO: do time loss detection
-        let delay_until_lost = if largest_acked == self.largest_sent_pkt {
-            cmp::max(self.latest_rtt * 9, self.smoothed_rtt * 9) / 8
-        } else {
-            Duration::from_secs(std::u64::MAX)
-        };
-
         let mut lost_pkt: Vec<u64> = Vec::new();
 
-        // TODO: avoid looping over every packet
-        for unacked in flight.sent.values().filter(|p| p.pkt_num < largest_acked) {
-            let time_since_sent = unacked.time.elapsed();
-            let delta = largest_acked - unacked.pkt_num;
+        let loss_delay = (cmp::max(self.latest_rtt, self.smoothed_rtt) * 9) / 8;
 
-            if time_since_sent > delay_until_lost || delta > REORDERING_THRESHOLD {
-                if unacked.retransmittable {
+        let lost_send_time = now - loss_delay;
+
+        let lost_pkt_num = largest_acked.checked_sub(PACKET_THRESHOLD)
+                                        .unwrap_or(0);
+
+        self.loss_time = None;
+
+        // TODO: avoid looping over every packet
+        for unacked in flight.sent.values().filter(|p| p.pkt_num <= largest_acked) {
+            if unacked.time <= lost_send_time || unacked.pkt_num <= lost_pkt_num {
+                if unacked.ack_eliciting {
                     trace!("{} packet lost {}", trace_id, unacked.pkt_num);
                 }
 
                 lost_pkt.push(unacked.pkt_num);
-            } else if delay_until_lost.as_secs() != std::u64::MAX {
-                self.loss_time = Some(now + delay_until_lost - time_since_sent);
+            } else if self.loss_time.is_none() {
+                self.loss_time = Some(unacked.time + loss_delay);
+            } else {
+                let loss_time = self.loss_time.unwrap();
+                self.loss_time =
+                    Some(cmp::min(loss_time, unacked.time + loss_delay));
             }
         }
 
@@ -399,6 +358,7 @@ impl Recovery {
     fn in_recovery(&self, sent_time: Instant) -> bool {
         match self.recovery_start_time {
             Some(recovery_start_time) => sent_time <= recovery_start_time,
+
             None => false,
         }
     }
@@ -407,7 +367,7 @@ impl Recovery {
         if let Some(mut p) = flight.sent.remove(&pkt_num) {
             flight.acked.append(&mut p.frames);
 
-            if p.retransmittable {
+            if p.ack_eliciting {
                 // OnPacketAckedCC
                 self.bytes_in_flight -= p.size;
 
@@ -432,7 +392,7 @@ impl Recovery {
         for lost in lost_pkt {
             let mut p = flight.sent.remove(&lost).unwrap();
 
-            if !p.retransmittable {
+            if !p.ack_eliciting {
                 continue;
             }
 
@@ -445,12 +405,17 @@ impl Recovery {
             }
         }
 
+        // CongestionEvent
         if !self.in_recovery(largest_lost_packet_sent_time) {
             self.recovery_start_time = Some(now);
 
             self.cwnd /= 2;
             self.cwnd = cmp::max(self.cwnd, MINIMUM_WINDOW);
             self.ssthresh = self.cwnd;
+
+            if self.pto_count > PERSISTENT_CONGESTION_THRESHOLD {
+                self.cwnd = MINIMUM_WINDOW;
+            }
         }
     }
 }
@@ -464,19 +429,15 @@ impl Default for Recovery {
 
             crypto_count: 0,
 
-            tlp_count: 0,
-
-            rto_count: 0,
+            pto_count: 0,
 
             time_of_last_sent_crypto_packet: now,
 
-            time_of_last_sent_retransmittable_packet: now,
+            time_of_last_sent_ack_eliciting_packet: now,
 
             largest_sent_pkt: 0,
 
-            largest_sent_before_rto: 0,
-
-            largest_acked: 0,
+            largest_acked_pkt: 0,
 
             latest_rtt: Duration::new(0, 0),
 
@@ -490,9 +451,9 @@ impl Default for Recovery {
 
             loss_time: None,
 
-            cwnd: INITIAL_WINDOW,
-
             bytes_in_flight: 0,
+
+            cwnd: INITIAL_WINDOW,
 
             recovery_start_time: None,
 
