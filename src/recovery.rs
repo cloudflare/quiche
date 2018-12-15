@@ -205,7 +205,9 @@ impl Recovery {
         self.crypto_count = 0;
         self.pto_count = 0;
 
-        self.detect_lost_packets(largest_acked, flight, now, trace_id);
+        self.largest_acked_pkt = largest_acked;
+
+        self.detect_lost_packets(flight, now, trace_id);
         self.set_loss_detection_timer(flight);
 
         trace!("{} {:?}", trace_id, self);
@@ -226,8 +228,7 @@ impl Recovery {
             self.bytes_in_flight -= hs_flight.retransmit_unacked_crypto();
             self.bytes_in_flight -= flight.retransmit_unacked_crypto();
         } else if self.loss_time.is_some() {
-            let largest_acked = self.largest_acked_pkt;
-            self.detect_lost_packets(largest_acked, flight, now, trace_id);
+            self.detect_lost_packets(flight, now, trace_id);
         } else {
             self.pto_count += 1;
             self.probes = 2;
@@ -323,9 +324,11 @@ impl Recovery {
             Some(self.time_of_last_sent_ack_eliciting_pkt + timeout);
     }
 
-    fn detect_lost_packets(&mut self, largest_acked: u64, flight: &mut InFlight,
-                           now: Instant, trace_id: &str) {
+    fn detect_lost_packets(&mut self, flight: &mut InFlight, now: Instant,
+                           trace_id: &str) {
         let mut lost_pkt: Vec<u64> = Vec::new();
+
+        let largest_acked = self.largest_acked_pkt;
 
         let loss_delay = (cmp::max(self.latest_rtt, self.smoothed_rtt) * 9) / 8;
 
