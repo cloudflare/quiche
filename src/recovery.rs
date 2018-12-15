@@ -343,6 +343,8 @@ impl Recovery {
                     trace!("{} packet lost {}", trace_id, unacked.pkt_num);
                 }
 
+                // We can't remove the lost packet from |flight.sent| here, so
+                // simply keep track of the number so it can be removed later.
                 lost_pkt.push(unacked.pkt_num);
             } else if self.loss_time.is_none() {
                 self.loss_time = Some(unacked.time + loss_delay);
@@ -389,8 +391,11 @@ impl Recovery {
 
     fn on_packets_lost(&mut self, lost_pkt: Vec<u64>, flight: &mut InFlight,
                        now: Instant) {
-        let mut largest_lost_packet = 0;
-        let mut largest_lost_packet_sent_time = now;
+        // Differently from OnPacketsLost(), we need to handle both
+        // ACK-eliciting and non-ACK-eliciting packets, so need to keep of
+        // whether we saw any lost ACK-eliciting packet to trigger the
+        // congestion event later.
+        let mut largest_lost_packet_sent_time: Option<Instant> = None;
 
         for lost in lost_pkt {
             let mut p = flight.sent.remove(&lost).unwrap();
@@ -402,14 +407,15 @@ impl Recovery {
             self.bytes_in_flight -= p.size;
             flight.lost.append(&mut p.frames);
 
-            if lost > largest_lost_packet {
-                largest_lost_packet = lost;
-                largest_lost_packet_sent_time = p.time;
-            }
+            largest_lost_packet_sent_time = Some(p.time);
+        }
+
+        if largest_lost_packet_sent_time.is_none() {
+            return;
         }
 
         // CongestionEvent
-        if !self.in_recovery(largest_lost_packet_sent_time) {
+        if !self.in_recovery(largest_lost_packet_sent_time.unwrap()) {
             self.recovery_start_time = Some(now);
 
             self.cwnd /= 2;
