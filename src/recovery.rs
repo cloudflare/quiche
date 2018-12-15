@@ -91,10 +91,11 @@ impl InFlight {
     pub fn retransmit_unacked_crypto(&mut self) -> usize {
         let mut unacked_bytes = 0;
 
-        for p in &mut self.sent.values_mut() {
+        for p in &mut self.sent.values_mut().filter(|p| p.is_crypto) {
             p.frames.retain(|f|
                 match f {
                     frame::Frame::Crypto { .. } => true,
+
                     _ => false,
                 });
 
@@ -217,11 +218,13 @@ impl Recovery {
                                    now: Instant, trace_id: &str) {
         // TODO: avoid looping over every packet
         if in_flight.sent.values().any(|p| p.is_crypto) ||
-           hs_flight.sent.values().any(|p| p.is_crypto) {
+           hs_flight.sent.values().any(|p| p.is_crypto) ||
+           flight.sent.values().any(|p| p.is_crypto) {
             self.crypto_count += 1;
 
             self.bytes_in_flight -= in_flight.retransmit_unacked_crypto();
             self.bytes_in_flight -= hs_flight.retransmit_unacked_crypto();
+            self.bytes_in_flight -= flight.retransmit_unacked_crypto();
         } else if self.loss_time.is_some() {
             let largest_acked = self.largest_acked_pkt;
             self.detect_lost_packets(largest_acked, flight, now, trace_id);
