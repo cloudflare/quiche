@@ -127,9 +127,9 @@ pub struct Recovery {
 
     pto_count: u32,
 
-    time_of_last_sent_ack_eliciting_packet: Instant,
+    time_of_last_sent_ack_eliciting_pkt: Instant,
 
-    time_of_last_sent_crypto_packet: Instant,
+    time_of_last_sent_crypto_pkt: Instant,
 
     largest_sent_pkt: u64,
 
@@ -172,10 +172,10 @@ impl Recovery {
 
         if ack_eliciting {
             if is_crypto {
-                self.time_of_last_sent_crypto_packet = now;
+                self.time_of_last_sent_crypto_pkt = now;
             }
 
-            self.time_of_last_sent_ack_eliciting_packet = now;
+            self.time_of_last_sent_ack_eliciting_pkt = now;
 
             // OnPacketSentCC
             self.bytes_in_flight += sent_bytes;
@@ -300,7 +300,7 @@ impl Recovery {
             timeout *= 2_u32.pow(self.crypto_count);
 
             self.loss_detection_timer =
-                Some(self.time_of_last_sent_crypto_packet + timeout);
+                Some(self.time_of_last_sent_crypto_pkt + timeout);
 
             return;
         }
@@ -320,7 +320,7 @@ impl Recovery {
         timeout *= 2_u32.pow(self.pto_count);
 
         self.loss_detection_timer =
-            Some(self.time_of_last_sent_ack_eliciting_packet + timeout);
+            Some(self.time_of_last_sent_ack_eliciting_pkt + timeout);
     }
 
     fn detect_lost_packets(&mut self, largest_acked: u64, flight: &mut InFlight,
@@ -395,7 +395,7 @@ impl Recovery {
         // ACK-eliciting and non-ACK-eliciting packets, so need to keep of
         // whether we saw any lost ACK-eliciting packet to trigger the
         // congestion event later.
-        let mut largest_lost_packet_sent_time: Option<Instant> = None;
+        let mut largest_lost_pkt_sent_time: Option<Instant> = None;
 
         for lost in lost_pkt {
             let mut p = flight.sent.remove(&lost).unwrap();
@@ -407,15 +407,15 @@ impl Recovery {
             self.bytes_in_flight -= p.size;
             flight.lost.append(&mut p.frames);
 
-            largest_lost_packet_sent_time = Some(p.time);
+            largest_lost_pkt_sent_time = Some(p.time);
         }
 
-        if largest_lost_packet_sent_time.is_none() {
+        if largest_lost_pkt_sent_time.is_none() {
             return;
         }
 
         // CongestionEvent
-        if !self.in_recovery(largest_lost_packet_sent_time.unwrap()) {
+        if !self.in_recovery(largest_lost_pkt_sent_time.unwrap()) {
             self.recovery_start_time = Some(now);
 
             self.cwnd /= 2;
@@ -440,9 +440,9 @@ impl Default for Recovery {
 
             pto_count: 0,
 
-            time_of_last_sent_crypto_packet: now,
+            time_of_last_sent_crypto_pkt: now,
 
-            time_of_last_sent_ack_eliciting_packet: now,
+            time_of_last_sent_ack_eliciting_pkt: now,
 
             largest_sent_pkt: 0,
 
