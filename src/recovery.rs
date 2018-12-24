@@ -203,10 +203,11 @@ impl Recovery {
             self.on_packet_acked(pn, flight);
         }
 
+        self.detect_lost_packets(flight, now, trace_id);
+
         self.crypto_count = 0;
         self.pto_count = 0;
 
-        self.detect_lost_packets(flight, now, trace_id);
         self.set_loss_detection_timer(flight);
 
         trace!("{} {:?}", trace_id, self);
