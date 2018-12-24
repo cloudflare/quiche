@@ -188,9 +188,10 @@ impl Recovery {
 
     pub fn on_ack_received(&mut self, ranges: &ranges::RangeSet, ack_delay: u64,
                            flight: &mut InFlight, now: Instant, trace_id: &str) {
-        let largest_acked = ranges.largest().unwrap();
+        self.largest_acked_pkt = cmp::max(self.largest_acked_pkt,
+                                          ranges.largest().unwrap());
 
-        if let Some(pkt) = flight.sent.get(&largest_acked) {
+        if let Some(pkt) = flight.sent.get(&self.largest_acked_pkt) {
             if pkt.ack_eliciting {
                 let ack_delay = Duration::from_micros(ack_delay);
                 self.update_rtt(pkt.time.elapsed(), ack_delay);
@@ -204,8 +205,6 @@ impl Recovery {
 
         self.crypto_count = 0;
         self.pto_count = 0;
-
-        self.largest_acked_pkt = largest_acked;
 
         self.detect_lost_packets(flight, now, trace_id);
         self.set_loss_detection_timer(flight);
