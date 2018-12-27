@@ -19,3 +19,6 @@ mio = "0"
 url = "1"
 docopt = "1"
 env_logger = "0"
+
+[lib]
+crate-type = ["lib", "staticlib"]

@@ -109,6 +109,23 @@ impl Error {
             _ => 0xa,
         }
     }
+
+    fn to_c(&self) -> libc::ssize_t {
+        match self {
+            Error::Pending => -1,
+            Error::Done => -2,
+            Error::BufferTooShort => -3,
+            Error::UnknownVersion => -4,
+            Error::InvalidFrame => -5,
+            Error::InvalidPacket => -6,
+            Error::InvalidState => -7,
+            Error::InvalidStreamState => -8,
+            Error::InvalidTransportParam => -9,
+            Error::CryptoFail => -10,
+            Error::TlsFail => -11,
+            Error::FlowControl => -12,
+        }
+    }
 }
 
 /// Stores configuration shared between multiple connections.
@@ -1745,6 +1762,7 @@ pub use crate::packet::Header;
 pub use crate::packet::Type;
 
 mod crypto;
+mod ffi;
 mod frame;
 mod octets;
 mod packet;

@@ -11,11 +11,14 @@ addons:
   apt:
     packages:
      - golang-go
+     - libev-dev
+     - uthash-dev
 
 script:
  - cargo build --verbose --all --examples
  - cargo test --verbose --all
  - cargo doc --no-deps
+ - make -C examples
 
 deploy:
   provider: pages
