@@ -53,7 +53,7 @@ pub enum Type {
     Application,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Header {
     pub ty: Type,
     pub version: u32,
@@ -252,8 +252,10 @@ impl std::fmt::Debug for Header {
         write!(f, "{:?}", self.ty)?;
 
         if self.ty != Type::Application {
-            write!(f, " vers={:x}", self.version)?;
+            write!(f, " version={:x}", self.version)?;
         }
+
+        write!(f, " flags={:02x}", self.flags)?;
 
         write!(f, " dcid=")?;
         for b in &self.dcid {
@@ -545,6 +547,48 @@ impl PktNumWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_header() {
+        let hdr = Header {
+            ty: Type::Initial,
+            version: 0xafafafaf,
+            flags: 0x80,
+            dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
+            scid: vec![ 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb ],
+            token: Some(vec![]),
+            versions: None,
+        };
+
+        let mut d: [u8; 50] = [0; 50];
+
+        let mut b = octets::Bytes::new(&mut d);
+        assert!(hdr.to_bytes(&mut b).is_ok());
+
+        let mut b = octets::Bytes::new(&mut d);
+        assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
+    }
+
+    #[test]
+    fn short_header() {
+        let hdr = Header {
+            ty: Type::Application,
+            version: 0,
+            flags: 0,
+            dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
+            scid: vec![ ],
+            token: None,
+            versions: None,
+        };
+
+        let mut d: [u8; 50] = [0; 50];
+
+        let mut b = octets::Bytes::new(&mut d);
+        assert!(hdr.to_bytes(&mut b).is_ok());
+
+        let mut b = octets::Bytes::new(&mut d);
+        assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
+    }
 
     #[test]
     fn pkt_num_window() {
