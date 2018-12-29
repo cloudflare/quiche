@@ -108,6 +108,18 @@ impl InFlight {
 
         unacked_bytes
     }
+
+    pub fn drop_unacked_data(&mut self) -> usize {
+        let mut unacked_bytes = 0;
+
+        for p in self.sent.values_mut().filter(|p| p.ack_eliciting) {
+            unacked_bytes += p.size;
+        }
+
+        self.sent.clear();
+
+        unacked_bytes
+    }
 }
 
 impl Default for InFlight {
@@ -237,6 +249,10 @@ impl Recovery {
         self.set_loss_detection_timer(flight);
 
         trace!("{} {:?}", trace_id, self);
+    }
+
+    pub fn drop_unacked_data(&mut self, flight: &mut InFlight) {
+        self.bytes_in_flight -= flight.drop_unacked_data();
     }
 
     pub fn loss_detection_timer(&self) -> Option<Instant> {

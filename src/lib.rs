@@ -729,6 +729,19 @@ impl Connection {
                 u64::from(self.local_transport_params.idle_timeout)));
 
         let read = payload_offset + payload_len + aead.alg().tag_len();
+
+        // Drop initial keys and recovery state on the server side after
+        // receiving an Handshake packet.
+        if self.is_server && self.initial.crypto_open.is_some() &&
+           hdr.ty == packet::Type::Handshake {
+            self.recovery.drop_unacked_data(&mut self.initial.flight);
+            self.initial.crypto_open = None;
+            self.initial.crypto_seal = None;
+            self.initial.clear();
+
+            trace!("{} dropped initial state", self.trace_id);
+        }
+
         Ok(read)
     }
 
@@ -1073,6 +1086,18 @@ impl Connection {
         self.recovery.on_packet_sent(sent, &mut space.flight, now, &self.trace_id);
 
         space.next_pkt_num += 1;
+
+        // Drop initial keys and recovery state on the client side after
+        // sending an Handshake packet.
+        if !self.is_server && self.initial.crypto_open.is_some() &&
+           hdr.ty == packet::Type::Handshake {
+            self.recovery.drop_unacked_data(&mut self.initial.flight);
+            self.initial.crypto_open = None;
+            self.initial.crypto_seal = None;
+            self.initial.clear();
+
+            trace!("{} dropped initial state", self.trace_id);
+        }
 
         Ok(written)
     }
