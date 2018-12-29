@@ -552,10 +552,12 @@ impl Connection {
                         return Err(Error::InvalidState);
                     }
 
-                    let max_rx_data = self.local_transport_params
-                                          .initial_max_stream_data_bidi_remote as usize;
-                    let max_tx_data = self.peer_transport_params
-                                          .initial_max_stream_data_bidi_local as usize;
+                    let max_rx_data =
+                        self.local_transport_params
+                            .initial_max_stream_data_bidi_remote as usize;
+                    let max_tx_data =
+                        self.peer_transport_params
+                            .initial_max_stream_data_bidi_local as usize;
 
                     // Get existing stream or create a new one.
                     let stream = match self.streams.entry(stream_id) {
@@ -626,7 +628,8 @@ impl Connection {
 
                 frame::Frame::ACK { ranges, ack_delay } => {
                     let ack_delay =
-                        ack_delay << self.peer_transport_params.ack_delay_exponent;
+                        ack_delay << self.peer_transport_params
+                                         .ack_delay_exponent;
 
                     self.recovery.on_ack_received(&ranges, ack_delay,
                                                   &mut space.flight,
@@ -664,10 +667,12 @@ impl Connection {
                         return Err(Error::InvalidState);
                     }
 
-                    let max_rx_data = self.local_transport_params
-                                          .initial_max_stream_data_bidi_remote as usize;
-                    let max_tx_data = self.peer_transport_params
-                                          .initial_max_stream_data_bidi_local as usize;
+                    let max_rx_data =
+                        self.local_transport_params
+                            .initial_max_stream_data_bidi_remote as usize;
+                    let max_tx_data =
+                        self.peer_transport_params
+                            .initial_max_stream_data_bidi_local as usize;
 
                     // Get existing stream or create a new one.
                     let stream = match self.streams.entry(stream_id) {
