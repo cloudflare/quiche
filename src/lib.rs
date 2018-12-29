@@ -25,6 +25,13 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+//! Savoury implementation of the QUIC transport protocol.
+//!
+//! quiche is an implementation of the QUIC transport protocol as specified
+//! by the IETF. It provides a low level API for processing QUIC packets and
+//! handling connection state, while leaving I/O (including dealing with
+//! sockets) to the application.
+
 #[macro_use]
 extern crate log;
 
@@ -35,6 +42,7 @@ use std::time;
 use std::collections::hash_map;
 use std::collections::HashMap;
 
+/// The current QUIC wire version.
 pub const VERSION_DRAFT15: u32 = 0xff00_000f;
 
 const CLIENT_INITIAL_MIN_LEN: usize = 1200;
@@ -44,34 +52,59 @@ const DRAINING_TIMEOUT: time::Duration = time::Duration::from_millis(200);
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// A QUIC error.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
-    NoError,
+    /// An asynchronous operation (e.g. certificate lookup) is pending.
     Again,
+
+    /// There is no more work to do.
     Done,
+
+    /// The provided buffer is too short.
     BufferTooShort,
+
+    /// The provided packet cannot be parsed because its version is unknown.
     UnknownVersion,
+
+    /// The provided packet cannot be parsed because it contains an invalid
+    /// frame.
     InvalidFrame,
+
+    /// The provided packet cannot be parsed.
     InvalidPacket,
+
+    /// The operation cannot be completed because the connection is in an
+    /// invalid state.
     InvalidState,
+
+    /// The operation cannot be completed because the stream is in an
+    /// invalid state.
     InvalidStreamState,
+
+    /// The peer's transport params cannot be parsed.
     InvalidTransportParam,
+
+    /// A cryptographic operation failed.
     CryptoFail,
+
+    /// The TLS handshake failed.
     TlsFail,
+
+    /// The peer violated the local flow control limits.
     FlowControl,
 }
 
 impl Error {
     pub fn to_wire(&self) -> u16 {
         match self {
-            Error::NoError => 0x0,
+            Error::Again => 0x0,
+            Error::Done => 0x0,
             Error::InvalidFrame => 0x7,
             Error::InvalidStreamState => 0x5,
             Error::InvalidTransportParam => 0x8,
             Error::CryptoFail => 0x100,
             Error::TlsFail => 0x100,
-            Error::Again => 0x0,
-            Error::Done => 0x0,
             Error::FlowControl => 0x3,
             _ => 0xa,
         }
@@ -84,6 +117,7 @@ enum Role {
     Connect,
 }
 
+/// Stores configuration shared between multiple connections.
 pub struct Config {
     local_transport_params: TransportParams,
 
@@ -93,6 +127,7 @@ pub struct Config {
 }
 
 impl Config {
+    /// Creates a config object with the given version and transport params.
     #[allow(clippy::new_ret_no_self)]
     pub fn new(version: u32, tp: &TransportParams) -> Result<Config> {
         let tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
@@ -104,16 +139,24 @@ impl Config {
         })
     }
 
+    /// Configures the given certificate chain.
+    ///
+    /// The content of `file` is parsed as a PEM-encoded leaf certificate,
+    /// followed by optional intermediate certificates.
     pub fn load_cert_chain_from_pem_file(&mut self, file: &str) -> Result<()> {
         self.tls_ctx.use_certificate_chain_file(file)
                     .map_err(|_| Error::TlsFail)
     }
 
+    /// Configures the given private key.
+    ///
+    /// The content of `file` is parsed as a PEM-encoded private key.
     pub fn load_priv_key_from_pem_file(&mut self, file: &str) -> Result<()> {
         self.tls_ctx.use_privkey_file(file)
                     .map_err(|_| Error::TlsFail)
     }
 
+    /// Configures whether to verify the peer's certificate.
     pub fn verify_peer(&mut self, verify: bool) {
         self.tls_ctx.set_verify(verify);
     }
@@ -123,6 +166,7 @@ impl Config {
     }
 }
 
+/// A QUIC connection.
 pub struct Connection {
     version: u32,
 
@@ -174,6 +218,40 @@ pub struct Connection {
     draining: bool,
 
     closed: bool,
+}
+
+/// Creates a new server-side connection.
+///
+/// The `scid` parameter is used as the connection's source connection ID,
+pub fn accept(scid: &[u8], config: &mut Config) -> Result<Box<Connection>> {
+    let conn = Connection::new(scid, config, Role::Accept)?;
+
+    Ok(conn)
+}
+
+/// Creates a new client-side connection.
+///
+/// The `scid` parameter is used as the connection's source connection ID,
+/// while the optional `server_name` parameter is used to verify the peer's
+/// certificate.
+pub fn connect(server_name: Option<&str>, scid: &[u8], config: &mut Config)
+                                                -> Result<Box<Connection>> {
+    let conn = Connection::new(scid, config, Role::Connect)?;
+
+    if server_name.is_some() {
+        conn.tls_state.set_host_name(server_name.unwrap())
+                      .map_err(|_| Error::TlsFail)?;
+    }
+
+    Ok(conn)
+}
+
+/// Writes a version negotiation packet.
+///
+/// The `hdr` parameter represents the header of the packet received from the
+/// client with an unsupported version.
+pub fn negotiate_version(hdr: &packet::Header, out: &mut [u8]) -> Result<usize> {
+    packet::negotiate_version(hdr, out)
 }
 
 impl Connection {
@@ -267,6 +345,13 @@ impl Connection {
         Ok(conn)
     }
 
+    /// Processes a single QUIC packet received from the peer.
+    ///
+    /// This should be called repeatedly with new data until `Done` or `Again`
+    /// are returned.
+    ///
+    /// On success the number of bytes processed from the input buffer is
+    /// returned, or one of `Done` or `Again` error codes.
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
 
@@ -626,6 +711,12 @@ impl Connection {
         Ok(read)
     }
 
+    /// Writes a single QUIC packet to be sent to the peer.
+    ///
+    /// This should be called repeatedly until `Done` or `Again` are returned.
+    ///
+    /// On success the number of bytes processed from the input buffer is
+    /// returned, or one of `Done` or `Again` error codes.
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
 
@@ -705,7 +796,6 @@ impl Connection {
         let hdr = packet::Header {
             ty: space.pkt_type,
             version: self.version,
-            flags: 0,
             dcid: self.dcid.clone(),
             scid: self.scid.clone(),
             token: None,
@@ -968,6 +1058,10 @@ impl Connection {
         Ok(written)
     }
 
+    /// Reads contiguous data from a stream.
+    ///
+    /// On success the stream data is returned, or `Done` if there is no data
+    /// to read.
     pub fn stream_recv(&mut self, stream_id: u64) -> Result<stream::RangeBuf> {
         let stream = match self.streams.get_mut(&stream_id) {
             Some(v) => v,
@@ -985,6 +1079,9 @@ impl Connection {
         Ok(buf)
     }
 
+    /// Writes data to a stream.
+    ///
+    /// On success the number of bytes written is returned.
     pub fn stream_send(&mut self, stream_id: u64, buf: &[u8], fin: bool)
                                                             -> Result<usize> {
         // We can't write on the peer's unidirectional streams.
@@ -1021,10 +1118,15 @@ impl Connection {
         Ok(buf.len())
     }
 
+    /// Creates an iterator of streams that have outstanding data to read.
     pub fn stream_iter(&mut self) -> Readable {
         stream::Readable::new(&self.streams)
     }
 
+    /// Returns the amount of time until the next timeout event.
+    ///
+    /// Once the given duration has elapsed, the `on_timeout()` method should
+    /// be called. A timeout of `None` means that the timer should be disarmed.
     pub fn timeout(&self) -> Option<std::time::Duration> {
         if self.closed {
             return None;
@@ -1053,6 +1155,9 @@ impl Connection {
         None
     }
 
+    /// Processes a timeout event.
+    ///
+    /// If no timeout has occurred it does nothing.
     pub fn on_timeout(&mut self) {
         let now = time::Instant::now();
 
@@ -1086,6 +1191,16 @@ impl Connection {
         }
     }
 
+    /// Closes the connection with the given error and reason.
+    ///
+    /// The `app` parameter specifies whether an application close should be
+    /// sent to the peer. Otherwise a normal connection close is sent.
+    ///
+    /// Returns `None` if the connection had already been closed.
+    ///
+    /// Note that the connection will not be closed immediately. An application
+    /// should continue calling `recv()`, `send()`, `timeout()`, ... as normal,
+    /// until the `is_closed()` method returns true.
     pub fn close(&mut self, app: bool, err: u16, reason: &[u8]) -> Result<()> {
         if self.draining {
             return Err(Error::Done);
@@ -1105,14 +1220,22 @@ impl Connection {
         Ok(())
     }
 
+    /// Returns a string uniquely representing the connection.
+    ///
+    /// This can be used for logging purposes to differentiate between multipl
+    /// connections.
     pub fn trace_id(&self) -> &str {
         &self.trace_id
     }
 
+    /// Returns true if the connection handshake is complete.
     pub fn is_established(&self) -> bool {
         self.handshake_completed
     }
 
+    /// Returns true if the connection is closed.
+    ///
+    /// If this returns true, the connection object can be dropped.
     pub fn is_closed(&self) -> bool {
         self.closed
     }
@@ -1163,28 +1286,6 @@ impl Connection {
 
         Ok(())
     }
-}
-
-pub fn accept(scid: &[u8], config: &mut Config) -> Result<Box<Connection>> {
-    let conn = Connection::new(scid, config, Role::Accept)?;
-
-    Ok(conn)
-}
-
-pub fn connect(server_name: Option<&str>, scid: &[u8], config: &mut Config)
-                                                -> Result<Box<Connection>> {
-    let conn = Connection::new(scid, config, Role::Connect)?;
-
-    if server_name.is_some() {
-        conn.tls_state.set_host_name(server_name.unwrap())
-                      .map_err(|_| Error::TlsFail)?;
-    }
-
-    Ok(conn)
-}
-
-pub fn negotiate_version(hdr: &packet::Header, out: &mut [u8]) -> Result<usize> {
-    packet::negotiate_version(hdr, out)
 }
 
 #[derive(Clone, Debug, PartialEq)]

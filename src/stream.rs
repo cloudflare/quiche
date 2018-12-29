@@ -127,6 +127,7 @@ pub fn is_bidi(id: u64) -> bool {
     (id & 0x2) == 0
 }
 
+/// An iterator over the streams that have outstanding data to read.
 pub struct Readable<'a> {
     streams: hash_map::Iter<'a, u64, Stream>,
 }
@@ -310,6 +311,7 @@ impl SendBuf {
     }
 }
 
+/// Buffer holding data at a specific offset.
 #[derive(Debug, Default, Eq)]
 pub struct RangeBuf {
     data: Vec<u8>,
@@ -318,7 +320,7 @@ pub struct RangeBuf {
 }
 
 impl RangeBuf {
-    pub fn from(buf: &[u8], off: usize, fin: bool) -> RangeBuf {
+    pub(crate) fn from(buf: &[u8], off: usize, fin: bool) -> RangeBuf {
         RangeBuf {
             data: Vec::from(buf),
             off,
@@ -326,22 +328,27 @@ impl RangeBuf {
         }
     }
 
+    /// Returns whether `self` holds the final offset in the series.
     pub fn fin(&self) -> bool {
         self.fin
     }
 
+    /// Returns the starting offset of `self`.
     pub fn off(&self) -> usize {
         self.off
     }
 
+    /// Returns the final offset of `self`.
     pub fn max_off(&self) -> usize {
         self.off() + self.len()
     }
 
+    /// Returns the length of `self`.
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
+    /// Returns true if `self` has a length of zero bytes.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

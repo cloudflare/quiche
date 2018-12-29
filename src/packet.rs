@@ -43,6 +43,7 @@ const TYPE_MASK: u8 = 0x7f;
 
 const MAX_CID_LEN: u8 = 18;
 
+/// QUIC packet type.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Type {
     Initial,
@@ -53,18 +54,35 @@ pub enum Type {
     Application,
 }
 
+/// A QUIC packet's header.
 #[derive(Clone, PartialEq)]
 pub struct Header {
+    /// The type of the packet.
     pub ty: Type,
+
+    /// The version of the packet.
     pub version: u32,
-    pub flags: u8,
+
+    /// The destination connection ID of the packet.
     pub dcid: Vec<u8>,
+
+    /// The source connection ID of the packet.
     pub scid: Vec<u8>,
+
+    /// The address verification token of the packet. Only present in `Initial`
+    /// packets.
     pub token: Option<Vec<u8>>,
+
+    /// The list of versions in the packet. Only present in `VersionNegotiation`
+    /// packets.
     pub versions: Option<Vec<u32>>,
 }
 
 impl Header {
+    /// Parses a QUIC packet header from the given buffer.
+    ///
+    /// The `dcil` parameter is the length of the destionation connection ID,
+    /// required to parse short header packets.
     pub fn from_slice(buf: &mut [u8], dcil: usize) -> Result<Header> {
         let mut b = octets::Bytes::new(buf);
         Header::from_bytes(&mut b, dcil)
@@ -79,7 +97,6 @@ impl Header {
 
             return Ok(Header {
                 ty: Type::Application,
-                flags: first & FORM_BIT,
                 version: 0,
                 dcid: dcid.to_vec(),
                 scid: Vec::new(),
@@ -160,7 +177,6 @@ impl Header {
 
         Ok(Header {
             ty,
-            flags: first & FORM_BIT,
             version,
             dcid,
             scid,
@@ -242,6 +258,9 @@ impl Header {
         Ok(())
     }
 
+    /// Returns true if the packet has a long header.
+    ///
+    /// The `b` parameter represents the first byte of the QUIC header.
     pub fn is_long(b: u8) -> bool {
         b & FORM_BIT != 0
     }
@@ -254,8 +273,6 @@ impl std::fmt::Debug for Header {
         if self.ty != Type::Application {
             write!(f, " version={:x}", self.version)?;
         }
-
-        write!(f, " flags={:02x}", self.flags)?;
 
         write!(f, " dcid=")?;
         for b in &self.dcid {
@@ -553,7 +570,6 @@ mod tests {
         let hdr = Header {
             ty: Type::Initial,
             version: 0xafafafaf,
-            flags: 0x80,
             dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
             scid: vec![ 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb ],
             token: Some(vec![]),
@@ -574,7 +590,6 @@ mod tests {
         let hdr = Header {
             ty: Type::Application,
             version: 0,
-            flags: 0,
             dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
             scid: vec![ ],
             token: None,
