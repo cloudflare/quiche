@@ -345,14 +345,30 @@ impl Connection {
         Ok(conn)
     }
 
-    /// Processes a single QUIC packet received from the peer.
-    ///
-    /// This should be called repeatedly with new data until `Done` or `Again`
-    /// are returned.
+    /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
     /// returned, or one of `Done` or `Again` error codes.
+    ///
+    /// Note that this will process coalesced packets as necessary.
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
+        let len = buf.len();
+
+        let mut done = 0;
+        let mut left = len;
+
+        // Process coalesced packets.
+        while left > 0 {
+            let read = self.recv_single(&mut buf[len - left..len])?;
+
+            done += read;
+            left -= read;
+        }
+
+        Ok(done)
+    }
+
+    fn recv_single(&mut self, buf: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
 
         if buf.is_empty() {
@@ -712,8 +728,6 @@ impl Connection {
     }
 
     /// Writes a single QUIC packet to be sent to the peer.
-    ///
-    /// This should be called repeatedly until `Done` or `Again` are returned.
     ///
     /// On success the number of bytes processed from the input buffer is
     /// returned, or one of `Done` or `Again` error codes.

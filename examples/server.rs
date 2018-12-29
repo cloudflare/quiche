@@ -174,29 +174,23 @@ fn main() {
                 hash_map::Entry::Occupied(v) => v.into_mut(),
             };
 
-            let mut left = len;
-
             // Process potentially coalesced packets.
-            while left > 0 {
-                let read = match conn.recv(&mut buf[len - left..len]) {
-                    Ok(v)  => v,
+            let read = match conn.recv(buf) {
+                Ok(v)  => v,
 
-                    Err(quiche::Error::Done) => {
-                        debug!("{} done reading", conn.trace_id());
-                        break;
-                    },
+                Err(quiche::Error::Done) => {
+                    debug!("{} done reading", conn.trace_id());
+                    break;
+                },
 
-                    Err(e) => {
-                        error!("{} recv failed: {:?}", conn.trace_id(), e);
-                        conn.close(false, e.to_wire(), b"fail").unwrap();
-                        break 'read;
-                    },
-                };
+                Err(e) => {
+                    error!("{} recv failed: {:?}", conn.trace_id(), e);
+                    conn.close(false, e.to_wire(), b"fail").unwrap();
+                    break 'read;
+                },
+            };
 
-                left -= read;
-
-                debug!("{} read {} bytes", conn.trace_id(), read);
-            }
+            debug!("{} processed {} bytes", conn.trace_id(), read);
 
             let streams: Vec<u64> = conn.stream_iter().collect();
             for s in streams {
