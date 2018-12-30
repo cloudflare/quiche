@@ -167,6 +167,8 @@ fn main() {
             info!("{} stream {} has {} bytes (fin? {})",
                   conn.trace_id(), s, data.len(), data.fin());
 
+            print!("{}", unsafe { std::str::from_utf8_unchecked(&data) });
+
             if s == HTTP_REQ_STREAM_ID && data.fin() {
                 conn.close(true, 0x00, b"kthxbye").unwrap();
             }
