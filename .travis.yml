@@ -15,3 +15,13 @@ addons:
 script:
  - cargo build --verbose --all --examples
  - cargo test --verbose --all
+ - cargo doc --no-deps
+
+deploy:
+  provider: pages
+  fqdn: docs.quic.tech
+  local-dir: target/debug/doc
+  skip-cleanup: true
+  github-token: $GITHUB_TOKEN
+  on:
+    branch: master
