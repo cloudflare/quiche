@@ -210,9 +210,18 @@ impl Recovery {
             }
         }
 
+        let mut has_newly_acked = false;
+
         for pn in ranges.flatten().rev() {
-            trace!("{} packet acked {}", trace_id, pn);
-            self.on_packet_acked(pn, flight);
+            trace!("{} packet newly acked {}", trace_id, pn);
+
+            let newly_acked = self.on_packet_acked(pn, flight);
+            has_newly_acked = cmp::max(has_newly_acked, newly_acked);
+
+        }
+
+        if !has_newly_acked {
+            return;
         }
 
         self.detect_lost_packets(flight, now, trace_id);
@@ -387,7 +396,8 @@ impl Recovery {
         }
     }
 
-    fn on_packet_acked(&mut self, pkt_num: u64, flight: &mut InFlight) {
+    fn on_packet_acked(&mut self, pkt_num: u64, flight: &mut InFlight) -> bool {
+        // Check if packet is newly acked.
         if let Some(mut p) = flight.sent.remove(&pkt_num) {
             flight.acked.append(&mut p.frames);
 
@@ -396,7 +406,7 @@ impl Recovery {
                 self.bytes_in_flight -= p.size;
 
                 if self.in_recovery(p.time) {
-                    return;
+                    return true;
                 }
 
                 if self.cwnd < self.ssthresh {
@@ -405,7 +415,12 @@ impl Recovery {
                     self.cwnd += (MAX_DATAGRAM_SIZE * p.size) / self.cwnd;
                 }
             }
+
+            return true;
         }
+
+        // Is not newly acked.
+        false
     }
 
     fn on_packets_lost(&mut self, lost_pkt: Vec<u64>, flight: &mut InFlight,
