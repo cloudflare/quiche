@@ -127,13 +127,13 @@ pub struct Config {
 }
 
 impl Config {
-    /// Creates a config object with the given version and transport params.
+    /// Creates a config object with the given version.
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(version: u32, tp: &TransportParams) -> Result<Config> {
+    pub fn new(version: u32) -> Result<Config> {
         let tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
 
         Ok(Config {
-            local_transport_params: tp.clone(),
+            local_transport_params: TransportParams::default(),
             version,
             tls_ctx,
         })
@@ -163,6 +163,58 @@ impl Config {
 
     pub fn log_keys(&mut self) {
         self.tls_ctx.enable_keylog();
+    }
+
+    pub fn set_idle_timeout(&mut self, v: u16) {
+        self.local_transport_params.idle_timeout = v;
+    }
+
+    pub fn set_initial_max_data(&mut self, v: u32) {
+        self.local_transport_params.initial_max_data = v;
+    }
+
+    pub fn set_initial_max_bidi_streams(&mut self, v: u16) {
+        self.local_transport_params.initial_max_bidi_streams = v;
+    }
+
+    pub fn set_initial_max_uni_streams(&mut self, v: u16) {
+        self.local_transport_params.initial_max_uni_streams = v;
+    }
+
+    pub fn set_max_packet_size(&mut self, v: u16) {
+        self.local_transport_params.max_packet_size = v;
+    }
+
+    pub fn set_ack_delay_exponent(&mut self, v: u8) {
+        self.local_transport_params.ack_delay_exponent = v;
+    }
+
+    pub fn set_disable_migration(&mut self, v: bool) {
+        self.local_transport_params.disable_migration = v;
+    }
+
+    pub fn set_max_ack_delay(&mut self, v: u8) {
+        self.local_transport_params.max_ack_delay = v;
+    }
+
+    pub fn set_initial_max_stream_data_bidi_local(&mut self, v: u32) {
+        self.local_transport_params.initial_max_stream_data_bidi_local = v;
+    }
+
+    pub fn set_initial_max_stream_data_bidi_remote(&mut self, v: u32) {
+        self.local_transport_params.initial_max_stream_data_bidi_remote = v;
+    }
+
+    pub fn set_initial_max_stream_data_uni(&mut self, v: u32) {
+        self.local_transport_params.initial_max_stream_data_uni = v;
+    }
+
+    pub fn set_stateless_reset_token_present(&mut self, v: bool) {
+        self.local_transport_params.stateless_reset_token_present = v;
+    }
+
+    pub fn set_stateless_reset_token(&mut self, v: [u8; 16]) {
+        self.local_transport_params.stateless_reset_token = v;
     }
 }
 
@@ -1333,7 +1385,7 @@ impl Connection {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct TransportParams {
+struct TransportParams {
     pub idle_timeout: u16,
     pub initial_max_data: u32,
     pub initial_max_bidi_streams: u16,
@@ -1603,8 +1655,6 @@ mod tests {
     }
 
     fn create_conn(is_server: bool) -> Box<Connection> {
-        let tp = TransportParams::default();
-
         let mut scid: [u8; 16] = [0; 16];
         rand::rand_bytes(&mut scid[..]);
 
@@ -1614,7 +1664,7 @@ mod tests {
             Role::Connect
         };
 
-        let mut config = Config::new(VERSION_DRAFT15, &tp).unwrap();
+        let mut config = Config::new(VERSION_DRAFT15).unwrap();
         config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
         config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
         config.verify_peer(false);

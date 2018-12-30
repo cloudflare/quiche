@@ -34,22 +34,6 @@ const LOCAL_CONN_ID_LEN: usize = 16;
 
 const HTTP_REQ_STREAM_ID: u64 = 4;
 
-const TRANSPORT_PARAMS: quiche::TransportParams = quiche::TransportParams {
-    idle_timeout: 30,
-    initial_max_data: 10_000_000,
-    initial_max_bidi_streams: 100,
-    initial_max_uni_streams: 100,
-    max_packet_size: 1500,
-    ack_delay_exponent: 3,
-    disable_migration: true,
-    max_ack_delay: 25,
-    initial_max_stream_data_bidi_local: 1_000_000,
-    initial_max_stream_data_bidi_remote: 1_000_000,
-    initial_max_stream_data_uni: 1_000_000,
-    stateless_reset_token_present: true,
-    stateless_reset_token: [0xba; 16],
-};
-
 const USAGE: &str = "Usage: client [options] URL
 
 Options:
@@ -58,8 +42,8 @@ Options:
 ";
 
 fn main() {
-    let mut buf = [0; TRANSPORT_PARAMS.max_packet_size as usize];
-    let mut out = [0; TRANSPORT_PARAMS.max_packet_size as usize];
+    let mut buf = [0; 65535];
+    let mut out = [0; 65535];
 
     env_logger::init();
 
@@ -83,8 +67,16 @@ fn main() {
     let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
     SystemRandom::new().fill(&mut scid[..]).unwrap();
 
-    let mut config = quiche::Config::new(0xbabababa, &TRANSPORT_PARAMS).unwrap();
+    let mut config = quiche::Config::new(0xbabababa).unwrap();
+
     config.verify_peer(true);
+
+    config.set_idle_timeout(30);
+    config.set_initial_max_data(10_000_000);
+    config.set_max_packet_size(1460);
+    config.set_disable_migration(true);
+    config.set_initial_max_stream_data_bidi_local(1_000_000);
+    config.set_initial_max_stream_data_bidi_remote(1_000_000);
 
     if args.get_bool("--no-verify") {
         config.verify_peer(false);
