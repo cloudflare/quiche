@@ -73,6 +73,7 @@ fn main() {
 
     config.set_idle_timeout(30);
     config.set_initial_max_data(10_000_000);
+    config.set_initial_max_bidi_streams(100);
     config.set_max_packet_size(1460);
     config.set_disable_migration(true);
     config.set_initial_max_stream_data_bidi_local(1_000_000);
