@@ -161,60 +161,76 @@ impl Config {
         self.tls_ctx.set_verify(verify);
     }
 
+    /// Enables logging of secrets.
+    ///
+    /// A connection's cryptographic secrets will be logged in the [keylog]
+    /// format in the file pointed to by the `SSLKEYLOGFILE` environment
+    /// variable.
+    ///
+    /// [keylog]: https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/Key_Log_Format
     pub fn log_keys(&mut self) {
         self.tls_ctx.enable_keylog();
     }
 
+    /// Sets the `idle_timeout` transport parameter.
     pub fn set_idle_timeout(&mut self, v: u16) {
         self.local_transport_params.idle_timeout = v;
     }
 
+    /// Sets the `initial_max_data` transport parameter.
     pub fn set_initial_max_data(&mut self, v: u32) {
         self.local_transport_params.initial_max_data = v;
     }
 
+    /// Sets the `initial_max_bidi_streams` transport parameter.
     pub fn set_initial_max_bidi_streams(&mut self, v: u16) {
         self.local_transport_params.initial_max_bidi_streams = v;
     }
 
+    /// Sets the `initial_max_uni_streams` transport parameter.
     pub fn set_initial_max_uni_streams(&mut self, v: u16) {
         self.local_transport_params.initial_max_uni_streams = v;
     }
 
+    /// Sets the `max_packet_size transport` parameter.
     pub fn set_max_packet_size(&mut self, v: u16) {
         self.local_transport_params.max_packet_size = v;
     }
 
+    /// Sets the `ack_delay_exponent` transport parameter.
     pub fn set_ack_delay_exponent(&mut self, v: u8) {
         self.local_transport_params.ack_delay_exponent = v;
     }
 
+    /// Sets the `disable_migration` transport parameter.
     pub fn set_disable_migration(&mut self, v: bool) {
         self.local_transport_params.disable_migration = v;
     }
 
+    /// Sets the `max_ack_delay` transport parameter.
     pub fn set_max_ack_delay(&mut self, v: u8) {
         self.local_transport_params.max_ack_delay = v;
     }
 
+    /// Sets the `initial_max_stream_data_bidi_local` transport parameter.
     pub fn set_initial_max_stream_data_bidi_local(&mut self, v: u32) {
         self.local_transport_params.initial_max_stream_data_bidi_local = v;
     }
 
+    /// Sets the `initial_max_stream_data_bidi_remote` transport parameter.
     pub fn set_initial_max_stream_data_bidi_remote(&mut self, v: u32) {
         self.local_transport_params.initial_max_stream_data_bidi_remote = v;
     }
 
+    /// Sets the `initial_max_stream_data_uni` transport parameter.
     pub fn set_initial_max_stream_data_uni(&mut self, v: u32) {
         self.local_transport_params.initial_max_stream_data_uni = v;
     }
 
-    pub fn set_stateless_reset_token_present(&mut self, v: bool) {
-        self.local_transport_params.stateless_reset_token_present = v;
-    }
-
+    /// Sets the `stateless_reset_token` transport parameter.
     pub fn set_stateless_reset_token(&mut self, v: [u8; 16]) {
         self.local_transport_params.stateless_reset_token = v;
+        self.local_transport_params.stateless_reset_token_present = true;
     }
 }
 
