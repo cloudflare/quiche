@@ -328,7 +328,7 @@ impl RangeBuf {
         }
     }
 
-    /// Returns whether `self` holds the final offset in the series.
+    /// Returns whether `self` holds the final offset in the stream.
     pub fn fin(&self) -> bool {
         self.fin
     }

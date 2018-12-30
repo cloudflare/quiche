@@ -400,9 +400,12 @@ impl Connection {
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
-    /// returned, or one of `Done` or `Again` error codes.
+    /// returned, or one of [`Done`] or [`Again`] error codes.
     ///
     /// Note that this will process coalesced packets as necessary.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    /// [`Again`]: enum.Error.html#variant.Again
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         let len = buf.len();
 
@@ -800,7 +803,10 @@ impl Connection {
     /// Writes a single QUIC packet to be sent to the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
-    /// returned, or one of `Done` or `Again` error codes.
+    /// returned, or one of [`Done`] or [`Again`] error codes.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    /// [`Again`]: enum.Error.html#variant.Again
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
 
@@ -1156,8 +1162,10 @@ impl Connection {
 
     /// Reads contiguous data from a stream.
     ///
-    /// On success the stream data is returned, or `Done` if there is no data
+    /// On success the stream data is returned, or [`Done`] if there is no data
     /// to read.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
     pub fn stream_recv(&mut self, stream_id: u64) -> Result<stream::RangeBuf> {
         let stream = match self.streams.get_mut(&stream_id) {
             Some(v) => v,
@@ -1292,11 +1300,17 @@ impl Connection {
     /// The `app` parameter specifies whether an application close should be
     /// sent to the peer. Otherwise a normal connection close is sent.
     ///
-    /// Returns `None` if the connection had already been closed.
+    /// Returns [`Done`] if the connection had already been closed.
     ///
     /// Note that the connection will not be closed immediately. An application
-    /// should continue calling `recv()`, `send()`, `timeout()`, ... as normal,
-    /// until the `is_closed()` method returns true.
+    /// should continue calling [`recv()`], [`send()`] and `timeout()` as normal,
+    /// until the [`is_closed()`].
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    /// [`recv()`]: struct.Connection.html#method.recv
+    /// [`send()`]: struct.Connection.html#method.send
+    /// [`timeout()`]: struct.Connection.html#method.timeout
+    /// [`is_closed()`]: struct.Connection.html#method.is_closed
     pub fn close(&mut self, app: bool, err: u16, reason: &[u8]) -> Result<()> {
         if self.draining {
             return Err(Error::Done);
