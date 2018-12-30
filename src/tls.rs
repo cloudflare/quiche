@@ -276,7 +276,7 @@ impl Handshake {
 
         unsafe {
             SSL_get_peer_quic_transport_params(self.as_ptr(),
-                                               &mut ptr as *mut *mut u8,
+                                               &mut ptr,
                                                &mut len)
         };
 
@@ -331,7 +331,7 @@ fn get_pending_cipher_from_ptr(ptr: *mut SSL) -> Result<crypto::Algorithm> {
     })?;
 
     let cipher_id = unsafe {
-        SSL_CIPHER_get_id(cipher as *const SSL_CIPHER)
+        SSL_CIPHER_get_id(cipher)
     };
 
     let alg = match cipher_id {

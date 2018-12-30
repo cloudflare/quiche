@@ -145,7 +145,7 @@ impl Open {
         {
             let mut b = octets::Bytes::new(&mut counter_nonce);
 
-            b.put_u32(0 as u32).unwrap();
+            b.put_u32(0).unwrap();
             b.put_u64(counter).unwrap();
         }
 
@@ -204,7 +204,7 @@ impl Seal {
         {
             let mut b = octets::Bytes::new(&mut counter_nonce);
 
-            b.put_u32(0 as u32).unwrap();
+            b.put_u32(0).unwrap();
             b.put_u64(counter).unwrap();
         }
 

@@ -368,7 +368,7 @@ pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
         _ => return Err(Error::InvalidPacket),
     };
 
-    Ok((out as u64, len))
+    Ok((out, len))
 }
 
 pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize) -> Result<u64> {

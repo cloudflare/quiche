@@ -434,8 +434,8 @@ impl Frame {
                     let gap = smallest_ack - block.end - 1;
                     let ack_block = (block.end - 1) - block.start;
 
-                    len += octets::varint_len(gap as u64) + // gap
-                           octets::varint_len(ack_block);   // ack_block
+                    len += octets::varint_len(gap) +      // gap
+                           octets::varint_len(ack_block); // ack_block
 
                     smallest_ack = block.start;
                 }

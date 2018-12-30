@@ -318,7 +318,7 @@ pub fn connect(server_name: Option<&str>, scid: &[u8], config: &mut Config)
 ///
 /// The `hdr` parameter represents the header of the packet received from the
 /// client with an unsupported version.
-pub fn negotiate_version(hdr: &packet::Header, out: &mut [u8]) -> Result<usize> {
+pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
     packet::negotiate_version(hdr, out)
 }
 
@@ -460,7 +460,7 @@ impl Connection {
 
         let mut b = octets::Bytes::new(buf);
 
-        let hdr = packet::Header::from_bytes(&mut b, self.scid.len())?;
+        let hdr = Header::from_bytes(&mut b, self.scid.len())?;
 
         if hdr.ty == packet::Type::VersionNegotiation {
             // Version negotiation packet can only be sent by the server.
@@ -899,7 +899,7 @@ impl Connection {
             }
         }
 
-        let hdr = packet::Header {
+        let hdr = Header {
             ty: space.pkt_type,
             version: self.version,
             dcid: self.dcid.clone(),
@@ -1182,7 +1182,7 @@ impl Connection {
     /// to read.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
-    pub fn stream_recv(&mut self, stream_id: u64) -> Result<stream::RangeBuf> {
+    pub fn stream_recv(&mut self, stream_id: u64) -> Result<RangeBuf> {
         let stream = match self.streams.get_mut(&stream_id) {
             Some(v) => v,
             None => return Err(Error::InvalidStreamState),
