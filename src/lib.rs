@@ -497,6 +497,7 @@ impl Connection {
 
             // Reset connection state to force sending another Initial packet.
             self.got_peer_conn_id = false;
+            self.recovery.drop_unacked_data(&mut self.initial.flight);
             self.initial.clear();
             self.tls_state.clear()
                 .map_err(|_| Error::TlsFail)?;
