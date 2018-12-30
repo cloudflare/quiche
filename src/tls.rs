@@ -478,6 +478,7 @@ extern fn keylog(_: *mut SSL, line: *const c_char) {
                 ffi::CStr::from_ptr(line).to_bytes()
             };
 
+            file.write_all(b"QUIC_").unwrap_or(());
             file.write_all(data).unwrap_or(());
             file.write_all(b"\n").unwrap_or(());
         }
