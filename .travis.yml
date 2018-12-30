@@ -20,7 +20,7 @@ script:
 deploy:
   provider: pages
   fqdn: docs.quic.tech
-  local-dir: target/debug/doc
+  local-dir: target/doc
   skip-cleanup: true
   github-token: $GITHUB_TOKEN
   on:
