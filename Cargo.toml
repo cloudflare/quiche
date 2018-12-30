@@ -5,6 +5,9 @@ authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
 edition = "2018"
 build = "src/build.rs"
 
+[build-dependencies]
+cmake = "0"
+
 [dependencies]
 log = "0"
 libc = "0"

@@ -58,8 +58,7 @@ building quiche using cargo, but requires the `cmake` and `go` commands to be
 available during the build process.
 
 In alternative you can use your own custom build of BoringSSL by configuring
-the directory containing ``libcrypto.a`` and ``libssl.a`` with the
-``QUICHE_BSSL_PATH`` environment variable:
+the BoringSSL directory with the ``QUICHE_BSSL_PATH`` environment variable:
 
 .. code-block:: bash
 
