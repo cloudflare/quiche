@@ -558,7 +558,13 @@ impl Connection {
 
         let aead = match space.crypto_open {
             Some(ref v) => v,
-            None        => return Err(Error::InvalidState),
+
+            None => {
+                trace!("{} dropped undecryptable packet type={:?} len={}",
+                       self.trace_id, hdr.ty, payload_len);
+
+                return Ok(b.off() + payload_len)
+            },
         };
 
         let (pn, pn_len) = packet::decrypt_pkt_num(&mut b, &aead)?;
