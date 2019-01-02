@@ -183,7 +183,7 @@ fn main() {
 
             debug!("{} processed {} bytes", conn.trace_id(), read);
 
-            let streams: Vec<u64> = conn.stream_iter().collect();
+            let streams: Vec<u64> = conn.readable().collect();
             for s in streams {
                 info!("{} stream {} is readable", conn.trace_id(), s);
                 handle_stream(conn, s, &args);

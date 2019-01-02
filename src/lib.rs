@@ -1238,7 +1238,7 @@ impl Connection {
     }
 
     /// Creates an iterator of streams that have outstanding data to read.
-    pub fn stream_iter(&mut self) -> Readable {
+    pub fn readable(&mut self) -> Readable {
         stream::Readable::new(&self.streams)
     }
 

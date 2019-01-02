@@ -161,7 +161,7 @@ fn main() {
             req_sent = true;
         }
 
-        let streams: Vec<u64> = conn.stream_iter().collect();
+        let streams: Vec<u64> = conn.readable().collect();
         for s in streams {
             let data = conn.stream_recv(s).unwrap();
 
