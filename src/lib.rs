@@ -111,12 +111,6 @@ impl Error {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Role {
-    Accept,
-    Connect,
-}
-
 /// Stores configuration shared between multiple connections.
 pub struct Config {
     local_transport_params: TransportParams,
@@ -292,7 +286,7 @@ pub struct Connection {
 ///
 /// The `scid` parameter is used as the connection's source connection ID,
 pub fn accept(scid: &[u8], config: &mut Config) -> Result<Box<Connection>> {
-    let conn = Connection::new(scid, config, Role::Accept)?;
+    let conn = Connection::new(scid, config, true)?;
 
     Ok(conn)
 }
@@ -304,7 +298,7 @@ pub fn accept(scid: &[u8], config: &mut Config) -> Result<Box<Connection>> {
 /// certificate.
 pub fn connect(server_name: Option<&str>, scid: &[u8], config: &mut Config)
                                                 -> Result<Box<Connection>> {
-    let conn = Connection::new(scid, config, Role::Connect)?;
+    let conn = Connection::new(scid, config, false)?;
 
     if server_name.is_some() {
         conn.tls_state.set_host_name(server_name.unwrap())
@@ -324,12 +318,10 @@ pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
 
 impl Connection {
     #[allow(clippy::new_ret_no_self)]
-    fn new(scid: &[u8], config: &mut Config, role: Role) -> Result<Box<Connection>> {
+    fn new(scid: &[u8], config: &mut Config, is_server: bool) -> Result<Box<Connection>> {
         let tls = config.tls_ctx.new_handshake().map_err(|_| Error::TlsFail)?;
 
         let max_rx_data = config.local_transport_params.initial_max_data;
-
-        let is_server = role == Role::Accept;
 
         let scid_as_hex: Vec<String> = scid.iter()
                                            .map(|b| format!("{:02x}", b))
@@ -1695,18 +1687,12 @@ mod tests {
         let mut scid: [u8; 16] = [0; 16];
         rand::rand_bytes(&mut scid[..]);
 
-        let role = if is_server {
-            Role::Accept
-        } else {
-            Role::Connect
-        };
-
         let mut config = Config::new(VERSION_DRAFT15).unwrap();
         config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
         config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
         config.verify_peer(false);
 
-        Connection::new(&scid, &mut config, role).unwrap()
+        Connection::new(&scid, &mut config, is_server).unwrap()
     }
 
     fn recv_send(conn: &mut Connection, buf: &mut [u8], len: usize) -> usize {
