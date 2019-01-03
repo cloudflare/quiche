@@ -56,7 +56,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     /// An asynchronous operation (e.g. certificate lookup) is pending.
-    Again,
+    Pending,
 
     /// There is no more work to do.
     Done,
@@ -98,7 +98,7 @@ pub enum Error {
 impl Error {
     pub fn to_wire(&self) -> u16 {
         match self {
-            Error::Again => 0x0,
+            Error::Pending => 0x0,
             Error::Done => 0x0,
             Error::InvalidFrame => 0x7,
             Error::InvalidStreamState => 0x5,
@@ -408,12 +408,12 @@ impl Connection {
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
-    /// returned, or one of [`Done`] or [`Again`] error codes.
+    /// returned, or one of [`Done`] or [`Pending`] error codes.
     ///
     /// Note that this will process coalesced packets as necessary.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
-    /// [`Again`]: enum.Error.html#variant.Again
+    /// [`Pending`]: enum.Error.html#variant.Pending
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         let len = buf.len();
 
@@ -818,10 +818,10 @@ impl Connection {
     /// Writes a single QUIC packet to be sent to the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
-    /// returned, or one of [`Done`] or [`Again`] error codes.
+    /// returned, or one of [`Done`] or [`Pending`] error codes.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
-    /// [`Again`]: enum.Error.html#variant.Again
+    /// [`Pending`]: enum.Error.html#variant.Pending
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
 
@@ -1405,7 +1405,7 @@ impl Connection {
                 Err(tls::Error::WantRead)         => (), // continue
                 Err(tls::Error::WantWrite)        => (), // continue
                 Err(tls::Error::SyscallFail)      => return Err(Error::TlsFail),
-                Err(tls::Error::PendingOperation) => return Err(Error::Again),
+                Err(tls::Error::PendingOperation) => return Err(Error::Pending),
             }
         }
 
