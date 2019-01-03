@@ -6,8 +6,8 @@ quiche
 
 quiche_ is an implementation of the QUIC transport protocol as specified by
 the IETF_. It provides a low level API for processing QUIC packets and
-handling connection state, while leaving I/O (including dealing with sockets)
-to the application.
+handling connection state. The application is responsible for providing I/O
+(e.g. sockets handling) as well as an event loop with support for timers.
 
 A live QUIC server based on quiche is available at ``https://quic.tech:4433/``
 to be used for experimentation.
