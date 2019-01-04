@@ -613,14 +613,98 @@ impl Connection {
             match frame {
                 frame::Frame::Padding { .. } => (),
 
-                frame::Frame::ConnectionClose { .. } => {
-                    self.draining = true;
-                    self.draining_timer = Some(now + DRAINING_TIMEOUT);
+                frame::Frame::Ping => {
+                    do_ack = true;
                 },
 
-                frame::Frame::ApplicationClose { .. } => {
-                    self.draining = true;
-                    self.draining_timer = Some(now + DRAINING_TIMEOUT);
+                frame::Frame::ACK { ranges, ack_delay } => {
+                    let ack_delay =
+                        ack_delay << self.peer_transport_params
+                                         .ack_delay_exponent;
+
+                    self.recovery.on_ack_received(&ranges, ack_delay,
+                                                  &mut space.flight,
+                                                  now, &self.trace_id);
+                },
+
+                frame::Frame::StopSending { stream_id, .. } => {
+                    if !self.handshake_completed {
+                        return Err(Error::InvalidState);
+                    }
+
+                    // STOP_SENDING on a receive-only stream is a fatal error.
+                    if !stream::is_local(stream_id, self.is_server) &&
+                       !stream::is_bidi(stream_id) {
+                        return Err(Error::InvalidPacket);
+                    }
+
+                    do_ack = true;
+                },
+
+                frame::Frame::Crypto { data } => {
+                    // Push the data to the stream so it can be re-ordered.
+                    space.crypto_stream.recv_push(data)?;
+
+                    // Feed crypto data to the TLS state, if there's data
+                    // available at the expected offset.
+                    if space.crypto_stream.readable() {
+                        let buf = space.crypto_stream.recv_pop()?;
+                        let level = space.crypto_level;
+
+                        self.tls_state.provide_data(level, &buf)
+                                      .map_err(|_| Error::TlsFail)?;
+                    }
+
+                    do_ack = true;
+                },
+
+                // TODO: implement stateless retry
+                frame::Frame::NewToken { .. } => {
+                    if !self.handshake_completed {
+                        return Err(Error::InvalidState);
+                    }
+
+                    do_ack = true;
+                },
+
+                frame::Frame::Stream { stream_id, data } => {
+                    if !self.handshake_completed {
+                        return Err(Error::InvalidState);
+                    }
+
+                    let max_rx_data =
+                        self.local_transport_params
+                            .initial_max_stream_data_bidi_remote as usize;
+                    let max_tx_data =
+                        self.peer_transport_params
+                            .initial_max_stream_data_bidi_local as usize;
+
+                    // Get existing stream or create a new one.
+                    let stream = match self.streams.entry(stream_id) {
+                        hash_map::Entry::Vacant(v) => {
+                            // Peer is not supposed to create this stream.
+                            if stream::is_local(stream_id, self.is_server) {
+                                return Err(Error::InvalidStreamState);
+                            }
+
+                            // TODO: check max stream ID
+
+                            let s = stream::Stream::new(max_rx_data, max_tx_data);
+                            v.insert(s)
+                        },
+
+                        hash_map::Entry::Occupied(v) => v.into_mut(),
+                    };
+
+                    self.rx_data += data.len();
+
+                    if self.tx_data > self.max_rx_data {
+                        return Err(Error::FlowControl);
+                    }
+
+                    stream.recv_push(data)?;
+
+                    do_ack = true;
                 },
 
                 frame::Frame::MaxData { max } => {
@@ -669,7 +753,7 @@ impl Connection {
                 },
 
                 // TODO: implement stream count limits
-                frame::Frame::MaxStreamId { .. } => {
+                frame::Frame::MaxStreamsBidi { .. } => {
                     if !self.handshake_completed {
                         return Err(Error::InvalidState);
                     }
@@ -677,7 +761,12 @@ impl Connection {
                     do_ack = true;
                 },
 
-                frame::Frame::Ping => {
+                // TODO: implement stream count limits
+                frame::Frame::MaxStreamsUni { .. } => {
+                    if !self.handshake_completed {
+                        return Err(Error::InvalidState);
+                    }
+
                     do_ack = true;
                 },
 
@@ -699,94 +788,14 @@ impl Connection {
                     do_ack = true;
                 },
 
-                frame::Frame::StopSending { stream_id, .. } => {
-                    if !self.handshake_completed {
-                        return Err(Error::InvalidState);
-                    }
-
-                    // STOP_SENDING on a receive-only stream is a fatal error.
-                    if !stream::is_local(stream_id, self.is_server) &&
-                       !stream::is_bidi(stream_id) {
-                        return Err(Error::InvalidPacket);
-                    }
-
-                    do_ack = true;
+                frame::Frame::ConnectionClose { .. } => {
+                    self.draining = true;
+                    self.draining_timer = Some(now + DRAINING_TIMEOUT);
                 },
 
-                frame::Frame::ACK { ranges, ack_delay } => {
-                    let ack_delay =
-                        ack_delay << self.peer_transport_params
-                                         .ack_delay_exponent;
-
-                    self.recovery.on_ack_received(&ranges, ack_delay,
-                                                  &mut space.flight,
-                                                  now, &self.trace_id);
-                },
-
-                // TODO: implement stateless retry
-                frame::Frame::NewToken { .. } => {
-                    if !self.handshake_completed {
-                        return Err(Error::InvalidState);
-                    }
-
-                    do_ack = true;
-                },
-
-                frame::Frame::Crypto { data } => {
-                    // Push the data to the stream so it can be re-ordered.
-                    space.crypto_stream.recv_push(data)?;
-
-                    // Feed crypto data to the TLS state, if there's data
-                    // available at the expected offset.
-                    if space.crypto_stream.readable() {
-                        let buf = space.crypto_stream.recv_pop()?;
-                        let level = space.crypto_level;
-
-                        self.tls_state.provide_data(level, &buf)
-                                      .map_err(|_| Error::TlsFail)?;
-                    }
-
-                    do_ack = true;
-                },
-
-                frame::Frame::Stream { stream_id, data } => {
-                    if !self.handshake_completed {
-                        return Err(Error::InvalidState);
-                    }
-
-                    let max_rx_data =
-                        self.local_transport_params
-                            .initial_max_stream_data_bidi_remote as usize;
-                    let max_tx_data =
-                        self.peer_transport_params
-                            .initial_max_stream_data_bidi_local as usize;
-
-                    // Get existing stream or create a new one.
-                    let stream = match self.streams.entry(stream_id) {
-                        hash_map::Entry::Vacant(v) => {
-                            // Peer is not supposed to create this stream.
-                            if stream::is_local(stream_id, self.is_server) {
-                                return Err(Error::InvalidStreamState);
-                            }
-
-                            // TODO: check max stream ID
-
-                            let s = stream::Stream::new(max_rx_data, max_tx_data);
-                            v.insert(s)
-                        },
-
-                        hash_map::Entry::Occupied(v) => v.into_mut(),
-                    };
-
-                    self.rx_data += data.len();
-
-                    if self.tx_data > self.max_rx_data {
-                        return Err(Error::FlowControl);
-                    }
-
-                    stream.recv_push(data)?;
-
-                    do_ack = true;
+                frame::Frame::ApplicationClose { .. } => {
+                    self.draining = true;
+                    self.draining_timer = Some(now + DRAINING_TIMEOUT);
                 },
             }
         }
@@ -1052,6 +1061,7 @@ impl Connection {
         if let Some(err) = self.app_error {
             let frame = frame::Frame::ApplicationClose {
                 error_code: err,
+                frame_type: 0,
                 reason: self.app_reason.clone(),
             };
 
