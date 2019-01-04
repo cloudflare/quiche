@@ -71,7 +71,7 @@ fn main() {
     let mut connections: HashMap<net::SocketAddr, Box<quiche::Connection>> =
         HashMap::new();
 
-    let mut config = quiche::Config::new(quiche::VERSION_DRAFT15).unwrap();
+    let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
 
     config.load_cert_chain_from_pem_file(args.get_str("--cert")).unwrap();
     config.load_priv_key_from_pem_file(args.get_str("--key")).unwrap();
@@ -139,7 +139,7 @@ fn main() {
                         continue;
                     }
 
-                    if hdr.version != quiche::VERSION_DRAFT15 {
+                    if hdr.version != quiche::VERSION_DRAFT17 {
                         warn!("Doing version negotiation");
 
                         let len = quiche::negotiate_version(&hdr, &mut out).unwrap();

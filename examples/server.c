@@ -305,7 +305,7 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    config = quiche_config_new(QUICHE_VERSION_DRAFT15);
+    config = quiche_config_new(QUICHE_VERSION_DRAFT17);
     if (config == NULL) {
         fprintf(stderr, "failed to create config\n");
         return -1;

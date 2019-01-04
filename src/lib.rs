@@ -43,7 +43,7 @@ use std::collections::hash_map;
 use std::collections::HashMap;
 
 /// The current QUIC wire version.
-pub const VERSION_DRAFT15: u32 = 0xff00_000f;
+pub const VERSION_DRAFT17: u32 = 0xff00_0011;
 
 const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 
@@ -491,7 +491,7 @@ impl Connection {
 
             let mut new_version = 0;
             for v in versions.iter() {
-                if *v == VERSION_DRAFT15 {
+                if *v == VERSION_DRAFT17 {
                     new_version = *v;
                 }
             }
@@ -1690,11 +1690,11 @@ mod tests {
         };
 
         let mut raw_params: [u8; 256] = [42; 256];
-        let mut raw_params = TransportParams::encode(&tp, VERSION_DRAFT15, true,
+        let mut raw_params = TransportParams::encode(&tp, VERSION_DRAFT17, true,
                                               &mut raw_params).unwrap();
         assert_eq!(raw_params.len(), 96);
 
-        let new_tp = TransportParams::decode(&mut raw_params, VERSION_DRAFT15,
+        let new_tp = TransportParams::decode(&mut raw_params, VERSION_DRAFT17,
                                              false).unwrap();
 
         assert_eq!(new_tp, tp);
@@ -1704,7 +1704,7 @@ mod tests {
         let mut scid: [u8; 16] = [0; 16];
         rand::rand_bytes(&mut scid[..]);
 
-        let mut config = Config::new(VERSION_DRAFT15).unwrap();
+        let mut config = Config::new(VERSION_DRAFT17).unwrap();
         config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
         config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
         config.verify_peer(false);

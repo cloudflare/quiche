@@ -437,7 +437,7 @@ pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
     b.put_u8(cil)?;
     b.put_bytes(&hdr.scid)?;
     b.put_bytes(&hdr.dcid)?;
-    b.put_u32(crate::VERSION_DRAFT15)?;
+    b.put_u32(crate::VERSION_DRAFT17)?;
 
     Ok(b.off())
 }
