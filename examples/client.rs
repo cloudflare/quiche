@@ -42,8 +42,8 @@ Options:
 ";
 
 fn main() {
-    let mut buf = [0; 65535];
-    let mut out = [0; 65535];
+    let mut buf = [0; 1500];
+    let mut out = [0; 1500];
 
     env_logger::init();
 
