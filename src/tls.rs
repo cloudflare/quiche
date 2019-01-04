@@ -385,7 +385,7 @@ extern fn set_encryption_secrets(ssl: *mut SSL, level: crypto::Level,
         return 0;
     }
 
-    if crypto::derive_pkt_num_key(aead, &secret, &mut pn_key).is_err() {
+    if crypto::derive_hdr_key(aead, &secret, &mut pn_key).is_err() {
         return 0;
     }
 
@@ -406,7 +406,7 @@ extern fn set_encryption_secrets(ssl: *mut SSL, level: crypto::Level,
         return 0;
     }
 
-    if crypto::derive_pkt_num_key(aead, &secret, &mut pn_key).is_err() {
+    if crypto::derive_hdr_key(aead, &secret, &mut pn_key).is_err() {
         return 0;
     }
 
