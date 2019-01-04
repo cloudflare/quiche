@@ -583,21 +583,13 @@ impl Connection {
         trace!("{} rx pkt {:?} len={} pn={}", &self.trace_id, hdr,
                payload_len, pn);
 
-        let payload_offset = b.off();
-
-        let (header, mut payload) = b.split_at(payload_offset)?;
-
-        let payload_len = {
-            let mut ciphertext = payload.peek_bytes(payload_len - pn_len)?;
-            aead.open_with_u64_counter(pn, header.as_ref(), ciphertext.as_mut())?
-        };
+        let mut payload =
+            packet::decrypt_pkt(&mut b, pn, pn_len, payload_len, &aead)?;
 
         if space.recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
             return Err(Error::Done);
         }
-
-        let mut payload = payload.get_bytes(payload_len)?;
 
         // To avoid sending an ACK in response to an ACK-only packet, we need
         // to keep track of whether this packet contains any frame other than
@@ -824,7 +816,7 @@ impl Connection {
             Some(now + time::Duration::from_secs(
                 self.local_transport_params.idle_timeout));
 
-        let read = payload_offset + payload_len + aead.alg().tag_len();
+        let read = b.off() + aead.alg().tag_len();
 
         // Drop initial keys and recovery state on the server side after
         // receiving an Handshake packet.
