@@ -25,22 +25,26 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::mem;
+use std::ptr;
+
 use crate::Result;
 use crate::Error;
 
 macro_rules! peek_u {
-    ($b:expr, $ty:ty) => ({
-        let len = std::mem::size_of::<$ty>();
-
+    ($b:expr, $ty:ty, $len:expr) => ({
         let src = &$b.buf[$b.off..];
 
-        if src.len() < len {
+        if src.len() < $len {
             return Err(Error::BufferTooShort);
         }
 
-        let out = unsafe {
-            #[allow(clippy::cast_ptr_alignment)]
-            std::ptr::read_unaligned(src.as_ptr() as *const $ty)
+        let mut out: $ty = 0;
+        unsafe {
+            let dst = &mut out as *mut $ty as *mut u8;
+            let off = (mem::size_of::<$ty>() - $len) as isize;
+
+            ptr::copy_nonoverlapping(src.as_ptr(), dst.offset(off), $len);
         };
 
         Ok(<$ty>::from_be(out))
@@ -48,32 +52,31 @@ macro_rules! peek_u {
 }
 
 macro_rules! get_u {
-    ($b:expr, $ty:ty) => ({
-        let len = std::mem::size_of::<$ty>();
-        let out = peek_u!($b, $ty);
+    ($b:expr, $ty:ty, $len:expr) => ({
+        let out = peek_u!($b, $ty, $len);
 
-        $b.off += len;
+        $b.off += $len;
 
         out
     });
 }
 
 macro_rules! put_u {
-    ($b:expr, $ty:ty, $v:expr) => ({
-        let len = std::mem::size_of::<$ty>();
-
+    ($b:expr, $ty:ty, $v:expr, $len:expr) => ({
         let dst = &mut $b.buf[$b.off..];
 
-        if dst.len() < len {
+        if dst.len() < $len {
             return Err(Error::BufferTooShort)
         }
 
         unsafe {
-            #[allow(clippy::cast_ptr_alignment)]
-            std::ptr::write_unaligned(dst.as_mut_ptr() as *mut $ty, <$ty>::to_be($v));
+            let src = &<$ty>::to_be($v) as *const $ty as *const u8;
+            let off = (mem::size_of::<$ty>() - $len) as isize;
+
+            ptr::copy_nonoverlapping(src.offset(off), dst.as_mut_ptr(), $len);
         }
 
-        $b.off += len;
+        $b.off += $len;
 
         Ok(dst)
     });
@@ -104,39 +107,47 @@ impl<'a> Bytes<'a> {
     }
 
     pub fn get_u8(&mut self) -> Result<u8> {
-        get_u!(self, u8)
+        get_u!(self, u8, 1)
     }
 
     pub fn peek_u8(&mut self) -> Result<u8> {
-        peek_u!(self, u8)
+        peek_u!(self, u8, 1)
     }
 
     pub fn put_u8(&mut self, v: u8) -> Result<&mut [u8]> {
-        put_u!(self, u8, v)
+        put_u!(self, u8, v, 1)
     }
 
     pub fn get_u16(&mut self) -> Result<u16> {
-        get_u!(self, u16)
+        get_u!(self, u16, 2)
     }
 
     pub fn put_u16(&mut self, v: u16) -> Result<&mut [u8]> {
-        put_u!(self, u16, v)
+        put_u!(self, u16, v, 2)
+    }
+
+    pub fn get_u24(&mut self) -> Result<u32> {
+        get_u!(self, u32, 3)
+    }
+
+    pub fn put_u24(&mut self, v: u32) -> Result<&mut [u8]> {
+        put_u!(self, u32, v, 3)
     }
 
     pub fn get_u32(&mut self) -> Result<u32> {
-        get_u!(self, u32)
+        get_u!(self, u32, 4)
     }
 
     pub fn put_u32(&mut self, v: u32) -> Result<&mut [u8]> {
-        put_u!(self, u32, v)
+        put_u!(self, u32, v, 4)
     }
 
     pub fn get_u64(&mut self) -> Result<u64> {
-        get_u!(self, u64)
+        get_u!(self, u64, 8)
     }
 
     pub fn put_u64(&mut self, v: u64) -> Result<&mut [u8]> {
-        put_u!(self, u64, v)
+        put_u!(self, u64, v, 8)
     }
 
     pub fn get_varint(&mut self) -> Result<u64> {
@@ -363,30 +374,36 @@ mod tests {
 
     #[test]
     fn get_u() {
-        let mut d: [u8; 15] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let mut d: [u8; 18] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+                               15, 16, 17, 18];
 
         let mut b = Bytes::new(&mut d);
-        assert_eq!(b.cap(), 15);
+        assert_eq!(b.cap(), 18);
         assert_eq!(b.off(), 0);
 
         assert_eq!(b.get_u8().unwrap(), 1);
-        assert_eq!(b.cap(), 14);
+        assert_eq!(b.cap(), 17);
         assert_eq!(b.off(), 1);
 
         assert_eq!(b.get_u16().unwrap(), 0x203);
-        assert_eq!(b.cap(), 12);
+        assert_eq!(b.cap(), 15);
         assert_eq!(b.off(), 3);
 
-        assert_eq!(b.get_u32().unwrap(), 0x4050607);
-        assert_eq!(b.cap(), 8);
-        assert_eq!(b.off(), 7);
+        assert_eq!(b.get_u24().unwrap(), 0x40506);
+        assert_eq!(b.cap(), 12);
+        assert_eq!(b.off(), 6);
 
-        assert_eq!(b.get_u64().unwrap(), 0x8090a0b0c0d0e0f);
+        assert_eq!(b.get_u32().unwrap(), 0x0708090a);
+        assert_eq!(b.cap(), 8);
+        assert_eq!(b.off(), 10);
+
+        assert_eq!(b.get_u64().unwrap(), 0x0b0c0d0e0f101112);
         assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 15);
+        assert_eq!(b.off(), 18);
 
         assert!(b.get_u8().is_err());
         assert!(b.get_u16().is_err());
+        assert!(b.get_u24().is_err());
         assert!(b.get_u32().is_err());
         assert!(b.get_u64().is_err());
     }
@@ -544,33 +561,38 @@ mod tests {
 
     #[test]
     fn put_u() {
-        let mut d: [u8; 15] = [0; 15];
+        let mut d: [u8; 18] = [0; 18];
 
         {
             let mut b = Bytes::new(&mut d);
-            assert_eq!(b.cap(), 15);
+            assert_eq!(b.cap(), 18);
             assert_eq!(b.off(), 0);
 
             assert!(b.put_u8(1).is_ok());
-            assert_eq!(b.cap(), 14);
+            assert_eq!(b.cap(), 17);
             assert_eq!(b.off(), 1);
 
             assert!(b.put_u16(0x203).is_ok());
-            assert_eq!(b.cap(), 12);
+            assert_eq!(b.cap(), 15);
             assert_eq!(b.off(), 3);
 
-            assert!(b.put_u32(0x4050607).is_ok());
-            assert_eq!(b.cap(), 8);
-            assert_eq!(b.off(), 7);
+            assert!(b.put_u24(0x40506).is_ok());
+            assert_eq!(b.cap(), 12);
+            assert_eq!(b.off(), 6);
 
-            assert!(b.put_u64(0x8090a0b0c0d0e0f).is_ok());
+            assert!(b.put_u32(0x0708090a).is_ok());
+            assert_eq!(b.cap(), 8);
+            assert_eq!(b.off(), 10);
+
+            assert!(b.put_u64(0x0b0c0d0e0f101112).is_ok());
             assert_eq!(b.cap(), 0);
-            assert_eq!(b.off(), 15);
+            assert_eq!(b.off(), 18);
 
             assert!(b.put_u8(1).is_err());
         }
 
-        let exp: [u8; 15] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let exp: [u8; 18] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+                             15, 16, 17, 18];
         assert_eq!(&d, &exp);
     }
 

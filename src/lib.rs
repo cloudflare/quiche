@@ -576,12 +576,12 @@ impl Connection {
             },
         };
 
-        let (pn, pn_len) = packet::decrypt_pkt_num(&mut b, &aead)?;
-        b.skip(pn_len)?;
+        let (pn, pn_len) = packet::decrypt_hdr(&mut b, &aead)?;
 
         let pn = packet::decode_pkt_num(space.largest_rx_pkt_num, pn, pn_len)?;
 
-        trace!("{} rx pkt {:?} len={} pn={}", &self.trace_id, hdr, payload_len, pn);
+        trace!("{} rx pkt {:?} len={} pn={}", &self.trace_id, hdr,
+               payload_len, pn);
 
         let payload_offset = b.off();
 
@@ -915,22 +915,23 @@ impl Connection {
             }
         }
 
+        // Calculate available space in the packet based on congestion window.
+        let mut left = cmp::min(self.recovery.cwnd(), b.cap());
+
+        let pn = space.next_pkt_num;
+        let pn_len = packet::pkt_num_len(pn)?;
+
         let hdr = Header {
             ty: space.pkt_type,
             version: self.version,
             dcid: self.dcid.clone(),
             scid: self.scid.clone(),
+            pkt_num_len: pn_len as u8,
             token: None,
             versions: None,
         };
 
-        // Calculate available space in the packet based on congestion window.
-        let mut left = cmp::min(self.recovery.cwnd(), b.cap());
-
         hdr.to_bytes(&mut b)?;
-
-        let pn = space.next_pkt_num;
-        let pn_len = packet::pkt_num_len(pn)?;
 
         // Calculate payload length.
         let mut length = pn_len + space.overhead();
@@ -1143,7 +1144,8 @@ impl Connection {
 
         let payload_offset = b.off();
 
-        trace!("{} tx pkt {:?} len={} pn={}", &self.trace_id, hdr, payload_len, pn);
+        trace!("{} tx pkt {:?} len={} pn={}", &self.trace_id, hdr,
+               payload_len, pn);
 
         // Encode frames into the output packet.
         for frame in &frames {
@@ -1163,17 +1165,16 @@ impl Connection {
         let ciphertext = payload.slice(payload_len)?;
         aead.seal_with_u64_counter(pn, header.as_ref(), ciphertext)?;
 
-        // Encrypt packet number.
-        let sample = &ciphertext[4 - pn_len..16 + (4 - pn_len)];
-        let pn_ciphertext = header.slice_last(pn_len)?;
-        aead.xor_keystream(sample, pn_ciphertext)?;
+        // Encrypt header.
+        packet::encrypt_hdr(&mut header, pn_len, ciphertext, aead)?;
 
         let written = payload_offset + payload_len;
 
-        let sent = recovery::Sent::new(pn, frames, written, ack_eliciting,
-                                       is_crypto, now);
+        let sent_pkt = recovery::Sent::new(pn, frames, written, ack_eliciting,
+                                           is_crypto, now);
 
-        self.recovery.on_packet_sent(sent, &mut space.flight, now, &self.trace_id);
+        self.recovery.on_packet_sent(sent_pkt, &mut space.flight, now,
+                                     &self.trace_id);
 
         space.next_pkt_num += 1;
 

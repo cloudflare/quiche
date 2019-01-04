@@ -36,10 +36,11 @@ use crate::recovery;
 use crate::stream;
 
 const FORM_BIT: u8 = 0x80;
-const KEY_PHASE_BIT: u8 = 0x40;
-const DEMUX_BIT: u8 = 0x08;
+const FIXED_BIT: u8 = 0x40;
+const KEY_PHASE_BIT: u8 = 0x04;
 
-const TYPE_MASK: u8 = 0x7f;
+const TYPE_MASK: u8 = 0x30;
+const PKT_NUM_MASK: u8 = 0x03;
 
 const MAX_CID_LEN: u8 = 18;
 
@@ -68,6 +69,9 @@ pub struct Header {
 
     /// The source connection ID of the packet.
     pub scid: Vec<u8>,
+
+    /// The length of the packet number.
+    pub pkt_num_len: u8,
 
     /// The address verification token of the packet. Only present in `Initial`
     /// packets.
@@ -100,6 +104,7 @@ impl Header {
                 version: 0,
                 dcid: dcid.to_vec(),
                 scid: Vec::new(),
+                pkt_num_len: 0,
                 token: None,
                 versions: None,
             });
@@ -111,11 +116,11 @@ impl Header {
         let ty = if version == 0 {
             Type::VersionNegotiation
         } else {
-            match first & TYPE_MASK {
-                0x7f => Type::Initial,
-                0x7e => Type::Retry,
-                0x7d => Type::Handshake,
-                0x7c => Type::ZeroRTT,
+            match (first & TYPE_MASK) >> 4 {
+                0x00 => Type::Initial,
+                0x01 => Type::ZeroRTT,
+                0x02 => Type::Handshake,
+                0x03 => Type::Retry,
                 _    => return Err(Error::InvalidPacket),
             }
         };
@@ -180,30 +185,29 @@ impl Header {
             version,
             dcid,
             scid,
+            pkt_num_len: 0,
             token,
             versions,
         })
     }
 
     pub(crate) fn to_bytes(&self, out: &mut octets::Bytes) -> Result<()> {
+        let mut first = 0;
+
+        // Encode pkt num length.
+        first |= self.pkt_num_len.checked_sub(1)
+                                 .unwrap_or(0);
+
         // Encode short header.
         if self.ty == Type::Application {
-            let mut first = rand::rand_u8();
-
             // Unset form bit for short header.
             first &= !FORM_BIT;
 
+            // Set fixed bit.
+            first |= FIXED_BIT;
+
             // TODO: support key update
             first &= !KEY_PHASE_BIT;
-
-            // "The third bit (0x20) of octet 0 is set to 1."
-            first |= 0x20;
-
-            // "The fourth bit (0x10) of octet 0 is set to 1."
-            first |= 0x10;
-
-            // Clear Google QUIC demultiplexing bit
-            first &= !DEMUX_BIT;
 
             out.put_u8(first)?;
             out.put_bytes(&self.dcid)?;
@@ -213,14 +217,14 @@ impl Header {
 
         // Encode long header.
         let ty: u8 = match self.ty {
-                Type::Initial   => 0x7f,
-                Type::Retry     => 0x7e,
-                Type::Handshake => 0x7d,
-                Type::ZeroRTT   => 0x7c,
+                Type::Initial   => 0x00,
+                Type::ZeroRTT   => 0x01,
+                Type::Handshake => 0x02,
+                Type::Retry     => 0x03,
                 _               => return Err(Error::InvalidPacket),
         };
 
-        let first = FORM_BIT | ty;
+        first |= FORM_BIT | FIXED_BIT | (ty << 4);
 
         out.put_u8(first)?;
 
@@ -297,11 +301,11 @@ impl std::fmt::Debug for Header {
 }
 
 pub fn pkt_num_len(pn: u64) -> Result<usize> {
-    let len = if pn < 128 {
+    let len = if pn < std::u8::MAX as u64 {
         1
-    } else if pn < 16384 {
+    } else if pn < std::u16::MAX as u64 {
         2
-    } else if pn < 1_073_741_824 {
+    } else if pn < std::u32::MAX as u64 {
         4
     } else {
         return Err(Error::InvalidPacket);
@@ -321,54 +325,52 @@ pub fn pkt_num_bits(len: usize) -> Result<usize> {
     Ok(bits)
 }
 
-pub fn decrypt_pkt_num(b: &mut octets::Bytes, aead: &crypto::Open)
-                                                    -> Result<(u64,usize)> {
-    let max_pn_len = std::cmp::min(b.cap() - aead.alg().pn_nonce_len(), 4);
+pub fn decrypt_hdr(b: &mut octets::Bytes, aead: &crypto::Open)
+                                                    -> Result<(u64, usize)> {
+    let mut first = {
+        let (first_buf, _) = b.split_at(1)?;
+        first_buf.as_ref()[0]
+    };
 
-    let mut pn_and_sample = b.peek_bytes(max_pn_len + aead.alg().pn_nonce_len())?;
+    let mut pn_and_sample = b.peek_bytes(4 + aead.alg().pn_nonce_len())?;
 
-    let (mut ciphertext, sample) = pn_and_sample.split_at(max_pn_len).unwrap();
+    let (mut ciphertext, sample) = pn_and_sample.split_at(4).unwrap();
 
     let ciphertext = ciphertext.as_mut();
 
-    // Decrypt first byte of pkt num into separate buffer to get length.
-    let mut first: u8 = ciphertext[0];
+    let mask = aead.new_mask(sample.as_ref())?;
 
-    aead.xor_keystream(sample.as_ref(), std::slice::from_mut(&mut first))?;
-
-    let len = if first >> 7 == 0 {
-        1
+    if Header::is_long(first) {
+        first ^= mask[0] & 0x0f;
     } else {
-        // Map most significant 2 bits to actual pkt num length.
-        match first >> 6 {
-            2 => 2,
-            3 => 4,
-            _ => return Err(Error::InvalidPacket),
-        }
-    };
-
-    // Decrypt full pkt num in-place.
-    aead.xor_keystream(sample.as_ref(), &mut ciphertext[..len])?;
-
-    let mut plaintext = Vec::with_capacity(len);
-    plaintext.extend_from_slice(&ciphertext[..len]);
-
-    // Mask the 2 most significant bits to remove the encoded length.
-    if len > 1 {
-        plaintext[0] &= 0x3f;
+        first ^= mask[0] & 0x1f;
     }
 
-    let mut b = octets::Bytes::new(&mut plaintext);
+    let pn_len = usize::from((first & PKT_NUM_MASK) + 1);
+
+    let ciphertext = &mut ciphertext[..pn_len];
+
+    for i in 0..pn_len {
+        ciphertext[i] ^= mask[i + 1];
+    }
 
     // Extract packet number corresponding to the decoded length.
-    let out = match len {
+    let pn = match pn_len {
         1 => u64::from(b.get_u8()?),
+
         2 => u64::from(b.get_u16()?),
+
+        3 => u64::from(b.get_u24()?),
+
         4 => u64::from(b.get_u32()?),
+
         _ => return Err(Error::InvalidPacket),
     };
 
-    Ok((out, len))
+    let (mut first_buf, _) = b.split_at(1)?;
+    first_buf.as_mut()[0] = first;
+
+    Ok((pn, pn_len))
 }
 
 pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize) -> Result<u64> {
@@ -390,25 +392,41 @@ pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize) -> Resu
     Ok(candidate_pn)
 }
 
+pub fn encrypt_hdr(b: &mut octets::Bytes, pn_len: usize, payload: &[u8],
+                   aead: &crypto::Seal) -> Result<()> {
+    let sample = &payload[4 - pn_len..16 + (4 - pn_len)];
+
+    let mask = aead.new_mask(sample)?;
+
+    let (mut first, mut rest) = b.split_at(1)?;
+
+    let first = first.as_mut();
+
+    if Header::is_long(first[0]) {
+        first[0] ^= mask[0] & 0x0f;
+    } else {
+        first[0] ^= mask[0] & 0x1f;
+    }
+
+    let pn_buf = rest.slice_last(pn_len)?;
+    for i in 0..pn_len {
+        pn_buf[i] ^= mask[i + 1];
+    }
+
+    Ok(())
+}
+
 pub fn encode_pkt_num(pn: u64, b: &mut octets::Bytes) -> Result<()> {
     let len = pkt_num_len(pn)?;
 
     match len {
-        1 => {
-            let buf = b.put_u8(pn as u8)?;
-            buf[0] &= !0x80;
-        },
+        1 => b.put_u8(pn as u8)?,
 
-        2 => {
-            let buf = b.put_u16(pn as u16)?;
-            buf[0] &= !0xc0;
-            buf[0] |= 0x80;
-        },
+        2 => b.put_u16(pn as u16)?,
 
-        4 => {
-            let buf = b.put_u32(pn as u32)?;
-            buf[0] |= 0xc0;
-        },
+        3 => b.put_u24(pn as u32)?,
+
+        4 => b.put_u32(pn as u32)?,
 
         _ => return Err(Error::InvalidPacket),
     };
@@ -568,11 +586,12 @@ mod tests {
     #[test]
     fn long_header() {
         let hdr = Header {
-            ty: Type::Initial,
+            ty: Type::Handshake,
             version: 0xafafafaf,
             dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
             scid: vec![ 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb ],
-            token: Some(vec![]),
+            pkt_num_len: 0,
+            token: None,
             versions: None,
         };
 
@@ -592,6 +611,7 @@ mod tests {
             version: 0,
             dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
             scid: vec![ ],
+            pkt_num_len: 0,
             token: None,
             versions: None,
         };

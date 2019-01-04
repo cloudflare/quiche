@@ -29,7 +29,6 @@ use ring::aead;
 use ring::digest;
 use ring::hkdf;
 use ring::hmac;
-use ring::unauthenticated_stream;
 
 use crate::Result;
 use crate::Error;
@@ -74,11 +73,11 @@ impl Algorithm {
         }
     }
 
-    fn get_ring_stream(self) -> &'static unauthenticated_stream::Algorithm {
+    fn get_ring_hp(self) -> &'static aead::quic::Algorithm {
         match self {
-            Algorithm::AES128_GCM => &unauthenticated_stream::AES_128_CTR,
-            Algorithm::AES256_GCM => &unauthenticated_stream::AES_256_CTR,
-            Algorithm::ChaCha20_Poly1305 => &unauthenticated_stream::CHACHA20,
+            Algorithm::AES128_GCM => &aead::quic::AES_128,
+            Algorithm::AES256_GCM => &aead::quic::AES_256,
+            Algorithm::ChaCha20_Poly1305 => &aead::quic::CHACHA20,
             Algorithm::Null => panic!("Not a valid AEAD"),
         }
     }
@@ -113,18 +112,18 @@ impl Algorithm {
 
 pub struct Open {
     alg: Algorithm,
-    pn_key: unauthenticated_stream::DecryptingKey,
+    hp_key: aead::quic::HeaderProtectionKey,
     key: aead::OpeningKey,
     nonce: Vec<u8>,
 }
 
 impl Open {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(alg: Algorithm, key: &[u8], iv: &[u8], pn_key: &[u8])
+    pub fn new(alg: Algorithm, key: &[u8], iv: &[u8], hp_key: &[u8])
                                                             -> Result<Open> {
         Ok(Open {
-            pn_key: unauthenticated_stream::DecryptingKey::new(
-                            alg.get_ring_stream(), &pn_key).unwrap(),
+            hp_key: aead::quic::HeaderProtectionKey::new(alg.get_ring_hp(),
+                                                         hp_key).unwrap(),
             key: aead::OpeningKey::new(alg.get_ring_aead(), &key).unwrap(),
             nonce: Vec::from(iv),
             alg,
@@ -132,6 +131,9 @@ impl Open {
     }
 
     pub fn open(&self, nonce: &[u8], ad: &[u8], buf: &mut [u8]) -> Result<usize> {
+        let nonce = aead::Nonce::try_assume_unique_for_key(nonce)
+                                .map_err(|_| Error::CryptoFail)?;
+        let ad = aead::Aad::from(ad);
         let plain = aead::open_in_place(&self.key, nonce, ad, 0, buf)
                          .map_err(|_| Error::CryptoFail)?;
 
@@ -158,11 +160,11 @@ impl Open {
         self.open(&nonce, ad, buf)
     }
 
-    pub fn xor_keystream(&self, nonce: &[u8], buf: &mut [u8]) -> Result<usize> {
-        let plain = unauthenticated_stream::decrypt_in_place(&self.pn_key,
-                        nonce, buf).map_err(|_| Error::CryptoFail)?;
+    pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
+        let mask = self.hp_key.new_mask(sample)
+                              .map_err(|_| Error::CryptoFail)?;
 
-        Ok(plain.len())
+        Ok(mask)
     }
 
     pub fn alg(&self) -> Algorithm {
@@ -172,25 +174,28 @@ impl Open {
 
 pub struct Seal {
     alg: Algorithm,
-    pn_key: unauthenticated_stream::EncryptingKey,
+    hp_key: aead::quic::HeaderProtectionKey,
     key: aead::SealingKey,
     nonce: Vec<u8>,
 }
 
 impl Seal {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(alg: Algorithm, key: &[u8], iv: &[u8], pn_key: &[u8])
+    pub fn new(alg: Algorithm, key: &[u8], iv: &[u8], hp_key: &[u8])
                                                             -> Result<Seal> {
         Ok(Seal {
-            pn_key: unauthenticated_stream::EncryptingKey::new(
-                            alg.get_ring_stream(), &pn_key).unwrap(),
-            key: aead::SealingKey::new(alg.get_ring_aead(), &key).unwrap(),
+            hp_key: aead::quic::HeaderProtectionKey::new(alg.get_ring_hp(),
+                                                         hp_key).unwrap(),
+            key: aead::SealingKey::new(alg.get_ring_aead(), key).unwrap(),
             nonce: Vec::from(iv),
             alg,
         })
     }
 
     pub fn seal(&self, nonce: &[u8], ad: &[u8], buf: &mut [u8]) -> Result<usize> {
+        let nonce = aead::Nonce::try_assume_unique_for_key(nonce)
+                                .map_err(|_| Error::CryptoFail)?;
+        let ad = aead::Aad::from(ad);
         let cipher = aead::seal_in_place(&self.key, nonce, ad, buf, self.alg().tag_len())
                           .map_err(|_| Error::CryptoFail)?;
 
@@ -217,11 +222,11 @@ impl Seal {
         self.seal(&nonce, ad, buf)
     }
 
-    pub fn xor_keystream(&self, nonce: &[u8], buf: &mut [u8]) -> Result<usize> {
-        let plain = unauthenticated_stream::encrypt_in_place(&self.pn_key,
-                        nonce, buf).map_err(|_| Error::CryptoFail)?;
+    pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
+        let mask = self.hp_key.new_mask(sample)
+                              .map_err(|_| Error::CryptoFail)?;
 
-        Ok(plain)
+        Ok(mask)
     }
 
     pub fn alg(&self) -> Algorithm {
@@ -243,29 +248,29 @@ pub fn derive_initial_key_material(cid: &[u8], is_server: bool)
     // Client.
     let mut client_key = vec![0; key_len];
     let mut client_iv = vec![0; nonce_len];
-    let mut client_pn_key = vec![0; key_len];
+    let mut client_hp_key = vec![0; key_len];
 
     derive_client_initial_secret(&initial_secret, &mut secret)?;
     derive_pkt_key(aead, &secret, &mut client_key)?;
     derive_pkt_iv(aead, &secret, &mut client_iv)?;
-    derive_hdr_key(aead, &secret, &mut client_pn_key)?;
+    derive_hdr_key(aead, &secret, &mut client_hp_key)?;
 
     // Server.
     let mut server_key = vec![0; key_len];
     let mut server_iv = vec![0; nonce_len];
-    let mut server_pn_key = vec![0; key_len];
+    let mut server_hp_key = vec![0; key_len];
 
     derive_server_initial_secret(&initial_secret, &mut secret)?;
     derive_pkt_key(aead, &secret, &mut server_key)?;
     derive_pkt_iv(aead, &secret, &mut server_iv)?;
-    derive_hdr_key(aead, &secret, &mut server_pn_key)?;
+    derive_hdr_key(aead, &secret, &mut server_hp_key)?;
 
     let (open, seal) = if is_server {
-        (Open::new(aead, &client_key, &client_iv, &client_pn_key)?,
-         Seal::new(aead, &server_key, &server_iv, &server_pn_key)?)
+        (Open::new(aead, &client_key, &client_iv, &client_hp_key)?,
+         Seal::new(aead, &server_key, &server_iv, &server_hp_key)?)
     } else {
-        (Open::new(aead, &server_key, &server_iv, &server_pn_key)?,
-         Seal::new(aead, &client_key, &client_iv, &client_pn_key)?)
+        (Open::new(aead, &server_key, &server_iv, &server_hp_key)?,
+         Seal::new(aead, &client_key, &client_iv, &client_hp_key)?)
     };
 
     Ok((open, seal))
