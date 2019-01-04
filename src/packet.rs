@@ -301,11 +301,11 @@ impl std::fmt::Debug for Header {
 }
 
 pub fn pkt_num_len(pn: u64) -> Result<usize> {
-    let len = if pn < std::u8::MAX as u64 {
+    let len = if pn < u64::from(std::u8::MAX) {
         1
-    } else if pn < std::u16::MAX as u64 {
+    } else if pn < u64::from(std::u16::MAX) {
         2
-    } else if pn < std::u32::MAX as u64 {
+    } else if pn < u64::from(std::u32::MAX) {
         4
     } else {
         return Err(Error::InvalidPacket);

@@ -271,7 +271,7 @@ pub extern fn quiche_rangebuf_free(b: *mut RangeBuf) {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_readable<'a>(conn: &'a mut Connection) -> *mut Readable<'a> {
+pub extern fn quiche_conn_readable(conn: &mut Connection) -> *mut Readable {
     let iter = conn.readable();
     Box::into_raw(Box::new(iter))
 }
@@ -308,7 +308,7 @@ pub extern fn quiche_conn_close(conn: &mut Connection, app: bool, err: u16,
 pub extern fn quiche_conn_timeout_as_nanos(conn: &mut Connection) -> u64 {
     match conn.timeout() {
         Some(timeout) => timeout.as_secs() * 1_000_000_000 +
-                         timeout.subsec_nanos() as u64,
+                         u64::from(timeout.subsec_nanos()),
 
         None => std::u64::MAX,
     }
