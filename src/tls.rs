@@ -502,11 +502,16 @@ fn map_result_ptr<'a, T>(bssl_result: *const T) -> Result<&'a T> {
 fn map_result_ssl(ssl: &Handshake, bssl_result: i32) -> Result<()> {
     match bssl_result {
         1 => Ok(()),
+
         _ => {
             let ssl_err = ssl.get_error(bssl_result);
             match ssl_err {
                 // SSL_ERROR_SSL
-                1 => Err(Error::TlsFail),
+                1 => {
+                    log_ssl_error();
+
+                    Err(Error::TlsFail)
+                },
 
                 // SSL_ERROR_WANT_READ
                 2 => Err(Error::WantRead),
@@ -533,6 +538,17 @@ fn map_result_ssl(ssl: &Handshake, bssl_result: i32) -> Result<()> {
             }
         }
     }
+}
+
+fn log_ssl_error() {
+    let err: [u8; 1024] = [0; 1024];
+
+    unsafe {
+        let e = ERR_peek_error();
+        ERR_error_string_n(e, err.as_ptr(), err.len());
+    }
+
+    trace!("{}", std::str::from_utf8(&err).unwrap());
 }
 
 extern {
@@ -610,4 +626,9 @@ extern {
     // X509_VERIFY_PARAM
     fn X509_VERIFY_PARAM_set1_host(param: *mut X509_VERIFY_PARAM,
         name: *const c_char, namelen: libc::size_t) -> i32;
+
+    // ERR
+    fn ERR_peek_error() -> u32;
+
+    fn ERR_error_string_n(err: u32, buf: *const u8, len: usize);
 }
