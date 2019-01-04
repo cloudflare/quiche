@@ -105,28 +105,28 @@ pub extern fn quiche_config_log_keys(config: &mut Config) {
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_idle_timeout(config: &mut Config, v: u16) {
+pub extern fn quiche_config_set_idle_timeout(config: &mut Config, v: u64) {
     config.set_idle_timeout(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_data(config: &mut Config, v: u32) {
-    config.set_initial_max_data(v);
-}
-
-#[no_mangle]
-pub extern fn quiche_config_set_initial_max_bidi_streams(config: &mut Config, v: u16) {
-    config.set_initial_max_bidi_streams(v);
-}
-
-#[no_mangle]
-pub extern fn quiche_config_set_initial_max_stream_data_bidi_local(config: &mut Config, v: u32) {
+pub extern fn quiche_config_set_initial_max_stream_data_bidi_local(config: &mut Config, v: u64) {
     config.set_initial_max_stream_data_bidi_local(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_stream_data_bidi_remote(config: &mut Config, v: u32) {
+pub extern fn quiche_config_set_initial_max_stream_data_bidi_remote(config: &mut Config, v: u64) {
     config.set_initial_max_stream_data_bidi_remote(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_initial_max_data(config: &mut Config, v: u64) {
+    config.set_initial_max_data(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_initial_max_streams_bidi(config: &mut Config, v: u64) {
+    config.set_initial_max_streams_bidi(v);
 }
 
 #[no_mangle]

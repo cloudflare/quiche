@@ -97,19 +97,19 @@ int quiche_config_load_priv_key_from_pem_file(quiche_config *config,
 void quiche_config_log_keys(quiche_config *config);
 
 // Sets the `idle_timeout` transport parameter.
-void quiche_config_set_idle_timeout(quiche_config *config, uint16_t v);
+void quiche_config_set_idle_timeout(quiche_config *config, uint64_t v);
 
 // Sets the `initial_max_data` transport parameter.
-void quiche_config_set_initial_max_data(quiche_config *config, uint32_t v);
-
-// Sets the `initial_max_bidi_streams` transport parameter.
-void quiche_config_set_initial_max_bidi_streams(quiche_config *config, uint16_t v);
+void quiche_config_set_initial_max_data(quiche_config *config, uint64_t v);
 
 // Sets the `initial_max_stream_data_bidi_local` transport parameter.
-void quiche_config_set_initial_max_stream_data_bidi_local(quiche_config *config, uint32_t v);
+void quiche_config_set_initial_max_stream_data_bidi_local(quiche_config *config, uint64_t v);
 
 // Sets the `initial_max_stream_data_bidi_remote` transport parameter.
-void quiche_config_set_initial_max_stream_data_bidi_remote(quiche_config *config, uint32_t v);
+void quiche_config_set_initial_max_stream_data_bidi_remote(quiche_config *config, uint64_t v);
+
+// Sets the `initial_max_streams_bidi` transport parameter.
+void quiche_config_set_initial_max_streams_bidi(quiche_config *config, uint16_t v);
 
 // Frees the config object.
 void quiche_config_free(quiche_config *config);

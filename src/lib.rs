@@ -184,64 +184,64 @@ impl Config {
     }
 
     /// Sets the `idle_timeout` transport parameter.
-    pub fn set_idle_timeout(&mut self, v: u16) {
+    pub fn set_idle_timeout(&mut self, v: u64) {
         self.local_transport_params.idle_timeout = v;
-    }
-
-    /// Sets the `initial_max_data` transport parameter.
-    pub fn set_initial_max_data(&mut self, v: u32) {
-        self.local_transport_params.initial_max_data = v;
-    }
-
-    /// Sets the `initial_max_bidi_streams` transport parameter.
-    pub fn set_initial_max_bidi_streams(&mut self, v: u16) {
-        self.local_transport_params.initial_max_bidi_streams = v;
-    }
-
-    /// Sets the `initial_max_uni_streams` transport parameter.
-    pub fn set_initial_max_uni_streams(&mut self, v: u16) {
-        self.local_transport_params.initial_max_uni_streams = v;
-    }
-
-    /// Sets the `max_packet_size transport` parameter.
-    pub fn set_max_packet_size(&mut self, v: u16) {
-        self.local_transport_params.max_packet_size = v;
-    }
-
-    /// Sets the `ack_delay_exponent` transport parameter.
-    pub fn set_ack_delay_exponent(&mut self, v: u8) {
-        self.local_transport_params.ack_delay_exponent = v;
-    }
-
-    /// Sets the `disable_migration` transport parameter.
-    pub fn set_disable_migration(&mut self, v: bool) {
-        self.local_transport_params.disable_migration = v;
-    }
-
-    /// Sets the `max_ack_delay` transport parameter.
-    pub fn set_max_ack_delay(&mut self, v: u8) {
-        self.local_transport_params.max_ack_delay = v;
-    }
-
-    /// Sets the `initial_max_stream_data_bidi_local` transport parameter.
-    pub fn set_initial_max_stream_data_bidi_local(&mut self, v: u32) {
-        self.local_transport_params.initial_max_stream_data_bidi_local = v;
-    }
-
-    /// Sets the `initial_max_stream_data_bidi_remote` transport parameter.
-    pub fn set_initial_max_stream_data_bidi_remote(&mut self, v: u32) {
-        self.local_transport_params.initial_max_stream_data_bidi_remote = v;
-    }
-
-    /// Sets the `initial_max_stream_data_uni` transport parameter.
-    pub fn set_initial_max_stream_data_uni(&mut self, v: u32) {
-        self.local_transport_params.initial_max_stream_data_uni = v;
     }
 
     /// Sets the `stateless_reset_token` transport parameter.
     pub fn set_stateless_reset_token(&mut self, v: [u8; 16]) {
         self.local_transport_params.stateless_reset_token = v;
         self.local_transport_params.stateless_reset_token_present = true;
+    }
+
+    /// Sets the `max_packet_size transport` parameter.
+    pub fn set_max_packet_size(&mut self, v: u64) {
+        self.local_transport_params.max_packet_size = v;
+    }
+
+    /// Sets the `initial_max_data` transport parameter.
+    pub fn set_initial_max_data(&mut self, v: u64) {
+        self.local_transport_params.initial_max_data = v;
+    }
+
+    /// Sets the `initial_max_stream_data_bidi_local` transport parameter.
+    pub fn set_initial_max_stream_data_bidi_local(&mut self, v: u64) {
+        self.local_transport_params.initial_max_stream_data_bidi_local = v;
+    }
+
+    /// Sets the `initial_max_stream_data_bidi_remote` transport parameter.
+    pub fn set_initial_max_stream_data_bidi_remote(&mut self, v: u64) {
+        self.local_transport_params.initial_max_stream_data_bidi_remote = v;
+    }
+
+    /// Sets the `initial_max_stream_data_uni` transport parameter.
+    pub fn set_initial_max_stream_data_uni(&mut self, v: u64) {
+        self.local_transport_params.initial_max_stream_data_uni = v;
+    }
+
+    /// Sets the `initial_max_streams_bidi` transport parameter.
+    pub fn set_initial_max_streams_bidi(&mut self, v: u64) {
+        self.local_transport_params.initial_max_streams_bidi = v;
+    }
+
+    /// Sets the `initial_max_streams_uni` transport parameter.
+    pub fn set_initial_max_streams_uni(&mut self, v: u64) {
+        self.local_transport_params.initial_max_streams_uni = v;
+    }
+
+    /// Sets the `ack_delay_exponent` transport parameter.
+    pub fn set_ack_delay_exponent(&mut self, v: u64) {
+        self.local_transport_params.ack_delay_exponent = v;
+    }
+
+    /// Sets the `max_ack_delay` transport parameter.
+    pub fn set_max_ack_delay(&mut self, v: u64) {
+        self.local_transport_params.max_ack_delay = v;
+    }
+
+    /// Sets the `disable_migration` transport parameter.
+    pub fn set_disable_migration(&mut self, v: bool) {
+        self.local_transport_params.disable_migration = v;
     }
 }
 
@@ -813,7 +813,7 @@ impl Connection {
 
         self.idle_timer =
             Some(now + time::Duration::from_secs(
-                u64::from(self.local_transport_params.idle_timeout)));
+                self.local_transport_params.idle_timeout));
 
         let read = payload_offset + payload_len + aead.alg().tag_len();
 
@@ -1400,9 +1400,8 @@ impl Connection {
 
                     self.max_tx_data = peer_params.initial_max_data as usize;
 
-                    let max_ack_delay = u64::from(peer_params.max_ack_delay);
                     self.recovery.max_ack_delay =
-                        time::Duration::from_millis(max_ack_delay);
+                        time::Duration::from_millis(peer_params.max_ack_delay);
 
                     self.peer_transport_params = peer_params;
 
@@ -1433,19 +1432,20 @@ impl Connection {
 
 #[derive(Clone, Debug, PartialEq)]
 struct TransportParams {
-    pub idle_timeout: u16,
-    pub initial_max_data: u32,
-    pub initial_max_bidi_streams: u16,
-    pub initial_max_uni_streams: u16,
-    pub max_packet_size: u16,
-    pub ack_delay_exponent: u8,
-    pub disable_migration: bool,
-    pub max_ack_delay: u8,
-    pub initial_max_stream_data_bidi_local: u32,
-    pub initial_max_stream_data_bidi_remote: u32,
-    pub initial_max_stream_data_uni: u32,
-    pub stateless_reset_token_present: bool,
+    pub original_connection_id: Option<Vec<u8>>,
+    pub idle_timeout: u64,
     pub stateless_reset_token: [u8; 16],
+    pub stateless_reset_token_present: bool,
+    pub max_packet_size: u64,
+    pub initial_max_data: u64,
+    pub initial_max_stream_data_bidi_local: u64,
+    pub initial_max_stream_data_bidi_remote: u64,
+    pub initial_max_stream_data_uni: u64,
+    pub initial_max_streams_bidi: u64,
+    pub initial_max_streams_uni: u64,
+    pub ack_delay_exponent: u64,
+    pub max_ack_delay: u64,
+    pub disable_migration: bool,
     // pub preferred_address: ...
 }
 
@@ -1475,34 +1475,18 @@ impl TransportParams {
 
             match id {
                 0x0000 => {
-                    tp.initial_max_stream_data_bidi_local = val.get_u32()?;
-                },
-
-                0x0001 => {
-                    tp.initial_max_data = val.get_u32()?;
-                },
-
-                0x0002 => {
-                    tp.initial_max_bidi_streams = val.get_u16()?;
-                },
-
-                0x0003 => {
-                    tp.idle_timeout = val.get_u16()?;
-                },
-
-                0x0004 => {
                     if is_server {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    // TODO: parse preferred_address
+                    // TODO: decode original_connection_id
                 },
 
-                0x0005 => {
-                    tp.max_packet_size = val.get_u16()?;
+                0x0001 => {
+                    tp.idle_timeout = val.get_varint()?;
                 },
 
-                0x0006 => {
+                0x0002 => {
                     if is_server {
                         return Err(Error::InvalidTransportParam);
                     }
@@ -1512,28 +1496,44 @@ impl TransportParams {
                     tp.stateless_reset_token_present = true;
                 },
 
+                0x0003 => {
+                    tp.max_packet_size = val.get_varint()?;
+                },
+
+                0x0004 => {
+                    tp.initial_max_data = val.get_varint()?;
+                },
+
+                0x0005 => {
+                    tp.initial_max_stream_data_bidi_local = val.get_varint()?;
+                },
+
+                0x0006 => {
+                    tp.initial_max_stream_data_bidi_remote = val.get_varint()?;
+                },
+
                 0x0007 => {
-                    tp.ack_delay_exponent = val.get_u8()?;
+                    tp.initial_max_stream_data_uni = val.get_varint()?;
                 },
 
                 0x0008 => {
-                    tp.initial_max_uni_streams = val.get_u16()?;
+                    tp.initial_max_streams_bidi = val.get_varint()?;
                 },
 
                 0x0009 => {
-                    tp.disable_migration = true;
+                    tp.initial_max_streams_uni = val.get_varint()?;
                 },
 
                 0x000a => {
-                    tp.initial_max_stream_data_bidi_remote = val.get_u32()?;
+                    tp.ack_delay_exponent = val.get_varint()?;
                 },
 
                 0x000b => {
-                    tp.initial_max_stream_data_uni = val.get_u32()?;
+                    tp.max_ack_delay = val.get_varint()?;
                 },
 
                 0x000c => {
-                    tp.max_ack_delay = val.get_u8()?;
+                    tp.disable_migration = true;
                 },
 
                 0x000d => {
@@ -1541,7 +1541,7 @@ impl TransportParams {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    // TODO: implement address validation
+                    // TODO: decode preferred_address
                 },
 
                 // Ignore unknown parameters.
@@ -1559,70 +1559,82 @@ impl TransportParams {
         let params_len = {
             let mut b = octets::Bytes::new(&mut params);
 
+            if is_server {
+                // TODO: encode original_connection_id
+            };
+
             if tp.idle_timeout != 0 {
-                b.put_u16(0x0003)?;
-                b.put_u16(mem::size_of::<u16>() as u16)?;
-                b.put_u16(tp.idle_timeout)?;
-            }
-
-            if tp.initial_max_data != 0 {
                 b.put_u16(0x0001)?;
-                b.put_u16(mem::size_of::<u32>() as u16)?;
-                b.put_u32(tp.initial_max_data)?;
-            }
-
-            if tp.initial_max_bidi_streams != 0 {
-                b.put_u16(0x0002)?;
-                b.put_u16(mem::size_of::<u16>() as u16)?;
-                b.put_u16(tp.initial_max_bidi_streams)?;
-            }
-
-            if tp.initial_max_uni_streams != 0 {
-                b.put_u16(0x0008)?;
-                b.put_u16(mem::size_of::<u16>() as u16)?;
-                b.put_u16(tp.initial_max_uni_streams)?;
-            }
-
-            if tp.max_packet_size != 0 {
-                b.put_u16(0x0005)?;
-                b.put_u16(mem::size_of::<u16>() as u16)?;
-                b.put_u16(tp.max_packet_size)?;
-            }
-
-            if tp.ack_delay_exponent != 0 {
-                b.put_u16(0x0007)?;
-                b.put_u16(mem::size_of::<u8>() as u16)?;
-                b.put_u8(tp.ack_delay_exponent)?;
-            }
-
-            if tp.disable_migration {
-                b.put_u16(0x0009)?;
-                b.put_u16(0)?;
-            }
-
-            if tp.initial_max_stream_data_bidi_local != 0 {
-                b.put_u16(0x0000)?;
-                b.put_u16(mem::size_of::<u32>() as u16)?;
-                b.put_u32(tp.initial_max_stream_data_bidi_local)?;
-            }
-
-            if tp.initial_max_stream_data_bidi_remote != 0 {
-                b.put_u16(0x000a)?;
-                b.put_u16(mem::size_of::<u32>() as u16)?;
-                b.put_u32(tp.initial_max_stream_data_bidi_remote)?;
-            }
-
-            if tp.initial_max_stream_data_uni != 0 {
-                b.put_u16(0x000b)?;
-                b.put_u16(mem::size_of::<u32>() as u16)?;
-                b.put_u32(tp.initial_max_stream_data_uni)?;
+                b.put_u16(octets::varint_len(tp.idle_timeout) as u16)?;
+                b.put_varint(tp.idle_timeout)?;
             }
 
             if is_server && tp.stateless_reset_token_present {
-                b.put_u16(0x0006)?;
+                b.put_u16(0x0002)?;
                 b.put_u16(tp.stateless_reset_token.len() as u16)?;
                 b.put_bytes(&tp.stateless_reset_token)?;
             }
+
+            if tp.max_packet_size != 0 {
+                b.put_u16(0x0003)?;
+                b.put_u16(octets::varint_len(tp.max_packet_size) as u16)?;
+                b.put_varint(tp.max_packet_size)?;
+            }
+
+            if tp.initial_max_data != 0 {
+                b.put_u16(0x0004)?;
+                b.put_u16(octets::varint_len(tp.initial_max_data) as u16)?;
+                b.put_varint(tp.initial_max_data)?;
+            }
+
+            if tp.initial_max_stream_data_bidi_local != 0 {
+                b.put_u16(0x0005)?;
+                b.put_u16(octets::varint_len(tp.initial_max_stream_data_bidi_local) as u16)?;
+                b.put_varint(tp.initial_max_stream_data_bidi_local)?;
+            }
+
+            if tp.initial_max_stream_data_bidi_remote != 0 {
+                b.put_u16(0x0006)?;
+                b.put_u16(octets::varint_len(tp.initial_max_stream_data_bidi_remote) as u16)?;
+                b.put_varint(tp.initial_max_stream_data_bidi_remote)?;
+            }
+
+            if tp.initial_max_stream_data_uni != 0 {
+                b.put_u16(0x0007)?;
+                b.put_u16(octets::varint_len(tp.initial_max_stream_data_uni) as u16)?;
+                b.put_varint(tp.initial_max_stream_data_uni)?;
+            }
+
+            if tp.initial_max_streams_bidi != 0 {
+                b.put_u16(0x0008)?;
+                b.put_u16(octets::varint_len(tp.initial_max_streams_bidi) as u16)?;
+                b.put_varint(tp.initial_max_streams_bidi)?;
+            }
+
+            if tp.initial_max_streams_uni != 0 {
+                b.put_u16(0x0009)?;
+                b.put_u16(octets::varint_len(tp.initial_max_streams_uni) as u16)?;
+                b.put_varint(tp.initial_max_streams_uni)?;
+            }
+
+            if tp.ack_delay_exponent != 0 {
+                b.put_u16(0x000a)?;
+                b.put_u16(octets::varint_len(tp.ack_delay_exponent) as u16)?;
+                b.put_varint(tp.ack_delay_exponent)?;
+            }
+
+            if tp.max_ack_delay != 0 {
+                b.put_u16(0x000b)?;
+                b.put_u16(octets::varint_len(tp.max_ack_delay) as u16)?;
+                b.put_varint(tp.max_ack_delay)?;
+            }
+
+            if tp.disable_migration {
+                b.put_u16(0x000c)?;
+                b.put_u16(0)?;
+            }
+
+            // TODO: encode preferred_address
 
             b.off()
         };
@@ -1650,19 +1662,20 @@ impl TransportParams {
 impl Default for TransportParams {
     fn default() -> TransportParams {
         TransportParams {
+            original_connection_id: None,
             idle_timeout: 0,
+            stateless_reset_token: [0; 16],
+            stateless_reset_token_present: false,
+            max_packet_size: 65527,
             initial_max_data: 0,
-            initial_max_bidi_streams: 0,
-            initial_max_uni_streams: 0,
-            max_packet_size: 1205,
-            ack_delay_exponent: 3,
-            disable_migration: false,
-            max_ack_delay: 25,
             initial_max_stream_data_bidi_local: 0,
             initial_max_stream_data_bidi_remote: 0,
             initial_max_stream_data_uni: 0,
-            stateless_reset_token_present: false,
-            stateless_reset_token: [0; 16],
+            initial_max_streams_bidi: 0,
+            initial_max_streams_uni: 0,
+            ack_delay_exponent: 3,
+            max_ack_delay: 25,
+            disable_migration: false,
         }
     }
 }
@@ -1675,25 +1688,26 @@ mod tests {
     #[test]
     fn transport_params() {
         let tp = TransportParams {
+            original_connection_id: None,
             idle_timeout: 30,
-            initial_max_data: 424_645_563,
-            initial_max_bidi_streams: 12_231,
-            initial_max_uni_streams: 18_473,
+            stateless_reset_token: [0xba; 16],
+            stateless_reset_token_present: true,
             max_packet_size: 23_421,
-            ack_delay_exponent: 123,
-            disable_migration: true,
-            max_ack_delay: 25,
+            initial_max_data: 424_645_563,
             initial_max_stream_data_bidi_local: 154_323_123,
             initial_max_stream_data_bidi_remote: 6_587_456,
             initial_max_stream_data_uni: 2_461_234,
-            stateless_reset_token_present: true,
-            stateless_reset_token: [0xba; 16],
+            initial_max_streams_bidi: 12_231,
+            initial_max_streams_uni: 18_473,
+            ack_delay_exponent: 123,
+            max_ack_delay: 1234,
+            disable_migration: true,
         };
 
         let mut raw_params: [u8; 256] = [42; 256];
         let mut raw_params = TransportParams::encode(&tp, VERSION_DRAFT17, true,
                                               &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 96);
+        assert_eq!(raw_params.len(), 106);
 
         let new_tp = TransportParams::decode(&mut raw_params, VERSION_DRAFT17,
                                              false).unwrap();

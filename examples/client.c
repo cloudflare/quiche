@@ -233,8 +233,8 @@ int main(int argc, char *argv[]) {
 
     quiche_config_set_idle_timeout(config, 30);
     quiche_config_set_initial_max_data(config, 10000000);
-    quiche_config_set_initial_max_bidi_streams(config, 100);
     quiche_config_set_initial_max_stream_data_bidi_local(config, 1000000);
+    quiche_config_set_initial_max_streams_bidi(config, 100);
 
     uint8_t scid[LOCAL_CONN_ID_LEN];
     int rng = open("/dev/urandom", O_RDONLY);
