@@ -474,12 +474,12 @@ impl Connection {
         if hdr.ty == packet::Type::VersionNegotiation {
             // Version negotiation packet can only be sent by the server.
             if self.is_server {
-                return Err(Error::InvalidPacket);
+                return Err(Error::Done);
             }
 
-            // Forbid duplicate version negotiation.
+            // Ignore duplicate version negotiation.
             if self.did_version_negotiation {
-                return Err(Error::InvalidState);
+                return Err(Error::Done);
             }
 
             trace!("{} rx pkt {:?}", &self.trace_id, hdr);
