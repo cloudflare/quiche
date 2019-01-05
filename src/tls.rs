@@ -292,7 +292,7 @@ impl Handshake {
         })
     }
 
-    pub fn get_write_level(&mut self) -> crypto::Level {
+    pub fn get_write_level(&self) -> crypto::Level {
         unsafe {
             SSL_quic_write_level(self.as_ptr())
         }
