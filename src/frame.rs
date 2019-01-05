@@ -122,9 +122,7 @@ impl Frame {
                     len += 1;
                 }
 
-                Frame::Padding {
-                    len,
-                }
+                Frame::Padding { len }
             },
 
             0x01 => Frame::Ping,
@@ -137,28 +135,18 @@ impl Frame {
             },
 
             0x06 => {
-                let offset = b.get_varint()?;
+                let offset = b.get_varint()? as usize;
                 let data = b.get_bytes_with_varint_length()?;
+                let data = stream::RangeBuf::from(data.as_ref(), offset, false);
 
-                Frame::Crypto {
-                    data: stream::RangeBuf::from(data.as_ref(),
-                                                 offset as usize,
-                                                 false),
-                }
+                Frame::Crypto { data }
             },
 
             0x07 => Frame::NewToken {
                 token: b.get_bytes_with_varint_length()?.to_vec(),
             },
 
-            0x08 => parse_stream_frame(frame_type, b)?,
-            0x09 => parse_stream_frame(frame_type, b)?,
-            0x0a => parse_stream_frame(frame_type, b)?,
-            0x0b => parse_stream_frame(frame_type, b)?,
-            0x0c => parse_stream_frame(frame_type, b)?,
-            0x0d => parse_stream_frame(frame_type, b)?,
-            0x0e => parse_stream_frame(frame_type, b)?,
-            0x0f => parse_stream_frame(frame_type, b)?,
+            0x08 ... 0x0f => parse_stream_frame(frame_type, b)?,
 
             0x10 => Frame::MaxData {
                 max: b.get_varint()?,
@@ -576,10 +564,7 @@ fn parse_ack_frame(_ty: u64, b: &mut octets::Bytes) -> Result<Frame> {
         ranges.insert(smallest_ack..largest_ack + 1);
     }
 
-    Ok(Frame::ACK {
-        ack_delay,
-        ranges,
-    })
+    Ok(Frame::ACK { ack_delay, ranges })
 }
 
 fn parse_stream_frame(ty: u64, b: &mut octets::Bytes) -> Result<Frame> {
@@ -602,11 +587,9 @@ fn parse_stream_frame(ty: u64, b: &mut octets::Bytes) -> Result<Frame> {
     let fin = first & 0x01 != 0;
 
     let data = b.get_bytes(len)?;
+    let data = stream::RangeBuf::from(data.as_ref(), offset as usize, fin);
 
-    Ok(Frame::Stream {
-        stream_id,
-        data: stream::RangeBuf::from(data.as_ref(), offset as usize, fin),
-    })
+    Ok(Frame::Stream { stream_id, data })
 }
 
 
