@@ -163,7 +163,8 @@ impl Header {
             },
 
             Type::Retry => {
-                panic!("Retry not supported");
+                // TODO: implement stateless retry
+                return Err(Error::Done)
             },
 
             Type::VersionNegotiation => {
