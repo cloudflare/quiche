@@ -1531,6 +1531,11 @@ impl Connection {
         self.handshake_completed
     }
 
+    /// Returns true if the connection is resumed.
+    pub fn is_resumed(&self) -> bool {
+        self.tls_state.is_resumed()
+    }
+
     /// Returns true if the connection is closed.
     ///
     /// If this returns true, the connection object can be dropped.
@@ -1572,8 +1577,10 @@ impl Connection {
 
                     self.peer_transport_params = peer_params;
 
-                    trace!("{} connection established: cipher={:?}",
-                           &self.trace_id, self.tls_state.cipher());
+                    trace!("{} connection established: cipher={:?} resumed={}",
+                           &self.trace_id,
+                           self.tls_state.cipher(),
+                           self.is_resumed());
                 },
 
                 Err(tls::Error::TlsFail) => {

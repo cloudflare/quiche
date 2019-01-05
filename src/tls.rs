@@ -305,6 +305,12 @@ impl Handshake {
         get_cipher_from_ptr(self.as_ptr())
     }
 
+    pub fn is_resumed(&self) -> bool {
+        unsafe {
+            SSL_session_reused(self.as_ptr()) == 1
+        }
+    }
+
     pub fn clear(&mut self) -> Result<()> {
         map_result_ssl(self, unsafe {
             SSL_clear(self.as_ptr())
@@ -616,6 +622,8 @@ extern {
     fn SSL_do_handshake(ssl: *mut SSL) -> c_int;
 
     fn SSL_quic_write_level(ssl: *mut SSL) -> crypto::Level;
+
+    fn SSL_session_reused(ssl: *mut SSL) -> c_int;
 
     fn SSL_clear(ssl: *mut SSL) -> c_int;
 
