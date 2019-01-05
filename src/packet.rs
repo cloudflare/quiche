@@ -491,8 +491,6 @@ pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
 }
 
 pub struct PktNumSpace {
-    pub pkt_type: Type,
-
     pub largest_rx_pkt_num: u64,
 
     pub next_pkt_num: u64,
@@ -514,10 +512,8 @@ pub struct PktNumSpace {
 }
 
 impl PktNumSpace {
-    pub fn new(ty: Type, crypto_level: crypto::Level) -> PktNumSpace {
+    pub fn new(crypto_level: crypto::Level) -> PktNumSpace {
         PktNumSpace {
-            pkt_type: ty,
-
             largest_rx_pkt_num: 0,
 
             next_pkt_num: 0,

@@ -354,12 +354,9 @@ impl Connection {
 
             trace_id: scid_as_hex.join(""),
 
-            initial: packet::PktNumSpace::new(packet::Type::Initial,
-                                              crypto::Level::Initial),
-            handshake: packet::PktNumSpace::new(packet::Type::Handshake,
-                                                crypto::Level::Handshake),
-            application: packet::PktNumSpace::new(packet::Type::Application,
-                                                  crypto::Level::Application),
+            initial: packet::PktNumSpace::new(crypto::Level::Initial),
+            handshake: packet::PktNumSpace::new(crypto::Level::Handshake),
+            application: packet::PktNumSpace::new(crypto::Level::Application),
 
             peer_transport_params: TransportParams::default(),
 
@@ -892,31 +889,17 @@ impl Connection {
 
         let mut b = octets::Bytes::new(&mut out[..avail]);
 
-        // Select packet number space context depending on whether there is
-        // handshake data to send, whether there are packets to ACK, or in
-        // the case of the application space, whether there are streams that
-        // can be written or that needs to increase flow control credit.
-        let space =
-            // On error or probe, send packet in the latest space available.
-            if self.error.is_some() || self.recovery.probes > 0 {
-                match self.tls_state.get_write_level() {
-                    crypto::Level::Initial     => &mut self.initial,
-                    crypto::Level::ZeroRTT     => unreachable!(),
-                    crypto::Level::Handshake   => &mut self.handshake,
-                    crypto::Level::Application => &mut self.application,
-                }
-            } else if self.initial.ready() {
-                &mut self.initial
-            } else if self.handshake.ready() {
-                &mut self.handshake
-            } else if self.handshake_completed &&
-                      (self.application.ready() ||
-                       self.streams.values().any(|s| s.writable()) ||
-                       self.streams.values().any(|s| s.more_credit())) {
-                &mut self.application
-            } else {
-                return Err(Error::Done);
-            };
+        let pkt_type = self.select_egress_pkt_type()?;
+
+        let space = match pkt_type {
+            packet::Type::Initial => &mut self.initial,
+
+            packet::Type::Handshake => &mut self.handshake,
+
+            packet::Type::Application => &mut self.application,
+
+            _ => unreachable!(),
+        };
 
         // Calculate available space in the packet based on congestion window.
         let mut left = cmp::min(self.recovery.cwnd(), b.cap());
@@ -925,7 +908,7 @@ impl Connection {
         let pn_len = packet::pkt_num_len(pn)?;
 
         let hdr = Header {
-            ty: space.pkt_type,
+            ty: pkt_type,
             version: self.version,
             dcid: self.dcid.clone(),
             scid: self.scid.clone(),
@@ -970,7 +953,7 @@ impl Connection {
 
         // Create MAX_DATA frame, when the new limit is at least double the
         // amount of data that can be received before blocking.
-        if space.pkt_type == packet::Type::Application && !is_closing
+        if pkt_type == packet::Type::Application && !is_closing
             && (self.new_max_rx_data != self.max_rx_data &&
                 self.new_max_rx_data / 2 > self.max_rx_data - self.rx_data)
         {
@@ -991,7 +974,7 @@ impl Connection {
         }
 
         // Create MAX_STREAM_DATA frames as needed.
-        if space.pkt_type == packet::Type::Application && !is_closing {
+        if pkt_type == packet::Type::Application && !is_closing {
             for (id, stream) in self.streams.iter_mut()
                                             .filter(|(_, s)| s.more_credit()) {
                 let frame = frame::Frame::MaxStreamData {
@@ -1079,7 +1062,7 @@ impl Connection {
         }
 
         // Pad the client's initial packet.
-        if !self.is_server && space.pkt_type == packet::Type::Initial {
+        if !self.is_server && pkt_type == packet::Type::Initial {
             let pkt_len = pn_len + payload_len + space.overhead();
 
             let frame = frame::Frame::Padding {
@@ -1093,7 +1076,7 @@ impl Connection {
         }
 
         // Create a single STREAM frame for the first stream that is writable.
-        if space.pkt_type == packet::Type::Application && !is_closing
+        if pkt_type == packet::Type::Application && !is_closing
             && self.max_tx_data > self.tx_data
             && left > frame::MAX_STREAM_OVERHEAD
         {
@@ -1144,7 +1127,7 @@ impl Connection {
         payload_len += space.overhead();
 
         // Only long header packets have an explicit length field.
-        if space.pkt_type != packet::Type::Application {
+        if pkt_type != packet::Type::Application {
             let len = pn_len + payload_len;
             b.put_varint(len as u64)?;
         }
@@ -1420,6 +1403,35 @@ impl Connection {
         }
 
         Ok(())
+    }
+
+    fn select_egress_pkt_type(&self) -> Result<Type> {
+        // Select packet type depending on whether there is handshake data to
+        // send, whether there are packets to ACK, or whether there are streams
+        // that can be written or that needs to increase flow control credit.
+        let ty =
+            // On error or probe, send packet in the latest space available.
+            if self.error.is_some() || self.recovery.probes > 0 {
+                match self.tls_state.get_write_level() {
+                    crypto::Level::Initial     => Type::Initial,
+                    crypto::Level::ZeroRTT     => unreachable!(),
+                    crypto::Level::Handshake   => Type::Handshake,
+                    crypto::Level::Application => Type::Application,
+                }
+            } else if self.initial.ready() {
+                Type::Initial
+            } else if self.handshake.ready() {
+                Type::Handshake
+            } else if self.handshake_completed &&
+                      (self.application.ready() ||
+                       self.streams.values().any(|s| s.writable()) ||
+                       self.streams.values().any(|s| s.more_credit())) {
+                Type::Application
+            } else {
+                return Err(Error::Done);
+            };
+
+        Ok(ty)
     }
 
     fn drop_initial_state(&mut self) {
