@@ -1061,20 +1061,6 @@ impl Connection {
             is_crypto = true;
         }
 
-        // Pad the client's initial packet.
-        if !self.is_server && pkt_type == packet::Type::Initial {
-            let pkt_len = pn_len + payload_len + space.overhead();
-
-            let frame = frame::Frame::Padding {
-                len: cmp::min(CLIENT_INITIAL_MIN_LEN - pkt_len, left),
-            };
-
-            payload_len += frame.wire_len();
-            left -= frame.wire_len();
-
-            frames.push(frame);
-        }
-
         // Create a single STREAM frame for the first stream that is writable.
         if pkt_type == packet::Type::Application && !is_closing
             && self.max_tx_data > self.tx_data
@@ -1101,6 +1087,7 @@ impl Connection {
                 };
 
                 payload_len += frame.wire_len();
+                left -= frame.wire_len();
 
                 frames.push(frame);
 
@@ -1111,6 +1098,19 @@ impl Connection {
 
         if frames.is_empty() {
             return Err(Error::Done);
+        }
+
+        // Pad the client's initial packet.
+        if !self.is_server && pkt_type == packet::Type::Initial {
+            let pkt_len = pn_len + payload_len + space.overhead();
+
+            let frame = frame::Frame::Padding {
+                len: cmp::min(CLIENT_INITIAL_MIN_LEN - pkt_len, left),
+            };
+
+            payload_len += frame.wire_len();
+
+            frames.push(frame);
         }
 
         // Pad payload so that it's always at least 4 bytes.
