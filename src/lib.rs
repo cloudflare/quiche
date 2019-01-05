@@ -820,16 +820,8 @@ impl Connection {
 
         let read = b.off() + aead.alg().tag_len();
 
-        // Drop initial keys and recovery state on the server side after
-        // receiving an Handshake packet.
-        if self.is_server && self.initial.crypto_open.is_some() &&
-           hdr.ty == packet::Type::Handshake {
-            self.recovery.drop_unacked_data(&mut self.initial.flight);
-            self.initial.crypto_open = None;
-            self.initial.crypto_seal = None;
-            self.initial.clear();
-
-            trace!("{} dropped initial state", self.trace_id);
+        if self.is_server && hdr.ty == packet::Type::Handshake {
+            self.drop_initial_state();
         }
 
         Ok(read)
@@ -1187,16 +1179,8 @@ impl Connection {
 
         space.next_pkt_num += 1;
 
-        // Drop initial keys and recovery state on the client side after
-        // sending an Handshake packet.
-        if !self.is_server && self.initial.crypto_open.is_some() &&
-           hdr.ty == packet::Type::Handshake {
-            self.recovery.drop_unacked_data(&mut self.initial.flight);
-            self.initial.crypto_open = None;
-            self.initial.crypto_seal = None;
-            self.initial.clear();
-
-            trace!("{} dropped initial state", self.trace_id);
+        if !self.is_server && hdr.ty == packet::Type::Handshake {
+            self.drop_initial_state();
         }
 
         Ok(written)
@@ -1436,6 +1420,21 @@ impl Connection {
         }
 
         Ok(())
+    }
+
+    fn drop_initial_state(&mut self) {
+        if self.initial.crypto_open.is_none() {
+            return;
+        }
+
+        // Drop initial keys and recovery state on the server side after
+        // receiving an Handshake packet.
+        self.recovery.drop_unacked_data(&mut self.initial.flight);
+        self.initial.crypto_open = None;
+        self.initial.crypto_seal = None;
+        self.initial.clear();
+
+        trace!("{} dropped initial state", self.trace_id);
     }
 }
 
