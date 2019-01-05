@@ -47,6 +47,8 @@ pub const VERSION_DRAFT17: u32 = 0xff00_0011;
 
 const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 
+const PAYLOAD_MIN_LEN: usize = 4;
+
 // TODO: calculate draining timer as 3 * RTO
 const DRAINING_TIMEOUT: time::Duration = time::Duration::from_millis(200);
 
@@ -934,16 +936,20 @@ impl Connection {
 
         hdr.to_bytes(&mut b)?;
 
-        // Calculate payload length.
-        let mut length = pn_len + space.overhead();
-
-        if left < b.off() + length + 4 {
+        // Make sure we have enough space left for the header, the payload
+        // length, the packet number and the AEAD overhead.
+        if left < b.off() + 4 + pn_len + space.overhead() {
             return Err(Error::Done);
         }
 
-        left -= b.off() + length + 4;
+        left -= b.off() + 4 + pn_len + space.overhead();
 
         let mut frames: Vec<frame::Frame> = Vec::new();
+
+        let mut ack_eliciting = false;
+        let mut is_crypto = false;
+
+        let mut payload_len = 0;
 
         // Create ACK frame.
         if space.do_ack {
@@ -955,15 +961,12 @@ impl Connection {
             if frame.wire_len() <= left {
                 space.do_ack = false;
 
-                length += frame.wire_len();
+                payload_len += frame.wire_len();
                 left -= frame.wire_len();
 
                 frames.push(frame);
             }
         }
-
-        let mut ack_eliciting = false;
-        let mut is_crypto = false;
 
         // Create MAX_DATA frame, when the new limit is at least double the
         // amount of data that can be received before blocking.
@@ -978,7 +981,7 @@ impl Connection {
             if frame.wire_len() <= left {
                 self.max_rx_data = self.new_max_rx_data;
 
-                length += frame.wire_len();
+                payload_len += frame.wire_len();
                 left -= frame.wire_len();
 
                 frames.push(frame);
@@ -1000,7 +1003,7 @@ impl Connection {
                     break;
                 }
 
-                length += frame.wire_len();
+                payload_len += frame.wire_len();
                 left -= frame.wire_len();
 
                 frames.push(frame);
@@ -1013,16 +1016,7 @@ impl Connection {
         if self.recovery.probes > 0 && left >= 4 {
             let frame = frame::Frame::Ping;
 
-            length += frame.wire_len();
-            left -= frame.wire_len();
-
-            frames.push(frame);
-
-            let frame = frame::Frame::Padding {
-                len: 3,
-            };
-
-            length += frame.wire_len();
+            payload_len += frame.wire_len();
             left -= frame.wire_len();
 
             frames.push(frame);
@@ -1040,7 +1034,7 @@ impl Connection {
                 reason: Vec::new(),
             };
 
-            length += frame.wire_len();
+            payload_len += frame.wire_len();
             left -= frame.wire_len();
 
             frames.push(frame);
@@ -1057,7 +1051,7 @@ impl Connection {
                 reason: self.app_reason.clone(),
             };
 
-            length += frame.wire_len();
+            payload_len += frame.wire_len();
             left -= frame.wire_len();
 
             frames.push(frame);
@@ -1075,7 +1069,7 @@ impl Connection {
                 data: crypto_buf,
             };
 
-            length += frame.wire_len();
+            payload_len += frame.wire_len();
             left -= frame.wire_len();
 
             frames.push(frame);
@@ -1086,13 +1080,13 @@ impl Connection {
 
         // Pad the client's initial packet.
         if !self.is_server && space.pkt_type == packet::Type::Initial {
-            let len: usize = cmp::min(CLIENT_INITIAL_MIN_LEN - length, left);
+            let pkt_len = pn_len + payload_len + space.overhead();
 
             let frame = frame::Frame::Padding {
-                len,
+                len: cmp::min(CLIENT_INITIAL_MIN_LEN - pkt_len, left),
             };
 
-            length += frame.wire_len();
+            payload_len += frame.wire_len();
             left -= frame.wire_len();
 
             frames.push(frame);
@@ -1123,7 +1117,7 @@ impl Connection {
                     data: stream_buf,
                 };
 
-                length += frame.wire_len();
+                payload_len += frame.wire_len();
 
                 frames.push(frame);
 
@@ -1136,14 +1130,26 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        // Pad payload so that it's always at least 4 bytes.
+        if payload_len < PAYLOAD_MIN_LEN {
+            let frame = frame::Frame::Padding {
+                len: PAYLOAD_MIN_LEN - payload_len,
+            };
+
+            payload_len += frame.wire_len();
+
+            frames.push(frame);
+        }
+
+        payload_len += space.overhead();
+
         // Only long header packets have an explicit length field.
         if space.pkt_type != packet::Type::Application {
-            b.put_varint(length as u64)?;
+            let len = pn_len + payload_len;
+            b.put_varint(len as u64)?;
         }
 
         packet::encode_pkt_num(pn, &mut b)?;
-
-        let payload_len = length - pn_len;
 
         let payload_offset = b.off();
 
