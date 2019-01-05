@@ -1257,7 +1257,7 @@ impl Connection {
         Ok(buf.len())
     }
 
-    /// Creates an iterator of streams that have outstanding data to read.
+    /// Creates an iterator over streams that have outstanding data to read.
     pub fn readable(&mut self) -> Readable {
         stream::Readable::new(&self.streams)
     }
@@ -1338,8 +1338,8 @@ impl Connection {
     /// Returns [`Done`] if the connection had already been closed.
     ///
     /// Note that the connection will not be closed immediately. An application
-    /// should continue calling [`recv()`], [`send()`] and `timeout()` as normal,
-    /// until the [`is_closed()`].
+    /// should continue calling [`recv()`], [`send()`] and [`timeout()`] as
+    /// normal, until the [`is_closed()`] method returns `true`.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`recv()`]: struct.Connection.html#method.recv
@@ -1367,7 +1367,7 @@ impl Connection {
 
     /// Returns a string uniquely representing the connection.
     ///
-    /// This can be used for logging purposes to differentiate between multipl
+    /// This can be used for logging purposes to differentiate between multiple
     /// connections.
     pub fn trace_id(&self) -> &str {
         &self.trace_id
