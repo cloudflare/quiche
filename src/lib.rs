@@ -1160,16 +1160,8 @@ impl Connection {
             None        => return Err(Error::InvalidState),
         };
 
-        let (mut header, mut payload) = b.split_at(payload_offset)?;
-
-        // Encrypt + authenticate payload.
-        let ciphertext = payload.slice(payload_len)?;
-        aead.seal_with_u64_counter(pn, header.as_ref(), ciphertext)?;
-
-        // Encrypt header.
-        packet::encrypt_hdr(&mut header, pn_len, ciphertext, aead)?;
-
-        let written = payload_offset + payload_len;
+        let written = packet::encrypt_pkt(&mut b, pn, pn_len, payload_len,
+                                          payload_offset, aead)?;
 
         let sent_pkt = recovery::Sent::new(pn, frames, written, ack_eliciting,
                                            is_crypto, now);

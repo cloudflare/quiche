@@ -432,6 +432,20 @@ pub fn encrypt_hdr(b: &mut octets::Bytes, pn_len: usize, payload: &[u8],
     Ok(())
 }
 
+pub fn encrypt_pkt(b: &mut octets::Bytes, pn: u64, pn_len: usize,
+                   payload_len: usize, payload_offset: usize,
+                   aead: &crypto::Seal) -> Result<usize> {
+    let (mut header, mut payload) = b.split_at(payload_offset)?;
+
+    // Encrypt + authenticate payload.
+    let ciphertext = payload.slice(payload_len)?;
+    aead.seal_with_u64_counter(pn, header.as_ref(), ciphertext)?;
+
+    encrypt_hdr(&mut header, pn_len, ciphertext, aead)?;
+
+    Ok(payload_offset + payload_len)
+}
+
 pub fn encode_pkt_num(pn: u64, b: &mut octets::Bytes) -> Result<()> {
     let len = pkt_num_len(pn)?;
 
