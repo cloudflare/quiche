@@ -186,7 +186,7 @@ fn main() {
             let streams: Vec<u64> = conn.readable().collect();
             for s in streams {
                 info!("{} stream {} is readable", conn.trace_id(), s);
-                handle_stream(conn, s, &args);
+                handle_stream(conn, s, args.get_str("--root"));
             }
         }
 
@@ -227,7 +227,7 @@ fn main() {
     }
 }
 
-fn handle_stream(conn: &mut quiche::Connection, stream: u64, args: &docopt::ArgvMap) {
+fn handle_stream(conn: &mut quiche::Connection, stream: u64, root: &str) {
     let stream_data = match conn.stream_recv(stream) {
         Ok(v) => v,
 
@@ -245,7 +245,7 @@ fn handle_stream(conn: &mut quiche::Connection, stream: u64, args: &docopt::Argv
         let uri = String::from_utf8(uri.to_vec()).unwrap();
         let uri = String::from(uri.lines().next().unwrap());
         let uri = std::path::Path::new(&uri);
-        let mut path = std::path::PathBuf::from(args.get_str("--root"));
+        let mut path = std::path::PathBuf::from(root);
 
         for c in uri.components() {
             if let std::path::Component::Normal(v) = c {
