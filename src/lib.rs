@@ -870,8 +870,7 @@ impl Connection {
             if self.error.is_some() || self.recovery.probes > 0 {
                 match self.tls_state.get_write_level() {
                     crypto::Level::Initial     => &mut self.initial,
-                    // TODO: implement 0-RTT
-                    crypto::Level::ZeroRTT     => panic!("0-RTT not implemented"),
+                    crypto::Level::ZeroRTT     => unreachable!(),
                     crypto::Level::Handshake   => &mut self.handshake,
                     crypto::Level::Application => &mut self.application,
                 }

@@ -430,8 +430,7 @@ extern fn add_handshake_data(ssl: *mut SSL, level: crypto::Level,
 
     let space = match level {
         crypto::Level::Initial     => &mut conn.initial,
-        // TODO: implement 0-RTT
-        crypto::Level::ZeroRTT     => panic!("0-RTT not implemented"),
+        crypto::Level::ZeroRTT     => unreachable!(),
         crypto::Level::Handshake   => &mut conn.handshake,
         crypto::Level::Application => &mut conn.application,
     };
