@@ -44,6 +44,9 @@ const INITIAL_SALT: [u8; 20] = [
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Level {
     Initial = 0,
+    // Silence "variant is never constructed" warning because the value can
+    // be received from BoringSSL as part of the FFI callbacks.
+    #[allow(dead_code)]
     ZeroRTT = 1,
     Handshake = 2,
     Application = 3,
