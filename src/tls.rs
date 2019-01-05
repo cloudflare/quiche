@@ -350,7 +350,7 @@ extern fn set_encryption_secrets(ssl: *mut SSL, level: crypto::Level,
         None    => return 0,
     };
 
-    trace!("{} tls set encryption secret lvl={:?}", conn.trace_id(), level);
+    trace!("{} tls set encryption secret lvl={:?}", conn.trace_id, level);
 
     let space = match level {
         crypto::Level::Initial     => &mut conn.initial,
@@ -424,7 +424,7 @@ extern fn add_handshake_data(ssl: *mut SSL, level: crypto::Level,
         None    => return 0,
     };
 
-    trace!("{} tls write message lvl={:?} len={}", conn.trace_id(), level, len);
+    trace!("{} tls write message lvl={:?} len={}", conn.trace_id, level, len);
 
     let buf = unsafe { slice::from_raw_parts(data, len) };
 
@@ -457,7 +457,7 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> i32 {
     };
 
     trace!("{} tls send alert lvl={:?} alert={:x}",
-           conn.trace_id(), level, alert);
+           conn.trace_id, level, alert);
 
     let error: u16 = TLS_ALERT_ERROR + u16::from(alert);
     conn.error = Some(error);

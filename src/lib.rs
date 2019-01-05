@@ -484,7 +484,7 @@ impl Connection {
                 return Err(Error::Done);
             }
 
-            trace!("{} rx pkt {:?}", &self.trace_id, hdr);
+            trace!("{} rx pkt {:?}", self.trace_id, hdr);
 
             let versions = match hdr.versions {
                 Some(ref v) => v,
@@ -582,7 +582,7 @@ impl Connection {
 
         let pn = packet::decode_pkt_num(space.largest_rx_pkt_num, pn, pn_len)?;
 
-        trace!("{} rx pkt {:?} len={} pn={}", &self.trace_id, hdr,
+        trace!("{} rx pkt {:?} len={} pn={}", self.trace_id, hdr,
                payload_len, pn);
 
         let mut payload =
@@ -602,7 +602,7 @@ impl Connection {
         while payload.cap() > 0 {
             let frame = frame::Frame::from_bytes(&mut payload)?;
 
-            trace!("{} rx frm {:?}", &self.trace_id, frame);
+            trace!("{} rx frm {:?}", self.trace_id, frame);
 
             match frame {
                 frame::Frame::Padding { .. } => (),
@@ -1145,12 +1145,12 @@ impl Connection {
 
         let payload_offset = b.off();
 
-        trace!("{} tx pkt {:?} len={} pn={}", &self.trace_id, hdr,
+        trace!("{} tx pkt {:?} len={} pn={}", self.trace_id, hdr,
                payload_len, pn);
 
         // Encode frames into the output packet.
         for frame in &frames {
-            trace!("{} tx frm {:?}", &self.trace_id, frame);
+            trace!("{} tx frm {:?}", self.trace_id, frame);
 
             frame.to_bytes(&mut b)?;
         }
@@ -1286,7 +1286,7 @@ impl Connection {
         if self.draining {
             if self.draining_timer.is_some() &&
                self.draining_timer.unwrap() <= now {
-                trace!("{} draining timeout expired", &self.trace_id);
+                trace!("{} draining timeout expired", self.trace_id);
 
                 self.closed = true;
             }
@@ -1295,7 +1295,7 @@ impl Connection {
         }
 
         if self.idle_timer.is_some() && self.idle_timer.unwrap() <= now {
-            trace!("{} idle timeout expired", &self.trace_id);
+            trace!("{} idle timeout expired", self.trace_id);
 
             self.closed = true;
             return;
@@ -1303,7 +1303,7 @@ impl Connection {
 
         if self.recovery.loss_detection_timer().is_some() &&
            self.recovery.loss_detection_timer().unwrap() <= now {
-            trace!("{} loss detection timeout expired", &self.trace_id);
+            trace!("{} loss detection timeout expired", self.trace_id);
 
             self.recovery.on_loss_detection_timer(&mut self.initial.flight,
                                                   &mut self.handshake.flight,
