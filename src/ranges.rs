@@ -37,6 +37,7 @@ pub struct RangeSet {
 }
 
 impl RangeSet {
+    // TODO: use RangeInclusive
     pub fn insert(&mut self, item: Range<u64>) {
         let mut start = item.start;
         let mut end = item.end;
@@ -92,6 +93,7 @@ impl RangeSet {
     }
 
     pub fn push_item(&mut self, item: u64) {
+        #[allow(clippy::range_plus_one)]
         self.insert(item..item + 1);
     }
 
