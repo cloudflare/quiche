@@ -1103,6 +1103,7 @@ impl Connection {
             && self.max_tx_data > self.tx_data
             && left > frame::MAX_STREAM_OVERHEAD
         {
+            // TODO: round-robin selected stream instead of picking the first
             for (id, stream) in self.streams.iter_mut()
                                             .filter(|(_, s)| s.writable()) {
                 // Make sure we can fit the data in the packet.
