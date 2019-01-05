@@ -213,11 +213,12 @@ impl Recovery {
         let mut has_newly_acked = false;
 
         for pn in ranges.flatten().rev() {
-            trace!("{} packet newly acked {}", trace_id, pn);
-
             let newly_acked = self.on_packet_acked(pn, flight);
             has_newly_acked = cmp::max(has_newly_acked, newly_acked);
 
+            if newly_acked {
+                trace!("{} packet newly acked {}", trace_id, pn);
+            }
         }
 
         if !has_newly_acked {
