@@ -692,7 +692,7 @@ impl Connection {
 
                     self.rx_data += data.len();
 
-                    if self.tx_data > self.max_rx_data {
+                    if self.rx_data > self.max_rx_data {
                         return Err(Error::FlowControl);
                     }
 
