@@ -429,7 +429,10 @@ impl Connection {
     /// On success the number of bytes processed from the input buffer is
     /// returned, or one of [`Done`] or [`Pending`] error codes.
     ///
-    /// Note that this will process coalesced packets as necessary.
+    /// Coalesced packets will be processed as necessary.
+    ///
+    /// Note that the contents of the input buffer `buf` might be modified by
+    /// this function due to, for example, in-place decryption.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`Pending`]: enum.Error.html#variant.Pending
