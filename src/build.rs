@@ -2,11 +2,10 @@ use cmake;
 
 fn main() {
     let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
-        let bssl = cmake::Config::new("deps/boringssl")
-                         .build_target("bssl")
-                         .build();
-
-        bssl.display().to_string()
+        cmake::Config::new("deps/boringssl").build_target("bssl")
+                                            .build()
+                                            .display()
+                                            .to_string()
     });
 
     let crypto_dir = format!("{}/build/crypto", bssl_dir);
