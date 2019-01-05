@@ -105,7 +105,6 @@ static QUICHE_STREAM_METHOD: SSL_QUIC_METHOD = SSL_QUIC_METHOD {
 };
 
 const SSL_OP_NO_TICKET: u32 = 0x0000_4000;
-const SSL_OP_CIPHER_SERVER_PREFERENCE: u32 = 0x0040_0000;
 const SSL_OP_NO_TLSV1: u32 = 0x0400_0000;
 const SSL_OP_NO_TLSV1_1: u32 = 0x1000_0000;
 const SSL_OP_NO_TLSV1_2: u32 = 0x0800_0000;
@@ -118,9 +117,7 @@ impl Context {
         unsafe {
             let ctx = SSL_CTX_new(TLS_method());
 
-            // TODO: enable session tickets (debug problem with quant)
             SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET |
-                                     SSL_OP_CIPHER_SERVER_PREFERENCE |
                                      SSL_OP_NO_TLSV1 |
                                      SSL_OP_NO_TLSV1_1 |
                                      SSL_OP_NO_TLSV1_2);
