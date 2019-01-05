@@ -96,16 +96,6 @@ impl<'a> Bytes<'a> {
         }
     }
 
-    pub fn skip(&mut self, len: usize) -> Result<()> {
-        if self.cap() < len {
-            return Err(Error::BufferTooShort)
-        }
-
-        self.off += len;
-
-        Ok(())
-    }
-
     pub fn get_u8(&mut self) -> Result<u8> {
         get_u!(self, u8, 1)
     }
@@ -350,27 +340,6 @@ pub fn varint_len(v: u64) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn skip() {
-        let mut d: [u8; 15] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-
-        let mut b = Bytes::new(&mut d);
-        assert_eq!(b.cap(), 15);
-        assert_eq!(b.off(), 0);
-
-        assert!(b.skip(5).is_ok());
-        assert_eq!(b.cap(), 10);
-        assert_eq!(b.off(), 5);
-
-        assert!(b.skip(15).is_err());
-        assert_eq!(b.cap(), 10);
-        assert_eq!(b.off(), 5);
-
-        assert!(b.skip(10).is_ok());
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 15);
-    }
 
     #[test]
     fn get_u() {
@@ -626,7 +595,7 @@ mod tests {
         assert_eq!(b.off(), 0);
         assert_eq!(b.as_ref(), b"helloworld");
 
-        assert!(b.skip(5).is_ok());
+        assert!(b.get_bytes(5).is_ok());
         assert_eq!(b.cap(), 5);
         assert_eq!(b.off(), 5);
         assert_eq!(b.as_ref(), b"world");
@@ -704,7 +673,7 @@ mod tests {
 
         {
             let mut b = Bytes::new(&mut d);
-            b.skip(5).unwrap();
+            b.get_bytes(5).unwrap();
 
             let mut exp: [u8; 5] = *b"world";
             assert_eq!(b.slice(5), Ok(&mut exp[..]));
