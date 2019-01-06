@@ -1383,10 +1383,8 @@ impl Connection {
 
                     self.peer_transport_params = peer_params;
 
-                    trace!("{} connection established: cipher={:?} params={:?}",
-                           &self.trace_id,
-                           self.application.cipher(),
-                           self.peer_transport_params);
+                    trace!("{} connection established: cipher={:?}",
+                           &self.trace_id, self.application.cipher());
                 },
 
                 Err(tls::Error::TlsFail) => {
