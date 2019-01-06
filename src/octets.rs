@@ -385,13 +385,13 @@ impl<'a> AsMut<[u8]> for Octets<'a> {
 /// Returns how many bytes it would take to encode `v` as a variable-length
 /// integer.
 pub fn varint_len(v: u64) -> usize {
-    if v < 63 {
+    if v <= 63 {
         1
-    } else if v < 16383 {
+    } else if v <= 16383 {
         2
-    } else if v < 1_073_741_823 {
+    } else if v <= 1_073_741_823 {
         4
-    } else if v < 4_611_686_018_427_387_903 {
+    } else if v <= 4_611_686_018_427_387_903 {
         8
     } else {
         unreachable!()
