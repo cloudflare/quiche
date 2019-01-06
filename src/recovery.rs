@@ -88,7 +88,7 @@ pub struct InFlight {
 }
 
 impl InFlight {
-    pub fn retransmit_unacked_crypto(&mut self) -> usize {
+    pub fn retransmit_unacked_crypto(&mut self, trace_id: &str) -> usize {
         let mut unacked_bytes = 0;
 
         for p in &mut self.sent.values_mut().filter(|p| p.is_crypto) {
@@ -98,6 +98,8 @@ impl InFlight {
 
                     _ => false,
                 });
+
+            trace!("{} crypto packet lost {}", trace_id, p.pkt_num);
 
             unacked_bytes += p.size;
 
@@ -109,16 +111,21 @@ impl InFlight {
         unacked_bytes
     }
 
-    pub fn drop_unacked_data(&mut self) -> usize {
+    pub fn drop_unacked_data(&mut self) -> (usize, usize) {
         let mut unacked_bytes = 0;
+        let mut crypto_unacked_bytes = 0;
 
         for p in self.sent.values_mut().filter(|p| p.ack_eliciting) {
             unacked_bytes += p.size;
+
+            if p.is_crypto {
+                crypto_unacked_bytes += p.size;
+            }
         }
 
         self.sent.clear();
 
-        unacked_bytes
+        (crypto_unacked_bytes, unacked_bytes)
     }
 }
 
@@ -161,6 +168,8 @@ pub struct Recovery {
 
     bytes_in_flight: usize,
 
+    crypto_bytes_in_flight: usize,
+
     cwnd: usize,
 
     recovery_start_time: Option<Instant>,
@@ -185,6 +194,8 @@ impl Recovery {
         if ack_eliciting {
             if is_crypto {
                 self.time_of_last_sent_crypto_pkt = now;
+
+                self.crypto_bytes_in_flight += sent_bytes;
             }
 
             self.time_of_last_sent_ack_eliciting_pkt = now;
@@ -192,7 +203,7 @@ impl Recovery {
             // OnPacketSentCC
             self.bytes_in_flight += sent_bytes;
 
-            self.set_loss_detection_timer(flight);
+            self.set_loss_detection_timer();
         }
 
         trace!("{} {:?}", trace_id, self);
@@ -230,7 +241,7 @@ impl Recovery {
         self.crypto_count = 0;
         self.pto_count = 0;
 
-        self.set_loss_detection_timer(flight);
+        self.set_loss_detection_timer();
 
         trace!("{} {:?}", trace_id, self);
     }
@@ -240,15 +251,20 @@ impl Recovery {
                                    hs_flight: &mut InFlight,
                                    flight: &mut InFlight,
                                    now: Instant, trace_id: &str) {
-        // TODO: avoid looping over every packet
-        if in_flight.sent.values().any(|p| p.is_crypto) ||
-           hs_flight.sent.values().any(|p| p.is_crypto) ||
-           flight.sent.values().any(|p| p.is_crypto) {
+        if self.crypto_bytes_in_flight > 0 {
             self.crypto_count += 1;
 
-            self.bytes_in_flight -= in_flight.retransmit_unacked_crypto();
-            self.bytes_in_flight -= hs_flight.retransmit_unacked_crypto();
-            self.bytes_in_flight -= flight.retransmit_unacked_crypto();
+            let unacked_bytes = in_flight.retransmit_unacked_crypto(trace_id);
+            self.crypto_bytes_in_flight -= unacked_bytes;
+            self.bytes_in_flight -= unacked_bytes;
+
+            let unacked_bytes = hs_flight.retransmit_unacked_crypto(trace_id);
+            self.crypto_bytes_in_flight -= unacked_bytes;
+            self.bytes_in_flight -= unacked_bytes;
+
+            let unacked_bytes = flight.retransmit_unacked_crypto(trace_id);
+            self.crypto_bytes_in_flight -= unacked_bytes;
+            self.bytes_in_flight -= unacked_bytes;
         } else if self.loss_time.is_some() {
             self.detect_lost_packets(flight, now, trace_id);
         } else {
@@ -256,13 +272,16 @@ impl Recovery {
             self.probes = 2;
         }
 
-        self.set_loss_detection_timer(flight);
+        self.set_loss_detection_timer();
 
         trace!("{} {:?}", trace_id, self);
     }
 
     pub fn drop_unacked_data(&mut self, flight: &mut InFlight) {
-        self.bytes_in_flight -= flight.drop_unacked_data();
+        let (crypto_unacked_bytes, unacked_bytes) = flight.drop_unacked_data();
+
+        self.crypto_bytes_in_flight -= crypto_unacked_bytes;
+        self.bytes_in_flight -= unacked_bytes;
     }
 
     pub fn loss_detection_timer(&self) -> Option<Instant> {
@@ -306,7 +325,7 @@ impl Recovery {
         }
     }
 
-    fn set_loss_detection_timer(&mut self, flight: &InFlight) {
+    fn set_loss_detection_timer(&mut self) {
         let zero = Duration::new(0, 0);
 
         if self.bytes_in_flight == 0 {
@@ -314,8 +333,7 @@ impl Recovery {
             return;
         }
 
-        // TODO: avoid looping over every packet
-        if flight.sent.values().any(|p| p.is_crypto) {
+        if self.crypto_bytes_in_flight > 0 {
             // Crypto retransmission timer.
             let mut timeout = if self.smoothed_rtt == zero {
                 INITIAL_RTT * 2
@@ -406,6 +424,10 @@ impl Recovery {
                 // OnPacketAckedCC
                 self.bytes_in_flight -= p.size;
 
+                if p.is_crypto {
+                    self.crypto_bytes_in_flight -= p.size;
+                }
+
                 if self.in_recovery(p.time) {
                     return true;
                 }
@@ -440,6 +462,11 @@ impl Recovery {
             }
 
             self.bytes_in_flight -= p.size;
+
+            if p.is_crypto {
+                self.crypto_bytes_in_flight -= p.size;
+            }
+
             flight.lost.append(&mut p.frames);
 
             largest_lost_pkt_sent_time = Some(p.time);
@@ -497,6 +524,8 @@ impl Default for Recovery {
 
             bytes_in_flight: 0,
 
+            crypto_bytes_in_flight: 0,
+
             cwnd: INITIAL_WINDOW,
 
             recovery_start_time: None,
@@ -527,6 +556,7 @@ impl std::fmt::Debug for Recovery {
             },
         };
 
+        write!(f, "crypto={} ", self.crypto_bytes_in_flight)?;
         write!(f, "inflight={} ", self.bytes_in_flight)?;
         write!(f, "cwnd={} ", self.cwnd)?;
         write!(f, "latest_rtt={:?} ", self.latest_rtt)?;
