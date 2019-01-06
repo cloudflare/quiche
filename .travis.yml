@@ -17,7 +17,6 @@ addons:
 script:
  - cargo build --verbose --all --all-features
  - cargo test --verbose --all --all-features
- - cargo clippy --verbose --all --all-features -- -D warnings
  - cargo doc --no-deps
  - make -C examples
 
