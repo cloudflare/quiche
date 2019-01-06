@@ -105,12 +105,6 @@ impl Algorithm {
     pub fn nonce_len(self) -> usize {
         self.get_ring_aead().nonce_len()
     }
-
-    pub fn pn_nonce_len(self) -> usize {
-        // For pkt num decryption a 4 bytes explicit counter is used along
-        // with the normal nonce for both ChaCha20 and AES-CTR.
-        self.get_ring_aead().nonce_len() + 4
-    }
 }
 
 pub struct Open {

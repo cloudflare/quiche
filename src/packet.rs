@@ -44,6 +44,9 @@ const PKT_NUM_MASK: u8 = 0x03;
 
 const MAX_CID_LEN: u8 = 18;
 
+const MAX_PKT_NUM_LEN: usize = 4;
+const SAMPLE_LEN: usize = 16;
+
 /// QUIC packet type.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Type {
@@ -333,9 +336,10 @@ pub fn decrypt_hdr(b: &mut octets::Bytes, aead: &crypto::Open)
         first_buf.as_ref()[0]
     };
 
-    let mut pn_and_sample = b.peek_bytes(4 + aead.alg().pn_nonce_len())?;
+    let mut pn_and_sample = b.peek_bytes(MAX_PKT_NUM_LEN + SAMPLE_LEN)?;
 
-    let (mut ciphertext, sample) = pn_and_sample.split_at(4).unwrap();
+    let (mut ciphertext, sample) = pn_and_sample.split_at(MAX_PKT_NUM_LEN)
+                                                .unwrap();
 
     let ciphertext = ciphertext.as_mut();
 
@@ -368,6 +372,7 @@ pub fn decrypt_hdr(b: &mut octets::Bytes, aead: &crypto::Open)
         _ => return Err(Error::InvalidPacket),
     };
 
+    // Write decrypted first byte back into the input buffer.
     let (mut first_buf, _) = b.split_at(1)?;
     first_buf.as_mut()[0] = first;
 
