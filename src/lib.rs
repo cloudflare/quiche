@@ -996,7 +996,7 @@ impl Connection {
         }
 
         // Create PING and PADDING for TLP.
-        if self.recovery.probes > 0 && left >= 4 {
+        if self.recovery.probes > 0 && left >= 1 {
             let frame = frame::Frame::Ping;
 
             payload_len += frame.wire_len();
