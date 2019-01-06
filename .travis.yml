@@ -14,9 +14,6 @@ addons:
      - libev-dev
      - uthash-dev
 
-before_script:
- - rustup component add clippy
-
 script:
  - cargo build --verbose --all --all-features
  - cargo test --verbose --all --all-features
