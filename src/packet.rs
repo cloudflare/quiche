@@ -269,7 +269,7 @@ impl Header {
     /// Returns true if the packet has a long header.
     ///
     /// The `b` parameter represents the first byte of the QUIC header.
-    pub fn is_long(b: u8) -> bool {
+    fn is_long(b: u8) -> bool {
         b & FORM_BIT != 0
     }
 }
