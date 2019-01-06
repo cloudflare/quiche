@@ -450,6 +450,7 @@ impl Connection {
         Ok(done)
     }
 
+    /// Processes a single QUIC packet received from the peer.
     fn recv_single(&mut self, buf: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
 
@@ -825,6 +826,8 @@ impl Connection {
 
         let read = b.off() + aead.alg().tag_len();
 
+        // On the server, drop initial state after receiving and successfully
+        // processing an Handshake packet.
         if self.is_server && hdr.ty == packet::Type::Handshake {
             self.drop_initial_state();
         }
@@ -1162,6 +1165,7 @@ impl Connection {
 
         space.next_pkt_num += 1;
 
+        // On the client, drop initial state after sending an Handshake packet.
         if !self.is_server && hdr.ty == packet::Type::Handshake {
             self.drop_initial_state();
         }
@@ -1361,6 +1365,13 @@ impl Connection {
         self.closed
     }
 
+    /// Continues the handshake.
+    ///
+    /// If the connection is already established, it does nothing.
+    ///
+    /// On success it returns `Ok` or the [`Pending`] error code.
+    ///
+    /// [`Pending`]: enum.Error.html#variant.Pending
     fn do_handshake(&mut self) -> Result<()> {
         if !self.handshake_completed {
             match self.tls_state.do_handshake() {
@@ -1405,10 +1416,11 @@ impl Connection {
         Ok(())
     }
 
+    /// Selects the type for the outgoing packet depending on whether there is
+    /// handshake data to send, whether there are packets to ACK, or whether
+    /// there are streams that can be written or that needs to increase flow
+    /// control credit.
     fn select_egress_pkt_type(&self) -> Result<Type> {
-        // Select packet type depending on whether there is handshake data to
-        // send, whether there are packets to ACK, or whether there are streams
-        // that can be written or that needs to increase flow control credit.
         let ty =
             // On error or probe, send packet in the latest space available.
             if self.error.is_some() || self.recovery.probes > 0 {
@@ -1434,13 +1446,12 @@ impl Connection {
         Ok(ty)
     }
 
+    /// Drops the initial keys and recovery state.
     fn drop_initial_state(&mut self) {
         if self.initial.crypto_open.is_none() {
             return;
         }
 
-        // Drop initial keys and recovery state on the server side after
-        // receiving an Handshake packet.
         self.recovery.drop_unacked_data(&mut self.initial.flight);
         self.initial.crypto_open = None;
         self.initial.crypto_seal = None;
