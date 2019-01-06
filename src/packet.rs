@@ -91,11 +91,11 @@ impl Header {
     /// The `dcil` parameter is the length of the destionation connection ID,
     /// required to parse short header packets.
     pub fn from_slice(buf: &mut [u8], dcil: usize) -> Result<Header> {
-        let mut b = octets::Bytes::new(buf);
+        let mut b = octets::Octets::with_slice(buf);
         Header::from_bytes(&mut b, dcil)
     }
 
-    pub(crate) fn from_bytes(b: &mut octets::Bytes, dcil: usize) -> Result<Header> {
+    pub(crate) fn from_bytes(b: &mut octets::Octets, dcil: usize) -> Result<Header> {
         let first = b.get_u8()?;
 
         if !Header::is_long(first) {
@@ -195,7 +195,7 @@ impl Header {
         })
     }
 
-    pub(crate) fn to_bytes(&self, out: &mut octets::Bytes) -> Result<()> {
+    pub(crate) fn to_bytes(&self, out: &mut octets::Octets) -> Result<()> {
         let mut first = 0;
 
         // Encode pkt num length.
@@ -329,7 +329,7 @@ pub fn pkt_num_bits(len: usize) -> Result<usize> {
     Ok(bits)
 }
 
-pub fn decrypt_hdr(b: &mut octets::Bytes, aead: &crypto::Open)
+pub fn decrypt_hdr(b: &mut octets::Octets, aead: &crypto::Open)
                                                     -> Result<(u64, usize)> {
     let mut first = {
         let (first_buf, _) = b.split_at(1)?;
@@ -399,9 +399,9 @@ pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize)
     Ok(candidate_pn)
 }
 
-pub fn decrypt_pkt<'a>(b: &'a mut octets::Bytes, pn: u64, pn_len: usize,
+pub fn decrypt_pkt<'a>(b: &'a mut octets::Octets, pn: u64, pn_len: usize,
                        payload_len: usize, aead: &crypto::Open)
-                                                -> Result<octets::Bytes<'a>> {
+                                                -> Result<octets::Octets<'a>> {
     let payload_offset = b.off();
 
     let (header, mut payload) = b.split_at(payload_offset)?;
@@ -414,7 +414,7 @@ pub fn decrypt_pkt<'a>(b: &'a mut octets::Bytes, pn: u64, pn_len: usize,
     b.get_bytes(payload_len)
 }
 
-pub fn encrypt_hdr(b: &mut octets::Bytes, pn_len: usize, payload: &[u8],
+pub fn encrypt_hdr(b: &mut octets::Octets, pn_len: usize, payload: &[u8],
                    aead: &crypto::Seal) -> Result<()> {
     let sample = &payload[4 - pn_len..16 + (4 - pn_len)];
 
@@ -438,7 +438,7 @@ pub fn encrypt_hdr(b: &mut octets::Bytes, pn_len: usize, payload: &[u8],
     Ok(())
 }
 
-pub fn encrypt_pkt(b: &mut octets::Bytes, pn: u64, pn_len: usize,
+pub fn encrypt_pkt(b: &mut octets::Octets, pn: u64, pn_len: usize,
                    payload_len: usize, payload_offset: usize,
                    aead: &crypto::Seal) -> Result<usize> {
     let (mut header, mut payload) = b.split_at(payload_offset)?;
@@ -452,7 +452,7 @@ pub fn encrypt_pkt(b: &mut octets::Bytes, pn: u64, pn_len: usize,
     Ok(payload_offset + payload_len)
 }
 
-pub fn encode_pkt_num(pn: u64, b: &mut octets::Bytes) -> Result<()> {
+pub fn encode_pkt_num(pn: u64, b: &mut octets::Octets) -> Result<()> {
     let len = pkt_num_len(pn)?;
 
     match len {
@@ -471,7 +471,7 @@ pub fn encode_pkt_num(pn: u64, b: &mut octets::Bytes) -> Result<()> {
 }
 
 pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
-    let mut b = octets::Bytes::new(out);
+    let mut b = octets::Octets::with_slice(out);
 
     let first = rand::rand_u8() | FORM_BIT;
 
@@ -632,10 +632,10 @@ mod tests {
 
         let mut d: [u8; 50] = [0; 50];
 
-        let mut b = octets::Bytes::new(&mut d);
+        let mut b = octets::Octets::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
 
-        let mut b = octets::Bytes::new(&mut d);
+        let mut b = octets::Octets::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
     }
 
@@ -653,10 +653,10 @@ mod tests {
 
         let mut d: [u8; 50] = [0; 50];
 
-        let mut b = octets::Bytes::new(&mut d);
+        let mut b = octets::Octets::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
 
-        let mut b = octets::Bytes::new(&mut d);
+        let mut b = octets::Octets::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
     }
 
@@ -770,7 +770,7 @@ mod tests {
                          expected_frames: &[u8],
                          expected_pn: u64,
                          expected_pn_len: usize) {
-        let mut b = octets::Bytes::new(pkt);
+        let mut b = octets::Octets::with_slice(pkt);
 
         let hdr = Header::from_bytes(&mut b, 0).unwrap();
         assert_eq!(hdr.ty, Type::Initial);

@@ -107,7 +107,7 @@ pub enum Frame {
 }
 
 impl Frame {
-    pub fn from_bytes(b: &mut octets::Bytes) -> Result<Frame> {
+    pub fn from_bytes(b: &mut octets::Octets) -> Result<Frame> {
         let frame_type = b.get_varint()?;
 
         // println!("GOT FRAME {:x}", frame_type);
@@ -193,7 +193,7 @@ impl Frame {
         Ok(frame)
     }
 
-    pub fn to_bytes(&self, b: &mut octets::Bytes) -> Result<usize> {
+    pub fn to_bytes(&self, b: &mut octets::Octets) -> Result<usize> {
         let before = b.cap();
 
         match self {
@@ -531,7 +531,7 @@ impl std::fmt::Debug for Frame {
     }
 }
 
-fn parse_ack_frame(_ty: u64, b: &mut octets::Bytes) -> Result<Frame> {
+fn parse_ack_frame(_ty: u64, b: &mut octets::Octets) -> Result<Frame> {
     let largest_ack = b.get_varint()?;
     let ack_delay = b.get_varint()?;
     let block_count = b.get_varint()?;
@@ -571,7 +571,7 @@ fn parse_ack_frame(_ty: u64, b: &mut octets::Bytes) -> Result<Frame> {
     Ok(Frame::ACK { ack_delay, ranges })
 }
 
-fn parse_stream_frame(ty: u64, b: &mut octets::Bytes) -> Result<Frame> {
+fn parse_stream_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
     let first = ty as u8;
 
     let stream_id = b.get_varint()?;
@@ -610,14 +610,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 128);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -629,7 +629,7 @@ mod tests {
         let frame = Frame::Ping;
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
@@ -637,7 +637,7 @@ mod tests {
         assert_eq!(&d[..wire_len], [0x01 as u8]);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -658,14 +658,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 17);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -680,14 +680,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 7);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -703,14 +703,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 18);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -724,14 +724,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 17);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -748,14 +748,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 19);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -769,14 +769,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 5);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -791,14 +791,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 7);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -812,14 +812,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 5);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -833,14 +833,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 5);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -856,14 +856,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 37);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -877,14 +877,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 5);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -900,14 +900,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 20);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }
@@ -923,14 +923,14 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
         assert_eq!(wire_len, 20);
 
         {
-            let mut b = octets::Bytes::new(&mut d);
+            let mut b = octets::Octets::with_slice(&mut d);
             assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
         }
     }

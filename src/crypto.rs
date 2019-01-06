@@ -142,7 +142,7 @@ impl Open {
         let mut counter_nonce: [u8; 12] = [0xba; 12];
 
         {
-            let mut b = octets::Bytes::new(&mut counter_nonce);
+            let mut b = octets::Octets::with_slice(&mut counter_nonce);
 
             b.put_u32(0).unwrap();
             b.put_u64(counter).unwrap();
@@ -204,7 +204,7 @@ impl Seal {
         let mut counter_nonce: [u8; 12] = [0xba; 12];
 
         {
-            let mut b = octets::Bytes::new(&mut counter_nonce);
+            let mut b = octets::Octets::with_slice(&mut counter_nonce);
 
             b.put_u32(0).unwrap();
             b.put_u64(counter).unwrap();
@@ -337,7 +337,7 @@ fn hkdf_expand_label(prk: &hmac::SigningKey, label: &[u8],  out: &mut [u8])
     let mut info: [u8; 256] = unsafe { std::mem::uninitialized() };
 
     let info_len = {
-        let mut b = octets::Bytes::new(&mut info);
+        let mut b = octets::Octets::with_slice(&mut info);
 
         if b.put_u16(out.len() as u16).is_err() ||
            b.put_u8((LABEL_PREFIX.len() + label.len()) as u8).is_err() ||

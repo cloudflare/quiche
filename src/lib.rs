@@ -469,7 +469,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let mut b = octets::Bytes::new(buf);
+        let mut b = octets::Octets::with_slice(buf);
 
         let hdr = Header::from_bytes(&mut b, self.scid.len())?;
 
@@ -887,7 +887,7 @@ impl Connection {
         // Cap output buffer to respect peer's max_packet_size limit.
         let avail = cmp::min(max_pkt_len, out.len());
 
-        let mut b = octets::Bytes::new(&mut out[..avail]);
+        let mut b = octets::Octets::with_slice(&mut out[..avail]);
 
         let pkt_type = self.select_egress_pkt_type()?;
 
@@ -1474,7 +1474,7 @@ struct TransportParams {
 impl TransportParams {
     fn decode(buf: &mut [u8], _version: u32, is_server: bool)
                                                 -> Result<TransportParams> {
-        let mut b = octets::Bytes::new(buf);
+        let mut b = octets::Octets::with_slice(buf);
 
         // TODO: check version
         let _tp_version = b.get_u32()?;
@@ -1579,7 +1579,7 @@ impl TransportParams {
         let mut params: [u8; 128] = [0; 128];
 
         let params_len = {
-            let mut b = octets::Bytes::new(&mut params);
+            let mut b = octets::Octets::with_slice(&mut params);
 
             if is_server {
                 // TODO: encode original_connection_id
@@ -1662,7 +1662,7 @@ impl TransportParams {
         };
 
         let out_len = {
-            let mut b = octets::Bytes::new(out);
+            let mut b = octets::Octets::with_slice(out);
 
             b.put_u32(version)?;
 
