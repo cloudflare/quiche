@@ -812,32 +812,6 @@ impl Connection {
             }
         }
 
-        // Process lost frames.
-        for lost in space.flight.lost.drain(..) {
-            match lost {
-                frame::Frame::Crypto { data } => {
-                    space.crypto_stream.send_push_front(data)?;
-                },
-
-                frame::Frame::Stream { stream_id, data } => {
-                    let stream = match self.streams.get_mut(&stream_id) {
-                        Some(v) => v,
-                        None => continue,
-                    };
-
-                    self.tx_data -= data.len();
-
-                    stream.send_push_front(data)?;
-                },
-
-                frame::Frame::ACK { .. } => {
-                    space.do_ack = true;
-                },
-
-                _ => (),
-            }
-        }
-
         space.recv_pkt_num.insert(pn);
 
         space.recv_pkt_need_ack.push_item(pn);
@@ -900,6 +874,32 @@ impl Connection {
 
             _ => unreachable!(),
         };
+
+        // Process lost frames.
+        for lost in space.flight.lost.drain(..) {
+            match lost {
+                frame::Frame::Crypto { data } => {
+                    space.crypto_stream.send_push_front(data)?;
+                },
+
+                frame::Frame::Stream { stream_id, data } => {
+                    let stream = match self.streams.get_mut(&stream_id) {
+                        Some(v) => v,
+                        None => continue,
+                    };
+
+                    self.tx_data -= data.len();
+
+                    stream.send_push_front(data)?;
+                },
+
+                frame::Frame::ACK { .. } => {
+                    space.do_ack = true;
+                },
+
+                _ => (),
+            }
+        }
 
         // Calculate available space in the packet based on congestion window.
         let mut left = cmp::min(self.recovery.cwnd(), b.cap());
