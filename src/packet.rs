@@ -318,17 +318,6 @@ pub fn pkt_num_len(pn: u64) -> Result<usize> {
     Ok(len)
 }
 
-pub fn pkt_num_bits(len: usize) -> Result<usize> {
-    let bits = match len {
-        1 => 7,
-        2 => 14,
-        4 => 30,
-        _ => return Err(Error::InvalidPacket),
-    };
-
-    Ok(bits)
-}
-
 pub fn decrypt_hdr(b: &mut octets::Octets, aead: &crypto::Open)
                                                     -> Result<(u64, usize)> {
     let mut first = {
@@ -379,9 +368,8 @@ pub fn decrypt_hdr(b: &mut octets::Octets, aead: &crypto::Open)
     Ok((pn, pn_len))
 }
 
-pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize)
-                                                            -> Result<u64> {
-    let pn_nbits     = pkt_num_bits(pn_len)?;
+pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize) -> u64 {
+    let pn_nbits     = pn_len * 8;
     let expected_pn  = largest_pn + 1;
     let pn_win       = 1 << pn_nbits;
     let pn_hwin      = pn_win / 2;
@@ -389,14 +377,14 @@ pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize)
     let candidate_pn = (expected_pn & !pn_mask) | truncated_pn;
 
     if candidate_pn + pn_hwin <= expected_pn {
-         return Ok(candidate_pn + pn_win);
+         return candidate_pn + pn_win;
     }
 
     if candidate_pn > expected_pn + pn_hwin && candidate_pn > pn_win {
-        return Ok(candidate_pn - pn_win);
+        return candidate_pn - pn_win;
     }
 
-    Ok(candidate_pn)
+    candidate_pn
 }
 
 pub fn decrypt_pkt<'a>(b: &'a mut octets::Octets, pn: u64, pn_len: usize,
@@ -661,6 +649,12 @@ mod tests {
     }
 
     #[test]
+    fn pkt_num_decode() {
+        let pn = decode_pkt_num(0xa82f30ea, 0x9b32, 2);
+        assert_eq!(pn, 0xa82f9b32);
+    }
+
+    #[test]
     fn pkt_num_window() {
         let mut win = PktNumWindow::default();
         assert_eq!(win.lower, 0);
@@ -781,7 +775,7 @@ mod tests {
             crypto::derive_initial_key_material(dcid, is_server).unwrap();
 
         let (pn, pn_len) = decrypt_hdr(&mut b, &aead).unwrap();
-        let pn = decode_pkt_num(0, pn, pn_len).unwrap();
+        let pn = decode_pkt_num(0, pn, pn_len);
 
         assert_eq!(pn, expected_pn);
         assert_eq!(pn_len, expected_pn_len);

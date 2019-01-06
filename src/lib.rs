@@ -580,7 +580,7 @@ impl Connection {
 
         let (pn, pn_len) = packet::decrypt_hdr(&mut b, &aead)?;
 
-        let pn = packet::decode_pkt_num(space.largest_rx_pkt_num, pn, pn_len)?;
+        let pn = packet::decode_pkt_num(space.largest_rx_pkt_num, pn, pn_len);
 
         trace!("{} rx pkt {:?} len={} pn={}", self.trace_id, hdr,
                payload_len, pn);
