@@ -213,15 +213,15 @@ impl<'a> Octets<'a> {
             return Err(Error::BufferTooShort);
         }
 
-        if v < 63 {
+        if v <= 63 {
             self.put_u8(v as u8)?;
-        } else if v < 16383 {
+        } else if v <= 16383 {
             let buf = self.put_u16(v as u16)?;
             buf[0] |= 0x40;
-        } else if v < 1_073_741_823 {
+        } else if v <= 1_073_741_823 {
             let buf = self.put_u32(v as u32)?;
             buf[0] |= 0x80;
-        } else if v < 4_611_686_018_427_387_903 {
+        } else if v <= 4_611_686_018_427_387_903 {
             let buf = self.put_u64(v)?;
             buf[0] |= 0xc0;
         } else {
