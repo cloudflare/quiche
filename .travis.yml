@@ -15,8 +15,8 @@ addons:
      - uthash-dev
 
 script:
- - cargo build --verbose --all --examples
- - cargo test --verbose --all
+ - cargo build --verbose --all --all-features --all-targets
+ - cargo test --verbose --all --all-features --all-targets
  - cargo doc --no-deps
  - make -C examples
 
