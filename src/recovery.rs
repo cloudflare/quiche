@@ -87,6 +87,16 @@ pub struct InFlight {
     pub acked: Vec<frame::Frame>,
 }
 
+impl Default for InFlight {
+    fn default() -> InFlight {
+        InFlight {
+            sent: BTreeMap::new(),
+            lost: Vec::new(),
+            acked: Vec::new(),
+        }
+    }
+}
+
 impl InFlight {
     pub fn retransmit_unacked_crypto(&mut self, trace_id: &str) -> usize {
         let mut unacked_bytes = 0;
@@ -129,16 +139,6 @@ impl InFlight {
     }
 }
 
-impl Default for InFlight {
-    fn default() -> InFlight {
-        InFlight {
-            sent: BTreeMap::new(),
-            lost: Vec::new(),
-            acked: Vec::new(),
-        }
-    }
-}
-
 pub struct Recovery {
     loss_detection_timer: Option<Instant>,
 
@@ -177,6 +177,52 @@ pub struct Recovery {
     ssthresh: usize,
 
     pub probes: usize,
+}
+
+impl Default for Recovery {
+    fn default() -> Recovery {
+        let now = Instant::now();
+
+        Recovery {
+            loss_detection_timer: None,
+
+            crypto_count: 0,
+
+            pto_count: 0,
+
+            time_of_last_sent_crypto_pkt: now,
+
+            time_of_last_sent_ack_eliciting_pkt: now,
+
+            largest_sent_pkt: 0,
+
+            largest_acked_pkt: 0,
+
+            latest_rtt: Duration::new(0, 0),
+
+            smoothed_rtt: Duration::new(0, 0),
+
+            min_rtt: Duration::from_secs(std::u64::MAX),
+
+            rttvar: Duration::new(0, 0),
+
+            max_ack_delay: Duration::from_millis(25),
+
+            loss_time: None,
+
+            bytes_in_flight: 0,
+
+            crypto_bytes_in_flight: 0,
+
+            cwnd: INITIAL_WINDOW,
+
+            recovery_start_time: None,
+
+            ssthresh: std::usize::MAX,
+
+            probes: 0,
+        }
+    }
 }
 
 impl Recovery {
@@ -486,52 +532,6 @@ impl Recovery {
             if self.pto_count > PERSISTENT_CONGESTION_THRESHOLD {
                 self.cwnd = MINIMUM_WINDOW;
             }
-        }
-    }
-}
-
-impl Default for Recovery {
-    fn default() -> Recovery {
-        let now = Instant::now();
-
-        Recovery {
-            loss_detection_timer: None,
-
-            crypto_count: 0,
-
-            pto_count: 0,
-
-            time_of_last_sent_crypto_pkt: now,
-
-            time_of_last_sent_ack_eliciting_pkt: now,
-
-            largest_sent_pkt: 0,
-
-            largest_acked_pkt: 0,
-
-            latest_rtt: Duration::new(0, 0),
-
-            smoothed_rtt: Duration::new(0, 0),
-
-            min_rtt: Duration::from_secs(std::u64::MAX),
-
-            rttvar: Duration::new(0, 0),
-
-            max_ack_delay: Duration::from_millis(25),
-
-            loss_time: None,
-
-            bytes_in_flight: 0,
-
-            crypto_bytes_in_flight: 0,
-
-            cwnd: INITIAL_WINDOW,
-
-            recovery_start_time: None,
-
-            ssthresh: std::usize::MAX,
-
-            probes: 0,
         }
     }
 }

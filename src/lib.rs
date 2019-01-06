@@ -1480,6 +1480,27 @@ struct TransportParams {
     // pub preferred_address: ...
 }
 
+impl Default for TransportParams {
+    fn default() -> TransportParams {
+        TransportParams {
+            original_connection_id: None,
+            idle_timeout: 0,
+            stateless_reset_token: [0; 16],
+            stateless_reset_token_present: false,
+            max_packet_size: 65527,
+            initial_max_data: 0,
+            initial_max_stream_data_bidi_local: 0,
+            initial_max_stream_data_bidi_remote: 0,
+            initial_max_stream_data_uni: 0,
+            initial_max_streams_bidi: 0,
+            initial_max_streams_uni: 0,
+            ack_delay_exponent: 3,
+            max_ack_delay: 25,
+            disable_migration: false,
+        }
+    }
+}
+
 impl TransportParams {
     fn decode(buf: &mut [u8], _version: u32, is_server: bool)
                                                 -> Result<TransportParams> {
@@ -1687,27 +1708,6 @@ impl TransportParams {
         };
 
         Ok(&mut out[..out_len])
-    }
-}
-
-impl Default for TransportParams {
-    fn default() -> TransportParams {
-        TransportParams {
-            original_connection_id: None,
-            idle_timeout: 0,
-            stateless_reset_token: [0; 16],
-            stateless_reset_token_present: false,
-            max_packet_size: 65527,
-            initial_max_data: 0,
-            initial_max_stream_data_bidi_local: 0,
-            initial_max_stream_data_bidi_remote: 0,
-            initial_max_stream_data_uni: 0,
-            initial_max_streams_bidi: 0,
-            initial_max_streams_uni: 0,
-            ack_delay_exponent: 3,
-            max_ack_delay: 25,
-            disable_migration: false,
-        }
     }
 }
 
