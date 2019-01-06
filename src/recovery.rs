@@ -383,8 +383,7 @@ impl Recovery {
 
         self.loss_time = None;
 
-        // TODO: avoid looping over every packet
-        for unacked in flight.sent.values().filter(|p| p.pkt_num <= largest_acked) {
+        for (_, unacked) in flight.sent.range(..=largest_acked) {
             if unacked.time <= lost_send_time || unacked.pkt_num <= lost_pkt_num {
                 if unacked.ack_eliciting {
                     trace!("{} packet lost {}", trace_id, unacked.pkt_num);
