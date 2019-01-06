@@ -1238,8 +1238,10 @@ impl Connection {
 
     /// Returns the amount of time until the next timeout event.
     ///
-    /// Once the given duration has elapsed, the `on_timeout()` method should
+    /// Once the given duration has elapsed, the [`on_timeout()`] method should
     /// be called. A timeout of `None` means that the timer should be disarmed.
+    ///
+    /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
     pub fn timeout(&self) -> Option<std::time::Duration> {
         if self.closed {
             return None;
