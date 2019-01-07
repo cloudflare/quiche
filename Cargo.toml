@@ -20,5 +20,8 @@ url = "1"
 docopt = "1"
 env_logger = "0"
 
+[profile.release]
+debug = true
+
 [lib]
 crate-type = ["lib", "staticlib"]
