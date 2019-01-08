@@ -32,6 +32,8 @@ use std::slice;
 use std::io::prelude::*;
 
 use libc::c_char;
+use libc::c_int;
+use libc::c_uint;
 use libc::c_void;
 
 use lazy_static;
@@ -80,19 +82,19 @@ struct X509_VERIFY_PARAM(c_void);
 struct SSL_QUIC_METHOD {
     set_encryption_secrets:
         extern fn(ssl: *mut SSL, level: crypto::Level, read_secret: *const u8,
-                  write_secret: *const u8, secret_len: usize) -> i32,
+                  write_secret: *const u8, secret_len: usize) -> c_int,
 
     add_handshake_data:
         extern fn(ssl: *mut SSL, level: crypto::Level, data: *const u8,
-                  len: usize) -> i32,
+                  len: usize) -> c_int,
 
-    flush_flight: extern fn(ssl: *mut SSL) -> i32,
+    flush_flight: extern fn(ssl: *mut SSL) -> c_int,
 
-    send_alert: extern fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> i32,
+    send_alert: extern fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int,
 }
 
 lazy_static::lazy_static! {
-    static ref QUICHE_EX_DATA_INDEX: i32 = unsafe {
+    static ref QUICHE_EX_DATA_INDEX: c_int = unsafe {
         SSL_get_ex_new_index(0, ptr::null(), ptr::null(), ptr::null(), ptr::null())
     };
 }
@@ -183,7 +185,7 @@ impl Drop for Context {
 pub struct Handshake(*mut SSL);
 
 impl Handshake {
-    pub fn get_error(&self, ret_code: i32) -> i32 {
+    pub fn get_error(&self, ret_code: c_int) -> c_int {
         unsafe {
             SSL_get_error(self.as_ptr(), ret_code)
         }
@@ -221,7 +223,7 @@ impl Handshake {
         }
     }
 
-    pub fn set_ex_data<T>(&self, idx: i32, data: &T) -> Result<()> {
+    pub fn set_ex_data<T>(&self, idx: c_int, data: &T) -> Result<()> {
         map_result(unsafe {
             let ptr = data as *const T as *const c_void;
             SSL_set_ex_data(self.as_ptr(), idx, ptr)
@@ -315,7 +317,7 @@ impl Drop for Handshake {
     }
 }
 
-fn get_ex_data_from_ptr<'a, T>(ptr: *mut SSL, idx: i32) -> Option<&'a mut T> {
+fn get_ex_data_from_ptr<'a, T>(ptr: *mut SSL, idx: c_int) -> Option<&'a mut T> {
     unsafe {
         let data = SSL_get_ex_data(ptr, idx) as *mut T;
         data.as_mut()
@@ -344,7 +346,7 @@ fn get_pending_cipher_from_ptr(ptr: *mut SSL) -> Result<crypto::Algorithm> {
 extern fn set_encryption_secrets(ssl: *mut SSL, level: crypto::Level,
                                  read_secret: *const u8,
                                  write_secret: *const u8,
-                                 secret_len: usize) -> i32 {
+                                 secret_len: usize) -> c_int {
     let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
         Some(v) => v,
         None    => return 0,
@@ -418,7 +420,7 @@ extern fn set_encryption_secrets(ssl: *mut SSL, level: crypto::Level,
 }
 
 extern fn add_handshake_data(ssl: *mut SSL, level: crypto::Level,
-                             data: *const u8, len: usize) -> i32 {
+                             data: *const u8, len: usize) -> c_int {
     let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
         Some(v) => v,
         None    => return 0,
@@ -442,14 +444,14 @@ extern fn add_handshake_data(ssl: *mut SSL, level: crypto::Level,
     1
 }
 
-extern fn flush_flight(_ssl: *mut SSL) -> i32 {
+extern fn flush_flight(_ssl: *mut SSL) -> c_int {
     // We don't really need to anything here since the output packets are
     // generated separately, when conn.send() is called.
 
     1
 }
 
-extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> i32 {
+extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int {
     let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
         Some(v) => v,
         None    => return 0,
@@ -481,7 +483,7 @@ extern fn keylog(_: *mut SSL, line: *const c_char) {
     }
 }
 
-fn map_result(bssl_result: i32) -> Result<()> {
+fn map_result(bssl_result: c_int) -> Result<()> {
     match bssl_result {
         1 => Ok(()),
         _ => Err(Error::TlsFail),
@@ -495,7 +497,7 @@ fn map_result_ptr<'a, T>(bssl_result: *const T) -> Result<&'a T> {
     }
 }
 
-fn map_result_ssl(ssl: &Handshake, bssl_result: i32) -> Result<()> {
+fn map_result_ssl(ssl: &Handshake, bssl_result: c_int) -> Result<()> {
     match bssl_result {
         1 => Ok(()),
 
@@ -555,20 +557,20 @@ extern {
     fn SSL_CTX_new(method: *const SSL_METHOD) -> *mut SSL_CTX;
     fn SSL_CTX_free(ctx: *mut SSL_CTX);
 
-    fn SSL_CTX_set_options(ctx: *mut SSL_CTX, options: u32) -> u32;
+    fn SSL_CTX_set_options(ctx: *mut SSL_CTX, options: c_uint) -> c_uint;
 
     fn SSL_CTX_set_quic_method(ctx: *mut SSL_CTX,
-        quic_method: *const SSL_QUIC_METHOD) -> i32;
+        quic_method: *const SSL_QUIC_METHOD) -> c_int;
 
     fn SSL_CTX_use_certificate_chain_file(ctx: *mut SSL_CTX,
-        file: *const c_char) -> i32;
+        file: *const c_char) -> c_int;
 
     fn SSL_CTX_use_PrivateKey_file(ctx: *mut SSL_CTX,
-        file: *const c_char, ty: i32) -> i32;
+        file: *const c_char, ty: c_int) -> c_int;
 
-    fn SSL_CTX_set_default_verify_paths(ctx: *mut SSL_CTX) -> i32;
+    fn SSL_CTX_set_default_verify_paths(ctx: *mut SSL_CTX) -> c_int;
 
-    fn SSL_CTX_set_verify(ctx: *mut SSL_CTX, mode: i32, cb: *const c_void,);
+    fn SSL_CTX_set_verify(ctx: *mut SSL_CTX, mode: c_int, cb: *const c_void);
 
     fn SSL_CTX_set_keylog_callback(ctx: *mut SSL_CTX,
         cb: extern fn(ssl: *mut SSL, line: *const c_char));
@@ -576,55 +578,55 @@ extern {
     // SSL
     fn SSL_get_ex_new_index(argl: libc::c_long, argp: *const c_void,
         unused: *const c_void, dup_unused: *const c_void,
-        free_func: *const c_void) -> i32;
+        free_func: *const c_void) -> c_int;
 
     fn SSL_new(ctx: *mut SSL_CTX) -> *mut SSL;
 
-    fn SSL_get_error(ssl: *mut SSL, ret_code: i32) -> i32;
+    fn SSL_get_error(ssl: *mut SSL, ret_code: c_int) -> c_int;
 
     fn SSL_set_accept_state(ssl: *mut SSL);
     fn SSL_set_connect_state(ssl: *mut SSL);
 
     fn SSL_get0_param(ssl: *mut SSL) -> *mut X509_VERIFY_PARAM;
 
-    fn SSL_set_ex_data(ssl: *mut SSL, idx: i32, ptr: *const c_void) -> i32;
-    fn SSL_get_ex_data(ssl: *mut SSL, idx: i32) -> *mut c_void;
+    fn SSL_set_ex_data(ssl: *mut SSL, idx: c_int, ptr: *const c_void) -> c_int;
+    fn SSL_get_ex_data(ssl: *mut SSL, idx: c_int) -> *mut c_void;
 
     fn SSL_get_pending_cipher(ssl: *mut SSL) -> *const SSL_CIPHER;
 
     fn SSL_set_min_proto_version(ssl: *mut SSL, version: u16);
     fn SSL_set_max_proto_version(ssl: *mut SSL, version: u16);
 
-    fn SSL_set_quiet_shutdown(ssl: *mut SSL, mode: i32);
+    fn SSL_set_quiet_shutdown(ssl: *mut SSL, mode: c_int);
 
-    fn SSL_set_tlsext_host_name(ssl: *mut SSL, name: *const c_char) -> i32;
+    fn SSL_set_tlsext_host_name(ssl: *mut SSL, name: *const c_char) -> c_int;
 
     fn SSL_set_quic_transport_params(ssl: *mut SSL, params: *const u8,
-        params_len: usize) -> i32;
+        params_len: usize) -> c_int;
 
     fn SSL_get_peer_quic_transport_params(ssl: *mut SSL,
         out_params: *mut *mut u8, out_params_len: *mut usize);
 
     fn SSL_provide_quic_data(ssl: *mut SSL, level: crypto::Level,
-        data: *const u8, len: usize) -> i32;
+        data: *const u8, len: usize) -> c_int;
 
-    fn SSL_do_handshake(ssl: *mut SSL) -> i32;
+    fn SSL_do_handshake(ssl: *mut SSL) -> c_int;
 
     fn SSL_quic_write_level(ssl: *mut SSL) -> crypto::Level;
 
-    fn SSL_clear(ssl: *mut SSL) -> i32;
+    fn SSL_clear(ssl: *mut SSL) -> c_int;
 
     fn SSL_free(ssl: *mut SSL);
 
     // SSL_CIPHER
-    fn SSL_CIPHER_get_id(cipher: *const SSL_CIPHER) -> u32;
+    fn SSL_CIPHER_get_id(cipher: *const SSL_CIPHER) -> c_uint;
 
     // X509_VERIFY_PARAM
     fn X509_VERIFY_PARAM_set1_host(param: *mut X509_VERIFY_PARAM,
-        name: *const c_char, namelen: libc::size_t) -> i32;
+        name: *const c_char, namelen: libc::size_t) -> c_int;
 
     // ERR
-    fn ERR_peek_error() -> u32;
+    fn ERR_peek_error() -> c_uint;
 
-    fn ERR_error_string_n(err: u32, buf: *const u8, len: usize);
+    fn ERR_error_string_n(err: c_uint, buf: *const u8, len: usize);
 }
