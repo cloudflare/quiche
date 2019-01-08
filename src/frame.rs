@@ -101,7 +101,6 @@ pub enum Frame {
 
     ApplicationClose {
         error_code: u16,
-        frame_type: u64,
         reason: Vec<u8>,
     },
 }
@@ -183,7 +182,6 @@ impl Frame {
 
             0x1d => Frame::ApplicationClose {
                 error_code: b.get_u16()?,
-                frame_type: b.get_varint()?,
                 reason: b.get_bytes_with_varint_length()?.to_vec(),
             },
 
@@ -329,15 +327,13 @@ impl Frame {
                 b.put_bytes(reason.as_ref())?;
             },
 
-            Frame::ApplicationClose { error_code, frame_type, reason } => {
+            Frame::ApplicationClose { error_code, reason } => {
                 b.put_varint(0x1d)?;
 
                 b.put_u16(*error_code)?;
-                b.put_varint(*frame_type)?;
                 b.put_varint(reason.len() as u64)?;
                 b.put_bytes(reason.as_ref())?;
             },
-
         }
 
         Ok(before - b.cap())
@@ -448,10 +444,9 @@ impl Frame {
                 reason.len()                              // reason
             },
 
-            Frame::ApplicationClose { frame_type, reason, .. } => {
+            Frame::ApplicationClose { reason, .. } => {
                 1 +                                       // frame type
                 2 +                                       // error_code
-                octets::varint_len(*frame_type) +         // frame_type
                 octets::varint_len(reason.len() as u64) + // reason_len
                 reason.len()                              // reason
             },
@@ -521,9 +516,9 @@ impl std::fmt::Debug for Frame {
                        error_code, frame_type, reason)?;
             },
 
-            Frame::ApplicationClose { error_code, frame_type, reason } => {
-                write!(f, "APPLICATION_CLOSE err={:x} frame={:x} reason={:x?}",
-                       error_code, frame_type, reason)?;
+            Frame::ApplicationClose { error_code, reason } => {
+                write!(f, "APPLICATION_CLOSE err={:x} reason={:x?}",
+                       error_code, reason)?;
             },
         }
 
@@ -918,7 +913,6 @@ mod tests {
 
         let frame = Frame::ApplicationClose {
             error_code: 0xbeef,
-            frame_type: 523_423,
             reason: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         };
 
@@ -927,7 +921,7 @@ mod tests {
             frame.to_bytes(&mut b).unwrap()
         };
 
-        assert_eq!(wire_len, 20);
+        assert_eq!(wire_len, 16);
 
         {
             let mut b = octets::Octets::with_slice(&mut d);

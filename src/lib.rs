@@ -1033,7 +1033,6 @@ impl Connection {
         if let Some(err) = self.app_error {
             let frame = frame::Frame::ApplicationClose {
                 error_code: err,
-                frame_type: 0,
                 reason: self.app_reason.clone(),
             };
 
