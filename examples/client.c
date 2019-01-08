@@ -57,7 +57,7 @@ static void debug_log(const char *line, void *argp) {
 }
 
 static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
-    static uint8_t out[65535];
+    static uint8_t out[1400];
 
     while (1) {
         ssize_t written = quiche_conn_send(conn_io->conn, out, sizeof(out));
