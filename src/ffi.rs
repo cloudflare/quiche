@@ -31,7 +31,9 @@ use std::slice;
 use std::sync::atomic;
 
 use libc::c_char;
+use libc::c_int;
 use libc::c_void;
+use libc::ssize_t;
 
 use crate::*;
 
@@ -76,26 +78,26 @@ pub extern fn quiche_config_new(version: u32) -> *mut Config {
 #[no_mangle]
 pub extern fn quiche_config_load_cert_chain_from_pem_file(config: &mut Config,
                                                           path: *const c_char)
-                                                            -> libc::ssize_t {
+                                                            -> c_int {
     let path = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
 
     match config.load_cert_chain_from_pem_file(path) {
         Ok(_) => 0,
 
-        Err(e) => e.to_c(),
+        Err(e) => e.to_c() as c_int,
     }
 }
 
 #[no_mangle]
 pub extern fn quiche_config_load_priv_key_from_pem_file(config: &mut Config,
                                                         path: *const c_char)
-                                                            -> libc::ssize_t {
+                                                            -> c_int {
     let path = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
 
     match config.load_priv_key_from_pem_file(path) {
         Ok(_) => 0,
 
-        Err(e) => e.to_c(),
+        Err(e) => e.to_c() as c_int,
     }
 }
 
@@ -137,13 +139,12 @@ pub extern fn quiche_config_free(config: *mut Config) {
 #[no_mangle]
 pub extern fn quiche_header_info(buf: *mut u8, buf_len: usize, dcil: usize,
                                  version: *mut u32, ty: *mut u8,
-                                 dcid: *mut u8, dcid_len: *mut usize)
-                                                            -> libc::ssize_t {
+                                 dcid: *mut u8, dcid_len: *mut usize) -> c_int {
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
     let hdr = match Header::from_slice(buf, dcil) {
         Ok(h) => h,
 
-        Err(e) => return e.to_c(),
+        Err(e) => return e.to_c() as c_int,
     };
 
     unsafe {
@@ -205,11 +206,11 @@ pub extern fn quiche_connect(server_name: *const c_char, scid: *const u8,
 
 #[no_mangle]
 pub extern fn quiche_conn_recv(conn: &mut Connection, buf: *mut u8,
-                               buf_len: usize) -> libc::ssize_t {
+                               buf_len: usize) -> ssize_t {
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
 
     match conn.recv(buf) {
-        Ok(v) => v as libc::ssize_t,
+        Ok(v) => v as ssize_t,
 
         Err(e) => e.to_c(),
     }
@@ -217,11 +218,11 @@ pub extern fn quiche_conn_recv(conn: &mut Connection, buf: *mut u8,
 
 #[no_mangle]
 pub extern fn quiche_conn_send(conn: &mut Connection, out: *mut u8,
-                               out_len: usize) -> libc::ssize_t {
+                               out_len: usize) -> ssize_t {
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
     match conn.send(out) {
-        Ok(v) => v as libc::ssize_t,
+        Ok(v) => v as ssize_t,
 
         Err(e) => e.to_c(),
     }
@@ -240,11 +241,11 @@ pub extern fn quiche_conn_stream_recv(conn: &mut Connection, stream_id: u64)
 #[no_mangle]
 pub extern fn quiche_conn_stream_send(conn: &mut Connection, stream_id: u64,
                                       buf: *const u8, buf_len: usize, fin: bool)
-                                                            -> libc::ssize_t {
+                                                            -> ssize_t {
     let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
 
     match conn.stream_send(stream_id, buf, fin) {
-        Ok(v) => v as libc::ssize_t,
+        Ok(v) => v as ssize_t,
 
         Err(e) => e.to_c(),
     }
@@ -293,14 +294,13 @@ pub extern fn quiche_readable_free(i: *mut Readable) {
 
 #[no_mangle]
 pub extern fn quiche_conn_close(conn: &mut Connection, app: bool, err: u16,
-                                reason: *const u8, reason_len: usize)
-                                                            -> libc::ssize_t {
+                                reason: *const u8, reason_len: usize) -> c_int {
     let reason = unsafe { slice::from_raw_parts(reason, reason_len) };
 
     match conn.close(app, err, reason) {
         Ok(_) => 0,
 
-        Err(e) => e.to_c(),
+        Err(e) => e.to_c() as c_int,
     }
 }
 

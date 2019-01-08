@@ -179,8 +179,8 @@ uint64_t quiche_conn_timeout_as_nanos(quiche_conn *conn);
 void quiche_conn_on_timeout(quiche_conn *conn);
 
 // Closes the connection with the given error and reason.
-ssize_t quiche_conn_close(quiche_conn *conn, bool app, uint16_t err,
-                          const uint8_t *reason, size_t reason_len);
+int quiche_conn_close(quiche_conn *conn, bool app, uint16_t err,
+                      const uint8_t *reason, size_t reason_len);
 
 // Returns true if the connection handshake is complete.
 bool quiche_conn_is_established(quiche_conn *conn);
