@@ -216,10 +216,6 @@ impl RecvBuf {
     }
 
     fn ready(&self) -> bool {
-        if self.len() == 0 {
-            return false;
-        }
-
         let buf = match self.data.peek() {
             Some(v) => v,
             None => return false,
@@ -243,6 +239,11 @@ struct SendBuf {
 impl SendBuf {
     fn push_slice(&mut self, data: &[u8], fin: bool) -> Result<()> {
         let mut len = 0;
+
+        if data.is_empty() {
+            let buf = RangeBuf::from(&[], self.off, fin);
+            return self.push(buf);
+        }
 
         // Split the input buffer into multiple RangeBufs. Otherwise a big
         // buffer would need to be split later on when popping data, which
@@ -314,7 +315,7 @@ impl SendBuf {
     }
 
     fn ready(&self) -> bool {
-        self.len() > 0
+        self.data.len() > 0
     }
 
     fn off(&self) -> usize {
@@ -508,6 +509,25 @@ mod tests {
     }
 
     #[test]
+    fn zero_len_read() {
+        let mut buf = RecvBuf::default();
+        assert_eq!(buf.len(), 0);
+
+        let first = RangeBuf::from(b"something", 0, false);
+        let second = RangeBuf::from(b"", 9, true);
+
+        assert!(buf.push(first).is_ok());
+        assert_eq!(buf.len(), 9);
+
+        assert!(buf.push(second).is_ok());
+        assert_eq!(buf.len(), 9);
+
+        let read = buf.pop(std::usize::MAX).unwrap();
+        assert_eq!(read.len(), 9);
+        assert_eq!(read.fin(), true);
+    }
+
+    #[test]
     fn empty_write() {
         let mut buf = SendBuf::default();
         assert_eq!(buf.len(), 0);
@@ -678,6 +698,27 @@ mod tests {
         assert_eq!(write.len(), 4);
         assert_eq!(write.fin(), true);
         assert_eq!(&write[..], b"orld");
+        assert_eq!(buf.len(), 0);
+    }
+
+    #[test]
+    fn zero_len_write() {
+        let mut buf = SendBuf::default();
+        assert_eq!(buf.len(), 0);
+
+        let first: [u8; 9] = *b"something";
+
+        assert!(buf.push_slice(&first, false).is_ok());
+        assert_eq!(buf.len(), 9);
+
+        assert!(buf.push_slice(&[], true).is_ok());
+        assert_eq!(buf.len(), 9);
+
+        let write = buf.pop(10, std::usize::MAX).unwrap();
+        assert_eq!(write.off(), 0);
+        assert_eq!(write.len(), 9);
+        assert_eq!(write.fin(), true);
+        assert_eq!(&write[..], b"something");
         assert_eq!(buf.len(), 0);
     }
 
