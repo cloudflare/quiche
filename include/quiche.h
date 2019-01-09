@@ -117,8 +117,9 @@ void quiche_config_free(quiche_config *config);
 // Extracts version, type and destination connection ID from the packet
 // in |buf|.
 int quiche_header_info(const uint8_t *buf, size_t buf_len, size_t dcil,
-                       uint32_t *version, uint8_t *type, uint8_t dcid[],
-                       size_t *dcid_len);
+                       uint32_t *version, uint8_t *type,
+                       uint8_t *scid, size_t *scid_len,
+                       uint8_t *dcid, size_t *dcid_len);
 
 // A QUIC connection.
 typedef struct Connection quiche_conn;

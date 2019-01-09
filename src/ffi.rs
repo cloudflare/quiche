@@ -139,6 +139,7 @@ pub extern fn quiche_config_free(config: *mut Config) {
 #[no_mangle]
 pub extern fn quiche_header_info(buf: *mut u8, buf_len: usize, dcil: usize,
                                  version: *mut u32, ty: *mut u8,
+                                 scid: *mut u8, scid_len: *mut usize,
                                  dcid: *mut u8, dcid_len: *mut usize) -> c_int {
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
     let hdr = match Header::from_slice(buf, dcil) {
@@ -158,6 +159,16 @@ pub extern fn quiche_header_info(buf: *mut u8, buf_len: usize, dcil: usize,
             Type::Application        => 5,
             Type::VersionNegotiation => 6,
         };
+
+        if *scid_len < hdr.scid.len() {
+            return -1;
+        }
+
+        let scid = slice::from_raw_parts_mut(scid, *scid_len);
+        let scid = &mut scid[..hdr.scid.len()];
+        scid.copy_from_slice(&hdr.scid);
+
+        *scid_len = hdr.scid.len();
 
         if *dcid_len < hdr.dcid.len() {
             return -1;

@@ -173,11 +173,14 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         uint8_t type;
         uint32_t version;
 
+        uint8_t scid[QUICHE_MAX_CONN_ID_LEN];
+        size_t scid_len = sizeof(scid);
+
         uint8_t dcid[QUICHE_MAX_CONN_ID_LEN];
         size_t dcid_len = sizeof(dcid);
 
         int rc = quiche_header_info(buf, read, LOCAL_CONN_ID_LEN, &version,
-                                    &type, dcid, &dcid_len);
+                                    &type, scid, &scid_len, dcid, &dcid_len);
         if (rc < 0) {
             fprintf(stderr, "failed to parse header: %d\n", rc);
             return;
