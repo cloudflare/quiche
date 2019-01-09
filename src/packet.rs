@@ -458,7 +458,7 @@ pub fn encode_pkt_num(pn: u64, b: &mut octets::Octets) -> Result<()> {
     Ok(())
 }
 
-pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
+pub fn negotiate_version(scid: &[u8], dcid: &[u8], out: &mut [u8]) -> Result<usize> {
     let mut b = octets::Octets::with_slice(out);
 
     let first = rand::rand_u8() | FORM_BIT;
@@ -468,17 +468,17 @@ pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
 
     // Invert client's scid and dcid.
     let mut cil: u8 = 0;
-    if !hdr.scid.is_empty() {
-        cil |= ((hdr.scid.len() - 3) as u8) << 4;
+    if !scid.is_empty() {
+        cil |= ((scid.len() - 3) as u8) << 4;
     }
 
-    if !hdr.dcid.is_empty() {
-        cil |= ((hdr.dcid.len() - 3) as u8) & 0xf;
+    if !dcid.is_empty() {
+        cil |= ((dcid.len() - 3) as u8) & 0xf;
     }
 
     b.put_u8(cil)?;
-    b.put_bytes(&hdr.scid)?;
-    b.put_bytes(&hdr.dcid)?;
+    b.put_bytes(&scid)?;
+    b.put_bytes(&dcid)?;
     b.put_u32(crate::VERSION_DRAFT17)?;
 
     Ok(b.off())

@@ -142,7 +142,9 @@ fn main() {
                     if hdr.version != quiche::VERSION_DRAFT17 {
                         warn!("Doing version negotiation");
 
-                        let len = quiche::negotiate_version(&hdr, &mut out).unwrap();
+                        let len = quiche::negotiate_version(&hdr.scid,
+                                                            &hdr.dcid,
+                                                            &mut out).unwrap();
                         let out = &out[..len];
 
                         socket.send_to(out, &src).unwrap();

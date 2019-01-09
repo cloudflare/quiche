@@ -329,10 +329,10 @@ pub fn connect(server_name: Option<&str>, scid: &[u8], config: &mut Config)
 
 /// Writes a version negotiation packet.
 ///
-/// The `hdr` parameter represents the header of the packet received from the
-/// client with an unsupported version.
-pub fn negotiate_version(hdr: &Header, out: &mut [u8]) -> Result<usize> {
-    packet::negotiate_version(hdr, out)
+/// The `scid` and `dcid` parameters should come from the header of the packet
+/// received from the client with an unsupported version.
+pub fn negotiate_version(scid: &[u8], dcid: &[u8], out: &mut [u8]) -> Result<usize> {
+    packet::negotiate_version(scid, dcid, out)
 }
 
 impl Connection {
