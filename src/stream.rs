@@ -449,10 +449,10 @@ mod tests {
 
     #[test]
     fn empty_write() {
-        let mut buf = RecvBuf::default();
+        let mut buf = SendBuf::default();
         assert_eq!(buf.len(), 0);
 
-        let write = buf.pop().unwrap();
+        let write = buf.pop(std::usize::MAX, std::usize::MAX).unwrap();
         assert_eq!(write.len(), 0);
     }
 
