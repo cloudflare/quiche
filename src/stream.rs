@@ -411,6 +411,7 @@ mod tests {
 
         let read = buf.pop(std::usize::MAX).unwrap();
         assert_eq!(read.len(), 0);
+        assert_eq!(read.fin(), false);
     }
 
     #[test]
@@ -420,13 +421,14 @@ mod tests {
 
         let first = RangeBuf::from(b"hello", 0, false);
         let second = RangeBuf::from(b"world", 5, false);
-        let third = RangeBuf::from(b"something", 10, false);
+        let third = RangeBuf::from(b"something", 10, true);
 
         assert!(buf.push(second).is_ok());
         assert_eq!(buf.len(), 10);
 
         let read = buf.pop(std::usize::MAX).unwrap();
         assert_eq!(read.len(), 0);
+        assert_eq!(read.fin(), false);
 
         assert!(buf.push(third).is_ok());
         assert_eq!(buf.len(), 19);
@@ -436,6 +438,7 @@ mod tests {
 
         let read = buf.pop(std::usize::MAX).unwrap();
         assert_eq!(read.len(), 19);
+        assert_eq!(read.fin(), true);
         assert_eq!(&read[..], b"helloworldsomething");
         assert_eq!(buf.len(), 0);
 
@@ -460,18 +463,21 @@ mod tests {
         let read = buf.pop(10).unwrap();
         assert_eq!(read.off(), 0);
         assert_eq!(read.len(), 10);
+        assert_eq!(read.fin(), false);
         assert_eq!(&read[..], b"somethingh");
         assert_eq!(buf.len(), 9);
 
         let read = buf.pop(5).unwrap();
         assert_eq!(read.off(), 10);
         assert_eq!(read.len(), 5);
+        assert_eq!(read.fin(), false);
         assert_eq!(&read[..], b"ellow");
         assert_eq!(buf.len(), 4);
 
         let read = buf.pop(10).unwrap();
         assert_eq!(read.off(), 15);
         assert_eq!(read.len(), 4);
+        assert_eq!(read.fin(), true);
         assert_eq!(&read[..], b"orld");
         assert_eq!(buf.len(), 0);
     }
@@ -482,19 +488,21 @@ mod tests {
         assert_eq!(buf.len(), 0);
 
         let first = RangeBuf::from(b"something", 0, false);
-        let second = RangeBuf::from(b"helloworld", 9, false);
+        let second = RangeBuf::from(b"helloworld", 9, true);
 
         assert!(buf.push(second).is_ok());
         assert_eq!(buf.len(), 19);
 
         let read = buf.pop(std::usize::MAX).unwrap();
         assert_eq!(read.len(), 0);
+        assert_eq!(read.fin(), false);
 
         assert!(buf.push(first).is_ok());
         assert_eq!(buf.len(), 19);
 
         let read = buf.pop(std::usize::MAX).unwrap();
         assert_eq!(read.len(), 19);
+        assert_eq!(read.fin(), true);
         assert_eq!(&read[..], b"somethinghelloworld");
         assert_eq!(buf.len(), 0);
     }
@@ -506,6 +514,7 @@ mod tests {
 
         let write = buf.pop(std::usize::MAX, std::usize::MAX).unwrap();
         assert_eq!(write.len(), 0);
+        assert_eq!(write.fin(), false);
     }
 
     #[test]
@@ -519,11 +528,12 @@ mod tests {
         assert!(buf.push_slice(&first, false).is_ok());
         assert_eq!(buf.len(), 9);
 
-        assert!(buf.push_slice(&second, false).is_ok());
+        assert!(buf.push_slice(&second, true).is_ok());
         assert_eq!(buf.len(), 19);
 
         let write = buf.pop(128, std::usize::MAX).unwrap();
         assert_eq!(write.len(), 19);
+        assert_eq!(write.fin(), true);
         assert_eq!(&write[..], b"somethinghelloworld");
         assert_eq!(buf.len(), 0);
     }
@@ -545,18 +555,21 @@ mod tests {
         let write = buf.pop(10, std::usize::MAX).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 10);
+        assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"somethingh");
         assert_eq!(buf.len(), 9);
 
         let write = buf.pop(5, std::usize::MAX).unwrap();
         assert_eq!(write.off(), 10);
         assert_eq!(write.len(), 5);
+        assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"ellow");
         assert_eq!(buf.len(), 4);
 
         let write = buf.pop(10, std::usize::MAX).unwrap();
         assert_eq!(write.off(), 15);
         assert_eq!(write.len(), 4);
+        assert_eq!(write.fin(), true);
         assert_eq!(&write[..], b"orld");
         assert_eq!(buf.len(), 0);
     }
@@ -579,6 +592,7 @@ mod tests {
         let write1 = buf.pop(4, std::usize::MAX).unwrap();
         assert_eq!(write1.off(), 0);
         assert_eq!(write1.len(), 4);
+        assert_eq!(write1.fin(), false);
         assert_eq!(&write1[..], b"some");
         assert_eq!(buf.len(), 15);
         assert_eq!(buf.off(), 4);
@@ -586,6 +600,7 @@ mod tests {
         let write2 = buf.pop(5, std::usize::MAX).unwrap();
         assert_eq!(write2.off(), 4);
         assert_eq!(write2.len(), 5);
+        assert_eq!(write2.fin(), false);
         assert_eq!(&write2[..], b"thing");
         assert_eq!(buf.len(), 10);
         assert_eq!(buf.off(), 9);
@@ -593,6 +608,7 @@ mod tests {
         let write3 = buf.pop(5, std::usize::MAX).unwrap();
         assert_eq!(write3.off(), 9);
         assert_eq!(write3.len(), 5);
+        assert_eq!(write3.fin(), false);
         assert_eq!(&write3[..], b"hello");
         assert_eq!(buf.len(), 5);
         assert_eq!(buf.off(), 14);
@@ -608,6 +624,7 @@ mod tests {
         let write4 = buf.pop(11, std::usize::MAX).unwrap();
         assert_eq!(write4.off(), 0);
         assert_eq!(write4.len(), 9);
+        assert_eq!(write4.fin(), false);
         assert_eq!(&write4[..], b"something");
         assert_eq!(buf.len(), 5);
         assert_eq!(buf.off(), 14);
@@ -615,6 +632,7 @@ mod tests {
         let write5 = buf.pop(11, std::usize::MAX).unwrap();
         assert_eq!(write5.off(), 14);
         assert_eq!(write5.len(), 5);
+        assert_eq!(write5.fin(), true);
         assert_eq!(&write5[..], b"world");
         assert_eq!(buf.len(), 0);
         assert_eq!(buf.off(), 19);
@@ -637,24 +655,28 @@ mod tests {
         let write = buf.pop(10, 5).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 5);
+        assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"somet");
         assert_eq!(buf.len(), 14);
 
         let write = buf.pop(10, 5).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 0);
+        assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"");
         assert_eq!(buf.len(), 14);
 
         let write = buf.pop(10, 15).unwrap();
         assert_eq!(write.off(), 5);
         assert_eq!(write.len(), 10);
+        assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"hinghellow");
         assert_eq!(buf.len(), 4);
 
         let write = buf.pop(10, 25).unwrap();
         assert_eq!(write.off(), 15);
         assert_eq!(write.len(), 4);
+        assert_eq!(write.fin(), true);
         assert_eq!(&write[..], b"orld");
         assert_eq!(buf.len(), 0);
     }
@@ -701,11 +723,13 @@ mod tests {
         let write = stream.send_pop(25).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 15);
+        assert_eq!(write.fin(), false);
         assert_eq!(write.data, b"helloworldsomet");
 
         let write = stream.send_pop(25).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 0);
+        assert_eq!(write.fin(), false);
         assert_eq!(write.data, b"");
 
         let first = RangeBuf::from(b"helloworldsomet", 0, false);
@@ -714,11 +738,13 @@ mod tests {
         let write = stream.send_pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 10);
+        assert_eq!(write.fin(), false);
         assert_eq!(write.data, b"helloworld");
 
         let write = stream.send_pop(10).unwrap();
         assert_eq!(write.off(), 10);
         assert_eq!(write.len(), 5);
+        assert_eq!(write.fin(), false);
         assert_eq!(write.data, b"somet");
     }
 }
