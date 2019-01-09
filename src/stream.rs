@@ -72,8 +72,8 @@ impl Stream {
         self.recv.push(buf)
     }
 
-    pub fn recv_pop(&mut self) -> Result<RangeBuf> {
-        let buf = self.recv.pop()?;
+    pub fn recv_pop(&mut self, max_len: usize) -> Result<RangeBuf> {
+        let buf = self.recv.pop(max_len)?;
 
         self.new_max_rx_data = self.new_max_rx_data.checked_add(buf.len())
                                                    .unwrap_or(std::usize::MAX);
@@ -176,17 +176,36 @@ impl RecvBuf {
         Ok(())
     }
 
-    fn pop(&mut self) -> Result<RangeBuf> {
+    fn pop(&mut self, max_len: usize) -> Result<RangeBuf> {
         let mut out = RangeBuf::default();
+        let mut out_len = max_len;
 
-        while self.ready() {
+        while out_len > 0 && self.ready() {
             let mut buf = match self.data.pop() {
                 Some(v) => v,
                 None => break,
             };
 
+            if buf.len() > out_len {
+                let new_buf = RangeBuf {
+                    data: buf.data.split_off(out_len),
+                    off: buf.off + out_len,
+                    fin: buf.fin,
+                };
+
+                buf.fin = false;
+
+                self.data.push(new_buf);
+            }
+
+            if out.is_empty() {
+                out.off = buf.off;
+            }
+
             self.off += buf.len();
             self.len -= buf.len();
+
+            out_len -= buf.len();
 
             out.fin = out.fin || buf.fin();
 
@@ -390,7 +409,7 @@ mod tests {
         let mut buf = RecvBuf::default();
         assert_eq!(buf.len(), 0);
 
-        let read = buf.pop().unwrap();
+        let read = buf.pop(std::usize::MAX).unwrap();
         assert_eq!(read.len(), 0);
     }
 
@@ -406,7 +425,7 @@ mod tests {
         assert!(buf.push(second).is_ok());
         assert_eq!(buf.len(), 10);
 
-        let read = buf.pop().unwrap();
+        let read = buf.pop(std::usize::MAX).unwrap();
         assert_eq!(read.len(), 0);
 
         assert!(buf.push(third).is_ok());
@@ -415,13 +434,46 @@ mod tests {
         assert!(buf.push(first).is_ok());
         assert_eq!(buf.len(), 19);
 
-        let read = buf.pop().unwrap();
+        let read = buf.pop(std::usize::MAX).unwrap();
         assert_eq!(read.len(), 19);
         assert_eq!(&read[..], b"helloworldsomething");
         assert_eq!(buf.len(), 0);
 
-        let read = buf.pop().unwrap();
+        let read = buf.pop(std::usize::MAX).unwrap();
         assert_eq!(read.len(), 0);
+    }
+
+    #[test]
+    fn split_read() {
+        let mut buf = RecvBuf::default();
+        assert_eq!(buf.len(), 0);
+
+        let first = RangeBuf::from(b"something", 0, false);
+        let second = RangeBuf::from(b"helloworld", 9, true);
+
+        assert!(buf.push(first).is_ok());
+        assert_eq!(buf.len(), 9);
+
+        assert!(buf.push(second).is_ok());
+        assert_eq!(buf.len(), 19);
+
+        let read = buf.pop(10).unwrap();
+        assert_eq!(read.off(), 0);
+        assert_eq!(read.len(), 10);
+        assert_eq!(&read[..], b"somethingh");
+        assert_eq!(buf.len(), 9);
+
+        let read = buf.pop(5).unwrap();
+        assert_eq!(read.off(), 10);
+        assert_eq!(read.len(), 5);
+        assert_eq!(&read[..], b"ellow");
+        assert_eq!(buf.len(), 4);
+
+        let read = buf.pop(10).unwrap();
+        assert_eq!(read.off(), 15);
+        assert_eq!(read.len(), 4);
+        assert_eq!(&read[..], b"orld");
+        assert_eq!(buf.len(), 0);
     }
 
     #[test]
@@ -435,13 +487,13 @@ mod tests {
         assert!(buf.push(second).is_ok());
         assert_eq!(buf.len(), 19);
 
-        let read = buf.pop().unwrap();
+        let read = buf.pop(std::usize::MAX).unwrap();
         assert_eq!(read.len(), 0);
 
         assert!(buf.push(first).is_ok());
         assert_eq!(buf.len(), 19);
 
-        let read = buf.pop().unwrap();
+        let read = buf.pop(std::usize::MAX).unwrap();
         assert_eq!(read.len(), 19);
         assert_eq!(&read[..], b"somethinghelloworld");
         assert_eq!(buf.len(), 0);
@@ -622,7 +674,7 @@ mod tests {
 
         assert_eq!(stream.recv_push(third), Err(Error::FlowControl));
 
-        assert_eq!(stream.recv_pop(),
+        assert_eq!(stream.recv_pop(std::usize::MAX),
                    Ok(RangeBuf::from(b"helloworld", 0, false)));
 
         assert!(stream.more_credit());

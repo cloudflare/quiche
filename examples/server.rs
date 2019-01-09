@@ -228,7 +228,7 @@ fn main() {
 }
 
 fn handle_stream(conn: &mut quiche::Connection, stream: u64, root: &str) {
-    let stream_data = match conn.stream_recv(stream) {
+    let stream_data = match conn.stream_recv(stream, std::usize::MAX) {
         Ok(v) => v,
 
         Err(quiche::Error::Done) => return,

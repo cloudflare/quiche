@@ -141,7 +141,8 @@ ssize_t quiche_conn_send(quiche_conn *conn, uint8_t *out, size_t out_len);
 typedef struct RangeBuf quiche_rangebuf;
 
 // Reads contiguous data from a stream.
-quiche_rangebuf *quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id);
+quiche_rangebuf *quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
+                                         size_t max_len);
 
 // Writes data to a stream.
 ssize_t quiche_conn_stream_send(quiche_conn *conn, uint64_t stream_id,

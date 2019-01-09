@@ -163,7 +163,7 @@ fn main() {
 
         let streams: Vec<u64> = conn.readable().collect();
         for s in streams {
-            let data = conn.stream_recv(s).unwrap();
+            let data = conn.stream_recv(s, std::usize::MAX).unwrap();
 
             info!("{} stream {} has {} bytes (fin? {})",
                   conn.trace_id(), s, data.len(), data.fin());

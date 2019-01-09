@@ -229,9 +229,9 @@ pub extern fn quiche_conn_send(conn: &mut Connection, out: *mut u8,
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_recv(conn: &mut Connection, stream_id: u64)
-                                                        -> *const RangeBuf {
-    match conn.stream_recv(stream_id) {
+pub extern fn quiche_conn_stream_recv(conn: &mut Connection, stream_id: u64,
+                                      max_len: usize) -> *const RangeBuf {
+    match conn.stream_recv(stream_id, max_len) {
         Ok(b) => Box::into_raw(Box::new(b)),
 
         Err(_) => ptr::null_mut(),

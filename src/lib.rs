@@ -643,7 +643,7 @@ impl Connection {
                     // Feed crypto data to the TLS state, if there's data
                     // available at the expected offset.
                     if space.crypto_stream.readable() {
-                        let buf = space.crypto_stream.recv_pop()?;
+                        let buf = space.crypto_stream.recv_pop(std::usize::MAX)?;
                         let level = space.crypto_level;
 
                         self.tls_state.provide_data(level, &buf)
@@ -1174,11 +1174,13 @@ impl Connection {
 
     /// Reads contiguous data from a stream.
     ///
+    /// The returned buffer will contain at most `max_len` bytes.
+    ///
     /// On success the stream data is returned, or [`Done`] if there is no data
     /// to read.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
-    pub fn stream_recv(&mut self, stream_id: u64) -> Result<RangeBuf> {
+    pub fn stream_recv(&mut self, stream_id: u64, max_len: usize) -> Result<RangeBuf> {
         let stream = match self.streams.get_mut(&stream_id) {
             Some(v) => v,
             None => return Err(Error::InvalidStreamState),
@@ -1188,7 +1190,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let buf = stream.recv_pop()?;
+        let buf = stream.recv_pop(max_len)?;
 
         self.new_max_rx_data = self.max_rx_data + buf.len();
 

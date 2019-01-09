@@ -150,7 +150,8 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         while (quiche_readable_next(iter, &s)) {
             fprintf(stderr, "stream %zu is readable\n", s);
 
-            quiche_rangebuf *b = quiche_conn_stream_recv(conn_io->conn, s);
+            quiche_rangebuf *b = quiche_conn_stream_recv(conn_io->conn, s,
+                                                         SIZE_MAX);
             if (b == NULL) {
                 break;
             }
