@@ -150,6 +150,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
     struct conn_io *tmp, *conn_io = NULL;
 
     static uint8_t buf[65535];
+    static uint8_t out[1400];
 
     while (1) {
         struct sockaddr_storage peer_addr;
@@ -189,7 +190,30 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         HASH_FIND(hh, conns->h, dcid, dcid_len, conn_io);
 
         if (conn_io == NULL) {
-            /* TODO: implement version negotiation */
+            if (version != QUICHE_VERSION_DRAFT17) {
+                fprintf(stderr, "version negotiation\n");
+
+                ssize_t written = quiche_negotiate_version(scid, scid_len,
+                                                           dcid, dcid_len,
+                                                           out, sizeof(out));
+
+                if (written < 0) {
+                    fprintf(stderr, "failed to create vneg packet: %ld\n",
+                            written);
+                    return;
+                }
+
+                ssize_t sent = sendto(conns->sock, out, written, 0,
+                                      (struct sockaddr *) &peer_addr,
+                                      peer_addr_len);
+                if (sent != written) {
+                    perror("failed to send");
+                    return;
+                }
+
+                fprintf(stderr, "sent %lu bytes\n", sent);
+                return;
+            }
 
             conn_io = create_conn();
             if (conn_io == NULL) {

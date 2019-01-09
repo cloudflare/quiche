@@ -216,6 +216,21 @@ pub extern fn quiche_connect(server_name: *const c_char, scid: *const u8,
 }
 
 #[no_mangle]
+pub extern fn quiche_negotiate_version(scid: *const u8, scid_len: usize,
+                                       dcid: *const u8, dcid_len: usize,
+                                       out: *mut u8, out_len: usize) -> ssize_t {
+    let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
+    let dcid = unsafe { slice::from_raw_parts(dcid, dcid_len) };
+    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+
+    match negotiate_version(scid, dcid, out) {
+        Ok(v) => v as ssize_t,
+
+        Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_recv(conn: &mut Connection, buf: *mut u8,
                                buf_len: usize) -> ssize_t {
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };

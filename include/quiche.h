@@ -132,6 +132,11 @@ quiche_conn *quiche_accept(const uint8_t *scid, size_t scid_len,
 quiche_conn *quiche_connect(const char *server_name, const uint8_t *scid,
                             size_t scid_len, quiche_config *config);
 
+// Writes a version negotiation packet.
+ssize_t quiche_negotiate_version(const uint8_t *scid, size_t scid_len,
+                                 const uint8_t *dcid, size_t dcid_len,
+                                 uint8_t *out, size_t out_len);
+
 // Processes QUIC packets received from the peer.
 ssize_t quiche_conn_recv(quiche_conn *conn, uint8_t *buf, size_t buf_len);
 
