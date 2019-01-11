@@ -95,6 +95,9 @@ pub enum Error {
 
     /// The peer violated the local flow control limits.
     FlowControl,
+
+    /// The peer violated the local stream limits.
+    StreamLimit,
 }
 
 impl Error {
@@ -108,6 +111,7 @@ impl Error {
             Error::CryptoFail => 0x100,
             Error::TlsFail => 0x100,
             Error::FlowControl => 0x3,
+            Error::StreamLimit => 0x4,
             _ => 0xa,
         }
     }
@@ -126,6 +130,7 @@ impl Error {
             Error::CryptoFail => -10,
             Error::TlsFail => -11,
             Error::FlowControl => -12,
+            Error::StreamLimit => -13,
         }
     }
 }
@@ -277,6 +282,9 @@ pub struct Connection {
 
     streams: HashMap<u64, stream::Stream>,
 
+    local_max_streams_bidi: usize,
+    local_max_streams_uni: usize,
+
     error: Option<u16>,
 
     app_error: Option<u16>,
@@ -374,6 +382,11 @@ impl Connection {
             max_tx_data: 0,
 
             streams: HashMap::new(),
+
+            local_max_streams_bidi:
+                config.local_transport_params.initial_max_streams_bidi as usize,
+            local_max_streams_uni:
+                config.local_transport_params.initial_max_streams_uni as usize,
 
             error: None,
 
@@ -688,7 +701,16 @@ impl Connection {
                                 return Err(Error::InvalidStreamState);
                             }
 
-                            // TODO: check max stream ID
+                            // Enforce stream count limits.
+                            if stream::is_bidi(stream_id) {
+                                self.local_max_streams_bidi
+                                    .checked_sub(1)
+                                    .ok_or(Error::StreamLimit)?;
+                            } else {
+                                self.local_max_streams_uni
+                                    .checked_sub(1)
+                                    .ok_or(Error::StreamLimit)?;
+                            }
 
                             let s = stream::Stream::new(max_rx_data, max_tx_data);
                             v.insert(s)
@@ -739,7 +761,16 @@ impl Connection {
                                 return Err(Error::InvalidStreamState);
                             }
 
-                            // TODO: check max stream ID
+                            // Enforce stream count limits.
+                            if stream::is_bidi(stream_id) {
+                                self.local_max_streams_bidi
+                                    .checked_sub(1)
+                                    .ok_or(Error::StreamLimit)?;
+                            } else {
+                                self.local_max_streams_uni
+                                    .checked_sub(1)
+                                    .ok_or(Error::StreamLimit)?;
+                            }
 
                             let s = stream::Stream::new(max_rx_data, max_tx_data);
                             v.insert(s)

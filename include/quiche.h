@@ -73,6 +73,9 @@ enum quiche_error {
 
     // The peer violated the local flow control limits.
     QUICHE_ERR_FLOW_CONTROL = -12,
+
+    // The peer violated the local stream limits.
+    QUICHE_ERR_STREAM_LIMIT = -13,
 };
 
 // Enables logging. |cb| will be called with log messages
