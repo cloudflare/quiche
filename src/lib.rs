@@ -285,6 +285,9 @@ pub struct Connection {
     local_max_streams_bidi: usize,
     local_max_streams_uni: usize,
 
+    peer_max_streams_bidi: usize,
+    peer_max_streams_uni: usize,
+
     error: Option<u16>,
 
     app_error: Option<u16>,
@@ -387,6 +390,9 @@ impl Connection {
                 config.local_transport_params.initial_max_streams_bidi as usize,
             local_max_streams_uni:
                 config.local_transport_params.initial_max_streams_uni as usize,
+
+            peer_max_streams_bidi: 0,
+            peer_max_streams_uni: 0,
 
             error: None,
 
@@ -784,20 +790,24 @@ impl Connection {
                     do_ack = true;
                 },
 
-                // TODO: implement stream count limits
-                frame::Frame::MaxStreamsBidi { .. } => {
+                frame::Frame::MaxStreamsBidi { max } => {
                     if !self.handshake_completed {
                         return Err(Error::InvalidState);
                     }
+
+                    self.peer_max_streams_bidi =
+                        cmp::max(self.peer_max_streams_bidi, max as usize);
 
                     do_ack = true;
                 },
 
-                // TODO: implement stream count limits
-                frame::Frame::MaxStreamsUni { .. } => {
+                frame::Frame::MaxStreamsUni { max } => {
                     if !self.handshake_completed {
                         return Err(Error::InvalidState);
                     }
+
+                    self.peer_max_streams_uni =
+                        cmp::max(self.peer_max_streams_uni, max as usize);
 
                     do_ack = true;
                 },
@@ -1257,7 +1267,14 @@ impl Connection {
                     return Err(Error::InvalidStreamState);
                 }
 
-                // TODO: check max stream ID
+                // Enforce stream count limits.
+                if stream::is_bidi(stream_id) {
+                    self.peer_max_streams_bidi.checked_sub(1)
+                                              .ok_or(Error::StreamLimit)?;
+                } else {
+                    self.peer_max_streams_uni.checked_sub(1)
+                                             .ok_or(Error::StreamLimit)?;
+                }
 
                 let s = stream::Stream::new(max_rx_data, max_tx_data);
                 v.insert(s)
@@ -1426,6 +1443,11 @@ impl Connection {
                                                               self.is_server)?;
 
                     self.max_tx_data = peer_params.initial_max_data as usize;
+
+                    self.peer_max_streams_bidi =
+                        peer_params.initial_max_streams_bidi as usize;
+                    self.peer_max_streams_uni =
+                        peer_params.initial_max_streams_uni as usize;
 
                     self.recovery.max_ack_delay =
                         time::Duration::from_millis(peer_params.max_ack_delay);
