@@ -293,6 +293,8 @@ pub struct Connection {
     app_error: Option<u16>,
     app_reason: Vec<u8>,
 
+    challenge: Option<Vec<u8>>,
+
     idle_timer: Option<time::Instant>,
 
     draining_timer: Option<time::Instant>,
@@ -398,6 +400,8 @@ impl Connection {
 
             app_error: None,
             app_reason: Vec::new(),
+
+            challenge: None,
 
             idle_timer: None,
 
@@ -830,6 +834,16 @@ impl Connection {
                     do_ack = true;
                 },
 
+                frame::Frame::PathChallenge { data } => {
+                    self.challenge = Some(data);
+
+                    do_ack = true;
+                },
+
+                frame::Frame::PathResponse { .. } => {
+                    do_ack = true;
+                },
+
                 frame::Frame::ConnectionClose { .. } => {
                     self.draining = true;
                     self.draining_timer = Some(now + DRAINING_TIMEOUT);
@@ -1090,6 +1104,20 @@ impl Connection {
 
             self.draining = true;
             self.draining_timer = Some(now + DRAINING_TIMEOUT);
+        }
+
+        // Create PATH_RESPONSE frame.
+        if let Some(ref challenge) = self.challenge {
+            let frame = frame::Frame::PathResponse {
+                data: challenge.clone(),
+            };
+
+            payload_len += frame.wire_len();
+            left -= frame.wire_len();
+
+            frames.push(frame);
+
+            self.challenge = None;
         }
 
         // Create CRYPTO frame.

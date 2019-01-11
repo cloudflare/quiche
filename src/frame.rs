@@ -93,6 +93,14 @@ pub enum Frame {
         seq_num: u64,
     },
 
+    PathChallenge {
+        data: Vec<u8>,
+    },
+
+    PathResponse {
+        data: Vec<u8>,
+    },
+
     ConnectionClose {
         error_code: u16,
         frame_type: u64,
@@ -172,6 +180,14 @@ impl Frame {
 
             0x19 => Frame::RetireConnectionId {
                 seq_num: b.get_varint()?,
+            },
+
+            0x1a => Frame::PathChallenge {
+                data: b.get_bytes(8)?.to_vec(),
+            },
+
+            0x1b => Frame::PathResponse {
+                data: b.get_bytes(8)?.to_vec(),
             },
 
             0x1c => Frame::ConnectionClose {
@@ -318,6 +334,18 @@ impl Frame {
                 b.put_varint(*seq_num)?;
             },
 
+            Frame::PathChallenge { data } => {
+                b.put_varint(0x1a)?;
+
+                b.put_bytes(data.as_ref())?;
+            },
+
+            Frame::PathResponse { data } => {
+                b.put_varint(0x1b)?;
+
+                b.put_bytes(data.as_ref())?;
+            },
+
             Frame::ConnectionClose { error_code, frame_type, reason } => {
                 b.put_varint(0x1c)?;
 
@@ -436,6 +464,16 @@ impl Frame {
                 octets::varint_len(*seq_num) // seq_num
             },
 
+            Frame::PathChallenge { .. } => {
+                1 + // frame type
+                8   // data
+            },
+
+            Frame::PathResponse { .. } => {
+                1 + // frame type
+                8   // data
+            },
+
             Frame::ConnectionClose { frame_type, reason, .. } => {
                 1 +                                       // frame type
                 2 +                                       // error_code
@@ -509,6 +547,14 @@ impl std::fmt::Debug for Frame {
 
             Frame::RetireConnectionId { .. } => {
                 write!(f, "RETIRE_CONNECTION_ID (TODO)")?;
+            },
+
+            Frame::PathChallenge { data } => {
+                write!(f, "PATH_CHALLENGE data={:02x?}", data)?;
+            },
+
+            Frame::PathResponse { data } => {
+                write!(f, "PATH_RESPONSE data={:02x?}", data)?;
             },
 
             Frame::ConnectionClose { error_code, frame_type, reason } => {
@@ -877,6 +923,48 @@ mod tests {
         };
 
         assert_eq!(wire_len, 5);
+
+        {
+            let mut b = octets::Octets::with_slice(&mut d);
+            assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
+        }
+    }
+
+    #[test]
+    fn path_challenge() {
+        let mut d: [u8; 128] = [42; 128];
+
+        let frame = Frame::PathChallenge {
+            data: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        };
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 9);
+
+        {
+            let mut b = octets::Octets::with_slice(&mut d);
+            assert_eq!(Frame::from_bytes(&mut b).unwrap(), frame);
+        }
+    }
+
+    #[test]
+    fn path_response() {
+        let mut d: [u8; 128] = [42; 128];
+
+        let frame = Frame::PathResponse {
+            data: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        };
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 9);
 
         {
             let mut b = octets::Octets::with_slice(&mut d);
