@@ -31,7 +31,7 @@ Status
 * [x] Congestion control
 * [ ] Key update
 * [ ] Stateless retry
-* [ ] Unidirectional streams
+* [x] Unidirectional streams
 * [ ] Session resumption
 * [ ] 0-RTT
 * [ ] Stateless reset

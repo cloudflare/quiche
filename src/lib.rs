@@ -667,6 +667,12 @@ impl Connection {
                         return Err(Error::InvalidState);
                     }
 
+                    // Peer can't send on our unidirectional streams.
+                    if !stream::is_bidi(stream_id) &&
+                        stream::is_local(stream_id, self.is_server) {
+                        return Err(Error::InvalidStreamState);
+                    }
+
                     let max_rx_data =
                         self.local_transport_params
                             .initial_max_stream_data_bidi_remote as usize;
