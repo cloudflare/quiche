@@ -37,8 +37,9 @@ const HTTP_REQ_STREAM_ID: u64 = 4;
 const USAGE: &str = "Usage: client [options] URL
 
 Options:
-  -h --help          Show this screen.
-  --no-verify        Don't verify server's certificate.
+  -h --help               Show this screen.
+  --wire-version VERSION  The version number to send to the server [default: babababa].
+  --no-verify             Don't verify server's certificate.
 ";
 
 fn main() {
@@ -67,7 +68,10 @@ fn main() {
     let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
     SystemRandom::new().fill(&mut scid[..]).unwrap();
 
-    let mut config = quiche::Config::new(0xbabababa).unwrap();
+    let version = args.get_str("--wire-version");
+    let version = u32::from_str_radix(version, 16).unwrap();
+
+    let mut config = quiche::Config::new(version).unwrap();
 
     config.verify_peer(true);
 
