@@ -510,13 +510,21 @@ impl Connection {
         let hdr = Header::from_bytes(&mut b, self.scid.len())?;
 
         if hdr.ty == packet::Type::VersionNegotiation {
-            // Version negotiation packet can only be sent by the server.
+            // Version negotiation packets can only be sent by the server.
             if self.is_server {
                 return Err(Error::Done);
             }
 
             // Ignore duplicate version negotiation.
             if self.did_version_negotiation {
+                return Err(Error::Done);
+            }
+
+            if hdr.dcid != self.scid {
+                return Err(Error::Done);
+            }
+
+            if hdr.scid != self.dcid {
                 return Err(Error::Done);
             }
 
@@ -549,7 +557,7 @@ impl Connection {
             self.tls_state.clear()
                 .map_err(|_| Error::TlsFail)?;
 
-            return Ok(b.off());
+            return Err(Error::Done);
         }
 
         if hdr.ty == packet::Type::Retry {
