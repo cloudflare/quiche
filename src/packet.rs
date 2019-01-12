@@ -73,11 +73,14 @@ pub struct Header {
     /// The source connection ID of the packet.
     pub scid: Vec<u8>,
 
+    /// The original destination connection ID. Only present in `Retry` packets.
+    pub odcid: Option<Vec<u8>>,
+
     /// The length of the packet number.
     pub pkt_num_len: u8,
 
     /// The address verification token of the packet. Only present in `Initial`
-    /// packets.
+    /// and `Retry` packets.
     pub token: Option<Vec<u8>>,
 
     /// The list of versions in the packet. Only present in `VersionNegotiation`
@@ -107,6 +110,7 @@ impl Header {
                 version: 0,
                 dcid: dcid.to_vec(),
                 scid: Vec::new(),
+                odcid: None,
                 pkt_num_len: 0,
                 token: None,
                 versions: None,
@@ -133,16 +137,16 @@ impl Header {
                 let mut dcil = v >> 4;
                 let mut scil = v & 0xf;
 
-                if dcil > MAX_CID_LEN || scil > MAX_CID_LEN {
-                    return Err(Error::InvalidPacket);
-                }
-
                 if dcil > 0 {
                     dcil += 3;
                 }
 
                 if scil > 0 {
                     scil += 3;
+                }
+
+                if dcil > MAX_CID_LEN || scil > MAX_CID_LEN {
+                    return Err(Error::InvalidPacket);
                 }
 
                 (dcil, scil)
@@ -156,18 +160,28 @@ impl Header {
 
         // End of invariants.
 
+        let mut odcid: Option<Vec<u8>> = None;
         let mut token: Option<Vec<u8>> = None;
         let mut versions: Option<Vec<u32>> = None;
 
         match ty {
             Type::Initial => {
-                // Only Initial packet have a token.
                 token = Some(b.get_bytes_with_varint_length()?.to_vec());
             },
 
             Type::Retry => {
-                // TODO: implement stateless retry
-                return Err(Error::Done)
+                let mut odcil = first & 0x0f;
+
+                if odcil > 0 {
+                    odcil += 3;
+                }
+
+                if odcil > MAX_CID_LEN {
+                    return Err(Error::InvalidPacket);
+                }
+
+                odcid = Some(b.get_bytes(odcil as usize)?.to_vec());
+                token = Some(b.to_vec());
             },
 
             Type::VersionNegotiation => {
@@ -189,6 +203,7 @@ impl Header {
             version,
             dcid,
             scid,
+            odcid,
             pkt_num_len: 0,
             token,
             versions,
@@ -249,17 +264,16 @@ impl Header {
         out.put_bytes(&self.dcid)?;
         out.put_bytes(&self.scid)?;
 
-        // Only Initial packet have a token.
-        if self.ty == Type::Initial {
+        // Only Initial and Retry packets have a token.
+        if self.ty == Type::Initial || self.ty == Type::Retry {
             match self.token {
                 Some(ref v) => {
+                    out.put_varint(v.len() as u64)?;
                     out.put_bytes(v)?;
                 },
 
-                None => {
-                    // No token, so lemgth = 0.
-                    out.put_varint(0)?;
-                }
+                // No token, so length = 0.
+                None => out.put_varint(0)?,
             }
         }
 
@@ -290,6 +304,20 @@ impl std::fmt::Debug for Header {
         if self.ty != Type::Application {
             write!(f, " scid=")?;
             for b in &self.scid {
+                write!(f, "{:02x}", b)?;
+            }
+        }
+
+        if let Some(ref odcid) = self.odcid {
+            write!(f, " odcid=")?;
+            for b in odcid {
+                write!(f, "{:02x}", b)?;
+            }
+        }
+
+        if let Some(ref token) = self.token {
+            write!(f, " token=")?;
+            for b in token {
                 write!(f, "{:02x}", b)?;
             }
         }
@@ -614,6 +642,7 @@ mod tests {
             dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
             scid: vec![ 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb ],
             pkt_num_len: 0,
+            odcid: None,
             token: None,
             versions: None,
         };
@@ -635,6 +664,7 @@ mod tests {
             dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
             scid: vec![ ],
             pkt_num_len: 0,
+            odcid: None,
             token: None,
             versions: None,
         };

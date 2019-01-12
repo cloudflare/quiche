@@ -288,6 +288,10 @@ pub struct Connection {
     peer_max_streams_bidi: usize,
     peer_max_streams_uni: usize,
 
+    odcid: Option<Vec<u8>>,
+
+    token: Option<Vec<u8>>,
+
     error: Option<u16>,
 
     app_error: Option<u16>,
@@ -304,6 +308,8 @@ pub struct Connection {
     derived_initial_secrets: bool,
 
     did_version_negotiation: bool,
+
+    did_retry: bool,
 
     got_peer_conn_id: bool,
 
@@ -396,6 +402,10 @@ impl Connection {
             peer_max_streams_bidi: 0,
             peer_max_streams_uni: 0,
 
+            odcid: None,
+
+            token: None,
+
             error: None,
 
             app_error: None,
@@ -412,6 +422,8 @@ impl Connection {
             derived_initial_secrets: false,
 
             did_version_negotiation: false,
+
+            did_retry: false,
 
             got_peer_conn_id: false,
 
@@ -540,6 +552,49 @@ impl Connection {
             return Ok(b.off());
         }
 
+        if hdr.ty == packet::Type::Retry {
+            // Retry packets can only be sent by the server.
+            if self.is_server {
+                return Err(Error::Done);
+            }
+
+            // Ignore duplicate retry.
+            if self.did_retry {
+                return Err(Error::Done);
+            }
+
+            if hdr.odcid.as_ref() != Some(&self.dcid) {
+                return Err(Error::Done);
+            }
+
+            trace!("{} rx pkt {:?}", self.trace_id, hdr);
+
+            self.token = hdr.token;
+            self.did_retry = true;
+
+            // Remember peer's new connection ID.
+            self.odcid = Some(self.dcid.clone());
+
+            self.dcid.resize(hdr.scid.len(), 0);
+            self.dcid.copy_from_slice(&hdr.scid);
+
+            // Derive Initial secrets using the new connection ID.
+            let (aead_open, aead_seal) =
+                crypto::derive_initial_key_material(&hdr.scid, self.is_server)?;
+
+            self.initial.crypto_open = Some(aead_open);
+            self.initial.crypto_seal = Some(aead_seal);
+
+            // Reset connection state to force sending another Initial packet.
+            self.got_peer_conn_id = false;
+            self.recovery.drop_unacked_data(&mut self.initial.flight);
+            self.initial.clear();
+            self.tls_state.clear()
+                .map_err(|_| Error::TlsFail)?;
+
+            return Err(Error::Done);
+        }
+
         if hdr.ty != packet::Type::Application && hdr.version != self.version {
             return Err(Error::UnknownVersion);
         }
@@ -568,8 +623,7 @@ impl Connection {
         // Derive initial secrets on the server.
         if !self.derived_initial_secrets {
             let (aead_open, aead_seal) =
-                crypto::derive_initial_key_material(&hdr.dcid,
-                                                    self.is_server)?;
+                crypto::derive_initial_key_material(&hdr.dcid, self.is_server)?;
 
             self.initial.crypto_open = Some(aead_open);
             self.initial.crypto_seal = Some(aead_seal);
@@ -977,7 +1031,8 @@ impl Connection {
             dcid: self.dcid.clone(),
             scid: self.scid.clone(),
             pkt_num_len: pn_len as u8,
-            token: None,
+            odcid: None,
+            token: self.token.clone(),
             versions: None,
         };
 
@@ -1470,6 +1525,10 @@ impl Connection {
                                                               self.version,
                                                               self.is_server)?;
 
+                    if peer_params.original_connection_id != self.odcid {
+                        return Err(Error::InvalidTransportParam);
+                    }
+
                     self.max_tx_data = peer_params.initial_max_data as usize;
 
                     self.peer_max_streams_bidi =
@@ -1619,7 +1678,7 @@ impl TransportParams {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    // TODO: decode original_connection_id
+                    tp.original_connection_id = Some(val.to_vec());
                 },
 
                 0x0001 => {
