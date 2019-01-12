@@ -322,10 +322,8 @@ impl std::fmt::Debug for Header {
             }
         }
 
-        if self.ty == Type::VersionNegotiation {
-            if let Some(ref versions) = self.versions {
-                write!(f, " versions={:x?}", versions)?;
-            }
+        if let Some(ref versions) = self.versions {
+            write!(f, " versions={:x?}", versions)?;
         }
 
         Ok(())
