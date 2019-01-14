@@ -57,9 +57,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// A QUIC error.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
-    /// An asynchronous operation (e.g. certificate lookup) is pending.
-    Pending,
-
     /// There is no more work to do.
     Done,
 
@@ -103,7 +100,6 @@ pub enum Error {
 impl Error {
     pub fn to_wire(&self) -> u16 {
         match self {
-            Error::Pending => 0x0,
             Error::Done => 0x0,
             Error::InvalidFrame => 0x7,
             Error::InvalidStreamState => 0x5,
@@ -118,19 +114,18 @@ impl Error {
 
     fn to_c(&self) -> libc::ssize_t {
         match self {
-            Error::Pending => -1,
-            Error::Done => -2,
-            Error::BufferTooShort => -3,
-            Error::UnknownVersion => -4,
-            Error::InvalidFrame => -5,
-            Error::InvalidPacket => -6,
-            Error::InvalidState => -7,
-            Error::InvalidStreamState => -8,
-            Error::InvalidTransportParam => -9,
-            Error::CryptoFail => -10,
-            Error::TlsFail => -11,
-            Error::FlowControl => -12,
-            Error::StreamLimit => -13,
+            Error::Done => -1,
+            Error::BufferTooShort => -2,
+            Error::UnknownVersion => -3,
+            Error::InvalidFrame => -4,
+            Error::InvalidPacket => -5,
+            Error::InvalidState => -6,
+            Error::InvalidStreamState => -7,
+            Error::InvalidTransportParam => -8,
+            Error::CryptoFail => -9,
+            Error::TlsFail => -10,
+            Error::FlowControl => -11,
+            Error::StreamLimit => -12,
         }
     }
 }
@@ -459,7 +454,7 @@ impl Connection {
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
-    /// returned, or one of [`Done`] or [`Pending`] error codes.
+    /// returned, or [`Done`].
     ///
     /// Coalesced packets will be processed as necessary.
     ///
@@ -467,7 +462,6 @@ impl Connection {
     /// this function due to, for example, in-place decryption.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
-    /// [`Pending`]: enum.Error.html#variant.Pending
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         let len = buf.len();
 
@@ -961,10 +955,9 @@ impl Connection {
     /// Writes a single QUIC packet to be sent to the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
-    /// returned, or one of [`Done`] or [`Pending`] error codes.
+    /// returned, or [`Done`].
     ///
     /// [`Done`]: enum.Error.html#variant.Done
-    /// [`Pending`]: enum.Error.html#variant.Pending
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
 
@@ -1514,10 +1507,6 @@ impl Connection {
     /// Continues the handshake.
     ///
     /// If the connection is already established, it does nothing.
-    ///
-    /// On success it returns `Ok` or the [`Pending`] error code.
-    ///
-    /// [`Pending`]: enum.Error.html#variant.Pending
     fn do_handshake(&mut self) -> Result<()> {
         if !self.handshake_completed {
             match self.tls_state.do_handshake() {
@@ -1561,10 +1550,9 @@ impl Connection {
                     }
                 },
 
-                Err(tls::Error::WantRead)         => (), // continue
-                Err(tls::Error::WantWrite)        => (), // continue
-                Err(tls::Error::SyscallFail)      => return Err(Error::TlsFail),
-                Err(tls::Error::PendingOperation) => return Err(Error::Pending),
+                Err(tls::Error::SyscallFail) => return Err(Error::TlsFail),
+
+                Err(_) => (),
             }
         }
 

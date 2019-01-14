@@ -35,47 +35,44 @@ extern "C" {
 #define QUICHE_MAX_CONN_ID_LEN 18
 
 enum quiche_error {
-    // An asynchronous operation (e.g. certificate lookup) is pending.
-    QUICHE_ERR_PENDING = -1,
-
     // There is no more work to do.
-    QUICHE_ERR_DONE = -2,
+    QUICHE_ERR_DONE = -1,
 
     // The provided buffer is too short.
-    QUICHE_ERR_BUFFER_TOO_SHORT = -3,
+    QUICHE_ERR_BUFFER_TOO_SHORT = -2,
 
     // The provided packet cannot be parsed because its version is unknown.
-    QUICHE_ERR_UNKNOWN_VERSION = -4,
+    QUICHE_ERR_UNKNOWN_VERSION = -3,
 
     // The provided packet cannot be parsed because it contains an invalid
     // frame.
-    QUICHE_ERR_INVALID_FRAME = -5,
+    QUICHE_ERR_INVALID_FRAME = -4,
 
     // The provided packet cannot be parsed.
-    QUICHE_ERR_INVALID_PACKET = -6,
+    QUICHE_ERR_INVALID_PACKET = -5,
 
     // The operation cannot be completed because the connection is in an
     // invalid state.
-    QUICHE_ERR_INVALID_STATE = -7,
+    QUICHE_ERR_INVALID_STATE = -6,
 
     // The operation cannot be completed because the stream is in an
     // invalid state.
-    QUICHE_ERR_INVALID_STREAM_STATE = -8,
+    QUICHE_ERR_INVALID_STREAM_STATE = -7,
 
     // The peer's transport params cannot be parsed.
-    QUICHE_ERR_INVALID_TRANSPORT_PARAM = -9,
+    QUICHE_ERR_INVALID_TRANSPORT_PARAM = -8,
 
     // A cryptographic operation failed.
-    QUICHE_ERR_CRYPTO_FAIL = -10,
+    QUICHE_ERR_CRYPTO_FAIL = -9,
 
     // The TLS handshake failed.
-    QUICHE_ERR_TLS_FAIL = -11,
+    QUICHE_ERR_TLS_FAIL = -10,
 
     // The peer violated the local flow control limits.
-    QUICHE_ERR_FLOW_CONTROL = -12,
+    QUICHE_ERR_FLOW_CONTROL = -11,
 
     // The peer violated the local stream limits.
-    QUICHE_ERR_STREAM_LIMIT = -13,
+    QUICHE_ERR_STREAM_LIMIT = -12,
 };
 
 // Enables logging. |cb| will be called with log messages
