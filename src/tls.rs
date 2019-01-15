@@ -126,8 +126,6 @@ impl Context {
 
             map_result(SSL_CTX_set_default_verify_paths(ctx))?;
 
-            map_result(SSL_CTX_set_quic_method(ctx, &QUICHE_STREAM_METHOD))?;
-
             Ok(Context(ctx))
         }
     }
@@ -199,6 +197,8 @@ impl Handshake {
         self.set_min_proto_version(TLS1_3_VERSION);
         self.set_max_proto_version(TLS1_3_VERSION);
 
+        self.set_quic_method()?;
+
         self.set_quiet_shutdown(true);
 
         let mut raw_params: [u8; 128] = [0; 128];
@@ -227,6 +227,12 @@ impl Handshake {
         map_result(unsafe {
             let ptr = data as *const T as *const c_void;
             SSL_set_ex_data(self.as_ptr(), idx, ptr)
+        })
+    }
+
+    pub fn set_quic_method(&self) -> Result<()> {
+        map_result(unsafe {
+            SSL_set_quic_method(self.as_ptr(), &QUICHE_STREAM_METHOD)
         })
     }
 
@@ -559,9 +565,6 @@ extern {
 
     fn SSL_CTX_set_options(ctx: *mut SSL_CTX, options: c_uint) -> c_uint;
 
-    fn SSL_CTX_set_quic_method(ctx: *mut SSL_CTX,
-        quic_method: *const SSL_QUIC_METHOD) -> c_int;
-
     fn SSL_CTX_use_certificate_chain_file(ctx: *mut SSL_CTX,
         file: *const c_char) -> c_int;
 
@@ -603,6 +606,9 @@ extern {
 
     fn SSL_set_quic_transport_params(ssl: *mut SSL, params: *const u8,
         params_len: usize) -> c_int;
+
+    fn SSL_set_quic_method(ssl: *mut SSL,
+        quic_method: *const SSL_QUIC_METHOD) -> c_int;
 
     fn SSL_get_peer_quic_transport_params(ssl: *mut SSL,
         out_params: *mut *mut u8, out_params_len: *mut usize);
