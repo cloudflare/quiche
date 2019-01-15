@@ -351,9 +351,15 @@ pub fn negotiate_version(scid: &[u8], dcid: &[u8], out: &mut [u8]) -> Result<usi
 
 impl Connection {
     #[allow(clippy::new_ret_no_self)]
-    fn new(scid: &[u8], config: &mut Config, is_server: bool) -> Result<Box<Connection>> {
+    fn new(scid: &[u8], config: &mut Config, is_server: bool)
+                                                -> Result<Box<Connection>> {
         let tls = config.tls_ctx.new_handshake().map_err(|_| Error::TlsFail)?;
+        Connection::with_tls(scid, config, tls, is_server)
+    }
 
+    #[doc(hidden)]
+    pub fn with_tls(scid: &[u8], config: &mut Config, tls: tls::Handshake,
+                    is_server: bool) -> Result<Box<Connection>> {
         let max_rx_data = config.local_transport_params.initial_max_data;
 
         let scid_as_hex: Vec<String> = scid.iter()

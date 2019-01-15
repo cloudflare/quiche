@@ -231,6 +231,20 @@ pub extern fn quiche_negotiate_version(scid: *const u8, scid_len: usize,
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_new_with_tls(scid: *const u8, scid_len: usize,
+                                       config: &mut Config, ssl: *mut c_void,
+                                       is_server: bool) -> *mut Connection {
+    let tls = tls::Handshake::from_void(ssl);
+    let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
+
+    match Connection::with_tls(scid, config, tls, is_server) {
+        Ok(c) => Box::into_raw(c),
+
+        Err(_) => ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_recv(conn: &mut Connection, buf: *mut u8,
                                buf_len: usize) -> ssize_t {
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };

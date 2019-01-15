@@ -183,6 +183,11 @@ impl Drop for Context {
 pub struct Handshake(*mut SSL);
 
 impl Handshake {
+    pub fn from_void(ssl: *mut libc::c_void) -> Handshake {
+        let ssl = ssl as *mut SSL;
+        Handshake(ssl)
+    }
+
     pub fn get_error(&self, ret_code: c_int) -> c_int {
         unsafe {
             SSL_get_error(self.as_ptr(), ret_code)
