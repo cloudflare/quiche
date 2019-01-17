@@ -38,6 +38,7 @@ const USAGE: &str = "Usage: client [options] URL
 
 Options:
   -h --help               Show this screen.
+  --http1                 Send HTTP/1.1 request instead of HTTP/0.9.
   --wire-version VERSION  The version number to send to the server [default: babababa].
   --no-verify             Don't verify server's certificate.
 ";
@@ -159,7 +160,13 @@ fn main() {
         if conn.is_established() && !req_sent {
             info!("{} sending HTTP request for {}", conn.trace_id(), url.path());
 
-            let req = format!("GET {}\r\n", url.path());
+            let req = if args.get_bool("--http1") {
+                format!("GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: quiche\r\n\r\n",
+                    url.path(), url.host().unwrap())
+            } else {
+                format!("GET {}\r\n", url.path())
+            };
+
             conn.stream_send(HTTP_REQ_STREAM_ID, req.as_bytes(), true).unwrap();
 
             req_sent = true;
