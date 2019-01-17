@@ -82,6 +82,7 @@ fn main() {
     config.set_initial_max_stream_data_bidi_local(1_000_000);
     config.set_initial_max_stream_data_bidi_remote(1_000_000);
     config.set_initial_max_streams_bidi(100);
+    config.set_initial_max_streams_uni(5);
     config.set_disable_migration(true);
 
     loop {
