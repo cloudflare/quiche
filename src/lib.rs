@@ -529,7 +529,7 @@ impl Connection {
 
         let mut b = octets::Octets::with_slice(buf);
 
-        let hdr = Header::from_bytes(&mut b, self.scid.len())?;
+        let mut hdr = Header::from_bytes(&mut b, self.scid.len())?;
 
         if hdr.ty == packet::Type::VersionNegotiation {
             // Version negotiation packets can only be sent by the server.
@@ -686,15 +686,16 @@ impl Connection {
             },
         };
 
-        let (pn, pn_len) = packet::decrypt_hdr(&mut b, &aead)?;
+        packet::decrypt_hdr(&mut b, &mut hdr, &aead)?;
 
-        let pn = packet::decode_pkt_num(space.largest_rx_pkt_num, pn, pn_len);
+        let pn = packet::decode_pkt_num(space.largest_rx_pkt_num,
+                                        hdr.pkt_num, hdr.pkt_num_len);
 
         trace!("{} rx pkt {:?} len={} pn={}", self.trace_id, hdr,
                payload_len, pn);
 
-        let mut payload =
-            packet::decrypt_pkt(&mut b, pn, pn_len, payload_len, &aead)?;
+        let mut payload = packet::decrypt_pkt(&mut b, pn, hdr.pkt_num_len,
+                                              payload_len, &aead)?;
 
         if space.recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
@@ -1059,7 +1060,8 @@ impl Connection {
             version: self.version,
             dcid: self.dcid.clone(),
             scid: self.scid.clone(),
-            pkt_num_len: pn_len as u8,
+            pkt_num: 0,
+            pkt_num_len: pn_len,
             odcid: None,
             token: self.token.clone(),
             versions: None,

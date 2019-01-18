@@ -76,8 +76,13 @@ pub struct Header {
     /// The original destination connection ID. Only present in `Retry` packets.
     pub odcid: Option<Vec<u8>>,
 
-    /// The length of the packet number.
-    pub pkt_num_len: u8,
+    /// The packet number. It's only meaningful after the header protection is
+    /// removed.
+    pub pkt_num: u64,
+
+    /// The length of the packet number. It's only meaningful after the header
+    /// protection is removed.
+    pub pkt_num_len: usize,
 
     /// The address verification token of the packet. Only present in `Initial`
     /// and `Retry` packets.
@@ -111,6 +116,7 @@ impl Header {
                 dcid: dcid.to_vec(),
                 scid: Vec::new(),
                 odcid: None,
+                pkt_num: 0,
                 pkt_num_len: 0,
                 token: None,
                 versions: None,
@@ -204,6 +210,7 @@ impl Header {
             dcid,
             scid,
             odcid,
+            pkt_num: 0,
             pkt_num_len: 0,
             token,
             versions,
@@ -215,7 +222,7 @@ impl Header {
 
         // Encode pkt num length.
         first |= self.pkt_num_len.checked_sub(1)
-                                 .unwrap_or(0);
+                                 .unwrap_or(0) as u8;
 
         // Encode short header.
         if self.ty == Type::Application {
@@ -359,8 +366,8 @@ pub fn pkt_num_len(pn: u64) -> Result<usize> {
     Ok(len)
 }
 
-pub fn decrypt_hdr(b: &mut octets::Octets, aead: &crypto::Open)
-                                                    -> Result<(u64, usize)> {
+pub fn decrypt_hdr(b: &mut octets::Octets, hdr: &mut Header, aead: &crypto::Open)
+                                                    -> Result<()> {
     let mut first = {
         let (first_buf, _) = b.split_at(1)?;
         first_buf.as_ref()[0]
@@ -406,7 +413,10 @@ pub fn decrypt_hdr(b: &mut octets::Octets, aead: &crypto::Open)
     let (mut first_buf, _) = b.split_at(1)?;
     first_buf.as_mut()[0] = first;
 
-    Ok((pn, pn_len))
+    hdr.pkt_num = pn;
+    hdr.pkt_num_len = pn_len;
+
+    Ok(())
 }
 
 pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize) -> u64 {
@@ -533,6 +543,7 @@ pub fn retry(scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], out: &mut 
         version: crate::VERSION_DRAFT17,
         dcid: scid.to_vec(),
         scid: new_scid.to_vec(),
+        pkt_num: 0,
         pkt_num_len: 0,
         odcid: Some(dcid.to_vec()),
         token: Some(token.to_vec()),
@@ -673,6 +684,7 @@ mod tests {
             version: 0xafafafaf,
             dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
             scid: vec![ 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb ],
+            pkt_num: 0,
             pkt_num_len: 0,
             odcid: Some(vec![0x01, 0x02, 0x03, 0x04]),
             token: Some(vec![0xba; 24]),
@@ -695,6 +707,7 @@ mod tests {
             version: 0xafafafaf,
             dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
             scid: vec![ 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb ],
+            pkt_num: 0,
             pkt_num_len: 0,
             odcid: None,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
@@ -717,6 +730,7 @@ mod tests {
             version: 0xafafafaf,
             dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
             scid: vec![ 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb ],
+            pkt_num: 0,
             pkt_num_len: 0,
             odcid: None,
             token: None,
@@ -739,6 +753,7 @@ mod tests {
             version: 0,
             dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
             scid: vec![ ],
+            pkt_num: 0,
             pkt_num_len: 0,
             odcid: None,
             token: None,
@@ -872,7 +887,7 @@ mod tests {
                          expected_pn_len: usize) {
         let mut b = octets::Octets::with_slice(pkt);
 
-        let hdr = Header::from_bytes(&mut b, 0).unwrap();
+        let mut hdr = Header::from_bytes(&mut b, 0).unwrap();
         assert_eq!(hdr.ty, Type::Initial);
 
         let payload_len = b.get_varint().unwrap() as usize;
@@ -880,14 +895,14 @@ mod tests {
         let (aead, _) =
             crypto::derive_initial_key_material(dcid, is_server).unwrap();
 
-        let (pn, pn_len) = decrypt_hdr(&mut b, &aead).unwrap();
-        let pn = decode_pkt_num(0, pn, pn_len);
+        decrypt_hdr(&mut b, &mut hdr, &aead).unwrap();
+        let pn = decode_pkt_num(0, hdr.pkt_num, hdr.pkt_num_len);
 
-        assert_eq!(pn, expected_pn);
-        assert_eq!(pn_len, expected_pn_len);
+        assert_eq!(hdr.pkt_num, expected_pn);
+        assert_eq!(hdr.pkt_num_len, expected_pn_len);
 
         let payload =
-            decrypt_pkt(&mut b, pn, pn_len, payload_len, &aead).unwrap();
+          decrypt_pkt(&mut b, pn, hdr.pkt_num_len, payload_len, &aead).unwrap();
 
         let payload = payload.as_ref();
         assert_eq!(&payload[..expected_frames.len()], expected_frames);
