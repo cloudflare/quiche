@@ -245,6 +245,11 @@ impl Header {
 
         first |= FORM_BIT | FIXED_BIT | (ty << 4);
 
+        if self.ty == Type::Retry {
+            let odcid = self.odcid.as_ref().unwrap();
+            first |= (odcid.len() - 3) as u8;
+        }
+
         out.put_u8(first)?;
 
         out.put_u32(self.version)?;
@@ -264,8 +269,13 @@ impl Header {
         out.put_bytes(&self.dcid)?;
         out.put_bytes(&self.scid)?;
 
+        if self.ty == Type::Retry {
+            let odcid = self.odcid.as_ref().unwrap();
+            out.put_bytes(odcid)?;
+        }
+
         // Only Initial and Retry packets have a token.
-        if self.ty == Type::Initial || self.ty == Type::Retry {
+        if self.ty == Type::Initial {
             match self.token {
                 Some(ref v) => {
                     out.put_varint(v.len() as u64)?;
@@ -275,6 +285,11 @@ impl Header {
                 // No token, so length = 0.
                 None => out.put_varint(0)?,
             }
+        }
+
+        // Retry packets don't have a token length.
+        if self.ty == Type::Retry {
+            out.put_bytes(self.token.as_ref().unwrap())?;
         }
 
         Ok(())
@@ -506,6 +521,25 @@ pub fn negotiate_version(scid: &[u8], dcid: &[u8], out: &mut [u8]) -> Result<usi
     b.put_bytes(&scid)?;
     b.put_bytes(&dcid)?;
     b.put_u32(crate::VERSION_DRAFT17)?;
+
+    Ok(b.off())
+}
+
+pub fn retry(scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], out: &mut [u8]) -> Result<usize> {
+    let mut b = octets::Octets::with_slice(out);
+
+    let hdr = Header {
+        ty: Type::Retry,
+        version: crate::VERSION_DRAFT17,
+        dcid: scid.to_vec(),
+        scid: new_scid.to_vec(),
+        pkt_num_len: 0,
+        odcid: Some(dcid.to_vec()),
+        token: Some(token.to_vec()),
+        versions: None,
+    };
+
+    hdr.to_bytes(&mut b)?;
 
     Ok(b.off())
 }
