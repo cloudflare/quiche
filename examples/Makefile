@@ -1,3 +1,4 @@
+SOURCE_DIR = ../src
 BUILD_DIR = ../target/debug
 INCLUDE_DIR = ../include
 
@@ -18,5 +19,5 @@ client: client.c $(INCLUDE_DIR)/quiche.h $(BUILD_DIR)/libquiche.a
 server: server.c $(INCLUDE_DIR)/quiche.h $(BUILD_DIR)/libquiche.a
 	cc $(CFLAGS) $(LDFLAGS) $< -o $@ -I$(INCLUDE_DIR) $(LIBS)
 
-$(BUILD_DIR)/libquiche.a:
+$(BUILD_DIR)/libquiche.a: $(SOURCE_DIR)/*.rs
 	cd .. && cargo build
