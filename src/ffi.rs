@@ -186,10 +186,17 @@ pub extern fn quiche_header_info(buf: *mut u8, buf_len: usize, dcil: usize,
 
 #[no_mangle]
 pub extern fn quiche_accept(scid: *const u8, scid_len: usize,
+                            odcid: *const u8, odcid_len: usize,
                             config: &mut Config) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
 
-    match accept(scid, config) {
+    let odcid = if !odcid.is_null() {
+        Some(unsafe { slice::from_raw_parts(odcid, odcid_len) })
+    } else {
+        None
+    };
+
+    match accept(scid, odcid, config) {
         Ok(c) => Box::into_raw(c),
 
         Err(_) => ptr::null_mut(),
@@ -232,12 +239,20 @@ pub extern fn quiche_negotiate_version(scid: *const u8, scid_len: usize,
 
 #[no_mangle]
 pub extern fn quiche_conn_new_with_tls(scid: *const u8, scid_len: usize,
+                                       odcid: *const u8, odcid_len: usize,
                                        config: &mut Config, ssl: *mut c_void,
                                        is_server: bool) -> *mut Connection {
-    let tls = tls::Handshake::from_void(ssl);
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
 
-    match Connection::with_tls(scid, config, tls, is_server) {
+    let odcid = if !odcid.is_null() {
+        Some(unsafe { slice::from_raw_parts(odcid, odcid_len) })
+    } else {
+        None
+    };
+
+    let tls = tls::Handshake::from_void(ssl);
+
+    match Connection::with_tls(scid, odcid, config, tls, is_server) {
         Ok(c) => Box::into_raw(c),
 
         Err(_) => ptr::null_mut(),

@@ -317,9 +317,14 @@ pub struct Connection {
 
 /// Creates a new server-side connection.
 ///
-/// The `scid` parameter is used as the connection's source connection ID,
-pub fn accept(scid: &[u8], config: &mut Config) -> Result<Box<Connection>> {
-    let conn = Connection::new(scid, config, true)?;
+/// The `scid` parameter represents the server's source connection ID, while
+/// the optional `odcid` parameter represents the original destination ID the
+/// client sent before a stateless retry (this is only required when using
+/// the [`retry()`] function).
+///
+/// [`retry()`]: /fn.accept.html
+pub fn accept(scid: &[u8], odcid: Option<&[u8]>, config: &mut Config) -> Result<Box<Connection>> {
+    let conn = Connection::new(scid, odcid, config, true)?;
 
     Ok(conn)
 }
@@ -331,7 +336,7 @@ pub fn accept(scid: &[u8], config: &mut Config) -> Result<Box<Connection>> {
 /// certificate.
 pub fn connect(server_name: Option<&str>, scid: &[u8], config: &mut Config)
                                                 -> Result<Box<Connection>> {
-    let conn = Connection::new(scid, config, false)?;
+    let conn = Connection::new(scid, None, config, false)?;
 
     if server_name.is_some() {
         conn.tls_state.set_host_name(server_name.unwrap())
@@ -343,23 +348,35 @@ pub fn connect(server_name: Option<&str>, scid: &[u8], config: &mut Config)
 
 /// Writes a version negotiation packet.
 ///
-/// The `scid` and `dcid` parameters should come from the header of the packet
-/// received from the client with an unsupported version.
+/// The `scid` and `dcid` parameters are the source connection ID and the
+/// destination connection ID extracted from the received client's Initial
+/// packet that advertises an unsupported version.
 pub fn negotiate_version(scid: &[u8], dcid: &[u8], out: &mut [u8]) -> Result<usize> {
     packet::negotiate_version(scid, dcid, out)
 }
 
+/// Writes a retry packet.
+///
+/// The `scid` and `dcid` parameters are the source connection ID and the
+/// destination connection ID extracted from the received client's Initial
+/// packet, while `new_scid` is the server's new source connection ID and
+/// `token` is the address verification token the client needs to echo back.
+pub fn retry(scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], out: &mut [u8]) -> Result<usize> {
+    packet::retry(scid, dcid, new_scid, token, out)
+}
+
 impl Connection {
     #[allow(clippy::new_ret_no_self)]
-    fn new(scid: &[u8], config: &mut Config, is_server: bool)
-                                                -> Result<Box<Connection>> {
+    fn new(scid: &[u8], odcid: Option<&[u8]>, config: &mut Config,
+           is_server: bool) -> Result<Box<Connection>> {
+
         let tls = config.tls_ctx.new_handshake().map_err(|_| Error::TlsFail)?;
-        Connection::with_tls(scid, config, tls, is_server)
+        Connection::with_tls(scid, odcid, config, tls, is_server)
     }
 
     #[doc(hidden)]
-    pub fn with_tls(scid: &[u8], config: &mut Config, tls: tls::Handshake,
-                    is_server: bool) -> Result<Box<Connection>> {
+    pub fn with_tls(scid: &[u8], odcid: Option<&[u8]>, config: &mut Config,
+                    tls: tls::Handshake, is_server: bool) -> Result<Box<Connection>> {
         let max_rx_data = config.local_transport_params.initial_max_data;
 
         let scid_as_hex: Vec<String> = scid.iter()
@@ -434,6 +451,11 @@ impl Connection {
 
             closed: false,
         });
+
+        if let Some(odcid) = odcid {
+            conn.local_transport_params.original_connection_id =
+                Some(odcid.to_vec());
+        }
 
         conn.tls_state.init(&conn).map_err(|_| Error::TlsFail)?;
 
@@ -1908,7 +1930,7 @@ mod tests {
         config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
         config.verify_peer(false);
 
-        Connection::new(&scid, &mut config, is_server).unwrap()
+        Connection::new(&scid, None, &mut config, is_server).unwrap()
     }
 
     fn recv_send(conn: &mut Connection, buf: &mut [u8], len: usize) -> usize {

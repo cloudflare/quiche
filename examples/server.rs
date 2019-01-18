@@ -155,12 +155,35 @@ fn main() {
                     let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
                     SystemRandom::new().fill(&mut scid[..]).unwrap();
 
+                    // Token is always present in Initial packets.
+                    let token = hdr.token.as_ref().unwrap();
+
+                    if token.is_empty() {
+                        warn!("Doing stateless retry");
+
+                        let new_token = mint_token(&hdr, &src);
+
+                        let len = quiche::retry(&hdr.scid, &hdr.dcid, &scid,
+                                                &new_token, &mut out).unwrap();
+                        let out = &out[..len];
+
+                        socket.send_to(out, &src).unwrap();
+                        continue;
+                    }
+
+                    let odcid = validate_token(&src, token);
+
+                    if odcid == None {
+                        error!("Invalid address validation token");
+                        continue;
+                    }
+
                     debug!("New connection: dcid={} scid={} lcid={}",
                            hex_dump(&hdr.dcid),
                            hex_dump(&hdr.scid),
                            hex_dump(&scid));
 
-                    let conn = quiche::accept(&scid, &mut config).unwrap();
+                    let conn = quiche::accept(&scid, odcid, &mut config).unwrap();
 
                     v.insert(conn)
                 },
@@ -269,6 +292,47 @@ fn handle_stream(conn: &mut quiche::Connection, stream: u64, root: &str) {
             error!("{} stream send failed {:?}", conn.trace_id(), e);
         }
     }
+}
+
+fn mint_token(hdr: &quiche::Header, src: &net::SocketAddr) -> Vec<u8> {
+    let mut token = Vec::new();
+
+    token.extend_from_slice(b"quiche");
+
+    let addr = match src.ip() {
+        std::net::IpAddr::V4(a) => a.octets().to_vec(),
+        std::net::IpAddr::V6(a) => a.octets().to_vec(),
+    };
+
+    token.extend_from_slice(&addr);
+    token.extend_from_slice(&hdr.dcid);
+
+    token
+}
+
+fn validate_token<'a>(src: &net::SocketAddr, token: &'a [u8]) -> Option<&'a [u8]> {
+    if token.len() < 6 {
+        return None;
+    }
+
+    if &token[..6] != b"quiche" {
+        return None;
+    }
+
+    let token = &token[6..];
+
+    let addr = match src.ip() {
+        std::net::IpAddr::V4(a) => a.octets().to_vec(),
+        std::net::IpAddr::V6(a) => a.octets().to_vec(),
+    };
+
+    if token.len() < addr.len() || &token[..addr.len()] != addr.as_slice() {
+        return None;
+    }
+
+    let token = &token[addr.len()..];
+
+    Some(&token[..])
 }
 
 fn hex_dump(buf: &[u8]) -> String {

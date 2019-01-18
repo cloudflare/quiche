@@ -126,6 +126,7 @@ typedef struct Connection quiche_conn;
 
 // Creates a new server-side connection.
 quiche_conn *quiche_accept(const uint8_t *scid, size_t scid_len,
+                           const uint8_t *odcid, size_t odcid_len,
                            quiche_config *config);
 
 // Creates a new client-side connection.
@@ -138,6 +139,7 @@ ssize_t quiche_negotiate_version(const uint8_t *scid, size_t scid_len,
                                  uint8_t *out, size_t out_len);
 
 quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
+                                      const uint8_t *odcid, size_t odcid_len,
                                       quiche_config *config, void *ssl,
                                       bool is_server);
 

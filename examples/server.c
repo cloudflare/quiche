@@ -127,7 +127,8 @@ static struct conn_io *create_conn(void) {
         return NULL;
     }
 
-    quiche_conn *conn = quiche_accept(conn_io->cid, LOCAL_CONN_ID_LEN, config);
+    quiche_conn *conn = quiche_accept(conn_io->cid, LOCAL_CONN_ID_LEN,
+                                      NULL, 0, config);
     if (conn == NULL) {
         fprintf(stderr, "failed to create connection\n");
         return NULL;
