@@ -1065,6 +1065,7 @@ impl Connection {
             odcid: None,
             token: self.token.clone(),
             versions: None,
+            key_phase: false,
         };
 
         hdr.to_bytes(&mut b)?;

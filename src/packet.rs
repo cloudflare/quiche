@@ -91,6 +91,10 @@ pub struct Header {
     /// The list of versions in the packet. Only present in `VersionNegotiation`
     /// packets.
     pub versions: Option<Vec<u32>>,
+
+    /// The key phase bit of the packet. It's only meaningful after the header
+    /// protection is removed.
+    pub key_phase: bool,
 }
 
 impl Header {
@@ -120,6 +124,7 @@ impl Header {
                 pkt_num_len: 0,
                 token: None,
                 versions: None,
+                key_phase: false,
             });
         }
 
@@ -214,6 +219,7 @@ impl Header {
             pkt_num_len: 0,
             token,
             versions,
+            key_phase: false,
         })
     }
 
@@ -232,8 +238,12 @@ impl Header {
             // Set fixed bit.
             first |= FIXED_BIT;
 
-            // TODO: support key update
-            first &= !KEY_PHASE_BIT;
+            // Set key phase bit.
+            if self.key_phase {
+                first |= KEY_PHASE_BIT;
+            } else {
+                first &= !KEY_PHASE_BIT;
+            }
 
             out.put_u8(first)?;
             out.put_bytes(&self.dcid)?;
@@ -348,6 +358,10 @@ impl std::fmt::Debug for Header {
             write!(f, " versions={:x?}", versions)?;
         }
 
+        if self.ty == Type::Application {
+            write!(f, " key_phase={}", self.key_phase)?;
+        }
+
         Ok(())
     }
 }
@@ -415,6 +429,10 @@ pub fn decrypt_hdr(b: &mut octets::Octets, hdr: &mut Header, aead: &crypto::Open
 
     hdr.pkt_num = pn;
     hdr.pkt_num_len = pn_len;
+
+    if hdr.ty == Type::Application {
+        hdr.key_phase = (first & KEY_PHASE_BIT) != 0;
+    }
 
     Ok(())
 }
@@ -548,6 +566,7 @@ pub fn retry(scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], out: &mut 
         odcid: Some(dcid.to_vec()),
         token: Some(token.to_vec()),
         versions: None,
+        key_phase: false,
     };
 
     hdr.to_bytes(&mut b)?;
@@ -689,6 +708,7 @@ mod tests {
             odcid: Some(vec![0x01, 0x02, 0x03, 0x04]),
             token: Some(vec![0xba; 24]),
             versions: None,
+            key_phase: false,
         };
 
         let mut d: [u8; 50] = [0; 50];
@@ -712,6 +732,7 @@ mod tests {
             odcid: None,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
             versions: None,
+            key_phase: false,
         };
 
         let mut d: [u8; 50] = [0; 50];
@@ -735,6 +756,7 @@ mod tests {
             odcid: None,
             token: None,
             versions: None,
+            key_phase: false,
         };
 
         let mut d: [u8; 50] = [0; 50];
@@ -758,6 +780,7 @@ mod tests {
             odcid: None,
             token: None,
             versions: None,
+            key_phase: false,
         };
 
         let mut d: [u8; 50] = [0; 50];
