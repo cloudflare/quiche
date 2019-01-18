@@ -1761,7 +1761,11 @@ impl TransportParams {
             let mut b = octets::Octets::with_slice(&mut params);
 
             if is_server {
-                // TODO: encode original_connection_id
+                if let Some(ref odcid) = tp.original_connection_id {
+                    b.put_u16(0x0000)?;
+                    b.put_u16(odcid.len() as u16)?;
+                    b.put_bytes(&odcid)?;
+                }
             };
 
             if tp.idle_timeout != 0 {
