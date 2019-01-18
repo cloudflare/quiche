@@ -315,7 +315,7 @@ impl SendBuf {
     }
 
     fn ready(&self) -> bool {
-        self.data.len() > 0
+        !self.data.is_empty()
     }
 
     fn off(&self) -> usize {
