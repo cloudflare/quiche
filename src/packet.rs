@@ -667,7 +667,51 @@ mod tests {
     use crate::octets;
 
     #[test]
-    fn long_header() {
+    fn retry() {
+        let hdr = Header {
+            ty: Type::Retry,
+            version: 0xafafafaf,
+            dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
+            scid: vec![ 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb ],
+            pkt_num_len: 0,
+            odcid: Some(vec![0x01, 0x02, 0x03, 0x04]),
+            token: Some(vec![0xba; 24]),
+            versions: None,
+        };
+
+        let mut d: [u8; 50] = [0; 50];
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(hdr.to_bytes(&mut b).is_ok());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
+    }
+
+    #[test]
+    fn initial() {
+        let hdr = Header {
+            ty: Type::Initial,
+            version: 0xafafafaf,
+            dcid: vec![ 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba ],
+            scid: vec![ 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb ],
+            pkt_num_len: 0,
+            odcid: None,
+            token: Some(vec![0x05, 0x06, 0x07, 0x08]),
+            versions: None,
+        };
+
+        let mut d: [u8; 50] = [0; 50];
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(hdr.to_bytes(&mut b).is_ok());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
+    }
+
+    #[test]
+    fn handshake() {
         let hdr = Header {
             ty: Type::Handshake,
             version: 0xafafafaf,
@@ -689,7 +733,7 @@ mod tests {
     }
 
     #[test]
-    fn short_header() {
+    fn application() {
         let hdr = Header {
             ty: Type::Application,
             version: 0,
