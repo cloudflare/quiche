@@ -30,7 +30,7 @@ Status
 * [x] Loss detection and recovery
 * [x] Congestion control
 * [ ] Key update
-* [ ] Stateless retry
+* [x] Stateless retry
 * [x] Unidirectional streams
 * [ ] Session resumption
 * [ ] 0-RTT
