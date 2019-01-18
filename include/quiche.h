@@ -115,16 +115,16 @@ void quiche_config_set_initial_max_stream_data_uni(quiche_config *config, uint64
 void quiche_config_set_initial_max_data(quiche_config *config, uint64_t v);
 
 // Sets the `initial_max_streams_bidi` transport parameter.
-void quiche_config_set_initial_max_streams_bidi(quiche_config *config, uint16_t v);
+void quiche_config_set_initial_max_streams_bidi(quiche_config *config, uint64_t v);
 
 // Sets the `initial_max_streams_uni` transport parameter.
-void quiche_config_set_initial_max_streams_uni(quiche_config *config, uint16_t v);
+void quiche_config_set_initial_max_streams_uni(quiche_config *config, uint64_t v);
 
 // Sets the `ack_delay_exponent` transport parameter.
-void quiche_config_set_ack_delay_exponent(quiche_config *config, uint16_t v);
+void quiche_config_set_ack_delay_exponent(quiche_config *config, uint64_t v);
 
 // Sets the `max_ack_delay` transport parameter.
-void quiche_config_set_max_ack_delay(quiche_config *config, uint16_t v);
+void quiche_config_set_max_ack_delay(quiche_config *config, uint64_t v);
 
 // Sets the `disable_migration` transport parameter.
 void quiche_config_set_disable_migration(quiche_config *config, bool v);
