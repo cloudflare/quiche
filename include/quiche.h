@@ -93,14 +93,14 @@ int quiche_config_load_cert_chain_from_pem_file(quiche_config *config,
 int quiche_config_load_priv_key_from_pem_file(quiche_config *config,
                                               const char *path);
 
+// Configures whether to verify the peer's certificate.
+void quiche_config_verify_peer(quiche_config *config, bool v);
+
 // Enables logging of secrets.
 void quiche_config_log_keys(quiche_config *config);
 
 // Sets the `idle_timeout` transport parameter.
 void quiche_config_set_idle_timeout(quiche_config *config, uint64_t v);
-
-// Sets the `initial_max_data` transport parameter.
-void quiche_config_set_initial_max_data(quiche_config *config, uint64_t v);
 
 // Sets the `initial_max_stream_data_bidi_local` transport parameter.
 void quiche_config_set_initial_max_stream_data_bidi_local(quiche_config *config, uint64_t v);
@@ -108,8 +108,26 @@ void quiche_config_set_initial_max_stream_data_bidi_local(quiche_config *config,
 // Sets the `initial_max_stream_data_bidi_remote` transport parameter.
 void quiche_config_set_initial_max_stream_data_bidi_remote(quiche_config *config, uint64_t v);
 
+// Sets the `initial_max_stream_data_uni` transport parameter.
+void quiche_config_set_initial_max_stream_data_uni(quiche_config *config, uint64_t v);
+
+// Sets the `initial_max_data` transport parameter.
+void quiche_config_set_initial_max_data(quiche_config *config, uint64_t v);
+
 // Sets the `initial_max_streams_bidi` transport parameter.
 void quiche_config_set_initial_max_streams_bidi(quiche_config *config, uint16_t v);
+
+// Sets the `initial_max_streams_uni` transport parameter.
+void quiche_config_set_initial_max_streams_uni(quiche_config *config, uint16_t v);
+
+// Sets the `ack_delay_exponent` transport parameter.
+void quiche_config_set_ack_delay_exponent(quiche_config *config, uint16_t v);
+
+// Sets the `max_ack_delay` transport parameter.
+void quiche_config_set_max_ack_delay(quiche_config *config, uint16_t v);
+
+// Sets the `disable_migration` transport parameter.
+void quiche_config_set_disable_migration(quiche_config *config, bool v);
 
 // Frees the config object.
 void quiche_config_free(quiche_config *config);

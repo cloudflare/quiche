@@ -102,6 +102,11 @@ pub extern fn quiche_config_load_priv_key_from_pem_file(config: &mut Config,
 }
 
 #[no_mangle]
+pub extern fn quiche_config_verify_peer(config: &mut Config, v: bool) {
+    config.verify_peer(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_log_keys(config: &mut Config) {
     config.log_keys();
 }
@@ -122,6 +127,11 @@ pub extern fn quiche_config_set_initial_max_stream_data_bidi_remote(config: &mut
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_initial_max_stream_data_uni(config: &mut Config, v: u64) {
+    config.set_initial_max_stream_data_uni(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_set_initial_max_data(config: &mut Config, v: u64) {
     config.set_initial_max_data(v);
 }
@@ -129,6 +139,26 @@ pub extern fn quiche_config_set_initial_max_data(config: &mut Config, v: u64) {
 #[no_mangle]
 pub extern fn quiche_config_set_initial_max_streams_bidi(config: &mut Config, v: u64) {
     config.set_initial_max_streams_bidi(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_initial_max_streams_uni(config: &mut Config, v: u64) {
+    config.set_initial_max_streams_uni(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_ack_delay_exponent(config: &mut Config, v: u64) {
+    config.set_ack_delay_exponent(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_max_ack_delay(config: &mut Config, v: u64) {
+    config.set_max_ack_delay(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_disable_migration(config: &mut Config, v: bool) {
+    config.set_disable_migration(v);
 }
 
 #[no_mangle]
