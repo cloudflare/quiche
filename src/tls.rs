@@ -311,6 +311,10 @@ impl Handshake {
         }
     }
 
+    pub fn cipher(&self) -> Result<crypto::Algorithm> {
+        get_cipher_from_ptr(self.as_ptr())
+    }
+
     pub fn clear(&mut self) -> Result<()> {
         map_result_ssl(self, unsafe {
             SSL_clear(self.as_ptr())
@@ -335,9 +339,9 @@ fn get_ex_data_from_ptr<'a, T>(ptr: *mut SSL, idx: c_int) -> Option<&'a mut T> {
     }
 }
 
-fn get_pending_cipher_from_ptr(ptr: *mut SSL) -> Result<crypto::Algorithm> {
+fn get_cipher_from_ptr(ptr: *mut SSL) -> Result<crypto::Algorithm> {
     let cipher = map_result_ptr(unsafe {
-        SSL_get_pending_cipher(ptr)
+        SSL_get_current_cipher(ptr)
     })?;
 
     let cipher_id = unsafe {
@@ -373,7 +377,7 @@ extern fn set_encryption_secrets(ssl: *mut SSL, level: crypto::Level,
         crypto::Level::Application => &mut conn.application,
     };
 
-    let aead = match get_pending_cipher_from_ptr(ssl) {
+    let aead = match get_cipher_from_ptr(ssl) {
         Ok(v)  => v,
         Err(_) => return 0,
     };
@@ -600,7 +604,7 @@ extern {
     fn SSL_set_ex_data(ssl: *mut SSL, idx: c_int, ptr: *const c_void) -> c_int;
     fn SSL_get_ex_data(ssl: *mut SSL, idx: c_int) -> *mut c_void;
 
-    fn SSL_get_pending_cipher(ssl: *mut SSL) -> *const SSL_CIPHER;
+    fn SSL_get_current_cipher(ssl: *mut SSL) -> *const SSL_CIPHER;
 
     fn SSL_set_min_proto_version(ssl: *mut SSL, version: u16);
     fn SSL_set_max_proto_version(ssl: *mut SSL, version: u16);

@@ -625,13 +625,6 @@ impl PktNumSpace {
                                                  std::usize::MAX);
     }
 
-    pub fn cipher(&self) -> crypto::Algorithm {
-        match self.crypto_open {
-            Some(ref v) => v.alg(),
-            None => crypto::Algorithm::Null,
-        }
-    }
-
     pub fn overhead(&self) -> usize {
         self.crypto_seal.as_ref().unwrap().alg().tag_len()
     }
