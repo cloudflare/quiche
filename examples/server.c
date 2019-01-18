@@ -45,6 +45,11 @@
 
 #define LOCAL_CONN_ID_LEN 16
 
+#define MAX_TOKEN_LEN \
+    sizeof("quiche") - 1 + \
+    sizeof(struct sockaddr_storage) + \
+    QUICHE_MAX_CONN_ID_LEN
+
 struct connections {
     int sock;
 
@@ -108,7 +113,45 @@ static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
     ev_timer_again(loop, &conn_io->timer);
 }
 
-static struct conn_io *create_conn(void) {
+static void mint_token(const uint8_t *dcid, size_t dcid_len,
+                       struct sockaddr_storage *addr, socklen_t addr_len,
+                       uint8_t *token, size_t *token_len) {
+    memcpy(token, "quiche", sizeof("quiche") - 1);
+    memcpy(token + sizeof("quiche") - 1, addr, addr_len);
+    memcpy(token + sizeof("quiche") - 1 + addr_len, dcid, dcid_len);
+
+    *token_len = sizeof("quiche") - 1 + addr_len + dcid_len;
+}
+
+static bool validate_token(const uint8_t *token, size_t token_len,
+                           struct sockaddr_storage *addr, socklen_t addr_len,
+                           uint8_t *odcid, size_t *odcid_len) {
+    if ((token_len < sizeof("quiche") - 1) ||
+         memcmp(token, "quiche", sizeof("quiche") - 1)) {
+        return false;
+    }
+
+    token += sizeof("quiche") - 1;
+    token_len -= sizeof("quiche") - 1;
+
+    if ((token_len < addr_len) || memcmp(token, addr, addr_len)) {
+        return false;
+    }
+
+    token += addr_len;
+    token_len -= addr_len;
+
+    if (*odcid_len < token_len) {
+        return false;
+    }
+
+    memcpy(odcid, token, token_len);
+    *odcid_len = token_len;
+
+    return true;
+}
+
+static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
     struct conn_io *conn_io = malloc(sizeof(*conn_io));
     if (conn_io == NULL) {
         fprintf(stderr, "failed to allocate connection IO\n");
@@ -128,7 +171,7 @@ static struct conn_io *create_conn(void) {
     }
 
     quiche_conn *conn = quiche_accept(conn_io->cid, LOCAL_CONN_ID_LEN,
-                                      NULL, 0, config);
+                                      odcid, odcid_len, config);
     if (conn == NULL) {
         fprintf(stderr, "failed to create connection\n");
         return NULL;
@@ -181,8 +224,15 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         uint8_t dcid[QUICHE_MAX_CONN_ID_LEN];
         size_t dcid_len = sizeof(dcid);
 
+        uint8_t odcid[QUICHE_MAX_CONN_ID_LEN];
+        size_t odcid_len = sizeof(odcid);
+
+        uint8_t token[MAX_TOKEN_LEN];
+        size_t token_len = sizeof(token);
+
         int rc = quiche_header_info(buf, read, LOCAL_CONN_ID_LEN, &version,
-                                    &type, scid, &scid_len, dcid, &dcid_len);
+                                    &type, scid, &scid_len, dcid, &dcid_len,
+                                    token, &token_len);
         if (rc < 0) {
             fprintf(stderr, "failed to parse header: %d\n", rc);
             return;
@@ -216,7 +266,44 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 return;
             }
 
-            conn_io = create_conn();
+            if (token_len == 0) {
+                fprintf(stderr, "stateless retry\n");
+
+                mint_token(dcid, dcid_len, &peer_addr, peer_addr_len,
+                           token, &token_len);
+
+                ssize_t written = quiche_retry(scid, scid_len,
+                                               dcid, dcid_len,
+                                               dcid, dcid_len,
+                                               token, token_len,
+                                               out, sizeof(out));
+
+                if (written < 0) {
+                    fprintf(stderr, "failed to create retry packet: %ld\n",
+                            written);
+                    return;
+                }
+
+                ssize_t sent = sendto(conns->sock, out, written, 0,
+                                      (struct sockaddr *) &peer_addr,
+                                      peer_addr_len);
+                if (sent != written) {
+                    perror("failed to send");
+                    return;
+                }
+
+                fprintf(stderr, "sent %lu bytes\n", sent);
+                return;
+            }
+
+
+            if (!validate_token(token, token_len, &peer_addr, peer_addr_len,
+                               odcid, &odcid_len)) {
+                fprintf(stderr, "invalid address validation token\n");
+                return;
+            }
+
+            conn_io = create_conn(odcid, odcid_len);
             if (conn_io == NULL) {
                 return;
             }

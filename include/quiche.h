@@ -114,12 +114,13 @@ void quiche_config_set_initial_max_streams_bidi(quiche_config *config, uint16_t 
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 
-// Extracts version, type and destination connection ID from the packet
-// in |buf|.
+// Extracts version, type, source / destination connection ID and address
+// verification token from the packet in |buf|.
 int quiche_header_info(const uint8_t *buf, size_t buf_len, size_t dcil,
                        uint32_t *version, uint8_t *type,
                        uint8_t *scid, size_t *scid_len,
-                       uint8_t *dcid, size_t *dcid_len);
+                       uint8_t *dcid, size_t *dcid_len,
+                       uint8_t *token, size_t *token_len);
 
 // A QUIC connection.
 typedef struct Connection quiche_conn;
@@ -137,6 +138,13 @@ quiche_conn *quiche_connect(const char *server_name, const uint8_t *scid,
 ssize_t quiche_negotiate_version(const uint8_t *scid, size_t scid_len,
                                  const uint8_t *dcid, size_t dcid_len,
                                  uint8_t *out, size_t out_len);
+
+// Writes a retry packet.
+ssize_t quiche_retry(const uint8_t *scid, size_t scid_len,
+                     const uint8_t *dcid, size_t dcid_len,
+                     const uint8_t *new_scid, size_t new_scid_len,
+                     const uint8_t *token, size_t token_len,
+                     uint8_t *out, size_t out_len);
 
 quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
                                       const uint8_t *odcid, size_t odcid_len,

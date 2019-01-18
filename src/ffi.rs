@@ -140,7 +140,8 @@ pub extern fn quiche_config_free(config: *mut Config) {
 pub extern fn quiche_header_info(buf: *mut u8, buf_len: usize, dcil: usize,
                                  version: *mut u32, ty: *mut u8,
                                  scid: *mut u8, scid_len: *mut usize,
-                                 dcid: *mut u8, dcid_len: *mut usize) -> c_int {
+                                 dcid: *mut u8, dcid_len: *mut usize,
+                                 token: *mut u8, token_len: *mut usize) -> c_int {
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
     let hdr = match Header::from_slice(buf, dcil) {
         Ok(h) => h,
@@ -179,6 +180,22 @@ pub extern fn quiche_header_info(buf: *mut u8, buf_len: usize, dcil: usize,
         dcid.copy_from_slice(&hdr.dcid);
 
         *dcid_len = hdr.dcid.len();
+
+        match hdr.token {
+            Some(tok) => {
+                if *token_len < tok.len() {
+                    return -1;
+                }
+
+                let token = slice::from_raw_parts_mut(token, *token_len);
+                let token = &mut token[..tok.len()];
+                token.copy_from_slice(&tok);
+
+                *token_len = tok.len();
+            },
+
+            None => *token_len = 0,
+        }
     }
 
     0
@@ -190,7 +207,7 @@ pub extern fn quiche_accept(scid: *const u8, scid_len: usize,
                             config: &mut Config) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
 
-    let odcid = if !odcid.is_null() {
+    let odcid = if !odcid.is_null() || odcid_len == 0 {
         Some(unsafe { slice::from_raw_parts(odcid, odcid_len) })
     } else {
         None
@@ -238,13 +255,32 @@ pub extern fn quiche_negotiate_version(scid: *const u8, scid_len: usize,
 }
 
 #[no_mangle]
+pub extern fn quiche_retry(scid: *const u8, scid_len: usize,
+                           dcid: *const u8, dcid_len: usize,
+                           new_scid: *const u8, new_scid_len: usize,
+                           token: *const u8, token_len: usize,
+                           out: *mut u8, out_len: usize) -> ssize_t {
+    let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
+    let dcid = unsafe { slice::from_raw_parts(dcid, dcid_len) };
+    let new_scid = unsafe { slice::from_raw_parts(new_scid, new_scid_len) };
+    let token = unsafe { slice::from_raw_parts(token, token_len) };
+    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+
+    match retry(scid, dcid, new_scid, token, out) {
+        Ok(v) => v as ssize_t,
+
+        Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_new_with_tls(scid: *const u8, scid_len: usize,
                                        odcid: *const u8, odcid_len: usize,
                                        config: &mut Config, ssl: *mut c_void,
                                        is_server: bool) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
 
-    let odcid = if !odcid.is_null() {
+    let odcid = if !odcid.is_null() || odcid_len == 0 {
         Some(unsafe { slice::from_raw_parts(odcid, odcid_len) })
     } else {
         None
