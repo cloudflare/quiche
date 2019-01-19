@@ -117,6 +117,11 @@ pub extern fn quiche_config_set_idle_timeout(config: &mut Config, v: u64) {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_max_packet_size(config: &mut Config, v: u64) {
+    config.set_max_packet_size(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_set_initial_max_stream_data_bidi_local(config: &mut Config, v: u64) {
     config.set_initial_max_stream_data_bidi_local(v);
 }

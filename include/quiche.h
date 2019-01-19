@@ -107,6 +107,9 @@ void quiche_config_log_keys(quiche_config *config);
 // Sets the `idle_timeout` transport parameter.
 void quiche_config_set_idle_timeout(quiche_config *config, uint64_t v);
 
+// Sets the `max_packet_size` transport parameter.
+void quiche_config_set_max_packet_size(quiche_config *config, uint64_t v);
+
 // Sets the `initial_max_stream_data_bidi_local` transport parameter.
 void quiche_config_set_initial_max_stream_data_bidi_local(quiche_config *config, uint64_t v);
 
