@@ -224,6 +224,7 @@ impl RecvBuf {
         buf.off == self.off
     }
 
+    #[allow(dead_code)]
     fn len(&self) -> usize {
         self.len
     }
@@ -326,6 +327,7 @@ impl SendBuf {
         }
     }
 
+    #[allow(dead_code)]
     fn len(&self) -> usize {
         self.len
     }
