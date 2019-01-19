@@ -32,6 +32,9 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+#include <stdbool.h>
+
 #define QUICHE_VERSION_DRAFT17 0xff000011
 
 #define QUICHE_MAX_CONN_ID_LEN 18
