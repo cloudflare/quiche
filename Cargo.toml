@@ -1,9 +1,15 @@
 [package]
 name = "quiche"
-version = "0.1.0"
+version = "0.1.0-alpha1"
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
 edition = "2018"
 build = "src/build.rs"
+description = "🥧 Savoury implementation of the QUIC transport protocol"
+repository = "https://github.com/ghedo/quiche"
+readme = "README.rst"
+keywords = ["quic"]
+categories = [ "network-programming" ]
+license = "BSD-2-Clause"
 
 [build-dependencies]
 cmake = "0"
