@@ -25,10 +25,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#ifndef QUICHE_H
+#define QUICHE_H
+
 #if defined(__cplusplus)
 extern "C" {
 #endif
-
 
 #define QUICHE_VERSION_DRAFT17 0xff000011
 
@@ -234,3 +236,5 @@ void quiche_conn_free(quiche_conn *conn);
 #if defined(__cplusplus)
 }  // extern C
 #endif
+
+#endif // QUICHE_H
