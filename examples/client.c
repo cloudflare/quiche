@@ -253,7 +253,7 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    quiche_conn *conn = quiche_connect(host, (const uint8_t *) &scid,
+    quiche_conn *conn = quiche_connect(host, (const uint8_t *) scid,
                                        sizeof(scid), config);
     if (conn == NULL) {
         fprintf(stderr, "failed to create connection\n");
