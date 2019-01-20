@@ -106,11 +106,6 @@ static QUICHE_STREAM_METHOD: SSL_QUIC_METHOD = SSL_QUIC_METHOD {
     send_alert,
 };
 
-const SSL_OP_NO_TICKET: u32 = 0x0000_4000;
-const SSL_OP_NO_TLSV1: u32 = 0x0400_0000;
-const SSL_OP_NO_TLSV1_1: u32 = 0x1000_0000;
-const SSL_OP_NO_TLSV1_2: u32 = 0x0800_0000;
-
 pub struct Context(*mut SSL_CTX);
 
 impl Context {
@@ -118,11 +113,6 @@ impl Context {
     pub fn new() -> Result<Context> {
         unsafe {
             let ctx = SSL_CTX_new(TLS_method());
-
-            SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET |
-                                     SSL_OP_NO_TLSV1 |
-                                     SSL_OP_NO_TLSV1_1 |
-                                     SSL_OP_NO_TLSV1_2);
 
             map_result(SSL_CTX_set_default_verify_paths(ctx))?;
 
@@ -571,8 +561,6 @@ extern {
     // SSL_CTX
     fn SSL_CTX_new(method: *const SSL_METHOD) -> *mut SSL_CTX;
     fn SSL_CTX_free(ctx: *mut SSL_CTX);
-
-    fn SSL_CTX_set_options(ctx: *mut SSL_CTX, options: c_uint) -> c_uint;
 
     fn SSL_CTX_use_certificate_chain_file(ctx: *mut SSL_CTX,
         file: *const c_char) -> c_int;
