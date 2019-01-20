@@ -913,11 +913,15 @@ impl Connection {
 
                     // Feed crypto data to the TLS state, if there's data
                     // available at the expected offset.
-                    if space.crypto_stream.readable() {
-                        let buf = space.crypto_stream.recv_pop(std::usize::MAX)?;
-                        let level = space.crypto_level;
+                    let mut crypto_buf: [u8; 512] = [0; 512];
 
-                        self.tls_state.provide_data(level, &buf)
+                    let level = space.crypto_level;
+
+                    while let Ok((read, _)) =
+                            space.crypto_stream.recv_pop(&mut crypto_buf) {
+
+                        let recv_buf = &crypto_buf[..read];
+                        self.tls_state.provide_data(level, &recv_buf)
                                       .map_err(|_| Error::TlsFail)?;
                     }
 
@@ -1487,15 +1491,18 @@ impl Connection {
         Ok(written)
     }
 
-    /// Reads contiguous data from a stream.
+    /// Reads contiguous data from a stream into the provided slice.
     ///
-    /// The returned buffer will contain at most `max_len` bytes.
+    /// The slice must be sized by the caller and will be populated up to its capacity.
     ///
-    /// On success the stream data is returned, or [`Done`] if there is no data
-    /// to read.
+    /// On success the amount of bytes read and a flag indicating the fin state is returned as a
+    /// tuple, or [`Done`] if there is no data to read.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
-    pub fn stream_recv(&mut self, stream_id: u64, max_len: usize) -> Result<RangeBuf> {
+    pub fn stream_recv(&mut self, stream_id: u64, out: &mut [u8])
+                                                            -> Result<(usize, bool)> {
+        // TODO: test !is_bidi && is_local
+
         let stream = match self.streams.get_mut(&stream_id) {
             Some(v) => v,
             None => return Err(Error::InvalidStreamState),
@@ -1505,11 +1512,11 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let buf = stream.recv_pop(max_len)?;
+        let (read, fin) = stream.recv_pop(out)?;
 
-        self.new_max_rx_data = self.max_rx_data + buf.len();
+        self.new_max_rx_data = self.max_rx_data + read;
 
-        Ok(buf)
+        Ok((read, fin))
     }
 
     /// Writes data to a stream.
@@ -2176,7 +2183,6 @@ mod tests {
     }
 }
 
-pub use crate::stream::RangeBuf;
 pub use crate::stream::Readable;
 pub use crate::packet::Header;
 pub use crate::packet::Type;

@@ -180,16 +180,20 @@ fn main() {
 
         let streams: Vec<u64> = conn.readable().collect();
         for s in streams {
-            let data = conn.stream_recv(s, std::usize::MAX).unwrap();
+            while let Ok((read, fin)) = conn.stream_recv(s, &mut buf) {
+                debug!("{} received {} bytes", conn.trace_id(), read);
 
-            debug!("{} stream {} has {} bytes (fin? {})",
-                   conn.trace_id(), s, data.len(), data.fin());
+                let stream_buf = &buf[..read];
 
-            print!("{}", unsafe { std::str::from_utf8_unchecked(&data) });
+                debug!("{} stream {} has {} bytes (fin? {})",
+                       conn.trace_id(), s, stream_buf.len(), fin);
 
-            if s == HTTP_REQ_STREAM_ID && data.fin() {
-                info!("{} response received, closing..,", conn.trace_id());
-                conn.close(true, 0x00, b"kthxbye").unwrap();
+                print!("{}", unsafe { std::str::from_utf8_unchecked(&stream_buf) });
+
+                if s == HTTP_REQ_STREAM_ID && fin {
+                    info!("{} response received, closing..,", conn.trace_id());
+                    conn.close(true, 0x00, b"kthxbye").unwrap();
+                }
             }
         }
 
