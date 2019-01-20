@@ -194,9 +194,8 @@ impl Config {
     }
 
     /// Sets the `stateless_reset_token` transport parameter.
-    pub fn set_stateless_reset_token(&mut self, v: [u8; 16]) {
-        self.local_transport_params.stateless_reset_token = v;
-        self.local_transport_params.stateless_reset_token_present = true;
+    pub fn set_stateless_reset_token(&mut self, v: &[u8; 16]) {
+        self.local_transport_params.stateless_reset_token = Some(v.to_vec());
     }
 
     /// Sets the `max_packet_size transport` parameter.
@@ -1649,8 +1648,7 @@ impl Connection {
 struct TransportParams {
     pub original_connection_id: Option<Vec<u8>>,
     pub idle_timeout: u64,
-    pub stateless_reset_token: [u8; 16],
-    pub stateless_reset_token_present: bool,
+    pub stateless_reset_token: Option<Vec<u8>>,
     pub max_packet_size: u64,
     pub initial_max_data: u64,
     pub initial_max_stream_data_bidi_local: u64,
@@ -1669,8 +1667,7 @@ impl Default for TransportParams {
         TransportParams {
             original_connection_id: None,
             idle_timeout: 0,
-            stateless_reset_token: [0; 16],
-            stateless_reset_token_present: false,
+            stateless_reset_token: None,
             max_packet_size: 65527,
             initial_max_data: 0,
             initial_max_stream_data_bidi_local: 0,
@@ -1727,9 +1724,7 @@ impl TransportParams {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    let token = val.get_bytes(16)?;
-                    tp.stateless_reset_token.copy_from_slice(token.as_ref());
-                    tp.stateless_reset_token_present = true;
+                    tp.stateless_reset_token = Some(val.get_bytes(16)?.to_vec());
                 },
 
                 0x0003 => {
@@ -1809,10 +1804,12 @@ impl TransportParams {
                 b.put_varint(tp.idle_timeout)?;
             }
 
-            if is_server && tp.stateless_reset_token_present {
-                b.put_u16(0x0002)?;
-                b.put_u16(tp.stateless_reset_token.len() as u16)?;
-                b.put_bytes(&tp.stateless_reset_token)?;
+            if let Some(ref token) = tp.stateless_reset_token {
+                if is_server {
+                    b.put_u16(0x0002)?;
+                    b.put_u16(token.len() as u16)?;
+                    b.put_bytes(&token)?;
+                }
             }
 
             if tp.max_packet_size != 0 {
@@ -1909,8 +1906,7 @@ mod tests {
         let tp = TransportParams {
             original_connection_id: None,
             idle_timeout: 30,
-            stateless_reset_token: [0xba; 16],
-            stateless_reset_token_present: true,
+            stateless_reset_token: Some(vec![0xba; 16]),
             max_packet_size: 23_421,
             initial_max_data: 424_645_563,
             initial_max_stream_data_bidi_local: 154_323_123,
