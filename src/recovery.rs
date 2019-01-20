@@ -43,7 +43,7 @@ const GRANULARITY: Duration = Duration::from_millis(1);
 const INITIAL_RTT: Duration = Duration::from_millis(100);
 
 // Congestion Control
-const MAX_DATAGRAM_SIZE: usize = 1460;
+const MAX_DATAGRAM_SIZE: usize = 1452;
 
 const INITIAL_WINDOW: usize = 10 * MAX_DATAGRAM_SIZE;
 const MINIMUM_WINDOW: usize = 2 * MAX_DATAGRAM_SIZE;

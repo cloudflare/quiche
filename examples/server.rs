@@ -37,6 +37,8 @@ use ring::rand::*;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
 
+const MAX_DATAGRAM_SIZE: usize = 1452;
+
 const USAGE: &str = "Usage: server [options]
 
 Options:
@@ -50,7 +52,7 @@ Options:
 
 fn main() {
     let mut buf = [0; 65535];
-    let mut out = [0; 1400];
+    let mut out = [0; MAX_DATAGRAM_SIZE];
 
     env_logger::init();
 
@@ -77,7 +79,7 @@ fn main() {
     config.load_priv_key_from_pem_file(args.get_str("--key")).unwrap();
 
     config.set_idle_timeout(30);
-    config.set_max_packet_size(1460);
+    config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
     config.set_initial_max_data(10_000_000);
     config.set_initial_max_stream_data_bidi_local(1_000_000);
     config.set_initial_max_stream_data_bidi_remote(1_000_000);

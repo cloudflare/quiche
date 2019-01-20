@@ -44,6 +44,8 @@
 
 #define LOCAL_CONN_ID_LEN 16
 
+#define MAX_DATAGRAM_SIZE 1452
+
 struct conn_io {
     ev_timer timer;
 
@@ -57,7 +59,7 @@ static void debug_log(const char *line, void *argp) {
 }
 
 static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
-    static uint8_t out[1400];
+    static uint8_t out[MAX_DATAGRAM_SIZE];
 
     while (1) {
         ssize_t written = quiche_conn_send(conn_io->conn, out, sizeof(out));
@@ -233,6 +235,7 @@ int main(int argc, char *argv[]) {
     }
 
     quiche_config_set_idle_timeout(config, 30);
+    quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);
     quiche_config_set_max_packet_size(config, 1460);
     quiche_config_set_initial_max_data(config, 10000000);
     quiche_config_set_initial_max_stream_data_bidi_local(config, 1000000);
