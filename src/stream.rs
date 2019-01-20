@@ -273,6 +273,8 @@ impl SendBuf {
 
     fn pop(&mut self, max_len: usize, max_off: usize) -> Result<RangeBuf> {
         let mut out = RangeBuf::default();
+        out.data = Vec::with_capacity(cmp::min(max_len, self.len()));
+
         let mut out_len = max_len;
         let mut out_off = self.data
                               .peek()
@@ -309,7 +311,7 @@ impl SendBuf {
 
             out.fin = out.fin || buf.fin();
 
-            out.data.append(&mut buf.data);
+            out.data.extend_from_slice(&buf.data);
         }
 
         Ok(out)
