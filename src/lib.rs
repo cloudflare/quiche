@@ -45,6 +45,9 @@ use std::collections::HashMap;
 /// The current QUIC wire version.
 pub const VERSION_DRAFT17: u32 = 0xff00_0011;
 
+/// The maximum length of a connection ID.
+pub const MAX_CONN_ID_LEN: usize = 18;
+
 const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 
 const PAYLOAD_MIN_LEN: usize = 4;

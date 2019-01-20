@@ -35,8 +35,10 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
+// The current QUIC wire version.
 #define QUICHE_VERSION_DRAFT17 0xff000011
 
+// The maximum length of a connection ID.
 #define QUICHE_MAX_CONN_ID_LEN 18
 
 enum quiche_error {
