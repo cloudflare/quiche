@@ -83,7 +83,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     config.load_cert_chain_from_pem_file(args.get_str("--cert"))?;
     config.load_priv_key_from_pem_file(args.get_str("--key"))?;
 
-    config.set_application_protos(&[b"h3-17", b"hq-17", b"http/0.9"])?;
+    config.set_application_protos(&[b"h3-17", b"hq-17", b"http/0.9", b"http/1.1"])?;
 
     config.set_idle_timeout(30);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
@@ -280,42 +280,127 @@ fn main() -> Result<(), Box<std::error::Error>> {
     }
 }
 
+fn handle_error(conn: &mut quiche::Connection, stream: u64, err: u16, msg: &str,
+                use_http09: bool) {
+    if use_http09 {
+        return;
+    }
+
+    let header =
+        format!(concat!("HTTP/1.1 {} {}\r\n",
+                        "Server: quiche-rust\r\n",
+                        "Content-Length: 0\r\n",
+                        "\r\n"),
+                err, msg);
+
+    conn.stream_send(stream, header.as_bytes(), true).unwrap();
+}
+
 fn handle_stream(
-    conn: &mut quiche::Connection, stream: u64, buf: &[u8], root: &str,
+        conn: &mut quiche::Connection, stream: u64, buf: &[u8], root: &str,
 ) {
-    if buf.len() > 4 && &buf[..4] == b"GET " {
-        let uri = &buf[4..buf.len()];
-        let uri = String::from_utf8(uri.to_vec()).unwrap();
-        let uri = String::from(uri.lines().next().unwrap());
-        let uri = std::path::Path::new(&uri);
-        let mut path = std::path::PathBuf::from(root);
+    let headers = String::from_utf8(buf.to_vec()).unwrap();
+    let mut lines = headers.lines();
+    let line = String::from(lines.next().unwrap());
+    let mut use_http09 = false;
 
-        for c in uri.components() {
-            if let std::path::Component::Normal(v) = c {
-                path.push(v)
-            }
+    let mut request_parts = line.split_whitespace();
+
+    let method = request_parts.next();
+    let mut uri = request_parts.next();
+    let protocol = request_parts.next();
+
+    if protocol.is_none() {
+        use_http09 = true;
+    } else if protocol != Some("HTTP/1.0") &&
+              protocol != Some("HTTP/1.1") {
+        info!("{} request on stream {} had incorrect version",
+              conn.trace_id(), stream);
+
+        handle_error(conn, stream, 400, "Bad Request", false);
+
+        return;
+    }
+
+    if method.is_none() || method != Some("GET") {
+
+        info!("{} request method on stream {} is not: GET",
+              conn.trace_id(), stream);
+
+        handle_error(conn, stream, 405, "Method Not Allowed", use_http09);
+
+        return;
+    }
+
+    if uri.is_none() {
+        info!("{} request on stream {} contained no path",
+              conn.trace_id(), stream);
+
+        handle_error(conn, stream, 400, "Bad Request", false);
+
+        return;
+    }
+
+    if uri == Some("/") {
+        uri = Some("/index.html");
+    }
+
+    if root.len() + 1 + uri.unwrap().len() > 256 {
+        info!("{} request on stream {} URI is too long",
+              conn.trace_id(), stream);
+
+        handle_error(conn, stream, 414, "Request-URI Too Long", use_http09);
+
+        return;
+    }
+
+    info!(
+        "{} got GET request for {:?} on stream {}",
+        conn.trace_id(),
+        uri,
+        stream
+    );
+
+    let uri = String::from(uri.unwrap());
+    let uri = std::path::Path::new(&uri);
+
+    let mut path = std::path::PathBuf::from(root);
+    for c in uri.components() {
+        if let std::path::Component::Normal(v) = c {
+            path.push(v)
         }
+    }
 
-        info!(
-            "{} got GET request for {:?} on stream {}",
-            conn.trace_id(),
-            path,
-            stream
-        );
+    let data = std::fs::read_to_string(path);
+    if data.is_err() {
+        handle_error(conn, stream, 404, "Not Found", use_http09);
+        return;
+    }
+    let data = data.unwrap();
 
-        let data = std::fs::read(path.as_path())
-            .unwrap_or_else(|_| Vec::from(String::from("Not Found!\r\n")));
+    if !use_http09 {
+        let header =
+            format!(concat!("HTTP/1.1 200 OK\r\n",
+                            "Server: quiche-rust\r\n",
+                            "Content-Length: {}\r\n",
+                            "\r\n"),
+                    data.len());
 
-        info!(
-            "{} sending response of size {} on stream {}",
-            conn.trace_id(),
-            data.len(),
-            stream
-        );
+        info!("{} sending response headers of size {} on stream {}",
+              conn.trace_id(), data.len(), stream);
 
-        if let Err(e) = conn.stream_send(stream, &data, true) {
-            error!("{} stream send failed {:?}", conn.trace_id(), e);
+        if let Err(e) = conn.stream_send(stream, header.as_bytes(), false) {
+            error!("{} stream send response headers failed {:?}", conn.trace_id(), e);
+
+            return;
         }
+    }
+
+    info!("{} sending response body of size {} on stream {}",
+          conn.trace_id(), data.len(), stream);
+
+    if let Err(e) = conn.stream_send(stream, data.as_bytes(), true) {
+        error!("{} stream send response body failed {:?}", conn.trace_id(), e);
     }
 }
 

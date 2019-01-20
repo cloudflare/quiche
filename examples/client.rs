@@ -41,7 +41,8 @@ const USAGE: &str = "Usage:
   client -h | --help
 
 Options:
-  --http1                 Send HTTP/1.1 request instead of HTTP/0.9.
+  -h --help               Show this screen.
+  --http09                Use HTTP/0.9 request format
   --wire-version VERSION  The version number to send to the server [default: babababa].
   --no-verify             Don't verify server's certificate.
   -h --help               Show this screen.
@@ -83,7 +84,11 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     config.verify_peer(true);
 
-    config.set_application_protos(&[b"hq-17", b"http/0.9"])?;
+    if args.get_bool("--http09") {
+        config.set_application_protos(&[b"hq-17", b"http/0.9"])?;
+    } else {
+        config.set_application_protos(&[b"hq-17", b"http/1.1"])?;
+    }
 
     config.set_idle_timeout(30);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
@@ -103,6 +108,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
     }
 
     let mut conn = quiche::connect(url.domain(), &scid, &mut config)?;
+
+    debug!("{} connecting to host: {}, scid: {}", conn.trace_id(), url.domain().unwrap(), hex_dump(&scid));
 
     let write = match conn.send(&mut out) {
         Ok(v) => v,
@@ -174,14 +181,14 @@ fn main() -> Result<(), Box<std::error::Error>> {
                 url.path()
             );
 
-            let req = if args.get_bool("--http1") {
-                format!(
-                    "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: quiche\r\n\r\n",
-                    url.path(),
-                    url.host().unwrap()
-                )
-            } else {
+            let req = if args.get_bool("--http09") {
                 format!("GET {}\r\n", url.path())
+            } else {
+                format!(concat!("GET {} HTTP/1.1\r\n",
+                                "Host: {}\r\n",
+                                "User-Agent: quiche-rust\r\n",
+                                "\r\n"),
+                        url.path(), url.host().unwrap())
             };
 
             conn.stream_send(HTTP_REQ_STREAM_ID, req.as_bytes(), true)?;
@@ -244,4 +251,12 @@ fn main() -> Result<(), Box<std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn hex_dump(buf: &[u8]) -> String {
+    let vec: Vec<String> = buf.iter()
+                              .map(|b| format!("{:02x}", b))
+                              .collect();
+
+    vec.join("")
 }

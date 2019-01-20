@@ -4,7 +4,7 @@ SOURCE_DIR = ../src
 BUILD_DIR = ../target/debug
 INCLUDE_DIR = ../include
 
-CFLAGS = -I. -Wall -pedantic -fsanitize=address
+CFLAGS = -I. -Wall -pedantic -fsanitize=address -O0 -g3
 
 ifeq ($(OS), Darwin)
 CFLAGS += -framework Security

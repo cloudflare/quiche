@@ -38,6 +38,8 @@
 #include <sys/socket.h>
 #include <netdb.h>
 
+#include <getopt.h>
+
 #include <ev.h>
 
 #include <quiche.h>
@@ -52,6 +54,12 @@ struct conn_io {
     int sock;
 
     quiche_conn *conn;
+
+    const char *host;
+    const char *port;
+    const char *path;
+
+    int use_http09;
 };
 
 static void debug_log(const char *line, void *argp) {
@@ -133,8 +141,21 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
     if (quiche_conn_is_established(conn_io->conn) && !req_sent) {
         fprintf(stderr, "connection established\n");
 
-        const static uint8_t r[] = "GET /index.html\r\n";
-        if (quiche_conn_stream_send(conn_io->conn, 4, r, sizeof(r), true) < 0) {
+        int req_len = conn_io->use_http09 ?
+            snprintf((char*)buf, sizeof(buf),
+                     "GET %s\r\n",
+                     conn_io->path) :
+            snprintf((char*)buf, sizeof(buf),
+                     "GET %s HTTP/1.1\r\n"
+                     "Host: %s%s%s\r\n"
+                     "User-Agent: quiche-c\r\n"
+                     "\r\n",
+                     conn_io->path ? conn_io->path : "/",
+                     conn_io->host,
+                     conn_io->port ? ":" : "",
+                     conn_io->port ? conn_io->port : "");
+
+        if (quiche_conn_stream_send(conn_io->conn, 4, buf, req_len, true) < 0) {
             fprintf(stderr, "failed to send HTTP request\n");
             return;
         }
@@ -198,9 +219,99 @@ static void timeout_cb(EV_P_ ev_timer *w, int revents) {
     }
 }
 
+static void usage(const char *argv0) {
+    printf(
+"Usage: %s [options]\n"
+"Options:\n"
+"  --host <HOST>             The server's hostname (required).\n"
+"  --port <PORT>             The server's port [default: 443].\n"
+"  --path <URLPATH>          The path to the object to be requested. [default: /].\n"
+"  --http09                  Use HTTP/0.9 request format.\n"
+"  --wire-version <VERSION>  The version number to send to the server [default: (0x)babababa]\n"
+"  --no-verify               Don't verify server's certificate.\n"
+"  --help                    Show this screen.\n",
+           argv0);
+}
+
+static long parse_version(const char *version) {
+    if (!version) {
+        return 0xbabababa;
+    }
+
+    long v = strtol(version, NULL, 0);
+    if ((v == 0) && ((errno == EINVAL) || (errno == ERANGE))) {
+        return 0xbabababa;
+    }
+
+    return v;
+}
+
 int main(int argc, char *argv[]) {
-    const char *host = argv[1];
-    const char *port = argv[2];
+    char *host = NULL;
+    char *port = NULL;
+    char *path = NULL;
+    char *version = NULL;
+    int use_http09 = 0;
+    int no_verify = 0;
+
+    int option_index = 0;
+    int o;
+
+    struct option long_options[] = {
+        { "host", required_argument, NULL, 'u' },
+        { "port", required_argument, NULL, 'p' },
+        { "path", required_argument, NULL, 'r' },
+        { "http09", no_argument, NULL, 't', },
+        { "wire-version", required_argument, NULL, 'w' },
+        { "no-verify", no_argument, NULL, 'v' },
+        { "help" , no_argument, NULL, 'h'},
+        { 0, 0, 0, 0}
+    };
+
+    char *optstring = "u:p:r:tw:v:h";
+
+    while (1) {
+        o = getopt_long_only(argc, argv, optstring, long_options, &option_index);
+        if (o == -1)
+            break;
+
+        switch (o) {
+        case 'u':
+            host = optarg;
+            break;
+
+        case 'p':
+            port = optarg;
+            break;
+
+        case 'r':
+            path = optarg;
+            break;
+
+        case 't':
+            use_http09 = 1;
+            break;
+
+        case 'w':
+            version = optarg;
+            break;
+
+        case 'v':
+            no_verify = 1;
+            break;
+
+        case 'h':
+        default:
+            usage(argv[0]);
+            return 1;
+        }
+    }
+
+    if (host == NULL) {
+        printf("Error: host required\n\n");
+        usage(argv[0]);
+        return 1;
+    }
 
     const struct addrinfo hints = {
         .ai_family = PF_UNSPEC,
@@ -208,10 +319,8 @@ int main(int argc, char *argv[]) {
         .ai_protocol = IPPROTO_UDP
     };
 
-    quiche_enable_debug_logging(debug_log, NULL);
-
     struct addrinfo *peer;
-    if (getaddrinfo(host, port, &hints, &peer) != 0) {
+    if (getaddrinfo(host, port ? port : "443", &hints, &peer) != 0) {
         perror("failed to resolve host");
         return -1;
     }
@@ -232,7 +341,9 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    quiche_config *config = quiche_config_new(0xbabababa);
+    quiche_enable_debug_logging(debug_log, NULL);
+
+    quiche_config *config = quiche_config_new(parse_version(version));
     if (config == NULL) {
         fprintf(stderr, "failed to create config\n");
         return -1;
@@ -247,6 +358,9 @@ int main(int argc, char *argv[]) {
     quiche_config_set_initial_max_streams_bidi(config, 100);
     quiche_config_set_initial_max_streams_uni(config, 100);
     quiche_config_set_disable_migration(config, true);
+    if (no_verify) {
+        quiche_config_verify_peer(config, false);
+    }
 
     uint8_t scid[LOCAL_CONN_ID_LEN];
     int rng = open("/dev/urandom", O_RDONLY);
@@ -276,6 +390,10 @@ int main(int argc, char *argv[]) {
 
     conn_io->sock = sock;
     conn_io->conn = conn;
+    conn_io->host = host;
+    conn_io->port = port;
+    conn_io->path = path;
+    conn_io->use_http09 = use_http09;
 
     ev_io watcher;
 
