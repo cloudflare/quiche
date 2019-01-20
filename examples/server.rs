@@ -123,9 +123,9 @@ fn main() {
 
             debug!("got {} bytes", len);
 
-            let buf = &mut buf[..len];
+            let pkt_buf = &mut buf[..len];
 
-            let hdr = match quiche::Header::from_slice(buf, LOCAL_CONN_ID_LEN) {
+            let hdr = match quiche::Header::from_slice(pkt_buf, LOCAL_CONN_ID_LEN) {
                 Ok(v) => v,
 
                 Err(e) => {
@@ -198,7 +198,7 @@ fn main() {
             };
 
             // Process potentially coalesced packets.
-            let read = match conn.recv(buf) {
+            let read = match conn.recv(pkt_buf) {
                 Ok(v)  => v,
 
                 Err(quiche::Error::Done) => {
@@ -217,7 +217,16 @@ fn main() {
 
             let streams: Vec<u64> = conn.readable().collect();
             for s in streams {
-                handle_stream(conn, s, args.get_str("--root"));
+                while let Ok((read, fin)) = conn.stream_recv(s, &mut buf) {
+                    debug!("{} received {} bytes", conn.trace_id(), read);
+
+                    let stream_buf = &buf[..read];
+
+                    debug!("{} stream {} has {} bytes (fin? {})",
+                           conn.trace_id(), s, stream_buf.len(), fin);
+
+                    handle_stream(conn, s, stream_buf, args.get_str("--root"));
+                }
             }
         }
 
@@ -258,21 +267,9 @@ fn main() {
     }
 }
 
-fn handle_stream(conn: &mut quiche::Connection, stream: u64, root: &str) {
-    let stream_data = match conn.stream_recv(stream, std::usize::MAX) {
-        Ok(v) => v,
-
-        Err(quiche::Error::Done) => return,
-
-        Err(e) => panic!("{} stream recv failed {:?}",
-                         conn.trace_id(), e),
-    };
-
-    info!("{} stream {} has {} bytes (fin? {})", conn.trace_id(),
-          stream, stream_data.len(), stream_data.fin());
-
-    if stream_data.len() > 4 && &stream_data[..4] == b"GET " {
-        let uri = &stream_data[4..stream_data.len()];
+fn handle_stream(conn: &mut quiche::Connection, stream: u64, buf: &[u8], root: &str) {
+    if buf.len() > 4 && &buf[..4] == b"GET " {
+        let uri = &buf[4..buf.len()];
         let uri = String::from_utf8(uri.to_vec()).unwrap();
         let uri = String::from(uri.lines().next().unwrap());
         let uri = std::path::Path::new(&uri);

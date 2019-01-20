@@ -336,19 +336,19 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             while (quiche_readable_next(iter, &s)) {
                 fprintf(stderr, "stream %zu is readable\n", s);
 
-                quiche_rangebuf *b = quiche_conn_stream_recv(conn_io->conn, s,
-                                                             SIZE_MAX);
-                if (b == NULL) {
+                bool fin = false;
+                ssize_t recv_len = quiche_conn_stream_recv(conn_io->conn, s,
+                                                           buf, sizeof(buf),
+                                                           &fin);
+                if (recv_len < 0) {
                     break;
                 }
 
-                if (quiche_rangebuf_fin(b)) {
+                if (fin) {
                     static const char *resp = "byez\n";
                     quiche_conn_stream_send(conn_io->conn, s, (uint8_t *) resp,
                                             5, true);
                 }
-
-                quiche_rangebuf_free(b);
             }
 
             quiche_readable_free(iter);

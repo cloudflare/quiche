@@ -152,24 +152,21 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         while (quiche_readable_next(iter, &s)) {
             fprintf(stderr, "stream %zu is readable\n", s);
 
-            quiche_rangebuf *b = quiche_conn_stream_recv(conn_io->conn, s,
-                                                         SIZE_MAX);
-            if (b == NULL) {
+            bool fin = false;
+            ssize_t recv_len = quiche_conn_stream_recv(conn_io->conn, s,
+                                                       buf, sizeof(buf),
+                                                       &fin);
+            if (recv_len < 0) {
                 break;
             }
 
-            const uint8_t *data = quiche_rangebuf_data(b);
-            size_t len = quiche_rangebuf_len(b);
+            printf("%.*s", (int) recv_len, buf);
 
-            printf("%.*s", (int) len, data);
-
-            if (quiche_rangebuf_fin(b)) {
+            if (fin) {
                 if (quiche_conn_close(conn_io->conn, true, 0, NULL, 0) < 0) {
                     fprintf(stderr, "failed to close connection\n");
                 }
             }
-
-            quiche_rangebuf_free(b);
         }
 
         quiche_readable_free(iter);

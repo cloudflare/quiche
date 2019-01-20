@@ -189,24 +189,12 @@ ssize_t quiche_conn_send(quiche_conn *conn, uint8_t *out, size_t out_len);
 typedef struct RangeBuf quiche_rangebuf;
 
 // Reads contiguous data from a stream.
-quiche_rangebuf *quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
-                                         size_t max_len);
+ssize_t quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
+                                uint8_t *out, size_t buf_len, bool *fin);
 
 // Writes data to a stream.
 ssize_t quiche_conn_stream_send(quiche_conn *conn, uint64_t stream_id,
                                 const uint8_t *buf, size_t buf_len, bool fin);
-
-// Returns the data of the buffer.
-const uint8_t *quiche_rangebuf_data(quiche_rangebuf *b);
-
-// Returns the length of the buffer.
-size_t quiche_rangebuf_len(quiche_rangebuf *b);
-
-// Returns whether `self` holds the final offset in the stream.
-bool quiche_rangebuf_fin(quiche_rangebuf *b);
-
-// Frees the buffer object.
-void quiche_rangebuf_free(quiche_rangebuf *b);
 
 // An iterator over the streams that have outstanding data to read.
 typedef struct Readable quiche_readable;

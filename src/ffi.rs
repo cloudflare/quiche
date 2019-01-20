@@ -356,12 +356,20 @@ pub extern fn quiche_conn_send(conn: &mut Connection, out: *mut u8,
 
 #[no_mangle]
 pub extern fn quiche_conn_stream_recv(conn: &mut Connection, stream_id: u64,
-                                      max_len: usize) -> *const RangeBuf {
-    match conn.stream_recv(stream_id, max_len) {
-        Ok(b) => Box::into_raw(Box::new(b)),
+                                      out: *mut u8, out_len: usize, fin: &mut bool)
+                                                            -> ssize_t {
+    // TODO: limit out_len to MAX_SSIZE to allow the result to fit in ssize_t
+    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
-        Err(_) => ptr::null_mut(),
-    }
+    let (out_len, out_fin) = match conn.stream_recv(stream_id, out) {
+        Ok(v) => v,
+
+        Err(e) => return e.to_c(),
+    };
+
+    *fin = out_fin;
+
+    out_len as ssize_t
 }
 
 #[no_mangle]
@@ -375,26 +383,6 @@ pub extern fn quiche_conn_stream_send(conn: &mut Connection, stream_id: u64,
 
         Err(e) => e.to_c(),
     }
-}
-
-#[no_mangle]
-pub extern fn quiche_rangebuf_data(b: &mut RangeBuf) -> *const u8 {
-    (&b).as_ptr()
-}
-
-#[no_mangle]
-pub extern fn quiche_rangebuf_len(b: &mut RangeBuf) -> usize {
-    b.len()
-}
-
-#[no_mangle]
-pub extern fn quiche_rangebuf_fin(b: &mut RangeBuf) -> bool {
-    b.fin()
-}
-
-#[no_mangle]
-pub extern fn quiche_rangebuf_free(b: *mut RangeBuf) {
-    unsafe { Box::from_raw(b) };
 }
 
 #[no_mangle]
