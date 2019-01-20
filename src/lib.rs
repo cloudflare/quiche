@@ -325,7 +325,7 @@ pub struct Connection {
 /// client sent before a stateless retry (this is only required when using
 /// the [`retry()`] function).
 ///
-/// [`retry()`]: /fn.accept.html
+/// [`retry()`]: fn.retry.html
 pub fn accept(scid: &[u8], odcid: Option<&[u8]>, config: &mut Config) -> Result<Box<Connection>> {
     let conn = Connection::new(scid, odcid, config, true)?;
 
