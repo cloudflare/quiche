@@ -1,8 +1,8 @@
 quiche
 ======
 
-.. image:: https://travis-ci.org/ghedo/quiche.svg
-  :target: https://travis-ci.org/ghedo/quiche
+.. image:: https://travis-ci.com/cloudflare/quiche.svg
+  :target: https://travis-ci.com/cloudflare/quiche
 
 quiche_ is an implementation of the QUIC transport protocol as specified by
 the IETF_. It provides a low level API for processing QUIC packets and
@@ -15,7 +15,7 @@ to be used for experimentation.
 Note that it is very experimental and unstable software, and many features are
 still in development.
 
-.. _quiche: https://ghedo.github.io/quiche
+.. _quiche: https://docs.quic.tech/quiche/
 .. _ietf: https://quicwg.org/
 
 Status
@@ -75,4 +75,4 @@ Copyright (C) 2018, Alessandro Ghedini
 
 See COPYING_ for the license.
 
-.. _COPYING: https://github.com/ghedo/quiche/tree/master/COPYING
+.. _COPYING: https://github.com/cloudflare/quiche/tree/master/COPYING
