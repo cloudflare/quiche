@@ -85,6 +85,9 @@ pub struct InFlight {
     pub sent: BTreeMap<u64, Sent>,
     pub lost: Vec<frame::Frame>,
     pub acked: Vec<frame::Frame>,
+
+    pub total_sent_pkts: usize,
+    pub total_lost_pkts: usize,
 }
 
 impl Default for InFlight {
@@ -93,6 +96,9 @@ impl Default for InFlight {
             sent: BTreeMap::new(),
             lost: Vec::new(),
             acked: Vec::new(),
+
+            total_sent_pkts: 0,
+            total_lost_pkts: 0,
         }
     }
 }
@@ -116,6 +122,8 @@ impl InFlight {
             self.lost.append(&mut p.frames);
         }
 
+        self.total_lost_pkts += self.sent.len();
+
         self.sent.clear();
 
         unacked_bytes
@@ -132,6 +140,8 @@ impl InFlight {
                 crypto_unacked_bytes += p.size;
             }
         }
+
+        self.total_lost_pkts += self.sent.len();
 
         self.sent.clear();
 
@@ -236,6 +246,8 @@ impl Recovery {
         self.largest_sent_pkt = pkt_num;
 
         flight.sent.insert(pkt_num, pkt);
+
+        flight.total_sent_pkts += 1;
 
         if ack_eliciting {
             if is_crypto {
@@ -345,6 +357,16 @@ impl Recovery {
         }
 
         self.cwnd - self.bytes_in_flight
+    }
+
+    pub fn rtt(&self) -> Duration {
+        let zero = Duration::new(0, 0);
+
+        if self.smoothed_rtt == zero {
+            return INITIAL_RTT;
+        }
+
+        self.smoothed_rtt
     }
 
     fn update_rtt(&mut self, latest_rtt: Duration, ack_delay: Duration) {
@@ -501,6 +523,8 @@ impl Recovery {
 
         for lost in lost_pkt {
             let mut p = flight.sent.remove(&lost).unwrap();
+
+            flight.total_lost_pkts += 1;
 
             if !p.ack_eliciting {
                 continue;

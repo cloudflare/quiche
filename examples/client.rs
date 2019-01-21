@@ -155,7 +155,7 @@ fn main() {
         }
 
         if conn.is_closed() {
-            debug!("{} connection closed", conn.trace_id());
+            debug!("{} connection closed, {:?}", conn.trace_id(), conn.stats());
             break;
         }
 
@@ -211,7 +211,7 @@ fn main() {
         }
 
         if conn.is_closed() {
-            debug!("{} connection closed", conn.trace_id());
+            debug!("{} connection closed, {:?}", conn.trace_id(), conn.stats());
             break;
         }
     }

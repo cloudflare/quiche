@@ -1542,6 +1542,21 @@ impl Connection {
         self.closed
     }
 
+    /// Collects and returns statistics about the connection.
+    pub fn stats(&self) -> Stats {
+        Stats {
+            sent_pkts: self.initial.flight.total_sent_pkts +
+                       self.handshake.flight.total_sent_pkts +
+                       self.application.flight.total_sent_pkts,
+
+            lost_pkts: self.initial.flight.total_lost_pkts +
+                       self.handshake.flight.total_lost_pkts +
+                       self.application.flight.total_lost_pkts,
+
+            rtt: self.recovery.rtt(),
+        }
+    }
+
     /// Continues the handshake.
     ///
     /// If the connection is already established, it does nothing.
@@ -1641,6 +1656,26 @@ impl Connection {
         self.initial.clear();
 
         trace!("{} dropped initial state", self.trace_id);
+    }
+}
+
+/// Statistics about the connection.
+#[derive(Clone)]
+pub struct Stats {
+    /// The number of QUIC packets sent on this connection.
+    pub sent_pkts: usize,
+
+    /// The number of QUIC packets that were lost.
+    pub lost_pkts: usize,
+
+    /// The estimated rounf-trip time of the connection.
+    pub rtt: time::Duration,
+}
+
+impl std::fmt::Debug for Stats {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "sent={} lost={} rtt={:?}",
+               self.sent_pkts, self.lost_pkts, self.rtt)
     }
 }
 

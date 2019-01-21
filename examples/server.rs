@@ -247,7 +247,7 @@ fn main() {
             debug!("Collecting garbage");
 
             if c.is_closed() {
-                debug!("{} connection collected", c.trace_id());
+                debug!("{} connection collected {:?}", c.trace_id(), c.stats());
             }
 
             !c.is_closed()
