@@ -25,6 +25,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::time;
+
 use crate::Result;
 use crate::Error;
 
@@ -577,6 +579,8 @@ pub fn retry(scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], out: &mut 
 pub struct PktNumSpace {
     pub largest_rx_pkt_num: u64,
 
+    pub largest_rx_pkt_time: time::Instant,
+
     pub next_pkt_num: u64,
 
     pub recv_pkt_need_ack: ranges::RangeSet,
@@ -599,6 +603,8 @@ impl PktNumSpace {
     pub fn new(crypto_level: crypto::Level) -> PktNumSpace {
         PktNumSpace {
             largest_rx_pkt_num: 0,
+
+            largest_rx_pkt_time: time::Instant::now(),
 
             next_pkt_num: 0,
 

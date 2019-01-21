@@ -724,8 +724,8 @@ impl Connection {
 
                 frame::Frame::ACK { ranges, ack_delay } => {
                     let ack_delay =
-                        ack_delay << self.peer_transport_params
-                                         .ack_delay_exponent;
+                        ack_delay * 2_u64.pow(self.peer_transport_params
+                                                  .ack_delay_exponent as u32);
 
                     self.recovery.on_ack_received(&ranges, ack_delay,
                                                   &mut space.flight,
@@ -961,6 +961,12 @@ impl Connection {
             }
         }
 
+        // We only record the time of arrival of the largest packet number
+        // that still needs to be ACK'd, to be used for ACK delay calculation.
+        if space.recv_pkt_need_ack.largest() < Some(pn) {
+            space.largest_rx_pkt_time = now;
+        }
+
         space.recv_pkt_num.insert(pn);
 
         space.recv_pkt_need_ack.push_item(pn);
@@ -1089,8 +1095,17 @@ impl Connection {
 
         // Create ACK frame.
         if space.do_ack {
+            let ack_delay = space.largest_rx_pkt_time.elapsed();
+
+            let ack_delay = ack_delay.as_secs() * 1_000_000 +
+                            u64::from(ack_delay.subsec_micros());
+
+            let ack_delay = 
+                ack_delay / 2_u64.pow(self.local_transport_params
+                                          .ack_delay_exponent as u32);
+
             let frame = frame::Frame::ACK {
-                ack_delay: 0,
+                ack_delay,
                 ranges: space.recv_pkt_need_ack.clone(),
             };
 
