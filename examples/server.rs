@@ -213,7 +213,6 @@ fn main() {
 
             let streams: Vec<u64> = conn.readable().collect();
             for s in streams {
-                info!("{} stream {} is readable", conn.trace_id(), s);
                 handle_stream(conn, s, args.get_str("--root"));
             }
         }
@@ -247,7 +246,7 @@ fn main() {
             debug!("Collecting garbage");
 
             if c.is_closed() {
-                debug!("{} connection collected {:?}", c.trace_id(), c.stats());
+                info!("{} connection collected {:?}", c.trace_id(), c.stats());
             }
 
             !c.is_closed()

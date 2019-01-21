@@ -155,7 +155,7 @@ fn main() {
         }
 
         if conn.is_closed() {
-            debug!("{} connection closed, {:?}", conn.trace_id(), conn.stats());
+            info!("{} connection closed, {:?}", conn.trace_id(), conn.stats());
             break;
         }
 
@@ -178,12 +178,13 @@ fn main() {
         for s in streams {
             let data = conn.stream_recv(s, std::usize::MAX).unwrap();
 
-            info!("{} stream {} has {} bytes (fin? {})",
-                  conn.trace_id(), s, data.len(), data.fin());
+            debug!("{} stream {} has {} bytes (fin? {})",
+                   conn.trace_id(), s, data.len(), data.fin());
 
             print!("{}", unsafe { std::str::from_utf8_unchecked(&data) });
 
             if s == HTTP_REQ_STREAM_ID && data.fin() {
+                info!("{} response received, closing..,", conn.trace_id());
                 conn.close(true, 0x00, b"kthxbye").unwrap();
             }
         }
@@ -211,7 +212,7 @@ fn main() {
         }
 
         if conn.is_closed() {
-            debug!("{} connection closed, {:?}", conn.trace_id(), conn.stats());
+            info!("{} connection closed, {:?}", conn.trace_id(), conn.stats());
             break;
         }
     }
