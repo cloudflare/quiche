@@ -372,13 +372,15 @@ impl Recovery {
     fn update_rtt(&mut self, latest_rtt: Duration, ack_delay: Duration) {
         let zero = Duration::new(0, 0);
 
+        self.min_rtt = cmp::min(self.min_rtt, latest_rtt);
+
         let ack_delay = cmp::min(self.max_ack_delay, ack_delay);
 
-        self.min_rtt = cmp::min(self.min_rtt, self.latest_rtt);
-
-        if latest_rtt - self.min_rtt > ack_delay {
-            self.latest_rtt = latest_rtt - ack_delay;
-        }
+        self.latest_rtt = if latest_rtt - self.min_rtt > ack_delay {
+            latest_rtt - ack_delay
+        } else {
+            latest_rtt
+        };
 
         if self.smoothed_rtt == zero {
             self.rttvar = self.latest_rtt / 2;
