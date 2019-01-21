@@ -36,13 +36,15 @@ const MAX_DATAGRAM_SIZE: usize = 1452;
 
 const HTTP_REQ_STREAM_ID: u64 = 4;
 
-const USAGE: &str = "Usage: client [options] URL
+const USAGE: &str = "Usage:
+  client [options] URL
+  client -h | --help
 
 Options:
-  -h --help               Show this screen.
   --http1                 Send HTTP/1.1 request instead of HTTP/0.9.
   --wire-version VERSION  The version number to send to the server [default: babababa].
   --no-verify             Don't verify server's certificate.
+  -h --help               Show this screen.
 ";
 
 fn main() {

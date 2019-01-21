@@ -38,15 +38,17 @@ const LOCAL_CONN_ID_LEN: usize = 16;
 
 const MAX_DATAGRAM_SIZE: usize = 1452;
 
-const USAGE: &str = "Usage: server [options]
+const USAGE: &str = "Usage:
+  server [options]
+  server -h | --help
 
 Options:
-  -h --help         Show this screen.
   --listen <addr>   Listen on the given IP:port [default: 127.0.0.1:4433]
   --cert <file>     TLS certificate path [default: examples/cert.crt]
   --key <file>      TLS certificate key path [default: examples/cert.key]
   --root <dir>      Root directory [default: examples/root/]
   --name <str>      Name of the server [default: quic.tech]
+  -h --help               Show this screen.
 ";
 
 type ConnMap = HashMap<Vec<u8>, (net::SocketAddr, Box<quiche::Connection>)>;
