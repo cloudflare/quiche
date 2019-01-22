@@ -233,7 +233,7 @@ impl Seal {
 
 pub fn derive_initial_key_material(cid: &[u8], is_server: bool)
                                                     -> Result<(Open, Seal)> {
-    let mut secret: [u8; 32] =  unsafe { std::mem::uninitialized() };
+    let mut secret: [u8; 32] =  [0; 32];
 
     let aead = Algorithm::AES128_GCM;
 
@@ -334,7 +334,7 @@ fn hkdf_expand_label(prk: &hmac::SigningKey, label: &[u8],  out: &mut [u8])
                                                             -> Result<()> {
     const LABEL_PREFIX: &[u8] = b"tls13 ";
 
-    let mut info: [u8; 256] = unsafe { std::mem::uninitialized() };
+    let mut info: [u8; 24] = [0; 24];
 
     let info_len = {
         let mut b = octets::Octets::with_slice(&mut info);
