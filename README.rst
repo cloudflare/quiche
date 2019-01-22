@@ -44,7 +44,7 @@ configuration object:
 
 .. code-block:: rust
 
-   let config = quiche::Config::new(quiche::VERSION_DRAFT17);
+   let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
 
 This is shared among multiple connections and can be used to configure a QUIC
 endpoint.
@@ -55,10 +55,10 @@ function can be used, while ``quiche::accept()`` is for servers:
 .. code-block:: rust
 
    // Client connection.
-   let conn = quiche::connect("quic.tech", &scid, &mut config).unwrap();
+   let mut conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
 
    // Server connection.
-   let conn = quiche::connect("quic.tech", &scid, &mut config).unwrap();
+   let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 
 Using the connection's ``recv()`` method the application can process incoming
 packets from the network that belong to that connection:
