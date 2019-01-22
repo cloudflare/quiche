@@ -36,6 +36,116 @@ Status
 * [ ] Stateless reset
 * [ ] Connection migration
 
+Getting Started
+---------------
+
+The first step in establishing a QUIC connection with quiche, is creating a
+configuration object:
+
+.. code-block:: rust
+
+   let config = quiche::Config::new(quiche::VERSION_DRAFT17);
+
+This is shared among multiple connections and can be used to configure a QUIC
+endpoint.
+
+Now a connection can be created, for clients the ``quiche::connect()`` utility
+function can be used, while ``quiche::accept()`` is for servers:
+
+.. code-block:: rust
+
+   // Client connection.
+   let conn = quiche::connect("quic.tech", &scid, &mut config).unwrap();
+
+   // Server connection.
+   let conn = quiche::connect("quic.tech", &scid, &mut config).unwrap();
+
+Using the connection's ``recv()`` method the application can process incoming
+packets from the network that belong to that connection:
+
+.. code-block:: rust
+
+   let read = socket.recv(&mut buf).unwrap();
+
+   let read = match conn.recv(&mut buf[..read]) {
+       Ok(v)  => v,
+
+       Err(quiche::Error::Done) => {
+           // Done reading.
+       },
+
+       Err(e) => {
+           // An error occurred, handle it.
+       },
+   };
+
+Outgoing packet are generated using the connection's ``send()`` method instead:
+
+.. code-block:: rust
+
+   let write = match conn.send(&mut out) {
+       Ok(v) => v,
+
+       Err(quiche::Error::Done) => {
+           // Done writing.
+       },
+
+       Err(e) => {
+           // An error occurred, handle it.
+       },
+   };
+
+   socket.send(&out[..write]).unwrap();
+
+When packets are sent, the application is responsible for maintainig a timer
+to react to time-based connection events. The timer expiration can be obtained
+using the connection's ``timeout()`` method.
+
+.. code-block:: rust
+
+   let timeout = conn.timeout();
+   timer.set(timeout); // This needs to be implemented by the application.
+
+The application is responsible for providing a timer implementation, which can
+be specific to the operating system or networking framework used. When a timer
+expires, the connection's ``on_timeout()`` method should be called, after which
+additional packets might need to be sent on the network:
+
+.. code-block:: rust
+
+   // Timeout expired, do something.
+   conn.on_timeout();
+
+   // Send additional packets on the network.
+   let write = match conn.send(&mut out) {
+       Ok(v) => v,
+
+       Err(quiche::Error::Done) => {
+           // Done writing.
+       },
+
+       Err(e) => {
+           // An error occurred, handle it.
+       },
+   };
+
+   socket.send(&out[..write]).unwrap();
+
+After some back and forth, the connection will complete its handshake and will
+be ready for sending or receiving application data:
+
+.. code-block:: rust
+
+   if conn.is_established() {
+       // Handshake completed, send some data on steadm 0.
+       conn.stream_send(0, b"hello", true);
+   }
+
+Have a look at the examples_ directory for more complete examples
+on how to use the quiche API (both from Rust and from C via its FFI API).
+
+.. _examples: examples/
+
 Building
 --------
 
