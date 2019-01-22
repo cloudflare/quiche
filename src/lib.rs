@@ -711,7 +711,7 @@ impl Connection {
 
         // Process packet payload.
         while payload.cap() > 0 {
-            let frame = frame::Frame::from_bytes(&mut payload)?;
+            let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
 
             trace!("{} rx frm {:?}", self.trace_id, frame);
 
@@ -733,10 +733,6 @@ impl Connection {
                 },
 
                 frame::Frame::StopSending { stream_id, .. } => {
-                    if !self.handshake_completed {
-                        return Err(Error::InvalidState);
-                    }
-
                     // STOP_SENDING on a receive-only stream is a fatal error.
                     if !stream::is_local(stream_id, self.is_server) &&
                        !stream::is_bidi(stream_id) {
@@ -765,18 +761,10 @@ impl Connection {
 
                 // TODO: implement stateless retry
                 frame::Frame::NewToken { .. } => {
-                    if !self.handshake_completed {
-                        return Err(Error::InvalidState);
-                    }
-
                     do_ack = true;
                 },
 
                 frame::Frame::Stream { stream_id, data } => {
-                    if !self.handshake_completed {
-                        return Err(Error::InvalidState);
-                    }
-
                     // Peer can't send on our unidirectional streams.
                     if !stream::is_bidi(stream_id) &&
                         stream::is_local(stream_id, self.is_server) {
@@ -828,10 +816,6 @@ impl Connection {
                 },
 
                 frame::Frame::MaxData { max } => {
-                    if !self.handshake_completed {
-                        return Err(Error::InvalidState);
-                    }
-
                     self.max_tx_data = cmp::max(self.max_tx_data,
                                                 max as usize);
 
@@ -839,10 +823,6 @@ impl Connection {
                 },
 
                 frame::Frame::MaxStreamData { stream_id, max } => {
-                    if !self.handshake_completed {
-                        return Err(Error::InvalidState);
-                    }
-
                     let max_rx_data =
                         self.local_transport_params
                             .initial_max_stream_data_bidi_remote as usize;
@@ -882,10 +862,6 @@ impl Connection {
                 },
 
                 frame::Frame::MaxStreamsBidi { max } => {
-                    if !self.handshake_completed {
-                        return Err(Error::InvalidState);
-                    }
-
                     self.peer_max_streams_bidi =
                         cmp::max(self.peer_max_streams_bidi, max as usize);
 
@@ -893,10 +869,6 @@ impl Connection {
                 },
 
                 frame::Frame::MaxStreamsUni { max } => {
-                    if !self.handshake_completed {
-                        return Err(Error::InvalidState);
-                    }
-
                     self.peer_max_streams_uni =
                         cmp::max(self.peer_max_streams_uni, max as usize);
 
@@ -905,19 +877,11 @@ impl Connection {
 
                 // TODO: implement connection migration
                 frame::Frame::NewConnectionId { .. } => {
-                    if !self.handshake_completed {
-                        return Err(Error::InvalidState);
-                    }
-
                     do_ack = true;
                 },
 
                 // TODO: implement connection migration
                 frame::Frame::RetireConnectionId { .. } => {
-                    if !self.handshake_completed {
-                        return Err(Error::InvalidState);
-                    }
-
                     do_ack = true;
                 },
 
