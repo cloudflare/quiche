@@ -1,5 +1,4 @@
-quiche
-======
+.. image:: quiche.png
 
 .. image:: https://travis-ci.com/cloudflare/quiche.svg
   :target: https://travis-ci.com/cloudflare/quiche
