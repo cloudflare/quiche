@@ -42,6 +42,7 @@ use crate::Connection;
 use crate::TransportParams;
 
 use crate::crypto;
+use crate::octets;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -159,6 +160,26 @@ impl Context {
         }
     }
 
+    pub fn set_alpn(&mut self, v: &[Vec<u8>]) -> Result<()> {
+        let mut protos: Vec<u8> = Vec::new();
+
+        for proto in v {
+            protos.push(proto.len() as u8);
+            protos.append(&mut proto.clone());
+        }
+
+        // Configure ALPN for servers.
+        unsafe {
+            SSL_CTX_set_alpn_select_cb(self.as_ptr(), select_alpn,
+                                       ptr::null_mut());
+        }
+
+        // Configure ALPN for clients.
+        map_result_zero_is_success(unsafe {
+            SSL_CTX_set_alpn_protos(self.as_ptr(), protos.as_ptr(), protos.len())
+        })
+    }
+
     fn as_ptr(&self) -> *mut SSL_CTX {
         self.0
     }
@@ -270,17 +291,36 @@ impl Handshake {
         })
     }
 
-    pub fn get_quic_transport_params(&self) -> Result<&mut [u8]> {
-        let mut ptr: *mut u8 = ptr::null_mut();
+    pub fn get_quic_transport_params(&self) -> &[u8] {
+        let mut ptr: *const u8 = ptr::null();
         let mut len: usize = 0;
 
         unsafe {
             SSL_get_peer_quic_transport_params(self.as_ptr(),
                                                &mut ptr,
-                                               &mut len)
-        };
+                                               &mut len);
+        }
 
-        Ok(unsafe { slice::from_raw_parts_mut(ptr, len) })
+        if len == 0 {
+            return &mut [];
+        }
+
+        unsafe { slice::from_raw_parts(ptr, len) }
+    }
+
+    pub fn get_alpn_protocol(&self) -> &[u8] {
+        let mut ptr: *const u8 = ptr::null();
+        let mut len: u32 = 0;
+
+        unsafe {
+            SSL_get0_alpn_selected(self.as_ptr(), &mut ptr, &mut len);
+        }
+
+        if len == 0 {
+            return &mut [];
+        }
+
+        unsafe { slice::from_raw_parts(ptr, len as usize) }
     }
 
     pub fn provide_data(&self, level: crypto::Level, buf: &[u8]) -> Result<()> {
@@ -494,9 +534,57 @@ extern fn keylog(_: *mut SSL, line: *const c_char) {
     }
 }
 
+extern fn select_alpn(ssl: *mut SSL, out: *mut *const u8, out_len: *mut u8,
+                      inp: *mut u8, in_len: libc::c_uint, _arg: *mut c_void)
+                                                                    -> c_int {
+    let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
+        Some(v) => v,
+        None    => return 3, // SSL_TLSEXT_ERR_NOACK
+    };
+
+    trace!("{} alpn callback", conn.trace_id());
+
+    if conn.application_protos.is_empty() {
+        return 3; // SSL_TLSEXT_ERR_NOACK
+    }
+
+    let mut protos = octets::Octets::with_slice(unsafe {
+        slice::from_raw_parts_mut(inp, in_len as usize)
+    });
+
+    while let Ok(proto) = protos.get_bytes_with_u8_length() {
+        let found = conn.application_protos.iter().any(|expected| {
+            if expected.len() == proto.len() &&
+               expected.as_slice() == proto.as_ref() {
+                unsafe {
+                    *out = expected.as_slice().as_ptr();
+                    *out_len = expected.len() as u8;
+                }
+
+                return true;
+            }
+
+            false
+        });
+
+        if found {
+            return 0; // SSL_TLSEXT_ERR_OK
+        }
+    }
+
+    3 // SSL_TLSEXT_ERR_NOACK
+}
+
 fn map_result(bssl_result: c_int) -> Result<()> {
     match bssl_result {
         1 => Ok(()),
+        _ => Err(Error::TlsFail),
+    }
+}
+
+fn map_result_zero_is_success(bssl_result: c_int) -> Result<()> {
+    match bssl_result {
+        0 => Ok(()),
         _ => Err(Error::TlsFail),
     }
 }
@@ -581,6 +669,14 @@ extern {
     fn SSL_CTX_set_keylog_callback(ctx: *mut SSL_CTX,
         cb: extern fn(ssl: *mut SSL, line: *const c_char));
 
+    fn SSL_CTX_set_alpn_protos(ctx: *mut SSL_CTX, protos: *const u8,
+                               protos_len: usize) -> c_int;
+
+    fn SSL_CTX_set_alpn_select_cb(ctx: *mut SSL_CTX,
+        cb: extern fn(ssl: *mut SSL, out: *mut *const u8, out_len: *mut u8,
+                      inp: *mut u8, in_len: libc::c_uint, arg: *mut c_void)
+                      -> c_int, arg: *mut c_void);
+
     // SSL
     fn SSL_get_ex_new_index(argl: libc::c_long, argp: *const c_void,
         unused: *const c_void, dup_unused: *const c_void,
@@ -614,7 +710,10 @@ extern {
         quic_method: *const SSL_QUIC_METHOD) -> c_int;
 
     fn SSL_get_peer_quic_transport_params(ssl: *mut SSL,
-        out_params: *mut *mut u8, out_params_len: *mut usize);
+        out_params: *mut *const u8, out_params_len: *mut usize);
+
+    fn SSL_get0_alpn_selected(ssl: *mut SSL,
+        out: *mut *const u8, out_len: *mut u32);
 
     fn SSL_provide_quic_data(ssl: *mut SSL, level: crypto::Level,
         data: *const u8, len: usize) -> c_int;

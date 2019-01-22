@@ -140,6 +140,8 @@ pub struct Config {
     version: u32,
 
     tls_ctx: tls::Context,
+
+    application_protos: Vec<Vec<u8>>,
 }
 
 impl Config {
@@ -152,6 +154,7 @@ impl Config {
             local_transport_params: TransportParams::default(),
             version,
             tls_ctx,
+            application_protos: Vec::new(),
         })
     }
 
@@ -186,6 +189,20 @@ impl Config {
     /// [keylog]: https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/Key_Log_Format
     pub fn log_keys(&mut self) {
         self.tls_ctx.enable_keylog();
+    }
+
+    /// Configures the list of support application protocolos.
+    ///
+    /// On the client this configures the list of protocols to send to the
+    /// server as part of the ALPN extension.
+    ///
+    /// On the server this configures the list of supported protocols to match
+    /// against the client-supplied list.
+    pub fn set_application_protos(&mut self, protos: &[&[u8]]) ->Result<()> {
+        self.application_protos = protos.iter().map(|p| p.to_vec()).collect();
+
+        self.tls_ctx.set_alpn(&self.application_protos)
+                    .map_err(|_| Error::TlsFail)
     }
 
     /// Sets the `idle_timeout` transport parameter.
@@ -269,6 +286,8 @@ pub struct Connection {
     tls_state: tls::Handshake,
 
     recovery: recovery::Recovery,
+
+    application_protos: Vec<Vec<u8>>,
 
     rx_data: usize,
     max_rx_data: usize,
@@ -404,6 +423,8 @@ impl Connection {
             tls_state: tls,
 
             recovery: recovery::Recovery::default(),
+
+            application_protos: config.application_protos.clone(),
 
             rx_data: 0,
             max_rx_data: max_rx_data as usize,
@@ -1504,6 +1525,13 @@ impl Connection {
         &self.trace_id
     }
 
+    /// Returns the negotiated ALPN protocol.
+    ///
+    /// If no protocol has been negotiated, the returned value is empty.
+    pub fn application_proto(&self) -> &[u8] {
+        self.tls_state.get_alpn_protocol()
+    }
+
     /// Returns true if the connection handshake is complete.
     pub fn is_established(&self) -> bool {
         self.handshake_completed
@@ -1547,8 +1575,7 @@ impl Connection {
                     self.handshake_completed = true;
 
                     let mut raw_params =
-                        self.tls_state.get_quic_transport_params()
-                                      .map_err(|_| Error::TlsFail)?;
+                        self.tls_state.get_quic_transport_params().to_vec();
 
                     let peer_params = TransportParams::decode(&mut raw_params,
                                                               self.version,
@@ -1570,9 +1597,10 @@ impl Connection {
 
                     self.peer_transport_params = peer_params;
 
-                    trace!("{} connection established: cipher={:?} resumed={}",
+                    trace!("{} connection established: cipher={:?} proto={:?} resumed={}",
                            &self.trace_id,
                            self.tls_state.cipher(),
+                           std::str::from_utf8(self.application_proto()),
                            self.is_resumed());
                 },
 

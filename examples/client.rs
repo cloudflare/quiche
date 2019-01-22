@@ -78,6 +78,8 @@ fn main() {
 
     config.verify_peer(true);
 
+    config.set_application_protos(&[b"h3-17", b"hq-17", b"http/0.9"]).unwrap();
+
     config.set_idle_timeout(30);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
     config.set_initial_max_data(10_000_000);
