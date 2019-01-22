@@ -32,7 +32,7 @@
 //! handling connection state, while leaving I/O (including dealing with
 //! sockets) to the application.
 //!
-//! The first step in establishing a QUIC connection with quiche, is creating a
+//! The first step in establishing a QUIC connection using quiche is creating a
 //! configuration object:
 //!
 //! ```

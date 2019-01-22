@@ -44,7 +44,7 @@ Status
 Getting Started
 ---------------
 
-The first step in establishing a QUIC connection with quiche, is creating a
+The first step in establishing a QUIC connection using quiche, is creating a
 configuration object:
 
 .. code-block:: rust
