@@ -31,6 +31,143 @@
 //! by the IETF. It provides a low level API for processing QUIC packets and
 //! handling connection state, while leaving I/O (including dealing with
 //! sockets) to the application.
+//!
+//! The first step in establishing a QUIC connection with quiche, is creating a
+//! configuration object:
+//!
+//! ```
+//! let config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
+//! ```
+//!
+//! This is shared among multiple connections and can be used to configure a
+//! QUIC endpoint.
+//!
+//! Now a connection can be created, for clients the [`connect()`] utility
+//! function can be used, while [`accept()`] is for servers:
+//!
+//! ```
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
+//! # let server_name = "quic.tech";
+//! # let scid: [u8; 16] = [0xba; 16];
+//! // Client connection.
+//! let conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
+//!
+//! // Server connection.
+//! let conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! ```
+//!
+//! Using the connection's [`recv()`] method the application can process
+//! incoming packets from the network that belong to that connection:
+//!
+//! ```no_run
+//! # let mut buf: [u8; 512] = [0; 512];
+//! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
+//! # let scid: [u8; 16] = [0xba; 16];
+//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! let read = socket.recv(&mut buf).unwrap();
+//!
+//! let read = match conn.recv(&mut buf[..read]) {
+//!     Ok(v)  => v,
+//!
+//!     Err(quiche::Error::Done) => {
+//!         // Done reading.
+//!         # return;
+//!     },
+//!
+//!     Err(e) => {
+//!         // An error occurred, handle it.
+//!         # return;
+//!     },
+//! };
+//! ```
+//!
+//! Outgoing packet are generated using the connection's [`send()`] method
+//! instead:
+//!
+//! ```no_run
+//! # let mut out: [u8; 512] = [0; 512];
+//! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
+//! # let scid: [u8; 16] = [0xba; 16];
+//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! let write = match conn.send(&mut out) {
+//!     Ok(v) => v,
+//!
+//!     Err(quiche::Error::Done) => {
+//!         // Done writing.
+//!         # return;
+//!     },
+//!
+//!     Err(e) => {
+//!         // An error occurred, handle it.
+//!         # return;
+//!     },
+//! };
+//!
+//! socket.send(&out[..write]).unwrap();
+//! ```
+//!
+//! When packets are sent, the application is responsible for maintainig a timer
+//! to react to time-based connection events. The timer expiration can be
+//! obtained using the connection's [`timeout()`] method.
+//!
+//! ```
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
+//! # let scid: [u8; 16] = [0xba; 16];
+//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! let timeout = conn.timeout();
+//! ```
+//!
+//! The application is responsible for providing a timer implementation, which
+//! can be specific to the operating system or networking framework used. When
+//! a timer expires, the connection's [`on_timeout()`] method should be called,
+//! after which additional packets might need to be sent on the network:
+//!
+//! ```no_run
+//! # let mut out: [u8; 512] = [0; 512];
+//! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
+//! # let scid: [u8; 16] = [0xba; 16];
+//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! // Timeout expired, do something.
+//! conn.on_timeout();
+//! let write = match conn.send(&mut out) {
+//!     Ok(v) => v,
+//!
+//!     Err(quiche::Error::Done) => {
+//!         // Done writing.
+//!         # return;
+//!     },
+//!
+//!     Err(e) => {
+//!         // An error occurred, handle it.
+//!         # return;
+//!     },
+//! };
+//!
+//! socket.send(&out[..write]).unwrap();
+//! ```
+//!
+//! After some back and forth, the connection will complete its handshake and
+//! will be ready for sending or receiving application data:
+//!
+//! ```no_run
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
+//! # let scid: [u8; 16] = [0xba; 16];
+//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! if conn.is_established() {
+//!     // Handshake completed, send some data on steadm 0.
+//!     conn.stream_send(0, b"hello", true);
+//! }
+//! ```
+//!
+//! [`connect()`]: fn.connect.html
+//! [`accept()`]: fn.accept.html
+//! [`recv()`]: struct.Connection.html#method.recv
+//! [`send()`]: struct.Connection.html#method.send
+//! [`timeout()`]: struct.Connection.html#method.timeout
+//! [`on_timeout()`]: struct.Connection.html#method.on_timeout
 
 #[macro_use]
 extern crate log;
