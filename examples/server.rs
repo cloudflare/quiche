@@ -30,7 +30,6 @@ extern crate log;
 
 use std::net;
 
-use std::collections::hash_map;
 use std::collections::HashMap;
 
 use ring::rand::*;
@@ -49,6 +48,8 @@ Options:
   --root <dir>      Root directory [default: examples/root/]
   --name <str>      Name of the server [default: quic.tech]
 ";
+
+type ConnMap = HashMap<Vec<u8>, (net::SocketAddr, Box<quiche::Connection>)>;
 
 fn main() {
     let mut buf = [0; 65535];
@@ -70,8 +71,7 @@ fn main() {
                   mio::Ready::readable(),
                   mio::PollOpt::edge()).unwrap();
 
-    let mut connections: HashMap<net::SocketAddr, Box<quiche::Connection>> =
-        HashMap::new();
+    let mut connections = ConnMap::new();
 
     let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
 
@@ -90,7 +90,7 @@ fn main() {
     loop {
         // TODO: use event loop that properly supports timers
         let timeout = connections.values()
-                                 .filter_map(|c| c.timeout())
+                                 .filter_map(|(_, c)| c.timeout())
                                  .min();
 
         poll.poll(&mut events, timeout).unwrap();
@@ -99,7 +99,7 @@ fn main() {
             if events.is_empty() {
                 debug!("timed out");
 
-                connections.values_mut().for_each(|c| c.on_timeout());
+                connections.values_mut().for_each(|(_, c)| c.on_timeout());
 
                 break 'read;
             }
@@ -135,62 +135,62 @@ fn main() {
                 continue;
             }
 
-            let conn = match connections.entry(src) {
-                hash_map::Entry::Vacant(v) => {
-                    if hdr.ty != quiche::Type::Initial {
-                        error!("Packet is not Initial");
-                        continue;
-                    }
+            let (_, conn) = if !connections.contains_key(&hdr.dcid) {
+                if hdr.ty != quiche::Type::Initial {
+                    error!("Packet is not Initial");
+                    continue;
+                }
 
-                    if hdr.version != quiche::VERSION_DRAFT17 {
-                        warn!("Doing version negotiation");
+                if hdr.version != quiche::VERSION_DRAFT17 {
+                    warn!("Doing version negotiation");
 
-                        let len = quiche::negotiate_version(&hdr.scid,
-                                                            &hdr.dcid,
-                                                            &mut out).unwrap();
-                        let out = &out[..len];
+                    let len = quiche::negotiate_version(&hdr.scid,
+                                                        &hdr.dcid,
+                                                        &mut out).unwrap();
+                    let out = &out[..len];
 
-                        socket.send_to(out, &src).unwrap();
-                        continue;
-                    }
+                    socket.send_to(out, &src).unwrap();
+                    continue;
+                }
 
-                    let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
-                    SystemRandom::new().fill(&mut scid[..]).unwrap();
+                let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
+                SystemRandom::new().fill(&mut scid[..]).unwrap();
 
-                    // Token is always present in Initial packets.
-                    let token = hdr.token.as_ref().unwrap();
+                // Token is always present in Initial packets.
+                let token = hdr.token.as_ref().unwrap();
 
-                    if token.is_empty() {
-                        warn!("Doing stateless retry");
+                if token.is_empty() {
+                    warn!("Doing stateless retry");
 
-                        let new_token = mint_token(&hdr, &src);
+                    let new_token = mint_token(&hdr, &src);
 
-                        let len = quiche::retry(&hdr.scid, &hdr.dcid, &scid,
-                                                &new_token, &mut out).unwrap();
-                        let out = &out[..len];
+                    let len = quiche::retry(&hdr.scid, &hdr.dcid, &scid,
+                                            &new_token, &mut out).unwrap();
+                    let out = &out[..len];
 
-                        socket.send_to(out, &src).unwrap();
-                        continue;
-                    }
+                    socket.send_to(out, &src).unwrap();
+                    continue;
+                }
 
-                    let odcid = validate_token(&src, token);
+                let odcid = validate_token(&src, token);
 
-                    if odcid == None {
-                        error!("Invalid address validation token");
-                        continue;
-                    }
+                if odcid == None {
+                    error!("Invalid address validation token");
+                    continue;
+                }
 
-                    debug!("New connection: dcid={} scid={} lcid={}",
-                           hex_dump(&hdr.dcid),
-                           hex_dump(&hdr.scid),
-                           hex_dump(&scid));
+                debug!("New connection: dcid={} scid={} lcid={}",
+                       hex_dump(&hdr.dcid),
+                       hex_dump(&hdr.scid),
+                       hex_dump(&scid));
 
-                    let conn = quiche::accept(&scid, odcid, &mut config).unwrap();
+                let conn = quiche::accept(&scid, odcid, &mut config).unwrap();
 
-                    v.insert(conn)
-                },
+                connections.insert(scid.to_vec(), (src, conn));
 
-                hash_map::Entry::Occupied(v) => v.into_mut(),
+                connections.get_mut(&scid[..]).unwrap()
+            } else {
+                connections.get_mut(&hdr.dcid).unwrap()
             };
 
             // Process potentially coalesced packets.
@@ -217,7 +217,7 @@ fn main() {
             }
         }
 
-        for (src, conn) in &mut connections {
+        for (peer, conn) in connections.values_mut() {
             loop {
                 let write = match conn.send(&mut out) {
                     Ok(v) => v,
@@ -235,14 +235,14 @@ fn main() {
                 };
 
                 // TODO: coalesce packets.
-                socket.send_to(&out[..write], &src).unwrap();
+                socket.send_to(&out[..write], &peer).unwrap();
 
                 debug!("{} written {} bytes", conn.trace_id(), write);
             }
         }
 
         // Garbage collect closed connections.
-        connections.retain(|_, ref mut c| {
+        connections.retain(|_, (_, ref mut c)| {
             debug!("Collecting garbage");
 
             if c.is_closed() {
