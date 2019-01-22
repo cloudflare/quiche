@@ -14,8 +14,12 @@ to be used for experimentation.
 Note that it is very experimental and unstable software, and many features are
 still in development.
 
+For more information on how quiche came about and some insights into its design
+you can read a post_ on Cloudflare's blog.
+
 .. _quiche: https://docs.quic.tech/quiche/
 .. _ietf: https://quicwg.org/
+.. _post: https://blog.cloudflare.com/enjoy-a-slice-of-quic-and-rust/
 
 Status
 ------
