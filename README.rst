@@ -15,7 +15,8 @@ Note that it is very experimental and unstable software, and many features are
 still in development.
 
 For more information on how quiche came about and some insights into its design
-you can read a post_ on Cloudflare's blog.
+you can read a post_ on Cloudflare's (where this library is used in production)
+blog that goes into some more detail.
 
 .. _quiche: https://docs.quic.tech/quiche/
 .. _ietf: https://quicwg.org/
