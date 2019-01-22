@@ -48,7 +48,7 @@ Options:
   --key <file>      TLS certificate key path [default: examples/cert.key]
   --root <dir>      Root directory [default: examples/root/]
   --name <str>      Name of the server [default: quic.tech]
-  -h --help               Show this screen.
+  -h --help         Show this screen.
 ";
 
 type ConnMap = HashMap<Vec<u8>, (net::SocketAddr, Box<quiche::Connection>)>;
