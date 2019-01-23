@@ -299,10 +299,7 @@ impl<'a> Octets<'a> {
             return Ok(());
         }
 
-        unsafe {
-            std::ptr::copy_nonoverlapping(v as *const [u8] as *const u8,
-                                          self.as_mut().as_mut_ptr(), len);
-        }
+        &mut self.as_mut()[..len].copy_from_slice(v);
 
         self.off += len;
 
