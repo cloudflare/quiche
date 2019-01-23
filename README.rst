@@ -1,6 +1,6 @@
 .. image:: quiche.svg
 
-.. image:: https://travis-ci.com/cloudflare/quiche.svg
+.. image:: https://travis-ci.com/cloudflare/quiche.svg?branch=master
   :target: https://travis-ci.com/cloudflare/quiche
 
 quiche_ is an implementation of the QUIC transport protocol as specified by
