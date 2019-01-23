@@ -154,7 +154,13 @@ on how to use the quiche API (both from Rust and from C via its FFI API).
 Building
 --------
 
-You can build quiche using cargo:
+The first step after cloning the git repo is updating the git submodules:
+
+.. code-block:: bash
+
+   $ git submodule update --init
+
+You can now build quiche using cargo:
 
 .. code-block:: bash
 
