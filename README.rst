@@ -142,7 +142,7 @@ be ready for sending or receiving application data:
 .. code-block:: rust
 
    if conn.is_established() {
-       // Handshake completed, send some data on steadm 0.
+       // Handshake completed, send some data on stream 0.
        conn.stream_send(0, b"hello", true);
    }
 

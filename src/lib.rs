@@ -157,7 +157,7 @@
 //! # let scid: [u8; 16] = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! if conn.is_established() {
-//!     // Handshake completed, send some data on steadm 0.
+//!     // Handshake completed, send some data on stream 0.
 //!     conn.stream_send(0, b"hello", true);
 //! }
 //! ```
