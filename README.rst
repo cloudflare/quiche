@@ -146,10 +146,25 @@ be ready for sending or receiving application data:
        conn.stream_send(0, b"hello", true);
    }
 
-Have a look at the examples_ directory for more complete examples
-on how to use the quiche API (both from Rust and from C via its FFI API).
+Have a look at the examples_ directory for more complete examples on how to use
+the quiche API, including examples on how to use quiche in C/C++ applications
+(see below for more information).
 
 .. _examples: examples/
+
+Calling quiche from C/C++
+-------------------------
+
+quiche exposes a `thin C API`_ on top of the Rust API that can be used to more
+easily integrate quiche into C/C++ applications (as well as in other languages
+that allow calling C APIs via some form of FFI). The C API follows the same
+design of the Rust one, modulo the constraints imposed by the C language itself.
+
+When running ``cargo build``, a static library called ``libquiche.a`` will be
+built automatically alongside the Rust one. This is fully stand-alone and can
+be linked directly into C/C++ applications.
+
+.. _thin C API: https://github.com/cloudflare/quiche/blob/master/include/quiche.h
 
 Building
 --------
