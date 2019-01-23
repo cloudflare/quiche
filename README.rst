@@ -1,4 +1,4 @@
-.. image:: quiche.png
+.. image:: quiche.svg
 
 .. image:: https://travis-ci.com/cloudflare/quiche.svg
   :target: https://travis-ci.com/cloudflare/quiche
