@@ -1805,6 +1805,10 @@ impl Connection {
 }
 
 /// Statistics about the connection.
+///
+/// A connections's statistics can be collected using the [`stats()`] method.
+///
+/// [`stats()`]: struct.Connection.html#method.stats
 #[derive(Clone)]
 pub struct Stats {
     /// The number of QUIC packets sent on this connection.
