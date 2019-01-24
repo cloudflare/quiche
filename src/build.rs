@@ -1,6 +1,9 @@
 use cmake;
 
 fn main() {
+    #[cfg(feature = "no_bssl")]
+    return;
+
     let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
         cmake::Config::new("deps/boringssl").build_target("bssl")
                                             .build()

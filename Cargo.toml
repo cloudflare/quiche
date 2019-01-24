@@ -19,6 +19,12 @@ exclude = [
     "deps/boringssl/third_party/wycheproof_testvectors/*",
 ]
 
+[features]
+no_bssl = []
+
+[package.metadata.docs.rs]
+features = [ "no_bssl" ]
+
 [build-dependencies]
 cmake = "0"
 
