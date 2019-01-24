@@ -33,6 +33,7 @@ log = "0"
 libc = "0"
 ring = "0.14"
 lazy_static = "1"
+http = "0"
 
 [dev-dependencies]
 mio = "0"
