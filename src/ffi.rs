@@ -456,6 +456,23 @@ pub extern fn quiche_conn_is_closed(conn: &mut Connection) -> bool {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_stats_sent(conn: &Connection, out: &mut u64) {
+    *out = conn.stats().sent as u64;
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_stats_lost(conn: &Connection, out: &mut u64) {
+    *out = conn.stats().lost as u64;
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_stats_rtt_as_nanos(conn: &Connection, out: &mut u64) {
+    let rtt = conn.stats().rtt;
+
+    *out = rtt.as_secs() * 1_000_000_000 + u64::from(rtt.subsec_nanos());
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_free(conn: *mut Connection) {
     unsafe { Box::from_raw(conn) };
 }

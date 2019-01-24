@@ -187,7 +187,14 @@ static void timeout_cb(EV_P_ ev_timer *w, int revents) {
     flush_egress(loop, conn_io);
 
     if (quiche_conn_is_closed(conn_io->conn)) {
-        fprintf(stderr, "connection closed\n");
+        uint64_t sent, lost, rtt;
+
+        quiche_conn_stats_sent(conn_io->conn, &sent);
+        quiche_conn_stats_lost(conn_io->conn, &lost);
+        quiche_conn_stats_rtt_as_nanos(conn_io->conn, &rtt);
+
+        fprintf(stderr, "connection closed, sent=%ld lost=%ld rtt=%ldns\n",
+                sent, lost, rtt);
 
         ev_break(EV_A_ EVBREAK_ONE);
         return;
