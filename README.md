@@ -1,8 +1,9 @@
 ![quiche](quiche.svg)
 
 [![crates.io](https://img.shields.io/crates/v/quiche.svg)](https://crates.io/crates/quiche)
+[![docs.rs](https://docs.rs/quiche/badge.svg)](https://docs.rs/quiche)
+[![license](https://img.shields.io/github/license/cloudflare/quiche.svg)](https://opensource.org/licenses/BSD-2-Clause)
 [![build](https://travis-ci.com/cloudflare/quiche.svg?branch=master)](https://travis-ci.com/cloudflare/quiche)
-[![license](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg)](https://opensource.org/licenses/BSD-2-Clause)
 
 [quiche] is an implementation of the QUIC transport protocol as specified by
 the [IETF]. It provides a low level API for processing QUIC packets and
