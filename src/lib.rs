@@ -1690,13 +1690,13 @@ impl Connection {
     /// Collects and returns statistics about the connection.
     pub fn stats(&self) -> Stats {
         Stats {
-            sent_pkts: self.initial.flight.total_sent_pkts +
-                       self.handshake.flight.total_sent_pkts +
-                       self.application.flight.total_sent_pkts,
+            sent: self.initial.flight.total_sent_pkts +
+                  self.handshake.flight.total_sent_pkts +
+                  self.application.flight.total_sent_pkts,
 
-            lost_pkts: self.initial.flight.total_lost_pkts +
-                       self.handshake.flight.total_lost_pkts +
-                       self.application.flight.total_lost_pkts,
+            lost: self.initial.flight.total_lost_pkts +
+                  self.handshake.flight.total_lost_pkts +
+                  self.application.flight.total_lost_pkts,
 
             rtt: self.recovery.rtt(),
         }
@@ -1808,10 +1808,10 @@ impl Connection {
 #[derive(Clone)]
 pub struct Stats {
     /// The number of QUIC packets sent on this connection.
-    pub sent_pkts: usize,
+    pub sent: usize,
 
     /// The number of QUIC packets that were lost.
-    pub lost_pkts: usize,
+    pub lost: usize,
 
     /// The estimated rounf-trip time of the connection.
     pub rtt: time::Duration,
@@ -1819,8 +1819,7 @@ pub struct Stats {
 
 impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "sent={} lost={} rtt={:?}",
-               self.sent_pkts, self.lost_pkts, self.rtt)
+        write!(f, "sent={} lost={} rtt={:?}", self.sent, self.lost, self.rtt)
     }
 }
 
