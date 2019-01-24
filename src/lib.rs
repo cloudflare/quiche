@@ -132,6 +132,7 @@
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! // Timeout expired, do something.
 //! conn.on_timeout();
+//!
 //! let write = match conn.send(&mut out) {
 //!     Ok(v) => v,
 //!
