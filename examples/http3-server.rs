@@ -258,7 +258,7 @@ fn main() {
                     break;
                 }
 
-                let h3_config =
+                let mut h3_config =
                     quiche::h3::Config::new(16, 1024, 0, 0).unwrap();
 
                 if client.http3_conn.is_none() {
@@ -268,7 +268,7 @@ fn main() {
                     );
                     let h3_conn = quiche::h3::accept(
                         &mut client.quiche_conn,
-                        &h3_config,
+                        &mut h3_config,
                     )
                     .unwrap();
 
