@@ -386,6 +386,12 @@ impl std::ops::Deref for RangeBuf {
     }
 }
 
+impl std::ops::DerefMut for RangeBuf {
+    fn deref_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+}
+
 impl Ord for RangeBuf {
     fn cmp(&self, other: &RangeBuf) -> cmp::Ordering {
         // Invert ordering to implement min-heap.
