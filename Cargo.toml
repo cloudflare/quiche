@@ -10,6 +10,14 @@ readme = "README.rst"
 keywords = ["quic"]
 categories = [ "network-programming" ]
 license = "BSD-2-Clause"
+exclude = [
+    "deps/boringssl/crypto/**/*_test.txt",
+    "deps/boringssl/crypto/**/*_tests.txt",
+    "deps/boringssl/**/nist_cavp/*.txt",
+    "deps/boringssl/fuzz/*",
+    "deps/boringssl/ssl/test/runner/*",
+    "deps/boringssl/third_party/wycheproof_testvectors/*",
+]
 
 [build-dependencies]
 cmake = "0"
