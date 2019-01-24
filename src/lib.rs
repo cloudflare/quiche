@@ -427,6 +427,9 @@ pub struct Connection {
 
     application_protos: Vec<Vec<u8>>,
 
+    sent_count: usize,
+    lost_count: usize,
+
     rx_data: usize,
     max_rx_data: usize,
     new_max_rx_data: usize,
@@ -563,6 +566,9 @@ impl Connection {
             recovery: recovery::Recovery::default(),
 
             application_protos: config.application_protos.clone(),
+
+            sent_count: 0,
+            lost_count: 0,
 
             rx_data: 0,
             max_rx_data: max_rx_data as usize,
@@ -1180,6 +1186,11 @@ impl Connection {
             }
         }
 
+        // Update global lost packets counter. This prevents us from losing
+        // information when the Initial state is dropped.
+        self.lost_count += space.flight.lost_count;
+        space.flight.lost_count = 0;
+
         // Calculate available space in the packet based on congestion window.
         let mut left = cmp::min(self.recovery.cwnd(), b.cap());
 
@@ -1466,6 +1477,8 @@ impl Connection {
 
         space.next_pkt_num += 1;
 
+        self.sent_count += 1;
+
         // On the client, drop initial state after sending an Handshake packet.
         if !self.is_server && hdr.ty == packet::Type::Handshake {
             self.drop_initial_state();
@@ -1690,14 +1703,8 @@ impl Connection {
     /// Collects and returns statistics about the connection.
     pub fn stats(&self) -> Stats {
         Stats {
-            sent: self.initial.flight.total_sent_pkts +
-                  self.handshake.flight.total_sent_pkts +
-                  self.application.flight.total_sent_pkts,
-
-            lost: self.initial.flight.total_lost_pkts +
-                  self.handshake.flight.total_lost_pkts +
-                  self.application.flight.total_lost_pkts,
-
+            sent: self.sent_count,
+            lost: self.lost_count,
             rtt: self.recovery.rtt(),
         }
     }

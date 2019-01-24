@@ -86,8 +86,7 @@ pub struct InFlight {
     pub lost: Vec<frame::Frame>,
     pub acked: Vec<frame::Frame>,
 
-    pub total_sent_pkts: usize,
-    pub total_lost_pkts: usize,
+    pub lost_count: usize,
 }
 
 impl Default for InFlight {
@@ -97,8 +96,7 @@ impl Default for InFlight {
             lost: Vec::new(),
             acked: Vec::new(),
 
-            total_sent_pkts: 0,
-            total_lost_pkts: 0,
+            lost_count: 0,
         }
     }
 }
@@ -122,7 +120,7 @@ impl InFlight {
             self.lost.append(&mut p.frames);
         }
 
-        self.total_lost_pkts += self.sent.len();
+        self.lost_count += self.sent.len();
 
         self.sent.clear();
 
@@ -141,7 +139,7 @@ impl InFlight {
             }
         }
 
-        self.total_lost_pkts += self.sent.len();
+        self.lost_count += self.sent.len();
 
         self.sent.clear();
 
@@ -246,8 +244,6 @@ impl Recovery {
         self.largest_sent_pkt = pkt_num;
 
         flight.sent.insert(pkt_num, pkt);
-
-        flight.total_sent_pkts += 1;
 
         if ack_eliciting {
             if is_crypto {
@@ -526,7 +522,7 @@ impl Recovery {
         for lost in lost_pkt {
             let mut p = flight.sent.remove(&lost).unwrap();
 
-            flight.total_lost_pkts += 1;
+            flight.lost_count += 1;
 
             if !p.ack_eliciting {
                 continue;
