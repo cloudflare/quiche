@@ -299,7 +299,7 @@ impl<'a> Octets<'a> {
             return Ok(());
         }
 
-        &mut self.as_mut()[..len].copy_from_slice(v);
+        self.as_mut()[..len].copy_from_slice(v);
 
         self.off += len;
 
