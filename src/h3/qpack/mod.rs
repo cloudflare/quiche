@@ -31,27 +31,6 @@ const INDEXED_WITH_POST_BASE: u8 = 0b0001_0000;
 const LITERAL: u8 = 0b0010_0000;
 const LITERAL_WITH_NAME_REF: u8 = 0b0100_0000;
 
-/// A name-value pair representing a raw HTTP header.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Header(String, String);
-
-impl Header {
-    /// Creates a new header.
-    pub fn new(name: &str, value: &str) -> Header {
-        Header(String::from(name), String::from(value))
-    }
-
-    /// Returns the header's name.
-    pub fn name(&self) -> &str {
-        &self.0
-    }
-
-    /// Returns the header's value.
-    pub fn value(&self) -> &str {
-        &self.1
-    }
-}
-
 /// A specialized [`Result`] type for quiche QPACK operations.
 ///
 /// This type is used throughout quiche's QPACK public API for any operation
@@ -109,6 +88,8 @@ impl std::convert::From<crate::Error> for Error {
 
 #[cfg(test)]
 mod tests {
+    use crate::*;
+
     use super::*;
 
     #[test]
@@ -116,15 +97,15 @@ mod tests {
         let mut encoded = [0u8; 240];
 
         let headers = vec![
-            Header::new(":path", "/rsrc.php/v3/yn/r/rIPZ9Qkrdd9.png"),
-            Header::new("accept-encoding", "gzip, deflate, br"),
-            Header::new("accept-language", "en-US,en;q=0.9"),
-            Header::new("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.70 Safari/537.36"),
-            Header::new("accept", "image/webp,image/apng,image/*,*/*;q=0.8"),
-            Header::new("referer", "https://static.xx.fbcdn.net/rsrc.php/v3/yT/l/0,cross/dzXGESIlGQQ.css"),
-            Header::new(":authority", "static.xx.fbcdn.net"),
-            Header::new(":scheme", "https"),
-            Header::new(":method", "GET"),
+            h3::Header::new(":path", "/rsrc.php/v3/yn/r/rIPZ9Qkrdd9.png"),
+            h3::Header::new("accept-encoding", "gzip, deflate, br"),
+            h3::Header::new("accept-language", "en-US,en;q=0.9"),
+            h3::Header::new("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.70 Safari/537.36"),
+            h3::Header::new("accept", "image/webp,image/apng,image/*,*/*;q=0.8"),
+            h3::Header::new("referer", "https://static.xx.fbcdn.net/rsrc.php/v3/yT/l/0,cross/dzXGESIlGQQ.css"),
+            h3::Header::new(":authority", "static.xx.fbcdn.net"),
+            h3::Header::new(":scheme", "https"),
+            h3::Header::new(":method", "GET"),
         ];
 
         let mut enc = Encoder::new();

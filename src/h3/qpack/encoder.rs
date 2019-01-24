@@ -28,7 +28,7 @@ use super::Result;
 
 use crate::octets;
 
-use super::Header;
+use crate::h3::Header;
 
 use super::INDEXED;
 use super::LITERAL;
