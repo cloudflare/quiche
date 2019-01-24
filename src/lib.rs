@@ -1953,7 +1953,6 @@ impl Connection {
     }
 
     /// Returns true if the connection is server-side.
-    #[allow(dead_code)]
     pub(crate) fn is_server(&self) -> bool {
         self.is_server
     }
@@ -3066,7 +3065,6 @@ pub use crate::stream::Readable;
 mod crypto;
 mod ffi;
 mod frame;
-#[doc(hidden)]
 pub mod h3;
 mod octets;
 mod packet;

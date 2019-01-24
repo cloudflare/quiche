@@ -29,7 +29,7 @@ use crate::octets;
 use super::Error;
 use super::Result;
 
-use super::Header;
+use crate::h3::Header;
 
 use super::INDEXED;
 use super::INDEXED_WITH_POST_BASE;

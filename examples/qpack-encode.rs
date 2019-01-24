@@ -32,7 +32,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
 
-use quiche::h3::qpack;
+use quiche::h3;
 
 const USAGE: &str = "Usage:
   qpack-encode [options] FILE
@@ -52,9 +52,9 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let file = File::open(args.get_str("FILE"))?;
     let file = BufReader::new(&file);
 
-    let mut enc = qpack::Encoder::new();
+    let mut enc = h3::qpack::Encoder::new();
 
-    let mut headers: Vec<qpack::Header> = Vec::new();
+    let mut headers: Vec<h3::Header> = Vec::new();
 
     let mut stream_id = 1u64;
 
@@ -84,7 +84,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
         let name = line.split('\t').nth(0).unwrap();
         let value = line.split('\t').last().unwrap();
 
-        headers.push(qpack::Header::new(name, value));
+        headers.push(h3::Header::new(name, value));
     }
 
     Ok(())
