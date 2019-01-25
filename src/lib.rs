@@ -1831,7 +1831,7 @@ pub struct Stats {
     /// The number of QUIC packets that were lost.
     pub lost: usize,
 
-    /// The estimated rounf-trip time of the connection.
+    /// The estimated round-trip time of the connection.
     pub rtt: time::Duration,
 }
 
