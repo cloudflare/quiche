@@ -1756,11 +1756,12 @@ impl Connection {
 
                     self.peer_transport_params = peer_params;
 
-                    trace!("{} connection established: cipher={:?} proto={:?} resumed={}",
+                    trace!("{} connection established: cipher={:?} proto={:?} resumed={} {:?}",
                            &self.trace_id,
                            self.tls_state.cipher(),
                            std::str::from_utf8(self.application_proto()),
-                           self.is_resumed());
+                           self.is_resumed(),
+                           self.peer_transport_params);
                 },
 
                 Err(tls::Error::TlsFail) => {
@@ -1848,7 +1849,7 @@ impl std::fmt::Debug for Stats {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 struct TransportParams {
     pub original_connection_id: Option<Vec<u8>>,
     pub idle_timeout: u64,
@@ -2097,6 +2098,29 @@ impl TransportParams {
         };
 
         Ok(&mut out[..out_len])
+    }
+}
+
+impl std::fmt::Debug for TransportParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "idle_timeout={} ", self.idle_timeout)?;
+        write!(f, "max_packet_size={} ", self.max_packet_size)?;
+        write!(f, "initial_max_data={} ", self.initial_max_data)?;
+        write!(f, "initial_max_stream_data_bidi_local={} ",
+               self.initial_max_stream_data_bidi_local)?;
+        write!(f, "initial_max_stream_data_bidi_remote={} ",
+               self.initial_max_stream_data_bidi_remote)?;
+        write!(f, "initial_max_stream_data_uni={} ",
+               self.initial_max_stream_data_uni)?;
+        write!(f, "initial_max_streams_bidi={} ",
+               self.initial_max_streams_bidi)?;
+        write!(f, "initial_max_streams_uni={} ",
+               self.initial_max_streams_uni)?;
+        write!(f, "ack_delay_exponent={} ",
+               self.ack_delay_exponent)?;
+        write!(f, "disable_migration={}", self.disable_migration)?;
+
+        Ok(())
     }
 }
 
