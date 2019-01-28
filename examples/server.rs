@@ -185,16 +185,15 @@ fn main() {
                     continue;
                 }
 
-                debug!("New connection: dcid={} scid={} lcid={}",
+                debug!("New connection: dcid={} scid={}",
                        hex_dump(&hdr.dcid),
-                       hex_dump(&hdr.scid),
-                       hex_dump(&scid));
+                       hex_dump(&hdr.scid));
 
-                let conn = quiche::accept(&scid, odcid, &mut config).unwrap();
+                let conn = quiche::accept(&hdr.dcid, odcid, &mut config).unwrap();
 
-                connections.insert(scid.to_vec(), (src, conn));
+                connections.insert(hdr.dcid.to_vec(), (src, conn));
 
-                connections.get_mut(&scid[..]).unwrap()
+                connections.get_mut(&hdr.dcid).unwrap()
             } else {
                 connections.get_mut(&hdr.dcid).unwrap()
             };
