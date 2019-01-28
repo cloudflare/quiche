@@ -134,6 +134,8 @@ fn main() {
                 }
             };
 
+            trace!("got packet {:?}", hdr);
+
             if hdr.ty == quiche::Type::VersionNegotiation {
                 error!("Version negotiation invalid on the server");
                 continue;
