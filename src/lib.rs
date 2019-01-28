@@ -1149,8 +1149,12 @@ impl Connection {
         // when we haven't parsed transport parameters yet, so use a default
         // value then.
         let max_pkt_len = if self.handshake_completed {
-            self.peer_transport_params.max_packet_size as usize
+            // We cap the maximum packet size to 16KB or so, so that it can be
+            // always encoded with a 2-byte varint.
+            cmp::min(16383, self.peer_transport_params.max_packet_size) as usize
         } else {
+            // Allow for 1200 bytes (minimum QUIC packet size) plus 4 bytes for
+            // the maximum possible length for varint payload length.
             1200
         };
 
@@ -1224,8 +1228,9 @@ impl Connection {
         hdr.to_bytes(&mut b)?;
 
         // Make sure we have enough space left for the header, the payload
-        // length, the packet number and the AEAD overhead.
-        left = left.checked_sub(b.off() + 4 + pn_len + space.overhead())
+        // length, the packet number and the AEAD overhead. We assume that
+        // the payload length can always be encoded with a 2-byte varint.
+        left = left.checked_sub(b.off() + 2 + pn_len + space.overhead())
                    .ok_or(Error::Done)?;
 
         let mut frames: Vec<frame::Frame> = Vec::new();
