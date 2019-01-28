@@ -1225,11 +1225,8 @@ impl Connection {
 
         // Make sure we have enough space left for the header, the payload
         // length, the packet number and the AEAD overhead.
-        if left < b.off() + 4 + pn_len + space.overhead() {
-            return Err(Error::Done);
-        }
-
-        left -= b.off() + 4 + pn_len + space.overhead();
+        left = left.checked_sub(b.off() + 4 + pn_len + space.overhead())
+                   .ok_or(Error::Done)?;
 
         let mut frames: Vec<frame::Frame> = Vec::new();
 
