@@ -1145,7 +1145,14 @@ impl Connection {
             self.do_handshake()?;
         }
 
-        let max_pkt_len = self.peer_transport_params.max_packet_size as usize;
+        // Use max_packet_size as sent by the peer, except during the handshake
+        // when we haven't parsed transport parameters yet, so use a default
+        // value then.
+        let max_pkt_len = if self.handshake_completed {
+            self.peer_transport_params.max_packet_size as usize
+        } else {
+            1200
+        };
 
         // Cap output buffer to respect peer's max_packet_size limit.
         let avail = cmp::min(max_pkt_len, out.len());
