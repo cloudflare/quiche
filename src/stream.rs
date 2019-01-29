@@ -75,8 +75,7 @@ impl Stream {
     pub fn recv_pop(&mut self, out: &mut [u8]) -> Result<(usize, bool)> {
         let (len, fin) = self.recv.pop(out)?;
 
-        self.new_max_rx_data = self.new_max_rx_data.checked_add(len)
-                                                   .unwrap_or(std::usize::MAX);
+        self.new_max_rx_data = self.new_max_rx_data.saturating_add(len);
 
         Ok((len, fin))
     }

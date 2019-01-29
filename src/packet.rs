@@ -229,8 +229,7 @@ impl Header {
         let mut first = 0;
 
         // Encode pkt num length.
-        first |= self.pkt_num_len.checked_sub(1)
-                                 .unwrap_or(0) as u8;
+        first |= self.pkt_num_len.saturating_sub(1) as u8;
 
         // Encode short header.
         if self.ty == Type::Application {
@@ -682,8 +681,7 @@ impl PktNumWindow {
     }
 
     fn upper(&self) -> u64 {
-        self.lower.checked_add(std::mem::size_of::<u128>() as u64 * 8)
-                  .unwrap_or(std::u64::MAX) - 1
+        self.lower.saturating_add(std::mem::size_of::<u128>() as u64 * 8) - 1
     }
 }
 

@@ -444,8 +444,7 @@ impl Recovery {
 
         let lost_send_time = now - loss_delay;
 
-        let lost_pkt_num = largest_acked.checked_sub(PACKET_THRESHOLD)
-                                        .unwrap_or(0);
+        let lost_pkt_num = largest_acked.saturating_sub(PACKET_THRESHOLD);
 
         self.loss_time = None;
 
