@@ -109,7 +109,7 @@ let write = match conn.send(&mut out) {
 socket.send(&out[..write]).unwrap();
 ```
 
-When packets are sent, the application is responsible for maintainig a timer
+When packets are sent, the application is responsible for maintaining a timer
 to react to time-based connection events. The timer expiration can be
 obtained using the connection's [`timeout()`] method.
 
