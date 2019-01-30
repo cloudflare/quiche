@@ -1153,8 +1153,8 @@ impl Connection {
             // always encoded with a 2-byte varint.
             cmp::min(16383, self.peer_transport_params.max_packet_size) as usize
         } else {
-            // Allow for 1200 bytes (minimum QUIC packet size) plus 4 bytes for
-            // the maximum possible length for varint payload length.
+            // Allow for 1200 bytes (minimum QUIC packet size) during the
+            // handshake.
             1200
         };
 
