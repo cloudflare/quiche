@@ -44,7 +44,7 @@ const KEY_PHASE_BIT: u8 = 0x04;
 const TYPE_MASK: u8 = 0x30;
 const PKT_NUM_MASK: u8 = 0x03;
 
-const MAX_CID_LEN: u8 = 18;
+pub const MAX_CID_LEN: u8 = 18;
 
 const MAX_PKT_NUM_LEN: usize = 4;
 const SAMPLE_LEN: usize = 16;
