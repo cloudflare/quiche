@@ -196,46 +196,47 @@ const DRAINING_TIMEOUT: time::Duration = time::Duration::from_millis(200);
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// A QUIC error.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(C)]
 pub enum Error {
     /// There is no more work to do.
-    Done,
+    Done = -1,
 
     /// The provided buffer is too short.
-    BufferTooShort,
+    BufferTooShort = -2,
 
     /// The provided packet cannot be parsed because its version is unknown.
-    UnknownVersion,
+    UnknownVersion = -3,
 
     /// The provided packet cannot be parsed because it contains an invalid
     /// frame.
-    InvalidFrame,
+    InvalidFrame = -4,
 
     /// The provided packet cannot be parsed.
-    InvalidPacket,
+    InvalidPacket = -5,
 
     /// The operation cannot be completed because the connection is in an
     /// invalid state.
-    InvalidState,
+    InvalidState = -6,
 
     /// The operation cannot be completed because the stream is in an
     /// invalid state.
-    InvalidStreamState,
+    InvalidStreamState = -7,
 
     /// The peer's transport params cannot be parsed.
-    InvalidTransportParam,
+    InvalidTransportParam = -8,
 
     /// A cryptographic operation failed.
-    CryptoFail,
+    CryptoFail = -9,
 
     /// The TLS handshake failed.
-    TlsFail,
+    TlsFail = -10,
 
     /// The peer violated the local flow control limits.
-    FlowControl,
+    FlowControl = -11,
 
     /// The peer violated the local stream limits.
-    StreamLimit,
+    StreamLimit = -12,
 }
 
 impl Error {
@@ -254,20 +255,7 @@ impl Error {
     }
 
     fn to_c(&self) -> libc::ssize_t {
-        match self {
-            Error::Done => -1,
-            Error::BufferTooShort => -2,
-            Error::UnknownVersion => -3,
-            Error::InvalidFrame => -4,
-            Error::InvalidPacket => -5,
-            Error::InvalidState => -6,
-            Error::InvalidStreamState => -7,
-            Error::InvalidTransportParam => -8,
-            Error::CryptoFail => -9,
-            Error::TlsFail => -10,
-            Error::FlowControl => -11,
-            Error::StreamLimit => -12,
-        }
+        *self as _
     }
 }
 
@@ -1247,7 +1235,7 @@ impl Connection {
             let ack_delay = ack_delay.as_secs() * 1_000_000 +
                             u64::from(ack_delay.subsec_micros());
 
-            let ack_delay = 
+            let ack_delay =
                 ack_delay / 2_u64.pow(self.local_transport_params
                                           .ack_delay_exponent as u32);
 
