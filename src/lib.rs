@@ -907,8 +907,32 @@ impl Connection {
             pn
         );
 
-        let mut payload =
-            packet::decrypt_pkt(&mut b, pn, hdr.pkt_num_len, payload_len, &aead)?;
+        let mut payload = match packet::decrypt_pkt(
+            &mut b,
+            pn,
+            hdr.pkt_num_len,
+            payload_len,
+            &aead,
+        ) {
+            Ok(v) => v,
+
+            Err(Error::CryptoFail) => {
+                // The packet number has already been parsed, so its length
+                // needs to be removed from the payload length.
+                let payload_len = payload_len - hdr.pkt_num_len;
+
+                trace!(
+                    "{} dropped undecryptable packet type={:?} len={}",
+                    self.trace_id,
+                    hdr.ty,
+                    payload_len,
+                );
+
+                return Ok(b.off() + payload_len);
+            },
+
+            Err(e) => return Err(e),
+        };
 
         if space.recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
