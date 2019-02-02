@@ -15,7 +15,7 @@ addons:
      - uthash-dev
 
 script:
- - cargo +nightly fmt --all -- --check
+ - [ $TRAVIS_RUST_VERSION = "nightly" ] && cargo fmt --all -- --check || true
  - cargo build --verbose --all
  - cargo test --verbose --all
  - cargo doc --no-deps
