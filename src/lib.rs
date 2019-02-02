@@ -257,6 +257,39 @@ impl Error {
     fn to_c(&self) -> libc::ssize_t {
         *self as _
     }
+
+    fn to_str(&self) -> &str {
+        match self {
+            Error::Done => "nothing else to do",
+            Error::BufferTooShort => "buffer is too short",
+            Error::UnknownVersion => "version is unknown",
+            Error::InvalidFrame => "frame is invalid",
+            Error::InvalidPacket => "packet is invalid",
+            Error::InvalidState => "connection state is invalid",
+            Error::InvalidStreamState => "stream state is invalid",
+            Error::InvalidTransportParam => "transport parameter is invalid",
+            Error::CryptoFail => "crypto operation failed",
+            Error::TlsFail => "TLS failed",
+            Error::FlowControl => "flow control limit was violated",
+            Error::StreamLimit => "stream limit was violated",
+        }
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.to_str())
+    }
+}
+
+impl std::error::Error for Error {
+    fn description(&self) -> &str {
+        self.to_str()
+    }
+
+    fn cause(&self) -> Option<&std::error::Error> {
+        None
+    }
 }
 
 /// Stores configuration shared between multiple connections.
