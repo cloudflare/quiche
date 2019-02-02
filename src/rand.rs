@@ -32,7 +32,7 @@ pub fn rand_bytes(buf: &mut [u8]) {
 }
 
 pub fn rand_u8() -> u8 {
-    let mut buf: [u8; 1] = [0; 1];
+    let mut buf = [0; 1];
 
     rand_bytes(&mut buf);
 

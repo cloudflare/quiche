@@ -670,7 +670,7 @@ mod tests {
 
     #[test]
     fn padding() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::Padding {
             len: 128,
@@ -699,7 +699,7 @@ mod tests {
 
     #[test]
     fn ping() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::Ping;
 
@@ -727,7 +727,7 @@ mod tests {
 
     #[test]
     fn ack() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let mut ranges = ranges::RangeSet::default();
         ranges.insert(4..7);
@@ -763,7 +763,7 @@ mod tests {
 
     #[test]
     fn stop_sending() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::StopSending {
             stream_id: 123_213,
@@ -793,9 +793,9 @@ mod tests {
 
     #[test]
     fn crypto() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
-        let data: [u8; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
         let frame = Frame::Crypto {
             data: stream::RangeBuf::from(&data, 1230976, false),
@@ -824,7 +824,7 @@ mod tests {
 
     #[test]
     fn new_token() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::NewToken {
             token: Vec::from("this is a token"),
@@ -853,9 +853,9 @@ mod tests {
 
     #[test]
     fn stream() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
-        let data: [u8; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
         let frame = Frame::Stream {
             stream_id: 32,
@@ -885,7 +885,7 @@ mod tests {
 
     #[test]
     fn max_data() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::MaxData {
             max: 128_318_273,
@@ -914,7 +914,7 @@ mod tests {
 
     #[test]
     fn max_stream_data() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::MaxStreamData {
             stream_id: 12_321,
@@ -944,7 +944,7 @@ mod tests {
 
     #[test]
     fn max_streams_bidi() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::MaxStreamsBidi {
             max: 128_318_273,
@@ -973,7 +973,7 @@ mod tests {
 
     #[test]
     fn max_streams_uni() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::MaxStreamsBidi {
             max: 128_318_273,
@@ -1002,7 +1002,7 @@ mod tests {
 
     #[test]
     fn new_connection_id() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::NewConnectionId {
             seq_num: 123_213,
@@ -1033,7 +1033,7 @@ mod tests {
 
     #[test]
     fn retire_connection_id() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::RetireConnectionId {
             seq_num: 123_213,
@@ -1062,7 +1062,7 @@ mod tests {
 
     #[test]
     fn path_challenge() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::PathChallenge {
             data: vec![1, 2, 3, 4, 5, 6, 7, 8],
@@ -1091,7 +1091,7 @@ mod tests {
 
     #[test]
     fn path_response() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::PathResponse {
             data: vec![1, 2, 3, 4, 5, 6, 7, 8],
@@ -1120,7 +1120,7 @@ mod tests {
 
     #[test]
     fn connection_close() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::ConnectionClose {
             error_code: 0xbeef,
@@ -1151,7 +1151,7 @@ mod tests {
 
     #[test]
     fn application_close() {
-        let mut d: [u8; 128] = [42; 128];
+        let mut d = [42; 128];
 
         let frame = Frame::ApplicationClose {
             error_code: 0xbeef,

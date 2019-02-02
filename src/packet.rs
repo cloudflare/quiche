@@ -708,7 +708,7 @@ mod tests {
             key_phase: false,
         };
 
-        let mut d: [u8; 50] = [0; 50];
+        let mut d = [0; 50];
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
@@ -732,7 +732,7 @@ mod tests {
             key_phase: false,
         };
 
-        let mut d: [u8; 50] = [0; 50];
+        let mut d = [0; 50];
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
@@ -756,7 +756,7 @@ mod tests {
             key_phase: false,
         };
 
-        let mut d: [u8; 50] = [0; 50];
+        let mut d = [0; 50];
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
@@ -780,7 +780,7 @@ mod tests {
             key_phase: false,
         };
 
-        let mut d: [u8; 50] = [0; 50];
+        let mut d = [0; 50];
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());

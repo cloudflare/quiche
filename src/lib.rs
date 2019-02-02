@@ -48,7 +48,7 @@
 //! ```
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
 //! # let server_name = "quic.tech";
-//! # let scid: [u8; 16] = [0xba; 16];
+//! # let scid = [0xba; 16];
 //! // Client connection.
 //! let conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
 //!
@@ -60,10 +60,10 @@
 //! incoming packets from the network that belong to that connection:
 //!
 //! ```no_run
-//! # let mut buf: [u8; 512] = [0; 512];
+//! # let mut buf = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
-//! # let scid: [u8; 16] = [0xba; 16];
+//! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! let read = socket.recv(&mut buf).unwrap();
 //!
@@ -86,10 +86,10 @@
 //! instead:
 //!
 //! ```no_run
-//! # let mut out: [u8; 512] = [0; 512];
+//! # let mut out = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
-//! # let scid: [u8; 16] = [0xba; 16];
+//! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! let write = match conn.send(&mut out) {
 //!     Ok(v) => v,
@@ -114,7 +114,7 @@
 //!
 //! ```
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
-//! # let scid: [u8; 16] = [0xba; 16];
+//! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! let timeout = conn.timeout();
 //! ```
@@ -125,10 +125,10 @@
 //! after which additional packets might need to be sent on the network:
 //!
 //! ```no_run
-//! # let mut out: [u8; 512] = [0; 512];
+//! # let mut out = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
-//! # let scid: [u8; 16] = [0xba; 16];
+//! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! // Timeout expired, do something.
 //! conn.on_timeout();
@@ -155,7 +155,7 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
-//! # let scid: [u8; 16] = [0xba; 16];
+//! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! if conn.is_established() {
 //!     // Handshake completed, send some data on stream 0.
@@ -650,7 +650,7 @@ impl Connection {
         // Derive initial secrets for the client. We can do this here because
         // we already generated the random destination connection ID.
         if !is_server {
-            let mut dcid: [u8; 16] = [0; 16];
+            let mut dcid = [0; 16];
             rand::rand_bytes(&mut dcid[..]);
 
             let (aead_open, aead_seal) =
@@ -934,7 +934,7 @@ impl Connection {
 
                     // Feed crypto data to the TLS state, if there's data
                     // available at the expected offset.
-                    let mut crypto_buf: [u8; 512] = [0; 512];
+                    let mut crypto_buf = [0; 512];
 
                     let level = space.crypto_level;
 
@@ -2013,7 +2013,7 @@ impl TransportParams {
 
     fn encode<'a>(tp: &TransportParams, version: u32, is_server: bool,
                   out: &'a mut [u8]) -> Result<&'a mut [u8]> {
-        let mut params: [u8; 128] = [0; 128];
+        let mut params = [0; 128];
 
         let params_len = {
             let mut b = octets::Octets::with_slice(&mut params);
@@ -2170,7 +2170,7 @@ mod tests {
             disable_migration: true,
         };
 
-        let mut raw_params: [u8; 256] = [42; 256];
+        let mut raw_params = [42; 256];
         let mut raw_params = TransportParams::encode(&tp, VERSION_DRAFT17, true,
                                               &mut raw_params).unwrap();
         assert_eq!(raw_params.len(), 106);
@@ -2182,7 +2182,7 @@ mod tests {
     }
 
     fn create_conn(is_server: bool) -> Box<Connection> {
-        let mut scid: [u8; 16] = [0; 16];
+        let mut scid = [0; 16];
         rand::rand_bytes(&mut scid[..]);
 
         let mut config = Config::new(VERSION_DRAFT17).unwrap();

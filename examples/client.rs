@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
                   mio::Ready::readable(),
                   mio::PollOpt::edge())?;
 
-    let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
+    let mut scid = [0; LOCAL_CONN_ID_LEN];
     SystemRandom::new().fill(&mut scid[..])?;
 
     let version = args.get_str("--wire-version");

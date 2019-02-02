@@ -159,7 +159,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
                     continue;
                 }
 
-                let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
+                let mut scid = [0; LOCAL_CONN_ID_LEN];
                 SystemRandom::new().fill(&mut scid[..])?;
 
                 // Token is always present in Initial packets.

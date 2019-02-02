@@ -217,7 +217,7 @@ impl Handshake {
 
         self.set_quiet_shutdown(true);
 
-        let mut raw_params: [u8; 128] = [0; 128];
+        let mut raw_params = [0; 128];
 
         let raw_params = TransportParams::encode(&conn.local_transport_params,
                                                  conn.version, conn.is_server,
@@ -638,7 +638,7 @@ fn map_result_ssl(ssl: &Handshake, bssl_result: c_int) -> Result<()> {
 }
 
 fn log_ssl_error() {
-    let err: [u8; 1024] = [0; 1024];
+    let err = [0; 1024];
 
     unsafe {
         let e = ERR_peek_error();

@@ -426,9 +426,9 @@ mod tests {
         let mut recv = RecvBuf::default();
         assert_eq!(recv.len(), 0);
 
-        let mut buf = vec![0; 32];
+        let mut buf = [0; 32];
 
-        assert_eq!(recv.pop(buf.as_mut_slice()), Err(Error::Done));
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -436,7 +436,7 @@ mod tests {
         let mut recv = RecvBuf::default();
         assert_eq!(recv.len(), 0);
 
-        let mut buf = vec![0; 32];
+        let mut buf = [0; 32];
 
         let first = RangeBuf::from(b"hello", 0, false);
         let second = RangeBuf::from(b"world", 5, false);
@@ -446,26 +446,26 @@ mod tests {
         assert_eq!(recv.len(), 10);
         assert_eq!(recv.off(), 0);
 
-        assert_eq!(recv.pop(buf.as_mut_slice()), Err(Error::Done));
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
 
         assert!(recv.push(third).is_ok());
         assert_eq!(recv.len(), 19);
         assert_eq!(recv.off(), 0);
 
-        assert_eq!(recv.pop(buf.as_mut_slice()), Err(Error::Done));
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
 
         assert!(recv.push(first).is_ok());
         assert_eq!(recv.len(), 19);
         assert_eq!(recv.off(), 0);
 
-        let (len, fin) = recv.pop(buf.as_mut_slice()).unwrap();
+        let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 19);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"helloworldsomething");
         assert_eq!(recv.len(), 0);
         assert_eq!(recv.off(), 19);
 
-        assert_eq!(recv.pop(buf.as_mut_slice()), Err(Error::Done));
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -473,7 +473,7 @@ mod tests {
         let mut recv = RecvBuf::default();
         assert_eq!(recv.len(), 0);
 
-        let mut buf = vec![0; 32];
+        let mut buf = [0; 32];
 
         let first = RangeBuf::from(b"something", 0, false);
         let second = RangeBuf::from(b"helloworld", 9, true);
@@ -513,7 +513,7 @@ mod tests {
         let mut recv = RecvBuf::default();
         assert_eq!(recv.len(), 0);
 
-        let mut buf = vec![0; 32];
+        let mut buf = [0; 32];
 
         let first = RangeBuf::from(b"something", 0, false);
         let second = RangeBuf::from(b"helloworld", 9, true);
@@ -522,13 +522,13 @@ mod tests {
         assert_eq!(recv.len(), 19);
         assert_eq!(recv.off(), 0);
 
-        assert_eq!(recv.pop(buf.as_mut_slice()), Err(Error::Done));
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
 
         assert!(recv.push(first).is_ok());
         assert_eq!(recv.len(), 19);
         assert_eq!(recv.off(), 0);
 
-        let (len, fin) = recv.pop(buf.as_mut_slice()).unwrap();
+        let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 19);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"somethinghelloworld");
@@ -541,7 +541,7 @@ mod tests {
         let mut recv = RecvBuf::default();
         assert_eq!(recv.len(), 0);
 
-        let mut buf = vec![0; 32];
+        let mut buf = [0; 32];
 
         let first = RangeBuf::from(b"something", 0, false);
         let second = RangeBuf::from(b"", 9, true);
@@ -554,7 +554,7 @@ mod tests {
         assert_eq!(recv.len(), 9);
         assert_eq!(recv.off(), 0);
 
-        let (len, fin) = recv.pop(buf.as_mut_slice()).unwrap();
+        let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 9);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"something");
@@ -577,8 +577,8 @@ mod tests {
         let mut send = SendBuf::default();
         assert_eq!(send.len(), 0);
 
-        let first: [u8; 9] = *b"something";
-        let second: [u8; 10] = *b"helloworld";
+        let first = *b"something";
+        let second = *b"helloworld";
 
         assert!(send.push_slice(&first, false).is_ok());
         assert_eq!(send.len(), 9);
@@ -598,8 +598,8 @@ mod tests {
         let mut send = SendBuf::default();
         assert_eq!(send.len(), 0);
 
-        let first: [u8; 9] = *b"something";
-        let second: [u8; 10] = *b"helloworld";
+        let first = *b"something";
+        let second = *b"helloworld";
 
         assert!(send.push_slice(&first, false).is_ok());
         assert_eq!(send.len(), 9);
@@ -635,8 +635,8 @@ mod tests {
         assert_eq!(send.len(), 0);
         assert_eq!(send.off(), 0);
 
-        let first: [u8; 9] = *b"something";
-        let second: [u8; 10] = *b"helloworld";
+        let first = *b"something";
+        let second = *b"helloworld";
 
         assert!(send.push_slice(&first, false).is_ok());
         assert_eq!(send.off(), 0);
@@ -698,8 +698,8 @@ mod tests {
         let mut send = SendBuf::default();
         assert_eq!(send.len(), 0);
 
-        let first: [u8; 9] = *b"something";
-        let second: [u8; 10] = *b"helloworld";
+        let first = *b"something";
+        let second = *b"helloworld";
 
         assert!(send.push_slice(&first, false).is_ok());
         assert_eq!(send.len(), 9);
@@ -741,7 +741,7 @@ mod tests {
         let mut send = SendBuf::default();
         assert_eq!(send.len(), 0);
 
-        let first: [u8; 9] = *b"something";
+        let first = *b"something";
 
         assert!(send.push_slice(&first, false).is_ok());
         assert_eq!(send.len(), 9);
@@ -762,7 +762,7 @@ mod tests {
         let mut stream = Stream::new(15, 0);
         assert!(!stream.more_credit());
 
-        let mut buf = vec![0; 32];
+        let mut buf = [0; 32];
 
         let first = RangeBuf::from(b"hello", 0, false);
         let second = RangeBuf::from(b"world", 5, false);
@@ -774,7 +774,7 @@ mod tests {
 
         assert_eq!(stream.recv_push(third), Err(Error::FlowControl));
 
-        let (len, fin) = stream.recv_pop(buf.as_mut_slice()).unwrap();
+        let (len, fin) = stream.recv_pop(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"helloworld");
         assert_eq!(fin, false);
 
