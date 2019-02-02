@@ -47,7 +47,7 @@ Options:
   -h --help               Show this screen.
 ";
 
-fn main() {
+fn main() -> Result<(), Box<std::error::Error>> {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
@@ -57,30 +57,30 @@ fn main() {
                       .and_then(|dopt| dopt.parse())
                       .unwrap_or_else(|e| e.exit());
 
-    let url = url::Url::parse(args.get_str("URL")).unwrap();
+    let url = url::Url::parse(args.get_str("URL"))?;
 
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
-    socket.connect(&url).unwrap();
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+    socket.connect(&url)?;
 
-    let poll = mio::Poll::new().unwrap();
+    let poll = mio::Poll::new()?;
     let mut events = mio::Events::with_capacity(1024);
 
-    let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
+    let socket = mio::net::UdpSocket::from_socket(socket)?;
     poll.register(&socket, mio::Token(0),
                   mio::Ready::readable(),
-                  mio::PollOpt::edge()).unwrap();
+                  mio::PollOpt::edge())?;
 
     let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
-    SystemRandom::new().fill(&mut scid[..]).unwrap();
+    SystemRandom::new().fill(&mut scid[..])?;
 
     let version = args.get_str("--wire-version");
-    let version = u32::from_str_radix(version, 16).unwrap();
+    let version = u32::from_str_radix(version, 16)?;
 
-    let mut config = quiche::Config::new(version).unwrap();
+    let mut config = quiche::Config::new(version)?;
 
     config.verify_peer(true);
 
-    config.set_application_protos(&[b"hq-17", b"http/0.9"]).unwrap();
+    config.set_application_protos(&[b"hq-17", b"http/0.9"])?;
 
     config.set_idle_timeout(30);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
@@ -98,7 +98,7 @@ fn main() {
         config.log_keys();
     }
 
-    let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
+    let mut conn = quiche::connect(url.domain(), &scid, &mut config)?;
 
     let write = match conn.send(&mut out) {
         Ok(v) => v,
@@ -106,14 +106,14 @@ fn main() {
         Err(e) => panic!("{} initial send failed: {:?}", conn.trace_id(), e),
     };
 
-    socket.send(&out[..write]).unwrap();
+    socket.send(&out[..write])?;
 
     debug!("{} written {}", conn.trace_id(), write);
 
     let mut req_sent = false;
 
     loop {
-        poll.poll(&mut events, conn.timeout()).unwrap();
+        poll.poll(&mut events, conn.timeout())?;
 
         'read: loop {
             if events.is_empty() {
@@ -150,7 +150,7 @@ fn main() {
 
                 Err(e) => {
                     error!("{} recv failed: {:?}", conn.trace_id(), e);
-                    conn.close(false, e.to_wire(), b"fail").unwrap();
+                    conn.close(false, e.to_wire(), b"fail")?;
                     break 'read;
                 },
             };
@@ -173,7 +173,7 @@ fn main() {
                 format!("GET {}\r\n", url.path())
             };
 
-            conn.stream_send(HTTP_REQ_STREAM_ID, req.as_bytes(), true).unwrap();
+            conn.stream_send(HTTP_REQ_STREAM_ID, req.as_bytes(), true)?;
 
             req_sent = true;
         }
@@ -192,7 +192,7 @@ fn main() {
 
                 if s == HTTP_REQ_STREAM_ID && fin {
                     info!("{} response received, closing..,", conn.trace_id());
-                    conn.close(true, 0x00, b"kthxbye").unwrap();
+                    conn.close(true, 0x00, b"kthxbye")?;
                 }
             }
         }
@@ -208,13 +208,13 @@ fn main() {
 
                 Err(e) => {
                     error!("{} send failed: {:?}", conn.trace_id(), e);
-                    conn.close(false, e.to_wire(), b"fail").unwrap();
+                    conn.close(false, e.to_wire(), b"fail")?;
                     break;
                 },
             };
 
             // TODO: coalesce packets.
-            socket.send(&out[..write]).unwrap();
+            socket.send(&out[..write])?;
 
             debug!("{} written {}", conn.trace_id(), write);
         }
@@ -224,4 +224,6 @@ fn main() {
             break;
         }
     }
+
+    Ok(())
 }

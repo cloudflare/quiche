@@ -53,7 +53,7 @@ Options:
 
 type ConnMap = HashMap<Vec<u8>, (net::SocketAddr, Box<quiche::Connection>)>;
 
-fn main() {
+fn main() -> Result<(), Box<std::error::Error>> {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
@@ -63,24 +63,24 @@ fn main() {
                       .and_then(|dopt| dopt.parse())
                       .unwrap_or_else(|e| e.exit());
 
-    let socket = net::UdpSocket::bind(args.get_str("--listen")).unwrap();
+    let socket = net::UdpSocket::bind(args.get_str("--listen"))?;
 
-    let poll = mio::Poll::new().unwrap();
+    let poll = mio::Poll::new()?;
     let mut events = mio::Events::with_capacity(1024);
 
-    let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
+    let socket = mio::net::UdpSocket::from_socket(socket)?;
     poll.register(&socket, mio::Token(0),
                   mio::Ready::readable(),
-                  mio::PollOpt::edge()).unwrap();
+                  mio::PollOpt::edge())?;
 
     let mut connections = ConnMap::new();
 
-    let mut config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
+    let mut config = quiche::Config::new(quiche::VERSION_DRAFT17)?;
 
-    config.load_cert_chain_from_pem_file(args.get_str("--cert")).unwrap();
-    config.load_priv_key_from_pem_file(args.get_str("--key")).unwrap();
+    config.load_cert_chain_from_pem_file(args.get_str("--cert"))?;
+    config.load_priv_key_from_pem_file(args.get_str("--key"))?;
 
-    config.set_application_protos(&[b"h3-17", b"hq-17", b"http/0.9"]).unwrap();
+    config.set_application_protos(&[b"h3-17", b"hq-17", b"http/0.9"])?;
 
     config.set_idle_timeout(30);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
@@ -97,7 +97,7 @@ fn main() {
                                  .filter_map(|(_, c)| c.timeout())
                                  .min();
 
-        poll.poll(&mut events, timeout).unwrap();
+        poll.poll(&mut events, timeout)?;
 
         'read: loop {
             if events.is_empty() {
@@ -152,15 +152,15 @@ fn main() {
 
                     let len = quiche::negotiate_version(&hdr.scid,
                                                         &hdr.dcid,
-                                                        &mut out).unwrap();
+                                                        &mut out)?;
                     let out = &out[..len];
 
-                    socket.send_to(out, &src).unwrap();
+                    socket.send_to(out, &src)?;
                     continue;
                 }
 
                 let mut scid: [u8; LOCAL_CONN_ID_LEN] = [0; LOCAL_CONN_ID_LEN];
-                SystemRandom::new().fill(&mut scid[..]).unwrap();
+                SystemRandom::new().fill(&mut scid[..])?;
 
                 // Token is always present in Initial packets.
                 let token = hdr.token.as_ref().unwrap();
@@ -171,10 +171,10 @@ fn main() {
                     let new_token = mint_token(&hdr, &src);
 
                     let len = quiche::retry(&hdr.scid, &hdr.dcid, &scid,
-                                            &new_token, &mut out).unwrap();
+                                            &new_token, &mut out)?;
                     let out = &out[..len];
 
-                    socket.send_to(out, &src).unwrap();
+                    socket.send_to(out, &src)?;
                     continue;
                 }
 
@@ -189,7 +189,7 @@ fn main() {
                        hex_dump(&hdr.dcid),
                        hex_dump(&hdr.scid));
 
-                let conn = quiche::accept(&hdr.dcid, odcid, &mut config).unwrap();
+                let conn = quiche::accept(&hdr.dcid, odcid, &mut config)?;
 
                 connections.insert(hdr.dcid.to_vec(), (src, conn));
 
@@ -209,7 +209,7 @@ fn main() {
 
                 Err(e) => {
                     error!("{} recv failed: {:?}", conn.trace_id(), e);
-                    conn.close(false, e.to_wire(), b"fail").unwrap();
+                    conn.close(false, e.to_wire(), b"fail")?;
                     break 'read;
                 },
             };
@@ -243,13 +243,13 @@ fn main() {
 
                     Err(e) => {
                         error!("{} send failed: {:?}", conn.trace_id(), e);
-                        conn.close(false, e.to_wire(), b"fail").unwrap();
+                        conn.close(false, e.to_wire(), b"fail")?;
                         break;
                     },
                 };
 
                 // TODO: coalesce packets.
-                socket.send_to(&out[..write], &peer).unwrap();
+                socket.send_to(&out[..write], &peer)?;
 
                 debug!("{} written {} bytes", conn.trace_id(), write);
             }
