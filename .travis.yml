@@ -14,6 +14,9 @@ addons:
      - libev-dev
      - uthash-dev
 
+install:
+ - rustup component add rustfmt
+
 script:
  - [ $TRAVIS_RUST_VERSION = "nightly" ] && cargo fmt --all -- --check || true
  - cargo build --verbose --all
