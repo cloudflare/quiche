@@ -131,36 +131,16 @@ impl Open {
         })
     }
 
-    pub fn open(&self, nonce: &[u8], ad: &[u8], buf: &mut [u8]) -> Result<usize> {
-        let nonce = aead::Nonce::try_assume_unique_for_key(nonce)
-                                .map_err(|_| Error::CryptoFail)?;
+    pub fn open_with_u64_counter(&self, counter: u64, ad: &[u8], buf: &mut [u8])
+                                                            -> Result<usize> {
+        let nonce = make_nonce(&self.nonce, counter);
 
         let ad = aead::Aad::from(ad);
 
         let plain = aead::open_in_place(&self.key, nonce, ad, 0, buf)
-                         .map_err(|_| Error::CryptoFail)?;
+            .map_err(|_| Error::CryptoFail)?;
 
         Ok(plain.len())
-    }
-
-    pub fn open_with_u64_counter(&self, counter: u64, ad: &[u8], buf: &mut [u8])
-                                                            -> Result<usize> {
-        let mut counter_nonce: [u8; 12] = [0xba; 12];
-
-        {
-            let mut b = octets::Octets::with_slice(&mut counter_nonce);
-
-            b.put_u32(0).unwrap();
-            b.put_u64(counter).unwrap();
-        }
-
-        let mut nonce = self.nonce.clone();
-
-        for i in 0 .. nonce.len() {
-            nonce[i] ^= counter_nonce[i];
-        }
-
-        self.open(&nonce, ad, buf)
     }
 
     pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
@@ -199,36 +179,14 @@ impl Seal {
         })
     }
 
-    pub fn seal(&self, nonce: &[u8], ad: &[u8], buf: &mut [u8]) -> Result<usize> {
-        let nonce = aead::Nonce::try_assume_unique_for_key(nonce)
-                                .map_err(|_| Error::CryptoFail)?;
+    pub fn seal_with_u64_counter(&self, counter: u64, ad: &[u8], buf: &mut [u8])
+                                                            -> Result<usize> {
+        let nonce = make_nonce(&self.nonce, counter);
 
         let ad = aead::Aad::from(ad);
 
-        let cipher = aead::seal_in_place(&self.key, nonce, ad, buf, self.alg().tag_len())
-                          .map_err(|_| Error::CryptoFail)?;
-
-        Ok(cipher)
-    }
-
-    pub fn seal_with_u64_counter(&self, counter: u64, ad: &[u8], buf: &mut [u8])
-                                                            -> Result<usize> {
-        let mut counter_nonce: [u8; 12] = [0xba; 12];
-
-        {
-            let mut b = octets::Octets::with_slice(&mut counter_nonce);
-
-            b.put_u32(0).unwrap();
-            b.put_u64(counter).unwrap();
-        }
-
-        let mut nonce = self.nonce.clone();
-
-        for i in 0 .. nonce.len() {
-            nonce[i] ^= counter_nonce[i];
-        }
-
-        self.seal(&nonce, ad, buf)
+        aead::seal_in_place(&self.key, nonce, ad, buf, self.alg().tag_len())
+            .map_err(|_| Error::CryptoFail)
     }
 
     pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
@@ -365,6 +323,19 @@ fn hkdf_expand_label(prk: &hmac::SigningKey, label: &[u8],  out: &mut [u8])
     hkdf::expand(prk, &info[..info_len], out);
 
     Ok(())
+}
+
+fn make_nonce(iv: &[u8], counter: u64) -> aead::Nonce {
+    let mut nonce = [0; 12];
+    nonce.copy_from_slice(&iv);
+
+    // XOR the last bytes of the IV with the counter. This is equivalent to
+    // left-padding the counter with zero bytes.
+    for (a, b) in nonce[4..].iter_mut().zip(counter.to_be_bytes().iter()) {
+        *a ^= b;
+    }
+
+    aead::Nonce::assume_unique_for_key(nonce)
 }
 
 
