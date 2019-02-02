@@ -277,7 +277,7 @@ impl Recovery {
 
         let mut has_newly_acked = false;
 
-        for pn in ranges.flatten().rev() {
+        for pn in ranges.flatten() {
             let newly_acked = self.on_packet_acked(pn, flight);
             has_newly_acked = cmp::max(has_newly_acked, newly_acked);
 
