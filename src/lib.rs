@@ -240,7 +240,7 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn to_wire(&self) -> u16 {
+    pub fn to_wire(self) -> u16 {
         match self {
             Error::Done => 0x0,
             Error::InvalidFrame => 0x7,
@@ -254,11 +254,11 @@ impl Error {
         }
     }
 
-    fn to_c(&self) -> libc::ssize_t {
-        *self as _
+    fn to_c(self) -> libc::ssize_t {
+        self as _
     }
 
-    fn to_str(&self) -> &str {
+    fn to_str(self) -> &'static str {
         match self {
             Error::Done => "nothing else to do",
             Error::BufferTooShort => "buffer is too short",
