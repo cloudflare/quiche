@@ -6,8 +6,8 @@
 // modification, are permitted provided that the following conditions are
 // met:
 //
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
+//     * Redistributions of source code must retain the above copyright notice,
+//       this list of conditions and the following disclaimer.
 //
 //     * Redistributions in binary form must reproduce the above copyright
 //       notice, this list of conditions and the following disclaimer in the
@@ -28,11 +28,11 @@
 use std::cmp;
 
 use std::collections::hash_map;
-use std::collections::HashMap;
 use std::collections::BinaryHeap;
+use std::collections::HashMap;
 
-use crate::Result;
 use crate::Error;
+use crate::Result;
 
 const MAX_WRITE_SIZE: usize = 1000;
 
@@ -114,7 +114,7 @@ impl Stream {
         // Send MAX_STREAM_DATA when the new limit is at least double the
         // amount of data that can be received before blocking.
         self.new_max_rx_data != self.max_rx_data &&
-        self.new_max_rx_data / 2 > self.max_rx_data - self.rx_data
+            self.new_max_rx_data / 2 > self.max_rx_data - self.rx_data
     }
 }
 
@@ -282,11 +282,13 @@ impl SendBuf {
         out.data = Vec::with_capacity(cmp::min(max_len, self.len()));
 
         let mut out_len = max_len;
-        let mut out_off = self.data
-                              .peek()
-                              .map_or_else(|| 0, |d| d.off());
+        let mut out_off = self.data.peek().map_or_else(|| 0, |d| d.off());
 
-        while out_len > 0 && self.ready() && self.off() == out_off && self.off() < max_off {
+        while out_len > 0 &&
+            self.ready() &&
+            self.off() == out_off &&
+            self.off() < max_off
+        {
             let mut buf = match self.data.pop() {
                 Some(v) => v,
                 None => break,

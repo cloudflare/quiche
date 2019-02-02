@@ -6,8 +6,8 @@
 // modification, are permitted provided that the following conditions are
 // met:
 //
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
+//     * Redistributions of source code must retain the above copyright notice,
+//       this list of conditions and the following disclaimer.
 //
 //     * Redistributions in binary form must reproduce the above copyright
 //       notice, this list of conditions and the following disclaimer in the
@@ -25,8 +25,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use crate::Result;
 use crate::Error;
+use crate::Result;
 
 use crate::octets;
 use crate::packet;
@@ -154,7 +154,7 @@ impl Frame {
                 token: b.get_bytes_with_varint_length()?.to_vec(),
             },
 
-            0x08 ... 0x0f => parse_stream_frame(frame_type, b)?,
+            0x08...0x0f => parse_stream_frame(frame_type, b)?,
 
             0x10 => Frame::MaxData {
                 max: b.get_varint()?,
@@ -202,7 +202,7 @@ impl Frame {
                 reason: b.get_bytes_with_varint_length()?.to_vec(),
             },
 
-            _    => return Err(Error::InvalidFrame),
+            _ => return Err(Error::InvalidFrame),
         };
 
         let allowed = match (pkt, &frame) {
@@ -223,7 +223,7 @@ impl Frame {
             (packet::Type::Application, _) => true,
 
             // All other cases are forbidden.
-            (_, _) => false,
+            (..) => false,
         };
 
         if !allowed {
@@ -277,7 +277,10 @@ impl Frame {
                 }
             },
 
-            Frame::StopSending { stream_id, error_code } => {
+            Frame::StopSending {
+                stream_id,
+                error_code,
+            } => {
                 b.put_varint(0x05)?;
 
                 b.put_varint(*stream_id)?;
@@ -345,7 +348,11 @@ impl Frame {
                 b.put_varint(*max)?;
             },
 
-            Frame::NewConnectionId { seq_num, conn_id, reset_token } => {
+            Frame::NewConnectionId {
+                seq_num,
+                conn_id,
+                reset_token,
+            } => {
                 b.put_varint(0x18)?;
 
                 b.put_varint(*seq_num)?;
@@ -372,7 +379,11 @@ impl Frame {
                 b.put_bytes(data.as_ref())?;
             },
 
-            Frame::ConnectionClose { error_code, frame_type, reason } => {
+            Frame::ConnectionClose {
+                error_code,
+                frame_type,
+                reason,
+            } => {
                 b.put_varint(0x1c)?;
 
                 b.put_u16(*error_code)?;
@@ -395,9 +406,7 @@ impl Frame {
 
     pub fn wire_len(&self) -> usize {
         match self {
-            Frame::Padding { len } => {
-                *len
-            },
+            Frame::Padding { len } => *len,
 
             Frame::Ping => 1,
 
@@ -407,12 +416,11 @@ impl Frame {
                 let first = it.next().unwrap();
                 let ack_block = (first.end - 1) - first.start;
 
-                let mut len =
-                    1 +                                   // frame type
-                    octets::varint_len(first.end - 1) +   // largest_ack
-                    octets::varint_len(*ack_delay) +      // ack_delay
+                let mut len = 1 + // frame type
+                    octets::varint_len(first.end - 1) + // largest_ack
+                    octets::varint_len(*ack_delay) + // ack_delay
                     octets::varint_len(it.len() as u64) + // block_count
-                    octets::varint_len(ack_block);        // first_block
+                    octets::varint_len(ack_block); // first_block
 
                 let mut smallest_ack = first.start;
 
@@ -420,7 +428,7 @@ impl Frame {
                     let gap = smallest_ack - block.end - 1;
                     let ack_block = (block.end - 1) - block.start;
 
-                    len += octets::varint_len(gap) +      // gap
+                    len += octets::varint_len(gap) + // gap
                            octets::varint_len(ack_block); // ack_block
 
                     smallest_ack = block.start;
@@ -430,89 +438,95 @@ impl Frame {
             },
 
             Frame::StopSending { stream_id, .. } => {
-                1 +                              // frame type
+                1 + // frame type
                 octets::varint_len(*stream_id) + // stream_id
-                2                                // error_code
+                2 // error_code
             },
 
             Frame::Crypto { data } => {
-                1 +                                     // frame type
+                1 + // frame type
                 octets::varint_len(data.off() as u64) + // offset
                 octets::varint_len(data.len() as u64) + // length
-                data.len()                              // data
+                data.len() // data
             },
 
-            Frame::NewToken { token } =>  {
-                1 +                                      // frame type
+            Frame::NewToken { token } => {
+                1 + // frame type
                 octets::varint_len(token.len() as u64) + // token length
-                token.len()                              // token
+                token.len() // token
             },
 
             Frame::Stream { stream_id, data } => {
-                1 +                                     // frame type
-                octets::varint_len(*stream_id) +        // stream_id
+                1 + // frame type
+                octets::varint_len(*stream_id) + // stream_id
                 octets::varint_len(data.off() as u64) + // offset
                 octets::varint_len(data.len() as u64) + // length
-                data.len()                              // data
+                data.len() // data
             },
 
             Frame::MaxData { max } => {
-                1 +                      // frame type
+                1 + // frame type
                 octets::varint_len(*max) // max
             },
 
             Frame::MaxStreamData { stream_id, max } => {
-                1 +                              // frame type
+                1 + // frame type
                 octets::varint_len(*stream_id) + // stream_id
-                octets::varint_len(*max)         // max
+                octets::varint_len(*max) // max
             },
 
             Frame::MaxStreamsBidi { max } => {
-                1 +                      // frame type
+                1 + // frame type
                 octets::varint_len(*max) // max
             },
 
             Frame::MaxStreamsUni { max } => {
-                1 +                      // frame type
+                1 + // frame type
                 octets::varint_len(*max) // max
             },
 
-            Frame::NewConnectionId { seq_num, conn_id, reset_token } => {
-                1 +                            // frame type
+            Frame::NewConnectionId {
+                seq_num,
+                conn_id,
+                reset_token,
+            } => {
+                1 + // frame type
                 octets::varint_len(*seq_num) + // seq_num
-                1 +                            // conn_id length
-                conn_id.len() +                // conn_id
-                reset_token.len()              // reset_token
+                1 + // conn_id length
+                conn_id.len() + // conn_id
+                reset_token.len() // reset_token
             },
 
             Frame::RetireConnectionId { seq_num } => {
-                1 +                          // frame type
+                1 + // frame type
                 octets::varint_len(*seq_num) // seq_num
             },
 
             Frame::PathChallenge { .. } => {
                 1 + // frame type
-                8   // data
+                8 // data
             },
 
             Frame::PathResponse { .. } => {
                 1 + // frame type
-                8   // data
+                8 // data
             },
 
-            Frame::ConnectionClose { frame_type, reason, .. } => {
-                1 +                                       // frame type
-                2 +                                       // error_code
-                octets::varint_len(*frame_type) +         // frame_type
+            Frame::ConnectionClose {
+                frame_type, reason, ..
+            } => {
+                1 + // frame type
+                2 + // error_code
+                octets::varint_len(*frame_type) + // frame_type
                 octets::varint_len(reason.len() as u64) + // reason_len
-                reason.len()                              // reason
+                reason.len() // reason
             },
 
             Frame::ApplicationClose { reason, .. } => {
-                1 +                                       // frame type
-                2 +                                       // error_code
+                1 + // frame type
+                2 + // error_code
                 octets::varint_len(reason.len() as u64) + // reason_len
-                reason.len()                              // reason
+                reason.len() // reason
             },
         }
     }
@@ -533,9 +547,11 @@ impl std::fmt::Debug for Frame {
                 write!(f, "ACK delay={} blocks={:?}", ack_delay, ranges)?;
             },
 
-            Frame::StopSending { stream_id, error_code } => {
-                write!(f, "STOP_SENDING stream={} err={:x}",
-                       stream_id, error_code)?;
+            Frame::StopSending {
+                stream_id,
+                error_code,
+            } => {
+                write!(f, "STOP_SENDING stream={} err={:x}", stream_id, error_code)?;
             },
 
             Frame::Crypto { data } => {
@@ -547,8 +563,14 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::Stream { stream_id, data } => {
-                write!(f, "STREAM id={} off={} len={} fin={}",
-                       stream_id, data.off(), data.len(), data.fin())?;
+                write!(
+                    f,
+                    "STREAM id={} off={} len={} fin={}",
+                    stream_id,
+                    data.off(),
+                    data.len(),
+                    data.fin()
+                )?;
             },
 
             Frame::MaxData { max } => {
@@ -583,14 +605,24 @@ impl std::fmt::Debug for Frame {
                 write!(f, "PATH_RESPONSE data={:02x?}", data)?;
             },
 
-            Frame::ConnectionClose { error_code, frame_type, reason } => {
-                write!(f, "CONNECTION_CLOSE err={:x} frame={:x} reason={:x?}",
-                       error_code, frame_type, reason)?;
+            Frame::ConnectionClose {
+                error_code,
+                frame_type,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "CONNECTION_CLOSE err={:x} frame={:x} reason={:x?}",
+                    error_code, frame_type, reason
+                )?;
             },
 
             Frame::ApplicationClose { error_code, reason } => {
-                write!(f, "APPLICATION_CLOSE err={:x} reason={:x?}",
-                       error_code, reason)?;
+                write!(
+                    f,
+                    "APPLICATION_CLOSE err={:x} reason={:x?}",
+                    error_code, reason
+                )?;
             },
         }
 
@@ -663,7 +695,6 @@ fn parse_stream_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
     Ok(Frame::Stream { stream_id, data })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -672,9 +703,7 @@ mod tests {
     fn padding() {
         let mut d = [42; 128];
 
-        let frame = Frame::Padding {
-            len: 128,
-        };
+        let frame = Frame::Padding { len: 128 };
 
         let wire_len = {
             let mut b = octets::Octets::with_slice(&mut d);
@@ -684,8 +713,10 @@ mod tests {
         assert_eq!(wire_len, 128);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_ok());
@@ -712,8 +743,10 @@ mod tests {
         assert_eq!(&d[..wire_len], [0x01 as u8]);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -748,8 +781,10 @@ mod tests {
         assert_eq!(wire_len, 17);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_ok());
@@ -767,7 +802,7 @@ mod tests {
 
         let frame = Frame::StopSending {
             stream_id: 123_213,
-            error_code: 15_352
+            error_code: 15_352,
         };
 
         let wire_len = {
@@ -778,8 +813,10 @@ mod tests {
         assert_eq!(wire_len, 7);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -809,8 +846,10 @@ mod tests {
         assert_eq!(wire_len, 18);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_ok());
@@ -838,8 +877,10 @@ mod tests {
         assert_eq!(wire_len, 17);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -870,8 +911,10 @@ mod tests {
         assert_eq!(wire_len, 19);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -887,9 +930,7 @@ mod tests {
     fn max_data() {
         let mut d = [42; 128];
 
-        let frame = Frame::MaxData {
-            max: 128_318_273,
-        };
+        let frame = Frame::MaxData { max: 128_318_273 };
 
         let wire_len = {
             let mut b = octets::Octets::with_slice(&mut d);
@@ -899,8 +940,10 @@ mod tests {
         assert_eq!(wire_len, 5);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -929,8 +972,10 @@ mod tests {
         assert_eq!(wire_len, 7);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -946,9 +991,7 @@ mod tests {
     fn max_streams_bidi() {
         let mut d = [42; 128];
 
-        let frame = Frame::MaxStreamsBidi {
-            max: 128_318_273,
-        };
+        let frame = Frame::MaxStreamsBidi { max: 128_318_273 };
 
         let wire_len = {
             let mut b = octets::Octets::with_slice(&mut d);
@@ -958,8 +1001,10 @@ mod tests {
         assert_eq!(wire_len, 5);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -975,9 +1020,7 @@ mod tests {
     fn max_streams_uni() {
         let mut d = [42; 128];
 
-        let frame = Frame::MaxStreamsBidi {
-            max: 128_318_273,
-        };
+        let frame = Frame::MaxStreamsBidi { max: 128_318_273 };
 
         let wire_len = {
             let mut b = octets::Octets::with_slice(&mut d);
@@ -987,8 +1030,10 @@ mod tests {
         assert_eq!(wire_len, 5);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1018,8 +1063,10 @@ mod tests {
         assert_eq!(wire_len, 37);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1035,9 +1082,7 @@ mod tests {
     fn retire_connection_id() {
         let mut d = [42; 128];
 
-        let frame = Frame::RetireConnectionId {
-            seq_num: 123_213,
-        };
+        let frame = Frame::RetireConnectionId { seq_num: 123_213 };
 
         let wire_len = {
             let mut b = octets::Octets::with_slice(&mut d);
@@ -1047,8 +1092,10 @@ mod tests {
         assert_eq!(wire_len, 5);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1076,8 +1123,10 @@ mod tests {
         assert_eq!(wire_len, 9);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1105,8 +1154,10 @@ mod tests {
         assert_eq!(wire_len, 9);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1136,8 +1187,10 @@ mod tests {
         assert_eq!(wire_len, 20);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_ok());
@@ -1166,8 +1219,10 @@ mod tests {
         assert_eq!(wire_len, 16);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Application),
-                   Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());

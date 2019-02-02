@@ -6,8 +6,8 @@
 // modification, are permitted provided that the following conditions are
 // met:
 //
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
+//     * Redistributions of source code must retain the above copyright notice,
+//       this list of conditions and the following disclaimer.
 //
 //     * Redistributions in binary form must reproduce the above copyright
 //       notice, this list of conditions and the following disclaimer in the
@@ -56,9 +56,9 @@ impl log::Log for Logger {
 }
 
 #[no_mangle]
-pub extern fn quiche_enable_debug_logging(cb: extern fn(line: *const u8,
-                                                        argp: *mut c_void),
-                                          argp: *mut c_void) {
+pub extern fn quiche_enable_debug_logging(
+    cb: extern fn(line: *const u8, argp: *mut c_void), argp: *mut c_void,
+) {
     let argp = atomic::AtomicPtr::new(argp);
     let logger = Box::new(Logger { cb, argp });
 
@@ -76,9 +76,9 @@ pub extern fn quiche_config_new(version: u32) -> *mut Config {
 }
 
 #[no_mangle]
-pub extern fn quiche_config_load_cert_chain_from_pem_file(config: &mut Config,
-                                                          path: *const c_char)
-                                                            -> c_int {
+pub extern fn quiche_config_load_cert_chain_from_pem_file(
+    config: &mut Config, path: *const c_char,
+) -> c_int {
     let path = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
 
     match config.load_cert_chain_from_pem_file(path) {
@@ -89,9 +89,9 @@ pub extern fn quiche_config_load_cert_chain_from_pem_file(config: &mut Config,
 }
 
 #[no_mangle]
-pub extern fn quiche_config_load_priv_key_from_pem_file(config: &mut Config,
-                                                        path: *const c_char)
-                                                            -> c_int {
+pub extern fn quiche_config_load_priv_key_from_pem_file(
+    config: &mut Config, path: *const c_char,
+) -> c_int {
     let path = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
 
     match config.load_priv_key_from_pem_file(path) {
@@ -122,17 +122,23 @@ pub extern fn quiche_config_set_max_packet_size(config: &mut Config, v: u64) {
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_stream_data_bidi_local(config: &mut Config, v: u64) {
+pub extern fn quiche_config_set_initial_max_stream_data_bidi_local(
+    config: &mut Config, v: u64,
+) {
     config.set_initial_max_stream_data_bidi_local(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_stream_data_bidi_remote(config: &mut Config, v: u64) {
+pub extern fn quiche_config_set_initial_max_stream_data_bidi_remote(
+    config: &mut Config, v: u64,
+) {
     config.set_initial_max_stream_data_bidi_remote(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_stream_data_uni(config: &mut Config, v: u64) {
+pub extern fn quiche_config_set_initial_max_stream_data_uni(
+    config: &mut Config, v: u64,
+) {
     config.set_initial_max_stream_data_uni(v);
 }
 
@@ -142,12 +148,16 @@ pub extern fn quiche_config_set_initial_max_data(config: &mut Config, v: u64) {
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_streams_bidi(config: &mut Config, v: u64) {
+pub extern fn quiche_config_set_initial_max_streams_bidi(
+    config: &mut Config, v: u64,
+) {
     config.set_initial_max_streams_bidi(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_streams_uni(config: &mut Config, v: u64) {
+pub extern fn quiche_config_set_initial_max_streams_uni(
+    config: &mut Config, v: u64,
+) {
     config.set_initial_max_streams_uni(v);
 }
 
@@ -172,11 +182,11 @@ pub extern fn quiche_config_free(config: *mut Config) {
 }
 
 #[no_mangle]
-pub extern fn quiche_header_info(buf: *mut u8, buf_len: usize, dcil: usize,
-                                 version: *mut u32, ty: *mut u8,
-                                 scid: *mut u8, scid_len: *mut usize,
-                                 dcid: *mut u8, dcid_len: *mut usize,
-                                 token: *mut u8, token_len: *mut usize) -> c_int {
+pub extern fn quiche_header_info(
+    buf: *mut u8, buf_len: usize, dcil: usize, version: *mut u32, ty: *mut u8,
+    scid: *mut u8, scid_len: *mut usize, dcid: *mut u8, dcid_len: *mut usize,
+    token: *mut u8, token_len: *mut usize,
+) -> c_int {
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
     let hdr = match Header::from_slice(buf, dcil) {
         Ok(h) => h,
@@ -188,11 +198,11 @@ pub extern fn quiche_header_info(buf: *mut u8, buf_len: usize, dcil: usize,
         *version = hdr.version;
 
         *ty = match hdr.ty {
-            Type::Initial            => 1,
-            Type::Retry              => 2,
-            Type::Handshake          => 3,
-            Type::ZeroRTT            => 4,
-            Type::Application        => 5,
+            Type::Initial => 1,
+            Type::Retry => 2,
+            Type::Handshake => 3,
+            Type::ZeroRTT => 4,
+            Type::Application => 5,
             Type::VersionNegotiation => 6,
         };
 
@@ -237,9 +247,10 @@ pub extern fn quiche_header_info(buf: *mut u8, buf_len: usize, dcil: usize,
 }
 
 #[no_mangle]
-pub extern fn quiche_accept(scid: *const u8, scid_len: usize,
-                            odcid: *const u8, odcid_len: usize,
-                            config: &mut Config) -> *mut Connection {
+pub extern fn quiche_accept(
+    scid: *const u8, scid_len: usize, odcid: *const u8, odcid_len: usize,
+    config: &mut Config,
+) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
 
     let odcid = if !odcid.is_null() || odcid_len == 0 {
@@ -256,9 +267,10 @@ pub extern fn quiche_accept(scid: *const u8, scid_len: usize,
 }
 
 #[no_mangle]
-pub extern fn quiche_connect(server_name: *const c_char, scid: *const u8,
-                             scid_len: usize, config: &mut Config)
-                                                -> *mut Connection {
+pub extern fn quiche_connect(
+    server_name: *const c_char, scid: *const u8, scid_len: usize,
+    config: &mut Config,
+) -> *mut Connection {
     let server_name = if server_name.is_null() {
         None
     } else {
@@ -275,9 +287,10 @@ pub extern fn quiche_connect(server_name: *const c_char, scid: *const u8,
 }
 
 #[no_mangle]
-pub extern fn quiche_negotiate_version(scid: *const u8, scid_len: usize,
-                                       dcid: *const u8, dcid_len: usize,
-                                       out: *mut u8, out_len: usize) -> ssize_t {
+pub extern fn quiche_negotiate_version(
+    scid: *const u8, scid_len: usize, dcid: *const u8, dcid_len: usize,
+    out: *mut u8, out_len: usize,
+) -> ssize_t {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
     let dcid = unsafe { slice::from_raw_parts(dcid, dcid_len) };
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
@@ -290,11 +303,11 @@ pub extern fn quiche_negotiate_version(scid: *const u8, scid_len: usize,
 }
 
 #[no_mangle]
-pub extern fn quiche_retry(scid: *const u8, scid_len: usize,
-                           dcid: *const u8, dcid_len: usize,
-                           new_scid: *const u8, new_scid_len: usize,
-                           token: *const u8, token_len: usize,
-                           out: *mut u8, out_len: usize) -> ssize_t {
+pub extern fn quiche_retry(
+    scid: *const u8, scid_len: usize, dcid: *const u8, dcid_len: usize,
+    new_scid: *const u8, new_scid_len: usize, token: *const u8, token_len: usize,
+    out: *mut u8, out_len: usize,
+) -> ssize_t {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
     let dcid = unsafe { slice::from_raw_parts(dcid, dcid_len) };
     let new_scid = unsafe { slice::from_raw_parts(new_scid, new_scid_len) };
@@ -309,10 +322,10 @@ pub extern fn quiche_retry(scid: *const u8, scid_len: usize,
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_new_with_tls(scid: *const u8, scid_len: usize,
-                                       odcid: *const u8, odcid_len: usize,
-                                       config: &mut Config, ssl: *mut c_void,
-                                       is_server: bool) -> *mut Connection {
+pub extern fn quiche_conn_new_with_tls(
+    scid: *const u8, scid_len: usize, odcid: *const u8, odcid_len: usize,
+    config: &mut Config, ssl: *mut c_void, is_server: bool,
+) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
 
     let odcid = if !odcid.is_null() || odcid_len == 0 {
@@ -331,8 +344,9 @@ pub extern fn quiche_conn_new_with_tls(scid: *const u8, scid_len: usize,
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_recv(conn: &mut Connection, buf: *mut u8,
-                               buf_len: usize) -> ssize_t {
+pub extern fn quiche_conn_recv(
+    conn: &mut Connection, buf: *mut u8, buf_len: usize,
+) -> ssize_t {
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
 
     match conn.recv(buf) {
@@ -343,8 +357,9 @@ pub extern fn quiche_conn_recv(conn: &mut Connection, buf: *mut u8,
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_send(conn: &mut Connection, out: *mut u8,
-                               out_len: usize) -> ssize_t {
+pub extern fn quiche_conn_send(
+    conn: &mut Connection, out: *mut u8, out_len: usize,
+) -> ssize_t {
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
     match conn.send(out) {
@@ -355,9 +370,10 @@ pub extern fn quiche_conn_send(conn: &mut Connection, out: *mut u8,
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_recv(conn: &mut Connection, stream_id: u64,
-                                      out: *mut u8, out_len: usize, fin: &mut bool)
-                                                            -> ssize_t {
+pub extern fn quiche_conn_stream_recv(
+    conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: usize,
+    fin: &mut bool,
+) -> ssize_t {
     // TODO: limit out_len to MAX_SSIZE to allow the result to fit in ssize_t
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
@@ -373,9 +389,9 @@ pub extern fn quiche_conn_stream_recv(conn: &mut Connection, stream_id: u64,
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_send(conn: &mut Connection, stream_id: u64,
-                                      buf: *const u8, buf_len: usize, fin: bool)
-                                                            -> ssize_t {
+pub extern fn quiche_conn_stream_send(
+    conn: &mut Connection, stream_id: u64, buf: *const u8, buf_len: usize, fin: bool,
+) -> ssize_t {
     let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
 
     match conn.stream_send(stream_id, buf, fin) {
@@ -392,7 +408,9 @@ pub extern fn quiche_conn_readable(conn: &mut Connection) -> *mut Readable {
 }
 
 #[no_mangle]
-pub extern fn quiche_readable_next(iter: &mut Readable, stream_id: *mut u64) -> bool {
+pub extern fn quiche_readable_next(
+    iter: &mut Readable, stream_id: *mut u64,
+) -> bool {
     if let Some(v) = iter.next() {
         unsafe { *stream_id = v };
         return true;
@@ -407,8 +425,9 @@ pub extern fn quiche_readable_free(i: *mut Readable) {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_close(conn: &mut Connection, app: bool, err: u16,
-                                reason: *const u8, reason_len: usize) -> c_int {
+pub extern fn quiche_conn_close(
+    conn: &mut Connection, app: bool, err: u16, reason: *const u8, reason_len: usize,
+) -> c_int {
     let reason = unsafe { slice::from_raw_parts(reason, reason_len) };
 
     match conn.close(app, err, reason) {
@@ -421,8 +440,8 @@ pub extern fn quiche_conn_close(conn: &mut Connection, app: bool, err: u16,
 #[no_mangle]
 pub extern fn quiche_conn_timeout_as_nanos(conn: &mut Connection) -> u64 {
     match conn.timeout() {
-        Some(timeout) => timeout.as_secs() * 1_000_000_000 +
-                         u64::from(timeout.subsec_nanos()),
+        Some(timeout) =>
+            timeout.as_secs() * 1_000_000_000 + u64::from(timeout.subsec_nanos()),
 
         None => std::u64::MAX,
     }

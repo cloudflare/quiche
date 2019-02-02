@@ -6,8 +6,8 @@
 // modification, are permitted provided that the following conditions are
 // met:
 //
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
+//     * Redistributions of source code must retain the above copyright notice,
+//       this list of conditions and the following disclaimer.
 //
 //     * Redistributions in binary form must reproduce the above copyright
 //       notice, this list of conditions and the following disclaimer in the
@@ -26,15 +26,14 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 /// Zero-copy abstraction for parsing and constructing network packets.
-
 use std::mem;
 use std::ptr;
 
-use crate::Result;
 use crate::Error;
+use crate::Result;
 
 macro_rules! peek_u {
-    ($b:expr, $ty:ty, $len:expr) => ({
+    ($b:expr, $ty:ty, $len:expr) => {{
         let src = &$b.buf[$b.off..];
 
         if src.len() < $len {
@@ -50,25 +49,25 @@ macro_rules! peek_u {
         };
 
         Ok(<$ty>::from_be(out))
-    });
+    }};
 }
 
 macro_rules! get_u {
-    ($b:expr, $ty:ty, $len:expr) => ({
+    ($b:expr, $ty:ty, $len:expr) => {{
         let out = peek_u!($b, $ty, $len);
 
         $b.off += $len;
 
         out
-    });
+    }};
 }
 
 macro_rules! put_u {
-    ($b:expr, $ty:ty, $v:expr, $len:expr) => ({
+    ($b:expr, $ty:ty, $v:expr, $len:expr) => {{
         let dst = &mut $b.buf[$b.off..];
 
         if dst.len() < $len {
-            return Err(Error::BufferTooShort)
+            return Err(Error::BufferTooShort);
         }
 
         unsafe {
@@ -81,7 +80,7 @@ macro_rules! put_u {
         $b.off += $len;
 
         Ok(dst)
-    });
+    }};
 }
 
 /// A zero-copy mutable byte buffer.
@@ -235,7 +234,7 @@ impl<'a> Octets<'a> {
     /// the buffer.
     pub fn get_bytes(&mut self, len: usize) -> Result<Octets> {
         if self.cap() < len {
-            return Err(Error::BufferTooShort)
+            return Err(Error::BufferTooShort);
         }
 
         let out = Octets {
@@ -275,7 +274,7 @@ impl<'a> Octets<'a> {
     /// advancing the buffer.
     pub fn peek_bytes(&mut self, len: usize) -> Result<Octets> {
         if self.cap() < len {
-            return Err(Error::BufferTooShort)
+            return Err(Error::BufferTooShort);
         }
 
         let out = Octets {
@@ -292,7 +291,7 @@ impl<'a> Octets<'a> {
         let len = v.len();
 
         if self.cap() < len {
-            return Err(Error::BufferTooShort)
+            return Err(Error::BufferTooShort);
         }
 
         if len == 0 {
@@ -314,15 +313,9 @@ impl<'a> Octets<'a> {
 
         let (left, right) = self.buf.split_at_mut(off);
 
-        let first = Octets {
-            buf: left,
-            off: 0,
-        };
+        let first = Octets { buf: left, off: 0 };
 
-        let last = Octets {
-            buf: right,
-            off: 0,
-        };
+        let last = Octets { buf: right, off: 0 };
 
         Ok((first, last))
     }
@@ -395,15 +388,15 @@ pub fn varint_len(v: u64) -> usize {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn get_u() {
-        let mut d = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
-                               15, 16, 17, 18];
+        let mut d = [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+        ];
 
         let mut b = Octets::with_slice(&mut d);
         assert_eq!(b.cap(), 18);
@@ -619,8 +612,9 @@ mod tests {
             assert!(b.put_u8(1).is_err());
         }
 
-        let exp = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
-                             15, 16, 17, 18];
+        let exp = [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+        ];
         assert_eq!(&d, &exp);
     }
 

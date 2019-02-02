@@ -6,8 +6,8 @@
 // modification, are permitted provided that the following conditions are
 // met:
 //
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
+//     * Redistributions of source code must retain the above copyright notice,
+//       this list of conditions and the following disclaimer.
 //
 //     * Redistributions in binary form must reproduce the above copyright
 //       notice, this list of conditions and the following disclaimer in the
@@ -60,8 +60,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
     env_logger::init();
 
     let args = docopt::Docopt::new(USAGE)
-                      .and_then(|dopt| dopt.parse())
-                      .unwrap_or_else(|e| e.exit());
+        .and_then(|dopt| dopt.parse())
+        .unwrap_or_else(|e| e.exit());
 
     let socket = net::UdpSocket::bind(args.get_str("--listen"))?;
 
@@ -69,9 +69,12 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let mut events = mio::Events::with_capacity(1024);
 
     let socket = mio::net::UdpSocket::from_socket(socket)?;
-    poll.register(&socket, mio::Token(0),
-                  mio::Ready::readable(),
-                  mio::PollOpt::edge())?;
+    poll.register(
+        &socket,
+        mio::Token(0),
+        mio::Ready::readable(),
+        mio::PollOpt::edge(),
+    )?;
 
     let mut connections = ConnMap::new();
 
@@ -93,9 +96,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     loop {
         // TODO: use event loop that properly supports timers
-        let timeout = connections.values()
-                                 .filter_map(|(_, c)| c.timeout())
-                                 .min();
+        let timeout = connections.values().filter_map(|(_, c)| c.timeout()).min();
 
         poll.poll(&mut events, timeout)?;
 
@@ -130,8 +131,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
                 Err(e) => {
                     error!("Parsing packet header failed: {:?}", e);
-                    continue
-                }
+                    continue;
+                },
             };
 
             trace!("got packet {:?}", hdr);
@@ -150,9 +151,9 @@ fn main() -> Result<(), Box<std::error::Error>> {
                 if hdr.version != quiche::VERSION_DRAFT17 {
                     warn!("Doing version negotiation");
 
-                    let len = quiche::negotiate_version(&hdr.scid,
-                                                        &hdr.dcid,
-                                                        &mut out)?;
+                    let len =
+                        quiche::negotiate_version(&hdr.scid, &hdr.dcid, &mut out)?;
+
                     let out = &out[..len];
 
                     socket.send_to(out, &src)?;
@@ -170,8 +171,10 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
                     let new_token = mint_token(&hdr, &src);
 
-                    let len = quiche::retry(&hdr.scid, &hdr.dcid, &scid,
-                                            &new_token, &mut out)?;
+                    let len = quiche::retry(
+                        &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
+                    )?;
+
                     let out = &out[..len];
 
                     socket.send_to(out, &src)?;
@@ -185,9 +188,11 @@ fn main() -> Result<(), Box<std::error::Error>> {
                     continue;
                 }
 
-                debug!("New connection: dcid={} scid={}",
-                       hex_dump(&hdr.dcid),
-                       hex_dump(&hdr.scid));
+                debug!(
+                    "New connection: dcid={} scid={}",
+                    hex_dump(&hdr.dcid),
+                    hex_dump(&hdr.scid)
+                );
 
                 let conn = quiche::accept(&hdr.dcid, odcid, &mut config)?;
 
@@ -200,7 +205,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
             // Process potentially coalesced packets.
             let read = match conn.recv(pkt_buf) {
-                Ok(v)  => v,
+                Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
                     debug!("{} done reading", conn.trace_id());
@@ -223,8 +228,13 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
                     let stream_buf = &buf[..read];
 
-                    debug!("{} stream {} has {} bytes (fin? {})",
-                           conn.trace_id(), s, stream_buf.len(), fin);
+                    debug!(
+                        "{} stream {} has {} bytes (fin? {})",
+                        conn.trace_id(),
+                        s,
+                        stream_buf.len(),
+                        fin
+                    );
 
                     handle_stream(conn, s, stream_buf, args.get_str("--root"));
                 }
@@ -268,7 +278,9 @@ fn main() -> Result<(), Box<std::error::Error>> {
     }
 }
 
-fn handle_stream(conn: &mut quiche::Connection, stream: u64, buf: &[u8], root: &str) {
+fn handle_stream(
+    conn: &mut quiche::Connection, stream: u64, buf: &[u8], root: &str,
+) {
     if buf.len() > 4 && &buf[..4] == b"GET " {
         let uri = &buf[4..buf.len()];
         let uri = String::from_utf8(uri.to_vec()).unwrap();
@@ -282,14 +294,22 @@ fn handle_stream(conn: &mut quiche::Connection, stream: u64, buf: &[u8], root: &
             }
         }
 
-        info!("{} got GET request for {:?} on stream {}",
-              conn.trace_id(), path, stream);
+        info!(
+            "{} got GET request for {:?} on stream {}",
+            conn.trace_id(),
+            path,
+            stream
+        );
 
         let data = std::fs::read(path.as_path())
-                    .unwrap_or_else(|_| Vec::from(String::from("Not Found!\r\n")));
+            .unwrap_or_else(|_| Vec::from(String::from("Not Found!\r\n")));
 
-        info!("{} sending response of size {} on stream {}",
-              conn.trace_id(), data.len(), stream);
+        info!(
+            "{} sending response of size {} on stream {}",
+            conn.trace_id(),
+            data.len(),
+            stream
+        );
 
         if let Err(e) = conn.stream_send(stream, &data, true) {
             error!("{} stream send failed {:?}", conn.trace_id(), e);
@@ -339,9 +359,7 @@ fn validate_token<'a>(src: &net::SocketAddr, token: &'a [u8]) -> Option<&'a [u8]
 }
 
 fn hex_dump(buf: &[u8]) -> String {
-    let vec: Vec<String> = buf.iter()
-                              .map(|b| format!("{:02x}", b))
-                              .collect();
+    let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
 
     vec.join("")
 }

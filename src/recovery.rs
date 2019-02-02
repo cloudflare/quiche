@@ -6,8 +6,8 @@
 // modification, are permitted provided that the following conditions are
 // met:
 //
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
+//     * Redistributions of source code must retain the above copyright notice,
+//       this list of conditions and the following disclaimer.
 //
 //     * Redistributions in binary form must reproduce the above copyright
 //       notice, this list of conditions and the following disclaimer in the
@@ -66,8 +66,10 @@ pub struct Sent {
 }
 
 impl Sent {
-    pub fn new(pkt_num: u64, frames: Vec<frame::Frame>, sent_bytes: usize,
-               ack_eliciting: bool, is_crypto: bool, now: Instant) -> Sent {
+    pub fn new(
+        pkt_num: u64, frames: Vec<frame::Frame>, sent_bytes: usize,
+        ack_eliciting: bool, is_crypto: bool, now: Instant,
+    ) -> Sent {
         let sent_bytes = if ack_eliciting { sent_bytes } else { 0 };
 
         Sent {
@@ -106,12 +108,11 @@ impl InFlight {
         let mut unacked_bytes = 0;
 
         for p in &mut self.sent.values_mut().filter(|p| p.is_crypto) {
-            p.frames.retain(|f|
-                match f {
-                    frame::Frame::Crypto { .. } => true,
+            p.frames.retain(|f| match f {
+                frame::Frame::Crypto { .. } => true,
 
-                    _ => false,
-                });
+                _ => false,
+            });
 
             trace!("{} crypto packet lost {}", trace_id, p.pkt_num);
 
@@ -234,8 +235,9 @@ impl Default for Recovery {
 }
 
 impl Recovery {
-    pub fn on_packet_sent(&mut self, pkt: Sent, flight: &mut InFlight,
-                          now: Instant, trace_id: &str) {
+    pub fn on_packet_sent(
+        &mut self, pkt: Sent, flight: &mut InFlight, now: Instant, trace_id: &str,
+    ) {
         let pkt_num = pkt.pkt_num;
         let ack_eliciting = pkt.ack_eliciting;
         let is_crypto = pkt.is_crypto;
@@ -263,10 +265,12 @@ impl Recovery {
         trace!("{} {:?}", trace_id, self);
     }
 
-    pub fn on_ack_received(&mut self, ranges: &ranges::RangeSet, ack_delay: u64,
-                           flight: &mut InFlight, now: Instant, trace_id: &str) {
-        self.largest_acked_pkt = cmp::max(self.largest_acked_pkt,
-                                          ranges.largest().unwrap());
+    pub fn on_ack_received(
+        &mut self, ranges: &ranges::RangeSet, ack_delay: u64, flight: &mut InFlight,
+        now: Instant, trace_id: &str,
+    ) {
+        self.largest_acked_pkt =
+            cmp::max(self.largest_acked_pkt, ranges.largest().unwrap());
 
         if let Some(pkt) = flight.sent.get(&self.largest_acked_pkt) {
             if pkt.ack_eliciting {
@@ -300,11 +304,10 @@ impl Recovery {
         trace!("{} {:?}", trace_id, self);
     }
 
-    pub fn on_loss_detection_timer(&mut self,
-                                   in_flight: &mut InFlight,
-                                   hs_flight: &mut InFlight,
-                                   flight: &mut InFlight,
-                                   now: Instant, trace_id: &str) {
+    pub fn on_loss_detection_timer(
+        &mut self, in_flight: &mut InFlight, hs_flight: &mut InFlight,
+        flight: &mut InFlight, now: Instant, trace_id: &str,
+    ) {
         if self.crypto_bytes_in_flight > 0 {
             self.crypto_count += 1;
 
@@ -423,9 +426,7 @@ impl Recovery {
         }
 
         // PTO timer.
-        let mut timeout = self.smoothed_rtt +
-                          (self.rttvar * 4) +
-                          self.max_ack_delay;
+        let mut timeout = self.smoothed_rtt + (self.rttvar * 4) + self.max_ack_delay;
 
         timeout = cmp::max(timeout, GRANULARITY);
         timeout *= 2_u32.pow(self.pto_count);
@@ -434,8 +435,9 @@ impl Recovery {
             Some(self.time_of_last_sent_ack_eliciting_pkt + timeout);
     }
 
-    fn detect_lost_packets(&mut self, flight: &mut InFlight, now: Instant,
-                           trace_id: &str) {
+    fn detect_lost_packets(
+        &mut self, flight: &mut InFlight, now: Instant, trace_id: &str,
+    ) {
         let mut lost_pkt: Vec<u64> = Vec::new();
 
         let largest_acked = self.largest_acked_pkt;
@@ -510,8 +512,9 @@ impl Recovery {
         false
     }
 
-    fn on_packets_lost(&mut self, lost_pkt: Vec<u64>, flight: &mut InFlight,
-                       now: Instant) {
+    fn on_packets_lost(
+        &mut self, lost_pkt: Vec<u64>, flight: &mut InFlight, now: Instant,
+    ) {
         // Differently from OnPacketsLost(), we need to handle both
         // ACK-eliciting and non-ACK-eliciting packets, so need to keep of
         // whether we saw any lost ACK-eliciting packet to trigger the

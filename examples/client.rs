@@ -6,8 +6,8 @@
 // modification, are permitted provided that the following conditions are
 // met:
 //
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
+//     * Redistributions of source code must retain the above copyright notice,
+//       this list of conditions and the following disclaimer.
 //
 //     * Redistributions in binary form must reproduce the above copyright
 //       notice, this list of conditions and the following disclaimer in the
@@ -54,8 +54,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
     env_logger::init();
 
     let args = docopt::Docopt::new(USAGE)
-                      .and_then(|dopt| dopt.parse())
-                      .unwrap_or_else(|e| e.exit());
+        .and_then(|dopt| dopt.parse())
+        .unwrap_or_else(|e| e.exit());
 
     let url = url::Url::parse(args.get_str("URL"))?;
 
@@ -66,9 +66,12 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let mut events = mio::Events::with_capacity(1024);
 
     let socket = mio::net::UdpSocket::from_socket(socket)?;
-    poll.register(&socket, mio::Token(0),
-                  mio::Ready::readable(),
-                  mio::PollOpt::edge())?;
+    poll.register(
+        &socket,
+        mio::Token(0),
+        mio::Ready::readable(),
+        mio::PollOpt::edge(),
+    )?;
 
     let mut scid = [0; LOCAL_CONN_ID_LEN];
     SystemRandom::new().fill(&mut scid[..])?;
@@ -141,7 +144,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
             // Process potentially coalesced packets.
             let read = match conn.recv(&mut buf[..len]) {
-                Ok(v)  => v,
+                Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
                     debug!("{} done reading", conn.trace_id());
@@ -164,11 +167,18 @@ fn main() -> Result<(), Box<std::error::Error>> {
         }
 
         if conn.is_established() && !req_sent {
-            info!("{} sending HTTP request for {}", conn.trace_id(), url.path());
+            info!(
+                "{} sending HTTP request for {}",
+                conn.trace_id(),
+                url.path()
+            );
 
             let req = if args.get_bool("--http1") {
-                format!("GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: quiche\r\n\r\n",
-                    url.path(), url.host().unwrap())
+                format!(
+                    "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: quiche\r\n\r\n",
+                    url.path(),
+                    url.host().unwrap()
+                )
             } else {
                 format!("GET {}\r\n", url.path())
             };
@@ -185,8 +195,13 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
                 let stream_buf = &buf[..read];
 
-                debug!("{} stream {} has {} bytes (fin? {})",
-                       conn.trace_id(), s, stream_buf.len(), fin);
+                debug!(
+                    "{} stream {} has {} bytes (fin? {})",
+                    conn.trace_id(),
+                    s,
+                    stream_buf.len(),
+                    fin
+                );
 
                 print!("{}", unsafe { std::str::from_utf8_unchecked(&stream_buf) });
 
