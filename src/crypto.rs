@@ -119,10 +119,14 @@ impl Open {
     pub fn new(alg: Algorithm, key: &[u8], iv: &[u8], hp_key: &[u8])
                                                             -> Result<Open> {
         Ok(Open {
-            hp_key: aead::quic::HeaderProtectionKey::new(alg.get_ring_hp(),
-                                                         hp_key).unwrap(),
-            key: aead::OpeningKey::new(alg.get_ring_aead(), &key).unwrap(),
+            hp_key: aead::quic::HeaderProtectionKey::new(alg.get_ring_hp(), hp_key)
+                .map_err(|_| Error::CryptoFail)?,
+
+            key: aead::OpeningKey::new(alg.get_ring_aead(), &key)
+                .map_err(|_| Error::CryptoFail)?,
+
             nonce: Vec::from(iv),
+
             alg,
         })
     }
@@ -130,7 +134,9 @@ impl Open {
     pub fn open(&self, nonce: &[u8], ad: &[u8], buf: &mut [u8]) -> Result<usize> {
         let nonce = aead::Nonce::try_assume_unique_for_key(nonce)
                                 .map_err(|_| Error::CryptoFail)?;
+
         let ad = aead::Aad::from(ad);
+
         let plain = aead::open_in_place(&self.key, nonce, ad, 0, buf)
                          .map_err(|_| Error::CryptoFail)?;
 
@@ -181,10 +187,14 @@ impl Seal {
     pub fn new(alg: Algorithm, key: &[u8], iv: &[u8], hp_key: &[u8])
                                                             -> Result<Seal> {
         Ok(Seal {
-            hp_key: aead::quic::HeaderProtectionKey::new(alg.get_ring_hp(),
-                                                         hp_key).unwrap(),
-            key: aead::SealingKey::new(alg.get_ring_aead(), key).unwrap(),
+            hp_key: aead::quic::HeaderProtectionKey::new(alg.get_ring_hp(), hp_key)
+                .map_err(|_| Error::CryptoFail)?,
+
+            key: aead::SealingKey::new(alg.get_ring_aead(), key)
+                .map_err(|_| Error::CryptoFail)?,
+
             nonce: Vec::from(iv),
+
             alg,
         })
     }
@@ -192,7 +202,9 @@ impl Seal {
     pub fn seal(&self, nonce: &[u8], ad: &[u8], buf: &mut [u8]) -> Result<usize> {
         let nonce = aead::Nonce::try_assume_unique_for_key(nonce)
                                 .map_err(|_| Error::CryptoFail)?;
+
         let ad = aead::Aad::from(ad);
+
         let cipher = aead::seal_in_place(&self.key, nonce, ad, buf, self.alg().tag_len())
                           .map_err(|_| Error::CryptoFail)?;
 
