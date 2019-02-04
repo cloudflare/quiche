@@ -184,7 +184,7 @@ use std::collections::HashMap;
 pub const VERSION_DRAFT17: u32 = 0xff00_0011;
 
 /// The maximum length of a connection ID.
-pub const MAX_CONN_ID_LEN: usize = 18;
+pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
 
 const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 
