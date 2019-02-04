@@ -237,6 +237,15 @@ pub enum Error {
 
     /// The peer violated the local stream limits.
     StreamLimit        = -12,
+
+    /// The QPACK header block's huffman encoding is invalid.
+    InvalidHuffmanEncoding = -13,
+
+    /// The QPACK static table index provided doesn't exist.
+    InvalidStaticTableIndex = -14,
+
+    /// The decoded QPACK header name or value is not valid.
+    InvalidHeaderValue = -15,
 }
 
 impl Error {
@@ -272,6 +281,9 @@ impl Error {
             Error::TlsFail => "TLS failed",
             Error::FlowControl => "flow control limit was violated",
             Error::StreamLimit => "stream limit was violated",
+            Error::InvalidHuffmanEncoding => "invalid huffman encoding",
+            Error::InvalidStaticTableIndex => "invalid QPACK static table index",
+            Error::InvalidHeaderValue => "invalid QPACK header name or value",
         }
     }
 }
@@ -2370,6 +2382,7 @@ pub use crate::stream::Readable;
 mod crypto;
 mod ffi;
 mod frame;
+pub mod h3;
 mod octets;
 mod packet;
 mod rand;
