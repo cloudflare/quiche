@@ -204,7 +204,9 @@ fn main() -> Result<(), Box<std::error::Error>> {
                     fin
                 );
 
-                print!("{}", unsafe { std::str::from_utf8_unchecked(&stream_buf) });
+                print!("{}", unsafe {
+                    std::str::from_utf8_unchecked(&stream_buf)
+                });
 
                 if s == HTTP_REQ_STREAM_ID && fin {
                     info!("{} response received, closing...", conn.trace_id());

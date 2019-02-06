@@ -50,7 +50,9 @@ impl Encoder {
     }
 
     /// Encodes a list of headers into a QPACK header block.
-    pub fn encode(&mut self, headers: &[Header], out: &mut [u8]) -> Result<usize> {
+    pub fn encode(
+        &mut self, headers: &[Header], out: &mut [u8],
+    ) -> Result<usize> {
         let mut b = octets::Octets::with_slice(out);
 
         // Request Insert Count.

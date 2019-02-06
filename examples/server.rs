@@ -126,7 +126,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
             let pkt_buf = &mut buf[..len];
 
-            let hdr = match quiche::Header::from_slice(pkt_buf, LOCAL_CONN_ID_LEN) {
+            let hdr = match quiche::Header::from_slice(pkt_buf, LOCAL_CONN_ID_LEN)
+            {
                 Ok(v) => v,
 
                 Err(e) => {
@@ -151,8 +152,9 @@ fn main() -> Result<(), Box<std::error::Error>> {
                 if hdr.version != quiche::VERSION_DRAFT17 {
                     warn!("Doing version negotiation");
 
-                    let len =
-                        quiche::negotiate_version(&hdr.scid, &hdr.dcid, &mut out)?;
+                    let len = quiche::negotiate_version(
+                        &hdr.scid, &hdr.dcid, &mut out,
+                    )?;
 
                     let out = &out[..len];
 
@@ -333,7 +335,9 @@ fn mint_token(hdr: &quiche::Header, src: &net::SocketAddr) -> Vec<u8> {
     token
 }
 
-fn validate_token<'a>(src: &net::SocketAddr, token: &'a [u8]) -> Option<&'a [u8]> {
+fn validate_token<'a>(
+    src: &net::SocketAddr, token: &'a [u8],
+) -> Option<&'a [u8]> {
     if token.len() < 6 {
         return None;
     }

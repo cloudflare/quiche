@@ -555,7 +555,9 @@ pub fn connect(
 /// The `scid` and `dcid` parameters are the source connection ID and the
 /// destination connection ID extracted from the received client's Initial
 /// packet that advertises an unsupported version.
-pub fn negotiate_version(scid: &[u8], dcid: &[u8], out: &mut [u8]) -> Result<usize> {
+pub fn negotiate_version(
+    scid: &[u8], dcid: &[u8], out: &mut [u8],
+) -> Result<usize> {
     packet::negotiate_version(scid, dcid, out)
 }
 
@@ -582,8 +584,8 @@ impl Connection {
 
     #[doc(hidden)]
     pub fn with_tls(
-        scid: &[u8], odcid: Option<&[u8]>, config: &mut Config, tls: tls::Handshake,
-        is_server: bool,
+        scid: &[u8], odcid: Option<&[u8]>, config: &mut Config,
+        tls: tls::Handshake, is_server: bool,
     ) -> Result<Box<Connection>> {
         let max_rx_data = config.local_transport_params.initial_max_data;
 
@@ -630,7 +632,8 @@ impl Connection {
                 as usize,
             local_max_streams_uni: config
                 .local_transport_params
-                .initial_max_streams_uni as usize,
+                .initial_max_streams_uni
+                as usize,
 
             peer_max_streams_bidi: 0,
             peer_max_streams_uni: 0,
@@ -1350,7 +1353,8 @@ impl Connection {
                 u64::from(ack_delay.subsec_micros());
 
             let ack_delay = ack_delay /
-                2_u64.pow(self.local_transport_params.ack_delay_exponent as u32);
+                2_u64
+                    .pow(self.local_transport_params.ack_delay_exponent as u32);
 
             let frame = frame::Frame::ACK {
                 ack_delay,
@@ -1497,7 +1501,8 @@ impl Connection {
             left > frame::MAX_STREAM_OVERHEAD
         {
             // TODO: round-robin selected stream instead of picking the first
-            for (id, stream) in self.streams.iter_mut().filter(|(_, s)| s.writable())
+            for (id, stream) in
+                self.streams.iter_mut().filter(|(_, s)| s.writable())
             {
                 // Make sure we can fit the data in the packet.
                 let stream_len = cmp::min(
@@ -1597,8 +1602,14 @@ impl Connection {
             aead,
         )?;
 
-        let sent_pkt =
-            recovery::Sent::new(pn, frames, written, ack_eliciting, is_crypto, now);
+        let sent_pkt = recovery::Sent::new(
+            pn,
+            frames,
+            written,
+            ack_eliciting,
+            is_crypto,
+            now,
+        );
 
         self.recovery.on_packet_sent(
             sent_pkt,
@@ -1662,12 +1673,12 @@ impl Connection {
             return Err(Error::InvalidStreamState);
         }
 
-        let max_rx_data = self
-            .local_transport_params
-            .initial_max_stream_data_bidi_local as usize;
-        let max_tx_data = self
-            .peer_transport_params
-            .initial_max_stream_data_bidi_remote as usize;
+        let max_rx_data =
+            self.local_transport_params
+                .initial_max_stream_data_bidi_local as usize;
+        let max_tx_data =
+            self.peer_transport_params
+                .initial_max_stream_data_bidi_remote as usize;
 
         // Get existing stream or create a new one.
         let stream = match self.streams.entry(stream_id) {
@@ -1747,7 +1758,9 @@ impl Connection {
         let now = time::Instant::now();
 
         if self.draining {
-            if self.draining_timer.is_some() && self.draining_timer.unwrap() <= now {
+            if self.draining_timer.is_some() &&
+                self.draining_timer.unwrap() <= now
+            {
                 trace!("{} draining timeout expired", self.trace_id);
 
                 self.closed = true;
@@ -2172,24 +2185,25 @@ impl TransportParams {
 
             if tp.initial_max_stream_data_bidi_local != 0 {
                 b.put_u16(0x0005)?;
-                b.put_u16(
-                    octets::varint_len(tp.initial_max_stream_data_bidi_local) as u16,
-                )?;
+                b.put_u16(octets::varint_len(
+                    tp.initial_max_stream_data_bidi_local,
+                ) as u16)?;
                 b.put_varint(tp.initial_max_stream_data_bidi_local)?;
             }
 
             if tp.initial_max_stream_data_bidi_remote != 0 {
                 b.put_u16(0x0006)?;
-                b.put_u16(
-                    octets::varint_len(tp.initial_max_stream_data_bidi_remote)
-                        as u16,
-                )?;
+                b.put_u16(octets::varint_len(
+                    tp.initial_max_stream_data_bidi_remote,
+                ) as u16)?;
                 b.put_varint(tp.initial_max_stream_data_bidi_remote)?;
             }
 
             if tp.initial_max_stream_data_uni != 0 {
                 b.put_u16(0x0007)?;
-                b.put_u16(octets::varint_len(tp.initial_max_stream_data_uni) as u16)?;
+                b.put_u16(
+                    octets::varint_len(tp.initial_max_stream_data_uni) as u16
+                )?;
                 b.put_varint(tp.initial_max_stream_data_uni)?;
             }
 

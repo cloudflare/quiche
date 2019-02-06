@@ -390,7 +390,8 @@ pub extern fn quiche_conn_stream_recv(
 
 #[no_mangle]
 pub extern fn quiche_conn_stream_send(
-    conn: &mut Connection, stream_id: u64, buf: *const u8, buf_len: usize, fin: bool,
+    conn: &mut Connection, stream_id: u64, buf: *const u8, buf_len: usize,
+    fin: bool,
 ) -> ssize_t {
     let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
 
@@ -426,7 +427,8 @@ pub extern fn quiche_readable_free(i: *mut Readable) {
 
 #[no_mangle]
 pub extern fn quiche_conn_close(
-    conn: &mut Connection, app: bool, err: u16, reason: *const u8, reason_len: usize,
+    conn: &mut Connection, app: bool, err: u16, reason: *const u8,
+    reason_len: usize,
 ) -> c_int {
     let reason = unsafe { slice::from_raw_parts(reason, reason_len) };
 

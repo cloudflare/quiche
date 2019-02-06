@@ -121,7 +121,9 @@ pub enum Frame {
 }
 
 impl Frame {
-    pub fn from_bytes(b: &mut octets::Octets, pkt: packet::Type) -> Result<Frame> {
+    pub fn from_bytes(
+        b: &mut octets::Octets, pkt: packet::Type,
+    ) -> Result<Frame> {
         let frame_type = b.get_varint()?;
 
         // println!("GOT FRAME {:x}", frame_type);
@@ -461,7 +463,11 @@ impl Frame {
                 len
             },
 
-            Frame::ResetStream { stream_id, final_size, .. } => {
+            Frame::ResetStream {
+                stream_id,
+                final_size,
+                ..
+            } => {
                 1 + // frame type
                 octets::varint_len(*stream_id) + // stream_id
                 2 + // error_code
@@ -583,15 +589,22 @@ impl std::fmt::Debug for Frame {
                 error_code,
                 final_size,
             } => {
-                write!(f, "RESET_STREAM stream={} err={:x} size={}",
-                       stream_id, error_code, final_size)?;
+                write!(
+                    f,
+                    "RESET_STREAM stream={} err={:x} size={}",
+                    stream_id, error_code, final_size
+                )?;
             },
 
             Frame::StopSending {
                 stream_id,
                 error_code,
             } => {
-                write!(f, "STOP_SENDING stream={} err={:x}", stream_id, error_code)?;
+                write!(
+                    f,
+                    "STOP_SENDING stream={} err={:x}",
+                    stream_id, error_code
+                )?;
             },
 
             Frame::Crypto { data } => {

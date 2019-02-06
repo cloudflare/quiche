@@ -266,8 +266,8 @@ impl Recovery {
     }
 
     pub fn on_ack_received(
-        &mut self, ranges: &ranges::RangeSet, ack_delay: u64, flight: &mut InFlight,
-        now: Instant, trace_id: &str,
+        &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
+        flight: &mut InFlight, now: Instant, trace_id: &str,
     ) {
         self.largest_acked_pkt =
             cmp::max(self.largest_acked_pkt, ranges.largest().unwrap());
@@ -426,7 +426,8 @@ impl Recovery {
         }
 
         // PTO timer.
-        let mut timeout = self.smoothed_rtt + (self.rttvar * 4) + self.max_ack_delay;
+        let mut timeout =
+            self.smoothed_rtt + (self.rttvar * 4) + self.max_ack_delay;
 
         timeout = cmp::max(timeout, GRANULARITY);
         timeout *= 2_u32.pow(self.pto_count);

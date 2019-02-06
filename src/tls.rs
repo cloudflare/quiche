@@ -98,7 +98,8 @@ struct SSL_QUIC_METHOD {
 
     flush_flight: extern fn(ssl: *mut SSL) -> c_int,
 
-    send_alert: extern fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int,
+    send_alert:
+        extern fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int,
 }
 
 lazy_static::lazy_static! {
@@ -177,7 +178,11 @@ impl Context {
 
         // Configure ALPN for servers.
         unsafe {
-            SSL_CTX_set_alpn_select_cb(self.as_ptr(), select_alpn, ptr::null_mut());
+            SSL_CTX_set_alpn_select_cb(
+                self.as_ptr(),
+                select_alpn,
+                ptr::null_mut(),
+            );
         }
 
         // Configure ALPN for clients.
@@ -383,10 +388,11 @@ extern fn set_encryption_secrets(
     ssl: *mut SSL, level: crypto::Level, read_secret: *const u8,
     write_secret: *const u8, secret_len: usize,
 ) -> c_int {
-    let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
-        Some(v) => v,
-        None => return 0,
-    };
+    let conn =
+        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
+            Some(v) => v,
+            None => return 0,
+        };
 
     trace!(
         "{} tls set encryption secret lvl={:?}",
@@ -462,10 +468,11 @@ extern fn set_encryption_secrets(
 extern fn add_handshake_data(
     ssl: *mut SSL, level: crypto::Level, data: *const u8, len: usize,
 ) -> c_int {
-    let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
-        Some(v) => v,
-        None => return 0,
-    };
+    let conn =
+        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
+            Some(v) => v,
+            None => return 0,
+        };
 
     trace!(
         "{} tls write message lvl={:?} len={}",
@@ -498,10 +505,11 @@ extern fn flush_flight(_ssl: *mut SSL) -> c_int {
 }
 
 extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int {
-    let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
-        Some(v) => v,
-        None => return 0,
-    };
+    let conn =
+        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
+            Some(v) => v,
+            None => return 0,
+        };
 
     trace!(
         "{} tls send alert lvl={:?} alert={:x}",
@@ -537,10 +545,11 @@ extern fn select_alpn(
     ssl: *mut SSL, out: *mut *const u8, out_len: *mut u8, inp: *mut u8,
     in_len: libc::c_uint, _arg: *mut c_void,
 ) -> c_int {
-    let conn = match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
-        Some(v) => v,
-        None => return 3, // SSL_TLSEXT_ERR_NOACK
-    };
+    let conn =
+        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
+            Some(v) => v,
+            None => return 3, // SSL_TLSEXT_ERR_NOACK
+        };
 
     trace!("{} alpn callback", conn.trace_id());
 
@@ -554,7 +563,8 @@ extern fn select_alpn(
 
     while let Ok(proto) = protos.get_bytes_with_u8_length() {
         let found = conn.application_protos.iter().any(|expected| {
-            if expected.len() == proto.len() && expected.as_slice() == proto.as_ref()
+            if expected.len() == proto.len() &&
+                expected.as_slice() == proto.as_ref()
             {
                 unsafe {
                     *out = expected.as_slice().as_ptr();
@@ -728,7 +738,9 @@ extern {
         ssl: *mut SSL, out_params: *mut *const u8, out_params_len: *mut usize,
     );
 
-    fn SSL_get0_alpn_selected(ssl: *mut SSL, out: *mut *const u8, out_len: *mut u32);
+    fn SSL_get0_alpn_selected(
+        ssl: *mut SSL, out: *mut *const u8, out_len: *mut u32,
+    );
 
     fn SSL_provide_quic_data(
         ssl: *mut SSL, level: crypto::Level, data: *const u8, len: usize,
