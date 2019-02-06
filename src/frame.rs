@@ -49,6 +49,12 @@ pub enum Frame {
         ranges: ranges::RangeSet,
     },
 
+    ResetStream {
+        stream_id: u64,
+        error_code: u16,
+        final_size: u64,
+    },
+
     StopSending {
         stream_id: u64,
         error_code: u16,
@@ -136,6 +142,12 @@ impl Frame {
             0x01 => Frame::Ping,
 
             0x02 => parse_ack_frame(frame_type, b)?,
+
+            0x04 => Frame::ResetStream {
+                stream_id: b.get_varint()?,
+                error_code: b.get_u16()?,
+                final_size: b.get_varint()?,
+            },
 
             0x05 => Frame::StopSending {
                 stream_id: b.get_varint()?,
@@ -275,6 +287,18 @@ impl Frame {
 
                     smallest_ack = block.start;
                 }
+            },
+
+            Frame::ResetStream {
+                stream_id,
+                error_code,
+                final_size,
+            } => {
+                b.put_varint(0x04)?;
+
+                b.put_varint(*stream_id)?;
+                b.put_u16(*error_code)?;
+                b.put_varint(*final_size)?;
             },
 
             Frame::StopSending {
@@ -437,6 +461,13 @@ impl Frame {
                 len
             },
 
+            Frame::ResetStream { stream_id, final_size, .. } => {
+                1 + // frame type
+                octets::varint_len(*stream_id) + // stream_id
+                2 + // error_code
+                octets::varint_len(*final_size) // final_size
+            },
+
             Frame::StopSending { stream_id, .. } => {
                 1 + // frame type
                 octets::varint_len(*stream_id) + // stream_id
@@ -545,6 +576,15 @@ impl std::fmt::Debug for Frame {
 
             Frame::ACK { ack_delay, ranges } => {
                 write!(f, "ACK delay={} blocks={:?}", ack_delay, ranges)?;
+            },
+
+            Frame::ResetStream {
+                stream_id,
+                error_code,
+                final_size,
+            } => {
+                write!(f, "RESET_STREAM stream={} err={:x} size={}",
+                       stream_id, error_code, final_size)?;
             },
 
             Frame::StopSending {
@@ -794,6 +834,39 @@ mod tests {
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_ok());
+    }
+
+    #[test]
+    fn reset_stream() {
+        let mut d = [42; 128];
+
+        let frame = Frame::ResetStream {
+            stream_id: 123_213,
+            error_code: 15_352,
+            final_size: 21_123_767,
+        };
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 11);
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
     }
 
     #[test]

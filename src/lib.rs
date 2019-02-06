@@ -984,6 +984,12 @@ impl Connection {
                     );
                 },
 
+                frame::Frame::ResetStream { .. } => {
+                    // TODO: return reset to the application
+
+                    do_ack = true;
+                },
+
                 frame::Frame::StopSending { stream_id, .. } => {
                     // STOP_SENDING on a receive-only stream is a fatal error.
                     if !stream::is_local(stream_id, self.is_server) &&
