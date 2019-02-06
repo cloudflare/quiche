@@ -25,7 +25,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//! Savoury implementation of the QUIC transport protocol.
+//! Savoury implementation of the QUIC transport protocol and HTTP/3.
 //!
 //! quiche is an implementation of the QUIC transport protocol as specified
 //! by the IETF. It provides a low level API for processing QUIC packets and
