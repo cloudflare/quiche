@@ -187,6 +187,10 @@ impl<'a> Octets<'a> {
             _ => return Err(Error::BufferTooShort),
         };
 
+        if len > self.cap() {
+            return Err(Error::BufferTooShort);
+        }
+
         let mut vec = self.get_bytes(len)?.to_vec();
 
         // Mask the 2 most significant bits to remove the encoded length.
