@@ -33,8 +33,10 @@ use std::io::prelude::*;
 
 use libc::c_char;
 use libc::c_int;
+use libc::c_long;
 use libc::c_uint;
 use libc::c_void;
+use libc::size_t;
 
 use lazy_static;
 
@@ -205,7 +207,7 @@ impl Drop for Context {
 pub struct Handshake(*mut SSL);
 
 impl Handshake {
-    pub fn from_void(ssl: *mut libc::c_void) -> Handshake {
+    pub fn from_void(ssl: *mut c_void) -> Handshake {
         let ssl = ssl as *mut SSL;
         Handshake(ssl)
     }
@@ -543,7 +545,7 @@ extern fn keylog(_: *mut SSL, line: *const c_char) {
 
 extern fn select_alpn(
     ssl: *mut SSL, out: *mut *const u8, out_len: *mut u8, inp: *mut u8,
-    in_len: libc::c_uint, _arg: *mut c_void,
+    in_len: c_uint, _arg: *mut c_void,
 ) -> c_int {
     let conn =
         match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
@@ -693,7 +695,7 @@ extern {
             out: *mut *const u8,
             out_len: *mut u8,
             inp: *mut u8,
-            in_len: libc::c_uint,
+            in_len: c_uint,
             arg: *mut c_void,
         ) -> c_int,
         arg: *mut c_void,
@@ -701,7 +703,7 @@ extern {
 
     // SSL
     fn SSL_get_ex_new_index(
-        argl: libc::c_long, argp: *const c_void, unused: *const c_void,
+        argl: c_long, argp: *const c_void, unused: *const c_void,
         dup_unused: *const c_void, free_func: *const c_void,
     ) -> c_int;
 
@@ -761,7 +763,7 @@ extern {
 
     // X509_VERIFY_PARAM
     fn X509_VERIFY_PARAM_set1_host(
-        param: *mut X509_VERIFY_PARAM, name: *const c_char, namelen: libc::size_t,
+        param: *mut X509_VERIFY_PARAM, name: *const c_char, namelen: size_t,
     ) -> c_int;
 
     // ERR
