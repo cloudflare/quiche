@@ -1183,6 +1183,7 @@ impl Connection {
     /// returned, or [`Done`].
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    #[allow(clippy::cyclomatic_complexity)]
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
 
