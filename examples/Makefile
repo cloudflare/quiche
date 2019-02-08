@@ -1,8 +1,14 @@
+OS := $(shell uname)
+
 SOURCE_DIR = ../src
 BUILD_DIR = ../target/debug
 INCLUDE_DIR = ../include
 
 CFLAGS = -I. -Wall -pedantic -fsanitize=address
+
+ifeq ($(OS), Darwin)
+CFLAGS += -framework Security
+endif
 
 LIBCRYPTO_DIR = $(dir $(shell find ${BUILD_DIR} -name libcrypto.a))
 LIBSSL_DIR = $(dir $(shell find ${BUILD_DIR} -name libssl.a))
