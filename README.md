@@ -1,4 +1,4 @@
-![quiche](quiche.svg)
+![quiche](https://raw.githubusercontent.com/cloudflare/quiche/master/quiche.svg)
 
 [![crates.io](https://img.shields.io/crates/v/quiche.svg)](https://crates.io/crates/quiche)
 [![docs.rs](https://docs.rs/quiche/badge.svg)](https://docs.rs/quiche)
