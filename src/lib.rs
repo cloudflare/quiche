@@ -177,9 +177,6 @@ use std::cmp;
 use std::mem;
 use std::time;
 
-use std::collections::hash_map;
-use std::collections::HashMap;
-
 /// The current QUIC wire version.
 pub const VERSION_DRAFT17: u32 = 0xff00_0011;
 
@@ -475,13 +472,7 @@ pub struct Connection {
     tx_data: usize,
     max_tx_data: usize,
 
-    streams: HashMap<u64, stream::Stream>,
-
-    local_max_streams_bidi: usize,
-    local_max_streams_uni: usize,
-
-    peer_max_streams_bidi: usize,
-    peer_max_streams_uni: usize,
+    streams: stream::StreamMap,
 
     odcid: Option<Vec<u8>>,
 
@@ -624,19 +615,7 @@ impl Connection {
             tx_data: 0,
             max_tx_data: 0,
 
-            streams: HashMap::new(),
-
-            local_max_streams_bidi: config
-                .local_transport_params
-                .initial_max_streams_bidi
-                as usize,
-            local_max_streams_uni: config
-                .local_transport_params
-                .initial_max_streams_uni
-                as usize,
-
-            peer_max_streams_bidi: 0,
-            peer_max_streams_uni: 0,
+            streams: stream::StreamMap::default(),
 
             odcid: None,
 
@@ -676,6 +655,14 @@ impl Connection {
         }
 
         conn.tls_state.init(&conn).map_err(|_| Error::TlsFail)?;
+
+        conn.streams.update_local_max_streams_bidi(
+            config.local_transport_params.initial_max_streams_bidi as usize,
+        );
+
+        conn.streams.update_local_max_streams_uni(
+            config.local_transport_params.initial_max_streams_uni as usize,
+        );
 
         // Derive initial secrets for the client. We can do this here because
         // we already generated the random destination connection ID.
@@ -1049,30 +1036,13 @@ impl Connection {
                         as usize;
 
                     // Get existing stream or create a new one.
-                    let stream = match self.streams.entry(stream_id) {
-                        hash_map::Entry::Vacant(v) => {
-                            // Peer is not supposed to create this stream.
-                            if stream::is_local(stream_id, self.is_server) {
-                                return Err(Error::InvalidStreamState);
-                            }
-
-                            // Enforce stream count limits.
-                            if stream::is_bidi(stream_id) {
-                                self.local_max_streams_bidi
-                                    .checked_sub(1)
-                                    .ok_or(Error::StreamLimit)?;
-                            } else {
-                                self.local_max_streams_uni
-                                    .checked_sub(1)
-                                    .ok_or(Error::StreamLimit)?;
-                            }
-
-                            let s = stream::Stream::new(max_rx_data, max_tx_data);
-                            v.insert(s)
-                        },
-
-                        hash_map::Entry::Occupied(v) => v.into_mut(),
-                    };
+                    let stream = self.streams.get_or_create(
+                        stream_id,
+                        max_rx_data,
+                        max_tx_data,
+                        false,
+                        self.is_server,
+                    )?;
 
                     self.rx_data += data.len();
 
@@ -1102,30 +1072,13 @@ impl Connection {
                         as usize;
 
                     // Get existing stream or create a new one.
-                    let stream = match self.streams.entry(stream_id) {
-                        hash_map::Entry::Vacant(v) => {
-                            // Peer is not supposed to create this stream.
-                            if stream::is_local(stream_id, self.is_server) {
-                                return Err(Error::InvalidStreamState);
-                            }
-
-                            // Enforce stream count limits.
-                            if stream::is_bidi(stream_id) {
-                                self.local_max_streams_bidi
-                                    .checked_sub(1)
-                                    .ok_or(Error::StreamLimit)?;
-                            } else {
-                                self.local_max_streams_uni
-                                    .checked_sub(1)
-                                    .ok_or(Error::StreamLimit)?;
-                            }
-
-                            let s = stream::Stream::new(max_rx_data, max_tx_data);
-                            v.insert(s)
-                        },
-
-                        hash_map::Entry::Occupied(v) => v.into_mut(),
-                    };
+                    let stream = self.streams.get_or_create(
+                        stream_id,
+                        max_rx_data,
+                        max_tx_data,
+                        false,
+                        self.is_server,
+                    )?;
 
                     stream.send_max_data(max as usize);
 
@@ -1133,15 +1086,13 @@ impl Connection {
                 },
 
                 frame::Frame::MaxStreamsBidi { max } => {
-                    self.peer_max_streams_bidi =
-                        cmp::max(self.peer_max_streams_bidi, max as usize);
+                    self.streams.update_peer_max_streams_bidi(max as usize);
 
                     do_ack = true;
                 },
 
                 frame::Frame::MaxStreamsUni { max } => {
-                    self.peer_max_streams_uni =
-                        cmp::max(self.peer_max_streams_uni, max as usize);
+                    self.streams.update_peer_max_streams_uni(max as usize);
 
                     do_ack = true;
                 },
@@ -1287,7 +1238,7 @@ impl Connection {
                 },
 
                 frame::Frame::Stream { stream_id, data } => {
-                    let stream = match self.streams.get_mut(&stream_id) {
+                    let stream = match self.streams.get_mut(stream_id) {
                         Some(v) => v,
                         None => continue,
                     };
@@ -1644,7 +1595,7 @@ impl Connection {
     ) -> Result<(usize, bool)> {
         // TODO: test !is_bidi && is_local
 
-        let stream = match self.streams.get_mut(&stream_id) {
+        let stream = match self.streams.get_mut(stream_id) {
             Some(v) => v,
             None => return Err(Error::InvalidStreamState),
         };
@@ -1681,29 +1632,13 @@ impl Connection {
                 .initial_max_stream_data_bidi_remote as usize;
 
         // Get existing stream or create a new one.
-        let stream = match self.streams.entry(stream_id) {
-            hash_map::Entry::Vacant(v) => {
-                if !stream::is_local(stream_id, self.is_server) {
-                    return Err(Error::InvalidStreamState);
-                }
-
-                // Enforce stream count limits.
-                if stream::is_bidi(stream_id) {
-                    self.peer_max_streams_bidi
-                        .checked_sub(1)
-                        .ok_or(Error::StreamLimit)?;
-                } else {
-                    self.peer_max_streams_uni
-                        .checked_sub(1)
-                        .ok_or(Error::StreamLimit)?;
-                }
-
-                let s = stream::Stream::new(max_rx_data, max_tx_data);
-                v.insert(s)
-            },
-
-            hash_map::Entry::Occupied(v) => v.into_mut(),
-        };
+        let stream = self.streams.get_or_create(
+            stream_id,
+            max_rx_data,
+            max_tx_data,
+            true,
+            self.is_server,
+        )?;
 
         // TODO: implement backpressure based on peer's flow control
 
@@ -1714,7 +1649,7 @@ impl Connection {
 
     /// Creates an iterator over streams that have outstanding data to read.
     pub fn readable(&mut self) -> Readable {
-        stream::Readable::new(&self.streams)
+        self.streams.readable()
     }
 
     /// Returns the amount of time until the next timeout event.
@@ -1894,10 +1829,12 @@ impl Connection {
 
                     self.max_tx_data = peer_params.initial_max_data as usize;
 
-                    self.peer_max_streams_bidi =
-                        peer_params.initial_max_streams_bidi as usize;
-                    self.peer_max_streams_uni =
-                        peer_params.initial_max_streams_uni as usize;
+                    self.streams.update_peer_max_streams_bidi(
+                        peer_params.initial_max_streams_bidi as usize,
+                    );
+                    self.streams.update_peer_max_streams_uni(
+                        peer_params.initial_max_streams_uni as usize,
+                    );
 
                     self.recovery.max_ack_delay =
                         time::Duration::from_millis(peer_params.max_ack_delay);
@@ -1949,8 +1886,8 @@ impl Connection {
                 Type::Handshake
             } else if self.handshake_completed &&
                       (self.application.ready() ||
-                       self.streams.values().any(|s| s.writable()) ||
-                       self.streams.values().any(|s| s.more_credit())) {
+                       self.streams.has_writable() ||
+                       self.streams.has_out_of_credit()) {
                 Type::Application
             } else {
                 return Err(Error::Done);
@@ -2344,6 +2281,10 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
+        config.set_initial_max_data(15);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_streams_bidi(1);
         config.verify_peer(false);
 
         Connection::new(&scid, None, &mut config, is_server).unwrap()
@@ -2378,7 +2319,7 @@ mod tests {
     }
 
     #[test]
-    fn self_handshake() {
+    fn handshake() {
         let mut buf = [0; 65535];
 
         let mut cln = create_conn(false);
@@ -2392,6 +2333,36 @@ mod tests {
         }
 
         assert!(true);
+    }
+
+    #[test]
+    fn stream() {
+        let mut buf = [0; 65535];
+
+        let mut cln = create_conn(false);
+        let mut srv = create_conn(true);
+
+        let mut len = cln.send(&mut buf).unwrap();
+
+        while !cln.is_established() && !srv.is_established() {
+            len = recv_send(&mut srv, &mut buf, len);
+            len = recv_send(&mut cln, &mut buf, len);
+        }
+
+        cln.stream_send(4, b"hello, world", true).unwrap();
+
+        while srv.readable().next().is_none() {
+            len = recv_send(&mut cln, &mut buf, len);
+            len = recv_send(&mut srv, &mut buf, len);
+        }
+
+        let mut r = srv.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        let mut b = [0; 15];
+        assert_eq!(srv.stream_recv(4, &mut b), Ok((12, true)));
+        assert_eq!(&b[..12], b"hello, world");
     }
 }
 

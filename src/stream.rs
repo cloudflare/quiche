@@ -37,6 +37,98 @@ use crate::Result;
 const MAX_WRITE_SIZE: usize = 1000;
 
 #[derive(Default)]
+pub struct StreamMap {
+    streams: HashMap<u64, Stream>,
+
+    peer_max_streams_bidi: usize,
+    peer_max_streams_uni: usize,
+
+    local_max_streams_bidi: usize,
+    local_max_streams_uni: usize,
+}
+
+impl StreamMap {
+    pub fn get_mut(&mut self, id: u64) -> Option<&mut Stream> {
+        self.streams.get_mut(&id)
+    }
+
+    pub fn get_or_create(
+        &mut self, id: u64, max_rx_data: usize, max_tx_data: usize, local: bool,
+        is_server: bool,
+    ) -> Result<&mut Stream> {
+        let stream = match self.streams.entry(id) {
+            hash_map::Entry::Vacant(v) => {
+                if local != is_local(id, is_server) {
+                    return Err(Error::InvalidStreamState);
+                }
+
+                // Enforce stream count limits.
+                match (is_local(id, is_server), is_bidi(id)) {
+                    (true, true) => self
+                        .peer_max_streams_bidi
+                        .checked_sub(1)
+                        .ok_or(Error::StreamLimit)?,
+
+                    (true, false) => self
+                        .peer_max_streams_uni
+                        .checked_sub(1)
+                        .ok_or(Error::StreamLimit)?,
+
+                    (false, true) => self
+                        .local_max_streams_bidi
+                        .checked_sub(1)
+                        .ok_or(Error::StreamLimit)?,
+
+                    (false, false) => self
+                        .local_max_streams_uni
+                        .checked_sub(1)
+                        .ok_or(Error::StreamLimit)?,
+                };
+
+                let s = Stream::new(max_rx_data, max_tx_data);
+                v.insert(s)
+            },
+
+            hash_map::Entry::Occupied(v) => v.into_mut(),
+        };
+
+        Ok(stream)
+    }
+
+    pub fn update_local_max_streams_bidi(&mut self, v: usize) {
+        self.local_max_streams_bidi = cmp::max(self.local_max_streams_bidi, v);
+    }
+
+    pub fn update_local_max_streams_uni(&mut self, v: usize) {
+        self.local_max_streams_uni = cmp::max(self.local_max_streams_uni, v);
+    }
+
+    pub fn update_peer_max_streams_bidi(&mut self, v: usize) {
+        self.peer_max_streams_bidi = cmp::max(self.peer_max_streams_bidi, v);
+    }
+
+    pub fn update_peer_max_streams_uni(&mut self, v: usize) {
+        self.peer_max_streams_uni = cmp::max(self.peer_max_streams_uni, v);
+    }
+
+    pub fn readable(&mut self) -> Readable {
+        Readable::new(&self.streams)
+    }
+
+    pub fn iter_mut(&mut self) -> hash_map::IterMut<u64, Stream> {
+        self.streams.iter_mut()
+    }
+
+    pub fn has_writable(&self) -> bool {
+        self.streams.values().any(|s| s.writable())
+    }
+
+    pub fn has_out_of_credit(&self) -> bool {
+        self.streams.values().any(|s| s.more_credit())
+    }
+}
+
+#[derive(Default)]
 pub struct Stream {
     recv: RecvBuf,
     send: SendBuf,
@@ -132,7 +224,7 @@ pub struct Readable<'a> {
 }
 
 impl<'a> Readable<'a> {
-    pub(crate) fn new(streams: &HashMap<u64, Stream>) -> Readable {
+    fn new(streams: &HashMap<u64, Stream>) -> Readable {
         Readable {
             streams: streams.iter(),
         }
