@@ -9,7 +9,6 @@ format_doc_comments = true
 comment_width = 80
 normalize_comments = true
 normalize_doc_attributes = true
-license_template_path = ""
 format_strings = false
 format_macro_matchers = false
 format_macro_bodies = true
