@@ -172,12 +172,6 @@ impl Stream {
         Ok((len, fin))
     }
 
-    pub fn recv_update_max_data(&mut self) -> usize {
-        self.max_rx_data = self.new_max_rx_data;
-
-        self.new_max_rx_data
-    }
-
     pub fn send_push(&mut self, data: &[u8], fin: bool) -> Result<()> {
         self.send.push_slice(data, fin)
     }
@@ -190,7 +184,13 @@ impl Stream {
         self.send.push(buf)
     }
 
-    pub fn send_max_data(&mut self, max_data: usize) {
+    pub fn update_max_rx_data(&mut self) -> usize {
+        self.max_rx_data = self.new_max_rx_data;
+
+        self.new_max_rx_data
+    }
+
+    pub fn update_max_tx_data(&mut self, max_data: usize) {
         self.max_tx_data = cmp::max(self.max_tx_data, max_data);
     }
 
@@ -874,7 +874,7 @@ mod tests {
 
         assert!(stream.more_credit());
 
-        assert_eq!(stream.recv_update_max_data(), 25);
+        assert_eq!(stream.update_max_rx_data(), 25);
         assert!(!stream.more_credit());
 
         let third = RangeBuf::from(b"something", 10, false);

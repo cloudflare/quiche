@@ -1080,7 +1080,7 @@ impl Connection {
                         self.is_server,
                     )?;
 
-                    stream.send_max_data(max as usize);
+                    stream.update_max_tx_data(max as usize);
 
                     do_ack = true;
                 },
@@ -1352,7 +1352,7 @@ impl Connection {
             {
                 let frame = frame::Frame::MaxStreamData {
                     stream_id: *id,
-                    max: stream.recv_update_max_data() as u64,
+                    max: stream.update_max_rx_data() as u64,
                 };
 
                 if frame.wire_len() > left {
