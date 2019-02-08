@@ -190,6 +190,12 @@ const PAYLOAD_MIN_LEN: usize = 4;
 // TODO: calculate draining timer as 3 * RTO
 const DRAINING_TIMEOUT: time::Duration = time::Duration::from_millis(200);
 
+/// A specialized [`Result`] type for quiche operations.
+///
+/// This type is used throughout quiche's public API for any operation that
+/// can produce an error.
+///
+/// [`Result`]: https://doc.rust-lang.org/std/result/enum.Result.html
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// A QUIC error.
