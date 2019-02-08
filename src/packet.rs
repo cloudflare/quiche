@@ -81,11 +81,11 @@ pub struct Header {
 
     /// The packet number. It's only meaningful after the header protection is
     /// removed.
-    pub pkt_num: u64,
+    pub(crate) pkt_num: u64,
 
     /// The length of the packet number. It's only meaningful after the header
     /// protection is removed.
-    pub pkt_num_len: usize,
+    pub(crate) pkt_num_len: usize,
 
     /// The address verification token of the packet. Only present in `Initial`
     /// and `Retry` packets.
@@ -97,7 +97,7 @@ pub struct Header {
 
     /// The key phase bit of the packet. It's only meaningful after the header
     /// protection is removed.
-    pub key_phase: bool,
+    pub(crate) key_phase: bool,
 }
 
 impl Header {
