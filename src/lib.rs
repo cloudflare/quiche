@@ -552,12 +552,20 @@ pub fn negotiate_version(
     packet::negotiate_version(scid, dcid, out)
 }
 
-/// Writes a retry packet.
+/// Writes a stateless retry packet.
 ///
 /// The `scid` and `dcid` parameters are the source connection ID and the
 /// destination connection ID extracted from the received client's Initial
 /// packet, while `new_scid` is the server's new source connection ID and
-/// `token` is the address verification token the client needs to echo back.
+/// `token` is the address validation token the client needs to echo back.
+///
+/// The application is responsible for generating the address validation
+/// token to be sent to the client, and verifying tokens sent back by the
+/// client. The generated token should include the `dcid` parameter, such
+/// that it can be later extracted from the token and passed to the
+/// [`accept()`] function as its `odcid` parameter.
+///
+/// [`accept()`]: fn.accept.html
 pub fn retry(
     scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], out: &mut [u8],
 ) -> Result<usize> {
