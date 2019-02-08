@@ -219,6 +219,10 @@ pub fn is_bidi(id: u64) -> bool {
 }
 
 /// An iterator over the streams that have outstanding data to read.
+///
+/// This can be obtained by calling a connection's [`readable()`] method.
+///
+/// [`readable()`]: struct.Connection.html#method.readable
 pub struct Readable<'a> {
     streams: hash_map::Iter<'a, u64, Stream>,
 }
