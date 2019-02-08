@@ -2,11 +2,6 @@ language: rust
 
 dist: xenial
 
-rust:
- - stable
- - beta
- - nightly
-
 addons:
   apt:
     packages:
@@ -14,11 +9,32 @@ addons:
      - libev-dev
      - uthash-dev
 
-script:
- - cargo build --verbose --all --examples
- - cargo test --verbose --all
- - cargo doc --no-deps
- - make -C examples
+matrix:
+  include:
+   - rust: stable
+     install:
+      - rustup component add clippy
+     script:
+      - cargo build --verbose --all
+      - cargo test --verbose --all
+      - cargo clippy -- -D warnings
+      - cargo doc --no-deps
+      - make -C examples
+   - rust: beta
+     script:
+      - cargo build --verbose --all
+      - cargo test --verbose --all
+      - cargo doc --no-deps
+      - make -C examples
+   - rust: nightly
+     install:
+      - rustup component add rustfmt
+     script:
+      - cargo build --verbose --all
+      - cargo test --verbose --all
+      - cargo fmt -- --check
+      - cargo doc --no-deps
+      - make -C examples
 
 deploy:
   provider: pages
