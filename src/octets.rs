@@ -184,7 +184,7 @@ impl<'a> Octets<'a> {
             1 => 2,
             2 => 4,
             3 => 8,
-            _ => return Err(Error::BufferTooShort),
+            _ => unreachable!(),
         };
 
         if len > self.cap() {
@@ -203,7 +203,7 @@ impl<'a> Octets<'a> {
             2 => u64::from(b.get_u16()?),
             4 => u64::from(b.get_u32()?),
             8 => b.get_u64()?,
-            _ => return Err(Error::BufferTooShort),
+            _ => unreachable!(),
         };
 
         Ok(out)
@@ -228,8 +228,8 @@ impl<'a> Octets<'a> {
             let buf = self.put_u64(v)?;
             buf[0] |= 0xc0;
         } else {
-            return Err(Error::BufferTooShort);
-        };
+            panic!("value is too large for varint");
+        }
 
         Ok(())
     }
@@ -582,6 +582,14 @@ mod tests {
         }
         let exp = [0; 3];
         assert_eq!(&d, &exp);
+    }
+
+    #[test]
+    #[should_panic]
+    fn varint_too_large() {
+        let mut d = [0; 3];
+        let mut b = Octets::with_slice(&mut d);
+        assert!(b.put_varint(std::u64::MAX).is_err());
     }
 
     #[test]
