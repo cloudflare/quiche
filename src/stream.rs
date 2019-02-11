@@ -197,6 +197,22 @@ impl Stream {
         Ok((len, fin))
     }
 
+    pub fn recv_reset(&mut self, final_size: usize) -> Result<()> {
+        // Stream's size is already known, forbid changing it.
+        if self.rx_fin_off.is_some() {
+            return Err(Error::FinalSize);
+        }
+
+        // Stream's known size is lower than data already received.
+        if final_size < self.rx_data {
+            return Err(Error::FinalSize);
+        }
+
+        self.rx_fin_off = Some(final_size);
+
+        Ok(())
+    }
+
     pub fn send_push(&mut self, data: &[u8], fin: bool) -> Result<()> {
         self.send.push_slice(data, fin)
     }
@@ -230,7 +246,8 @@ impl Stream {
     pub fn more_credit(&self) -> bool {
         // Send MAX_STREAM_DATA when the new limit is at least double the
         // amount of data that can be received before blocking.
-        self.rx_fin_off.is_none() && self.new_max_rx_data != self.max_rx_data &&
+        self.rx_fin_off.is_none() &&
+            self.new_max_rx_data != self.max_rx_data &&
             self.new_max_rx_data / 2 > self.max_rx_data - self.rx_data
     }
 }

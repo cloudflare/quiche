@@ -251,7 +251,7 @@ pub enum Error {
     InvalidHeaderValue = -15,
 
     /// The received data exceeds the stream's final size.
-    FinalSize = -16,
+    FinalSize          = -16,
 }
 
 impl Error {
@@ -993,8 +993,37 @@ impl Connection {
                     );
                 },
 
-                frame::Frame::ResetStream { .. } => {
-                    // TODO: return reset to the application
+                frame::Frame::ResetStream {
+                    stream_id,
+                    final_size,
+                    ..
+                } => {
+                    // Peer can't send on our unidirectional streams.
+                    if !stream::is_bidi(stream_id) &&
+                        stream::is_local(stream_id, self.is_server)
+                    {
+                        return Err(Error::InvalidStreamState);
+                    }
+
+                    let max_rx_data = self
+                        .local_transport_params
+                        .initial_max_stream_data_bidi_remote
+                        as usize;
+                    let max_tx_data = self
+                        .peer_transport_params
+                        .initial_max_stream_data_bidi_local
+                        as usize;
+
+                    // Get existing stream or create a new one.
+                    let stream = self.streams.get_or_create(
+                        stream_id,
+                        max_rx_data,
+                        max_tx_data,
+                        false,
+                        self.is_server,
+                    )?;
+
+                    stream.recv_reset(final_size as usize)?;
 
                     do_ack = true;
                 },
