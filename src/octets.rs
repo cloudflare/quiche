@@ -179,13 +179,7 @@ impl<'a> Octets<'a> {
     pub fn get_varint(&mut self) -> Result<u64> {
         let first = self.peek_u8()?;
 
-        let len = match first >> 6 {
-            0 => 1,
-            1 => 2,
-            2 => 4,
-            3 => 8,
-            _ => unreachable!(),
-        };
+        let len = varint_parse_len(first);
 
         if len > self.cap() {
             return Err(Error::BufferTooShort);
@@ -389,6 +383,17 @@ pub fn varint_len(v: u64) -> usize {
         8
     } else {
         unreachable!()
+    }
+}
+
+/// Returns how long the variable-length integer is, given its first byte.
+pub fn varint_parse_len(first: u8) -> usize {
+    match first >> 6 {
+        0 => 1,
+        1 => 2,
+        2 => 4,
+        3 => 8,
+        _ => unreachable!(),
     }
 }
 
