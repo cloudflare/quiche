@@ -249,6 +249,9 @@ pub enum Error {
 
     /// The decoded QPACK header name or value is not valid.
     InvalidHeaderValue = -15,
+
+    /// The received data exceeds the stream's final size.
+    FinalSize = -16,
 }
 
 impl Error {
@@ -262,6 +265,7 @@ impl Error {
             Error::TlsFail => 0x100,
             Error::FlowControl => 0x3,
             Error::StreamLimit => 0x4,
+            Error::FinalSize => 0x6,
             _ => 0xa,
         }
     }
@@ -284,6 +288,7 @@ impl Error {
             Error::TlsFail => "TLS failed",
             Error::FlowControl => "flow control limit was violated",
             Error::StreamLimit => "stream limit was violated",
+            Error::FinalSize => "data exceeded stream's final size",
             Error::InvalidHuffmanEncoding => "invalid huffman encoding",
             Error::InvalidStaticTableIndex => "invalid QPACK static table index",
             Error::InvalidHeaderValue => "invalid QPACK header name or value",

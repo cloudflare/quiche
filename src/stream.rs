@@ -138,6 +138,8 @@ pub struct Stream {
     rx_data: usize,
     max_rx_data: usize,
     new_max_rx_data: usize,
+
+    rx_fin_off: Option<usize>,
 }
 
 impl Stream {
@@ -146,17 +148,40 @@ impl Stream {
             recv: RecvBuf::default(),
             send: SendBuf::default(),
 
+            max_tx_data,
+
             rx_data: 0,
             max_rx_data,
             new_max_rx_data: max_rx_data,
 
-            max_tx_data,
+            rx_fin_off: None,
         }
     }
 
     pub fn recv_push(&mut self, buf: RangeBuf) -> Result<()> {
         if buf.max_off() > self.max_rx_data {
             return Err(Error::FlowControl);
+        }
+
+        if let Some(fin_off) = self.rx_fin_off {
+            // Stream's size is known, forbid data beyond that point.
+            if buf.max_off() > fin_off {
+                return Err(Error::FinalSize);
+            }
+        }
+
+        // Stream's size is already known, forbid changing it.
+        if buf.fin() && self.rx_fin_off.is_some() {
+            return Err(Error::FinalSize);
+        }
+
+        // Stream's known size is lower than data already received.
+        if buf.fin() && buf.max_off() < self.rx_data {
+            return Err(Error::FinalSize);
+        }
+
+        if buf.fin() {
+            self.rx_fin_off = Some(buf.max_off());
         }
 
         self.rx_data = cmp::max(self.rx_data, buf.max_off());
@@ -205,7 +230,7 @@ impl Stream {
     pub fn more_credit(&self) -> bool {
         // Send MAX_STREAM_DATA when the new limit is at least double the
         // amount of data that can be received before blocking.
-        self.new_max_rx_data != self.max_rx_data &&
+        self.rx_fin_off.is_none() && self.new_max_rx_data != self.max_rx_data &&
             self.new_max_rx_data / 2 > self.max_rx_data - self.rx_data
     }
 }
@@ -883,6 +908,62 @@ mod tests {
 
         let third = RangeBuf::from(b"something", 10, false);
         assert_eq!(stream.recv_push(third), Ok(()));
+    }
+
+    #[test]
+    fn recv_past_fin() {
+        let mut stream = Stream::new(15, 0);
+        assert!(!stream.more_credit());
+
+        let first = RangeBuf::from(b"hello", 0, true);
+        let second = RangeBuf::from(b"world", 5, false);
+
+        assert_eq!(stream.recv_push(first), Ok(()));
+        assert_eq!(stream.recv_push(second), Err(Error::FinalSize));
+    }
+
+    #[test]
+    fn recv_double_fin() {
+        let mut stream = Stream::new(15, 0);
+        assert!(!stream.more_credit());
+
+        let first = RangeBuf::from(b"hello", 0, true);
+        let second = RangeBuf::from(b"world", 0, true);
+
+        assert_eq!(stream.recv_push(first), Ok(()));
+        assert_eq!(stream.recv_push(second), Err(Error::FinalSize));
+    }
+
+    #[test]
+    fn recv_fin_lowered_than_received() {
+        let mut stream = Stream::new(15, 0);
+        assert!(!stream.more_credit());
+
+        let first = RangeBuf::from(b"hello", 0, true);
+        let second = RangeBuf::from(b"world", 5, false);
+
+        assert_eq!(stream.recv_push(second), Ok(()));
+        assert_eq!(stream.recv_push(first), Err(Error::FinalSize));
+    }
+
+    #[test]
+    fn recv_fin_flow_control() {
+        let mut stream = Stream::new(15, 0);
+        assert!(!stream.more_credit());
+
+        let mut buf = [0; 32];
+
+        let first = RangeBuf::from(b"hello", 0, false);
+        let second = RangeBuf::from(b"world", 5, true);
+
+        assert_eq!(stream.recv_push(first), Ok(()));
+        assert_eq!(stream.recv_push(second), Ok(()));
+
+        let (len, fin) = stream.recv_pop(&mut buf).unwrap();
+        assert_eq!(&buf[..len], b"helloworld");
+        assert_eq!(fin, true);
+
+        assert!(!stream.more_credit());
     }
 
     #[test]
