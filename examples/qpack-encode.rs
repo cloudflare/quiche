@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let mut stream_id = 1u64;
 
     for line in file.lines().map(|l| l.unwrap()) {
-        if line.starts_with("#") {
+        if line.starts_with('#') {
             continue;
         }
 
@@ -70,9 +70,9 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
             debug!("Writing header block stream={} len={}", stream_id, len);
 
-            std::io::stdout().write(&stream_id.to_be_bytes())?;
-            std::io::stdout().write(&(len as u32).to_be_bytes())?;
-            std::io::stdout().write(&out[..len])?;
+            std::io::stdout().write_all(&stream_id.to_be_bytes())?;
+            std::io::stdout().write_all(&(len as u32).to_be_bytes())?;
+            std::io::stdout().write_all(&out[..len])?;
 
             stream_id += 1;
 
@@ -81,8 +81,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
             continue;
         }
 
-        let name = line.split("\t").nth(0).unwrap();
-        let value = line.split("\t").last().unwrap();
+        let name = line.split('\t').nth(0).unwrap();
+        let value = line.split('\t').last().unwrap();
 
         headers.push(qpack::Header::new(name, value));
     }

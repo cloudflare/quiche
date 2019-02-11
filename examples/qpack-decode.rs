@@ -83,7 +83,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
             println!("{}\t{}", hdr.name(), hdr.value());
         }
 
-        println!("");
+        println!();
     }
 
     Ok(())
