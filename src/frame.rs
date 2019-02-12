@@ -729,7 +729,7 @@ fn parse_stream_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
     let stream_id = b.get_varint()?;
 
     let offset = if first & 0x04 != 0 {
-        b.get_varint()?
+        b.get_varint()? as usize
     } else {
         0
     };
@@ -740,10 +740,14 @@ fn parse_stream_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
         b.cap()
     };
 
+    if offset + len > 2usize.pow(62) {
+        return Err(Error::InvalidFrame);
+    }
+
     let fin = first & 0x01 != 0;
 
     let data = b.get_bytes(len)?;
-    let data = stream::RangeBuf::from(data.as_ref(), offset as usize, fin);
+    let data = stream::RangeBuf::from(data.as_ref(), offset, fin);
 
     Ok(Frame::Stream { stream_id, data })
 }
@@ -1010,6 +1014,31 @@ mod tests {
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn stream_too_big() {
+        let mut d = [42; 128];
+
+        let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+        let frame = Frame::Stream {
+            stream_id: 32,
+            data: stream::RangeBuf::from(&data, 2usize.pow(62) - 11, true),
+        };
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 23);
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Err(Error::InvalidFrame)
+        );
     }
 
     #[test]
