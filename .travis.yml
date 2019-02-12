@@ -17,7 +17,7 @@ matrix:
      script:
       - cargo build --verbose --all
       - cargo test --verbose --all
-      - cargo clippy -- -D warnings
+      - cargo clippy --all --examples -- -D warnings
       - cargo doc --no-deps
       - make -C examples
    - rust: beta
