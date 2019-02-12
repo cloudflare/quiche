@@ -168,11 +168,11 @@ impl Stream {
             if buf.max_off() > fin_off {
                 return Err(Error::FinalSize);
             }
-        }
 
-        // Stream's size is already known, forbid changing it.
-        if buf.fin() && self.rx_fin_off.is_some() {
-            return Err(Error::FinalSize);
+            // Stream's size is already known, forbid changing it.
+            if buf.fin() && fin_off != buf.max_off() {
+                return Err(Error::FinalSize);
+            }
         }
 
         // Stream's known size is lower than data already received.
@@ -199,8 +199,10 @@ impl Stream {
 
     pub fn recv_reset(&mut self, final_size: usize) -> Result<()> {
         // Stream's size is already known, forbid changing it.
-        if self.rx_fin_off.is_some() {
-            return Err(Error::FinalSize);
+        if let Some(fin_off) = self.rx_fin_off {
+            if fin_off != final_size {
+                return Err(Error::FinalSize);
+            }
         }
 
         // Stream's known size is lower than data already received.
@@ -940,19 +942,37 @@ mod tests {
     }
 
     #[test]
-    fn recv_double_fin() {
+    fn recv_fin_dup() {
         let mut stream = Stream::new(15, 0);
         assert!(!stream.more_credit());
 
         let first = RangeBuf::from(b"hello", 0, true);
-        let second = RangeBuf::from(b"world", 0, true);
+        let second = RangeBuf::from(b"hello", 0, true);
 
         assert_eq!(stream.recv_push(first), Ok(()));
-        assert_eq!(stream.recv_push(second), Err(Error::FinalSize));
+        assert_eq!(stream.recv_push(second), Ok(()));
+
+        let mut buf = [0; 32];
+
+        let (len, fin) = stream.recv_pop(&mut buf).unwrap();
+        assert_eq!(&buf[..len], b"hello");
+        assert_eq!(fin, true);
     }
 
     #[test]
-    fn recv_fin_lowered_than_received() {
+    fn recv_fin_change() {
+        let mut stream = Stream::new(15, 0);
+        assert!(!stream.more_credit());
+
+        let first = RangeBuf::from(b"hello", 0, true);
+        let second = RangeBuf::from(b"world", 5, true);
+
+        assert_eq!(stream.recv_push(second), Ok(()));
+        assert_eq!(stream.recv_push(first), Err(Error::FinalSize));
+    }
+
+    #[test]
+    fn recv_fin_lower_than_received() {
         let mut stream = Stream::new(15, 0);
         assert!(!stream.more_credit());
 
@@ -981,6 +1001,52 @@ mod tests {
         assert_eq!(fin, true);
 
         assert!(!stream.more_credit());
+    }
+
+    #[test]
+    fn recv_fin_reset_mismatch() {
+        let mut stream = Stream::new(15, 0);
+        assert!(!stream.more_credit());
+
+        let first = RangeBuf::from(b"hello", 0, true);
+
+        assert_eq!(stream.recv_push(first), Ok(()));
+        assert_eq!(stream.recv_reset(10), Err(Error::FinalSize));
+    }
+
+    #[test]
+    fn recv_reset_dup() {
+        let mut stream = Stream::new(15, 0);
+        assert!(!stream.more_credit());
+
+        let first = RangeBuf::from(b"hello", 0, false);
+
+        assert_eq!(stream.recv_push(first), Ok(()));
+        assert_eq!(stream.recv_reset(5), Ok(()));
+        assert_eq!(stream.recv_reset(5), Ok(()));
+    }
+
+    #[test]
+    fn recv_reset_change() {
+        let mut stream = Stream::new(15, 0);
+        assert!(!stream.more_credit());
+
+        let first = RangeBuf::from(b"hello", 0, false);
+
+        assert_eq!(stream.recv_push(first), Ok(()));
+        assert_eq!(stream.recv_reset(5), Ok(()));
+        assert_eq!(stream.recv_reset(10), Err(Error::FinalSize));
+    }
+
+    #[test]
+    fn recv_reset_lower_than_received() {
+        let mut stream = Stream::new(15, 0);
+        assert!(!stream.more_credit());
+
+        let first = RangeBuf::from(b"hello", 0, false);
+
+        assert_eq!(stream.recv_push(first), Ok(()));
+        assert_eq!(stream.recv_reset(4), Err(Error::FinalSize));
     }
 
     #[test]
