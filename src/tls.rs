@@ -120,7 +120,6 @@ static QUICHE_STREAM_METHOD: SSL_QUIC_METHOD = SSL_QUIC_METHOD {
 pub struct Context(*mut SSL_CTX);
 
 impl Context {
-    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> Result<Context> {
         unsafe {
             let ctx = SSL_CTX_new(TLS_method());

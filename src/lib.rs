@@ -325,7 +325,6 @@ pub struct Config {
 
 impl Config {
     /// Creates a config object with the given version.
-    #[allow(clippy::new_ret_no_self)]
     pub fn new(version: u32) -> Result<Config> {
         let tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
 
@@ -584,7 +583,6 @@ pub fn retry(
 }
 
 impl Connection {
-    #[allow(clippy::new_ret_no_self)]
     fn new(
         scid: &[u8], odcid: Option<&[u8]>, config: &mut Config, is_server: bool,
     ) -> Result<Box<Connection>> {
