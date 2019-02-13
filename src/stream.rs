@@ -64,25 +64,29 @@ impl StreamMap {
 
                 // Enforce stream count limits.
                 match (is_local(id, is_server), is_bidi(id)) {
-                    (true, true) => self
-                        .peer_max_streams_bidi
-                        .checked_sub(1)
-                        .ok_or(Error::StreamLimit)?,
+                    (true, true) =>
+                        self.peer_max_streams_bidi = self
+                            .peer_max_streams_bidi
+                            .checked_sub(1)
+                            .ok_or(Error::StreamLimit)?,
 
-                    (true, false) => self
-                        .peer_max_streams_uni
-                        .checked_sub(1)
-                        .ok_or(Error::StreamLimit)?,
+                    (true, false) =>
+                        self.peer_max_streams_uni = self
+                            .peer_max_streams_uni
+                            .checked_sub(1)
+                            .ok_or(Error::StreamLimit)?,
 
-                    (false, true) => self
-                        .local_max_streams_bidi
-                        .checked_sub(1)
-                        .ok_or(Error::StreamLimit)?,
+                    (false, true) =>
+                        self.local_max_streams_bidi = self
+                            .local_max_streams_bidi
+                            .checked_sub(1)
+                            .ok_or(Error::StreamLimit)?,
 
-                    (false, false) => self
-                        .local_max_streams_uni
-                        .checked_sub(1)
-                        .ok_or(Error::StreamLimit)?,
+                    (false, false) =>
+                        self.local_max_streams_uni = self
+                            .local_max_streams_uni
+                            .checked_sub(1)
+                            .ok_or(Error::StreamLimit)?,
                 };
 
                 let s = Stream::new(max_rx_data, max_tx_data);
