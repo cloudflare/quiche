@@ -1031,7 +1031,7 @@ impl Connection {
                     if !stream::is_local(stream_id, self.is_server) &&
                         !stream::is_bidi(stream_id)
                     {
-                        return Err(Error::InvalidPacket);
+                        return Err(Error::InvalidStreamState);
                     }
 
                     do_ack = true;
