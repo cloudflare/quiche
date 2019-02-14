@@ -1021,7 +1021,11 @@ impl Connection {
                         self.is_server,
                     )?;
 
-                    stream.recv_reset(final_size as usize)?;
+                    self.rx_data += stream.recv_reset(final_size as usize)?;
+
+                    if self.rx_data > self.max_rx_data {
+                        return Err(Error::FlowControl);
+                    }
 
                     do_ack = true;
                 },
@@ -2700,6 +2704,41 @@ mod tests {
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::StreamLimit),
+        );
+    }
+
+    #[test]
+    fn reset_stream_flow_control() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = Pipe::new().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [
+            frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 8,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::ResetStream {
+                stream_id: 8,
+                error_code: 0,
+                final_size: 15,
+            },
+            frame::Frame::Stream {
+                stream_id: 12,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+        ];
+
+        let pkt_type = packet::Type::Application;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::FlowControl),
         );
     }
 }

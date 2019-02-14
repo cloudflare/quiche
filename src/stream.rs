@@ -201,7 +201,7 @@ impl Stream {
         Ok((len, fin))
     }
 
-    pub fn recv_reset(&mut self, final_size: usize) -> Result<()> {
+    pub fn recv_reset(&mut self, final_size: usize) -> Result<usize> {
         // Stream's size is already known, forbid changing it.
         if let Some(fin_off) = self.rx_fin_off {
             if fin_off != final_size {
@@ -216,7 +216,9 @@ impl Stream {
 
         self.rx_fin_off = Some(final_size);
 
-        Ok(())
+        // Return how many bytes need to be removed from the connection flow
+        // control.
+        Ok(final_size - self.rx_data)
     }
 
     pub fn send_push(&mut self, data: &[u8], fin: bool) -> Result<()> {
@@ -1026,8 +1028,8 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, false);
 
         assert_eq!(stream.recv_push(first), Ok(()));
-        assert_eq!(stream.recv_reset(5), Ok(()));
-        assert_eq!(stream.recv_reset(5), Ok(()));
+        assert_eq!(stream.recv_reset(5), Ok(0));
+        assert_eq!(stream.recv_reset(5), Ok(0));
     }
 
     #[test]
@@ -1038,7 +1040,7 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, false);
 
         assert_eq!(stream.recv_push(first), Ok(()));
-        assert_eq!(stream.recv_reset(5), Ok(()));
+        assert_eq!(stream.recv_reset(5), Ok(0));
         assert_eq!(stream.recv_reset(10), Err(Error::FinalSize));
     }
 
