@@ -2560,6 +2560,148 @@ mod tests {
         assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((12, true)));
         assert_eq!(&b[..12], b"hello, world");
     }
+
+    #[test]
+    fn flow_control() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = Pipe::new().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [
+            frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 8,
+                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 12,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+        ];
+
+        let pkt_type = packet::Type::Application;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::FlowControl),
+        );
+    }
+
+    #[test]
+    fn stream_flow_control() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = Pipe::new().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 4,
+            data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaaa", 0, true),
+        }];
+
+        let pkt_type = packet::Type::Application;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::FlowControl),
+        );
+    }
+
+    #[test]
+    fn stream_limit_bidi() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = Pipe::new().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [
+            frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 8,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 12,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 16,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 20,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 24,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 28,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+        ];
+
+        let pkt_type = packet::Type::Application;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::StreamLimit),
+        );
+    }
+
+    #[test]
+    fn stream_limit_uni() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = Pipe::new().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [
+            frame::Frame::Stream {
+                stream_id: 2,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 6,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 10,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 14,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 18,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 22,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 26,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+        ];
+
+        let pkt_type = packet::Type::Application;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::StreamLimit),
+        );
+    }
 }
 
 pub use crate::packet::Header;
