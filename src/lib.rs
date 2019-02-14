@@ -2285,6 +2285,190 @@ impl std::fmt::Debug for TransportParams {
 mod tests {
     use super::*;
 
+    struct Pipe {
+        pub client: Box<Connection>,
+        pub server: Box<Connection>,
+    }
+
+    impl Pipe {
+        fn new() -> Result<Pipe> {
+            let mut config = Config::new(crate::VERSION_DRAFT17)?;
+            config.load_cert_chain_from_pem_file("examples/cert.crt")?;
+            config.load_priv_key_from_pem_file("examples/cert.key")?;
+            config.set_initial_max_data(30);
+            config.set_initial_max_stream_data_bidi_local(15);
+            config.set_initial_max_stream_data_bidi_remote(15);
+            config.set_initial_max_streams_bidi(3);
+            config.set_initial_max_streams_uni(3);
+            config.verify_peer(false);
+
+            Ok(Pipe {
+                client: create_conn(&mut config, false)?,
+                server: create_conn(&mut config, true)?,
+            })
+        }
+
+        fn with_client_config(cln_config: &mut Config) -> Result<Pipe> {
+            let mut config = Config::new(crate::VERSION_DRAFT17)?;
+            config.load_cert_chain_from_pem_file("examples/cert.crt")?;
+            config.load_priv_key_from_pem_file("examples/cert.key")?;
+            config.set_initial_max_data(30);
+            config.set_initial_max_stream_data_bidi_local(15);
+            config.set_initial_max_stream_data_bidi_remote(15);
+            config.set_initial_max_streams_bidi(3);
+            config.set_initial_max_streams_uni(3);
+
+            Ok(Pipe {
+                client: create_conn(cln_config, false)?,
+                server: create_conn(&mut config, true)?,
+            })
+        }
+
+        fn handshake(&mut self, buf: &mut [u8]) -> Result<()> {
+            let mut len = self.client.send(buf)?;
+
+            while !self.client.is_established() && !self.server.is_established() {
+                len = recv_send(&mut self.server, buf, len)?;
+                len = recv_send(&mut self.client, buf, len)?;
+            }
+
+            Ok(())
+        }
+
+        fn advance(&mut self, buf: &mut [u8]) -> Result<()> {
+            let mut client_done = false;
+            let mut server_done = false;
+
+            let mut len = 0;
+
+            while !client_done || !server_done {
+                len = recv_send(&mut self.client, buf, len)?;
+                client_done = len == 0;
+
+                len = recv_send(&mut self.server, buf, len)?;
+                server_done = len == 0;
+            }
+
+            Ok(())
+        }
+
+        fn send_pkt_to_server(
+            &mut self, pkt_type: packet::Type, frames: &[frame::Frame],
+            buf: &mut [u8],
+        ) -> Result<usize> {
+            let written = encode_pkt(&mut self.client, pkt_type, frames, buf)?;
+            recv_send(&mut self.server, buf, written)
+        }
+    }
+
+    fn create_conn(cfg: &mut Config, is_server: bool) -> Result<Box<Connection>> {
+        let mut scid = [0; 16];
+        rand::rand_bytes(&mut scid[..]);
+
+        Connection::new(&scid, None, cfg, is_server)
+    }
+
+    fn recv_send(
+        conn: &mut Connection, buf: &mut [u8], len: usize,
+    ) -> Result<usize> {
+        let mut left = len;
+
+        while left > 0 {
+            match conn.recv(&mut buf[len - left..len]) {
+                Ok(read) => left -= read,
+
+                Err(Error::Done) => break,
+
+                Err(e) => return Err(e),
+            }
+        }
+
+        assert_eq!(left, 0);
+
+        let mut off = 0;
+
+        while off < buf.len() {
+            match conn.send(&mut buf[off..]) {
+                Ok(write) => off += write,
+
+                Err(Error::Done) => break,
+
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(off)
+    }
+
+    fn encode_pkt(
+        conn: &mut Connection, pkt_type: packet::Type, frames: &[frame::Frame],
+        buf: &mut [u8],
+    ) -> Result<usize> {
+        let mut b = octets::Octets::with_slice(buf);
+
+        let space = match pkt_type {
+            packet::Type::Initial => &mut conn.initial,
+
+            packet::Type::Handshake => &mut conn.handshake,
+
+            packet::Type::Application => &mut conn.application,
+
+            _ => return Err(Error::InvalidPacket),
+        };
+
+        let pn = space.next_pkt_num;
+        let pn_len = packet::pkt_num_len(pn)?;
+
+        let hdr = Header {
+            ty: pkt_type,
+            version: conn.version,
+            dcid: conn.dcid.clone(),
+            scid: conn.scid.clone(),
+            pkt_num: 0,
+            pkt_num_len: pn_len,
+            odcid: None,
+            token: conn.token.clone(),
+            versions: None,
+            key_phase: false,
+        };
+
+        hdr.to_bytes(&mut b)?;
+
+        let payload_len =
+            frames.iter().fold(0, |acc, x| acc + x.wire_len()) + space.overhead();
+
+        if pkt_type != packet::Type::Application {
+            let len = pn_len + payload_len;
+            b.put_varint(len as u64)?;
+        }
+
+        packet::encode_pkt_num(pn, &mut b)?;
+
+        let payload_offset = b.off();
+
+        for frame in frames {
+            frame.to_bytes(&mut b)?;
+        }
+
+        let aead = match space.crypto_seal {
+            Some(ref v) => v,
+            None => return Err(Error::InvalidState),
+        };
+
+        let written = packet::encrypt_pkt(
+            &mut b,
+            pn,
+            pn_len,
+            payload_len,
+            payload_offset,
+            aead,
+        )?;
+
+        space.next_pkt_num += 1;
+
+        Ok(written)
+    }
+
     #[test]
     fn transport_params() {
         let tp = TransportParams {
@@ -2316,98 +2500,33 @@ mod tests {
         assert_eq!(new_tp, tp);
     }
 
-    fn create_conn(is_server: bool) -> Box<Connection> {
-        let mut scid = [0; 16];
-        rand::rand_bytes(&mut scid[..]);
-
-        let mut config = Config::new(VERSION_DRAFT17).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config.set_initial_max_data(15);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_streams_bidi(1);
-        config.verify_peer(false);
-
-        Connection::new(&scid, None, &mut config, is_server).unwrap()
-    }
-
-    fn recv_send(conn: &mut Connection, buf: &mut [u8], len: usize) -> usize {
-        let mut left = len;
-
-        while left > 0 {
-            let read = conn.recv(&mut buf[len - left..len]).unwrap();
-
-            left -= read;
-        }
-
-        let mut off = 0;
-
-        while off < buf.len() {
-            let write = match conn.send(&mut buf[off..]) {
-                Ok(v) => v,
-
-                Err(Error::Done) => {
-                    break;
-                },
-
-                Err(e) => panic!("SEND FAILED: {:?}", e),
-            };
-
-            off += write;
-        }
-
-        off
-    }
-
     #[test]
     fn handshake() {
         let mut buf = [0; 65535];
 
-        let mut cln = create_conn(false);
-        let mut srv = create_conn(true);
+        let mut pipe = Pipe::new().unwrap();
 
-        let mut len = cln.send(&mut buf).unwrap();
-
-        while !cln.is_established() && !srv.is_established() {
-            len = recv_send(&mut srv, &mut buf, len);
-            len = recv_send(&mut cln, &mut buf, len);
-        }
-
-        assert!(true);
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
     }
 
     #[test]
     fn stream() {
         let mut buf = [0; 65535];
 
-        let mut cln = create_conn(false);
-        let mut srv = create_conn(true);
+        let mut pipe = Pipe::new().unwrap();
 
-        let mut len = cln.send(&mut buf).unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
-        while !cln.is_established() && !srv.is_established() {
-            len = recv_send(&mut srv, &mut buf, len);
-            len = recv_send(&mut cln, &mut buf, len);
-        }
+        assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
 
-        cln.stream_send(4, b"hello, world", true).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
 
-        while srv.readable().next().is_none() {
-            len = recv_send(&mut cln, &mut buf, len);
-            len = recv_send(&mut srv, &mut buf, len);
-        }
-
-        let mut r = srv.readable();
+        let mut r = pipe.server.readable();
         assert_eq!(r.next(), Some(4));
         assert_eq!(r.next(), None);
 
         let mut b = [0; 15];
-        assert_eq!(srv.stream_recv(4, &mut b), Ok((12, true)));
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((12, true)));
         assert_eq!(&b[..12], b"hello, world");
     }
 }
