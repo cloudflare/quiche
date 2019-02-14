@@ -2296,9 +2296,16 @@ mod tests {
 
     impl Pipe {
         fn new() -> Result<Pipe> {
+            let mut client_scid = [0; 16];
+            rand::rand_bytes(&mut client_scid[..]);
+
+            let mut server_scid = [0; 16];
+            rand::rand_bytes(&mut server_scid[..]);
+
             let mut config = Config::new(crate::VERSION_DRAFT17)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
+            config.set_application_protos(&[b"proto1", b"proto2"])?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
             config.set_initial_max_stream_data_bidi_remote(15);
@@ -2307,15 +2314,22 @@ mod tests {
             config.verify_peer(false);
 
             Ok(Pipe {
-                client: create_conn(&mut config, false)?,
-                server: create_conn(&mut config, true)?,
+                client: connect(Some("quic.tech"), &client_scid, &mut config)?,
+                server: accept(&server_scid, None, &mut config)?,
             })
         }
 
-        fn with_client_config(cln_config: &mut Config) -> Result<Pipe> {
+        fn with_client_config(client_config: &mut Config) -> Result<Pipe> {
+            let mut client_scid = [0; 16];
+            rand::rand_bytes(&mut client_scid[..]);
+
+            let mut server_scid = [0; 16];
+            rand::rand_bytes(&mut server_scid[..]);
+
             let mut config = Config::new(crate::VERSION_DRAFT17)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
+            config.set_application_protos(&[b"proto1", b"proto2"])?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
             config.set_initial_max_stream_data_bidi_remote(15);
@@ -2323,8 +2337,8 @@ mod tests {
             config.set_initial_max_streams_uni(3);
 
             Ok(Pipe {
-                client: create_conn(cln_config, false)?,
-                server: create_conn(&mut config, true)?,
+                client: connect(Some("quic.tech"), &client_scid, client_config)?,
+                server: accept(&server_scid, None, &mut config)?,
             })
         }
 
@@ -2363,13 +2377,6 @@ mod tests {
             let written = encode_pkt(&mut self.client, pkt_type, frames, buf)?;
             recv_send(&mut self.server, buf, written)
         }
-    }
-
-    fn create_conn(cfg: &mut Config, is_server: bool) -> Result<Box<Connection>> {
-        let mut scid = [0; 16];
-        rand::rand_bytes(&mut scid[..]);
-
-        Connection::new(&scid, None, cfg, is_server)
     }
 
     fn recv_send(
@@ -2542,6 +2549,29 @@ mod tests {
         let mut pipe = Pipe::new().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(
+            pipe.client.application_proto(),
+            pipe.server.application_proto()
+        );
+    }
+
+    #[test]
+    fn handshake_alpn_mismatch() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(VERSION_DRAFT17).unwrap();
+        config
+            .set_application_protos(&[b"proto3", b"proto4"])
+            .unwrap();
+        config.verify_peer(false);
+
+        let mut pipe = Pipe::with_client_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.application_proto(), b"");
+        assert_eq!(pipe.server.application_proto(), b"");
     }
 
     #[test]
