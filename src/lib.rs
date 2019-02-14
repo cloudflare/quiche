@@ -2350,6 +2350,8 @@ mod tests {
                 len = recv_send(&mut self.client, buf, len)?;
             }
 
+            recv_send(&mut self.server, buf, len)?;
+
             Ok(())
         }
 
@@ -2478,6 +2480,39 @@ mod tests {
         space.next_pkt_num += 1;
 
         Ok(written)
+    }
+
+    fn decode_pkt(
+        conn: &mut Connection, buf: &mut [u8], len: usize,
+    ) -> Result<Vec<frame::Frame>> {
+        let mut b = octets::Octets::with_slice(&mut buf[..len]);
+
+        let mut hdr = Header::from_bytes(&mut b, conn.scid.len()).unwrap();
+
+        let aead = conn.application.crypto_open.as_ref().unwrap();
+
+        let payload_len = b.cap();
+
+        packet::decrypt_hdr(&mut b, &mut hdr, &aead).unwrap();
+
+        let pn = packet::decode_pkt_num(
+            conn.application.largest_rx_pkt_num,
+            hdr.pkt_num,
+            hdr.pkt_num_len,
+        );
+
+        let mut payload =
+            packet::decrypt_pkt(&mut b, pn, hdr.pkt_num_len, payload_len, aead)
+                .unwrap();
+
+        let mut frames = Vec::new();
+
+        while payload.cap() > 0 {
+            let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
+            frames.push(frame);
+        }
+
+        Ok(frames)
     }
 
     #[test]
@@ -2769,6 +2804,36 @@ mod tests {
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FlowControl),
+        );
+    }
+
+    #[test]
+    fn path_challenge() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = Pipe::new().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [frame::Frame::PathChallenge {
+            data: vec![0xba; 8],
+        }];
+
+        let pkt_type = packet::Type::Application;
+        let len = pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        let frames = decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+        let mut iter = frames.iter();
+
+        iter.next().unwrap();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::PathResponse {
+                data: vec![0xba; 8],
+            })
         );
     }
 }
