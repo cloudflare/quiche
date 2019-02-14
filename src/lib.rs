@@ -2501,6 +2501,37 @@ mod tests {
     }
 
     #[test]
+    fn unknown_version() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(0xbabababa).unwrap();
+        config.verify_peer(false);
+
+        let mut pipe = Pipe::with_client_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Err(Error::UnknownVersion));
+    }
+
+    #[test]
+    fn version_negotiation() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(0xbabababa).unwrap();
+        config.verify_peer(false);
+
+        let mut pipe = Pipe::with_client_config(&mut config).unwrap();
+
+        let mut len = pipe.client.send(&mut buf).unwrap();
+
+        let hdr = packet::Header::from_slice(&mut buf[..len], 0).unwrap();
+        len = crate::negotiate_version(&hdr.scid, &hdr.dcid, &mut buf).unwrap();
+
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Err(Error::Done));
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+    }
+
+    #[test]
     fn handshake() {
         let mut buf = [0; 65535];
 
