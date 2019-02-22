@@ -15,23 +15,23 @@ matrix:
      install:
       - rustup component add clippy
      script:
-      - cargo build --verbose --all
-      - cargo test --verbose --all
+      - RUSTFLAGS="-D warnings" cargo build --verbose --all
+      - RUSTFLAGS="-D warnings" cargo test --verbose --all
       - cargo clippy --all --examples -- -D warnings
       - cargo doc --no-deps
       - make -C examples
    - rust: beta
      script:
-      - cargo build --verbose --all
-      - cargo test --verbose --all
+      - RUSTFLAGS="-D warnings" cargo build --verbose --all
+      - RUSTFLAGS="-D warnings" cargo test --verbose --all
       - cargo doc --no-deps
       - make -C examples
    - rust: nightly
      install:
       - rustup component add rustfmt
      script:
-      - cargo build --verbose --all
-      - cargo test --verbose --all
+      - RUSTFLAGS="-D warnings" cargo build --verbose --all
+      - RUSTFLAGS="-D warnings" cargo test --verbose --all
       - cargo fmt -- --check
       - cargo doc --no-deps
       - make -C examples
