@@ -28,10 +28,12 @@ matrix:
       - make -C examples
    - rust: nightly
      install:
+      - rustup component add clippy
       - rustup component add rustfmt
      script:
       - RUSTFLAGS="-D warnings" cargo build --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
+      - cargo clippy --examples -- -D warnings
       - cargo fmt -- --check
       - cargo doc --no-deps
       - make -C examples
