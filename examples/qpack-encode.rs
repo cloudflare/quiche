@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     let mut stream_id = 1u64;
 
-    for line in file.lines().map(|l| l.unwrap()) {
+    for line in file.lines().map(Result::unwrap) {
         if line.starts_with('#') {
             continue;
         }
