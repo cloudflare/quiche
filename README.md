@@ -28,7 +28,7 @@ blog that goes into some more detail.
 Status
 ------
 
-* [x] QUIC draft-17
+* [x] QUIC draft-18
 * [x] Version Negotiation
 * [x] TLS 1.3 handshake (using BoringSSL)
 * [x] Stream API
@@ -56,7 +56,7 @@ The first step in establishing a QUIC connection using quiche is creating a
 configuration object:
 
 ```rust
-let config = quiche::Config::new(quiche::VERSION_DRAFT17).unwrap();
+let config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
 ```
 
 This is shared among multiple connections and can be used to configure a

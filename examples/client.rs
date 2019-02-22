@@ -83,7 +83,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     config.verify_peer(true);
 
-    config.set_application_protos(&[b"hq-17", b"http/0.9"])?;
+    config.set_application_protos(&[b"hq-18", b"http/0.9"])?;
 
     config.set_idle_timeout(30);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
