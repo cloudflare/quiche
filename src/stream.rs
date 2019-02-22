@@ -124,11 +124,11 @@ impl StreamMap {
     }
 
     pub fn has_writable(&self) -> bool {
-        self.streams.values().any(|s| s.writable())
+        self.streams.values().any(Stream::writable)
     }
 
     pub fn has_out_of_credit(&self) -> bool {
-        self.streams.values().any(|s| s.more_credit())
+        self.streams.values().any(Stream::more_credit)
     }
 }
 
@@ -428,7 +428,7 @@ impl SendBuf {
         out.data = Vec::with_capacity(cmp::min(max_len, self.len()));
 
         let mut out_len = max_len;
-        let mut out_off = self.data.peek().map_or_else(|| 0, |d| d.off());
+        let mut out_off = self.data.peek().map_or_else(|| 0, RangeBuf::off);
 
         while out_len > 0 &&
             self.ready() &&
