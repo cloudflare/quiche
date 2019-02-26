@@ -491,7 +491,7 @@ extern fn add_handshake_data(
         crypto::Level::Application => &mut conn.application,
     };
 
-    if space.crypto_stream.send_push(buf, false).is_err() {
+    if space.crypto_stream.send.push_slice(buf, false).is_err() {
         return 0;
     }
 

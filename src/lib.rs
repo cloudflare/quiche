@@ -1021,7 +1021,7 @@ impl Connection {
                         self.is_server,
                     )?;
 
-                    self.rx_data += stream.recv_reset(final_size as usize)?;
+                    self.rx_data += stream.recv.reset(final_size as usize)?;
 
                     if self.rx_data > self.max_rx_data {
                         return Err(Error::FlowControl);
@@ -1043,7 +1043,7 @@ impl Connection {
 
                 frame::Frame::Crypto { data } => {
                     // Push the data to the stream so it can be re-ordered.
-                    space.crypto_stream.recv_push(data)?;
+                    space.crypto_stream.recv.push(data)?;
 
                     // Feed crypto data to the TLS state, if there's data
                     // available at the expected offset.
@@ -1052,7 +1052,7 @@ impl Connection {
                     let level = space.crypto_level;
 
                     while let Ok((read, _)) =
-                        space.crypto_stream.recv_pop(&mut crypto_buf)
+                        space.crypto_stream.recv.pop(&mut crypto_buf)
                     {
                         let recv_buf = &crypto_buf[..read];
                         self.tls_state
@@ -1100,7 +1100,7 @@ impl Connection {
                         return Err(Error::FlowControl);
                     }
 
-                    stream.recv_push(data)?;
+                    stream.recv.push(data)?;
 
                     do_ack = true;
                 },
@@ -1130,7 +1130,7 @@ impl Connection {
                         self.is_server,
                     )?;
 
-                    stream.update_max_tx_data(max as usize);
+                    stream.send.update_max_len(max as usize);
 
                     do_ack = true;
                 },
@@ -1284,7 +1284,7 @@ impl Connection {
         for lost in space.flight.lost.drain(..) {
             match lost {
                 frame::Frame::Crypto { data } => {
-                    space.crypto_stream.send_push_front(data)?;
+                    space.crypto_stream.send.push(data)?;
                 },
 
                 frame::Frame::Stream { stream_id, data } => {
@@ -1295,7 +1295,7 @@ impl Connection {
 
                     self.tx_data -= data.len();
 
-                    stream.send_push_front(data)?;
+                    stream.send.push(data)?;
                 },
 
                 frame::Frame::ACK { .. } => {
@@ -1397,12 +1397,14 @@ impl Connection {
 
         // Create MAX_STREAM_DATA frames as needed.
         if pkt_type == packet::Type::Application && !is_closing {
-            for (id, stream) in
-                self.streams.iter_mut().filter(|(_, s)| s.more_credit())
+            for (id, stream) in self
+                .streams
+                .iter_mut()
+                .filter(|(_, s)| s.recv.more_credit())
             {
                 let frame = frame::Frame::MaxStreamData {
                     stream_id: *id,
-                    max: stream.update_max_rx_data() as u64,
+                    max: stream.recv.update_max_len() as u64,
                 };
 
                 if frame.wire_len() > left {
@@ -1482,7 +1484,7 @@ impl Connection {
         // Create CRYPTO frame.
         if space.crypto_stream.writable() && !is_closing {
             let crypto_len = left - frame::MAX_CRYPTO_OVERHEAD;
-            let crypto_buf = space.crypto_stream.send_pop(crypto_len)?;
+            let crypto_buf = space.crypto_stream.send.pop(crypto_len)?;
 
             let frame = frame::Frame::Crypto { data: crypto_buf };
 
@@ -1511,7 +1513,7 @@ impl Connection {
                     self.max_tx_data - self.tx_data,
                 );
 
-                let stream_buf = stream.send_pop(stream_len)?;
+                let stream_buf = stream.send.pop(stream_len)?;
 
                 if stream_buf.is_empty() {
                     continue;
@@ -1654,7 +1656,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let (read, fin) = stream.recv_pop(out)?;
+        let (read, fin) = stream.recv.pop(out)?;
 
         self.new_max_rx_data = self.max_rx_data + read;
 
@@ -1692,7 +1694,7 @@ impl Connection {
 
         // TODO: implement backpressure based on peer's flow control
 
-        stream.send_push(buf, fin)?;
+        stream.send.push_slice(buf, fin)?;
 
         Ok(buf.len())
     }

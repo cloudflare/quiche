@@ -128,119 +128,22 @@ impl StreamMap {
     }
 
     pub fn has_out_of_credit(&self) -> bool {
-        self.streams.values().any(Stream::more_credit)
+        self.streams.values().any(|s| s.recv.more_credit())
     }
 }
 
 #[derive(Default)]
 pub struct Stream {
-    recv: RecvBuf,
-    send: SendBuf,
-
-    max_tx_data: usize,
-
-    rx_data: usize,
-    max_rx_data: usize,
-    new_max_rx_data: usize,
-
-    rx_fin_off: Option<usize>,
+    pub recv: RecvBuf,
+    pub send: SendBuf,
 }
 
 impl Stream {
     pub fn new(max_rx_data: usize, max_tx_data: usize) -> Stream {
         Stream {
-            recv: RecvBuf::default(),
-            send: SendBuf::default(),
-
-            max_tx_data,
-
-            rx_data: 0,
-            max_rx_data,
-            new_max_rx_data: max_rx_data,
-
-            rx_fin_off: None,
+            recv: RecvBuf::new(max_rx_data),
+            send: SendBuf::new(max_tx_data),
         }
-    }
-
-    pub fn recv_push(&mut self, buf: RangeBuf) -> Result<()> {
-        if buf.max_off() > self.max_rx_data {
-            return Err(Error::FlowControl);
-        }
-
-        if let Some(fin_off) = self.rx_fin_off {
-            // Stream's size is known, forbid data beyond that point.
-            if buf.max_off() > fin_off {
-                return Err(Error::FinalSize);
-            }
-
-            // Stream's size is already known, forbid changing it.
-            if buf.fin() && fin_off != buf.max_off() {
-                return Err(Error::FinalSize);
-            }
-        }
-
-        // Stream's known size is lower than data already received.
-        if buf.fin() && buf.max_off() < self.rx_data {
-            return Err(Error::FinalSize);
-        }
-
-        if buf.fin() {
-            self.rx_fin_off = Some(buf.max_off());
-        }
-
-        self.rx_data = cmp::max(self.rx_data, buf.max_off());
-
-        self.recv.push(buf)
-    }
-
-    pub fn recv_pop(&mut self, out: &mut [u8]) -> Result<(usize, bool)> {
-        let (len, fin) = self.recv.pop(out)?;
-
-        self.new_max_rx_data = self.new_max_rx_data.saturating_add(len);
-
-        Ok((len, fin))
-    }
-
-    pub fn recv_reset(&mut self, final_size: usize) -> Result<usize> {
-        // Stream's size is already known, forbid changing it.
-        if let Some(fin_off) = self.rx_fin_off {
-            if fin_off != final_size {
-                return Err(Error::FinalSize);
-            }
-        }
-
-        // Stream's known size is lower than data already received.
-        if final_size < self.rx_data {
-            return Err(Error::FinalSize);
-        }
-
-        self.rx_fin_off = Some(final_size);
-
-        // Return how many bytes need to be removed from the connection flow
-        // control.
-        Ok(final_size - self.rx_data)
-    }
-
-    pub fn send_push(&mut self, data: &[u8], fin: bool) -> Result<()> {
-        self.send.push_slice(data, fin)
-    }
-
-    pub fn send_pop(&mut self, max_len: usize) -> Result<RangeBuf> {
-        self.send.pop(max_len, self.max_tx_data)
-    }
-
-    pub fn send_push_front(&mut self, buf: RangeBuf) -> Result<()> {
-        self.send.push(buf)
-    }
-
-    pub fn update_max_rx_data(&mut self) -> usize {
-        self.max_rx_data = self.new_max_rx_data;
-
-        self.new_max_rx_data
-    }
-
-    pub fn update_max_tx_data(&mut self, max_data: usize) {
-        self.max_tx_data = cmp::max(self.max_tx_data, max_data);
     }
 
     pub fn readable(&self) -> bool {
@@ -248,15 +151,7 @@ impl Stream {
     }
 
     pub fn writable(&self) -> bool {
-        self.send.ready() && self.send.off() <= self.max_tx_data
-    }
-
-    pub fn more_credit(&self) -> bool {
-        // Send MAX_STREAM_DATA when the new limit is at least double the
-        // amount of data that can be received before blocking.
-        self.rx_fin_off.is_none() &&
-            self.new_max_rx_data != self.max_rx_data &&
-            self.new_max_rx_data / 2 > self.max_rx_data - self.rx_data
+        self.send.ready() && self.send.off() <= self.send.max_len
     }
 }
 
@@ -300,28 +195,64 @@ impl<'a> Iterator for Readable<'a> {
 }
 
 #[derive(Default)]
-struct RecvBuf {
+pub struct RecvBuf {
     data: BinaryHeap<RangeBuf>,
     off: usize,
     len: usize,
+    max_len: usize,
+    max_len_new: usize,
+    fin_off: Option<usize>,
 }
 
 impl RecvBuf {
-    fn push(&mut self, buf: RangeBuf) -> Result<()> {
+    fn new(max_len: usize) -> RecvBuf {
+        RecvBuf {
+            max_len,
+            max_len_new: max_len,
+            ..RecvBuf::default()
+        }
+    }
+
+    pub fn push(&mut self, buf: RangeBuf) -> Result<()> {
         // TODO: discard duplicated data (e.g. using RangeSet)
-        if self.off >= buf.off() + buf.len() {
+        if self.off >= buf.max_off() {
             // Data is fully duplicate.
             return Ok(());
         }
 
-        self.len = cmp::max(self.len, buf.off + buf.len());
+        if buf.max_off() > self.max_len {
+            return Err(Error::FlowControl);
+        }
+
+        if let Some(fin_off) = self.fin_off {
+            // Stream's size is known, forbid data beyond that point.
+            if buf.max_off() > fin_off {
+                return Err(Error::FinalSize);
+            }
+
+            // Stream's size is already known, forbid changing it.
+            if buf.fin() && fin_off != buf.max_off() {
+                return Err(Error::FinalSize);
+            }
+        }
+
+        // Stream's known size is lower than data already received.
+        if buf.fin() && buf.max_off() < self.len {
+            return Err(Error::FinalSize);
+        }
+
+        if buf.fin() {
+            self.fin_off = Some(buf.max_off());
+        }
+
+        self.len = cmp::max(self.len, buf.max_off());
 
         self.data.push(buf);
 
         Ok(())
     }
 
-    fn pop(&mut self, out: &mut [u8]) -> Result<(usize, bool)> {
+    pub fn pop(&mut self, out: &mut [u8]) -> Result<(usize, bool)> {
         let mut fin = false;
         let mut len = 0;
         let mut cap = out.len();
@@ -358,7 +289,43 @@ impl RecvBuf {
             fin = fin || buf.fin();
         }
 
+        self.max_len_new = self.max_len_new.saturating_add(len);
+
         Ok((len, fin))
+    }
+
+    pub fn reset(&mut self, final_size: usize) -> Result<usize> {
+        // Stream's size is already known, forbid changing it.
+        if let Some(fin_off) = self.fin_off {
+            if fin_off != final_size {
+                return Err(Error::FinalSize);
+            }
+        }
+
+        // Stream's known size is lower than data already received.
+        if final_size < self.len {
+            return Err(Error::FinalSize);
+        }
+
+        self.fin_off = Some(final_size);
+
+        // Return how many bytes need to be removed from the connection flow
+        // control.
+        Ok(final_size - self.len)
+    }
+
+    pub fn update_max_len(&mut self) -> usize {
+        self.max_len = self.max_len_new;
+
+        self.max_len
+    }
+
+    pub fn more_credit(&self) -> bool {
+        // Send MAX_STREAM_DATA when the new limit is at least double the
+        // amount of data that can be received before blocking.
+        self.fin_off.is_none() &&
+            self.max_len_new != self.max_len &&
+            self.max_len_new / 2 > self.max_len - self.len
     }
 
     fn ready(&self) -> bool {
@@ -382,14 +349,22 @@ impl RecvBuf {
 }
 
 #[derive(Default)]
-struct SendBuf {
+pub struct SendBuf {
     data: BinaryHeap<RangeBuf>,
     off: usize,
     len: usize,
+    max_len: usize,
 }
 
 impl SendBuf {
-    fn push_slice(&mut self, data: &[u8], fin: bool) -> Result<()> {
+    fn new(max_len: usize) -> SendBuf {
+        SendBuf {
+            max_len,
+            ..SendBuf::default()
+        }
+    }
+
+    pub fn push_slice(&mut self, data: &[u8], fin: bool) -> Result<()> {
         let mut len = 0;
 
         if data.is_empty() {
@@ -414,7 +389,7 @@ impl SendBuf {
         Ok(())
     }
 
-    fn push(&mut self, buf: RangeBuf) -> Result<()> {
+    pub fn push(&mut self, buf: RangeBuf) -> Result<()> {
         self.len += buf.len();
 
         self.data.push(buf);
@@ -422,7 +397,7 @@ impl SendBuf {
         Ok(())
     }
 
-    fn pop(&mut self, max_len: usize, max_off: usize) -> Result<RangeBuf> {
+    pub fn pop(&mut self, max_len: usize) -> Result<RangeBuf> {
         let mut out = RangeBuf::default();
         out.data = Vec::with_capacity(cmp::min(max_len, self.len()));
 
@@ -432,15 +407,15 @@ impl SendBuf {
         while out_len > 0 &&
             self.ready() &&
             self.off() == out_off &&
-            self.off() < max_off
+            self.off() < self.max_len
         {
             let mut buf = match self.data.pop() {
                 Some(v) => v,
                 None => break,
             };
 
-            if buf.len() > out_len || buf.max_off() >= max_off {
-                let new_len = cmp::min(out_len, max_off - buf.off());
+            if buf.len() > out_len || buf.max_off() >= self.max_len {
+                let new_len = cmp::min(out_len, self.max_len - buf.off());
 
                 let new_buf = RangeBuf {
                     data: buf.data.split_off(new_len),
@@ -460,7 +435,7 @@ impl SendBuf {
             self.len -= buf.len();
 
             out_len -= buf.len();
-            out_off = buf.off() + buf.len();
+            out_off = buf.max_off();
 
             out.fin = out.fin || buf.fin();
 
@@ -468,6 +443,10 @@ impl SendBuf {
         }
 
         Ok(out)
+    }
+
+    pub fn update_max_len(&mut self, max_len: usize) {
+        self.max_len = cmp::max(self.max_len, max_len);
     }
 
     fn ready(&self) -> bool {
@@ -570,7 +549,7 @@ mod tests {
 
     #[test]
     fn empty_read() {
-        let mut recv = RecvBuf::default();
+        let mut recv = RecvBuf::new(std::usize::MAX);
         assert_eq!(recv.len(), 0);
 
         let mut buf = [0; 32];
@@ -580,7 +559,7 @@ mod tests {
 
     #[test]
     fn ordered_read() {
-        let mut recv = RecvBuf::default();
+        let mut recv = RecvBuf::new(std::usize::MAX);
         assert_eq!(recv.len(), 0);
 
         let mut buf = [0; 32];
@@ -617,7 +596,7 @@ mod tests {
 
     #[test]
     fn split_read() {
-        let mut recv = RecvBuf::default();
+        let mut recv = RecvBuf::new(std::usize::MAX);
         assert_eq!(recv.len(), 0);
 
         let mut buf = [0; 32];
@@ -657,7 +636,7 @@ mod tests {
 
     #[test]
     fn incomplete_read() {
-        let mut recv = RecvBuf::default();
+        let mut recv = RecvBuf::new(std::usize::MAX);
         assert_eq!(recv.len(), 0);
 
         let mut buf = [0; 32];
@@ -685,7 +664,7 @@ mod tests {
 
     #[test]
     fn zero_len_read() {
-        let mut recv = RecvBuf::default();
+        let mut recv = RecvBuf::new(std::usize::MAX);
         assert_eq!(recv.len(), 0);
 
         let mut buf = [0; 32];
@@ -711,17 +690,17 @@ mod tests {
 
     #[test]
     fn empty_write() {
-        let mut send = SendBuf::default();
+        let mut send = SendBuf::new(std::usize::MAX);
         assert_eq!(send.len(), 0);
 
-        let write = send.pop(std::usize::MAX, std::usize::MAX).unwrap();
+        let write = send.pop(std::usize::MAX).unwrap();
         assert_eq!(write.len(), 0);
         assert_eq!(write.fin(), false);
     }
 
     #[test]
     fn multi_write() {
-        let mut send = SendBuf::default();
+        let mut send = SendBuf::new(std::usize::MAX);
         assert_eq!(send.len(), 0);
 
         let first = *b"something";
@@ -733,7 +712,7 @@ mod tests {
         assert!(send.push_slice(&second, true).is_ok());
         assert_eq!(send.len(), 19);
 
-        let write = send.pop(128, std::usize::MAX).unwrap();
+        let write = send.pop(128).unwrap();
         assert_eq!(write.len(), 19);
         assert_eq!(write.fin(), true);
         assert_eq!(&write[..], b"somethinghelloworld");
@@ -742,7 +721,7 @@ mod tests {
 
     #[test]
     fn split_write() {
-        let mut send = SendBuf::default();
+        let mut send = SendBuf::new(std::usize::MAX);
         assert_eq!(send.len(), 0);
 
         let first = *b"something";
@@ -754,21 +733,21 @@ mod tests {
         assert!(send.push_slice(&second, true).is_ok());
         assert_eq!(send.len(), 19);
 
-        let write = send.pop(10, std::usize::MAX).unwrap();
+        let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 10);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"somethingh");
         assert_eq!(send.len(), 9);
 
-        let write = send.pop(5, std::usize::MAX).unwrap();
+        let write = send.pop(5).unwrap();
         assert_eq!(write.off(), 10);
         assert_eq!(write.len(), 5);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"ellow");
         assert_eq!(send.len(), 4);
 
-        let write = send.pop(10, std::usize::MAX).unwrap();
+        let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 15);
         assert_eq!(write.len(), 4);
         assert_eq!(write.fin(), true);
@@ -778,7 +757,7 @@ mod tests {
 
     #[test]
     fn resend() {
-        let mut send = SendBuf::default();
+        let mut send = SendBuf::new(std::usize::MAX);
         assert_eq!(send.len(), 0);
         assert_eq!(send.off(), 0);
 
@@ -791,7 +770,7 @@ mod tests {
         assert!(send.push_slice(&second, true).is_ok());
         assert_eq!(send.off(), 0);
 
-        let write1 = send.pop(4, std::usize::MAX).unwrap();
+        let write1 = send.pop(4).unwrap();
         assert_eq!(write1.off(), 0);
         assert_eq!(write1.len(), 4);
         assert_eq!(write1.fin(), false);
@@ -799,7 +778,7 @@ mod tests {
         assert_eq!(send.len(), 15);
         assert_eq!(send.off(), 4);
 
-        let write2 = send.pop(5, std::usize::MAX).unwrap();
+        let write2 = send.pop(5).unwrap();
         assert_eq!(write2.off(), 4);
         assert_eq!(write2.len(), 5);
         assert_eq!(write2.fin(), false);
@@ -807,7 +786,7 @@ mod tests {
         assert_eq!(send.len(), 10);
         assert_eq!(send.off(), 9);
 
-        let write3 = send.pop(5, std::usize::MAX).unwrap();
+        let write3 = send.pop(5).unwrap();
         assert_eq!(write3.off(), 9);
         assert_eq!(write3.len(), 5);
         assert_eq!(write3.fin(), false);
@@ -823,7 +802,7 @@ mod tests {
         assert_eq!(send.len(), 14);
         assert_eq!(send.off(), 0);
 
-        let write4 = send.pop(11, std::usize::MAX).unwrap();
+        let write4 = send.pop(11).unwrap();
         assert_eq!(write4.off(), 0);
         assert_eq!(write4.len(), 9);
         assert_eq!(write4.fin(), false);
@@ -831,7 +810,7 @@ mod tests {
         assert_eq!(send.len(), 5);
         assert_eq!(send.off(), 14);
 
-        let write5 = send.pop(11, std::usize::MAX).unwrap();
+        let write5 = send.pop(11).unwrap();
         assert_eq!(write5.off(), 14);
         assert_eq!(write5.len(), 5);
         assert_eq!(write5.fin(), true);
@@ -854,28 +833,34 @@ mod tests {
         assert!(send.push_slice(&second, true).is_ok());
         assert_eq!(send.len(), 19);
 
-        let write = send.pop(10, 5).unwrap();
+        send.update_max_len(5);
+
+        let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 5);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"somet");
         assert_eq!(send.len(), 14);
 
-        let write = send.pop(10, 5).unwrap();
+        let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 0);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"");
         assert_eq!(send.len(), 14);
 
-        let write = send.pop(10, 15).unwrap();
+        send.update_max_len(15);
+
+        let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 5);
         assert_eq!(write.len(), 10);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"hinghellow");
         assert_eq!(send.len(), 4);
 
-        let write = send.pop(10, 25).unwrap();
+        send.update_max_len(25);
+
+        let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 15);
         assert_eq!(write.len(), 4);
         assert_eq!(write.fin(), true);
@@ -885,7 +870,7 @@ mod tests {
 
     #[test]
     fn zero_len_write() {
-        let mut send = SendBuf::default();
+        let mut send = SendBuf::new(std::usize::MAX);
         assert_eq!(send.len(), 0);
 
         let first = *b"something";
@@ -896,7 +881,7 @@ mod tests {
         assert!(send.push_slice(&[], true).is_ok());
         assert_eq!(send.len(), 9);
 
-        let write = send.pop(10, std::usize::MAX).unwrap();
+        let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 9);
         assert_eq!(write.fin(), true);
@@ -907,7 +892,7 @@ mod tests {
     #[test]
     fn recv_flow_control() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.more_credit());
+        assert!(!stream.recv.more_credit());
 
         let mut buf = [0; 32];
 
@@ -915,51 +900,51 @@ mod tests {
         let second = RangeBuf::from(b"world", 5, false);
         let third = RangeBuf::from(b"something", 10, false);
 
-        assert_eq!(stream.recv_push(second), Ok(()));
-        assert_eq!(stream.recv_push(first), Ok(()));
-        assert!(!stream.more_credit());
+        assert_eq!(stream.recv.push(second), Ok(()));
+        assert_eq!(stream.recv.push(first), Ok(()));
+        assert!(!stream.recv.more_credit());
 
-        assert_eq!(stream.recv_push(third), Err(Error::FlowControl));
+        assert_eq!(stream.recv.push(third), Err(Error::FlowControl));
 
-        let (len, fin) = stream.recv_pop(&mut buf).unwrap();
+        let (len, fin) = stream.recv.pop(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"helloworld");
         assert_eq!(fin, false);
 
-        assert!(stream.more_credit());
+        assert!(stream.recv.more_credit());
 
-        assert_eq!(stream.update_max_rx_data(), 25);
-        assert!(!stream.more_credit());
+        assert_eq!(stream.recv.update_max_len(), 25);
+        assert!(!stream.recv.more_credit());
 
         let third = RangeBuf::from(b"something", 10, false);
-        assert_eq!(stream.recv_push(third), Ok(()));
+        assert_eq!(stream.recv.push(third), Ok(()));
     }
 
     #[test]
     fn recv_past_fin() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.more_credit());
+        assert!(!stream.recv.more_credit());
 
         let first = RangeBuf::from(b"hello", 0, true);
         let second = RangeBuf::from(b"world", 5, false);
 
-        assert_eq!(stream.recv_push(first), Ok(()));
-        assert_eq!(stream.recv_push(second), Err(Error::FinalSize));
+        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.push(second), Err(Error::FinalSize));
     }
 
     #[test]
     fn recv_fin_dup() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.more_credit());
+        assert!(!stream.recv.more_credit());
 
         let first = RangeBuf::from(b"hello", 0, true);
         let second = RangeBuf::from(b"hello", 0, true);
 
-        assert_eq!(stream.recv_push(first), Ok(()));
-        assert_eq!(stream.recv_push(second), Ok(()));
+        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.push(second), Ok(()));
 
         let mut buf = [0; 32];
 
-        let (len, fin) = stream.recv_pop(&mut buf).unwrap();
+        let (len, fin) = stream.recv.pop(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"hello");
         assert_eq!(fin, true);
     }
@@ -967,91 +952,91 @@ mod tests {
     #[test]
     fn recv_fin_change() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.more_credit());
+        assert!(!stream.recv.more_credit());
 
         let first = RangeBuf::from(b"hello", 0, true);
         let second = RangeBuf::from(b"world", 5, true);
 
-        assert_eq!(stream.recv_push(second), Ok(()));
-        assert_eq!(stream.recv_push(first), Err(Error::FinalSize));
+        assert_eq!(stream.recv.push(second), Ok(()));
+        assert_eq!(stream.recv.push(first), Err(Error::FinalSize));
     }
 
     #[test]
     fn recv_fin_lower_than_received() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.more_credit());
+        assert!(!stream.recv.more_credit());
 
         let first = RangeBuf::from(b"hello", 0, true);
         let second = RangeBuf::from(b"world", 5, false);
 
-        assert_eq!(stream.recv_push(second), Ok(()));
-        assert_eq!(stream.recv_push(first), Err(Error::FinalSize));
+        assert_eq!(stream.recv.push(second), Ok(()));
+        assert_eq!(stream.recv.push(first), Err(Error::FinalSize));
     }
 
     #[test]
     fn recv_fin_flow_control() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.more_credit());
+        assert!(!stream.recv.more_credit());
 
         let mut buf = [0; 32];
 
         let first = RangeBuf::from(b"hello", 0, false);
         let second = RangeBuf::from(b"world", 5, true);
 
-        assert_eq!(stream.recv_push(first), Ok(()));
-        assert_eq!(stream.recv_push(second), Ok(()));
+        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.push(second), Ok(()));
 
-        let (len, fin) = stream.recv_pop(&mut buf).unwrap();
+        let (len, fin) = stream.recv.pop(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"helloworld");
         assert_eq!(fin, true);
 
-        assert!(!stream.more_credit());
+        assert!(!stream.recv.more_credit());
     }
 
     #[test]
     fn recv_fin_reset_mismatch() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.more_credit());
+        assert!(!stream.recv.more_credit());
 
         let first = RangeBuf::from(b"hello", 0, true);
 
-        assert_eq!(stream.recv_push(first), Ok(()));
-        assert_eq!(stream.recv_reset(10), Err(Error::FinalSize));
+        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.reset(10), Err(Error::FinalSize));
     }
 
     #[test]
     fn recv_reset_dup() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.more_credit());
+        assert!(!stream.recv.more_credit());
 
         let first = RangeBuf::from(b"hello", 0, false);
 
-        assert_eq!(stream.recv_push(first), Ok(()));
-        assert_eq!(stream.recv_reset(5), Ok(0));
-        assert_eq!(stream.recv_reset(5), Ok(0));
+        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.reset(5), Ok(0));
+        assert_eq!(stream.recv.reset(5), Ok(0));
     }
 
     #[test]
     fn recv_reset_change() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.more_credit());
+        assert!(!stream.recv.more_credit());
 
         let first = RangeBuf::from(b"hello", 0, false);
 
-        assert_eq!(stream.recv_push(first), Ok(()));
-        assert_eq!(stream.recv_reset(5), Ok(0));
-        assert_eq!(stream.recv_reset(10), Err(Error::FinalSize));
+        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.reset(5), Ok(0));
+        assert_eq!(stream.recv.reset(10), Err(Error::FinalSize));
     }
 
     #[test]
     fn recv_reset_lower_than_received() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.more_credit());
+        assert!(!stream.recv.more_credit());
 
         let first = RangeBuf::from(b"hello", 0, false);
 
-        assert_eq!(stream.recv_push(first), Ok(()));
-        assert_eq!(stream.recv_reset(4), Err(Error::FinalSize));
+        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.reset(4), Err(Error::FinalSize));
     }
 
     #[test]
@@ -1062,32 +1047,32 @@ mod tests {
         let second = b"world";
         let third = b"something";
 
-        assert_eq!(stream.send_push(first, false), Ok(()));
-        assert_eq!(stream.send_push(second, false), Ok(()));
-        assert_eq!(stream.send_push(third, false), Ok(()));
+        assert_eq!(stream.send.push_slice(first, false), Ok(()));
+        assert_eq!(stream.send.push_slice(second, false), Ok(()));
+        assert_eq!(stream.send.push_slice(third, false), Ok(()));
 
-        let write = stream.send_pop(25).unwrap();
+        let write = stream.send.pop(25).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 15);
         assert_eq!(write.fin(), false);
         assert_eq!(write.data, b"helloworldsomet");
 
-        let write = stream.send_pop(25).unwrap();
+        let write = stream.send.pop(25).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 0);
         assert_eq!(write.fin(), false);
         assert_eq!(write.data, b"");
 
         let first = RangeBuf::from(b"helloworldsomet", 0, false);
-        assert_eq!(stream.send_push_front(first), Ok(()));
+        assert_eq!(stream.send.push(first), Ok(()));
 
-        let write = stream.send_pop(10).unwrap();
+        let write = stream.send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 10);
         assert_eq!(write.fin(), false);
         assert_eq!(write.data, b"helloworld");
 
-        let write = stream.send_pop(10).unwrap();
+        let write = stream.send.pop(10).unwrap();
         assert_eq!(write.off(), 10);
         assert_eq!(write.len(), 5);
         assert_eq!(write.fin(), false);
