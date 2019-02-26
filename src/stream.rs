@@ -351,7 +351,6 @@ impl RecvBuf {
             out[len..len + buf.len()].copy_from_slice(&buf.data);
 
             self.off += buf.len();
-            self.len -= buf.len();
 
             len += buf.len();
             cap -= buf.len();
@@ -610,7 +609,7 @@ mod tests {
         assert_eq!(len, 19);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"helloworldsomething");
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len(), 19);
         assert_eq!(recv.off(), 19);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
@@ -638,21 +637,21 @@ mod tests {
         assert_eq!(len, 10);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"somethingh");
-        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.len(), 19);
         assert_eq!(recv.off(), 10);
 
         let (len, fin) = recv.pop(&mut buf[..5]).unwrap();
         assert_eq!(len, 5);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"ellow");
-        assert_eq!(recv.len(), 4);
+        assert_eq!(recv.len(), 19);
         assert_eq!(recv.off(), 15);
 
         let (len, fin) = recv.pop(&mut buf[..10]).unwrap();
         assert_eq!(len, 4);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"orld");
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len(), 19);
         assert_eq!(recv.off(), 19);
     }
 
@@ -680,7 +679,7 @@ mod tests {
         assert_eq!(len, 19);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"somethinghelloworld");
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len(), 19);
         assert_eq!(recv.off(), 19);
     }
 
@@ -706,7 +705,7 @@ mod tests {
         assert_eq!(len, 9);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"something");
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len(), 9);
         assert_eq!(recv.off(), 9);
     }
 
