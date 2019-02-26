@@ -245,6 +245,12 @@ impl RecvBuf {
             self.fin_off = Some(buf.max_off());
         }
 
+        // We already saved the final offset, so there's nothing else we
+        // need to keep from the RangeBuf if it's empty.
+        if buf.is_empty() {
+            return Ok(());
+        }
+
         self.len = cmp::max(self.len, buf.max_off());
 
         self.data.push(buf);
@@ -253,7 +259,6 @@ impl RecvBuf {
     }
 
     pub fn pop(&mut self, out: &mut [u8]) -> Result<(usize, bool)> {
-        let mut fin = false;
         let mut len = 0;
         let mut cap = out.len();
 
@@ -285,13 +290,11 @@ impl RecvBuf {
 
             len += buf.len();
             cap -= buf.len();
-
-            fin = fin || buf.fin();
         }
 
         self.max_len_new = self.max_len_new.saturating_add(len);
 
-        Ok((len, fin))
+        Ok((len, self.is_fin()))
     }
 
     pub fn reset(&mut self, final_size: usize) -> Result<usize> {
@@ -335,6 +338,14 @@ impl RecvBuf {
         };
 
         buf.off == self.off
+    }
+
+    fn is_fin(&self) -> bool {
+        if self.fin_off == Some(self.off) {
+            return true;
+        }
+
+        false
     }
 
     #[allow(dead_code)]
@@ -675,10 +686,12 @@ mod tests {
         assert!(recv.push(first).is_ok());
         assert_eq!(recv.len(), 9);
         assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 1);
 
         assert!(recv.push(second).is_ok());
         assert_eq!(recv.len(), 9);
         assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 1);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 9);
