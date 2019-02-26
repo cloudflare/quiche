@@ -214,7 +214,6 @@ impl RecvBuf {
     }
 
     pub fn push(&mut self, buf: RangeBuf) -> Result<()> {
-        // TODO: discard duplicated data (e.g. using RangeSet)
         if self.off >= buf.max_off() {
             // Data is fully duplicate.
             return Ok(());
@@ -251,9 +250,32 @@ impl RecvBuf {
             return Ok(());
         }
 
-        self.len = cmp::max(self.len, buf.max_off());
+        let mut tmp_buf = Some(buf);
 
-        self.data.push(buf);
+        while let Some(mut buf) = tmp_buf {
+            tmp_buf = None;
+
+            for b in &self.data {
+                // New buffer is fully contained in existing buffer.
+                if buf.off() >= b.off() && buf.max_off() <= b.max_off() {
+                    return Ok(());
+                }
+
+                // New buffer's start overlaps existing buffer.
+                if buf.off() >= b.off() && buf.off() < b.max_off() {
+                    buf = buf.split_off(b.max_off() - buf.off());
+                }
+
+                // New buffer's end overlaps existing buffer.
+                if buf.off() < b.off() && buf.max_off() > b.off() {
+                    tmp_buf = Some(buf.split_off(b.off() - buf.off()));
+                }
+            }
+
+            self.len = cmp::max(self.len, buf.max_off());
+
+            self.data.push(buf);
+        }
 
         Ok(())
     }
@@ -427,14 +449,7 @@ impl SendBuf {
 
             if buf.len() > out_len || buf.max_off() >= self.max_len {
                 let new_len = cmp::min(out_len, self.max_len - buf.off());
-
-                let new_buf = RangeBuf {
-                    data: buf.data.split_off(new_len),
-                    off: buf.off + new_len,
-                    fin: buf.fin,
-                };
-
-                buf.fin = false;
+                let new_buf = buf.split_off(new_len);
 
                 self.data.push(new_buf);
             }
@@ -518,6 +533,19 @@ impl RangeBuf {
     /// Returns true if `self` has a length of zero bytes.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Splits the buffer into two at the given index.
+    pub fn split_off(&mut self, at: usize) -> RangeBuf {
+        let buf = RangeBuf {
+            data: self.data.split_off(at),
+            off: self.off + at,
+            fin: self.fin,
+        };
+
+        self.fin = false;
+
+        buf
     }
 }
 
@@ -699,6 +727,322 @@ mod tests {
         assert_eq!(&buf[..len], b"something");
         assert_eq!(recv.len(), 9);
         assert_eq!(recv.off(), 9);
+    }
+
+    #[test]
+    fn past_read() {
+        let mut recv = RecvBuf::new(std::usize::MAX);
+        assert_eq!(recv.len(), 0);
+
+        let mut buf = [0; 32];
+
+        let first = RangeBuf::from(b"something", 0, false);
+        let second = RangeBuf::from(b"hello", 3, true);
+
+        assert!(recv.push(first).is_ok());
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 1);
+
+        let (len, fin) = recv.pop(&mut buf).unwrap();
+        assert_eq!(len, 9);
+        assert_eq!(fin, false);
+        assert_eq!(&buf[..len], b"something");
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 9);
+
+        assert!(recv.push(second).is_ok());
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 9);
+        assert_eq!(recv.data.len(), 0);
+
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+    }
+
+    #[test]
+    fn fully_overlapping_read() {
+        let mut recv = RecvBuf::new(std::usize::MAX);
+        assert_eq!(recv.len(), 0);
+
+        let mut buf = [0; 32];
+
+        let first = RangeBuf::from(b"something", 0, false);
+        let second = RangeBuf::from(b"hello", 4, false);
+
+        assert!(recv.push(first).is_ok());
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 1);
+
+        assert!(recv.push(second).is_ok());
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 1);
+
+        let (len, fin) = recv.pop(&mut buf).unwrap();
+        assert_eq!(len, 9);
+        assert_eq!(fin, false);
+        assert_eq!(&buf[..len], b"something");
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 9);
+        assert_eq!(recv.data.len(), 0);
+
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+    }
+
+    #[test]
+    fn fully_overlapping_read2() {
+        let mut recv = RecvBuf::new(std::usize::MAX);
+        assert_eq!(recv.len(), 0);
+
+        let mut buf = [0; 32];
+
+        let first = RangeBuf::from(b"something", 0, false);
+        let second = RangeBuf::from(b"hello", 4, false);
+
+        assert!(recv.push(second).is_ok());
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 1);
+
+        assert!(recv.push(first).is_ok());
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 2);
+
+        let (len, fin) = recv.pop(&mut buf).unwrap();
+        assert_eq!(len, 9);
+        assert_eq!(fin, false);
+        println!("{}", std::str::from_utf8(&buf[..len]).unwrap());
+        assert_eq!(&buf[..len], b"somehello");
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 9);
+        assert_eq!(recv.data.len(), 0);
+
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+    }
+
+    #[test]
+    fn fully_overlapping_read3() {
+        let mut recv = RecvBuf::new(std::usize::MAX);
+        assert_eq!(recv.len(), 0);
+
+        let mut buf = [0; 32];
+
+        let first = RangeBuf::from(b"something", 0, false);
+        let second = RangeBuf::from(b"hello", 3, false);
+
+        assert!(recv.push(second).is_ok());
+        assert_eq!(recv.len(), 8);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 1);
+
+        assert!(recv.push(first).is_ok());
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 3);
+
+        let (len, fin) = recv.pop(&mut buf).unwrap();
+        assert_eq!(len, 9);
+        assert_eq!(fin, false);
+        println!("{}", std::str::from_utf8(&buf[..len]).unwrap());
+        assert_eq!(&buf[..len], b"somhellog");
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 9);
+        assert_eq!(recv.data.len(), 0);
+
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+    }
+
+    #[test]
+    fn fully_overlapping_read_multi() {
+        let mut recv = RecvBuf::new(std::usize::MAX);
+        assert_eq!(recv.len(), 0);
+
+        let mut buf = [0; 32];
+
+        let first = RangeBuf::from(b"somethingsomething", 0, false);
+        let second = RangeBuf::from(b"hello", 3, false);
+        let third = RangeBuf::from(b"hello", 12, false);
+
+        assert!(recv.push(second).is_ok());
+        assert_eq!(recv.len(), 8);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 1);
+
+        assert!(recv.push(third).is_ok());
+        assert_eq!(recv.len(), 17);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 2);
+
+        assert!(recv.push(first).is_ok());
+        assert_eq!(recv.len(), 18);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 5);
+
+        let (len, fin) = recv.pop(&mut buf).unwrap();
+        assert_eq!(len, 18);
+        assert_eq!(fin, false);
+        println!("{}", std::str::from_utf8(&buf[..len]).unwrap());
+        assert_eq!(&buf[..len], b"somhellogsomhellog");
+        assert_eq!(recv.len(), 18);
+        assert_eq!(recv.off(), 18);
+        assert_eq!(recv.data.len(), 0);
+
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+    }
+
+    #[test]
+    fn overlapping_start_read() {
+        let mut recv = RecvBuf::new(std::usize::MAX);
+        assert_eq!(recv.len(), 0);
+
+        let mut buf = [0; 32];
+
+        let first = RangeBuf::from(b"something", 0, false);
+        let second = RangeBuf::from(b"hello", 8, true);
+
+        assert!(recv.push(first).is_ok());
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 1);
+
+        assert!(recv.push(second).is_ok());
+        assert_eq!(recv.len(), 13);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 2);
+
+        let (len, fin) = recv.pop(&mut buf).unwrap();
+        assert_eq!(len, 13);
+        assert_eq!(fin, true);
+        assert_eq!(&buf[..len], b"somethingello");
+        assert_eq!(recv.len(), 13);
+        assert_eq!(recv.off(), 13);
+
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+    }
+
+    #[test]
+    fn overlapping_end_read() {
+        let mut recv = RecvBuf::new(std::usize::MAX);
+        assert_eq!(recv.len(), 0);
+
+        let mut buf = [0; 32];
+
+        let first = RangeBuf::from(b"hello", 0, false);
+        let second = RangeBuf::from(b"something", 3, true);
+
+        assert!(recv.push(second).is_ok());
+        assert_eq!(recv.len(), 12);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 1);
+
+        assert!(recv.push(first).is_ok());
+        assert_eq!(recv.len(), 12);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 2);
+
+        let (len, fin) = recv.pop(&mut buf).unwrap();
+        assert_eq!(len, 12);
+        assert_eq!(fin, true);
+        assert_eq!(&buf[..len], b"helsomething");
+        assert_eq!(recv.len(), 12);
+        assert_eq!(recv.off(), 12);
+
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+    }
+
+    #[test]
+    fn partially_multi_overlapping_reordered_read() {
+        let mut recv = RecvBuf::new(std::usize::MAX);
+        assert_eq!(recv.len(), 0);
+
+        let mut buf = [0; 32];
+
+        let first = RangeBuf::from(b"hello", 8, false);
+        let second = RangeBuf::from(b"something", 0, false);
+        let third = RangeBuf::from(b"moar", 11, true);
+
+        assert!(recv.push(first).is_ok());
+        assert_eq!(recv.len(), 13);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 1);
+
+        assert!(recv.push(second).is_ok());
+        assert_eq!(recv.len(), 13);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 2);
+
+        assert!(recv.push(third).is_ok());
+        assert_eq!(recv.len(), 15);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 3);
+
+        let (len, fin) = recv.pop(&mut buf).unwrap();
+        assert_eq!(len, 15);
+        assert_eq!(fin, true);
+        assert_eq!(&buf[..len], b"somethinhelloar");
+        assert_eq!(recv.len(), 15);
+        assert_eq!(recv.off(), 15);
+        assert_eq!(recv.data.len(), 0);
+
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+    }
+
+    #[test]
+    fn partially_multi_overlapping_reordered_read2() {
+        let mut recv = RecvBuf::new(std::usize::MAX);
+        assert_eq!(recv.len(), 0);
+
+        let mut buf = [0; 32];
+
+        let first = RangeBuf::from(b"aaa", 0, false);
+        let second = RangeBuf::from(b"bbb", 2, false);
+        let third = RangeBuf::from(b"ccc", 4, false);
+        let fourth = RangeBuf::from(b"ddd", 6, false);
+        let fifth = RangeBuf::from(b"eee", 9, false);
+        let sixth = RangeBuf::from(b"fff", 11, false);
+
+        assert!(recv.push(second).is_ok());
+        assert_eq!(recv.len(), 5);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 1);
+
+        assert!(recv.push(fourth).is_ok());
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 2);
+
+        assert!(recv.push(third).is_ok());
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 3);
+
+        assert!(recv.push(first).is_ok());
+        assert_eq!(recv.len(), 9);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 4);
+
+        assert!(recv.push(sixth).is_ok());
+        assert_eq!(recv.len(), 14);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 5);
+
+        assert!(recv.push(fifth).is_ok());
+        assert_eq!(recv.len(), 14);
+        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.data.len(), 6);
+
+        let (len, fin) = recv.pop(&mut buf).unwrap();
+        assert_eq!(len, 14);
+        assert_eq!(fin, false);
+        println!("{}", std::str::from_utf8(&buf[..len]).unwrap());
+        assert_eq!(&buf[..len], b"aabbbcdddeefff");
+        assert_eq!(recv.len(), 14);
+        assert_eq!(recv.off(), 14);
+        assert_eq!(recv.data.len(), 0);
+
+        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
     }
 
     #[test]
