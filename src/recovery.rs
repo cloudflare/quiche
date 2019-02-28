@@ -416,10 +416,10 @@ impl Recovery {
         }
 
         // PTO timer.
-        let mut timeout =
-            self.rtt() + (self.rttvar * 4) + self.max_ack_delay;
+        let mut timeout = self.rtt() +
+            cmp::max(self.rttvar * 4, GRANULARITY) +
+            self.max_ack_delay;
 
-        timeout = cmp::max(timeout, GRANULARITY);
         timeout *= 2_u32.pow(self.pto_count);
 
         self.loss_detection_timer =
