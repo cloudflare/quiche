@@ -362,6 +362,10 @@ impl Recovery {
         self.smoothed_rtt.unwrap_or(INITIAL_RTT)
     }
 
+    pub fn pto(&self) -> Duration {
+        self.rtt() + cmp::max(self.rttvar * 4, GRANULARITY) + self.max_ack_delay
+    }
+
     fn update_rtt(&mut self, latest_rtt: Duration, ack_delay: Duration) {
         let ack_delay = cmp::min(self.max_ack_delay, ack_delay);
 
@@ -416,11 +420,7 @@ impl Recovery {
         }
 
         // PTO timer.
-        let mut timeout = self.rtt() +
-            cmp::max(self.rttvar * 4, GRANULARITY) +
-            self.max_ack_delay;
-
-        timeout *= 2_u32.pow(self.pto_count);
+        let timeout = self.pto() * 2_u32.pow(self.pto_count);
 
         self.loss_detection_timer =
             Some(self.time_of_last_sent_ack_eliciting_pkt + timeout);
