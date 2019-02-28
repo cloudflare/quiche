@@ -165,7 +165,7 @@ pub struct Recovery {
 
     latest_rtt: Duration,
 
-    smoothed_rtt: Duration,
+    smoothed_rtt: Option<Duration>,
 
     rttvar: Duration,
 
@@ -209,7 +209,7 @@ impl Default for Recovery {
 
             latest_rtt: Duration::new(0, 0),
 
-            smoothed_rtt: Duration::new(0, 0),
+            smoothed_rtt: None,
 
             min_rtt: Duration::from_secs(std::u64::MAX),
 
@@ -359,21 +359,13 @@ impl Recovery {
     }
 
     pub fn rtt(&self) -> Duration {
-        let zero = Duration::new(0, 0);
-
-        if self.smoothed_rtt == zero {
-            return INITIAL_RTT;
-        }
-
-        self.smoothed_rtt
+        self.smoothed_rtt.unwrap_or(INITIAL_RTT)
     }
 
     fn update_rtt(&mut self, latest_rtt: Duration, ack_delay: Duration) {
-        let zero = Duration::new(0, 0);
+        let ack_delay = cmp::min(self.max_ack_delay, ack_delay);
 
         self.min_rtt = cmp::min(self.min_rtt, latest_rtt);
-
-        let ack_delay = cmp::min(self.max_ack_delay, ack_delay);
 
         self.latest_rtt = if latest_rtt - self.min_rtt > ack_delay {
             latest_rtt - ack_delay
@@ -381,22 +373,24 @@ impl Recovery {
             latest_rtt
         };
 
-        if self.smoothed_rtt == zero {
-            self.rttvar = self.latest_rtt / 2;
+        match self.smoothed_rtt {
+            None => {
+                self.rttvar = self.latest_rtt / 2;
 
-            self.smoothed_rtt = self.latest_rtt;
-        } else {
-            let rttvar_sample = sub_abs(self.smoothed_rtt, self.latest_rtt);
+                self.smoothed_rtt = Some(self.latest_rtt);
+            },
 
-            self.rttvar = (self.rttvar * 3 + rttvar_sample) / 4;
+            Some(srtt) => {
+                let rttvar_sample = sub_abs(srtt, self.latest_rtt);
 
-            self.smoothed_rtt = (self.smoothed_rtt * 7 + self.latest_rtt) / 8;
+                self.rttvar = (self.rttvar * 3 + rttvar_sample) / 4;
+
+                self.smoothed_rtt = Some((srtt * 7 + self.latest_rtt) / 8);
+            },
         }
     }
 
     fn set_loss_detection_timer(&mut self) {
-        let zero = Duration::new(0, 0);
-
         if self.bytes_in_flight == 0 {
             self.loss_detection_timer = None;
             return;
@@ -404,11 +398,7 @@ impl Recovery {
 
         if self.crypto_bytes_in_flight > 0 {
             // Crypto retransmission timer.
-            let mut timeout = if self.smoothed_rtt == zero {
-                INITIAL_RTT * 2
-            } else {
-                self.smoothed_rtt * 2
-            };
+            let mut timeout = self.rtt() * 2;
 
             timeout = cmp::max(timeout, GRANULARITY);
             timeout *= 2_u32.pow(self.crypto_count);
@@ -427,7 +417,7 @@ impl Recovery {
 
         // PTO timer.
         let mut timeout =
-            self.smoothed_rtt + (self.rttvar * 4) + self.max_ack_delay;
+            self.rtt() + (self.rttvar * 4) + self.max_ack_delay;
 
         timeout = cmp::max(timeout, GRANULARITY);
         timeout *= 2_u32.pow(self.pto_count);
@@ -443,7 +433,7 @@ impl Recovery {
 
         let largest_acked = self.largest_acked_pkt;
 
-        let loss_delay = (cmp::max(self.latest_rtt, self.smoothed_rtt) * 9) / 8;
+        let loss_delay = (cmp::max(self.latest_rtt, self.rtt()) * 9) / 8;
 
         let lost_send_time = now - loss_delay;
 
