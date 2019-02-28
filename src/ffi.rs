@@ -442,8 +442,7 @@ pub extern fn quiche_conn_close(
 #[no_mangle]
 pub extern fn quiche_conn_timeout_as_nanos(conn: &mut Connection) -> u64 {
     match conn.timeout() {
-        Some(timeout) =>
-            timeout.as_secs() * 1_000_000_000 + u64::from(timeout.subsec_nanos()),
+        Some(timeout) => timeout.as_nanos() as u64,
 
         None => std::u64::MAX,
     }
@@ -476,9 +475,7 @@ pub extern fn quiche_conn_stats_lost(conn: &Connection, out: &mut u64) {
 
 #[no_mangle]
 pub extern fn quiche_conn_stats_rtt_as_nanos(conn: &Connection, out: &mut u64) {
-    let rtt = conn.stats().rtt;
-
-    *out = rtt.as_secs() * 1_000_000_000 + u64::from(rtt.subsec_nanos());
+    *out = conn.stats().rtt.as_nanos() as u64;
 }
 
 #[no_mangle]

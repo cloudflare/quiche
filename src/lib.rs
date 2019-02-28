@@ -1347,10 +1347,7 @@ impl Connection {
         if space.do_ack {
             let ack_delay = space.largest_rx_pkt_time.elapsed();
 
-            let ack_delay = ack_delay.as_secs() * 1_000_000 +
-                u64::from(ack_delay.subsec_micros());
-
-            let ack_delay = ack_delay /
+            let ack_delay = ack_delay.as_micros() as u64 /
                 2_u64
                     .pow(self.local_transport_params.ack_delay_exponent as u32);
 
