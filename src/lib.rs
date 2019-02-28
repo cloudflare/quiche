@@ -187,9 +187,6 @@ const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 
 const PAYLOAD_MIN_LEN: usize = 4;
 
-// TODO: calculate draining timer as 3 * RTO
-const DRAINING_TIMEOUT: time::Duration = time::Duration::from_millis(200);
-
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -1169,12 +1166,12 @@ impl Connection {
 
                 frame::Frame::ConnectionClose { .. } => {
                     self.draining = true;
-                    self.draining_timer = Some(now + DRAINING_TIMEOUT);
+                    self.draining_timer = Some(now + (self.recovery.pto() * 3));
                 },
 
                 frame::Frame::ApplicationClose { .. } => {
                     self.draining = true;
-                    self.draining_timer = Some(now + DRAINING_TIMEOUT);
+                    self.draining_timer = Some(now + (self.recovery.pto() * 3));
                 },
             }
         }
@@ -1448,7 +1445,7 @@ impl Connection {
             frames.push(frame);
 
             self.draining = true;
-            self.draining_timer = Some(now + DRAINING_TIMEOUT);
+            self.draining_timer = Some(now + (self.recovery.pto() * 3));
         }
 
         // Create APPLICAtiON_CLOSE frame.
@@ -1464,7 +1461,7 @@ impl Connection {
             frames.push(frame);
 
             self.draining = true;
-            self.draining_timer = Some(now + DRAINING_TIMEOUT);
+            self.draining_timer = Some(now + (self.recovery.pto() * 3));
         }
 
         // Create PATH_RESPONSE frame.
