@@ -206,23 +206,37 @@ impl<'a> Octets<'a> {
     /// Writes an unsigned variable-length integer in network byte-order at the
     /// current offset and advances the buffer.
     pub fn put_varint(&mut self, v: u64) -> Result<()> {
-        if self.cap() == 0 {
+        self.put_varint_with_len(v, varint_len(v))
+    }
+
+    /// Writes an unsigned variable-length integer of the specified length, in
+    /// network byte-order at the current offset and advances the buffer.
+    pub fn put_varint_with_len(&mut self, v: u64, len: usize) -> Result<()> {
+        if self.cap() < len {
             return Err(Error::BufferTooShort);
         }
 
-        if v <= 63 {
-            self.put_u8(v as u8)?;
-        } else if v <= 16383 {
-            let buf = self.put_u16(v as u16)?;
-            buf[0] |= 0x40;
-        } else if v <= 1_073_741_823 {
-            let buf = self.put_u32(v as u32)?;
-            buf[0] |= 0x80;
-        } else if v <= 4_611_686_018_427_387_903 {
-            let buf = self.put_u64(v)?;
-            buf[0] |= 0xc0;
-        } else {
-            panic!("value is too large for varint");
+        match len {
+            1 => {
+                self.put_u8(v as u8)?;
+            },
+
+            2 => {
+                let buf = self.put_u16(v as u16)?;
+                buf[0] |= 0x40;
+            },
+
+            4 => {
+                let buf = self.put_u32(v as u32)?;
+                buf[0] |= 0x80;
+            },
+
+            8 => {
+                let buf = self.put_u64(v)?;
+                buf[0] |= 0xc0;
+            },
+
+            _ => panic!("value is too large for varint"),
         }
 
         Ok(())
