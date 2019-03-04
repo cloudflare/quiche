@@ -114,6 +114,8 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     debug!("{} written {}", conn.trace_id(), write);
 
+    let req_start = std::time::Instant::now();
+
     let mut req_sent = false;
 
     loop {
@@ -209,7 +211,9 @@ fn main() -> Result<(), Box<std::error::Error>> {
                 });
 
                 if s == HTTP_REQ_STREAM_ID && fin {
-                    info!("{} response received, closing...", conn.trace_id());
+                    info!("{} response received in {:?}, closing...",
+                          conn.trace_id(), req_start.elapsed());
+
                     conn.close(true, 0x00, b"kthxbye")?;
                 }
             }
