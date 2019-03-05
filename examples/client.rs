@@ -211,8 +211,11 @@ fn main() -> Result<(), Box<std::error::Error>> {
                 });
 
                 if s == HTTP_REQ_STREAM_ID && fin {
-                    info!("{} response received in {:?}, closing...",
-                          conn.trace_id(), req_start.elapsed());
+                    info!(
+                        "{} response received in {:?}, closing...",
+                        conn.trace_id(),
+                        req_start.elapsed()
+                    );
 
                     conn.close(true, 0x00, b"kthxbye")?;
                 }
