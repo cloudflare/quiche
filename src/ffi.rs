@@ -454,6 +454,16 @@ pub extern fn quiche_conn_on_timeout(conn: &mut Connection) {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_application_proto(conn: &mut Connection,
+                                            out: &mut *const u8,
+                                            out_len: &mut usize) {
+    let proto = conn.application_proto();
+
+    *out = proto.as_ptr();
+    *out_len = proto.len();
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_is_established(conn: &mut Connection) -> bool {
     conn.is_established()
 }

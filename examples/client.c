@@ -131,7 +131,13 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
     }
 
     if (quiche_conn_is_established(conn_io->conn) && !req_sent) {
-        fprintf(stderr, "connection established\n");
+        uint8_t *app_proto;
+        size_t app_proto_len;
+
+        quiche_conn_application_proto(conn_io->conn, &app_proto, &app_proto_len);
+
+        fprintf(stderr, "connection established: %*.s\n",
+                (int) app_proto_len, app_proto);
 
         const static uint8_t r[] = "GET /index.html\r\n";
         if (quiche_conn_stream_send(conn_io->conn, 4, r, sizeof(r), true) < 0) {

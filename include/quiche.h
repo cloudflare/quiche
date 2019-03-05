@@ -222,6 +222,10 @@ void quiche_conn_on_timeout(quiche_conn *conn);
 int quiche_conn_close(quiche_conn *conn, bool app, uint16_t err,
                       const uint8_t *reason, size_t reason_len);
 
+// Returns the negotiated ALPN protocol.
+uint8_t *quiche_conn_application_proto(quiche_conn *conn, uint8_t **out,
+                                       size_t *out_len);
+
 // Returns true if the connection handshake is complete.
 bool quiche_conn_is_established(quiche_conn *conn);
 
