@@ -238,17 +238,17 @@ pub enum Error {
     /// The peer violated the local stream limits.
     StreamLimit        = -12,
 
+    /// The received data exceeds the stream's final size.
+    FinalSize          = -13,
+
     /// The QPACK header block's huffman encoding is invalid.
-    InvalidHuffmanEncoding = -13,
+    InvalidHuffmanEncoding = -14,
 
     /// The QPACK static table index provided doesn't exist.
-    InvalidStaticTableIndex = -14,
+    InvalidStaticTableIndex = -15,
 
     /// The decoded QPACK header name or value is not valid.
-    InvalidHeaderValue = -15,
-
-    /// The received data exceeds the stream's final size.
-    FinalSize          = -16,
+    InvalidHeaderValue = -16,
 }
 
 impl Error {
