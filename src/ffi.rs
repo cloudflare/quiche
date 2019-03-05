@@ -122,6 +122,11 @@ pub extern fn quiche_config_set_max_packet_size(config: &mut Config, v: u64) {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_initial_max_data(config: &mut Config, v: u64) {
+    config.set_initial_max_data(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_set_initial_max_stream_data_bidi_local(
     config: &mut Config, v: u64,
 ) {
@@ -140,11 +145,6 @@ pub extern fn quiche_config_set_initial_max_stream_data_uni(
     config: &mut Config, v: u64,
 ) {
     config.set_initial_max_stream_data_uni(v);
-}
-
-#[no_mangle]
-pub extern fn quiche_config_set_initial_max_data(config: &mut Config, v: u64) {
-    config.set_initial_max_data(v);
 }
 
 #[no_mangle]

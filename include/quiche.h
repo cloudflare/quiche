@@ -80,6 +80,9 @@ enum quiche_error {
 
     // The peer violated the local stream limits.
     QUICHE_ERR_STREAM_LIMIT = -12,
+
+    // The received data exceeds the stream's final size.
+    QUICHE_ERR_FINAL_SIZE = -13,
 };
 
 // Enables logging. |cb| will be called with log messages
@@ -112,6 +115,9 @@ void quiche_config_set_idle_timeout(quiche_config *config, uint64_t v);
 // Sets the `max_packet_size` transport parameter.
 void quiche_config_set_max_packet_size(quiche_config *config, uint64_t v);
 
+// Sets the `initial_max_data` transport parameter.
+void quiche_config_set_initial_max_data(quiche_config *config, uint64_t v);
+
 // Sets the `initial_max_stream_data_bidi_local` transport parameter.
 void quiche_config_set_initial_max_stream_data_bidi_local(quiche_config *config, uint64_t v);
 
@@ -120,9 +126,6 @@ void quiche_config_set_initial_max_stream_data_bidi_remote(quiche_config *config
 
 // Sets the `initial_max_stream_data_uni` transport parameter.
 void quiche_config_set_initial_max_stream_data_uni(quiche_config *config, uint64_t v);
-
-// Sets the `initial_max_data` transport parameter.
-void quiche_config_set_initial_max_data(quiche_config *config, uint64_t v);
 
 // Sets the `initial_max_streams_bidi` transport parameter.
 void quiche_config_set_initial_max_streams_bidi(quiche_config *config, uint64_t v);
