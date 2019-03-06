@@ -48,6 +48,7 @@ Options:
   --key <file>      TLS certificate key path [default: examples/cert.key]
   --root <dir>      Root directory [default: examples/root/]
   --name <str>      Name of the server [default: quic.tech]
+  --no-retry        Disable stateless retry.
   -h --help         Show this screen.
 ";
 
@@ -166,29 +167,33 @@ fn main() -> Result<(), Box<std::error::Error>> {
                 let mut scid = [0; LOCAL_CONN_ID_LEN];
                 SystemRandom::new().fill(&mut scid[..])?;
 
-                // Token is always present in Initial packets.
-                let token = hdr.token.as_ref().unwrap();
+                let mut odcid = None;
 
-                if token.is_empty() {
-                    warn!("Doing stateless retry");
+                if !args.get_bool("--no-retry") {
+                    // Token is always present in Initial packets.
+                    let token = hdr.token.as_ref().unwrap();
 
-                    let new_token = mint_token(&hdr, &src);
+                    if token.is_empty() {
+                        warn!("Doing stateless retry");
 
-                    let len = quiche::retry(
-                        &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
-                    )?;
+                        let new_token = mint_token(&hdr, &src);
 
-                    let out = &out[..len];
+                        let len = quiche::retry(
+                            &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
+                        )?;
 
-                    socket.send_to(out, &src)?;
-                    continue;
-                }
+                        let out = &out[..len];
 
-                let odcid = validate_token(&src, token);
+                        socket.send_to(out, &src)?;
+                        continue;
+                    }
 
-                if odcid == None {
-                    error!("Invalid address validation token");
-                    continue;
+                    odcid = validate_token(&src, token);
+
+                    if odcid == None {
+                        error!("Invalid address validation token");
+                        continue;
+                    }
                 }
 
                 debug!(
