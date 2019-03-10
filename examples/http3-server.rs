@@ -31,7 +31,7 @@ use std::net;
 
 use std::collections::HashMap;
 
-use http::Response;
+use quiche::h3::qpack::Header;
 use ring::rand::*;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
@@ -258,7 +258,7 @@ fn main() {
                     break;
                 }
 
-                let mut h3_config =
+                let h3_config =
                     quiche::h3::Config::new(16, 1024, 0, 0).unwrap();
 
                 if client.http3_conn.is_none() {
@@ -268,7 +268,7 @@ fn main() {
                     );
                     let h3_conn = quiche::h3::accept(
                         &mut client.quiche_conn,
-                        &mut h3_config,
+                        &h3_config,
                     )
                     .unwrap();
 
@@ -280,31 +280,19 @@ fn main() {
 
             if let Some(http3_conn) = &mut client.http3_conn {
                 match http3_conn.process(client.quiche_conn.as_mut()) {
-                    Ok(quiche::h3::Event::OnReqHeaders { stream_id, value }) => {
+                    Ok(quiche::h3::Event::OnHeaders { stream_id, value }) => {
                         info!(
                             "got request {:?} on stream id {}",
                             value, stream_id
                         );
 
-                        let resp = build_response(root_dir, &value);
-
-                        http3_conn.send_response(
-                            client.quiche_conn.as_mut(),
-                            stream_id,
-                            resp,
-                        );
+                        send_response(&mut client.quiche_conn, http3_conn, root_dir, &value, stream_id);
                     },
                     Ok(quiche::h3::Event::OnPayloadData { stream_id, value }) => {
                         info!(
                             "Got request data of length {} in stream id {}",
                             value.len(),
                             stream_id
-                        );
-                    },
-                    Ok(quiche::h3::Event::OnRespHeaders { .. }) => {
-                        error!(
-                            "{} HTTP/3 response received",
-                            client.quiche_conn.trace_id(),
                         );
                     },
                     Err(quiche::h3::Error::Done) => {
@@ -428,11 +416,34 @@ fn hex_dump(buf: &[u8]) -> String {
     vec.join("")
 }
 
-fn build_response(
-    root_dir: &str, request: &http::Request<()>,
-) -> http::Response<Vec<u8>> {
+fn send_response(
+    quic_conn: &mut quiche::Connection,
+    http3_conn: &mut quiche::h3::Connection,
+    root_dir: &str,
+    request: &[Header],
+    stream_id: u64
+) {
     let mut file_path = std::path::PathBuf::from(root_dir);
-    file_path.push(request.uri().path().trim_start_matches('/'));
+
+    let mut method = None;
+
+    for hdr in request {
+        match hdr.name() {
+            ":path:" => {
+                file_path.push(hdr.value());
+            },
+            ":method:" => {
+                method = Some(hdr.value());
+            },
+            _ => { 
+                //TODO 
+            }
+        }
+    }
+    
+    if method != Some("GET") {
+        return ;
+    }
 
     let mut status = 404;
     let mut body = Vec::from(String::from("Not Found!"));
@@ -446,11 +457,31 @@ fn build_response(
         },
     }
 
-    Response::builder()
-        .status(status)
-        .version(http::Version::HTTP_2)
-        .header("Server", "quiche-http/3")
-        .header("Content-Length", body.len())
-        .body(body)
-        .unwrap()
+    let headers = vec![
+        Header::new(":status:", &status.to_string()),
+        Header::new("Server:", "quiche-http/3"),
+        Header::new("Content-Length", &body.len().to_string()),
+    ];
+
+    match http3_conn.send_response(
+        quic_conn,
+        stream_id,
+        &headers,
+        Some(body)
+    ) {
+        Ok(()) => {
+            info!(
+                "{} Sent response on stream {}",
+                quic_conn.trace_id(),
+                stream_id
+            );
+        },
+        Err(e) => {
+            error!(
+                "{} HTTP/3 error {:?}",
+                quic_conn.trace_id(),
+                e
+            );
+        }
+    }
 }

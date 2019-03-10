@@ -35,6 +35,9 @@ const LITERAL_WITH_NAME_REF: u8 = 0b0100_0000;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Header(String, String);
 
+/// A vector of Headers representing an HTTP header list.
+pub type HeaderList = Vec<Header>;
+
 impl Header {
     /// Creates a new header.
     pub fn new(name: &str, value: &str) -> Header {

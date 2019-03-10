@@ -30,23 +30,12 @@ use std::collections::BTreeMap;
 
 use crate::octets;
 
-use http::{
-    Request,
-    Response,
-    StatusCode,
-    Uri,
-};
-
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub enum Event {
-    OnReqHeaders {
+    OnHeaders {
         stream_id: u64,
-        value: http::Request<()>,
-    },
-    OnRespHeaders {
-        stream_id: u64,
-        value: http::Response<()>,
+        value: qpack::HeaderList
     },
     OnPayloadData {
         stream_id: u64,
@@ -187,135 +176,6 @@ impl std::convert::From<super::Error> for Error {
             _ => Error::GeneralProtocolError,
         }
     }
-}
-
-fn req_hdrs_to_qpack(
-    encoder: &mut qpack::Encoder, request: &http::Request<()>,
-) -> Vec<u8> {
-    let mut vec = vec![0u8; 65535];
-
-    let mut headers: Vec<qpack::Header> = Vec::new();
-
-    headers.push(qpack::Header::new(":method", request.method().as_str()));
-    headers.push(qpack::Header::new(
-        ":scheme",
-        request.uri().scheme_str().unwrap(),
-    ));
-    headers.push(qpack::Header::new(
-        ":authority",
-        request.uri().host().unwrap(),
-    ));
-    headers.push(qpack::Header::new(
-        ":path",
-        request.uri().path_and_query().unwrap().as_str(),
-    ));
-
-    for (key, value) in request.headers().iter() {
-        headers.push(qpack::Header::new(key.as_str(), value.to_str().unwrap()));
-    }
-
-    let len = encoder.encode(&headers, &mut vec);
-
-    vec.truncate(len.unwrap());
-    trace!("Encoded header block len={:?}", len);
-
-    vec
-}
-
-fn resp_hdrs_to_qpack(
-    encoder: &mut qpack::Encoder, response: &http::Response<Vec<u8>>,
-) -> Vec<u8> {
-    let mut vec = vec![0u8; 65535];
-
-    let mut headers: Vec<qpack::Header> = Vec::new();
-
-    headers.push(qpack::Header::new(":status", response.status().as_str()));
-
-    for (key, value) in response.headers().iter() {
-        headers.push(qpack::Header::new(key.as_str(), value.to_str().unwrap()));
-    }
-
-    let len = encoder.encode(&headers, &mut vec);
-
-    vec.truncate(len.unwrap());
-    trace!("Encoded header block len={:?}", len);
-
-    vec
-}
-
-fn req_hdrs_from_qpack(
-    decoder: &mut qpack::Decoder, hdr_block: &mut [u8],
-) -> http::Request<()> {
-    let mut req: Request<()> = Request::default();
-
-    // TODO: make pseudo header parsing more efficient. Right now, we create
-    // some variables to hold pseudo headers that may arrive in any order.
-    // Some of these are later formatted back into a complete URI
-    let mut method = String::new();
-    let mut scheme = String::new();
-    let mut authority = String::new();
-    let mut path = String::new();
-
-    for hdr in decoder.decode(hdr_block).unwrap() {
-        match hdr.name() {
-            ":method" => {
-                method = hdr.value().to_string();
-            },
-            ":scheme" => {
-                scheme = hdr.value().to_string();
-            },
-            ":authority" => {
-                authority = hdr.value().to_string();
-            },
-            ":path" => {
-                path = hdr.value().to_string();
-            },
-            _ => {
-                req.headers_mut().insert(
-                    http::header::HeaderName::from_bytes(hdr.name().as_bytes())
-                        .unwrap(),
-                    http::header::HeaderValue::from_str(hdr.value()).unwrap(),
-                );
-            },
-        }
-    }
-
-    let uri = format!("{}://{}{}", scheme, authority, path);
-
-    *req.method_mut() = method.parse().unwrap();
-    *req.version_mut() = http::Version::HTTP_2;
-    *req.uri_mut() = uri.parse::<Uri>().unwrap();
-
-    req
-}
-
-fn resp_hdrs_from_qpack(
-    decoder: &mut qpack::Decoder, hdr_block: &mut [u8],
-) -> http::Response<()> {
-    let mut resp: Response<()> = Response::default();
-
-    // TODO: make pseudo header parsing more efficient.
-    let mut status = String::new();
-
-    for hdr in decoder.decode(hdr_block).unwrap() {
-        match hdr.name() {
-            ":status" => {
-                status = hdr.value().to_string();
-            },
-            _ => {
-                resp.headers_mut().insert(
-                    http::header::HeaderName::from_bytes(hdr.name().as_bytes())
-                        .unwrap(),
-                    http::header::HeaderValue::from_str(hdr.value()).unwrap(),
-                );
-            },
-        }
-    }
-
-    *resp.status_mut() = StatusCode::from_bytes(status.as_bytes()).unwrap();
-    *resp.version_mut() = http::Version::HTTP_2;
-
-    resp
 }
 
 /// An HTTP/3 configuration.
@@ -568,19 +428,23 @@ impl Connection {
     }
 
     /// Prepare a request in HTTP/3 wire format, allocate a stream ID and send
-    /// it. Request body (if any) is ignored.
+    /// it.
     pub fn send_request(
         &mut self, quic_conn: &mut super::Connection,
-        request: &http::Request<()>, has_body: bool,
+        headers: &qpack::HeaderList, has_body: bool,
     ) -> Result<(u64)> {
+        // TODO: don't allocate so much memory for request
         let mut d = [42; 65535];
+        
+        // TODO: encoded header block is <= raw ?
+        let mut header_block = Vec::with_capacity(headers.capacity());
+        let len = self.qpack_encoder.encode(&headers, &mut header_block)?;
+        header_block.truncate(len);
 
-        let req_frame = frame::Frame::Headers {
-            header_block: req_hdrs_to_qpack(&mut self.qpack_encoder, &request),
-        };
+        let hdrs_frame = frame::Frame::Headers { header_block};
 
         let mut b = octets::Octets::with_slice(&mut d);
-        req_frame.to_bytes(&mut b).unwrap();
+        hdrs_frame.to_bytes(&mut b)?;
 
         let stream_id = self.get_available_request_stream()?;
         self.streams
@@ -607,17 +471,22 @@ impl Connection {
     /// it.
     pub fn send_response(
         &mut self, quic_conn: &mut super::Connection, stream_id: u64,
-        response: http::Response<Vec<u8>>,
-    ) {
+        headers: &qpack::HeaderList,
+        body: Option<Vec<u8>>,
+    ) -> Result<()> {
+        // TODO: don't allocate so much memory for request
         let mut stream_d = [42; 65535];
-        let fin_stream = response.body().is_empty();
+        let fin_stream = body.is_none();
 
-        let headers = frame::Frame::Headers {
-            header_block: resp_hdrs_to_qpack(&mut self.qpack_encoder, &response),
-        };
+        // TODO: encoded header block is <= raw ?
+        let mut header_block = Vec::with_capacity(headers.capacity());
+        let len = self.qpack_encoder.encode(&headers, &mut header_block)?;
+        header_block.truncate(len);
+
+        let hdrs_frame = frame::Frame::Headers {header_block};
 
         let mut stream_b = octets::Octets::with_slice(&mut stream_d);
-        headers.to_bytes(&mut stream_b).unwrap();
+        hdrs_frame.to_bytes(&mut stream_b)?;
 
         let off = stream_b.off();
 
@@ -634,26 +503,30 @@ impl Connection {
             error!("{} stream send failed {:?}", quic_conn.trace_id(), e);
         }
 
-        let data = frame::Frame::Data {
-            payload: response.into_body(),
-        };
+        // Only send DATA frames if there was a body
+        if let Some(payload) = body {
+            let data_frame = frame::Frame::Data { payload };
 
-        // reuse the octets object
-        let mut stream_b = octets::Octets::with_slice(&mut stream_d);
-        data.to_bytes(&mut stream_b).unwrap();
+            // reuse the octets object
+            let mut stream_b = octets::Octets::with_slice(&mut stream_d);
+            data_frame.to_bytes(&mut stream_b)?;
 
-        let off = stream_b.off();
+            let off = stream_b.off();
 
-        info!(
-            "{} sending response DATA frame of size {} on stream {}",
-            quic_conn.trace_id(),
-            off,
-            stream_id
-        );
+            debug!(
+                "{} sending response DATA frame of size {} on stream {}",
+                quic_conn.trace_id(),
+                off,
+                stream_id
+            );
+        }
 
         if let Err(e) = quic_conn.stream_send(stream_id, &stream_d[..off], true) {
             error!("{} stream send failed {:?}", quic_conn.trace_id(), e);
+            return Err(Error::from(e));
         }
+
+        Ok(())
     }
 
     pub fn process(
@@ -783,27 +656,12 @@ impl Connection {
                         debug!("GOAWAY frame received but not doing anything.");
                     },
                     frame::Frame::Headers { mut header_block } => {
-                        if self.is_server {
-                            let req = req_hdrs_from_qpack(
-                                &mut self.qpack_decoder,
-                                &mut header_block[..],
-                            );
+                        let hdrs = self.qpack_decoder.decode(&mut header_block[..])?;
 
-                            return Ok(Event::OnReqHeaders {
-                                stream_id: *stream_id,
-                                value: req,
-                            });
-                        } else {
-                            let resp = resp_hdrs_from_qpack(
-                                &mut self.qpack_decoder,
-                                &mut header_block[..],
-                            );
-
-                            return Ok(Event::OnRespHeaders {
-                                stream_id: *stream_id,
-                                value: resp,
-                            });
-                        }
+                        return Ok(Event::OnHeaders {
+                            stream_id: *stream_id,
+                            value: hdrs,
+                        });
                     },
                     frame::Frame::Data { payload } => {
                         debug!("DATA frame received on stream id {}", stream_id);

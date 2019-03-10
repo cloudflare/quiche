@@ -29,9 +29,9 @@ extern crate log;
 
 use std::str;
 
-use http::Request;
-use http::Uri;
 use ring::rand::*;
+
+use quiche::h3::qpack::Header;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
 
@@ -57,12 +57,10 @@ fn main() {
         .and_then(|dopt| dopt.parse())
         .unwrap_or_else(|e| e.exit());
 
-    let uri = args.get_str("URL").parse::<Uri>().unwrap();
-    let uri_authority = uri.authority_part().unwrap().as_str();
-    let uri_host = uri.host().unwrap();
+    let url = url::Url::parse(args.get_str("URL")).unwrap();
 
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
-    socket.connect(&uri_authority).unwrap();
+    socket.connect(&url).unwrap();
 
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
@@ -109,7 +107,7 @@ fn main() {
     }
 
     let mut quic_conn =
-        quiche::connect(Some(uri_host), &scid, &mut quiche_config).unwrap();
+        quiche::connect(url.domain(), &scid, &mut quiche_config).unwrap();
 
     let write = match quic_conn.send(&mut out) {
         Ok(v) => v,
@@ -194,13 +192,13 @@ fn main() {
 
         if let Some(http3_conn) = &mut http3_conn {
             if !req_sent {
-                let req = Request::builder()
-                    .method("GET")
-                    .uri(&uri)
-                    .version(http::Version::HTTP_2)
-                    .header("User-Agent", "quiche-http/3")
-                    .body(())
-                    .unwrap();
+                let req = vec![
+                    Header::new(":method:", "GET"),
+                    Header::new(":scheme:", url.scheme()),
+                    Header::new(":authority:", url.host_str().unwrap()),
+                    Header::new(":path:", url.path()),
+                    Header::new("User-Agent", "quiche-http/3"),
+                ];
                 info!("Sending HTTP request {:?}", req);
 
                 match http3_conn.send_request(&mut quic_conn, &req, false) {
@@ -221,7 +219,7 @@ fn main() {
 
             loop {
                 match http3_conn.process(&mut quic_conn) {
-                    Ok(quiche::h3::Event::OnRespHeaders { stream_id, value }) => {
+                    Ok(quiche::h3::Event::OnHeaders { stream_id, value }) => {
                         info!(
                             "Got response headers {:?} on stream id {}",
                             value, stream_id
@@ -235,12 +233,6 @@ fn main() {
                         );
 
                         info!("{}", str::from_utf8(&value).unwrap());
-                    },
-                    Ok(quiche::h3::Event::OnReqHeaders { .. }) => {
-                        error!(
-                            "{} HTTP/3 request received",
-                            quic_conn.trace_id(),
-                        );
                     },
                     Err(quiche::h3::Error::Done) => {
                         break;
