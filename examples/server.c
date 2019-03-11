@@ -45,7 +45,7 @@
 
 #define LOCAL_CONN_ID_LEN 16
 
-#define MAX_DATAGRAM_SIZE 1452
+#define MAX_DATAGRAM_SIZE 1350
 
 #define MAX_TOKEN_LEN \
     sizeof("quiche") - 1 + \

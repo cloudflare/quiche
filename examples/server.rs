@@ -36,7 +36,7 @@ use ring::rand::*;
 
 const LOCAL_CONN_ID_LEN: usize = 16;
 
-const MAX_DATAGRAM_SIZE: usize = 1452;
+const MAX_DATAGRAM_SIZE: usize = 1350;
 
 const USAGE: &str = "Usage:
   server [options]

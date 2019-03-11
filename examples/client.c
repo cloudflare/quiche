@@ -44,7 +44,7 @@
 
 #define LOCAL_CONN_ID_LEN 16
 
-#define MAX_DATAGRAM_SIZE 1452
+#define MAX_DATAGRAM_SIZE 1350
 
 struct conn_io {
     ev_timer timer;
