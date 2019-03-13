@@ -2661,9 +2661,15 @@ mod tests {
         let mut buf = [0; 65535];
 
         let mut config = Config::new(VERSION_DRAFT18).unwrap();
-        config.load_cert_chain_from_pem_file("examples/cert-big.crt").unwrap();
-        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
-        config.set_application_protos(&[b"proto1", b"proto2"]).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert-big.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
 
         let mut pipe = Pipe::with_server_config(&mut config).unwrap();
 
