@@ -1333,8 +1333,8 @@ impl Connection {
         // Calculate available space in the packet based on congestion window.
         let mut left = cmp::min(self.recovery.cwnd(), b.cap());
 
-        // Limit data sent by the server to 3 times the data sent by the client
-        // before the client's address is validated.
+        // Limit data sent by the server based on the amount of data received
+        // from the client before its address is validated.
         if !self.verified_peer_address && self.is_server {
             left = cmp::min(left, self.max_send_bytes);
         }
