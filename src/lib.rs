@@ -187,6 +187,8 @@ const CLIENT_INITIAL_MIN_LEN: usize = 1200;
 
 const PAYLOAD_MIN_LEN: usize = 4;
 
+const MAX_AMPLIFICATION_FACTOR: usize = 3;
+
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -479,6 +481,8 @@ pub struct Connection {
     tx_data: usize,
     max_tx_data: usize,
 
+    max_send_bytes: usize,
+
     streams: stream::StreamMap,
 
     odcid: Option<Vec<u8>>,
@@ -505,6 +509,8 @@ pub struct Connection {
     did_retry: bool,
 
     got_peer_conn_id: bool,
+
+    verified_peer_address: bool,
 
     handshake_completed: bool,
 
@@ -629,6 +635,8 @@ impl Connection {
             tx_data: 0,
             max_tx_data: 0,
 
+            max_send_bytes: 0,
+
             streams: stream::StreamMap::default(),
 
             odcid: None,
@@ -655,6 +663,9 @@ impl Connection {
             did_retry: false,
 
             got_peer_conn_id: false,
+
+            // If we did stateless retry assume the peer's address is verified.
+            verified_peer_address: odcid.is_some(),
 
             handshake_completed: false,
 
@@ -1221,6 +1232,17 @@ impl Connection {
             self.drop_initial_state();
         }
 
+        // If we already received bytes from the peer, it means this is not
+        // the first flight, so consider the peer's address verified.
+        if self.max_send_bytes > 0 {
+            self.verified_peer_address = true;
+        }
+
+        // Keep track of how many bytes we received from the client, so we
+        // can limit bytes sent back before address validation to a multiple
+        // of this.
+        self.max_send_bytes += read * MAX_AMPLIFICATION_FACTOR;
+
         Ok(read)
     }
 
@@ -1310,6 +1332,12 @@ impl Connection {
 
         // Calculate available space in the packet based on congestion window.
         let mut left = cmp::min(self.recovery.cwnd(), b.cap());
+
+        // Limit data sent by the server to 3 times the data sent by the client
+        // before the client's address is validated.
+        if !self.verified_peer_address && self.is_server {
+            left = cmp::min(left, self.max_send_bytes);
+        }
 
         let pn = space.next_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
@@ -1623,6 +1651,8 @@ impl Connection {
         if !self.is_server && hdr.ty == packet::Type::Handshake {
             self.drop_initial_state();
         }
+
+        self.max_send_bytes = self.max_send_bytes.saturating_sub(written);
 
         Ok(written)
     }
@@ -2338,6 +2368,27 @@ mod tests {
             })
         }
 
+        fn with_server_config(server_config: &mut Config) -> Result<Pipe> {
+            let mut client_scid = [0; 16];
+            rand::rand_bytes(&mut client_scid[..]);
+
+            let mut server_scid = [0; 16];
+            rand::rand_bytes(&mut server_scid[..]);
+
+            let mut config = Config::new(crate::VERSION_DRAFT18)?;
+            config.set_application_protos(&[b"proto1", b"proto2"])?;
+            config.set_initial_max_data(30);
+            config.set_initial_max_stream_data_bidi_local(15);
+            config.set_initial_max_stream_data_bidi_remote(15);
+            config.set_initial_max_streams_bidi(3);
+            config.set_initial_max_streams_uni(3);
+
+            Ok(Pipe {
+                client: connect(Some("quic.tech"), &client_scid, &mut config)?,
+                server: accept(&server_scid, None, server_config)?,
+            })
+        }
+
         fn handshake(&mut self, buf: &mut [u8]) -> Result<()> {
             let mut len = self.client.send(buf)?;
 
@@ -2603,6 +2654,24 @@ mod tests {
 
         assert_eq!(pipe.client.application_proto(), b"");
         assert_eq!(pipe.server.application_proto(), b"");
+    }
+
+    #[test]
+    fn limit_handshake_data() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(VERSION_DRAFT18).unwrap();
+        config.load_cert_chain_from_pem_file("examples/cert-big.crt").unwrap();
+        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+        config.set_application_protos(&[b"proto1", b"proto2"]).unwrap();
+
+        let mut pipe = Pipe::with_server_config(&mut config).unwrap();
+
+        let client_sent = pipe.client.send(&mut buf).unwrap();
+        let server_sent =
+            recv_send(&mut pipe.server, &mut buf, client_sent).unwrap();
+
+        assert_eq!(server_sent, (client_sent - 1) * MAX_AMPLIFICATION_FACTOR);
     }
 
     #[test]
