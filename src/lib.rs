@@ -450,72 +450,123 @@ impl Config {
 
 /// A QUIC connection.
 pub struct Connection {
+    /// QUIC wire version used for the connection.
     version: u32,
 
+    /// Peer's connection ID.
     dcid: Vec<u8>,
+
+    /// Local connection ID.
     scid: Vec<u8>,
 
+    /// Unique opaque ID for the connection that can be used for logging.
     trace_id: String,
 
+    /// Initial packets number space.
     initial: packet::PktNumSpace,
+
+    /// Handshake packets number space.
     handshake: packet::PktNumSpace,
+
+    /// 0-RTT/1-RTT packets number space.
     application: packet::PktNumSpace,
 
+    /// Peer's transport parameters.
     peer_transport_params: TransportParams,
 
+    /// Local transport parameters.
     local_transport_params: TransportParams,
 
+    /// TLS handshake state.
     tls_state: tls::Handshake,
 
+    /// Loss recovery and congestion control state.
     recovery: recovery::Recovery,
 
+    /// List of supported application protocols.
     application_protos: Vec<Vec<u8>>,
 
+    /// Total number of sent packets.
     sent_count: usize,
+
+    /// Total number of lost packets.
     lost_count: usize,
 
+    /// Total number of bytes received from the peer.
     rx_data: usize,
+
+    /// Local flow control limit for the connection.
     max_rx_data: usize,
+
+    /// Updated local flow control limit for the connection. This is used to
+    /// trigger sending MAX_DATA frames after a certain threshold.
     new_max_rx_data: usize,
 
+    /// Total number of bytes sent to the peer.
     tx_data: usize,
+
+    /// Peer's flow control limit for the connection.
     max_tx_data: usize,
 
+    /// Total number of bytes the server can send before the peer's address
+    /// is verified.
     max_send_bytes: usize,
 
+    /// Streams map, indexed by stream ID.
     streams: stream::StreamMap,
 
+    /// Peer's original connection ID. Used by the client during stateless
+    /// retry to validate the server's transport parameter.
     odcid: Option<Vec<u8>>,
 
+    /// Received address verification token.
     token: Option<Vec<u8>>,
 
+    /// Error code to be sent to the peer in CONNECTION_CLOSE.
     error: Option<u16>,
 
+    /// Error code to be sent to the peer in APPLICATION_CLOSE.
     app_error: Option<u16>,
+
+    /// Error reason to be sent to the peer in APPLICATION_CLOSE.
     app_reason: Vec<u8>,
 
+    /// Received path challenge.
     challenge: Option<Vec<u8>>,
 
+    /// Idle timeout expiration time.
     idle_timer: Option<time::Instant>,
 
+    /// Draining timeout expiration time.
     draining_timer: Option<time::Instant>,
 
+    /// Whether this is a server-side connection.
     is_server: bool,
 
+    /// Whether the initial secrets have been derived.
     derived_initial_secrets: bool,
 
+    /// Whether a version negotiation packet has already been received. Only
+    /// relevant for client connections.
     did_version_negotiation: bool,
 
+    /// Whether a retry packet has already been received. Only relevant for
+    /// client connections.
     did_retry: bool,
 
+    /// Whether the peer already updated its connection ID.
     got_peer_conn_id: bool,
 
+    /// Whether the peer's address has been verified.
     verified_peer_address: bool,
 
+    /// Whether the connection handshake has completed.
     handshake_completed: bool,
 
+    /// Whether the connection is in the draining state.
     draining: bool,
 
+    /// Whether the connection is closed.
     closed: bool,
 }
 
