@@ -310,7 +310,7 @@ fn handle_stream(
         );
 
         let data = std::fs::read(path.as_path())
-            .unwrap_or_else(|_| Vec::from(String::from("Not Found!\r\n")));
+            .unwrap_or_else(|_| b"Not Found!\r\n".to_vec());
 
         info!(
             "{} sending response of size {} on stream {}",
