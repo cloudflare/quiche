@@ -194,19 +194,21 @@ fn main() -> Result<(), Box<std::error::Error>> {
                         error!("Invalid address validation token");
                         continue;
                     }
+
+                    scid.copy_from_slice(&hdr.dcid);
                 }
 
                 debug!(
                     "New connection: dcid={} scid={}",
                     hex_dump(&hdr.dcid),
-                    hex_dump(&hdr.scid)
+                    hex_dump(&scid)
                 );
 
-                let conn = quiche::accept(&hdr.dcid, odcid, &mut config)?;
+                let conn = quiche::accept(&scid, odcid, &mut config)?;
 
-                connections.insert(hdr.dcid.to_vec(), (src, conn));
+                connections.insert(scid.to_vec(), (src, conn));
 
-                connections.get_mut(&hdr.dcid).unwrap()
+                connections.get_mut(&scid[..]).unwrap()
             } else {
                 connections.get_mut(&hdr.dcid).unwrap()
             };
