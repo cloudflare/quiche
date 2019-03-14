@@ -96,6 +96,10 @@ fn main() -> Result<(), Box<std::error::Error>> {
     config.set_initial_max_streams_uni(5);
     config.set_disable_migration(true);
 
+    if std::env::var_os("SSLKEYLOGFILE").is_some() {
+        config.log_keys();
+    }
+
     loop {
         // TODO: use event loop that properly supports timers
         let timeout = connections.values().filter_map(|(_, c)| c.timeout()).min();
