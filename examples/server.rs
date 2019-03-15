@@ -84,7 +84,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     config.load_cert_chain_from_pem_file(args.get_str("--cert"))?;
     config.load_priv_key_from_pem_file(args.get_str("--key"))?;
 
-    config.set_application_protos(&[b"h3-18", b"hq-18", b"http/0.9"])?;
+    config.set_application_protos(b"\x05hq-18\x08http/0.9")?;
 
     config.set_idle_timeout(30);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);

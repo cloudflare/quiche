@@ -372,13 +372,33 @@ impl Config {
 
     /// Configures the list of support application protocolos.
     ///
+    /// The list of protocols `protos` must be in wire-format (i.e. a series
+    /// of non-empty, 8-bit length-prefixed strings).
+    ///
     /// On the client this configures the list of protocols to send to the
     /// server as part of the ALPN extension.
     ///
     /// On the server this configures the list of supported protocols to match
     /// against the client-supplied list.
-    pub fn set_application_protos(&mut self, protos: &[&[u8]]) -> Result<()> {
-        self.application_protos = protos.iter().map(|p| p.to_vec()).collect();
+    ///
+    /// # Examples:
+    ///
+    /// ```rust
+    /// # let mut config = quiche::Config::new(0xbabababa).unwrap();
+    /// config.set_application_protos(b"\x08http/1.1\x08http/0.9").unwrap();
+    /// ```
+    pub fn set_application_protos(&mut self, protos: &[u8]) -> Result<()> {
+        let mut protos = protos.to_vec();
+
+        let mut b = octets::Octets::with_slice(&mut protos);
+
+        let mut protos_list = Vec::new();
+
+        while let Ok(proto) = b.get_bytes_with_u8_length() {
+            protos_list.push(proto.to_vec());
+        }
+
+        self.application_protos = protos_list;
 
         self.tls_ctx
             .set_alpn(&self.application_protos)
@@ -2382,7 +2402,7 @@ mod tests {
             let mut config = Config::new(crate::VERSION_DRAFT18)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
-            config.set_application_protos(&[b"proto1", b"proto2"])?;
+            config.set_application_protos(b"\x06proto1\x06proto2")?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
             config.set_initial_max_stream_data_bidi_remote(15);
@@ -2406,7 +2426,7 @@ mod tests {
             let mut config = Config::new(crate::VERSION_DRAFT18)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
-            config.set_application_protos(&[b"proto1", b"proto2"])?;
+            config.set_application_protos(b"\x06proto1\x06proto2")?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
             config.set_initial_max_stream_data_bidi_remote(15);
@@ -2427,7 +2447,7 @@ mod tests {
             rand::rand_bytes(&mut server_scid[..]);
 
             let mut config = Config::new(crate::VERSION_DRAFT18)?;
-            config.set_application_protos(&[b"proto1", b"proto2"])?;
+            config.set_application_protos(b"\x06proto1\x06proto2")?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
             config.set_initial_max_stream_data_bidi_remote(15);
@@ -2695,7 +2715,7 @@ mod tests {
 
         let mut config = Config::new(VERSION_DRAFT18).unwrap();
         config
-            .set_application_protos(&[b"proto3", b"proto4"])
+            .set_application_protos(b"\x06proto3\x06proto4")
             .unwrap();
         config.verify_peer(false);
 
@@ -2719,7 +2739,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(&[b"proto1", b"proto2"])
+            .set_application_protos(b"\x06proto1\06proto2")
             .unwrap();
 
         let mut pipe = Pipe::with_server_config(&mut config).unwrap();

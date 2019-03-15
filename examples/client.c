@@ -136,7 +136,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
         quiche_conn_application_proto(conn_io->conn, &app_proto, &app_proto_len);
 
-        fprintf(stderr, "connection established: %*.s\n",
+        fprintf(stderr, "connection established: %.*s\n",
                 (int) app_proto_len, app_proto);
 
         const static uint8_t r[] = "GET /index.html\r\n";
@@ -243,6 +243,9 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "failed to create config\n");
         return -1;
     }
+
+    quiche_config_set_application_protos(config,
+        (uint8_t *) "\x05hq-18\x08http/0.9", 15);
 
     quiche_config_set_idle_timeout(config, 30);
     quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);

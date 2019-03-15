@@ -109,6 +109,11 @@ void quiche_config_verify_peer(quiche_config *config, bool v);
 // Enables logging of secrets.
 void quiche_config_log_keys(quiche_config *config);
 
+// Configures the list of support application protocolos.
+int quiche_config_set_application_protos(quiche_config *config,
+                                         uint8_t *protos,
+                                         size_t protos_len);
+
 // Sets the `idle_timeout` transport parameter.
 void quiche_config_set_idle_timeout(quiche_config *config, uint64_t v);
 

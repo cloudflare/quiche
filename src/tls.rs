@@ -552,8 +552,6 @@ extern fn select_alpn(
             None => return 3, // SSL_TLSEXT_ERR_NOACK
         };
 
-    trace!("{} alpn callback", conn.trace_id());
-
     if conn.application_protos.is_empty() {
         return 3; // SSL_TLSEXT_ERR_NOACK
     }

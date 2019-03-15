@@ -112,6 +112,19 @@ pub extern fn quiche_config_log_keys(config: &mut Config) {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_application_protos(
+    config: &mut Config, protos: *const u8, protos_len: usize,
+) -> c_int {
+    let protos = unsafe { slice::from_raw_parts(protos, protos_len) };
+
+    match config.set_application_protos(protos) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_config_set_idle_timeout(config: &mut Config, v: u64) {
     config.set_idle_timeout(v);
 }
