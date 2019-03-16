@@ -3055,6 +3055,7 @@ pub use crate::stream::Readable;
 mod crypto;
 mod ffi;
 mod frame;
+#[doc(hidden)]
 pub mod h3;
 mod octets;
 mod packet;
