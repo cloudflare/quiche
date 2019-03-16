@@ -2383,16 +2383,16 @@ impl std::fmt::Debug for TransportParams {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod testing {
     use super::*;
 
-    struct Pipe {
+    pub struct Pipe {
         pub client: Box<Connection>,
         pub server: Box<Connection>,
     }
 
     impl Pipe {
-        fn new() -> Result<Pipe> {
+        pub fn new() -> Result<Pipe> {
             let mut client_scid = [0; 16];
             rand::rand_bytes(&mut client_scid[..]);
 
@@ -2416,7 +2416,7 @@ mod tests {
             })
         }
 
-        fn with_client_config(client_config: &mut Config) -> Result<Pipe> {
+        pub fn with_client_config(client_config: &mut Config) -> Result<Pipe> {
             let mut client_scid = [0; 16];
             rand::rand_bytes(&mut client_scid[..]);
 
@@ -2439,7 +2439,7 @@ mod tests {
             })
         }
 
-        fn with_server_config(server_config: &mut Config) -> Result<Pipe> {
+        pub fn with_server_config(server_config: &mut Config) -> Result<Pipe> {
             let mut client_scid = [0; 16];
             rand::rand_bytes(&mut client_scid[..]);
 
@@ -2460,7 +2460,7 @@ mod tests {
             })
         }
 
-        fn handshake(&mut self, buf: &mut [u8]) -> Result<()> {
+        pub fn handshake(&mut self, buf: &mut [u8]) -> Result<()> {
             let mut len = self.client.send(buf)?;
 
             while !self.client.is_established() && !self.server.is_established() {
@@ -2473,7 +2473,7 @@ mod tests {
             Ok(())
         }
 
-        fn advance(&mut self, buf: &mut [u8]) -> Result<()> {
+        pub fn advance(&mut self, buf: &mut [u8]) -> Result<()> {
             let mut client_done = false;
             let mut server_done = false;
 
@@ -2490,7 +2490,7 @@ mod tests {
             Ok(())
         }
 
-        fn send_pkt_to_server(
+        pub fn send_pkt_to_server(
             &mut self, pkt_type: packet::Type, frames: &[frame::Frame],
             buf: &mut [u8],
         ) -> Result<usize> {
@@ -2499,7 +2499,7 @@ mod tests {
         }
     }
 
-    fn recv_send(
+    pub fn recv_send(
         conn: &mut Connection, buf: &mut [u8], len: usize,
     ) -> Result<usize> {
         let mut left = len;
@@ -2531,7 +2531,7 @@ mod tests {
         Ok(off)
     }
 
-    fn encode_pkt(
+    pub fn encode_pkt(
         conn: &mut Connection, pkt_type: packet::Type, frames: &[frame::Frame],
         buf: &mut [u8],
     ) -> Result<usize> {
@@ -2600,7 +2600,7 @@ mod tests {
         Ok(written)
     }
 
-    fn decode_pkt(
+    pub fn decode_pkt(
         conn: &mut Connection, buf: &mut [u8], len: usize,
     ) -> Result<Vec<frame::Frame>> {
         let mut b = octets::Octets::with_slice(&mut buf[..len]);
@@ -2632,6 +2632,11 @@ mod tests {
 
         Ok(frames)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     #[test]
     fn transport_params() {
@@ -2671,7 +2676,7 @@ mod tests {
         let mut config = Config::new(0xbabababa).unwrap();
         config.verify_peer(false);
 
-        let mut pipe = Pipe::with_client_config(&mut config).unwrap();
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Err(Error::UnknownVersion));
     }
@@ -2683,7 +2688,7 @@ mod tests {
         let mut config = Config::new(0xbabababa).unwrap();
         config.verify_peer(false);
 
-        let mut pipe = Pipe::with_client_config(&mut config).unwrap();
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
 
         let mut len = pipe.client.send(&mut buf).unwrap();
 
@@ -2699,7 +2704,7 @@ mod tests {
     fn handshake() {
         let mut buf = [0; 65535];
 
-        let mut pipe = Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::new().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2719,7 +2724,7 @@ mod tests {
             .unwrap();
         config.verify_peer(false);
 
-        let mut pipe = Pipe::with_client_config(&mut config).unwrap();
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2742,11 +2747,11 @@ mod tests {
             .set_application_protos(b"\x06proto1\06proto2")
             .unwrap();
 
-        let mut pipe = Pipe::with_server_config(&mut config).unwrap();
+        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
 
         let client_sent = pipe.client.send(&mut buf).unwrap();
         let server_sent =
-            recv_send(&mut pipe.server, &mut buf, client_sent).unwrap();
+            testing::recv_send(&mut pipe.server, &mut buf, client_sent).unwrap();
 
         assert_eq!(server_sent, (client_sent - 1) * MAX_AMPLIFICATION_FACTOR);
     }
@@ -2755,7 +2760,7 @@ mod tests {
     fn stream() {
         let mut buf = [0; 65535];
 
-        let mut pipe = Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::new().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2776,7 +2781,7 @@ mod tests {
     fn flow_control() {
         let mut buf = [0; 65535];
 
-        let mut pipe = Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::new().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2806,7 +2811,7 @@ mod tests {
     fn stream_flow_control() {
         let mut buf = [0; 65535];
 
-        let mut pipe = Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::new().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2826,7 +2831,7 @@ mod tests {
     fn stream_limit_bidi() {
         let mut buf = [0; 65535];
 
-        let mut pipe = Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::new().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2872,7 +2877,7 @@ mod tests {
     fn stream_limit_uni() {
         let mut buf = [0; 65535];
 
-        let mut pipe = Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::new().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2918,7 +2923,7 @@ mod tests {
     fn stream_data_overlap() {
         let mut buf = [0; 65535];
 
-        let mut pipe = Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::new().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2949,7 +2954,7 @@ mod tests {
     fn stream_data_overlap_with_reordering() {
         let mut buf = [0; 65535];
 
-        let mut pipe = Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::new().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2980,7 +2985,7 @@ mod tests {
     fn reset_stream_flow_control() {
         let mut buf = [0; 65535];
 
-        let mut pipe = Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::new().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -3015,7 +3020,7 @@ mod tests {
     fn path_challenge() {
         let mut buf = [0; 65535];
 
-        let mut pipe = Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::new().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -3028,7 +3033,8 @@ mod tests {
             .send_pkt_to_server(pkt_type, &frames, &mut buf)
             .unwrap();
 
-        let frames = decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
         let mut iter = frames.iter();
 
         iter.next().unwrap();
