@@ -370,7 +370,7 @@ impl Config {
         self.tls_ctx.enable_keylog();
     }
 
-    /// Configures the list of support application protocolos.
+    /// Configures the list of supported application protocols.
     ///
     /// The list of protocols `protos` must be in wire-format (i.e. a series
     /// of non-empty, 8-bit length-prefixed strings).
@@ -385,7 +385,7 @@ impl Config {
     ///
     /// ```rust
     /// # let mut config = quiche::Config::new(0xbabababa).unwrap();
-    /// config.set_application_protos(b"\x08http/1.1\x08http/0.9").unwrap();
+    /// config.set_application_protos(b"\x08http/1.1\x08http/0.9");
     /// ```
     pub fn set_application_protos(&mut self, protos: &[u8]) -> Result<()> {
         let mut protos = protos.to_vec();
