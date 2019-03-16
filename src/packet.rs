@@ -103,7 +103,7 @@ pub struct Header {
 impl Header {
     /// Parses a QUIC packet header from the given buffer.
     ///
-    /// The `dcil` parameter is the length of the destionation connection ID,
+    /// The `dcil` parameter is the length of the destination connection ID,
     /// required to parse short header packets.
     pub fn from_slice(buf: &mut [u8], dcil: usize) -> Result<Header> {
         let mut b = octets::Octets::with_slice(buf);
