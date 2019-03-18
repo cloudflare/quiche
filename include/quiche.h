@@ -35,6 +35,9 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
+// QUIC transport API.
+//
+
 // The current QUIC wire version.
 #define QUICHE_VERSION_DRAFT18 0xff000012
 
@@ -248,6 +251,82 @@ void quiche_conn_stats_rtt_as_nanos(quiche_conn *conn, uint64_t *out);
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
 
+
+// HTTP/3 API
+//
+
+// Stores configuration shared between multiple connections.
+typedef struct Http3Config quiche_h3_config;
+
+// Creates a HTTP/3 config object with the given version.
+quiche_h3_config *quiche_h3_config_new(uint64_t num_placeholders,
+                                       uint64_t max_header_list_size,
+                                       uint64_t qpack_max_table_capacity,
+                                       uint64_t qpack_blaocked_streams);
+
+// Frees the HTTP/3 config object.
+void quiche_h3_config_free(quiche_h3_config *config);
+
+// A QUIC connection.
+typedef struct Http3Connection quiche_h3_conn;
+
+// Creates a new server-side connection.
+quiche_h3_conn *quiche_h3_accept(quiche_conn *quiche_conn,
+                              quiche_h3_config *config);
+
+// Creates a new HTTP/3 connection using the provided QUIC connection.
+quiche_h3_conn *quiche_h3_conn_new_with_transport(quiche_conn *quiche_conn,
+                                                  quiche_h3_config *config);
+
+enum quiche_h3_event_type {
+    QUICHE_H3_EVENT_HEADERS,
+    QUICHE_H3_EVENT_DATA,
+};
+
+typedef struct Http3Event quiche_h3_event;
+
+// Processes HTTP/3 data received from the peer.
+int quiche_h3_conn_poll(quiche_h3_conn *conn, quiche_conn *quic_conn,
+                        quiche_h3_event **ev);
+
+// Returns the type of the event.
+enum quiche_h3_event_type quiche_h3_event_type(quiche_h3_event *ev);
+
+// Iterates over the headers in the event.
+void quiche_h3_event_for_each_header(quiche_h3_event *ev,
+                                     void (*cb)(uint8_t *name, size_t name_len,
+                                                uint8_t *value, size_t value_len,
+                                                void *argp),
+                                     void *argp);
+
+// Returns the data from the event.
+size_t quiche_h3_event_data(quiche_h3_event *ev, uint8_t **out);
+
+// Frees the HTTP/3 event object.
+void quiche_h3_event_free(quiche_h3_event *ev);
+
+typedef struct {
+    const char *name;
+    const char *value;
+} quiche_h3_header;
+
+// Sends an HTTP/3 request.
+int64_t quiche_h3_send_request(quiche_h3_conn *conn, quiche_conn *quic_conn,
+                               quiche_h3_header *headers, size_t headers_len,
+                               bool fin);
+
+// sends an http/3 response on the specified stream.
+int quiche_h3_send_response(quiche_h3_conn *conn, quiche_conn *quic_conn,
+                            uint64_t stream_id, quiche_h3_header *headers,
+                            size_t headers_len, bool fin);
+
+// Sends an HTTP/3 body chunk on the given stream.
+ssize_t quiche_h3_send_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
+                            uint64_t stream_id, uint8_t *body, size_t body_len,
+                            bool fin);
+
+// Frees the HTTP/3 connection object.
+void quiche_h3_conn_free(quiche_h3_conn *conn);
 
 #if defined(__cplusplus)
 }  // extern C

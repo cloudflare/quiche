@@ -18,7 +18,7 @@ LDFLAGS = -L$(LIBCRYPTO_DIR) -L$(LIBSSL_DIR) -L$(LIB_DIR)
 
 LIBS = -lcrypto -lssl -lquiche -lev -ldl -pthread
 
-all: client server
+all: client server http3-client http3-server
 
 client: client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ -I$(INCLUDE_DIR) $(LIBS)
@@ -26,5 +26,11 @@ client: client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
 server: server.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ -I$(INCLUDE_DIR) $(LIBS)
 
-$(LIB_DIR)/libquiche.a: $(SOURCE_DIR)/*.rs
+http3-client: http3-client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ -I$(INCLUDE_DIR) $(LIBS)
+
+http3-server: http3-server.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ -I$(INCLUDE_DIR) $(LIBS)
+
+$(LIB_DIR)/libquiche.a: $(SOURCE_DIR)/**/*.rs
 	cd .. && cargo build --target-dir $(BUILD_DIR)
