@@ -1794,6 +1794,23 @@ impl Connection {
         Ok(buf.len())
     }
 
+    /// Returns true if all the data has been read from the specified stream.
+    ///
+    /// This instructs the application that all the data received from the
+    /// peer on the stream has been read, and there won't be anymore in the
+    /// future.
+    ///
+    /// Basically this returns true when the peer either set the `fin` flag
+    /// for the stream, or sent `RESET_STREAM`.
+    pub fn stream_finished(&self, stream_id: u64) -> bool {
+        let stream = match self.streams.get(stream_id) {
+            Some(v) => v,
+            None => return true,
+        };
+
+        stream.recv.is_fin()
+    }
+
     /// Creates an iterator over streams that have outstanding data to read.
     pub fn readable(&mut self) -> Readable {
         self.streams.readable()
@@ -2768,6 +2785,8 @@ mod tests {
 
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
+        assert!(!pipe.server.stream_finished(4));
+
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), Some(4));
         assert_eq!(r.next(), None);
@@ -2775,6 +2794,8 @@ mod tests {
         let mut b = [0; 15];
         assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((12, true)));
         assert_eq!(&b[..12], b"hello, world");
+
+        assert!(pipe.server.stream_finished(4));
     }
 
     #[test]

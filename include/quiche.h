@@ -204,6 +204,9 @@ ssize_t quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
 ssize_t quiche_conn_stream_send(quiche_conn *conn, uint64_t stream_id,
                                 const uint8_t *buf, size_t buf_len, bool fin);
 
+// Returns true if all the data has been read from the specified stream.
+bool quiche_conn_stream_finished(quiche_conn *conn, uint64_t stream_id);
+
 // An iterator over the streams that have outstanding data to read.
 typedef struct Readable quiche_readable;
 

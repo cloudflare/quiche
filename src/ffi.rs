@@ -416,6 +416,13 @@ pub extern fn quiche_conn_stream_send(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_stream_finished(
+    conn: &mut Connection, stream_id: u64,
+) -> bool {
+    conn.stream_finished(stream_id)
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_readable(conn: &mut Connection) -> *mut Readable {
     let iter = conn.readable();
     Box::into_raw(Box::new(iter))

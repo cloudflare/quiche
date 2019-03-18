@@ -48,6 +48,10 @@ pub struct StreamMap {
 }
 
 impl StreamMap {
+    pub fn get(&self, id: u64) -> Option<&Stream> {
+        self.streams.get(&id)
+    }
+
     pub fn get_mut(&mut self, id: u64) -> Option<&mut Stream> {
         self.streams.get_mut(&id)
     }
@@ -353,6 +357,14 @@ impl RecvBuf {
             self.max_len_new / 2 > self.max_len - self.len
     }
 
+    pub fn is_fin(&self) -> bool {
+        if self.fin_off == Some(self.off) {
+            return true;
+        }
+
+        false
+    }
+
     fn ready(&self) -> bool {
         let buf = match self.data.peek() {
             Some(v) => v,
@@ -360,14 +372,6 @@ impl RecvBuf {
         };
 
         buf.off == self.off
-    }
-
-    fn is_fin(&self) -> bool {
-        if self.fin_off == Some(self.off) {
-            return true;
-        }
-
-        false
     }
 
     #[allow(dead_code)]
