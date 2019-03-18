@@ -5,7 +5,7 @@ BUILD_DIR = $(CURDIR)/build
 LIB_DIR = $(BUILD_DIR)/debug
 INCLUDE_DIR = ../include
 
-CFLAGS = -I. -Wall -Werror -pedantic -fsanitize=address
+CFLAGS = -I. -Wall -Werror -pedantic -fsanitize=address -g
 
 ifeq ($(OS), Darwin)
 CFLAGS += -framework Security
