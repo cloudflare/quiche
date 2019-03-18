@@ -161,6 +161,10 @@ impl Error {
             Error::BufferTooShort => 0x999,
         }
     }
+
+    fn to_c(self) -> libc::ssize_t {
+        self as _
+    }
 }
 
 impl std::fmt::Display for Error {
@@ -741,6 +745,7 @@ impl Connection {
     }
 }
 
+mod ffi;
 mod frame;
 #[doc(hidden)]
 pub mod qpack;
