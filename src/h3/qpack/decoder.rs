@@ -26,8 +26,8 @@
 
 use crate::octets;
 
-use crate::Error;
-use crate::Result;
+use super::Error;
+use super::Result;
 
 use super::Header;
 

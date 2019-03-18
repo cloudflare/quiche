@@ -242,15 +242,6 @@ pub enum Error {
 
     /// The received data exceeds the stream's final size.
     FinalSize          = -13,
-
-    /// The QPACK header block's huffman encoding is invalid.
-    InvalidHuffmanEncoding = -14,
-
-    /// The QPACK static table index provided doesn't exist.
-    InvalidStaticTableIndex = -15,
-
-    /// The decoded QPACK header name or value is not valid.
-    InvalidHeaderValue = -16,
 }
 
 impl Error {
@@ -296,9 +287,6 @@ impl std::error::Error for Error {
             Error::FlowControl => "flow control limit was violated",
             Error::StreamLimit => "stream limit was violated",
             Error::FinalSize => "data exceeded stream's final size",
-            Error::InvalidHuffmanEncoding => "invalid huffman encoding",
-            Error::InvalidStaticTableIndex => "invalid QPACK static table index",
-            Error::InvalidHeaderValue => "invalid QPACK header name or value",
         }
     }
 

@@ -52,6 +52,61 @@ impl Header {
     }
 }
 
+/// A specialized [`Result`] type for quiche QPACK operations.
+///
+/// This type is used throughout quiche's QPACK public API for any operation
+/// that can produce an error.
+///
+/// [`Result`]: https://doc.rust-lang.org/std/result/enum.Result.html
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// A QPACK error.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Error {
+    /// The provided buffer is too short.
+    BufferTooShort,
+
+    /// The QPACK header block's huffman encoding is invalid.
+    InvalidHuffmanEncoding,
+
+    /// The QPACK static table index provided doesn't exist.
+    InvalidStaticTableIndex,
+
+    /// The decoded QPACK header name or value is not valid.
+    InvalidHeaderValue,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl std::error::Error for Error {
+    fn description(&self) -> &str {
+        match self {
+            Error::BufferTooShort => "buffer is too short",
+            Error::InvalidHuffmanEncoding => "invalid huffman encoding",
+            Error::InvalidStaticTableIndex => "invalid QPACK static table index",
+            Error::InvalidHeaderValue => "invalid QPACK header name or value",
+        }
+    }
+
+    fn cause(&self) -> Option<&std::error::Error> {
+        None
+    }
+}
+
+impl std::convert::From<crate::Error> for Error {
+    fn from(err: crate::Error) -> Self {
+        match err {
+            crate::Error::BufferTooShort => Error::BufferTooShort,
+
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
