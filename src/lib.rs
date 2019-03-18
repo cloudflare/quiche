@@ -272,8 +272,16 @@ impl Error {
     fn to_c(self) -> libc::ssize_t {
         self as _
     }
+}
 
-    fn to_str(self) -> &'static str {
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl std::error::Error for Error {
+    fn description(&self) -> &str {
         match self {
             Error::Done => "nothing else to do",
             Error::BufferTooShort => "buffer is too short",
@@ -292,18 +300,6 @@ impl Error {
             Error::InvalidStaticTableIndex => "invalid QPACK static table index",
             Error::InvalidHeaderValue => "invalid QPACK header name or value",
         }
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.to_str())
-    }
-}
-
-impl std::error::Error for Error {
-    fn description(&self) -> &str {
-        self.to_str()
     }
 
     fn cause(&self) -> Option<&std::error::Error> {
