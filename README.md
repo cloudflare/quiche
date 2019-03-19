@@ -47,7 +47,7 @@ Status
 * [x] QPACK static table encoding
 * [ ] QPACK dynamic table decoding
 * [ ] QPACK dynamic table encoding
-* [ ] HTTP/3 request/response
+* [x] HTTP/3 request/response
 
 Getting Started
 ---------------
