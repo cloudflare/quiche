@@ -7,8 +7,8 @@ build = "src/build.rs"
 description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
 repository = "https://github.com/cloudflare/quiche"
 readme = "README.md"
-keywords = ["quic"]
-categories = [ "network-programming" ]
+keywords = ["quic", "http3"]
+categories = ["network-programming"]
 license = "BSD-2-Clause"
 exclude = [
     "deps/boringssl/crypto/**/*_test.txt",
@@ -23,7 +23,7 @@ exclude = [
 no_bssl = []
 
 [package.metadata.docs.rs]
-features = [ "no_bssl" ]
+features = ["no_bssl"]
 
 [build-dependencies]
 cmake = "0"
