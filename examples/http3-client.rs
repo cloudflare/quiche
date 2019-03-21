@@ -213,21 +213,6 @@ fn main() -> Result<(), Box<std::error::Error>> {
                             headers,
                             stream_id
                         );
-
-                        if conn.stream_finished(stream_id) {
-                            info!(
-                                "{} response received in {:?}, closing...",
-                                conn.trace_id(),
-                                req_start.elapsed()
-                            );
-
-                            match conn.close(true, 0x00, b"kthxbye") {
-                                // Already closed.
-                                Ok(_) | Err(quiche::Error::Done) => (),
-
-                                Err(e) => panic!("error closing conn: {:?}", e),
-                            }
-                        }
                     },
 
                     Ok((stream_id, quiche::h3::Event::Data(data))) => {
