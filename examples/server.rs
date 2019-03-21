@@ -235,22 +235,29 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
             debug!("{} processed {} bytes", conn.trace_id(), read);
 
-            let streams: Vec<u64> = conn.readable().collect();
-            for s in streams {
-                while let Ok((read, fin)) = conn.stream_recv(s, &mut buf) {
-                    debug!("{} received {} bytes", conn.trace_id(), read);
+            if conn.is_established() {
+                let streams: Vec<u64> = conn.readable().collect();
+                for s in streams {
+                    while let Ok((read, fin)) = conn.stream_recv(s, &mut buf) {
+                        debug!("{} received {} bytes", conn.trace_id(), read);
 
-                    let stream_buf = &buf[..read];
+                        let stream_buf = &buf[..read];
 
-                    debug!(
-                        "{} stream {} has {} bytes (fin? {})",
-                        conn.trace_id(),
-                        s,
-                        stream_buf.len(),
-                        fin
-                    );
+                        debug!(
+                            "{} stream {} has {} bytes (fin? {})",
+                            conn.trace_id(),
+                            s,
+                            stream_buf.len(),
+                            fin
+                        );
 
-                    handle_stream(conn, s, stream_buf, args.get_str("--root"));
+                        handle_stream(
+                            conn,
+                            s,
+                            stream_buf,
+                            args.get_str("--root"),
+                        );
+                    }
                 }
             }
         }
