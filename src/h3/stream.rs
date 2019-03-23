@@ -33,10 +33,10 @@ use crate::octets;
 
 use super::frame;
 
-pub const HTTP3_CONTROL_STREAM_TYPE_ID: u8 = 0x43;
-pub const HTTP3_PUSH_STREAM_TYPE_ID: u8 = 0x50;
-pub const QPACK_ENCODER_STREAM_TYPE_ID: u8 = 0x48;
-pub const QPACK_DECODER_STREAM_TYPE_ID: u8 = 0x68;
+pub const HTTP3_CONTROL_STREAM_TYPE_ID: u64 = 0x0;
+pub const HTTP3_PUSH_STREAM_TYPE_ID: u64 = 0x1;
+pub const QPACK_ENCODER_STREAM_TYPE_ID: u64 = 0x2;
+pub const QPACK_DECODER_STREAM_TYPE_ID: u64 = 0x3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Type {
@@ -45,7 +45,7 @@ pub enum Type {
     Push,
     QpackEncoder,
     QpackDecoder,
-    // TODO: enable GREASE streams
+    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -60,18 +60,18 @@ pub enum State {
     PushIdLen,
     PushId,
     QpackInstruction,
+    Done,
 }
 
 impl Type {
-    pub fn deserialize(v: u8) -> Result<Type> {
+    pub fn deserialize(v: u64) -> Result<Type> {
         match v {
             HTTP3_CONTROL_STREAM_TYPE_ID => Ok(Type::Control),
             HTTP3_PUSH_STREAM_TYPE_ID => Ok(Type::Push),
             QPACK_ENCODER_STREAM_TYPE_ID => Ok(Type::QpackEncoder),
             QPACK_DECODER_STREAM_TYPE_ID => Ok(Type::QpackDecoder),
 
-            // TODO: parse grease stream
-            _ => Err(Error::UnknownStreamType),
+            _ => Ok(Type::Unknown),
         }
     }
 }
@@ -83,7 +83,6 @@ pub struct Stream {
     ty: Option<Type>,
     is_local: bool,
     initialized: bool,
-    ty_len: u8,
     state: State,
     stream_offset: u64,
     buf: Vec<u8>,
@@ -91,7 +90,7 @@ pub struct Stream {
     buf_end_pos: u64,
     next_varint_len: usize,
     frame_payload_len: u64,
-    frame_type: Option<u8>,
+    frame_type: Option<u64>,
     frames: VecDeque<frame::Frame>,
 }
 
@@ -104,7 +103,7 @@ impl Stream {
         if crate::stream::is_bidi(id) {
             ty = Some(Type::Request);
             initialized = true;
-            state = State::FramePayloadLenLen;
+            state = State::FrameTypeLen;
         };
 
         Stream {
@@ -112,7 +111,6 @@ impl Stream {
             ty,
             is_local,
             initialized,
-            ty_len: 0,
             state,
             stream_offset: 0,
             // TODO: need a more elegant approach to buffer management.
@@ -155,17 +153,6 @@ impl Stream {
         Ok(())
     }
 
-    pub fn set_stream_type_len(&mut self, len: u8) -> Result<()> {
-        if self.state != State::StreamTypeLen {
-            return Err(Error::InternalError);
-        }
-
-        self.ty_len = len;
-        self.state = State::StreamType;
-
-        Ok(())
-    }
-
     pub fn set_stream_type(&mut self, ty: Type) -> Result<()> {
         if self.state != State::StreamType {
             return Err(Error::InternalError);
@@ -173,13 +160,10 @@ impl Stream {
 
         self.ty = Some(ty);
 
-        self.stream_offset += u64::from(self.ty_len);
-        self.buf_read_off += u64::from(self.ty_len);
-
         match ty {
-            Type::Request => self.state = State::FramePayloadLenLen,
+            Type::Request => self.state = State::FrameTypeLen,
 
-            Type::Control => self.state = State::FramePayloadLenLen,
+            Type::Control => self.state = State::FrameTypeLen,
 
             Type::Push => self.state = State::PushIdLen,
 
@@ -187,28 +171,40 @@ impl Stream {
                 self.state = State::QpackInstruction;
                 self.initialized = true;
             },
+
+            Type::Unknown => {
+                self.state = State::Done;
+            },
         }
 
         Ok(())
     }
 
     pub fn set_next_varint_len(&mut self, len: usize) -> Result<()> {
-        self.next_varint_len = len;
-
         match self.state {
+            State::StreamTypeLen => self.state = State::StreamType,
+
             State::FramePayloadLenLen => self.state = State::FramePayloadLen,
 
             State::FrameTypeLen => self.state = State::FrameType,
 
             State::PushIdLen => self.state = State::PushId,
 
-            _ => (),
+            State::PushId => self.state = State::FrameTypeLen,
+
+            _ => return Err(Error::InternalError),
         }
+
+        self.next_varint_len = len;
 
         Ok(())
     }
 
     pub fn get_varint(&mut self) -> Result<u64> {
+        if self.next_varint_len == 0 {
+            return Err(Error::Done);
+        }
+
         if self.buf.len() - self.buf_read_off as usize >=
             self.next_varint_len as usize
         {
@@ -221,37 +217,44 @@ impl Stream {
             self.stream_offset += self.next_varint_len as u64;
             self.buf_read_off += self.next_varint_len as u64;
 
+            // Reset next_varint_len so we avoid incorrect multiple calls.
+            self.next_varint_len = 0;
+
+            // If processing push, progress the state machine appropriately.
+            if self.state == State::PushId {
+                self.state = State::FrameTypeLen;
+            }
+
             return Ok(varint);
         }
 
         Err(Error::Done)
     }
 
-    pub fn get_u8(&mut self) -> Result<(u8)> {
-        let ret = self.buf_bytes(1)?[0];
-
-        self.stream_offset += 1;
-        self.buf_read_off += 1;
-
-        Ok(ret)
-    }
-
     pub fn set_frame_payload_len(&mut self, len: u64) -> Result<()> {
+        if self.state != State::FramePayloadLen {
+            return Err(Error::InternalError);
+        }
+
         // Only expect frames on Control, Request and Push streams.
         if self.ty == Some(Type::Control) ||
             self.ty == Some(Type::Request) ||
             self.ty == Some(Type::Push)
         {
             self.frame_payload_len = len;
-            self.state = State::FrameTypeLen;
+            self.state = State::FramePayload;
 
             return Ok(());
         }
 
-        Err(Error::UnexpectedFrame)
+        Err(Error::InternalError)
     }
 
-    pub fn set_frame_type(&mut self, ty: u8) -> Result<()> {
+    pub fn set_frame_type(&mut self, ty: u64) -> Result<()> {
+        if self.state != State::FrameType {
+            return Err(Error::InternalError);
+        }
+
         // Only expect frames on Control, Request and Push streams.
         match self.ty {
             Some(Type::Control) => {
@@ -269,13 +272,21 @@ impl Stream {
 
                     (_, false) => return Err(Error::MissingSettings),
 
+                    (frame::GOAWAY_FRAME_TYPE_ID, true) => (),
+
+                    (frame::MAX_PUSH_FRAME_TYPE_ID, true) => (),
+
+                    (frame::CANCEL_PUSH_FRAME_TYPE_ID, true) => (),
+
+                    (frame::PRIORITY_FRAME_TYPE_ID, true) => (),
+
                     (_, true) => return Err(Error::UnexpectedFrame),
                 }
 
-                self.state = State::FramePayload;
+                self.state = State::FramePayloadLenLen;
             },
 
-            Some(Type::Request) => self.state = State::FramePayload,
+            Some(Type::Request) => self.state = State::FramePayloadLenLen,
 
             Some(Type::Push) => self.state = State::FramePayloadLenLen,
 
@@ -291,7 +302,9 @@ impl Stream {
         // Parse the whole frame payload but only if there is enough data in
         // the stream buffer. stream.buf_bytes() returns an error if we don't
         // have enough.
-        assert!(self.frame_type.is_some());
+        if self.frame_type.is_none() {
+            return Err(Error::InternalError);
+        }
 
         if let Ok(frame) = frame::Frame::from_bytes(
             self.frame_type.unwrap(),
@@ -309,7 +322,8 @@ impl Stream {
         // bytes were seen by the application layer.
         self.stream_offset += self.frame_payload_len;
 
-        self.state = State::FramePayloadLenLen;
+        // Set state to parse next frame
+        self.state = State::FrameTypeLen;
 
         Ok(())
     }
@@ -317,5 +331,477 @@ impl Stream {
     pub fn more(&self) -> bool {
         let rem_bytes = self.buf_end_pos - self.buf_read_off;
         rem_bytes > 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_good() {
+        let mut stream = Stream::new(3, false);
+        assert_eq!(*stream.state(), State::StreamTypeLen);
+
+        let mut d = [42; 40];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        let frame = frame::Frame::Settings {
+            num_placeholders: Some(0),
+            max_header_list_size: Some(0),
+            qpack_max_table_capacity: Some(0),
+            qpack_blocked_streams: Some(0),
+            grease: None,
+        };
+
+        b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
+        frame.to_bytes(&mut b).unwrap();
+        let off = b.off();
+
+        stream.push(&mut d[..off]).unwrap();
+
+        // Parse stream type.
+        assert_eq!(stream.more(), true);
+        let stream_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(stream_ty_len, 1);
+        stream.set_next_varint_len(stream_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::StreamType);
+
+        let stream_ty = stream.get_varint().unwrap();
+        assert_eq!(stream_ty, HTTP3_CONTROL_STREAM_TYPE_ID);
+        stream
+            .set_stream_type(Type::deserialize(stream_ty).unwrap())
+            .unwrap();
+        assert_eq!(*stream.state(), State::FrameTypeLen);
+
+        // Parse the SETTINGS frame.
+        assert_eq!(stream.more(), true);
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_ty_len, 1);
+
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::FrameType);
+
+        let frame_ty = stream.get_varint().unwrap();
+        assert_eq!(frame_ty, frame::SETTINGS_FRAME_TYPE_ID);
+
+        stream.set_frame_type(frame_ty).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+
+        let frame_payload_len_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_payload_len_len, 1);
+        stream.set_next_varint_len(frame_payload_len_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLen);
+
+        let frame_payload_len = stream.get_varint().unwrap();
+        assert_eq!(frame_payload_len, 8);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayload);
+
+        assert_eq!(stream.parse_frame(), Ok(()));
+        assert_eq!(*stream.state(), State::FrameTypeLen);
+
+        assert_eq!(stream.get_frame(), Some(frame));
+
+        assert_eq!(stream.more(), false);
+    }
+
+    #[test]
+    fn control_bad_multiple_settings() {
+        let mut stream = Stream::new(3, false);
+        assert_eq!(*stream.state(), State::StreamTypeLen);
+
+        let mut d = [42; 40];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        let frame = frame::Frame::Settings {
+            num_placeholders: Some(0),
+            max_header_list_size: Some(0),
+            qpack_max_table_capacity: Some(0),
+            qpack_blocked_streams: Some(0),
+            grease: None,
+        };
+
+        b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
+        frame.to_bytes(&mut b).unwrap();
+        frame.to_bytes(&mut b).unwrap();
+        let off = b.off();
+
+        stream.push(&mut d[..off]).unwrap();
+
+        // Parse stream type.
+        let stream_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        stream.set_next_varint_len(stream_ty_len).unwrap();
+        let stream_ty = stream.get_varint().unwrap();
+        stream
+            .set_stream_type(Type::deserialize(stream_ty).unwrap())
+            .unwrap();
+
+        // Parse first SETTINGS frame.
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+
+        let frame_ty = stream.get_varint().unwrap();
+        stream.set_frame_type(frame_ty).unwrap();
+
+        let frame_payload_len_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        stream.set_next_varint_len(frame_payload_len_len).unwrap();
+
+        let frame_payload_len = stream.get_varint().unwrap();
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(stream.parse_frame(), Ok(()));
+        stream.get_frame();
+
+        assert_eq!(stream.more(), true);
+
+        // Parse second SETTINGS frame.
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+
+        let frame_ty = stream.get_varint().unwrap();
+        assert_eq!(stream.set_frame_type(frame_ty), Err(Error::UnexpectedFrame));
+    }
+
+    #[test]
+    fn control_bad_late_settings() {
+        let mut stream = Stream::new(3, false);
+        assert_eq!(*stream.state(), State::StreamTypeLen);
+
+        let mut d = [42; 40];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        let goaway = frame::Frame::GoAway { stream_id: 0 };
+
+        let settings = frame::Frame::Settings {
+            num_placeholders: Some(0),
+            max_header_list_size: Some(0),
+            qpack_max_table_capacity: Some(0),
+            qpack_blocked_streams: Some(0),
+            grease: None,
+        };
+
+        b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
+        goaway.to_bytes(&mut b).unwrap();
+        settings.to_bytes(&mut b).unwrap();
+        let off = b.off();
+
+        stream.push(&mut d[..off]).unwrap();
+
+        // Parse stream type.
+        let stream_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        stream.set_next_varint_len(stream_ty_len).unwrap();
+        let stream_ty = stream.get_varint().unwrap();
+        stream
+            .set_stream_type(Type::deserialize(stream_ty).unwrap())
+            .unwrap();
+
+        // Parse GOAWAY.
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+
+        let frame_ty = stream.get_varint().unwrap();
+        assert_eq!(stream.set_frame_type(frame_ty), Err(Error::MissingSettings));
+    }
+
+    #[test]
+    fn control_bad_frame() {
+        let mut stream = Stream::new(3, false);
+        assert_eq!(*stream.state(), State::StreamTypeLen);
+
+        let mut d = [42; 40];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let hdrs = frame::Frame::Headers { header_block };
+
+        let settings = frame::Frame::Settings {
+            num_placeholders: Some(0),
+            max_header_list_size: Some(0),
+            qpack_max_table_capacity: Some(0),
+            qpack_blocked_streams: Some(0),
+            grease: None,
+        };
+
+        b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
+        settings.to_bytes(&mut b).unwrap();
+        hdrs.to_bytes(&mut b).unwrap();
+        let off = b.off();
+
+        stream.push(&mut d[..off]).unwrap();
+
+        // Parse stream type.
+        let stream_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        stream.set_next_varint_len(stream_ty_len).unwrap();
+        let stream_ty = stream.get_varint().unwrap();
+        stream
+            .set_stream_type(Type::deserialize(stream_ty).unwrap())
+            .unwrap();
+
+        // Parse first SETTINGS frame.
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+
+        let frame_ty = stream.get_varint().unwrap();
+        stream.set_frame_type(frame_ty).unwrap();
+
+        let frame_payload_len_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        stream.set_next_varint_len(frame_payload_len_len).unwrap();
+
+        let frame_payload_len = stream.get_varint().unwrap();
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(stream.parse_frame(), Ok(()));
+        stream.get_frame();
+
+        // Parse HEADERS.
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+
+        let frame_ty = stream.get_varint().unwrap();
+        assert_eq!(stream.set_frame_type(frame_ty), Err(Error::UnexpectedFrame));
+    }
+
+    #[test]
+    fn request_no_data() {
+        let mut stream = Stream::new(0, false);
+
+        assert_eq!(stream.ty, Some(Type::Request));
+        assert_eq!(*stream.state(), State::FrameTypeLen);
+
+        assert_eq!(
+            stream.set_stream_type(Type::Request),
+            Err(Error::InternalError)
+        );
+
+        assert_eq!(stream.more(), false);
+        assert_eq!(stream.get_varint(), Err(Error::Done));
+        assert_eq!(stream.set_frame_payload_len(100), Err(Error::InternalError));
+        assert_eq!(stream.get_frame(), None);
+        assert_eq!(stream.parse_frame(), Err(Error::InternalError));
+
+        assert_eq!(stream.set_frame_type(1), Err(Error::InternalError));
+    }
+
+    #[test]
+    fn request_good() {
+        let mut stream = Stream::new(0, false);
+
+        let mut d = [42; 128];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let hdrs = frame::Frame::Headers { header_block };
+        let data = frame::Frame::Data { payload };
+
+        hdrs.to_bytes(&mut b).unwrap();
+        data.to_bytes(&mut b).unwrap();
+        let off = b.off();
+
+        stream.push(&mut d[..off]).unwrap();
+
+        // parse the HEADERS frame
+        assert_eq!(stream.more(), true);
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_ty_len, 1);
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::FrameType);
+
+        let frame_ty = stream.get_varint().unwrap();
+        assert_eq!(frame_ty, frame::HEADERS_FRAME_TYPE_ID);
+
+        stream.set_frame_type(frame_ty).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+
+        let frame_payload_len_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_payload_len_len, 1);
+        stream.set_next_varint_len(frame_payload_len_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLen);
+
+        let frame_payload_len = stream.get_varint().unwrap();
+        assert_eq!(frame_payload_len, 12);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayload);
+
+        assert_eq!(stream.parse_frame(), Ok(()));
+        assert_eq!(*stream.state(), State::FrameTypeLen);
+
+        assert_eq!(stream.get_frame(), Some(hdrs));
+
+        // parse the DATA frame
+        assert_eq!(stream.more(), true);
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_ty_len, 1);
+
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::FrameType);
+
+        let frame_ty = stream.get_varint().unwrap();
+        assert_eq!(frame_ty, frame::DATA_FRAME_TYPE_ID);
+
+        stream.set_frame_type(frame_ty).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+
+        let frame_payload_len_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_payload_len_len, 1);
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLen);
+
+        let frame_payload_len = stream.get_varint().unwrap();
+        assert_eq!(frame_payload_len, 12);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayload);
+
+        assert_eq!(stream.parse_frame(), Ok(()));
+        assert_eq!(*stream.state(), State::FrameTypeLen);
+
+        assert_eq!(stream.get_frame(), Some(data));
+
+        assert_eq!(stream.more(), false);
+    }
+
+    #[test]
+    fn push_good() {
+        let mut stream = Stream::new(2, false);
+
+        let mut d = [42; 128];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let hdrs = frame::Frame::Headers { header_block };
+        let data = frame::Frame::Data { payload };
+
+        b.put_varint(HTTP3_PUSH_STREAM_TYPE_ID).unwrap();
+        b.put_varint(1).unwrap();
+        hdrs.to_bytes(&mut b).unwrap();
+        data.to_bytes(&mut b).unwrap();
+        let off = b.off();
+
+        stream.push(&mut d[..off]).unwrap();
+
+        // parse stream type
+        let stream_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        stream.set_next_varint_len(stream_ty_len).unwrap();
+        let stream_ty = stream.get_varint().unwrap();
+        assert_eq!(stream_ty, HTTP3_PUSH_STREAM_TYPE_ID);
+        stream
+            .set_stream_type(Type::deserialize(stream_ty).unwrap())
+            .unwrap();
+        assert_eq!(*stream.state(), State::PushIdLen);
+
+        // parse push ID
+        let push_id_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        stream.set_next_varint_len(push_id_len).unwrap();
+        assert_eq!(*stream.state(), State::PushId);
+        let push_id = stream.get_varint().unwrap();
+        assert_eq!(push_id, 1);
+
+        // parse the HEADERS frame
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_ty_len, 1);
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::FrameType);
+
+        let frame_ty = stream.get_varint().unwrap();
+        assert_eq!(frame_ty, frame::HEADERS_FRAME_TYPE_ID);
+
+        stream.set_frame_type(frame_ty).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+
+        let frame_payload_len_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_payload_len_len, 1);
+        stream.set_next_varint_len(frame_payload_len_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLen);
+
+        let frame_payload_len = stream.get_varint().unwrap();
+        assert_eq!(frame_payload_len, 12);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayload);
+
+        assert_eq!(stream.parse_frame(), Ok(()));
+        assert_eq!(*stream.state(), State::FrameTypeLen);
+
+        assert_eq!(stream.get_frame(), Some(hdrs));
+
+        // parse the DATA frame
+        assert_eq!(stream.more(), true);
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_ty_len, 1);
+
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::FrameType);
+
+        let frame_ty = stream.get_varint().unwrap();
+        assert_eq!(frame_ty, frame::DATA_FRAME_TYPE_ID);
+
+        stream.set_frame_type(frame_ty).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+
+        let frame_payload_len_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_payload_len_len, 1);
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLen);
+
+        let frame_payload_len = stream.get_varint().unwrap();
+        assert_eq!(frame_payload_len, 12);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayload);
+
+        assert_eq!(stream.parse_frame(), Ok(()));
+        assert_eq!(*stream.state(), State::FrameTypeLen);
+
+        assert_eq!(stream.get_frame(), Some(data));
+
+        assert_eq!(stream.more(), false);
+    }
+
+    #[test]
+    fn grease() {
+        let mut stream = Stream::new(2, false);
+
+        let mut d = [42; 20];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        b.put_varint(33).unwrap();
+
+        stream.push(&mut d).unwrap();
+
+        // parse stream type
+        assert_eq!(stream.more(), true);
+        let stream_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(stream_ty_len, 1);
+        stream.set_next_varint_len(stream_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::StreamType);
+
+        let stream_ty = stream.get_varint().unwrap();
+        assert_eq!(stream_ty, 33);
+        stream
+            .set_stream_type(Type::deserialize(stream_ty).unwrap())
+            .unwrap();
+        assert_eq!(*stream.state(), State::Done);
     }
 }

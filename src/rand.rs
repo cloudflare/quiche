@@ -39,6 +39,14 @@ pub fn rand_u8() -> u8 {
     buf[0]
 }
 
+pub fn rand_u64() -> u64 {
+    let mut buf = [0; 8];
+
+    rand_bytes(&mut buf);
+
+    u64::from_ne_bytes(buf)
+}
+
 extern {
     fn RAND_bytes(buf: *mut u8, len: libc::size_t) -> libc::c_int;
 }
