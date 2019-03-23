@@ -550,6 +550,10 @@ impl Connection {
         http3_conn.send_settings(conn)?;
         http3_conn.open_qpack_streams(conn)?;
 
+        if conn.grease {
+            http3_conn.open_grease_stream(conn)?;
+        }
+
         Ok(http3_conn)
     }
 
@@ -598,8 +602,8 @@ impl Connection {
         header_block.truncate(len);
 
         let mut b = octets::Octets::with_slice(&mut d);
+        b.put_varint(frame::HEADERS_FRAME_TYPE_ID)?;
         b.put_varint(len as u64)?;
-        b.put_u8(frame::HEADERS_FRAME_TYPE_ID)?;
 
         let off = b.off();
 
@@ -631,8 +635,8 @@ impl Connection {
         let mut d = [42; 10];
 
         let mut b = octets::Octets::with_slice(&mut d);
+        b.put_varint(frame::DATA_FRAME_TYPE_ID)?;
         b.put_varint(body.len() as u64)?;
-        b.put_u8(frame::DATA_FRAME_TYPE_ID)?;
 
         let off = b.off();
 
@@ -684,7 +688,12 @@ impl Connection {
 
         for (stream_id, stream) in self.streams.iter_mut() {
             if let Some(frame) = stream.get_frame() {
-                trace!("{} rx frm {:?}", conn.trace_id(), frame);
+                trace!(
+                    "{} rx frm {:?} on stream {}",
+                    conn.trace_id(),
+                    frame,
+                    stream_id
+                );
 
                 match frame {
                     frame::Frame::Settings {
@@ -692,8 +701,15 @@ impl Connection {
                         max_header_list_size,
                         qpack_max_table_capacity,
                         qpack_blocked_streams,
+                        ..
                     } => {
                         if self.is_server && num_placeholders.is_some() {
+                            conn.close(
+                                true,
+                                Error::WrongSettingDirection.to_wire(),
+                                b"Num placeholder setting received by server.",
+                            )?;
+
                             return Err(Error::WrongSettingDirection);
                         }
 
@@ -706,6 +722,13 @@ impl Connection {
                     },
 
                     frame::Frame::Headers { mut header_block } => {
+                        if Some(*stream_id) == self.peer_control_stream_id {
+                            Connection::close_unexpected_frame(
+                                conn,
+                                b"HEADERS received on control stream",
+                            )?;
+                        }
+
                         let headers = self
                             .qpack_decoder
                             .decode(&mut header_block[..])
@@ -714,24 +737,105 @@ impl Connection {
                     },
 
                     frame::Frame::Data { payload } => {
+                        if Some(*stream_id) == self.peer_control_stream_id {
+                            Connection::close_unexpected_frame(
+                                conn,
+                                b"DATA received on control stream",
+                            )?;
+                        }
+
                         return Ok((*stream_id, Event::Data(payload)));
                     },
 
-                    // TODO: implement GOAWAY
-                    frame::Frame::GoAway { .. } => {},
-                    // TODO: implement MAX_PUSH_ID
-                    frame::Frame::MaxPushId { .. } => {},
-                    // TODO: implement PUSH_PROMISE
-                    frame::Frame::PushPromise { .. } => {},
-                    // TODO: implement DUPLICATE_PUSH
-                    frame::Frame::DuplicatePush { .. } => {},
-                    // TODO: implement CANCEL_PUSH frame
-                    frame::Frame::CancelPush { .. } => {},
+                    frame::Frame::GoAway { .. } => {
+                        if Some(*stream_id) != self.peer_control_stream_id {
+                            Connection::close_unexpected_frame(
+                                conn,
+                                b"GOAWAY received on non-control stream",
+                            )?;
+                        }
+
+                        if self.is_server {
+                            Connection::close_unexpected_frame(
+                                conn,
+                                b"GOWAY received on server",
+                            )?;
+                        }
+
+                        // TODO: implement GOAWAY
+                    },
+
+                    frame::Frame::MaxPushId { .. } => {
+                        if Some(*stream_id) != self.peer_control_stream_id {
+                            Connection::close_unexpected_frame(
+                                conn,
+                                b"MAX_PUSH_ID received on non-control stream",
+                            )?;
+                        }
+
+                        if !self.is_server {
+                            Connection::close_unexpected_frame(
+                                conn,
+                                b"MAX_PUSH_ID received by client",
+                            )?;
+                        }
+
+                        // TODO: implement MAX_PUSH_ID
+                    },
+
+                    frame::Frame::PushPromise { .. } => {
+                        if stream_id % 4 != 0 {
+                            Connection::close_unexpected_frame(
+                                conn,
+                                b"PUSH_PROMISE received on non-request stream",
+                            )?;
+                        }
+
+                        // TODO: implement PUSH_PROMISE
+                    },
+
+                    frame::Frame::DuplicatePush { .. } => {
+                        if stream_id % 4 != 0 {
+                            Connection::close_unexpected_frame(
+                                conn,
+                                b"DUPLICATE_PUSH received on non-request stream",
+                            )?;
+                        }
+
+                        // TODO: implement DUPLICATE_PUSH
+                    },
+
+                    frame::Frame::CancelPush { .. } => {
+                        if Some(*stream_id) != self.peer_control_stream_id {
+                            Connection::close_unexpected_frame(
+                                conn,
+                                b"CANCEL_PUSH received on non-control stream",
+                            )?;
+                        }
+
+                        // TODO: implement CANCEL_PUSH frame
+                    },
                 }
             }
         }
 
         Err(Error::Done)
+    }
+
+    fn close_unexpected_frame(
+        conn: &mut super::Connection, reason: &[u8],
+    ) -> Result<()> {
+        conn.close(true, Error::UnexpectedFrame.to_wire(), reason)?;
+
+        Err(Error::UnexpectedFrame)
+    }
+
+    fn close_wrong_stream_count(
+        conn: &mut super::Connection, reason: &[u8],
+    ) -> Result<()> {
+        conn.close(true, Error::WrongStreamCount.to_wire(), reason)?;
+
+        Err(Error::WrongStreamCount)
     }
 
     /// Allocates a new request stream ID for the local endpoint to use.
@@ -762,11 +866,13 @@ impl Connection {
     ) -> Result<()> {
         if self.control_stream_id.is_none() {
             let stream_id = self.get_available_uni_stream()?;
-            conn.stream_send(
-                stream_id,
-                &stream::HTTP3_CONTROL_STREAM_TYPE_ID.to_be_bytes(),
-                false,
-            )?;
+
+            let mut d = [42; 8];
+            let mut b = octets::Octets::with_slice(&mut d);
+            b.put_varint(stream::HTTP3_CONTROL_STREAM_TYPE_ID)?;
+            let off = b.off();
+
+            conn.stream_send(stream_id, &d[..off], false)?;
 
             self.control_stream_id = Some(stream_id);
         }
@@ -778,27 +884,37 @@ impl Connection {
     fn open_qpack_streams(&mut self, conn: &mut super::Connection) -> Result<()> {
         if self.local_qpack_streams.encoder_stream_id.is_none() {
             let stream_id = self.get_available_uni_stream()?;
-            conn.stream_send(
-                stream_id,
-                &stream::QPACK_ENCODER_STREAM_TYPE_ID.to_be_bytes(),
-                false,
-            )?;
+
+            let mut d = [0; 8];
+            let mut b = octets::Octets::with_slice(&mut d);
+            b.put_varint(stream::QPACK_ENCODER_STREAM_TYPE_ID)?;
+            let off = b.off();
+
+            conn.stream_send(stream_id, &d[..off], false)?;
 
             self.local_qpack_streams.encoder_stream_id = Some(stream_id);
         }
 
         if self.local_qpack_streams.decoder_stream_id.is_none() {
             let stream_id = self.get_available_uni_stream()?;
-            conn.stream_send(
-                stream_id,
-                &stream::QPACK_DECODER_STREAM_TYPE_ID.to_be_bytes(),
-                false,
-            )?;
+
+            let mut d = [0; 8];
+            let mut b = octets::Octets::with_slice(&mut d);
+            b.put_varint(stream::QPACK_DECODER_STREAM_TYPE_ID)?;
+            let off = b.off();
+
+            conn.stream_send(stream_id, &d[..off], false)?;
 
             self.local_qpack_streams.decoder_stream_id = Some(stream_id);
         }
 
         Ok(())
+    }
+
+    /// Generate am HTTP/3 GREASE variable length integer.
+    fn grease_value() -> u64 {
+        let n = std::cmp::min(super::rand::rand_u64(), 148_764_065_110_560_899);
+        31 * n + 33
     }
 
     /// Send GREASE frames on the provided stream ID.
@@ -810,15 +926,15 @@ impl Connection {
         let mut b = octets::Octets::with_slice(&mut d);
 
         // Empty GREASE frame.
+        b.put_varint(Connection::grease_value())?;
         b.put_varint(0)?;
-        b.put_u8(0xb)?;
 
         // GREASE frame with payload.
+        b.put_varint(Connection::grease_value())?;
         b.put_varint(18)?;
-        b.put_u8(0x2a)?;
 
         trace!(
-            "{} sending GREASE frames on stream {}",
+            "{} sending GREASE frames on stream id {}",
             conn.trace_id(),
             stream_id
         );
@@ -827,6 +943,43 @@ impl Connection {
         conn.stream_send(stream_id, &d[..off], false)?;
 
         conn.stream_send(stream_id, b"GREASE is the word", false)?;
+
+        Ok(())
+    }
+
+    /// Opens a new unidirectional stream with a GREASE type and sends some
+    /// unframed payload.
+    fn open_grease_stream(&mut self, conn: &mut super::Connection) -> Result<()> {
+        let stream_id = self.get_available_uni_stream()?;
+
+        let mut d = [0; 8];
+        let mut b = octets::Octets::with_slice(&mut d);
+        b.put_varint(Connection::grease_value())?;
+
+        let off = b.off();
+
+        match conn.stream_send(stream_id, &d[..off], false) {
+            Ok(_v) => {
+                trace!(
+                    "{} sending GREASE stream on stream id {}",
+                    conn.trace_id(),
+                    stream_id
+                );
+                conn.stream_send(stream_id, b"GREASE is the word", false)?;
+            },
+            Err(super::Error::StreamLimit) => {
+                trace!(
+                    "{} sending GREASE stream was blocked on stream id {}",
+                    conn.trace_id(),
+                    stream_id
+                );
+
+                return Ok(());
+            },
+            Err(e) => {
+                return Err(Error::from(e));
+            },
+        };
 
         Ok(())
     }
@@ -844,6 +997,12 @@ impl Connection {
             None
         };
 
+        let grease = if conn.grease {
+            Some((Connection::grease_value(), Connection::grease_value()))
+        } else {
+            None
+        };
+
         let frame = frame::Frame::Settings {
             num_placeholders,
             max_header_list_size: self.local_settings.max_header_list_size,
@@ -851,6 +1010,7 @@ impl Connection {
                 .local_settings
                 .qpack_max_table_capacity,
             qpack_blocked_streams: self.local_settings.qpack_blocked_streams,
+            grease,
         };
 
         let mut b = octets::Octets::with_slice(&mut d);
@@ -889,12 +1049,14 @@ impl Connection {
         while stream.more() {
             match stream.state() {
                 stream::State::StreamTypeLen => {
-                    let varint_len = 1;
+                    let varint_byte = stream.buf_bytes(1)?[0];
+                    stream.set_next_varint_len(octets::varint_parse_len(
+                        varint_byte,
+                    ))?;
+                },
 
-                    stream.set_stream_type_len(varint_len)?;
-
-                    let varint_bytes = stream.buf_bytes(varint_len as usize)?;
-                    let varint = varint_bytes[0];
+                stream::State::StreamType => {
+                    let varint = stream.get_varint()?;
 
                     let ty = stream::Type::deserialize(varint)?;
 
@@ -904,7 +1066,10 @@ impl Connection {
                         stream::Type::Control => {
                             // Only one control stream allowed.
                             if self.peer_control_stream_id.is_some() {
-                                return Err(Error::WrongStreamCount);
+                                Connection::close_wrong_stream_count(
+                                    conn,
+                                    b"Received multiple control streams",
+                                )?;
                             }
 
                             trace!(
@@ -919,6 +1084,12 @@ impl Connection {
                         stream::Type::Push => {
                             // Only clients can receive push stream.
                             if self.is_server {
+                                conn.close(
+                                    true,
+                                    Error::WrongStreamDirection.to_wire(),
+                                    b"Server received push stream.",
+                                )?;
+
                                 return Err(Error::WrongStreamDirection);
                             }
                         },
@@ -927,7 +1098,10 @@ impl Connection {
                             // Only one qpack encoder stream allowed.
                             if self.peer_qpack_streams.encoder_stream_id.is_some()
                             {
-                                return Err(Error::WrongStreamCount);
+                                Connection::close_wrong_stream_count(
+                                    conn,
+                                    b"Received multiple QPACK encoder streams",
+                                )?;
                             }
 
                             self.peer_qpack_streams.encoder_stream_id =
@@ -938,20 +1112,23 @@ impl Connection {
                             // Only one qpack decoder allowed.
                             if self.peer_qpack_streams.decoder_stream_id.is_some()
                             {
-                                return Err(Error::WrongStreamCount);
+                                Connection::close_wrong_stream_count(
+                                    conn,
+                                    b"Received multiple QPACK decoder streams",
+                                )?;
                             }
 
                             self.peer_qpack_streams.decoder_stream_id =
                                 Some(stream_id);
                         },
 
-                        // TODO: enable GREASE streamsget_varint
+                        stream::Type::Unknown => {
+                            // Unknown stream types are ignored.
+                            // TODO: we MAY send STOP_SENDING
+                        },
+
                         stream::Type::Request => unreachable!(),
                     }
-                },
-
-                stream::State::StreamType => {
-                    // TODO: populate this in draft 18+
                 },
 
                 stream::State::FramePayloadLenLen => {
@@ -974,7 +1151,7 @@ impl Connection {
                 },
 
                 stream::State::FrameType => {
-                    let varint = stream.get_u8()?;
+                    let varint = stream.get_varint()?;
                     stream.set_frame_type(varint)?;
                 },
 
@@ -983,6 +1160,10 @@ impl Connection {
                 },
 
                 stream::State::QpackInstruction => {
+                    return Err(Error::Done);
+                },
+
+                stream::State::Done => {
                     return Err(Error::Done);
                 },
 
@@ -999,6 +1180,11 @@ mod tests {
     use super::*;
 
     use crate::testing;
+
+    #[test]
+    fn grease_value_in_varint_limit() {
+        assert!(Connection::grease_value() < 2u64.pow(62) - 1);
+    }
 
     #[test]
     fn simple_request() {
@@ -1063,6 +1249,7 @@ mod tests {
         let ev = h3_cln.poll(&mut pipe.client).unwrap();
         assert_eq!(ev, (stream, Event::Headers(resp.to_vec())));
     }
+
 }
 
 mod ffi;

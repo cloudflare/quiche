@@ -91,7 +91,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     config.load_cert_chain_from_pem_file(args.get_str("--cert"))?;
     config.load_priv_key_from_pem_file(args.get_str("--key"))?;
 
-    config.set_application_protos(b"\x05h3-18")?;
+    config.set_application_protos(b"\x05h3-19")?;
 
     config.set_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
@@ -252,7 +252,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
             debug!("{} processed {} bytes", client.conn.trace_id(), read);
 
             if client.conn.is_established() && client.http3_conn.is_none() {
-                if client.conn.application_proto() != b"h3-18" {
+                if client.conn.application_proto() != b"h3-19" {
                     // TODO a better error code?
                     client.conn.close(
                         false,

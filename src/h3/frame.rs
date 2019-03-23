@@ -24,27 +24,25 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::mem;
-
 use super::Error;
 use super::Result;
 
 use crate::octets;
 
-pub const DATA_FRAME_TYPE_ID: u8 = 0x0;
-pub const HEADERS_FRAME_TYPE_ID: u8 = 0x1;
-pub const _PRIORITY_FRAME_TYPE_ID: u8 = 0x2;
-pub const CANCEL_PUSH_FRAME_TYPE_ID: u8 = 0x3;
-pub const SETTINGS_FRAME_TYPE_ID: u8 = 0x4;
-pub const PUSH_PROMISE_FRAME_TYPE_ID: u8 = 0x5;
-pub const GOAWAY_FRAME_TYPE_ID: u8 = 0x6;
-pub const MAX_PUSH_FRAME_TYPE_ID: u8 = 0xD;
-pub const DUPLICATE_PUSH_FRAME_TYPE_ID: u8 = 0xE;
+pub const DATA_FRAME_TYPE_ID: u64 = 0x0;
+pub const HEADERS_FRAME_TYPE_ID: u64 = 0x1;
+pub const PRIORITY_FRAME_TYPE_ID: u64 = 0x2;
+pub const CANCEL_PUSH_FRAME_TYPE_ID: u64 = 0x3;
+pub const SETTINGS_FRAME_TYPE_ID: u64 = 0x4;
+pub const PUSH_PROMISE_FRAME_TYPE_ID: u64 = 0x5;
+pub const GOAWAY_FRAME_TYPE_ID: u64 = 0x6;
+pub const MAX_PUSH_FRAME_TYPE_ID: u64 = 0xD;
+pub const DUPLICATE_PUSH_FRAME_TYPE_ID: u64 = 0xE;
 
-const SETTINGS_QPACK_MAX_TABLE_CAPACITY: u16 = 0x1;
-const SETTINGS_MAX_HEADER_LIST_SIZE: u16 = 0x6;
-const SETTINGS_QPACK_BLOCKED_STREAMS: u16 = 0x7;
-const SETTINGS_NUM_PLACEHOLDERS: u16 = 0x8;
+const SETTINGS_QPACK_MAX_TABLE_CAPACITY: u64 = 0x1;
+const SETTINGS_MAX_HEADER_LIST_SIZE: u64 = 0x6;
+const SETTINGS_QPACK_BLOCKED_STREAMS: u64 = 0x7;
+const SETTINGS_NUM_PLACEHOLDERS: u64 = 0x8;
 
 #[derive(Clone, PartialEq)]
 pub enum Frame {
@@ -65,6 +63,7 @@ pub enum Frame {
         max_header_list_size: Option<u64>,
         qpack_max_table_capacity: Option<u64>,
         qpack_blocked_streams: Option<u64>,
+        grease: Option<(u64, u64)>,
     },
 
     PushPromise {
@@ -87,7 +86,7 @@ pub enum Frame {
 
 impl Frame {
     pub fn from_bytes(
-        frame_type: u8, payload_length: u64, bytes: &mut [u8],
+        frame_type: u64, payload_length: u64, bytes: &mut [u8],
     ) -> Result<Frame> {
         let mut b = octets::Octets::with_slice(bytes);
 
@@ -134,22 +133,22 @@ impl Frame {
 
         match self {
             Frame::Data { payload } => {
+                b.put_varint(DATA_FRAME_TYPE_ID)?;
                 b.put_varint(payload.len() as u64)?;
-                b.put_u8(DATA_FRAME_TYPE_ID)?;
 
                 b.put_bytes(payload.as_ref())?;
             },
 
             Frame::Headers { header_block } => {
+                b.put_varint(HEADERS_FRAME_TYPE_ID)?;
                 b.put_varint(header_block.len() as u64)?;
-                b.put_u8(HEADERS_FRAME_TYPE_ID)?;
 
                 b.put_bytes(header_block.as_ref())?;
             },
 
             Frame::CancelPush { push_id } => {
+                b.put_varint(CANCEL_PUSH_FRAME_TYPE_ID)?;
                 b.put_varint(octets::varint_len(*push_id) as u64)?;
-                b.put_u8(CANCEL_PUSH_FRAME_TYPE_ID)?;
 
                 b.put_varint(*push_id)?;
             },
@@ -159,50 +158,61 @@ impl Frame {
                 max_header_list_size,
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
+                grease,
             } => {
                 let mut len = 0;
 
                 if let Some(val) = num_placeholders {
-                    len += mem::size_of::<u16>();
+                    len += octets::varint_len(SETTINGS_NUM_PLACEHOLDERS);
                     len += octets::varint_len(*val);
                 }
 
                 if let Some(val) = max_header_list_size {
-                    len += mem::size_of::<u16>();
+                    len += octets::varint_len(SETTINGS_MAX_HEADER_LIST_SIZE);
                     len += octets::varint_len(*val);
                 }
 
                 if let Some(val) = qpack_max_table_capacity {
-                    len += mem::size_of::<u16>();
+                    len += octets::varint_len(SETTINGS_QPACK_MAX_TABLE_CAPACITY);
                     len += octets::varint_len(*val);
                 }
 
                 if let Some(val) = qpack_blocked_streams {
-                    len += mem::size_of::<u16>();
+                    len += octets::varint_len(SETTINGS_QPACK_BLOCKED_STREAMS);
                     len += octets::varint_len(*val);
                 }
 
+                if let Some(val) = grease {
+                    len += octets::varint_len(val.0);
+                    len += octets::varint_len(val.1);
+                }
+
+                b.put_varint(SETTINGS_FRAME_TYPE_ID)?;
                 b.put_varint(len as u64)?;
-                b.put_u8(SETTINGS_FRAME_TYPE_ID)?;
 
                 if let Some(val) = num_placeholders {
-                    b.put_u16(0x8)?;
+                    b.put_varint(SETTINGS_NUM_PLACEHOLDERS)?;
                     b.put_varint(*val as u64)?;
                 }
 
                 if let Some(val) = max_header_list_size {
-                    b.put_u16(0x6)?;
+                    b.put_varint(SETTINGS_MAX_HEADER_LIST_SIZE)?;
                     b.put_varint(*val as u64)?;
                 }
 
                 if let Some(val) = qpack_max_table_capacity {
-                    b.put_u16(0x1)?;
+                    b.put_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY)?;
                     b.put_varint(*val as u64)?;
                 }
 
                 if let Some(val) = qpack_blocked_streams {
-                    b.put_u16(0x7)?;
+                    b.put_varint(SETTINGS_QPACK_BLOCKED_STREAMS)?;
                     b.put_varint(*val as u64)?;
+                }
+
+                if let Some(val) = grease {
+                    b.put_varint(val.0)?;
+                    b.put_varint(val.1)?;
                 }
             },
 
@@ -211,30 +221,30 @@ impl Frame {
                 header_block,
             } => {
                 let len = octets::varint_len(*push_id) + header_block.len();
+                b.put_varint(PUSH_PROMISE_FRAME_TYPE_ID)?;
                 b.put_varint(len as u64)?;
-                b.put_u8(PUSH_PROMISE_FRAME_TYPE_ID)?;
 
                 b.put_varint(*push_id)?;
                 b.put_bytes(header_block.as_ref())?;
             },
 
             Frame::GoAway { stream_id } => {
+                b.put_varint(GOAWAY_FRAME_TYPE_ID)?;
                 b.put_varint(octets::varint_len(*stream_id) as u64)?;
-                b.put_u8(GOAWAY_FRAME_TYPE_ID)?;
 
                 b.put_varint(*stream_id)?;
             },
 
             Frame::MaxPushId { push_id } => {
+                b.put_varint(MAX_PUSH_FRAME_TYPE_ID)?;
                 b.put_varint(octets::varint_len(*push_id) as u64)?;
-                b.put_u8(MAX_PUSH_FRAME_TYPE_ID)?;
 
                 b.put_varint(*push_id)?;
             },
 
             Frame::DuplicatePush { push_id } => {
+                b.put_varint(DUPLICATE_PUSH_FRAME_TYPE_ID)?;
                 b.put_varint(octets::varint_len(*push_id) as u64)?;
-                b.put_u8(DUPLICATE_PUSH_FRAME_TYPE_ID)?;
 
                 b.put_varint(*push_id)?;
             },
@@ -264,6 +274,7 @@ impl std::fmt::Debug for Frame {
                 max_header_list_size,
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
+                ..
             } => {
                 write!(f, "SETTINGS placeholders={:?}, max_headers={:?}, qpack_max_table={:?}, qpack_blocked={:?} ", num_placeholders, max_header_list_size, qpack_max_table_capacity, qpack_blocked_streams)?;
             },
@@ -306,23 +317,24 @@ fn parse_settings_frame(
     let mut qpack_blocked_streams = None;
 
     while b.off() < settings_length {
-        let setting = b.get_u16()?;
+        let setting_ty = b.get_varint()?;
+        let settings_val = b.get_varint()?;
 
-        match setting {
+        match setting_ty {
             SETTINGS_QPACK_MAX_TABLE_CAPACITY => {
-                qpack_max_table_capacity = Some(b.get_varint()?);
+                qpack_max_table_capacity = Some(settings_val);
             },
 
             SETTINGS_MAX_HEADER_LIST_SIZE => {
-                max_header_list_size = Some(b.get_varint()?);
+                max_header_list_size = Some(settings_val);
             },
 
             SETTINGS_QPACK_BLOCKED_STREAMS => {
-                qpack_blocked_streams = Some(b.get_varint()?);
+                qpack_blocked_streams = Some(settings_val);
             },
 
             SETTINGS_NUM_PLACEHOLDERS => {
-                num_placeholders = Some(b.get_varint()?);
+                num_placeholders = Some(settings_val);
             },
 
             // Unknown Settings parameters must be ignored.
@@ -335,6 +347,7 @@ fn parse_settings_frame(
         max_header_list_size,
         qpack_max_table_capacity,
         qpack_blocked_streams,
+        grease: None,
     })
 }
 
@@ -439,7 +452,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_all() {
+    fn settings_all_no_grease() {
         let mut d = [42; 128];
 
         let frame = Frame::Settings {
@@ -447,9 +460,10 @@ mod tests {
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
+            grease: None,
         };
 
-        let frame_payload_len = 12;
+        let frame_payload_len = 8;
         let frame_header_len = 2;
 
         let wire_len = {
@@ -471,6 +485,48 @@ mod tests {
     }
 
     #[test]
+    fn settings_all_grease() {
+        let mut d = [42; 128];
+
+        let frame = Frame::Settings {
+            num_placeholders: Some(0),
+            max_header_list_size: Some(0),
+            qpack_max_table_capacity: Some(0),
+            qpack_blocked_streams: Some(0),
+            grease: Some((33, 33)),
+        };
+
+        // Frame parsing will always ignore GREASE values.
+        let frame_parsed = Frame::Settings {
+            num_placeholders: Some(0),
+            max_header_list_size: Some(0),
+            qpack_max_table_capacity: Some(0),
+            qpack_blocked_streams: Some(0),
+            grease: None,
+        };
+
+        let frame_payload_len = 10;
+        let frame_header_len = 2;
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, frame_header_len + frame_payload_len);
+
+        assert_eq!(
+            Frame::from_bytes(
+                SETTINGS_FRAME_TYPE_ID,
+                frame_payload_len as u64,
+                &mut d[frame_header_len..]
+            )
+            .unwrap(),
+            frame_parsed
+        );
+    }
+
+    #[test]
     fn settings_h3_only() {
         let mut d = [42; 128];
 
@@ -479,9 +535,10 @@ mod tests {
             max_header_list_size: Some(1024),
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
+            grease: None,
         };
 
-        let frame_payload_len = 7;
+        let frame_payload_len = 5;
         let frame_header_len = 2;
 
         let wire_len = {
@@ -511,9 +568,10 @@ mod tests {
             max_header_list_size: None,
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
+            grease: None,
         };
 
-        let frame_payload_len = 6;
+        let frame_payload_len = 4;
         let frame_header_len = 2;
 
         let wire_len = {
