@@ -189,6 +189,13 @@ the quiche API, including examples on how to use quiche in C/C++ applications
 
 [examples/]: examples/
 
+## HTTP/3
+
+The [`HTTP/3 documentation`] provides a detailed description of using quiche
+for client and server implementations.
+
+[`HTTP/3 documentation`]: https://docs.quic.tech/quiche/h3/index.html
+
 Calling quiche from C/C++
 -------------------------
 
