@@ -389,6 +389,10 @@ impl Connection {
 
         let off = b.off();
 
+        if conn.grease {
+            self.send_grease_frames(conn, stream_id)?;
+        }
+
         trace!(
             "{} sending HEADERS of size {} on stream {}",
             conn.trace_id(),
@@ -579,6 +583,36 @@ impl Connection {
 
             self.local_qpack_streams.decoder_stream_id = Some(stream_id);
         }
+
+        Ok(())
+    }
+
+    /// Send GREASE frames on the provided stream ID.
+    fn send_grease_frames(
+        &mut self, conn: &mut super::Connection, stream_id: u64,
+    ) -> Result<()> {
+        let mut d = [42; 128];
+
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        // Empty GREASE frame.
+        b.put_varint(0)?;
+        b.put_u8(0xb)?;
+
+        // GREASE frame with payload.
+        b.put_varint(18)?;
+        b.put_u8(0x2a)?;
+
+        trace!(
+            "{} sending GREASE frames on stream {}",
+            conn.trace_id(),
+            stream_id
+        );
+
+        let off = b.off();
+        conn.stream_send(stream_id, &d[..off], false)?;
+
+        conn.stream_send(stream_id, b"GREASE is the word", false)?;
 
         Ok(())
     }

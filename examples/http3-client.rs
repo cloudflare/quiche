@@ -42,6 +42,7 @@ Options:
   --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
   --wire-version VERSION   The version number to send to the server [default: babababa].
   --no-verify              Don't verify server's certificate.
+  --no-grease              Don't send GREASE.
   -h --help                Show this screen.
 ";
 
@@ -105,6 +106,10 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     if args.get_bool("--no-verify") {
         config.verify_peer(false);
+    }
+
+    if args.get_bool("--no-grease") {
+        config.grease(false);
     }
 
     if std::env::var_os("SSLKEYLOGFILE").is_some() {

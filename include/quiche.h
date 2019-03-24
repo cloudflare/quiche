@@ -109,6 +109,9 @@ int quiche_config_load_priv_key_from_pem_file(quiche_config *config,
 // Configures whether to verify the peer's certificate.
 void quiche_config_verify_peer(quiche_config *config, bool v);
 
+// Configures whether to send GREASE.
+void quiche_config_grease(quiche_config *config, bool v);
+
 // Enables logging of secrets.
 void quiche_config_log_keys(quiche_config *config);
 
