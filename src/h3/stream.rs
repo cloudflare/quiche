@@ -275,16 +275,7 @@ impl Stream {
                 self.state = State::FramePayload;
             },
 
-            Some(Type::Request) => match ty {
-                frame::HEADERS_FRAME_TYPE_ID |
-                frame::DATA_FRAME_TYPE_ID |
-                frame::PRIORITY_FRAME_TYPE_ID |
-                frame::PUSH_PROMISE_FRAME_TYPE_ID => {
-                    self.state = State::FramePayload;
-                },
-
-                _ => return Err(Error::UnexpectedFrame),
-            },
+            Some(Type::Request) => self.state = State::FramePayload,
 
             Some(Type::Push) => self.state = State::FramePayloadLenLen,
 
