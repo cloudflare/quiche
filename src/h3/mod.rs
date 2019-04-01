@@ -238,6 +238,7 @@ impl Header {
 }
 
 /// An HTTP/3 connection event.
+#[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// Request/response headers were received.
     Headers(Vec<Header>),
@@ -742,6 +743,77 @@ impl Connection {
         }
 
         Err(Error::Done)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::testing;
+
+    #[test]
+    fn simple_request() {
+        let mut buf = [0; 65535];
+
+        let mut config = crate::Config::new(crate::VERSION_DRAFT18).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_initial_max_data(150);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let config = Config::new(0, 1024, 0, 0).unwrap();
+
+        let mut h3_cln =
+            Connection::with_transport(&mut pipe.client, &config).unwrap();
+        let mut h3_srv =
+            Connection::with_transport(&mut pipe.server, &config).unwrap();
+
+        pipe.advance(&mut buf).ok();
+
+        let req = [
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":authority", "quic.tech"),
+            Header::new(":path", "/test"),
+            Header::new("user-agent", "quiche-test"),
+        ];
+
+        let stream = h3_cln.send_request(&mut pipe.client, &req, true).unwrap();
+        assert_eq!(stream, 0);
+
+        pipe.advance(&mut buf).ok();
+
+        let ev = h3_srv.poll(&mut pipe.server).unwrap();
+        assert_eq!(ev, (stream, Event::Headers(req.to_vec())));
+
+        let resp = [
+            Header::new(":status", "200"),
+            Header::new("server", "quiche-test"),
+        ];
+
+        h3_srv
+            .send_response(&mut pipe.server, stream, &resp, true)
+            .unwrap();
+
+        pipe.advance(&mut buf).ok();
+
+        let ev = h3_cln.poll(&mut pipe.client).unwrap();
+        assert_eq!(ev, (stream, Event::Headers(resp.to_vec())));
     }
 }
 

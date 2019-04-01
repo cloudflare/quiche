@@ -2393,13 +2393,7 @@ pub(crate) mod testing {
     }
 
     impl Pipe {
-        pub fn new() -> Result<Pipe> {
-            let mut client_scid = [0; 16];
-            rand::rand_bytes(&mut client_scid[..]);
-
-            let mut server_scid = [0; 16];
-            rand::rand_bytes(&mut server_scid[..]);
-
+        pub fn default() -> Result<Pipe> {
             let mut config = Config::new(crate::VERSION_DRAFT18)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
@@ -2411,9 +2405,19 @@ pub(crate) mod testing {
             config.set_initial_max_streams_uni(3);
             config.verify_peer(false);
 
+            Pipe::with_config(&mut config)
+        }
+
+        pub fn with_config(config: &mut Config) -> Result<Pipe> {
+            let mut client_scid = [0; 16];
+            rand::rand_bytes(&mut client_scid[..]);
+
+            let mut server_scid = [0; 16];
+            rand::rand_bytes(&mut server_scid[..]);
+
             Ok(Pipe {
-                client: connect(Some("quic.tech"), &client_scid, &mut config)?,
-                server: accept(&server_scid, None, &mut config)?,
+                client: connect(Some("quic.tech"), &client_scid, config)?,
+                server: accept(&server_scid, None, config)?,
             })
         }
 
@@ -2705,7 +2709,7 @@ mod tests {
     fn handshake() {
         let mut buf = [0; 65535];
 
-        let mut pipe = testing::Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::default().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2761,7 +2765,7 @@ mod tests {
     fn stream() {
         let mut buf = [0; 65535];
 
-        let mut pipe = testing::Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::default().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2786,7 +2790,7 @@ mod tests {
     fn flow_control() {
         let mut buf = [0; 65535];
 
-        let mut pipe = testing::Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::default().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2816,7 +2820,7 @@ mod tests {
     fn stream_flow_control() {
         let mut buf = [0; 65535];
 
-        let mut pipe = testing::Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::default().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2836,7 +2840,7 @@ mod tests {
     fn stream_limit_bidi() {
         let mut buf = [0; 65535];
 
-        let mut pipe = testing::Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::default().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2882,7 +2886,7 @@ mod tests {
     fn stream_limit_uni() {
         let mut buf = [0; 65535];
 
-        let mut pipe = testing::Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::default().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2928,7 +2932,7 @@ mod tests {
     fn stream_data_overlap() {
         let mut buf = [0; 65535];
 
-        let mut pipe = testing::Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::default().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2959,7 +2963,7 @@ mod tests {
     fn stream_data_overlap_with_reordering() {
         let mut buf = [0; 65535];
 
-        let mut pipe = testing::Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::default().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -2990,7 +2994,7 @@ mod tests {
     fn reset_stream_flow_control() {
         let mut buf = [0; 65535];
 
-        let mut pipe = testing::Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::default().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
@@ -3025,7 +3029,7 @@ mod tests {
     fn path_challenge() {
         let mut buf = [0; 65535];
 
-        let mut pipe = testing::Pipe::new().unwrap();
+        let mut pipe = testing::Pipe::default().unwrap();
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
