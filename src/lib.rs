@@ -1952,11 +1952,6 @@ impl Connection {
         }
     }
 
-    /// Returns true if the connection is server-side.
-    pub(crate) fn is_server(&self) -> bool {
-        self.is_server
-    }
-
     /// Continues the handshake.
     ///
     /// If the connection is already established, it does nothing.

@@ -330,7 +330,7 @@ impl Connection {
     pub fn with_transport(
         conn: &mut super::Connection, config: &Config,
     ) -> Result<Connection> {
-        let mut http3_conn = Connection::new(config, conn.is_server())?;
+        let mut http3_conn = Connection::new(config, conn.is_server)?;
 
         http3_conn.send_settings(conn)?;
         http3_conn.open_qpack_streams(conn)?;
