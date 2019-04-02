@@ -34,7 +34,6 @@ use crate::crypto;
 use crate::octets;
 use crate::rand;
 use crate::ranges;
-use crate::recovery;
 use crate::stream;
 
 const FORM_BIT: u8 = 0x80;
@@ -57,8 +56,8 @@ pub const EPOCH_COUNT: usize = 3;
 /// Packet number space epoch.
 ///
 /// This should only ever be one of `EPOCH_INITIAL`, `EPOCH_HANDSHAKE` or
-/// `EPOCH_APPLICATION`, and can be used to index a specific packet number
-/// space from the `Connection`.
+/// `EPOCH_APPLICATION`, and can be used to index state specific to a packet
+/// number space in `Connection` and `Recovery`.
 pub type Epoch = usize;
 
 /// QUIC packet type.
@@ -637,8 +636,6 @@ pub struct PktNumSpace {
 
     pub recv_pkt_num: PktNumWindow,
 
-    pub flight: recovery::InFlight,
-
     pub do_ack: bool,
 
     pub crypto_level: crypto::Level,
@@ -662,8 +659,6 @@ impl PktNumSpace {
 
             recv_pkt_num: PktNumWindow::default(),
 
-            flight: recovery::InFlight::default(),
-
             do_ack: false,
 
             crypto_level,
@@ -676,9 +671,10 @@ impl PktNumSpace {
     }
 
     pub fn clear(&mut self) {
-        self.flight = recovery::InFlight::default();
         self.crypto_stream =
             stream::Stream::new(std::usize::MAX, std::usize::MAX);
+
+        self.do_ack = false;
     }
 
     pub fn overhead(&self) -> usize {
@@ -686,9 +682,7 @@ impl PktNumSpace {
     }
 
     pub fn ready(&self) -> bool {
-        self.crypto_stream.writable() ||
-            !self.flight.lost.is_empty() ||
-            self.do_ack
+        self.crypto_stream.writable() || self.do_ack
     }
 }
 

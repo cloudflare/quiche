@@ -487,9 +487,6 @@ pub struct Connection {
     /// Total number of sent packets.
     sent_count: usize,
 
-    /// Total number of lost packets.
-    lost_count: usize,
-
     /// Total number of bytes received from the peer.
     rx_data: usize,
 
@@ -677,7 +674,6 @@ impl Connection {
             application_protos: config.application_protos.clone(),
 
             sent_count: 0,
-            lost_count: 0,
 
             rx_data: 0,
             max_rx_data: max_rx_data as usize,
@@ -857,9 +853,7 @@ impl Connection {
 
             // Reset connection state to force sending another Initial packet.
             self.got_peer_conn_id = false;
-            self.recovery.drop_unacked_data(
-                &mut self.pkt_num_spaces[packet::EPOCH_INITIAL].flight,
-            );
+            self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
             self.tls_state.clear().map_err(|_| Error::TlsFail)?;
 
@@ -903,9 +897,7 @@ impl Connection {
 
             // Reset connection state to force sending another Initial packet.
             self.got_peer_conn_id = false;
-            self.recovery.drop_unacked_data(
-                &mut self.pkt_num_spaces[packet::EPOCH_INITIAL].flight,
-            );
+            self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
             self.tls_state.clear().map_err(|_| Error::TlsFail)?;
 
@@ -1046,7 +1038,7 @@ impl Connection {
                     self.recovery.on_ack_received(
                         &ranges,
                         ack_delay,
-                        &mut self.pkt_num_spaces[epoch].flight,
+                        epoch,
                         now,
                         &self.trace_id,
                     );
@@ -1241,7 +1233,7 @@ impl Connection {
         }
 
         // Process ACK'd frames.
-        for acked in self.pkt_num_spaces[epoch].flight.acked.drain(..) {
+        for acked in self.recovery.acked[epoch].drain(..) {
             match acked {
                 // Stop acknowledging packets less than or equal to the
                 // largest acknowledged in the sent ACK frame that, in
@@ -1349,8 +1341,10 @@ impl Connection {
         let pkt_type = packet::Type::from_epoch(epoch);
 
         // Process lost frames.
-        for lost in self.pkt_num_spaces[epoch].flight.lost.drain(..) {
+        for lost in self.recovery.lost[epoch].drain(..) {
             match lost {
+                // TODO: avoid spurious retransmission for CRYPTO data that
+                // was already ACK'd.
                 frame::Frame::Crypto { data } => {
                     self.pkt_num_spaces[epoch].crypto_stream.send.push(data)?;
                 },
@@ -1373,11 +1367,6 @@ impl Connection {
                 _ => (),
             }
         }
-
-        // Update global lost packets counter. This prevents us from losing
-        // information when the Initial state is dropped.
-        self.lost_count += self.pkt_num_spaces[epoch].flight.lost_count;
-        self.pkt_num_spaces[epoch].flight.lost_count = 0;
 
         // Calculate available space in the packet based on congestion window.
         let mut left = cmp::min(self.recovery.cwnd(), b.cap());
@@ -1712,12 +1701,8 @@ impl Connection {
             is_crypto,
         };
 
-        self.recovery.on_packet_sent(
-            sent_pkt,
-            &mut self.pkt_num_spaces[epoch].flight,
-            now,
-            &self.trace_id,
-        );
+        self.recovery
+            .on_packet_sent(sent_pkt, epoch, now, &self.trace_id);
 
         self.pkt_num_spaces[epoch].next_pkt_num += 1;
 
@@ -1885,11 +1870,7 @@ impl Connection {
         {
             trace!("{} loss detection timeout expired", self.trace_id);
 
-            self.recovery.on_loss_detection_timer(
-                &mut self.pkt_num_spaces,
-                now,
-                &self.trace_id,
-            );
+            self.recovery.on_loss_detection_timeout(now, &self.trace_id);
 
             return;
         }
@@ -1966,7 +1947,7 @@ impl Connection {
     pub fn stats(&self) -> Stats {
         Stats {
             sent: self.sent_count,
-            lost: self.lost_count,
+            lost: self.recovery.lost_count,
             rtt: self.recovery.rtt(),
         }
     }
@@ -2054,7 +2035,13 @@ impl Connection {
                 continue;
             }
 
+            // We are ready to send data for this packet number space.
             if self.pkt_num_spaces[epoch].ready() {
+                return Ok(epoch);
+            }
+
+            // There are lost frames in this packet number space.
+            if !self.recovery.lost[epoch].is_empty() {
                 return Ok(epoch);
             }
         }
@@ -2078,12 +2065,10 @@ impl Connection {
             return;
         }
 
-        self.recovery.drop_unacked_data(
-            &mut self.pkt_num_spaces[packet::EPOCH_INITIAL].flight,
-        );
         self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open = None;
         self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_seal = None;
         self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
+        self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
 
         trace!("{} dropped initial state", self.trace_id);
     }
