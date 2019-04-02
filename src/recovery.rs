@@ -33,6 +33,7 @@ use std::time::Instant;
 use std::collections::BTreeMap;
 
 use crate::frame;
+use crate::packet;
 use crate::ranges;
 
 // Loss Recovery
@@ -305,25 +306,35 @@ impl Recovery {
     }
 
     pub fn on_loss_detection_timer(
-        &mut self, in_flight: &mut InFlight, hs_flight: &mut InFlight,
-        flight: &mut InFlight, now: Instant, trace_id: &str,
+        &mut self, pkt_num_spaces: &mut [packet::PktNumSpace], now: Instant,
+        trace_id: &str,
     ) {
         if self.crypto_bytes_in_flight > 0 {
             self.crypto_count += 1;
 
-            let unacked_bytes = in_flight.retransmit_unacked_crypto(trace_id);
+            let unacked_bytes = pkt_num_spaces[packet::EPOCH_INITIAL]
+                .flight
+                .retransmit_unacked_crypto(trace_id);
             self.crypto_bytes_in_flight -= unacked_bytes;
             self.bytes_in_flight -= unacked_bytes;
 
-            let unacked_bytes = hs_flight.retransmit_unacked_crypto(trace_id);
+            let unacked_bytes = pkt_num_spaces[packet::EPOCH_HANDSHAKE]
+                .flight
+                .retransmit_unacked_crypto(trace_id);
             self.crypto_bytes_in_flight -= unacked_bytes;
             self.bytes_in_flight -= unacked_bytes;
 
-            let unacked_bytes = flight.retransmit_unacked_crypto(trace_id);
+            let unacked_bytes = pkt_num_spaces[packet::EPOCH_APPLICATION]
+                .flight
+                .retransmit_unacked_crypto(trace_id);
             self.crypto_bytes_in_flight -= unacked_bytes;
             self.bytes_in_flight -= unacked_bytes;
         } else if self.loss_time.is_some() {
-            self.detect_lost_packets(flight, now, trace_id);
+            self.detect_lost_packets(
+                &mut pkt_num_spaces[packet::EPOCH_APPLICATION].flight,
+                now,
+                trace_id,
+            );
         } else {
             self.pto_count += 1;
             self.probes = 2;

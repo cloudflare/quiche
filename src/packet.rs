@@ -49,6 +49,18 @@ pub const MAX_CID_LEN: u8 = 18;
 const MAX_PKT_NUM_LEN: usize = 4;
 const SAMPLE_LEN: usize = 16;
 
+pub const EPOCH_INITIAL: usize = 0;
+pub const EPOCH_HANDSHAKE: usize = 1;
+pub const EPOCH_APPLICATION: usize = 2;
+pub const EPOCH_COUNT: usize = 3;
+
+/// Packet number space epoch.
+///
+/// This should only ever be one of `EPOCH_INITIAL`, `EPOCH_HANDSHAKE` or
+/// `EPOCH_APPLICATION`, and can be used to index a specific packet number
+/// space from the `Connection`.
+pub type Epoch = usize;
+
 /// QUIC packet type.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Type {
@@ -58,6 +70,34 @@ pub enum Type {
     ZeroRTT,
     VersionNegotiation,
     Application,
+}
+
+impl Type {
+    pub fn from_epoch(e: Epoch) -> Type {
+        match e {
+            EPOCH_INITIAL => Type::Initial,
+
+            EPOCH_HANDSHAKE => Type::Handshake,
+
+            EPOCH_APPLICATION => Type::Application,
+
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn to_epoch(self) -> Result<Epoch> {
+        match self {
+            Type::Initial => Ok(EPOCH_INITIAL),
+
+            Type::ZeroRTT => Ok(EPOCH_APPLICATION),
+
+            Type::Handshake => Ok(EPOCH_HANDSHAKE),
+
+            Type::Application => Ok(EPOCH_APPLICATION),
+
+            _ => Err(Error::InvalidPacket),
+        }
+    }
 }
 
 /// A QUIC packet's header.

@@ -466,14 +466,8 @@ pub struct Connection {
     /// Unique opaque ID for the connection that can be used for logging.
     trace_id: String,
 
-    /// Initial packets number space.
-    initial: packet::PktNumSpace,
-
-    /// Handshake packets number space.
-    handshake: packet::PktNumSpace,
-
-    /// 0-RTT/1-RTT packets number space.
-    application: packet::PktNumSpace,
+    /// Packet number spaces.
+    pkt_num_spaces: [packet::PktNumSpace; packet::EPOCH_COUNT],
 
     /// Peer's transport parameters.
     peer_transport_params: TransportParams,
@@ -666,9 +660,11 @@ impl Connection {
 
             trace_id: scid_as_hex.join(""),
 
-            initial: packet::PktNumSpace::new(crypto::Level::Initial),
-            handshake: packet::PktNumSpace::new(crypto::Level::Handshake),
-            application: packet::PktNumSpace::new(crypto::Level::Application),
+            pkt_num_spaces: [
+                packet::PktNumSpace::new(crypto::Level::Initial),
+                packet::PktNumSpace::new(crypto::Level::Handshake),
+                packet::PktNumSpace::new(crypto::Level::Application),
+            ],
 
             peer_transport_params: TransportParams::default(),
 
@@ -755,8 +751,10 @@ impl Connection {
 
             conn.dcid.extend_from_slice(&dcid);
 
-            conn.initial.crypto_open = Some(aead_open);
-            conn.initial.crypto_seal = Some(aead_seal);
+            conn.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
+                Some(aead_open);
+            conn.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_seal =
+                Some(aead_seal);
 
             conn.derived_initial_secrets = true;
         }
@@ -859,8 +857,10 @@ impl Connection {
 
             // Reset connection state to force sending another Initial packet.
             self.got_peer_conn_id = false;
-            self.recovery.drop_unacked_data(&mut self.initial.flight);
-            self.initial.clear();
+            self.recovery.drop_unacked_data(
+                &mut self.pkt_num_spaces[packet::EPOCH_INITIAL].flight,
+            );
+            self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
             self.tls_state.clear().map_err(|_| Error::TlsFail)?;
 
             return Err(Error::Done);
@@ -896,13 +896,17 @@ impl Connection {
             let (aead_open, aead_seal) =
                 crypto::derive_initial_key_material(&hdr.scid, self.is_server)?;
 
-            self.initial.crypto_open = Some(aead_open);
-            self.initial.crypto_seal = Some(aead_seal);
+            self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
+                Some(aead_open);
+            self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_seal =
+                Some(aead_seal);
 
             // Reset connection state to force sending another Initial packet.
             self.got_peer_conn_id = false;
-            self.recovery.drop_unacked_data(&mut self.initial.flight);
-            self.initial.clear();
+            self.recovery.drop_unacked_data(
+                &mut self.pkt_num_spaces[packet::EPOCH_INITIAL].flight,
+            );
+            self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
             self.tls_state.clear().map_err(|_| Error::TlsFail)?;
 
             return Err(Error::Done);
@@ -938,8 +942,10 @@ impl Connection {
             let (aead_open, aead_seal) =
                 crypto::derive_initial_key_material(&hdr.dcid, self.is_server)?;
 
-            self.initial.crypto_open = Some(aead_open);
-            self.initial.crypto_seal = Some(aead_seal);
+            self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
+                Some(aead_open);
+            self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_seal =
+                Some(aead_seal);
 
             self.derived_initial_secrets = true;
 
@@ -947,18 +953,10 @@ impl Connection {
             self.got_peer_conn_id = true;
         }
 
-        // Select packet number space context based on the input packet type.
-        let space = match hdr.ty {
-            packet::Type::Initial => &mut self.initial,
+        // Select packet number space epoch based on the received packet's type.
+        let epoch = hdr.ty.to_epoch()?;
 
-            packet::Type::Handshake => &mut self.handshake,
-
-            packet::Type::Application => &mut self.application,
-
-            _ => return Err(Error::InvalidPacket),
-        };
-
-        let aead = match space.crypto_open {
+        let aead = match self.pkt_num_spaces[epoch].crypto_open {
             Some(ref v) => v,
 
             None => {
@@ -976,7 +974,7 @@ impl Connection {
         packet::decrypt_hdr(&mut b, &mut hdr, &aead)?;
 
         let pn = packet::decode_pkt_num(
-            space.largest_rx_pkt_num,
+            self.pkt_num_spaces[epoch].largest_rx_pkt_num,
             hdr.pkt_num,
             hdr.pkt_num_len,
         );
@@ -1016,7 +1014,7 @@ impl Connection {
             Err(e) => return Err(e),
         };
 
-        if space.recv_pkt_num.contains(pn) {
+        if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
             return Err(Error::Done);
         }
@@ -1048,7 +1046,7 @@ impl Connection {
                     self.recovery.on_ack_received(
                         &ranges,
                         ack_delay,
-                        &mut space.flight,
+                        &mut self.pkt_num_spaces[epoch].flight,
                         now,
                         &self.trace_id,
                     );
@@ -1106,17 +1104,17 @@ impl Connection {
 
                 frame::Frame::Crypto { data } => {
                     // Push the data to the stream so it can be re-ordered.
-                    space.crypto_stream.recv.push(data)?;
+                    self.pkt_num_spaces[epoch].crypto_stream.recv.push(data)?;
 
                     // Feed crypto data to the TLS state, if there's data
                     // available at the expected offset.
                     let mut crypto_buf = [0; 512];
 
-                    let level = space.crypto_level;
+                    let level = self.pkt_num_spaces[epoch].crypto_level;
 
-                    while let Ok((read, _)) =
-                        space.crypto_stream.recv.pop(&mut crypto_buf)
-                    {
+                    let stream = &mut self.pkt_num_spaces[epoch].crypto_stream;
+
+                    while let Ok((read, _)) = stream.recv.pop(&mut crypto_buf) {
                         let recv_buf = &crypto_buf[..read];
                         self.tls_state
                             .provide_data(level, &recv_buf)
@@ -1243,14 +1241,16 @@ impl Connection {
         }
 
         // Process ACK'd frames.
-        for acked in space.flight.acked.drain(..) {
+        for acked in self.pkt_num_spaces[epoch].flight.acked.drain(..) {
             match acked {
                 // Stop acknowledging packets less than or equal to the
                 // largest acknowledged in the sent ACK frame that, in
                 // turn, got ACK'd.
                 frame::Frame::ACK { ranges, .. } => {
                     let largest_acked = ranges.largest().unwrap();
-                    space.recv_pkt_need_ack.remove_until(largest_acked);
+                    self.pkt_num_spaces[epoch]
+                        .recv_pkt_need_ack
+                        .remove_until(largest_acked);
                 },
 
                 // This does nothing. It's here to avoid a warning.
@@ -1262,16 +1262,18 @@ impl Connection {
 
         // We only record the time of arrival of the largest packet number
         // that still needs to be ACK'd, to be used for ACK delay calculation.
-        if space.recv_pkt_need_ack.largest() < Some(pn) {
-            space.largest_rx_pkt_time = now;
+        if self.pkt_num_spaces[epoch].recv_pkt_need_ack.largest() < Some(pn) {
+            self.pkt_num_spaces[epoch].largest_rx_pkt_time = now;
         }
 
-        space.recv_pkt_num.insert(pn);
+        self.pkt_num_spaces[epoch].recv_pkt_num.insert(pn);
 
-        space.recv_pkt_need_ack.push_item(pn);
-        space.do_ack = cmp::max(space.do_ack, do_ack);
+        self.pkt_num_spaces[epoch].recv_pkt_need_ack.push_item(pn);
+        self.pkt_num_spaces[epoch].do_ack =
+            cmp::max(self.pkt_num_spaces[epoch].do_ack, do_ack);
 
-        space.largest_rx_pkt_num = cmp::max(space.largest_rx_pkt_num, pn);
+        self.pkt_num_spaces[epoch].largest_rx_pkt_num =
+            cmp::max(self.pkt_num_spaces[epoch].largest_rx_pkt_num, pn);
 
         self.idle_timer = Some(
             now + time::Duration::from_secs(
@@ -1342,23 +1344,15 @@ impl Connection {
 
         let mut b = octets::Octets::with_slice(&mut out[..avail]);
 
-        let pkt_type = self.select_egress_pkt_type()?;
+        let epoch = self.write_epoch()?;
 
-        let space = match pkt_type {
-            packet::Type::Initial => &mut self.initial,
-
-            packet::Type::Handshake => &mut self.handshake,
-
-            packet::Type::Application => &mut self.application,
-
-            _ => unreachable!(),
-        };
+        let pkt_type = packet::Type::from_epoch(epoch);
 
         // Process lost frames.
-        for lost in space.flight.lost.drain(..) {
+        for lost in self.pkt_num_spaces[epoch].flight.lost.drain(..) {
             match lost {
                 frame::Frame::Crypto { data } => {
-                    space.crypto_stream.send.push(data)?;
+                    self.pkt_num_spaces[epoch].crypto_stream.send.push(data)?;
                 },
 
                 frame::Frame::Stream { stream_id, data } => {
@@ -1373,7 +1367,7 @@ impl Connection {
                 },
 
                 frame::Frame::ACK { .. } => {
-                    space.do_ack = true;
+                    self.pkt_num_spaces[epoch].do_ack = true;
                 },
 
                 _ => (),
@@ -1382,8 +1376,8 @@ impl Connection {
 
         // Update global lost packets counter. This prevents us from losing
         // information when the Initial state is dropped.
-        self.lost_count += space.flight.lost_count;
-        space.flight.lost_count = 0;
+        self.lost_count += self.pkt_num_spaces[epoch].flight.lost_count;
+        self.pkt_num_spaces[epoch].flight.lost_count = 0;
 
         // Calculate available space in the packet based on congestion window.
         let mut left = cmp::min(self.recovery.cwnd(), b.cap());
@@ -1394,8 +1388,11 @@ impl Connection {
             left = cmp::min(left, self.max_send_bytes);
         }
 
-        let pn = space.next_pkt_num;
+        let pn = self.pkt_num_spaces[epoch].next_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
+
+        // The AEAD overhead at the current encryption level.
+        let overhead = self.pkt_num_spaces[epoch].overhead();
 
         let hdr = Header {
             ty: pkt_type,
@@ -1416,7 +1413,7 @@ impl Connection {
         // length, the packet number and the AEAD overhead. We assume that
         // the payload length can always be encoded with a 2-byte varint.
         left = left
-            .checked_sub(b.off() + 2 + pn_len + space.overhead())
+            .checked_sub(b.off() + 2 + pn_len + overhead)
             .ok_or(Error::Done)?;
 
         let mut frames: Vec<frame::Frame> = Vec::new();
@@ -1427,8 +1424,9 @@ impl Connection {
         let mut payload_len = 0;
 
         // Create ACK frame.
-        if space.do_ack {
-            let ack_delay = space.largest_rx_pkt_time.elapsed();
+        if self.pkt_num_spaces[epoch].do_ack {
+            let ack_delay =
+                self.pkt_num_spaces[epoch].largest_rx_pkt_time.elapsed();
 
             let ack_delay = ack_delay.as_micros() as u64 /
                 2_u64
@@ -1436,11 +1434,11 @@ impl Connection {
 
             let frame = frame::Frame::ACK {
                 ack_delay,
-                ranges: space.recv_pkt_need_ack.clone(),
+                ranges: self.pkt_num_spaces[epoch].recv_pkt_need_ack.clone(),
             };
 
             if frame.wire_len() <= left {
-                space.do_ack = false;
+                self.pkt_num_spaces[epoch].do_ack = false;
 
                 payload_len += frame.wire_len();
                 left -= frame.wire_len();
@@ -1559,9 +1557,12 @@ impl Connection {
         }
 
         // Create CRYPTO frame.
-        if space.crypto_stream.writable() && !is_closing {
+        if self.pkt_num_spaces[epoch].crypto_stream.writable() && !is_closing {
             let crypto_len = left - frame::MAX_CRYPTO_OVERHEAD;
-            let crypto_buf = space.crypto_stream.send.pop(crypto_len)?;
+            let crypto_buf = self.pkt_num_spaces[epoch]
+                .crypto_stream
+                .send
+                .pop(crypto_len)?;
 
             let frame = frame::Frame::Crypto { data: crypto_buf };
 
@@ -1619,7 +1620,7 @@ impl Connection {
 
         // Pad the client's initial packet.
         if !self.is_server && pkt_type == packet::Type::Initial {
-            let pkt_len = pn_len + payload_len + space.overhead();
+            let pkt_len = pn_len + payload_len + overhead;
 
             let frame = frame::Frame::Padding {
                 len: cmp::min(CLIENT_INITIAL_MIN_LEN - pkt_len, left),
@@ -1641,7 +1642,7 @@ impl Connection {
             frames.push(frame);
         }
 
-        payload_len += space.overhead();
+        payload_len += overhead;
 
         // Only long header packets have an explicit length field.
         if pkt_type != packet::Type::Application {
@@ -1668,7 +1669,7 @@ impl Connection {
             frame.to_bytes(&mut b)?;
         }
 
-        let aead = match space.crypto_seal {
+        let aead = match self.pkt_num_spaces[epoch].crypto_seal {
             Some(ref v) => v,
             None => return Err(Error::InvalidState),
         };
@@ -1693,12 +1694,12 @@ impl Connection {
 
         self.recovery.on_packet_sent(
             sent_pkt,
-            &mut space.flight,
+            &mut self.pkt_num_spaces[epoch].flight,
             now,
             &self.trace_id,
         );
 
-        space.next_pkt_num += 1;
+        self.pkt_num_spaces[epoch].next_pkt_num += 1;
 
         self.sent_count += 1;
 
@@ -1865,9 +1866,7 @@ impl Connection {
             trace!("{} loss detection timeout expired", self.trace_id);
 
             self.recovery.on_loss_detection_timer(
-                &mut self.initial.flight,
-                &mut self.handshake.flight,
-                &mut self.application.flight,
+                &mut self.pkt_num_spaces,
                 now,
                 &self.trace_id,
             );
@@ -2014,46 +2013,57 @@ impl Connection {
         Ok(())
     }
 
-    /// Selects the type for the outgoing packet depending on whether there is
-    /// handshake data to send, whether there are packets to ACK, or whether
-    /// there are streams that can be written or that needs to increase flow
-    /// control credit.
-    fn select_egress_pkt_type(&self) -> Result<Type> {
-        let ty =
-            // On error or probe, send packet in the latest space available.
-            if self.error.is_some() || self.recovery.probes > 0 {
-                match self.tls_state.get_write_level() {
-                    crypto::Level::Initial     => Type::Initial,
-                    crypto::Level::ZeroRTT     => unreachable!(),
-                    crypto::Level::Handshake   => Type::Handshake,
-                    crypto::Level::Application => Type::Application,
-                }
-            } else if self.initial.ready() {
-                Type::Initial
-            } else if self.handshake.ready() {
-                Type::Handshake
-            } else if self.handshake_completed &&
-                      (self.application.ready() ||
-                       self.streams.has_writable() ||
-                       self.streams.has_out_of_credit()) {
-                Type::Application
-            } else {
-                return Err(Error::Done);
+    /// Selects the packet number space for outgoing packets.
+    fn write_epoch(&self) -> Result<packet::Epoch> {
+        // On error or probe, send packet in the latest space available.
+        if self.error.is_some() || self.recovery.probes > 0 {
+            let epoch = match self.tls_state.get_write_level() {
+                crypto::Level::Initial => packet::EPOCH_INITIAL,
+                crypto::Level::ZeroRTT => unreachable!(),
+                crypto::Level::Handshake => packet::EPOCH_HANDSHAKE,
+                crypto::Level::Application => packet::EPOCH_APPLICATION,
             };
 
-        Ok(ty)
+            return Ok(epoch);
+        }
+
+        for epoch in packet::EPOCH_INITIAL..packet::EPOCH_COUNT {
+            // Only use application packet number space when handshake is
+            // complete.
+            if epoch == packet::EPOCH_APPLICATION && !self.handshake_completed {
+                continue;
+            }
+
+            if self.pkt_num_spaces[epoch].ready() {
+                return Ok(epoch);
+            }
+        }
+
+        // If there are writable streams, use Application.
+        if self.handshake_completed &&
+            (self.streams.has_writable() || self.streams.has_out_of_credit())
+        {
+            return Ok(packet::EPOCH_APPLICATION);
+        }
+
+        Err(Error::Done)
     }
 
     /// Drops the initial keys and recovery state.
     fn drop_initial_state(&mut self) {
-        if self.initial.crypto_open.is_none() {
+        if self.pkt_num_spaces[packet::EPOCH_INITIAL]
+            .crypto_open
+            .is_none()
+        {
             return;
         }
 
-        self.recovery.drop_unacked_data(&mut self.initial.flight);
-        self.initial.crypto_open = None;
-        self.initial.crypto_seal = None;
-        self.initial.clear();
+        self.recovery.drop_unacked_data(
+            &mut self.pkt_num_spaces[packet::EPOCH_INITIAL].flight,
+        );
+        self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open = None;
+        self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_seal = None;
+        self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
 
         trace!("{} dropped initial state", self.trace_id);
     }
@@ -2542,15 +2552,9 @@ pub(crate) mod testing {
     ) -> Result<usize> {
         let mut b = octets::Octets::with_slice(buf);
 
-        let space = match pkt_type {
-            packet::Type::Initial => &mut conn.initial,
+        let epoch = pkt_type.to_epoch()?;
 
-            packet::Type::Handshake => &mut conn.handshake,
-
-            packet::Type::Application => &mut conn.application,
-
-            _ => return Err(Error::InvalidPacket),
-        };
+        let space = &mut conn.pkt_num_spaces[epoch];
 
         let pn = space.next_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
@@ -2612,14 +2616,16 @@ pub(crate) mod testing {
 
         let mut hdr = Header::from_bytes(&mut b, conn.scid.len()).unwrap();
 
-        let aead = conn.application.crypto_open.as_ref().unwrap();
+        let epoch = hdr.ty.to_epoch()?;
+
+        let aead = conn.pkt_num_spaces[epoch].crypto_open.as_ref().unwrap();
 
         let payload_len = b.cap();
 
         packet::decrypt_hdr(&mut b, &mut hdr, &aead).unwrap();
 
         let pn = packet::decode_pkt_num(
-            conn.application.largest_rx_pkt_num,
+            conn.pkt_num_spaces[epoch].largest_rx_pkt_num,
             hdr.pkt_num,
             hdr.pkt_num_len,
         );
@@ -3038,9 +3044,12 @@ mod tests {
         }];
 
         let pkt_type = packet::Type::Application;
+
         let len = pipe
             .send_pkt_to_server(pkt_type, &frames, &mut buf)
             .unwrap();
+
+        assert!(len > 0);
 
         let frames =
             testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();

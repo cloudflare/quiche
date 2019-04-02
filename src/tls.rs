@@ -45,6 +45,7 @@ use crate::TransportParams;
 
 use crate::crypto;
 use crate::octets;
+use crate::packet;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -402,11 +403,13 @@ extern fn set_encryption_secrets(
     );
 
     let space = match level {
-        crypto::Level::Initial => &mut conn.initial,
+        crypto::Level::Initial => &mut conn.pkt_num_spaces[packet::EPOCH_INITIAL],
         // TODO: implement 0-RTT
         crypto::Level::ZeroRTT => unimplemented!("0-RTT"),
-        crypto::Level::Handshake => &mut conn.handshake,
-        crypto::Level::Application => &mut conn.application,
+        crypto::Level::Handshake =>
+            &mut conn.pkt_num_spaces[packet::EPOCH_HANDSHAKE],
+        crypto::Level::Application =>
+            &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
     };
 
     let aead = match get_cipher_from_ptr(ssl) {
@@ -485,10 +488,12 @@ extern fn add_handshake_data(
     let buf = unsafe { slice::from_raw_parts(data, len) };
 
     let space = match level {
-        crypto::Level::Initial => &mut conn.initial,
+        crypto::Level::Initial => &mut conn.pkt_num_spaces[packet::EPOCH_INITIAL],
         crypto::Level::ZeroRTT => unreachable!(),
-        crypto::Level::Handshake => &mut conn.handshake,
-        crypto::Level::Application => &mut conn.application,
+        crypto::Level::Handshake =>
+            &mut conn.pkt_num_spaces[packet::EPOCH_HANDSHAKE],
+        crypto::Level::Application =>
+            &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
     };
 
     if space.crypto_stream.send.push_slice(buf, false).is_err() {
