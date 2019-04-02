@@ -36,7 +36,7 @@ use crate::stream;
 pub const MAX_CRYPTO_OVERHEAD: usize = 8;
 pub const MAX_STREAM_OVERHEAD: usize = 12;
 
-#[derive(PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Frame {
     Padding {
         len: usize,

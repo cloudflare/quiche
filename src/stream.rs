@@ -498,7 +498,7 @@ impl SendBuf {
 }
 
 /// Buffer holding data at a specific offset.
-#[derive(Debug, Default, Eq)]
+#[derive(Clone, Debug, Default, Eq)]
 pub struct RangeBuf {
     data: Vec<u8>,
     off: usize,
