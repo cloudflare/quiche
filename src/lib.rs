@@ -1730,7 +1730,13 @@ impl Connection {
     pub fn stream_recv(
         &mut self, stream_id: u64, out: &mut [u8],
     ) -> Result<(usize, bool)> {
-        // TODO: test !is_bidi && is_local
+        // We can't read on our own unidirectional streams.
+        if !stream::is_bidi(stream_id) &&
+            stream::is_local(stream_id, self.is_server)
+        {
+            return Err(Error::InvalidStreamState);
+        }
+
 
         let stream = match self.streams.get_mut(stream_id) {
             Some(v) => v,
