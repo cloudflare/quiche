@@ -391,6 +391,7 @@ pub struct SendBuf {
     off: usize,
     len: usize,
     max_len: usize,
+    off_ack: usize,
 }
 
 impl SendBuf {
@@ -427,6 +428,11 @@ impl SendBuf {
     }
 
     pub fn push(&mut self, buf: RangeBuf) -> Result<()> {
+        // Don't queue data that was already fully ACK'd.
+        if self.off_ack >= buf.max_off() {
+            return Ok(());
+        }
+
         self.len += buf.len();
 
         self.data.push(buf);
@@ -477,6 +483,15 @@ impl SendBuf {
 
     pub fn update_max_len(&mut self, max_len: usize) {
         self.max_len = cmp::max(self.max_len, max_len);
+    }
+
+    pub fn ack(&mut self, off: usize, len: usize) {
+        // Keep track of the highest contiguosly ACK'd offset. This can be
+        // used to avoid spurious retransmissions of data that has already
+        // been ACK'd.
+        if self.off_ack == off {
+            self.off_ack += len;
+        }
     }
 
     fn ready(&self) -> bool {

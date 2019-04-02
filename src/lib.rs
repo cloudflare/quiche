@@ -1245,8 +1245,21 @@ impl Connection {
                         .remove_until(largest_acked);
                 },
 
-                // This does nothing. It's here to avoid a warning.
-                frame::Frame::Ping => (),
+                frame::Frame::Crypto { data } => {
+                    self.pkt_num_spaces[epoch]
+                        .crypto_stream
+                        .send
+                        .ack(data.off(), data.len());
+                },
+
+                frame::Frame::Stream { stream_id, data } => {
+                    let stream = match self.streams.get_mut(stream_id) {
+                        Some(v) => v,
+                        None => continue,
+                    };
+
+                    stream.send.ack(data.off(), data.len());
+                },
 
                 _ => (),
             }
@@ -1343,8 +1356,6 @@ impl Connection {
         // Process lost frames.
         for lost in self.recovery.lost[epoch].drain(..) {
             match lost {
-                // TODO: avoid spurious retransmission for CRYPTO data that
-                // was already ACK'd.
                 frame::Frame::Crypto { data } => {
                     self.pkt_num_spaces[epoch].crypto_stream.send.push(data)?;
                 },
