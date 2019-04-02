@@ -1737,7 +1737,6 @@ impl Connection {
             return Err(Error::InvalidStreamState);
         }
 
-
         let stream = match self.streams.get_mut(stream_id) {
             Some(v) => v,
             None => return Err(Error::InvalidStreamState),
