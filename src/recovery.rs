@@ -53,35 +53,19 @@ const PERSISTENT_CONGESTION_THRESHOLD: u32 = 2;
 
 #[derive(Debug)]
 pub struct Sent {
-    pkt_num: u64,
+    pub pkt_num: u64,
 
     pub frames: Vec<frame::Frame>,
 
-    time: Instant,
+    pub time: Instant,
 
-    size: usize,
+    pub size: usize,
 
-    ack_eliciting: bool,
+    pub ack_eliciting: bool,
 
-    is_crypto: bool,
-}
+    pub in_flight: bool,
 
-impl Sent {
-    pub fn new(
-        pkt_num: u64, frames: Vec<frame::Frame>, sent_bytes: usize,
-        ack_eliciting: bool, is_crypto: bool, now: Instant,
-    ) -> Sent {
-        let sent_bytes = if ack_eliciting { sent_bytes } else { 0 };
-
-        Sent {
-            pkt_num,
-            frames,
-            time: now,
-            size: sent_bytes,
-            ack_eliciting,
-            is_crypto,
-        }
-    }
+    pub is_crypto: bool,
 }
 
 pub struct InFlight {
@@ -241,6 +225,7 @@ impl Recovery {
     ) {
         let pkt_num = pkt.pkt_num;
         let ack_eliciting = pkt.ack_eliciting;
+        let in_flight = pkt.in_flight;
         let is_crypto = pkt.is_crypto;
         let sent_bytes = pkt.size;
 
@@ -248,14 +233,16 @@ impl Recovery {
 
         flight.sent.insert(pkt_num, pkt);
 
-        if ack_eliciting {
+        if in_flight {
             if is_crypto {
                 self.time_of_last_sent_crypto_pkt = now;
 
                 self.crypto_bytes_in_flight += sent_bytes;
             }
 
-            self.time_of_last_sent_ack_eliciting_pkt = now;
+            if ack_eliciting {
+                self.time_of_last_sent_ack_eliciting_pkt = now;
+            }
 
             // OnPacketSentCC
             self.bytes_in_flight += sent_bytes;
@@ -454,7 +441,7 @@ impl Recovery {
 
         for (_, unacked) in flight.sent.range(..=largest_acked) {
             if unacked.time <= lost_send_time || unacked.pkt_num <= lost_pkt_num {
-                if unacked.ack_eliciting {
+                if unacked.in_flight {
                     trace!("{} packet lost {}", trace_id, unacked.pkt_num);
                 }
 
@@ -501,8 +488,10 @@ impl Recovery {
                 }
 
                 if self.cwnd < self.ssthresh {
+                    // Slow start.
                     self.cwnd += p.size;
                 } else {
+                    // Congestion avoidance.
                     self.cwnd += (MAX_DATAGRAM_SIZE * p.size) / self.cwnd;
                 }
             }
@@ -518,8 +507,8 @@ impl Recovery {
         &mut self, lost_pkt: Vec<u64>, flight: &mut InFlight, now: Instant,
     ) {
         // Differently from OnPacketsLost(), we need to handle both
-        // ACK-eliciting and non-ACK-eliciting packets, so need to keep of
-        // whether we saw any lost ACK-eliciting packet to trigger the
+        // in-flight and non-in-flight packets, so need to keep track
+        // of whether we saw any lost in-flight packet to trigger the
         // congestion event later.
         let mut largest_lost_pkt_sent_time: Option<Instant> = None;
 
@@ -528,7 +517,7 @@ impl Recovery {
 
             flight.lost_count += 1;
 
-            if !p.ack_eliciting {
+            if !p.in_flight {
                 continue;
             }
 

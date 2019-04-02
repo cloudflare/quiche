@@ -1419,6 +1419,7 @@ impl Connection {
         let mut frames: Vec<frame::Frame> = Vec::new();
 
         let mut ack_eliciting = false;
+        let mut in_flight = false;
         let mut is_crypto = false;
 
         let mut payload_len = 0;
@@ -1467,6 +1468,7 @@ impl Connection {
                 frames.push(frame);
 
                 ack_eliciting = true;
+                in_flight = true;
             }
         }
 
@@ -1492,6 +1494,7 @@ impl Connection {
                 frames.push(frame);
 
                 ack_eliciting = true;
+                in_flight = true;
             }
         }
 
@@ -1507,6 +1510,7 @@ impl Connection {
             self.recovery.probes -= 1;
 
             ack_eliciting = true;
+            in_flight = true;
         }
 
         // Create CONNECTION_CLOSE frame.
@@ -1524,6 +1528,9 @@ impl Connection {
 
             self.draining = true;
             self.draining_timer = Some(now + (self.recovery.pto() * 3));
+
+            ack_eliciting = true;
+            in_flight = true;
         }
 
         // Create APPLICAtiON_CLOSE frame.
@@ -1540,6 +1547,9 @@ impl Connection {
 
             self.draining = true;
             self.draining_timer = Some(now + (self.recovery.pto() * 3));
+
+            ack_eliciting = true;
+            in_flight = true;
         }
 
         // Create PATH_RESPONSE frame.
@@ -1554,6 +1564,9 @@ impl Connection {
             frames.push(frame);
 
             self.challenge = None;
+
+            ack_eliciting = true;
+            in_flight = true;
         }
 
         // Create CRYPTO frame.
@@ -1572,6 +1585,7 @@ impl Connection {
             frames.push(frame);
 
             ack_eliciting = true;
+            in_flight = true;
             is_crypto = true;
         }
 
@@ -1610,6 +1624,7 @@ impl Connection {
                 frames.push(frame);
 
                 ack_eliciting = true;
+                in_flight = true;
                 break;
             }
         }
@@ -1629,6 +1644,8 @@ impl Connection {
             payload_len += frame.wire_len();
 
             frames.push(frame);
+
+            in_flight = true;
         }
 
         // Pad payload so that it's always at least 4 bytes.
@@ -1640,6 +1657,8 @@ impl Connection {
             payload_len += frame.wire_len();
 
             frames.push(frame);
+
+            in_flight = true;
         }
 
         payload_len += overhead;
@@ -1683,14 +1702,15 @@ impl Connection {
             aead,
         )?;
 
-        let sent_pkt = recovery::Sent::new(
-            pn,
+        let sent_pkt = recovery::Sent {
+            pkt_num: pn,
             frames,
-            written,
+            time: now,
+            size: if ack_eliciting { written } else { 0 },
             ack_eliciting,
+            in_flight,
             is_crypto,
-            now,
-        );
+        };
 
         self.recovery.on_packet_sent(
             sent_pkt,
