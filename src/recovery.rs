@@ -49,7 +49,7 @@ const MAX_DATAGRAM_SIZE: usize = 1452;
 const INITIAL_WINDOW: usize = 10 * MAX_DATAGRAM_SIZE;
 const MINIMUM_WINDOW: usize = 2 * MAX_DATAGRAM_SIZE;
 
-const PERSISTENT_CONGESTION_THRESHOLD: u32 = 2;
+const PERSISTENT_CONGESTION_THRESHOLD: u32 = 3;
 
 #[derive(Debug)]
 pub struct Sent {
@@ -469,6 +469,13 @@ impl Recovery {
         false
     }
 
+    fn in_persistent_congestion(&mut self, _largest_lost_pkt: &Sent) -> bool {
+        let _congestion_period = self.pto() * PERSISTENT_CONGESTION_THRESHOLD;
+
+        // TODO: properly detect persistent congestion
+        return false;
+    }
+
     fn on_packets_lost(
         &mut self, lost_pkt: Vec<u64>, epoch: packet::Epoch, now: Instant,
     ) {
@@ -476,7 +483,7 @@ impl Recovery {
         // in-flight and non-in-flight packets, so need to keep track
         // of whether we saw any lost in-flight packet to trigger the
         // congestion event later.
-        let mut largest_lost_pkt_sent_time: Option<Instant> = None;
+        let mut largest_lost_pkt: Option<Sent> = None;
 
         for lost in lost_pkt {
             let mut p = self.sent[epoch].remove(&lost).unwrap();
@@ -495,23 +502,20 @@ impl Recovery {
 
             self.lost[epoch].append(&mut p.frames);
 
-            largest_lost_pkt_sent_time = Some(p.time);
+            largest_lost_pkt = Some(p);
         }
 
-        if largest_lost_pkt_sent_time.is_none() {
-            return;
-        }
+        if let Some(largest_lost_pkt) = largest_lost_pkt {
+            // CongestionEvent
+            if !self.in_recovery(largest_lost_pkt.time) {
+                self.recovery_start_time = Some(now);
 
-        // CongestionEvent
-        if !self.in_recovery(largest_lost_pkt_sent_time.unwrap()) {
-            self.recovery_start_time = Some(now);
+                self.cwnd /= 2;
+                self.cwnd = cmp::max(self.cwnd, MINIMUM_WINDOW);
+                self.ssthresh = self.cwnd;
+            }
 
-            self.cwnd /= 2;
-            self.cwnd = cmp::max(self.cwnd, MINIMUM_WINDOW);
-            self.ssthresh = self.cwnd;
-
-            // TODO: properly detect persistent congestion
-            if self.pto_count > PERSISTENT_CONGESTION_THRESHOLD {
+            if self.in_persistent_congestion(&largest_lost_pkt) {
                 self.cwnd = MINIMUM_WINDOW;
             }
         }
