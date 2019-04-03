@@ -79,8 +79,6 @@ pub struct Recovery {
 
     time_of_last_sent_crypto_pkt: Instant,
 
-    largest_sent_pkt: u64,
-
     largest_acked_pkt: [u64; packet::EPOCH_COUNT],
 
     latest_rtt: Duration,
@@ -131,8 +129,6 @@ impl Default for Recovery {
 
             time_of_last_sent_ack_eliciting_pkt: now,
 
-            largest_sent_pkt: 0,
-
             largest_acked_pkt: [0; packet::EPOCH_COUNT],
 
             latest_rtt: Duration::new(0, 0),
@@ -179,8 +175,6 @@ impl Recovery {
         let in_flight = pkt.in_flight;
         let is_crypto = pkt.is_crypto;
         let sent_bytes = pkt.size;
-
-        self.largest_sent_pkt = pkt_num;
 
         self.sent[epoch].insert(pkt_num, pkt);
 
