@@ -441,7 +441,7 @@ impl Recovery {
         if let Some(mut p) = self.sent[epoch].remove(&pkt_num) {
             self.acked[epoch].append(&mut p.frames);
 
-            if p.ack_eliciting {
+            if p.in_flight {
                 // OnPacketAckedCC
                 self.bytes_in_flight -= p.size;
 
