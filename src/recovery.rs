@@ -473,7 +473,7 @@ impl Recovery {
         let _congestion_period = self.pto() * PERSISTENT_CONGESTION_THRESHOLD;
 
         // TODO: properly detect persistent congestion
-        return false;
+        false
     }
 
     fn on_packets_lost(
