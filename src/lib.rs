@@ -42,7 +42,7 @@
 //! configuration object:
 //!
 //! ```
-//! let config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! let config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! ```
 //!
 //! This is shared among multiple connections and can be used to configure a
@@ -52,7 +52,7 @@
 //! a new connection, while [`accept()`] is for servers:
 //!
 //! ```
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
 //! // Client connection.
@@ -70,7 +70,7 @@
 //! ```no_run
 //! # let mut buf = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! loop {
@@ -100,7 +100,7 @@
 //! ```no_run
 //! # let mut out = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! loop {
@@ -127,7 +127,7 @@
 //! obtained using the connection's [`timeout()`] method.
 //!
 //! ```
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! let timeout = conn.timeout();
@@ -141,7 +141,7 @@
 //! ```no_run
 //! # let mut out = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! // Timeout expired, handle it.
@@ -175,7 +175,7 @@
 //! Data can be sent on a stream by using the [`stream_send()`] method:
 //!
 //! ```no_run
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! if conn.is_established() {
@@ -193,7 +193,7 @@
 //!
 //! ```no_run
 //! # let mut buf = [0; 512];
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! if conn.is_established() {
@@ -233,7 +233,7 @@ use std::mem;
 use std::time;
 
 /// The current QUIC wire version.
-pub const VERSION_DRAFT18: u32 = 0xff00_0012;
+pub const VERSION_DRAFT19: u32 = 0xff00_0013;
 
 /// The maximum length of a connection ID.
 pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
@@ -906,7 +906,7 @@ impl Connection {
 
             let mut new_version = 0;
             for v in versions.iter() {
-                if *v == VERSION_DRAFT18 {
+                if *v == VERSION_DRAFT19 {
                     new_version = *v;
                 }
             }
@@ -2493,7 +2493,7 @@ pub(crate) mod testing {
 
     impl Pipe {
         pub fn default() -> Result<Pipe> {
-            let mut config = Config::new(crate::VERSION_DRAFT18)?;
+            let mut config = Config::new(crate::VERSION_DRAFT19)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
             config.set_application_protos(b"\x06proto1\x06proto2")?;
@@ -2527,7 +2527,7 @@ pub(crate) mod testing {
             let mut server_scid = [0; 16];
             rand::rand_bytes(&mut server_scid[..]);
 
-            let mut config = Config::new(crate::VERSION_DRAFT18)?;
+            let mut config = Config::new(crate::VERSION_DRAFT19)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
             config.set_application_protos(b"\x06proto1\x06proto2")?;
@@ -2550,7 +2550,7 @@ pub(crate) mod testing {
             let mut server_scid = [0; 16];
             rand::rand_bytes(&mut server_scid[..]);
 
-            let mut config = Config::new(crate::VERSION_DRAFT18)?;
+            let mut config = Config::new(crate::VERSION_DRAFT19)?;
             config.set_application_protos(b"\x06proto1\x06proto2")?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
@@ -2758,12 +2758,12 @@ mod tests {
 
         let mut raw_params = [42; 256];
         let mut raw_params =
-            TransportParams::encode(&tp, VERSION_DRAFT18, true, &mut raw_params)
+            TransportParams::encode(&tp, VERSION_DRAFT19, true, &mut raw_params)
                 .unwrap();
         assert_eq!(raw_params.len(), 106);
 
         let new_tp =
-            TransportParams::decode(&mut raw_params, VERSION_DRAFT18, false)
+            TransportParams::decode(&mut raw_params, VERSION_DRAFT19, false)
                 .unwrap();
 
         assert_eq!(new_tp, tp);
@@ -2818,7 +2818,7 @@ mod tests {
     fn handshake_alpn_mismatch() {
         let mut buf = [0; 65535];
 
-        let mut config = Config::new(VERSION_DRAFT18).unwrap();
+        let mut config = Config::new(VERSION_DRAFT19).unwrap();
         config
             .set_application_protos(b"\x06proto3\x06proto4")
             .unwrap();
@@ -2836,7 +2836,7 @@ mod tests {
     fn limit_handshake_data() {
         let mut buf = [0; 65535];
 
-        let mut config = Config::new(VERSION_DRAFT18).unwrap();
+        let mut config = Config::new(VERSION_DRAFT19).unwrap();
         config
             .load_cert_chain_from_pem_file("examples/cert-big.crt")
             .unwrap();

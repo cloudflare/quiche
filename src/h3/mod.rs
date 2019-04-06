@@ -38,7 +38,7 @@
 //! Application Layer Protocol Negotiation (ALPN) Protocol ID:
 //!
 //! ```
-//! let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! config.set_application_protos(b"\x05h3-18").unwrap();
 //! ```
 //!
@@ -47,7 +47,7 @@
 //! was negotiated using the [`application_proto()`] method:
 //!
 //! ```no_run
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # config.set_application_protos(b"\x05h3-18").unwrap();
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
@@ -69,7 +69,7 @@
 //! connection:
 //!
 //! ```no_run
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # config.set_application_protos(b"\x05h3-18").unwrap();
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
@@ -85,7 +85,7 @@
 //! causes the requests to get sent to the peer:
 //!
 //! ```no_run
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # config.set_application_protos(b"\x05h3-18").unwrap();
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
@@ -107,7 +107,7 @@
 //! the connection's [`send_body()`] method:
 //!
 //! ```no_run
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # config.set_application_protos(b"\x05h3-18").unwrap();
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
@@ -136,7 +136,7 @@
 //! [`send_response()`] and [`send_body()`]:
 //!
 //! ```no_run
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # config.set_application_protos(b"\x05h3-18").unwrap();
 //! # let scid = [0xba; 16];
 //! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
@@ -186,7 +186,7 @@
 //! An HTTP/3 client uses [`poll()`] to read responses:
 //!
 //! ```no_run
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 //! # config.set_application_protos(b"\x05h3-18").unwrap();
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
@@ -1004,7 +1004,7 @@ mod tests {
     fn simple_request() {
         let mut buf = [0; 65535];
 
-        let mut config = crate::Config::new(crate::VERSION_DRAFT18).unwrap();
+        let mut config = crate::Config::new(crate::VERSION_DRAFT19).unwrap();
         config
             .load_cert_chain_from_pem_file("examples/cert.crt")
             .unwrap();

@@ -39,7 +39,7 @@ extern "C" {
 //
 
 // The current QUIC wire version.
-#define QUICHE_VERSION_DRAFT18 0xff000012
+#define QUICHE_VERSION_DRAFT19 0xff000013
 
 // The maximum length of a connection ID.
 #define QUICHE_MAX_CONN_ID_LEN 18
