@@ -229,7 +229,6 @@
 extern crate log;
 
 use std::cmp;
-use std::mem;
 use std::time;
 
 /// The current QUIC wire version.
@@ -2264,11 +2263,8 @@ impl Connection {
                     let mut raw_params =
                         self.tls_state.get_quic_transport_params().to_vec();
 
-                    let peer_params = TransportParams::decode(
-                        &mut raw_params,
-                        self.version,
-                        self.is_server,
-                    )?;
+                    let peer_params =
+                        TransportParams::decode(&mut raw_params, self.is_server)?;
 
                     if peer_params.original_connection_id != self.odcid {
                         return Err(Error::InvalidTransportParam);
@@ -2442,18 +2438,8 @@ impl Default for TransportParams {
 }
 
 impl TransportParams {
-    fn decode(
-        buf: &mut [u8], _version: u32, is_server: bool,
-    ) -> Result<TransportParams> {
+    fn decode(buf: &mut [u8], is_server: bool) -> Result<TransportParams> {
         let mut b = octets::Octets::with_slice(buf);
-
-        // TODO: check version
-        let _tp_version = b.get_u32()?;
-
-        if !is_server {
-            // Ignore supported versions from server.
-            b.get_bytes_with_u8_length()?;
-        }
 
         let mut tp = TransportParams::default();
 
@@ -2544,7 +2530,7 @@ impl TransportParams {
     }
 
     fn encode<'a>(
-        tp: &TransportParams, version: u32, is_server: bool, out: &'a mut [u8],
+        tp: &TransportParams, is_server: bool, out: &'a mut [u8],
     ) -> Result<&'a mut [u8]> {
         let mut params = [0; 128];
 
@@ -2645,13 +2631,6 @@ impl TransportParams {
 
         let out_len = {
             let mut b = octets::Octets::with_slice(out);
-
-            b.put_u32(version)?;
-
-            if is_server {
-                b.put_u8(mem::size_of::<u32>() as u8)?;
-                b.put_u32(version)?;
-            };
 
             b.put_u16(params_len as u16)?;
             b.put_bytes(&params[..params_len])?;
@@ -2977,13 +2956,10 @@ mod tests {
 
         let mut raw_params = [42; 256];
         let mut raw_params =
-            TransportParams::encode(&tp, VERSION_DRAFT19, true, &mut raw_params)
-                .unwrap();
-        assert_eq!(raw_params.len(), 106);
+            TransportParams::encode(&tp, true, &mut raw_params).unwrap();
+        assert_eq!(raw_params.len(), 97);
 
-        let new_tp =
-            TransportParams::decode(&mut raw_params, VERSION_DRAFT19, false)
-                .unwrap();
+        let new_tp = TransportParams::decode(&mut raw_params, false).unwrap();
 
         assert_eq!(new_tp, tp);
     }
