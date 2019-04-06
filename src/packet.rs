@@ -610,7 +610,7 @@ pub fn negotiate_version(
     b.put_u8(cil)?;
     b.put_bytes(&scid)?;
     b.put_bytes(&dcid)?;
-    b.put_u32(crate::VERSION_DRAFT18)?;
+    b.put_u32(crate::VERSION_DRAFT19)?;
 
     Ok(b.off())
 }
@@ -622,7 +622,7 @@ pub fn retry(
 
     let hdr = Header {
         ty: Type::Retry,
-        version: crate::VERSION_DRAFT18,
+        version: crate::VERSION_DRAFT19,
         dcid: scid.to_vec(),
         scid: new_scid.to_vec(),
         pkt_num: 0,

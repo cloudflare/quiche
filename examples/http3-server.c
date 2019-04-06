@@ -253,7 +253,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         HASH_FIND(hh, conns->h, dcid, dcid_len, conn_io);
 
         if (conn_io == NULL) {
-            if (version != QUICHE_VERSION_DRAFT18) {
+            if (version != QUICHE_VERSION_DRAFT19) {
                 fprintf(stderr, "version negotiation\n");
 
                 ssize_t written = quiche_negotiate_version(scid, scid_len,
@@ -456,7 +456,7 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    config = quiche_config_new(QUICHE_VERSION_DRAFT18);
+    config = quiche_config_new(QUICHE_VERSION_DRAFT19);
     if (config == NULL) {
         fprintf(stderr, "failed to create config\n");
         return -1;

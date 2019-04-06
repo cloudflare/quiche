@@ -34,7 +34,7 @@ The first step in establishing a QUIC connection using quiche is creating a
 configuration object:
 
 ```rust
-let config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+let config = quiche::Config::new(quiche::VERSION_DRAFT19).unwrap();
 ```
 
 This is shared among multiple connections and can be used to configure a

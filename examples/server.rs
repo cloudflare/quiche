@@ -79,12 +79,12 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     let mut connections = ConnMap::new();
 
-    let mut config = quiche::Config::new(quiche::VERSION_DRAFT18)?;
+    let mut config = quiche::Config::new(quiche::VERSION_DRAFT19)?;
 
     config.load_cert_chain_from_pem_file(args.get_str("--cert"))?;
     config.load_priv_key_from_pem_file(args.get_str("--key"))?;
 
-    config.set_application_protos(b"\x05hq-18\x08http/0.9")?;
+    config.set_application_protos(b"\x05hq-19\x08http/0.9")?;
 
     config.set_idle_timeout(30);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
@@ -157,7 +157,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
                     continue;
                 }
 
-                if hdr.version != quiche::VERSION_DRAFT18 {
+                if hdr.version != quiche::VERSION_DRAFT19 {
                     warn!("Doing version negotiation");
 
                     let len = quiche::negotiate_version(
