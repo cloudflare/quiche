@@ -2504,11 +2504,23 @@ impl TransportParams {
                 },
 
                 0x000a => {
-                    tp.ack_delay_exponent = val.get_varint()?;
+                    let ack_delay_exponent = val.get_varint()?;
+
+                    if ack_delay_exponent > 20 {
+                        return Err(Error::InvalidTransportParam);
+                    }
+
+                    tp.ack_delay_exponent = ack_delay_exponent;
                 },
 
                 0x000b => {
-                    tp.max_ack_delay = val.get_varint()?;
+                    let max_ack_delay = val.get_varint()?;
+
+                    if max_ack_delay >= 2_u64.pow(14) {
+                        return Err(Error::InvalidTransportParam);
+                    }
+
+                    tp.max_ack_delay = max_ack_delay;
                 },
 
                 0x000c => {
@@ -2951,15 +2963,15 @@ mod tests {
             initial_max_stream_data_uni: 2_461_234,
             initial_max_streams_bidi: 12_231,
             initial_max_streams_uni: 18_473,
-            ack_delay_exponent: 123,
-            max_ack_delay: 1234,
+            ack_delay_exponent: 20,
+            max_ack_delay: 2_u64.pow(14) - 1,
             disable_migration: true,
         };
 
         let mut raw_params = [42; 256];
         let mut raw_params =
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 97);
+        assert_eq!(raw_params.len(), 96);
 
         let new_tp = TransportParams::decode(&mut raw_params, false).unwrap();
 
