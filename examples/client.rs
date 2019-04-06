@@ -41,10 +41,12 @@ const USAGE: &str = "Usage:
   client -h | --help
 
 Options:
-  --http1                 Send HTTP/1.1 request instead of HTTP/0.9.
-  --wire-version VERSION  The version number to send to the server [default: babababa].
-  --no-verify             Don't verify server's certificate.
-  -h --help               Show this screen.
+  --http1                  Send HTTP/1.1 request instead of HTTP/0.9.
+  --max-data BYTES         Connection-wide flow control limit [default: 10000000].
+  --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
+  --wire-version VERSION   The version number to send to the server [default: babababa].
+  --no-verify              Don't verify server's certificate.
+  -h --help                Show this screen.
 ";
 
 fn main() -> Result<(), Box<std::error::Error>> {
@@ -78,6 +80,12 @@ fn main() -> Result<(), Box<std::error::Error>> {
     let mut scid = [0; LOCAL_CONN_ID_LEN];
     SystemRandom::new().fill(&mut scid[..])?;
 
+    let max_data = args.get_str("--max-data");
+    let max_data = u64::from_str_radix(max_data, 10)?;
+
+    let max_stream_data = args.get_str("--max-stream-data");
+    let max_stream_data = u64::from_str_radix(max_stream_data, 10)?;
+
     let version = args.get_str("--wire-version");
     let version = u32::from_str_radix(version, 16)?;
 
@@ -89,9 +97,9 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     config.set_idle_timeout(30);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
-    config.set_initial_max_data(10_000_000);
-    config.set_initial_max_stream_data_bidi_local(1_000_000);
-    config.set_initial_max_stream_data_bidi_remote(1_000_000);
+    config.set_initial_max_data(max_data);
+    config.set_initial_max_stream_data_bidi_local(max_stream_data);
+    config.set_initial_max_stream_data_bidi_remote(max_stream_data);
     config.set_initial_max_streams_bidi(100);
     config.set_initial_max_streams_uni(100);
     config.set_disable_migration(true);
