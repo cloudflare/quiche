@@ -1481,7 +1481,7 @@ impl Connection {
             cmp::max(self.pkt_num_spaces[epoch].largest_rx_pkt_num, pn);
 
         self.idle_timer = Some(
-            now + time::Duration::from_secs(
+            now + time::Duration::from_millis(
                 self.local_transport_params.idle_timeout,
             ),
         );
