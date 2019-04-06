@@ -414,12 +414,15 @@ impl Recovery {
                 // We can't remove the lost packet from |self.sent| here, so
                 // simply keep track of the number so it can be removed later.
                 lost_pkt.push(unacked.pkt_num);
-            } else if self.loss_time[epoch].is_none() {
-                self.loss_time[epoch] = Some(unacked.time + loss_delay);
             } else {
-                let loss_time = self.loss_time[epoch].unwrap();
-                self.loss_time[epoch] =
-                    Some(cmp::min(loss_time, unacked.time + loss_delay));
+                let loss_time = match self.loss_time[epoch] {
+                    None => unacked.time + loss_delay,
+
+                    Some(loss_time) =>
+                        cmp::min(loss_time, unacked.time + loss_delay),
+                };
+
+                self.loss_time[epoch] = Some(loss_time);
             }
         }
 
