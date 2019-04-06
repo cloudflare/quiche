@@ -1480,11 +1480,13 @@ impl Connection {
         self.pkt_num_spaces[epoch].largest_rx_pkt_num =
             cmp::max(self.pkt_num_spaces[epoch].largest_rx_pkt_num, pn);
 
-        self.idle_timer = Some(
-            now + time::Duration::from_millis(
-                self.local_transport_params.idle_timeout,
-            ),
-        );
+        if self.local_transport_params.idle_timeout > 0 {
+            self.idle_timer = Some(
+                now + time::Duration::from_millis(
+                    self.local_transport_params.idle_timeout,
+                ),
+            );
+        }
 
         self.recv_count += 1;
 
