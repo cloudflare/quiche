@@ -34,6 +34,7 @@ use crate::Error;
 use crate::Result;
 
 use crate::octets;
+use crate::packet;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -45,6 +46,20 @@ pub enum Level {
     ZeroRTT     = 1,
     Handshake   = 2,
     Application = 3,
+}
+
+impl Level {
+    pub fn from_epoch(e: packet::Epoch) -> Level {
+        match e {
+            packet::EPOCH_INITIAL => Level::Initial,
+
+            packet::EPOCH_HANDSHAKE => Level::Handshake,
+
+            packet::EPOCH_APPLICATION => Level::Application,
+
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

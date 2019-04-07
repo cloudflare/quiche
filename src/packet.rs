@@ -638,8 +638,6 @@ pub struct PktNumSpace {
 
     pub do_ack: bool,
 
-    pub crypto_level: crypto::Level,
-
     pub crypto_open: Option<crypto::Open>,
     pub crypto_seal: Option<crypto::Seal>,
 
@@ -647,7 +645,7 @@ pub struct PktNumSpace {
 }
 
 impl PktNumSpace {
-    pub fn new(crypto_level: crypto::Level) -> PktNumSpace {
+    pub fn new() -> PktNumSpace {
         PktNumSpace {
             largest_rx_pkt_num: 0,
 
@@ -660,8 +658,6 @@ impl PktNumSpace {
             recv_pkt_num: PktNumWindow::default(),
 
             do_ack: false,
-
-            crypto_level,
 
             crypto_open: None,
             crypto_seal: None,

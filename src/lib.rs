@@ -658,9 +658,9 @@ impl Connection {
             trace_id: scid_as_hex.join(""),
 
             pkt_num_spaces: [
-                packet::PktNumSpace::new(crypto::Level::Initial),
-                packet::PktNumSpace::new(crypto::Level::Handshake),
-                packet::PktNumSpace::new(crypto::Level::Application),
+                packet::PktNumSpace::new(),
+                packet::PktNumSpace::new(),
+                packet::PktNumSpace::new(),
             ],
 
             peer_transport_params: TransportParams::default(),
@@ -1102,7 +1102,7 @@ impl Connection {
                     // available at the expected offset.
                     let mut crypto_buf = [0; 512];
 
-                    let level = self.pkt_num_spaces[epoch].crypto_level;
+                    let level = crypto::Level::from_epoch(epoch);
 
                     let stream = &mut self.pkt_num_spaces[epoch].crypto_stream;
 
