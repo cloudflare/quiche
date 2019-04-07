@@ -1013,8 +1013,8 @@ impl Connection {
 
         // To avoid sending an ACK in response to an ACK-only packet, we need
         // to keep track of whether this packet contains any frame other than
-        // ACK.
-        let mut do_ack = false;
+        // ACK and PADDING.
+        let mut ack_elicited = false;
 
         // Process packet payload.
         while payload.cap() > 0 {
@@ -1026,7 +1026,7 @@ impl Connection {
                 frame::Frame::Padding { .. } => (),
 
                 frame::Frame::Ping => {
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 frame::Frame::ACK { ranges, ack_delay } => {
@@ -1080,7 +1080,7 @@ impl Connection {
                         return Err(Error::FlowControl);
                     }
 
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 frame::Frame::StopSending { stream_id, .. } => {
@@ -1091,7 +1091,7 @@ impl Connection {
                         return Err(Error::InvalidStreamState);
                     }
 
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 frame::Frame::Crypto { data } => {
@@ -1113,12 +1113,12 @@ impl Connection {
                             .map_err(|_| Error::TlsFail)?;
                     }
 
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 // TODO: implement stateless retry
                 frame::Frame::NewToken { .. } => {
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 frame::Frame::Stream { stream_id, data } => {
@@ -1155,13 +1155,13 @@ impl Connection {
 
                     stream.recv.push(data)?;
 
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 frame::Frame::MaxData { max } => {
                     self.max_tx_data = cmp::max(self.max_tx_data, max as usize);
 
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 frame::Frame::MaxStreamData { stream_id, max } => {
@@ -1185,39 +1185,39 @@ impl Connection {
 
                     stream.send.update_max_len(max as usize);
 
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 frame::Frame::MaxStreamsBidi { max } => {
                     self.streams.update_peer_max_streams_bidi(max as usize);
 
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 frame::Frame::MaxStreamsUni { max } => {
                     self.streams.update_peer_max_streams_uni(max as usize);
 
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 // TODO: implement connection migration
                 frame::Frame::NewConnectionId { .. } => {
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 // TODO: implement connection migration
                 frame::Frame::RetireConnectionId { .. } => {
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 frame::Frame::PathChallenge { data } => {
                     self.challenge = Some(data);
 
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 frame::Frame::PathResponse { .. } => {
-                    do_ack = true;
+                    ack_elicited = true;
                 },
 
                 frame::Frame::ConnectionClose { .. } => {
@@ -1274,8 +1274,8 @@ impl Connection {
         self.pkt_num_spaces[epoch].recv_pkt_num.insert(pn);
 
         self.pkt_num_spaces[epoch].recv_pkt_need_ack.push_item(pn);
-        self.pkt_num_spaces[epoch].do_ack =
-            cmp::max(self.pkt_num_spaces[epoch].do_ack, do_ack);
+        self.pkt_num_spaces[epoch].ack_elicited =
+            cmp::max(self.pkt_num_spaces[epoch].ack_elicited, ack_elicited);
 
         self.pkt_num_spaces[epoch].largest_rx_pkt_num =
             cmp::max(self.pkt_num_spaces[epoch].largest_rx_pkt_num, pn);
@@ -1372,7 +1372,7 @@ impl Connection {
                 },
 
                 frame::Frame::ACK { .. } => {
-                    self.pkt_num_spaces[epoch].do_ack = true;
+                    self.pkt_num_spaces[epoch].ack_elicited = true;
                 },
 
                 _ => (),
@@ -1425,7 +1425,7 @@ impl Connection {
         let mut payload_len = 0;
 
         // Create ACK frame.
-        if self.pkt_num_spaces[epoch].do_ack {
+        if self.pkt_num_spaces[epoch].ack_elicited {
             let ack_delay =
                 self.pkt_num_spaces[epoch].largest_rx_pkt_time.elapsed();
 
@@ -1439,7 +1439,7 @@ impl Connection {
             };
 
             if frame.wire_len() <= left {
-                self.pkt_num_spaces[epoch].do_ack = false;
+                self.pkt_num_spaces[epoch].ack_elicited = false;
 
                 payload_len += frame.wire_len();
                 left -= frame.wire_len();

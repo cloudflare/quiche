@@ -636,7 +636,7 @@ pub struct PktNumSpace {
 
     pub recv_pkt_num: PktNumWindow,
 
-    pub do_ack: bool,
+    pub ack_elicited: bool,
 
     pub crypto_open: Option<crypto::Open>,
     pub crypto_seal: Option<crypto::Seal>,
@@ -657,7 +657,7 @@ impl PktNumSpace {
 
             recv_pkt_num: PktNumWindow::default(),
 
-            do_ack: false,
+            ack_elicited: false,
 
             crypto_open: None,
             crypto_seal: None,
@@ -670,7 +670,7 @@ impl PktNumSpace {
         self.crypto_stream =
             stream::Stream::new(std::usize::MAX, std::usize::MAX);
 
-        self.do_ack = false;
+        self.ack_elicited = false;
     }
 
     pub fn overhead(&self) -> usize {
@@ -678,7 +678,7 @@ impl PktNumSpace {
     }
 
     pub fn ready(&self) -> bool {
-        self.crypto_stream.writable() || self.do_ack
+        self.crypto_stream.writable() || self.ack_elicited
     }
 }
 
