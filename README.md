@@ -25,30 +25,6 @@ blog that goes into some more detail.
 [ietf]: https://quicwg.org/
 [post]: https://blog.cloudflare.com/enjoy-a-slice-of-quic-and-rust/
 
-Status
-------
-
-* [x] QUIC draft-18
-* [x] Version Negotiation
-* [x] TLS 1.3 handshake (using BoringSSL)
-* [x] Stream API
-* [x] Flow control
-* [x] Connection close
-* [x] Loss detection and recovery
-* [x] Congestion control
-* [ ] Key update
-* [x] Stateless retry
-* [x] Unidirectional streams
-* [ ] Session resumption
-* [ ] 0-RTT
-* [ ] Stateless reset
-* [ ] Connection migration
-* [x] QPACK static table decoding
-* [x] QPACK static table encoding
-* [ ] QPACK dynamic table decoding
-* [ ] QPACK dynamic table encoding
-* [x] HTTP/3 request/response
-
 Getting Started
 ---------------
 
