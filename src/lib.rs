@@ -25,12 +25,18 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//! Savoury implementation of the QUIC transport protocol and HTTP/3.
+//! 🥧 Savoury implementation of the QUIC transport protocol and HTTP/3.
 //!
-//! quiche is an implementation of the QUIC transport protocol as specified
-//! by the IETF. It provides a low level API for processing QUIC packets and
-//! handling connection state, while leaving I/O (including dealing with
-//! sockets) to the application.
+//! [quiche] is an implementation of the QUIC transport protocol and HTTP/3 as
+//! specified by the [IETF]. It provides a low level API for processing QUIC
+//! packets and handling connection state. The application is responsible for
+//! providing I/O (e.g. sockets handling) as well as an event loop with support
+//! for timers.
+//!
+//! [quiche]: https://github.com/cloudflare/quiche/
+//! [ietf]: https://quicwg.org/
+//!
+//! ## Connection setup
 //!
 //! The first step in establishing a QUIC connection using quiche is creating a
 //! configuration object:
@@ -42,8 +48,8 @@
 //! This is shared among multiple connections and can be used to configure a
 //! QUIC endpoint.
 //!
-//! Now a connection can be created, for clients the [`connect()`] utility
-//! function can be used, while [`accept()`] is for servers:
+//! On the client-side the [`connect()`] utility function can be used to create
+//! a new connection, while [`accept()`] is for servers:
 //!
 //! ```
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
@@ -56,8 +62,10 @@
 //! let conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! ```
 //!
+//! ## Handling incoming packets
+//!
 //! Using the connection's [`recv()`] method the application can process
-//! incoming packets from the network that belong to that connection:
+//! incoming packets that belong to that connection from the network:
 //!
 //! ```no_run
 //! # let mut buf = [0; 512];
@@ -65,22 +73,26 @@
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
-//! let read = socket.recv(&mut buf).unwrap();
+//! loop {
+//!     let read = socket.recv(&mut buf).unwrap();
 //!
-//! let read = match conn.recv(&mut buf[..read]) {
-//!     Ok(v) => v,
+//!     let read = match conn.recv(&mut buf[..read]) {
+//!         Ok(v) => v,
 //!
-//!     Err(quiche::Error::Done) => {
-//!         // Done reading.
-//!         # return;
-//!     },
+//!         Err(quiche::Error::Done) => {
+//!             // Done reading.
+//!             break;
+//!         },
 //!
-//!     Err(e) => {
-//!         // An error occurred, handle it.
-//!         # return;
-//!     },
-//! };
+//!         Err(e) => {
+//!             // An error occurred, handle it.
+//!             break;
+//!         },
+//!     };
+//! }
 //! ```
+//!
+//! ## Generating outgoing packets
 //!
 //! Outgoing packet are generated using the connection's [`send()`] method
 //! instead:
@@ -91,25 +103,27 @@
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
-//! let write = match conn.send(&mut out) {
-//!     Ok(v) => v,
+//! loop {
+//!     let write = match conn.send(&mut out) {
+//!         Ok(v) => v,
 //!
-//!     Err(quiche::Error::Done) => {
-//!         // Done writing.
-//!         # return;
-//!     },
+//!         Err(quiche::Error::Done) => {
+//!             // Done writing.
+//!             break;
+//!         },
 //!
-//!     Err(e) => {
-//!         // An error occurred, handle it.
-//!         # return;
-//!     },
-//! };
+//!         Err(e) => {
+//!             // An error occurred, handle it.
+//!             break;
+//!         },
+//!     };
 //!
-//! socket.send(&out[..write]).unwrap();
+//!     socket.send(&out[..write]).unwrap();
+//! }
 //! ```
 //!
-//! When packets are sent, the application is responsible for maintaining a timer
-//! to react to time-based connection events. The timer expiration can be
+//! When packets are sent, the application is responsible for maintaining a
+//! timer to react to time-based connection events. The timer expiration can be
 //! obtained using the connection's [`timeout()`] method.
 //!
 //! ```
@@ -130,28 +144,35 @@
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
-//! // Timeout expired, do something.
+//! // Timeout expired, handle it.
 //! conn.on_timeout();
 //!
-//! let write = match conn.send(&mut out) {
-//!     Ok(v) => v,
+//! // Send more packets as needed after timeout.
+//! loop {
+//!     let write = match conn.send(&mut out) {
+//!         Ok(v) => v,
 //!
-//!     Err(quiche::Error::Done) => {
-//!         // Done writing.
-//!         # return;
-//!     },
+//!         Err(quiche::Error::Done) => {
+//!             // Done writing.
+//!             break;
+//!         },
 //!
-//!     Err(e) => {
-//!         // An error occurred, handle it.
-//!         # return;
-//!     },
-//! };
+//!         Err(e) => {
+//!             // An error occurred, handle it.
+//!             break;
+//!         },
+//!     };
 //!
-//! socket.send(&out[..write]).unwrap();
+//!     socket.send(&out[..write]).unwrap();
+//! }
 //! ```
 //!
+//! ## Sending and receiving stream data
+//!
 //! After some back and forth, the connection will complete its handshake and
-//! will be ready for sending or receiving application data:
+//! will be ready for sending or receiving application data.
+//!
+//! Data can be sent on a stream by using the [`stream_send()`] method:
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
@@ -159,7 +180,32 @@
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! if conn.is_established() {
 //!     // Handshake completed, send some data on stream 0.
-//!     conn.stream_send(0, b"hello", true);
+//!     conn.stream_send(0, b"hello", true).unwrap();
+//! }
+//! ```
+//!
+//! The application can check whether there are any readable streams by using
+//! the connection's [`readable()`] method, which returns an iterator over all
+//! the streams that have outstanding data to read.
+//!
+//! The [`stream_recv()`] method can then be used to retrieve the application
+//! data from the readable stream:
+//!
+//! ```no_run
+//! # let mut buf = [0; 512];
+//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let scid = [0xba; 16];
+//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! if conn.is_established() {
+//!     // Iterate over readable streams.
+//!     let streams: Vec<u64> = conn.readable().collect();
+//!
+//!     for stream_id in streams {
+//!         // Stream is readable, read until there's no more data.
+//!         while let Ok((read, fin)) = conn.stream_recv(stream_id, &mut buf) {
+//!             println!("Got {} bytes on stream {}", read, stream_id);
+//!         }
+//!     }
 //! }
 //! ```
 //!
@@ -169,6 +215,9 @@
 //! [`send()`]: struct.Connection.html#method.send
 //! [`timeout()`]: struct.Connection.html#method.timeout
 //! [`on_timeout()`]: struct.Connection.html#method.on_timeout
+//! [`stream_send()`]: struct.Connection.html#method.stream_send
+//! [`readable()`]: struct.Connection.html#method.readable
+//! [`stream_recv()`]: struct.Connection.html#method.stream_recv
 
 #[macro_use]
 extern crate log;

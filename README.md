@@ -28,6 +28,8 @@ blog that goes into some more detail.
 Getting Started
 ---------------
 
+### Connection setup
+
 The first step in establishing a QUIC connection using quiche is creating a
 configuration object:
 
@@ -38,8 +40,8 @@ let config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
 This is shared among multiple connections and can be used to configure a
 QUIC endpoint.
 
-Now a connection can be created, for clients the [`connect()`] utility
-function can be used, while [`accept()`] is for servers:
+On the client-side the [`connect()`] utility function can be used to create
+a new connection, while [`accept()`] is for servers:
 
 ```rust
 // Client connection.
@@ -49,50 +51,58 @@ let conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
 let conn = quiche::accept(&scid, None, &mut config).unwrap();
 ```
 
+### Handling incoming packets
+
 Using the connection's [`recv()`] method the application can process
-incoming packets from the network that belong to that connection:
+incoming packets that belong to that connection from the network:
 
 ```rust
-let read = socket.recv(&mut buf).unwrap();
+loop {
+    let read = socket.recv(&mut buf).unwrap();
 
-let read = match conn.recv(&mut buf[..read]) {
-    Ok(v)  => v,
+    let read = match conn.recv(&mut buf[..read]) {
+        Ok(v) => v,
 
-    Err(quiche::Error::Done) => {
-        // Done reading.
-        # return;
-    },
+        Err(quiche::Error::Done) => {
+            // Done reading.
+            break;
+        },
 
-    Err(e) => {
-        // An error occurred, handle it.
-        # return;
-    },
-};
+        Err(e) => {
+            // An error occurred, handle it.
+            break;
+        },
+    };
+}
 ```
+
+### Generating outgoing packets
 
 Outgoing packet are generated using the connection's [`send()`] method
 instead:
 
 ```rust
-let write = match conn.send(&mut out) {
-    Ok(v) => v,
+loop {
+    let write = match conn.send(&mut out) {
+        Ok(v) => v,
 
-    Err(quiche::Error::Done) => {
-        // Done writing.
-        # return;
-    },
+        Err(quiche::Error::Done) => {
+            // Done writing.
+            break;
+        },
 
-    Err(e) => {
-        // An error occurred, handle it.
-        # return;
-    },
-};
+        Err(e) => {
+            // An error occurred, handle it.
+            break;
+        },
+    };
 
-socket.send(&out[..write]).unwrap();
+    socket.send(&out[..write]).unwrap();
+}
 ```
 
-When packets are sent, the application is responsible for maintaining a timer
-to react to time-based connection events. The timer expiration can be
+When packets are sent, the application is responsible for maintaining a
+timer to react to time-based connection events. The timer expiration can be
 obtained using the connection's [`timeout()`] method.
 
 ```rust
@@ -105,33 +115,61 @@ a timer expires, the connection's [`on_timeout()`] method should be called,
 after which additional packets might need to be sent on the network:
 
 ```rust
-// Timeout expired, do something.
+// Timeout expired, handle it.
 conn.on_timeout();
 
-let write = match conn.send(&mut out) {
-    Ok(v) => v,
+// Send more packets as needed after timeout.
+loop {
+    let write = match conn.send(&mut out) {
+        Ok(v) => v,
 
-    Err(quiche::Error::Done) => {
-        // Done writing.
-        # return;
-    },
+        Err(quiche::Error::Done) => {
+            // Done writing.
+            break;
+        },
 
-    Err(e) => {
-        // An error occurred, handle it.
-        # return;
-    },
-};
+        Err(e) => {
+            // An error occurred, handle it.
+            break;
+        },
+    };
 
-socket.send(&out[..write]).unwrap();
+    socket.send(&out[..write]).unwrap();
+}
 ```
 
+### Sending and receiving stream data
+
 After some back and forth, the connection will complete its handshake and
-will be ready for sending or receiving application data:
+will be ready for sending or receiving application data.
+
+Data can be sent on a stream by using the [`stream_send()`] method:
 
 ```rust
 if conn.is_established() {
     // Handshake completed, send some data on stream 0.
-    conn.stream_send(0, b"hello", true);
+    conn.stream_send(0, b"hello", true).unwrap();
+}
+```
+
+The application can check whether there are any readable streams by using
+the connection's [`readable()`] method, which returns an iterator over all
+the streams that have outstanding data to read.
+
+The [`stream_recv()`] method can then be used to retrieve the application
+data from the readable stream:
+
+```rust
+if conn.is_established() {
+    // Iterate over readable streams.
+    let streams: Vec<u64> = conn.readable().collect();
+
+    for stream_id in streams {
+        // Stream is readable, read until there's no more data.
+        while let Ok((read, fin)) = conn.stream_recv(stream_id, &mut buf) {
+            println!("Got {} bytes on stream {}", read, stream_id);
+        }
+    }
 }
 ```
 
@@ -141,6 +179,9 @@ if conn.is_established() {
 [`send()`]: https://docs.quic.tech/quiche/struct.Connection.html#method.send
 [`timeout()`]: https://docs.quic.tech/quiche/struct.Connection.html#method.timeout
 [`on_timeout()`]: https://docs.quic.tech/quiche/struct.Connection.html#method.on_timeout
+[`stream_send()`]: https://docs.quic.tech/quiche/struct.Connection.html#method.stream_send
+[`readable()`]: https://docs.quic.tech/quiche/struct.Connection.html#method.readable
+[`stream_recv()`]: https://docs.quic.tech/quiche/struct.Connection.html#method.stream_recv
 
 Have a look at the [examples/] directory for more complete examples on how to use
 the quiche API, including examples on how to use quiche in C/C++ applications
