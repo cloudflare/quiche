@@ -26,15 +26,15 @@
 
 //! HTTP/3 wire protocol and QPACK implementation.
 //!
-//! The quiche HTTP/3 module implements the application mapping of HTTP to the
-//! QUIC transport protocol as specified by the IETF. It provides a high level
-//! API for sending and receiving HTTP requests and responses.
+//! This module provides a high level API for sending and receiving HTTP/3
+//! requests and responses on top of the QUIC transport protocol.
 //!
 //! ## Connection setup
 //!
-//! HTTP/3 connections require a quiche QUIC connection, see
-//! [`Connection setup`] for a full description of the setup process. To use
-//! HTTP/3, the QUIC connection must be configured with a suitable
+//! HTTP/3 connections require a QUIC transport-layer connection, see
+//! [Connection setup] for a full description of the setup process.
+//!
+//! To use HTTP/3, the QUIC connection must be configured with a suitable
 //! Application Layer Protocol Negotiation (ALPN) Protocol ID:
 //!
 //! ```
@@ -42,9 +42,9 @@
 //! config.set_application_protos(b"\x05h3-18").unwrap();
 //! ```
 //!
-//! The QUIC handshake is driven by [`sending`] and [`receiving`] QUIC packets.
-//! Once the handshake has completed, we should check that HTTP/3 was negotiated
-//! using the [`application_proto()`] method:
+//! The QUIC handshake is driven by [sending] and [receiving] QUIC packets.
+//! Once the handshake has completed, the application should check that HTTP/3
+//! was negotiated using the [`application_proto()`] method:
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
@@ -64,8 +64,9 @@
 //! let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
 //! ```
 //!
-//! HTTP/3 client and server connections are both created using the [`with_transport()`]
-//! function, the role is inferred from the type of QUIC connection:
+//! HTTP/3 client and server connections are both created using the
+//! [`with_transport()`] function, the role is inferred from the type of QUIC
+//! connection:
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
@@ -77,11 +78,11 @@
 //! let h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config).unwrap();
 //! ```
 //!
-//! ## Sending a request with no body
+//! ## Sending a request
 //!
-//! An HTTP/3 client can send a request by using the connection's [`send_request()`]
-//! method to queue request headers; [`sending`] QUIC packets causes the
-//! requests to get sent to the peer:
+//! An HTTP/3 client can send a request by using the connection's
+//! [`send_request()`] method to queue request headers; [sending] QUIC packets
+//! causes the requests to get sent to the peer:
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
@@ -91,7 +92,8 @@
 //! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
 //! # let mut conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config).unwrap();
-//! let req = vec![quiche::h3::Header::new(":method", "GET"),
+//! let req = vec![
+//!     quiche::h3::Header::new(":method", "GET"),
 //!     quiche::h3::Header::new(":scheme", "https"),
 //!     quiche::h3::Header::new(":authority", "quic.tech"),
 //!     quiche::h3::Header::new(":path", "/"),
@@ -100,8 +102,6 @@
 //!
 //! h3_conn.send_request(&mut conn, &req, true).unwrap();
 //! ```
-//!
-//! ## Sending a request with body
 //!
 //! An HTTP/3 client can send a request with additional body data by using
 //! the connection's [`send_body()`] method:
@@ -114,7 +114,8 @@
 //! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
 //! # let mut conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config).unwrap();
-//! let req = vec![quiche::h3::Header::new(":method", "GET"),
+//! let req = vec![
+//!     quiche::h3::Header::new(":method", "GET"),
 //!     quiche::h3::Header::new(":scheme", "https"),
 //!     quiche::h3::Header::new(":authority", "quic.tech"),
 //!     quiche::h3::Header::new(":path", "/"),
@@ -125,9 +126,9 @@
 //! h3_conn.send_body(&mut conn, stream_id, b"Hello World!", true).unwrap();
 //! ```
 //!
-//! ## Serving requests
+//! ## Handling requests and responses
 //!
-//! After [`receiving`] QUIC packets, HTTP/3 data is processed using the
+//! After [receiving] QUIC packets, HTTP/3 data is processed using the
 //! connection's [`poll()`] method. On success, this returns an [`Event`] object
 //! and an ID corresponding to the stream where the `Event` originated.
 //!
@@ -145,24 +146,15 @@
 //! loop {
 //!     match h3_conn.poll(&mut conn) {
 //!         Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
-//!             let mut method = "";
-//!             let mut path = "";
+//!             let mut headers = headers.into_iter();
 //!
-//!             for hdr in &headers {
-//!                 match hdr.name() {
-//!                     ":method" => {
-//!                         method = hdr.value();
-//!                     },
+//!             // Look for the request's method.
+//!             let method = headers.find(|h| h.name() == ":method").unwrap();
 //!
-//!                     ":path" => {
-//!                         path = hdr.value();
-//!                     },
+//!             // Look for the request's path.
+//!             let path = headers.find(|h| h.name() == ":path").unwrap();
 //!
-//!                     _ => (),
-//!                 }
-//!             }
-//!
-//!             if method == "GET" && path == "/" {
+//!             if method.value() == "GET" && path.value() == "/" {
 //!                 let resp = vec![
 //!                     quiche::h3::Header::new(":status", &200.to_string()),
 //!                     quiche::h3::Header::new("server", "quiche"),
@@ -171,7 +163,6 @@
 //!                 h3_conn.send_response(&mut conn, stream_id, &resp, false).unwrap();
 //!                 h3_conn.send_body(&mut conn, stream_id, b"Hello World!", true).unwrap();
 //!             }
-//!             # return
 //!         },
 //!
 //!         Ok((stream_id, quiche::h3::Event::Data(data))) => {
@@ -181,18 +172,16 @@
 //!
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
-//!             # return;
+//!             break;
 //!         },
 //!
 //!         Err(e) => {
 //!             // An error occurred, handle it.
-//!             # return;
+//!             break;
 //!         },
 //!     }
 //! }
 //! ```
-//!
-//! ## Handling responses
 //!
 //! An HTTP/3 client uses [`poll()`] to read responses:
 //!
@@ -208,39 +197,31 @@
 //! loop {
 //!     match h3_conn.poll(&mut conn) {
 //!         Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
-//!             let mut status = "";
-//!
-//!             for hdr in &headers {
-//!                 match hdr.name() {
-//!                     ":status" => {
-//!                         status = hdr.value();
-//!                     },
-//!
-//!                     _ => (),
-//!                 }
-//!             }
-//!             # return
+//!             let status = headers.iter().find(|h| h.name() == ":status").unwrap();
+//!             println!("Received {} response on stream {}",
+//!                      status.value(), stream_id);
 //!         },
 //!
 //!         Ok((stream_id, quiche::h3::Event::Data(data))) => {
-//!             print!("Received {} bytes of payload on stream {}", data.len(), stream_id);
-//!             # return;
+//!             println!("Received {} bytes of payload on stream {}",
+//!                      data.len(), stream_id);
 //!         },
 //!
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
-//!             # return;
+//!             break;
 //!         },
 //!
 //!         Err(e) => {
 //!             // An error occurred, handle it.
-//!             # return;
+//!             break;
 //!         },
 //!     }
 //! }
 //! ```
 //!
 //! ## Detecting end of stream
+//!
 //! HTTP/3 request and response exchanges may consist of several HEADERS and
 //! DATA frames. Calling [`poll()`] repeatedly will generate an [`Event`] for
 //! each. The QUIC connection's [`stream_finished()`] method can be used to
@@ -249,9 +230,9 @@
 //!
 //! [`application_proto()`]: ../struct.Connection.html#method.application_proto
 //! [`stream_finished()`]: ../struct.Connection.html#method.stream_finished
-//! [`Connection setup`]: ../index.html#connection-setup
-//! [`sending`]: ../index.html#generating-outgoing-packets
-//! [`receiving`]: ../index.html#handling-incoming-packets
+//! [Connection setup]: ../index.html#connection-setup
+//! [sending]: ../index.html#generating-outgoing-packets
+//! [receiving]: ../index.html#handling-incoming-packets
 //! [`with_transport()`]: struct.Connection.html#method.with_transport
 //! [`poll()`]: struct.Connection.html#method.poll
 //! [`Event`]: enum.Event.html
