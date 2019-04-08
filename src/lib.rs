@@ -911,7 +911,7 @@ impl Connection {
                 }
             }
 
-            // We don't support any of the versions offfered.
+            // We don't support any of the versions offered.
             if new_version == 0 {
                 return Err(Error::UnknownVersion);
             }

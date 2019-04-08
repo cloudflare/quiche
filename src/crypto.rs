@@ -422,11 +422,11 @@ mod tests {
         assert_eq!(&pkt_iv, &expected_client_pkt_iv);
 
         assert!(derive_hdr_key(aead, &secret, &mut hdr_key).is_ok());
-        let expected_cliet_hdr_key = [
+        let expected_client_hdr_key = [
             0xcd, 0x25, 0x3a, 0x36, 0xff, 0x93, 0x93, 0x7c, 0x46, 0x93, 0x84,
             0xa8, 0x23, 0xaf, 0x6c, 0x56,
         ];
-        assert_eq!(&hdr_key, &expected_cliet_hdr_key);
+        assert_eq!(&hdr_key, &expected_client_hdr_key);
 
         // Server.
         assert!(
@@ -500,11 +500,11 @@ mod tests {
         assert_eq!(&pkt_iv, &expected_client_pkt_iv);
 
         assert!(derive_hdr_key(aead, &secret, &mut hdr_key).is_ok());
-        let expected_cliet_hdr_key = [
+        let expected_client_hdr_key = [
             0x0e, 0xdd, 0x98, 0x2a, 0x6a, 0xc5, 0x27, 0xf2, 0xed, 0xdc, 0xbb,
             0x73, 0x48, 0xde, 0xa5, 0xd7,
         ];
-        assert_eq!(&hdr_key, &expected_cliet_hdr_key);
+        assert_eq!(&hdr_key, &expected_client_hdr_key);
 
         // Server.
         assert!(

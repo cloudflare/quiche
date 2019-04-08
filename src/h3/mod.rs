@@ -283,8 +283,8 @@ pub enum Error {
     /// Forward connection failure for CONNECT target.
     ConnectError         = -9,
 
-    /// Endpoint detected that the peer is exhibiting behaviour that causes.
-    /// excessive load
+    /// Endpoint detected that the peer is exhibiting behavior that causes.
+    /// excessive load.
     ExcessiveLoad        = -10,
 
     /// Operation cannot be served over HTTP/3. Retry over HTTP/1.1.
