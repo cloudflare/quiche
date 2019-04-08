@@ -173,6 +173,11 @@ if conn.is_established() {
 }
 ```
 
+### HTTP/3
+
+The quiche [HTTP/3 module] provides a high level API for sending and receiving
+HTTP requests and responses on top of the QUIC transport protocol.
+
 [`connect()`]: https://docs.quic.tech/quiche/fn.connect.html
 [`accept()`]: https://docs.quic.tech/quiche/fn.accept.html
 [`recv()`]: https://docs.quic.tech/quiche/struct.Connection.html#method.recv
@@ -182,19 +187,13 @@ if conn.is_established() {
 [`stream_send()`]: https://docs.quic.tech/quiche/struct.Connection.html#method.stream_send
 [`readable()`]: https://docs.quic.tech/quiche/struct.Connection.html#method.readable
 [`stream_recv()`]: https://docs.quic.tech/quiche/struct.Connection.html#method.stream_recv
+[HTTP/3 module]: https://docs.quic.tech/quiche/h3/index.html
 
 Have a look at the [examples/] directory for more complete examples on how to use
 the quiche API, including examples on how to use quiche in C/C++ applications
 (see below for more information).
 
 [examples/]: examples/
-
-## HTTP/3
-
-The [`HTTP/3 documentation`] provides a detailed description of using quiche
-for client and server implementations.
-
-[`HTTP/3 documentation`]: https://docs.quic.tech/quiche/h3/index.html
 
 Calling quiche from C/C++
 -------------------------

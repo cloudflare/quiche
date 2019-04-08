@@ -211,8 +211,8 @@
 //!
 //! ## HTTP/3
 //!
-//! The [`HTTP/3 documentation`] provides a detailed description of using quiche
-//! for client and server implementations.
+//! The [HTTP/3 module]'s documentation provides a detailed description of
+//! quiche's HTTP/3 API that can be used to implement clients and servers.
 //!
 //! [`connect()`]: fn.connect.html
 //! [`accept()`]: fn.accept.html
@@ -223,7 +223,7 @@
 //! [`stream_send()`]: struct.Connection.html#method.stream_send
 //! [`readable()`]: struct.Connection.html#method.readable
 //! [`stream_recv()`]: struct.Connection.html#method.stream_recv
-//! [`HTTP/3 documentation`]: h3/index.html
+//! [HTTP/3 module]: h3/index.html
 
 #[macro_use]
 extern crate log;
