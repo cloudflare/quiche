@@ -444,26 +444,15 @@ pub extern fn quiche_conn_stream_finished(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_readable(conn: &mut Connection) -> *mut Readable {
-    let iter = conn.readable();
-    Box::into_raw(Box::new(iter))
-}
-
-#[no_mangle]
 pub extern fn quiche_readable_next(
-    iter: &mut Readable, stream_id: *mut u64,
+    conn: &mut Connection, stream_id: *mut u64,
 ) -> bool {
-    if let Some(v) = iter.next() {
+    if let Some(v) = conn.readable().next() {
         unsafe { *stream_id = v };
         return true;
     }
 
     false
-}
-
-#[no_mangle]
-pub extern fn quiche_readable_free(i: *mut Readable) {
-    unsafe { Box::from_raw(i) };
 }
 
 #[no_mangle]

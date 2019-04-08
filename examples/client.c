@@ -153,9 +153,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
     if (quiche_conn_is_established(conn_io->conn)) {
         uint64_t s = 0;
 
-        quiche_readable *iter = quiche_conn_readable(conn_io->conn);
-
-        while (quiche_readable_next(iter, &s)) {
+        while (quiche_readable_next(conn_io->conn, &s)) {
             fprintf(stderr, "stream %zu is readable\n", s);
 
             bool fin = false;
@@ -174,8 +172,6 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 }
             }
         }
-
-        quiche_readable_free(iter);
     }
 
     flush_egress(loop, conn_io);

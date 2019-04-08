@@ -213,18 +213,9 @@ ssize_t quiche_conn_stream_send(quiche_conn *conn, uint64_t stream_id,
 // Returns true if all the data has been read from the specified stream.
 bool quiche_conn_stream_finished(quiche_conn *conn, uint64_t stream_id);
 
-// An iterator over the streams that have outstanding data to read.
-typedef struct Readable quiche_readable;
-
-// Creates an iterator of streams that have outstanding data to read.
-quiche_readable *quiche_conn_readable(quiche_conn *conn);
-
-// Fetches the next element from the stream iterator. Returns false if the
-// iterator is empty.
-bool quiche_readable_next(quiche_readable *iter, uint64_t *stream_id);
-
-// Frees the readable object.
-void quiche_readable_free(quiche_readable *r);
+// Fetches the next stream that has outstanding data to read. Returns false if
+// there are no readable streams.
+bool quiche_readable_next(quiche_conn *conn, uint64_t *stream_id);
 
 // Returns the amount of time until the next timeout event, as nanoseconds.
 uint64_t quiche_conn_timeout_as_nanos(quiche_conn *conn);
