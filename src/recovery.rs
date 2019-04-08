@@ -208,7 +208,8 @@ impl Recovery {
         if let Some(pkt) = self.sent[epoch].get(&self.largest_acked_pkt[epoch]) {
             if pkt.ack_eliciting {
                 let ack_delay = Duration::from_micros(ack_delay);
-                self.update_rtt(pkt.time.elapsed(), ack_delay);
+                let latest_rtt = pkt.time.elapsed();
+                self.update_rtt(latest_rtt, ack_delay);
             }
         }
 
