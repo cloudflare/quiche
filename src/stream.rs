@@ -487,7 +487,7 @@ impl SendBuf {
 
     pub fn ack(&mut self, off: usize, len: usize) {
         // Keep track of the highest contiguously ACK'd offset. This can be
-        // used to avoid spurious retransmis:ions of data that has already
+        // used to avoid spurious retransmissions of data that has already
         // been ACK'd.
         if self.off_ack == off {
             self.off_ack += len;
