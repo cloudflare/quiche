@@ -168,7 +168,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
                 Err(e) => {
                     error!("{} recv failed: {:?}", conn.trace_id(), e);
-                    conn.close(false, e.to_wire(), b"fail")?;
+                    conn.close(false, e.to_wire(), b"fail").ok();
                     break 'read;
                 },
             };
@@ -280,7 +280,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
                 Err(e) => {
                     error!("{} send failed: {:?}", conn.trace_id(), e);
-                    conn.close(false, e.to_wire(), b"fail")?;
+                    conn.close(false, e.to_wire(), b"fail").ok();
                     break;
                 },
             };
