@@ -144,6 +144,19 @@ impl Header {
     ///
     /// The `dcil` parameter is the length of the destination connection ID,
     /// required to parse short header packets.
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # const LOCAL_CONN_ID_LEN: usize = 16;
+    /// # let mut buf = [0; 512];
+    /// # let mut out = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// let (len, src) = socket.recv_from(&mut buf).unwrap();
+    ///
+    /// let hdr =
+    ///     quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN).unwrap();
+    /// ```
     pub fn from_slice(buf: &mut [u8], dcil: usize) -> Result<Header> {
         let mut b = octets::Octets::with_slice(buf);
         Header::from_bytes(&mut b, dcil)

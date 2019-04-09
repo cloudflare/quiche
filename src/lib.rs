@@ -365,6 +365,12 @@ pub struct Config {
 
 impl Config {
     /// Creates a config object with the given version.
+    ///
+    /// ## Examples:
+    ///
+    /// ```
+    /// let config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+    /// ```
     pub fn new(version: u32) -> Result<Config> {
         let tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
 
@@ -381,6 +387,13 @@ impl Config {
     ///
     /// The content of `file` is parsed as a PEM-encoded leaf certificate,
     /// followed by optional intermediate certificates.
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut config = quiche::Config::new(0xbabababa).unwrap();
+    /// config.load_cert_chain_from_pem_file("/path/to/cert.pem");
+    /// ```
     pub fn load_cert_chain_from_pem_file(&mut self, file: &str) -> Result<()> {
         self.tls_ctx
             .use_certificate_chain_file(file)
@@ -390,6 +403,13 @@ impl Config {
     /// Configures the given private key.
     ///
     /// The content of `file` is parsed as a PEM-encoded private key.
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut config = quiche::Config::new(0xbabababa).unwrap();
+    /// config.load_priv_key_from_pem_file("/path/to/key.pem");
+    /// ```
     pub fn load_priv_key_from_pem_file(&mut self, file: &str) -> Result<()> {
         self.tls_ctx
             .use_privkey_file(file)
@@ -428,9 +448,9 @@ impl Config {
     /// On the server this configures the list of supported protocols to match
     /// against the client-supplied list.
     ///
-    /// # Examples:
+    /// ## Examples:
     ///
-    /// ```rust
+    /// ```
     /// # let mut config = quiche::Config::new(0xbabababa).unwrap();
     /// config.set_application_protos(b"\x08http/1.1\x08http/0.9");
     /// ```
@@ -639,6 +659,14 @@ pub struct Connection {
 /// the [`retry()`] function).
 ///
 /// [`retry()`]: fn.retry.html
+///
+/// ## Examples:
+///
+/// ```no_run
+/// # let mut config = quiche::Config::new(0xbabababa).unwrap();
+/// # let scid = [0xba; 16];
+/// let conn = quiche::accept(&scid, None, &mut config).unwrap();
+/// ```
 pub fn accept(
     scid: &[u8], odcid: Option<&[u8]>, config: &mut Config,
 ) -> Result<Box<Connection>> {
@@ -652,6 +680,15 @@ pub fn accept(
 /// The `scid` parameter is used as the connection's source connection ID,
 /// while the optional `server_name` parameter is used to verify the peer's
 /// certificate.
+///
+/// ## Examples:
+///
+/// ```no_run
+/// # let mut config = quiche::Config::new(0xbabababa).unwrap();
+/// # let server_name = "quic.tech";
+/// # let scid = [0xba; 16];
+/// let conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
+/// ```
 pub fn connect(
     server_name: Option<&str>, scid: &[u8], config: &mut Config,
 ) -> Result<Box<Connection>> {
@@ -671,6 +708,25 @@ pub fn connect(
 /// The `scid` and `dcid` parameters are the source connection ID and the
 /// destination connection ID extracted from the received client's Initial
 /// packet that advertises an unsupported version.
+///
+/// ## Examples:
+///
+/// ```no_run
+/// # const LOCAL_CONN_ID_LEN: usize = 16;
+/// # let mut buf = [0; 512];
+/// # let mut out = [0; 512];
+/// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+/// let (len, src) = socket.recv_from(&mut buf).unwrap();
+///
+/// let hdr =
+///     quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN).unwrap();
+///
+/// if hdr.version != quiche::VERSION_DRAFT18 {
+///     let len =
+///         quiche::negotiate_version(&hdr.scid, &hdr.dcid, &mut out).unwrap();
+///     socket.send_to(&out[..len], &src).unwrap();
+/// }
+/// ```
 pub fn negotiate_version(
     scid: &[u8], dcid: &[u8], out: &mut [u8],
 ) -> Result<usize> {
@@ -691,6 +747,51 @@ pub fn negotiate_version(
 /// [`accept()`] function as its `odcid` parameter.
 ///
 /// [`accept()`]: fn.accept.html
+///
+/// ## Examples:
+///
+/// ```no_run
+/// # const LOCAL_CONN_ID_LEN: usize = 16;
+/// # let mut config = quiche::Config::new(0xbabababa).unwrap();
+/// # let mut buf = [0; 512];
+/// # let mut out = [0; 512];
+/// # let scid = [0xba; 16];
+/// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+/// # fn mint_token(hdr: &quiche::Header, src: &std::net::SocketAddr) -> Vec<u8> {
+/// #     vec![]
+/// # }
+/// # fn validate_token<'a>(src: &std::net::SocketAddr, token: &'a [u8]) -> Option<&'a [u8]> {
+/// #     None
+/// # }
+/// let (len, src) = socket.recv_from(&mut buf).unwrap();
+///
+/// let hdr =
+///     quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN).unwrap();
+///
+/// let token = hdr.token.as_ref().unwrap();
+///
+/// // No token sent by client, create a new one.
+/// if token.is_empty() {
+///     let new_token = mint_token(&hdr, &src);
+///
+///     let len = quiche::retry(
+///         &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
+///     ).unwrap();
+///
+///     socket.send_to(&out[..len], &src).unwrap();
+///     return;
+/// }
+///
+/// // Client sent token, validate it.
+/// let odcid = validate_token(&src, token);
+///
+/// if odcid == None {
+///     // Invalid address validation token.
+///     return;
+/// }
+///
+/// let conn = quiche::accept(&scid, odcid, &mut config).unwrap();
+/// ```
 pub fn retry(
     scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], out: &mut [u8],
 ) -> Result<usize> {
@@ -837,6 +938,33 @@ impl Connection {
     /// this function due to, for example, in-place decryption.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// loop {
+    ///     let read = socket.recv(&mut buf).unwrap();
+    ///
+    ///     let read = match conn.recv(&mut buf[..read]) {
+    ///         Ok(v) => v,
+    ///
+    ///         Err(quiche::Error::Done) => {
+    ///             // Done reading.
+    ///             break;
+    ///         },
+    ///
+    ///         Err(e) => {
+    ///             // An error occurred, handle it.
+    ///             break;
+    ///         },
+    ///     };
+    /// }
+    /// ```
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         let len = buf.len();
 
@@ -1382,6 +1510,33 @@ impl Connection {
     /// returned, or [`Done`].
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut out = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// loop {
+    ///     let write = match conn.send(&mut out) {
+    ///         Ok(v) => v,
+    ///
+    ///         Err(quiche::Error::Done) => {
+    ///             // Done writing.
+    ///             break;
+    ///         },
+    ///
+    ///         Err(e) => {
+    ///             // An error occurred, handle it.
+    ///             break;
+    ///         },
+    ///     };
+    ///
+    ///     socket.send(&out[..write]).unwrap();
+    /// }
+    /// ```
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
 
@@ -1806,6 +1961,20 @@ impl Connection {
     /// is returned as a tuple, or [`Done`] if there is no data to read.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// # let stream_id = 0;
+    /// while let Ok((read, fin)) = conn.stream_recv(stream_id, &mut buf) {
+    ///     println!("Got {} bytes on stream {}", read, stream_id);
+    /// }
+    /// ```
     pub fn stream_recv(
         &mut self, stream_id: u64, out: &mut [u8],
     ) -> Result<(usize, bool)> {
@@ -1835,6 +2004,18 @@ impl Connection {
     /// Writes data to a stream.
     ///
     /// On success the number of bytes written is returned.
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// # let stream_id = 0;
+    /// conn.stream_send(stream_id, b"hello", true).unwrap();
+    /// ```
     pub fn stream_send(
         &mut self, stream_id: u64, buf: &[u8], fin: bool,
     ) -> Result<usize> {
@@ -1886,6 +2067,25 @@ impl Connection {
     }
 
     /// Creates an iterator over streams that have outstanding data to read.
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// // Iterate over readable streams.
+    /// let streams: Vec<u64> = conn.readable().collect();
+    ///
+    /// for stream_id in streams {
+    ///     // Stream is readable, read until there's no more data.
+    ///     while let Ok((read, fin)) = conn.stream_recv(stream_id, &mut buf) {
+    ///         println!("Got {} bytes on stream {}", read, stream_id);
+    ///     }
+    /// }
+    /// ```
     pub fn readable(&mut self) -> Readable {
         self.streams.readable()
     }
