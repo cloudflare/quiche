@@ -41,7 +41,7 @@ const PACKET_THRESHOLD: u64 = 3;
 
 const GRANULARITY: Duration = Duration::from_millis(1);
 
-const INITIAL_RTT: Duration = Duration::from_millis(100);
+const INITIAL_RTT: Duration = Duration::from_millis(500);
 
 // Congestion Control
 const MAX_DATAGRAM_SIZE: usize = 1452;
