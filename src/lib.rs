@@ -2476,6 +2476,7 @@ impl std::fmt::Debug for TransportParams {
             self.initial_max_streams_uni
         )?;
         write!(f, "ack_delay_exponent={} ", self.ack_delay_exponent)?;
+        write!(f, "max_ack_delay={} ", self.max_ack_delay)?;
         write!(f, "disable_migration={}", self.disable_migration)?;
 
         Ok(())
