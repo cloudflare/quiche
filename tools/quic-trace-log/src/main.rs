@@ -256,6 +256,8 @@ fn main() {
         }
     }
 
+    println!("Generated {} events", events.len());
+
     trace.set_events(protobuf::RepeatedField::from_vec(events));
 
     let mut cos = protobuf::CodedOutputStream::new(&mut out);
