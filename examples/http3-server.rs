@@ -91,7 +91,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
     config.load_cert_chain_from_pem_file(args.get_str("--cert"))?;
     config.load_priv_key_from_pem_file(args.get_str("--key"))?;
 
-    config.set_application_protos(b"\x05h3-18")?;
+    config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL)?;
 
     config.set_idle_timeout(30);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);

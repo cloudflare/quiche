@@ -280,7 +280,9 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    quiche_config_set_application_protos(config, (uint8_t *) "\x05h3-18", 6);
+    quiche_config_set_application_protos(config,
+        (uint8_t *) QUICHE_H3_APPLICATION_PROTOCOL,
+        sizeof(QUICHE_H3_APPLICATION_PROTOCOL) - 1);
 
     quiche_config_set_idle_timeout(config, 30);
     quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);

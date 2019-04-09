@@ -39,7 +39,7 @@
 //!
 //! ```
 //! let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
-//! config.set_application_protos(b"\x05h3-18").unwrap();
+//! config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL);
 //! ```
 //!
 //! The QUIC handshake is driven by [sending] and [receiving] QUIC packets.
@@ -48,7 +48,7 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
-//! # config.set_application_protos(b"\x05h3-18").unwrap();
+//! # config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL).unwrap();
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
 //! # let conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
@@ -70,7 +70,7 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
-//! # config.set_application_protos(b"\x05h3-18").unwrap();
+//! # config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL).unwrap();
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
@@ -86,7 +86,7 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
-//! # config.set_application_protos(b"\x05h3-18").unwrap();
+//! # config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL).unwrap();
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
 //! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
@@ -108,7 +108,7 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
-//! # config.set_application_protos(b"\x05h3-18").unwrap();
+//! # config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL).unwrap();
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
 //! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
@@ -137,7 +137,7 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
-//! # config.set_application_protos(b"\x05h3-18").unwrap();
+//! # config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL).unwrap();
 //! # let scid = [0xba; 16];
 //! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
@@ -187,7 +187,7 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
-//! # config.set_application_protos(b"\x05h3-18").unwrap();
+//! # config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL).unwrap();
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
 //! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
@@ -243,6 +243,9 @@
 use std::collections::BTreeMap;
 
 use crate::octets;
+
+/// The current HTTP/3 ALPN token.
+pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-18";
 
 /// A specialized [`Result`] type for quiche HTTP/3 operations.
 ///
