@@ -994,8 +994,6 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        self.do_handshake()?;
-
         let is_closing = self.error.is_some() || self.app_error.is_some();
 
         if is_closing {
@@ -1159,6 +1157,8 @@ impl Connection {
             },
         };
 
+        let aead_tag_len = aead.alg().tag_len();
+
         packet::decrypt_hdr(&mut b, &mut hdr, &aead)?;
 
         let pn = packet::decode_pkt_num(
@@ -1308,6 +1308,8 @@ impl Connection {
                             .provide_data(level, &recv_buf)
                             .map_err(|_| Error::TlsFail)?;
                     }
+
+                    self.do_handshake()?;
 
                     ack_elicited = true;
                 },
@@ -1482,7 +1484,7 @@ impl Connection {
             ),
         );
 
-        let read = b.off() + aead.alg().tag_len();
+        let read = b.off() + aead_tag_len;
 
         // On the server, drop initial state after receiving and successfully
         // processing an Handshake packet.
