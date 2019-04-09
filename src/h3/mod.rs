@@ -43,22 +43,9 @@
 //! ```
 //!
 //! The QUIC handshake is driven by [sending] and [receiving] QUIC packets.
-//! Once the handshake has completed, the application should check that HTTP/3
-//! was negotiated using the [`application_proto()`] method:
 //!
-//! ```no_run
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
-//! # config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL).unwrap();
-//! # let server_name = "quic.tech";
-//! # let scid = [0xba; 16];
-//! # let conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
-//! if conn.is_established() && conn.application_proto() == b"h3-18" {
-//!     // Handshake completed and HTTP/3 negotiated.
-//! }
-//! ```
-//!
-//! The first step in establishing an HTTP/3 connection is creating its
-//! configuration object:
+//! Once the handshake has completed, the first step in establishing an HTTP/3
+//! connection is creating its configuration object:
 //!
 //! ```
 //! let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();

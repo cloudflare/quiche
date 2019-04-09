@@ -2243,6 +2243,13 @@ impl Connection {
         if !self.handshake_completed {
             match self.tls_state.do_handshake() {
                 Ok(_) => {
+                    if self.application_proto().is_empty() {
+                        // Send no_application_proto TLS alert when no protocol
+                        // can be negotiated.
+                        self.error = Some(0x178);
+                        return Err(Error::TlsFail);
+                    }
+
                     // Handshake is complete!
                     self.handshake_completed = true;
 
@@ -2987,6 +2994,9 @@ mod tests {
         let mut buf = [0; 65535];
 
         let mut config = Config::new(0xbabababa).unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -3027,7 +3037,7 @@ mod tests {
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
 
-        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+        assert_eq!(pipe.handshake(&mut buf), Err(Error::TlsFail));
 
         assert_eq!(pipe.client.application_proto(), b"");
         assert_eq!(pipe.server.application_proto(), b"");

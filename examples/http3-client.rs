@@ -182,12 +182,6 @@ fn main() -> Result<(), Box<std::error::Error>> {
         }
 
         if conn.is_established() && http3_conn.is_none() {
-            if conn.application_proto() != b"h3-18" {
-                // TODO a better error code?
-                conn.close(false, 0x0, b"I don't support your ALPNs")?;
-                break;
-            }
-
             let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
 
             let mut h3_conn =

@@ -252,17 +252,6 @@ fn main() -> Result<(), Box<std::error::Error>> {
             debug!("{} processed {} bytes", client.conn.trace_id(), read);
 
             if client.conn.is_established() && client.http3_conn.is_none() {
-                if client.conn.application_proto() != b"h3-18" {
-                    // TODO a better error code?
-                    client.conn.close(
-                        false,
-                        0x0,
-                        b"I don't support your ALPNs",
-                    )?;
-
-                    break;
-                }
-
                 debug!(
                     "{} QUIC handshake completed, now trying HTTP/3",
                     client.conn.trace_id()
