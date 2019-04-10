@@ -1806,7 +1806,7 @@ impl Connection {
             in_flight = true;
         }
 
-        // Create APPLICAtiON_CLOSE frame.
+        // Create APPLICATION_CLOSE frame.
         if let Some(err) = self.app_error {
             if pkt_type == packet::Type::Application {
                 let frame = frame::Frame::ApplicationClose {

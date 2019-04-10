@@ -83,6 +83,7 @@ pub struct Stream {
     ty: Option<Type>,
     is_local: bool,
     initialized: bool,
+    is_peer_fin: bool,
     state: State,
     stream_offset: u64,
     buf: Vec<u8>,
@@ -111,6 +112,7 @@ impl Stream {
             ty,
             is_local,
             initialized,
+            is_peer_fin: false,
             state,
             stream_offset: 0,
             // TODO: need a more elegant approach to buffer management.
@@ -126,6 +128,14 @@ impl Stream {
 
     pub fn state(&mut self) -> &State {
         &self.state
+    }
+
+    pub fn peer_fin(&self) -> bool {
+        self.is_peer_fin
+    }
+
+    pub fn set_peer_fin(&mut self, fin: bool) {
+        self.is_peer_fin = fin;
     }
 
     pub fn get_frame(&mut self) -> Option<frame::Frame> {

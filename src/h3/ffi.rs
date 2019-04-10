@@ -92,6 +92,8 @@ pub extern fn quiche_h3_event_type(ev: &h3::Event) -> u32 {
         h3::Event::Headers { .. } => 0,
 
         h3::Event::Data { .. } => 1,
+
+        h3::Event::Finished { .. } => 2,
     }
 }
 
@@ -125,7 +127,7 @@ pub extern fn quiche_h3_event_for_each_header(
                 }
             },
 
-        h3::Event::Data { .. } => unreachable!(),
+        _ => unreachable!(),
     }
 
     0
@@ -136,8 +138,6 @@ pub extern fn quiche_h3_event_data(
     ev: &h3::Event, out: *mut *const u8,
 ) -> size_t {
     match ev {
-        h3::Event::Headers { .. } => unreachable!(),
-
         h3::Event::Data(data) => {
             unsafe {
                 *out = (&data).as_ptr();
@@ -145,6 +145,8 @@ pub extern fn quiche_h3_event_data(
 
             data.len()
         },
+
+        _ => unreachable!(),
     }
 }
 

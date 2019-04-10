@@ -409,6 +409,9 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                         fprintf(stderr, "got HTTP data\n");
                         break;
                     }
+
+                    case QUICHE_H3_EVENT_FINISHED:
+                        break;
                 }
 
                 quiche_h3_event_free(ev);

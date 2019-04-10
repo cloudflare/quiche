@@ -246,12 +246,12 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                     printf("%.*s", (int) len, data);
                     break;
                 }
-            }
 
-            if (quiche_conn_stream_finished(conn_io->conn, s)) {
-                if (quiche_conn_close(conn_io->conn, true, 0, NULL, 0) < 0) {
-                    fprintf(stderr, "failed to close connection\n");
-                }
+                case QUICHE_H3_EVENT_FINISHED:
+                    if (quiche_conn_close(conn_io->conn, true, 0, NULL, 0) < 0) {
+                        fprintf(stderr, "failed to close connection\n");
+                    }
+                    break;
             }
 
             quiche_h3_event_free(ev);

@@ -303,6 +303,8 @@ fn main() {
                         );
                     },
 
+                    Ok((_stream_id, quiche::h3::Event::Finished)) => {},
+
                     Err(quiche::h3::Error::Done) => {},
 
                     Err(e) => {
