@@ -279,6 +279,7 @@ quiche_h3_conn *quiche_h3_conn_new_with_transport(quiche_conn *quiche_conn,
 enum quiche_h3_event_type {
     QUICHE_H3_EVENT_HEADERS,
     QUICHE_H3_EVENT_DATA,
+    QUICHE_H3_EVENT_FINISHED,
 };
 
 typedef struct Http3Event quiche_h3_event;

@@ -236,21 +236,22 @@ fn main() {
                         print!("{}", unsafe {
                             std::str::from_utf8_unchecked(&data)
                         });
+                    },
 
-                        if conn.stream_finished(stream_id) {
-                            info!(
-                                "{} response received in {:?}, closing...",
-                                conn.trace_id(),
-                                req_start.elapsed()
-                            );
+                    Ok((_stream_id, quiche::h3::Event::Finished)) => {
+                        info!(
+                            "{} response received in {:?}, closing...",
+                            conn.trace_id(),
+                            req_start.elapsed()
+                        );
 
-                            match conn.close(true, 0x00, b"kthxbye") {
-                                // Already closed.
-                                Ok(_) | Err(quiche::Error::Done) => (),
+                        match conn.close(true, 0x00, b"kthxbye") {
+                            // Already closed.
+                            Ok(_) | Err(quiche::Error::Done) => (),
 
-                                Err(e) => panic!("error closing conn: {:?}", e),
-                            }
+                            Err(e) => panic!("error closing conn: {:?}", e),
                         }
+                        break;
                     },
 
                     Err(quiche::h3::Error::Done) => {
