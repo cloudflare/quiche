@@ -212,7 +212,7 @@
 //! ```
 //!
 //! ## Detecting end of request or response
-
+//!
 //! A single HTTP/3 request or response may consist of several HEADERS and DATA
 //! frames; it is finished when the QUIC stream is closed. Calling [`poll()`]
 //! repeatedly will generate an [`Event`] for each of these. The application may
