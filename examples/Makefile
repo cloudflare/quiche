@@ -17,12 +17,9 @@ LIBSSL_DIR = $(dir $(shell find ${BUILD_DIR} -name libssl.a))
 
 LDFLAGS = -L$(LIBCRYPTO_DIR) -L$(LIBSSL_DIR) -L$(LIB_DIR)
 
-LIBS = -lquiche -lev -ldl -pthread
+LIBS = -l:libquiche.a -lev -ldl -pthread
 
 all: client server http3-client http3-server
-
-clean:
-	@rm -f client server http3-client http3-server $(LIB_DIR)/libquiche.a
 
 client: client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
@@ -38,3 +35,6 @@ http3-server: http3-server.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
 
 $(LIB_DIR)/libquiche.a: $(SOURCE_DIR)/**/*.rs
 	cd .. && cargo build --target-dir $(BUILD_DIR)
+
+clean:
+	@$(RM) -rf client server http3-client http3-server build/

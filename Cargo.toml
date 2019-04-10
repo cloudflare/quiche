@@ -48,7 +48,7 @@ debug = true
 debug = true
 
 [lib]
-crate-type = ["lib", "staticlib"]
+crate-type = ["lib", "staticlib", "cdylib"]
 
 [[bench]]
 name = "benches"

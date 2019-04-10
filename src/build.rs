@@ -6,6 +6,7 @@ fn main() {
 
     let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
         cmake::Config::new("deps/boringssl")
+            .cflag("-fPIC")
             .build_target("bssl")
             .build()
             .display()
