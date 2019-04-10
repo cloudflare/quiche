@@ -44,4 +44,4 @@ env_logger = "0"
 debug = true
 
 [lib]
-crate-type = ["lib", "staticlib"]
+crate-type = ["lib", "staticlib", "cdylib"]
