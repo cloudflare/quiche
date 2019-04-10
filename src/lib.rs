@@ -712,14 +712,14 @@ pub fn connect(
 /// ## Examples:
 ///
 /// ```no_run
-/// # const LOCAL_CONN_ID_LEN: usize = 16;
 /// # let mut buf = [0; 512];
 /// # let mut out = [0; 512];
 /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
 /// let (len, src) = socket.recv_from(&mut buf).unwrap();
 ///
 /// let hdr =
-///     quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN).unwrap();
+///     quiche::Header::from_slice(&mut buf[..len], quiche::MAX_CONN_ID_LEN)
+///         .unwrap();
 ///
 /// if hdr.version != quiche::VERSION_DRAFT18 {
 ///     let len =
@@ -751,7 +751,6 @@ pub fn negotiate_version(
 /// ## Examples:
 ///
 /// ```no_run
-/// # const LOCAL_CONN_ID_LEN: usize = 16;
 /// # let mut config = quiche::Config::new(0xbabababa).unwrap();
 /// # let mut buf = [0; 512];
 /// # let mut out = [0; 512];
@@ -766,7 +765,7 @@ pub fn negotiate_version(
 /// let (len, src) = socket.recv_from(&mut buf).unwrap();
 ///
 /// let hdr =
-///     quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN).unwrap();
+///     quiche::Header::from_slice(&mut buf[..len], quiche::MAX_CONN_ID_LEN).unwrap();
 ///
 /// let token = hdr.token.as_ref().unwrap();
 ///

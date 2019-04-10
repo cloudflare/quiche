@@ -30,8 +30,6 @@ extern crate log;
 
 use ring::rand::*;
 
-const LOCAL_CONN_ID_LEN: usize = 16;
-
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
 const HTTP_REQ_STREAM_ID: u64 = 4;
@@ -77,7 +75,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
         mio::PollOpt::edge(),
     )?;
 
-    let mut scid = [0; LOCAL_CONN_ID_LEN];
+    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
     SystemRandom::new().fill(&mut scid[..])?;
 
     let max_data = args.get_str("--max-data");

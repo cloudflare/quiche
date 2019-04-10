@@ -33,8 +33,6 @@ use std::collections::HashMap;
 
 use ring::rand::*;
 
-const LOCAL_CONN_ID_LEN: usize = 16;
-
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
 const USAGE: &str = "Usage:
@@ -144,8 +142,10 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
             let pkt_buf = &mut buf[..len];
 
-            let hdr = match quiche::Header::from_slice(pkt_buf, LOCAL_CONN_ID_LEN)
-            {
+            let hdr = match quiche::Header::from_slice(
+                pkt_buf,
+                quiche::MAX_CONN_ID_LEN,
+            ) {
                 Ok(v) => v,
 
                 Err(e) => {
@@ -180,7 +180,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
                     continue;
                 }
 
-                let mut scid = [0; LOCAL_CONN_ID_LEN];
+                let mut scid = [0; quiche::MAX_CONN_ID_LEN];
                 SystemRandom::new().fill(&mut scid[..])?;
 
                 let mut odcid = None;
