@@ -365,6 +365,10 @@ pub extern fn quiche_conn_new_with_tls(
 pub extern fn quiche_conn_recv(
     conn: &mut Connection, buf: *mut u8, buf_len: usize,
 ) -> ssize_t {
+    if buf_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
 
     match conn.recv(buf) {
@@ -378,6 +382,10 @@ pub extern fn quiche_conn_recv(
 pub extern fn quiche_conn_send(
     conn: &mut Connection, out: *mut u8, out_len: usize,
 ) -> ssize_t {
+    if out_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
     match conn.send(out) {
@@ -392,7 +400,10 @@ pub extern fn quiche_conn_stream_recv(
     conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: usize,
     fin: &mut bool,
 ) -> ssize_t {
-    // TODO: limit out_len to MAX_SSIZE to allow the result to fit in ssize_t
+    if out_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
     let (out_len, out_fin) = match conn.stream_recv(stream_id, out) {
@@ -411,6 +422,10 @@ pub extern fn quiche_conn_stream_send(
     conn: &mut Connection, stream_id: u64, buf: *const u8, buf_len: usize,
     fin: bool,
 ) -> ssize_t {
+    if buf_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
     let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
 
     match conn.stream_send(stream_id, buf, fin) {

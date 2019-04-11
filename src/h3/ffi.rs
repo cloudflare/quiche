@@ -225,6 +225,10 @@ pub extern fn quiche_h3_send_body(
     conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
     body: *const u8, body_len: usize, fin: bool,
 ) -> ssize_t {
+    if buf_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
     let body = unsafe { slice::from_raw_parts(body, body_len) };
 
     match conn.send_body(quic_conn, stream_id, body, fin) {
