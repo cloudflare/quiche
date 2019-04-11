@@ -39,7 +39,6 @@ const USAGE: &str = "Usage:
   client -h | --help
 
 Options:
-  --http1                  Send HTTP/1.1 request instead of HTTP/0.9.
   --max-data BYTES         Connection-wide flow control limit [default: 10000000].
   --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
   --wire-version VERSION   The version number to send to the server [default: babababa].
@@ -184,16 +183,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
                 url.path()
             );
 
-            let req = if args.get_bool("--http1") {
-                format!(
-                    "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: quiche\r\n\r\n",
-                    url.path(),
-                    url.host().unwrap()
-                )
-            } else {
-                format!("GET {}\r\n", url.path())
-            };
-
+            let req = format!("GET {}\r\n", url.path());
             conn.stream_send(HTTP_REQ_STREAM_ID, req.as_bytes(), true)?;
 
             req_sent = true;
