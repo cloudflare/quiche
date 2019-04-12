@@ -567,6 +567,9 @@ pub struct Connection {
     /// List of supported application protocols.
     application_protos: Vec<Vec<u8>>,
 
+    /// Total number of received packets.
+    recv_count: usize,
+
     /// Total number of sent packets.
     sent_count: usize,
 
@@ -839,6 +842,7 @@ impl Connection {
 
             application_protos: config.application_protos.clone(),
 
+            recv_count: 0,
             sent_count: 0,
 
             rx_data: 0,
@@ -1482,6 +1486,8 @@ impl Connection {
                 self.local_transport_params.idle_timeout,
             ),
         );
+
+        self.recv_count += 1;
 
         let read = b.off() + aead_tag_len;
 
@@ -2231,6 +2237,7 @@ impl Connection {
     /// Collects and returns statistics about the connection.
     pub fn stats(&self) -> Stats {
         Stats {
+            recv: self.recv_count,
             sent: self.sent_count,
             lost: self.recovery.lost_count,
             rtt: self.recovery.rtt(),
@@ -2373,6 +2380,9 @@ impl Connection {
 /// [`stats()`]: struct.Connection.html#method.stats
 #[derive(Clone)]
 pub struct Stats {
+    /// The number of QUIC packets received on this connection.
+    pub recv: usize,
+
     /// The number of QUIC packets sent on this connection.
     pub sent: usize,
 
@@ -2387,8 +2397,8 @@ impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "sent={} lost={} rtt={:?}",
-            self.sent, self.lost, self.rtt
+            "recv={} sent={} lost={} rtt={:?}",
+            self.recv, self.sent, self.lost, self.rtt
         )
     }
 }

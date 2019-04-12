@@ -238,6 +238,7 @@ bool quiche_conn_is_established(quiche_conn *conn);
 bool quiche_conn_is_closed(quiche_conn *conn);
 
 // Collects and returns statistics about the connection.
+void quiche_conn_stats_recv(quiche_conn *conn, uint64_t *out);
 void quiche_conn_stats_sent(quiche_conn *conn, uint64_t *out);
 void quiche_conn_stats_lost(quiche_conn *conn, uint64_t *out);
 void quiche_conn_stats_rtt_as_nanos(quiche_conn *conn, uint64_t *out);

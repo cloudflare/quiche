@@ -504,6 +504,11 @@ pub extern fn quiche_conn_is_closed(conn: &mut Connection) -> bool {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_recv_sent(conn: &Connection, out: &mut u64) {
+    *out = conn.stats().recv as u64;
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_stats_sent(conn: &Connection, out: &mut u64) {
     *out = conn.stats().sent as u64;
 }
