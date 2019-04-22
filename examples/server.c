@@ -334,7 +334,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             quiche_readable *iter = quiche_conn_readable(conn_io->conn);
 
             while (quiche_readable_next(iter, &s)) {
-                fprintf(stderr, "stream %zu is readable\n", s);
+                fprintf(stderr, "stream %llu is readable\n", s);
 
                 bool fin = false;
                 ssize_t recv_len = quiche_conn_stream_recv(conn_io->conn, s,

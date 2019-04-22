@@ -173,7 +173,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                                                    conn_io->conn,
                                                    headers, 5, true);
 
-        fprintf(stderr, "sent HTTP request %zu\n", stream_id);
+        fprintf(stderr, "sent HTTP request %llu\n", stream_id);
 
         req_sent = true;
     }
@@ -232,7 +232,7 @@ static void timeout_cb(EV_P_ ev_timer *w, int revents) {
         quiche_conn_stats_lost(conn_io->conn, &lost);
         quiche_conn_stats_rtt_as_nanos(conn_io->conn, &rtt);
 
-        fprintf(stderr, "connection closed, sent=%ld lost=%ld rtt=%ldns\n",
+        fprintf(stderr, "connection closed, sent=%lld lost=%lld rtt=%lldns\n",
                 sent, lost, rtt);
 
         ev_break(EV_A_ EVBREAK_ONE);
