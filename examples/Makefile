@@ -23,7 +23,7 @@ LIBS = -lcrypto -lssl -lquiche -lev -ldl -pthread
 all: client server http3-client http3-server
 
 clean:
-	@rm -f client server http3-client http3-server
+	@rm -f client server http3-client http3-server $(LIB_DIR)/libquiche.a
 
 client: client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
