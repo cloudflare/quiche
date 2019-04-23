@@ -5,6 +5,8 @@ BUILD_DIR = $(CURDIR)/build
 LIB_DIR = $(BUILD_DIR)/debug
 INCLUDE_DIR = ../include
 
+# added for uthash
+INCS = -I$(INCLUDE_DIR) -I../deps/uthash/include
 CFLAGS = -I. -Wall -Werror -pedantic -fsanitize=address -g
 
 ifeq ($(OS), Darwin)
@@ -21,16 +23,16 @@ LIBS = -lcrypto -lssl -lquiche -lev -ldl -pthread
 all: client server http3-client http3-server
 
 client: client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
-	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ -I$(INCLUDE_DIR) $(LIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
 
 server: server.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
-	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ -I$(INCLUDE_DIR) $(LIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
 
 http3-client: http3-client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
-	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ -I$(INCLUDE_DIR) $(LIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
 
 http3-server: http3-server.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
-	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ -I$(INCLUDE_DIR) $(LIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
 
 $(LIB_DIR)/libquiche.a: $(SOURCE_DIR)/**/*.rs
 	cd .. && cargo build --target-dir $(BUILD_DIR)
