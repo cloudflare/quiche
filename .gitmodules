@@ -2,6 +2,3 @@
 	path = deps/boringssl
 	url = https://boringssl.googlesource.com/boringssl
 	ignore = dirty
-[submodule "deps/uthash"]
-	path = deps/uthash
-	url = git@github.com:troydhanson/uthash.git

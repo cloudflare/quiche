@@ -6,7 +6,7 @@ LIB_DIR = $(BUILD_DIR)/debug
 INCLUDE_DIR = ../include
 
 # added for uthash
-INCS = -I$(INCLUDE_DIR) -I../deps/uthash/include
+INCS = -I$(INCLUDE_DIR)
 CFLAGS = -I. -Wall -Werror -pedantic -fsanitize=address -g
 
 ifeq ($(OS), Darwin)
@@ -21,6 +21,9 @@ LDFLAGS = -L$(LIBCRYPTO_DIR) -L$(LIBSSL_DIR) -L$(LIB_DIR)
 LIBS = -lcrypto -lssl -lquiche -lev -ldl -pthread
 
 all: client server http3-client http3-server
+
+clean:
+	@rm -f client server http3-client http3-server
 
 client: client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
