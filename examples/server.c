@@ -25,6 +25,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -332,7 +333,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             uint64_t s = 0;
 
             while (quiche_readable_next(conn_io->conn, &s)) {
-                fprintf(stderr, "stream %zu is readable\n", s);
+                fprintf(stderr, "stream %" PRIu64 " is readable\n", s);
 
                 bool fin = false;
                 ssize_t recv_len = quiche_conn_stream_recv(conn_io->conn, s,
