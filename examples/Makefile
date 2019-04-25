@@ -5,7 +5,6 @@ BUILD_DIR = $(CURDIR)/build
 LIB_DIR = $(BUILD_DIR)/debug
 INCLUDE_DIR = ../include
 
-# added for uthash
 INCS = -I$(INCLUDE_DIR)
 CFLAGS = -I. -Wall -Werror -pedantic -fsanitize=address -g
 
