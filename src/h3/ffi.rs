@@ -147,7 +147,7 @@ pub extern fn quiche_h3_event_free(ev: *mut h3::Event) {
 }
 
 #[repr(C)]
-pub struct FFIHeader {
+pub struct Header {
     name: *mut c_char,
     value: *mut c_char,
 }
@@ -155,7 +155,7 @@ pub struct FFIHeader {
 #[no_mangle]
 pub extern fn quiche_h3_send_request(
     conn: &mut h3::Connection, quic_conn: &mut Connection,
-    headers: *const FFIHeader, headers_len: size_t, fin: bool,
+    headers: *const Header, headers_len: size_t, fin: bool,
 ) -> i64 {
     let headers = unsafe { slice::from_raw_parts(headers, headers_len) };
 
@@ -189,7 +189,7 @@ pub extern fn quiche_h3_send_request(
 #[no_mangle]
 pub extern fn quiche_h3_send_response(
     conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
-    headers: *const FFIHeader, headers_len: size_t, fin: bool,
+    headers: *const Header, headers_len: size_t, fin: bool,
 ) -> c_int {
     let headers = unsafe { slice::from_raw_parts(headers, headers_len) };
 
