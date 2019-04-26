@@ -79,7 +79,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     let mut connections = ConnMap::new();
 
-    let mut config = quiche::Config::new(quiche::VERSION_DRAFT19)?;
+    let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 
     config.load_cert_chain_from_pem_file(args.get_str("--cert"))?;
     config.load_priv_key_from_pem_file(args.get_str("--key"))?;
@@ -157,7 +157,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
                     continue;
                 }
 
-                if hdr.version != quiche::VERSION_DRAFT19 {
+                if hdr.version != quiche::PROTOCOL_VERSION {
                     warn!("Doing version negotiation");
 
                     let len = quiche::negotiate_version(
