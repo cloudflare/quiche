@@ -2294,13 +2294,7 @@ impl Connection {
                            self.peer_transport_params);
                 },
 
-                Err(tls::Error::TlsFail) => {
-                    // If we have an error to send (e.g. a TLS alert), ignore
-                    // the error so we send a CONNECTION_CLOSE to the peer.
-                    if self.error.is_none() {
-                        return Err(Error::TlsFail);
-                    }
-                },
+                Err(tls::Error::TlsFail) => return Err(Error::TlsFail),
 
                 Err(tls::Error::SyscallFail) => return Err(Error::TlsFail),
 
