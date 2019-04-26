@@ -228,7 +228,7 @@ use std::collections::BTreeMap;
 use crate::octets;
 
 /// The current HTTP/3 ALPN token.
-pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-19";
+pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-20";
 
 /// A specialized [`Result`] type for quiche HTTP/3 operations.
 ///
@@ -358,9 +358,9 @@ impl Error {
             Error::GeneralProtocolError => 0xFF,
             Error::MalformedFrame => 0x10,
 
-            Error::QpackDecompressionFailed => 0x20, // TODO: value is TBD
-            Error::QpackEncoderStreamError => 0x21,  // TODO: value is TBD
-            Error::QpackDecoderStreamError => 0x22,  // TODO: value is TBD
+            Error::QpackDecompressionFailed => 0x200,
+            Error::QpackEncoderStreamError => 0x201,
+            Error::QpackDecoderStreamError => 0x202,
             Error::BufferTooShort => 0x999,
 
             Error::TransportError => 0xFF,
@@ -1431,15 +1431,13 @@ mod tests {
 
         loop {
             match s.server.poll(&mut s.pipe.server) {
-                Ok(o) => {
-                    println!("ok {:?}", o);
-                },
+                Ok(_) => (),
+
                 Err(Error::Done) => {
                     break;
                 },
-                Err(e) => {
-                    println!("err {:?}", e);
-                },
+
+                Err(_) => (),
             }
         }
 
@@ -1468,15 +1466,13 @@ mod tests {
 
         loop {
             match s.server.poll(&mut s.pipe.server) {
-                Ok(o) => {
-                    println!("ok {:?}", o);
-                },
+                Ok(_) => (),
+
                 Err(Error::Done) => {
                     break;
                 },
-                Err(e) => {
-                    println!("err {:?}", e);
-                },
+
+                Err(_) => (),
             }
         }
 

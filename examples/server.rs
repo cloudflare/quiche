@@ -90,7 +90,7 @@ fn main() {
         .unwrap();
 
     config
-        .set_application_protos(b"\x05hq-19\x08http/0.9")
+        .set_application_protos(b"\x05hq-20\x08http/0.9")
         .unwrap();
 
     config.set_idle_timeout(5000);
