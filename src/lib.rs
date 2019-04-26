@@ -1389,12 +1389,20 @@ impl Connection {
                 },
 
                 frame::Frame::MaxStreamsBidi { max } => {
+                    if max > 2u64.pow(60) {
+                        return Err(Error::StreamLimit);
+                    }
+
                     self.streams.update_peer_max_streams_bidi(max as usize);
 
                     ack_elicited = true;
                 },
 
                 frame::Frame::MaxStreamsUni { max } => {
+                    if max > 2u64.pow(60) {
+                        return Err(Error::StreamLimit);
+                    }
+
                     self.streams.update_peer_max_streams_uni(max as usize);
 
                     ack_elicited = true;
@@ -2490,11 +2498,23 @@ impl TransportParams {
                 },
 
                 0x0008 => {
-                    tp.initial_max_streams_bidi = val.get_varint()?;
+                    let max = val.get_varint()?;
+
+                    if max > 2u64.pow(60) {
+                        return Err(Error::StreamLimit);
+                    }
+
+                    tp.initial_max_streams_bidi = max;
                 },
 
                 0x0009 => {
-                    tp.initial_max_streams_uni = val.get_varint()?;
+                    let max = val.get_varint()?;
+
+                    if max > 2u64.pow(60) {
+                        return Err(Error::StreamLimit);
+                    }
+
+                    tp.initial_max_streams_uni = max;
                 },
 
                 0x000a => {
@@ -3184,6 +3204,30 @@ mod tests {
     }
 
     #[test]
+    fn stream_limit_max_bidi() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [frame::Frame::MaxStreamsBidi { max: 2u64.pow(60) }];
+
+        let pkt_type = packet::Type::Application;
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+        let frames = [frame::Frame::MaxStreamsBidi {
+            max: 2u64.pow(60) + 1,
+        }];
+
+        let pkt_type = packet::Type::Application;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::StreamLimit),
+        );
+    }
+
+    #[test]
     fn stream_limit_uni() {
         let mut buf = [0; 65535];
 
@@ -3221,6 +3265,30 @@ mod tests {
                 data: stream::RangeBuf::from(b"a", 0, false),
             },
         ];
+
+        let pkt_type = packet::Type::Application;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::StreamLimit),
+        );
+    }
+
+    #[test]
+    fn stream_limit_max_uni() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [frame::Frame::MaxStreamsUni { max: 2u64.pow(60) }];
+
+        let pkt_type = packet::Type::Application;
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+        let frames = [frame::Frame::MaxStreamsUni {
+            max: 2u64.pow(60) + 1,
+        }];
 
         let pkt_type = packet::Type::Application;
         assert_eq!(
