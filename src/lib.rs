@@ -2708,8 +2708,8 @@ impl std::fmt::Debug for TransportParams {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod testing {
+#[doc(hidden)]
+pub mod testing {
     use super::*;
 
     pub struct Pipe {
