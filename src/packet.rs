@@ -356,7 +356,9 @@ impl Header {
                 },
 
                 // No token, so length = 0.
-                None => out.put_varint(0)?,
+                None => {
+                    out.put_varint(0)?;
+                },
             }
         }
 

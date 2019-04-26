@@ -64,11 +64,12 @@ macro_rules! get_u {
 
 macro_rules! put_u {
     ($b:expr, $ty:ty, $v:expr, $len:expr) => {{
-        let dst = &mut $b.buf[$b.off..];
-
-        if dst.len() < $len {
+        if $b.buf.len() < $b.off + $len {
             return Err(Error::BufferTooShort);
         }
+
+        #[allow(clippy::range_plus_one)]
+        let dst = &mut $b.buf[$b.off..($b.off + $len)];
 
         unsafe {
             let src = &<$ty>::to_be($v) as *const $ty as *const u8;
@@ -205,41 +206,44 @@ impl<'a> Octets<'a> {
 
     /// Writes an unsigned variable-length integer in network byte-order at the
     /// current offset and advances the buffer.
-    pub fn put_varint(&mut self, v: u64) -> Result<()> {
+    pub fn put_varint(&mut self, v: u64) -> Result<&mut [u8]> {
         self.put_varint_with_len(v, varint_len(v))
     }
 
     /// Writes an unsigned variable-length integer of the specified length, in
     /// network byte-order at the current offset and advances the buffer.
-    pub fn put_varint_with_len(&mut self, v: u64, len: usize) -> Result<()> {
+    pub fn put_varint_with_len(
+        &mut self, v: u64, len: usize,
+    ) -> Result<&mut [u8]> {
         if self.cap() < len {
             return Err(Error::BufferTooShort);
         }
 
-        match len {
-            1 => {
-                self.put_u8(v as u8)?;
-            },
+        let buf = match len {
+            1 => self.put_u8(v as u8)?,
 
             2 => {
                 let buf = self.put_u16(v as u16)?;
                 buf[0] |= 0x40;
+                buf
             },
 
             4 => {
                 let buf = self.put_u32(v as u32)?;
                 buf[0] |= 0x80;
+                buf
             },
 
             8 => {
                 let buf = self.put_u64(v)?;
                 buf[0] |= 0xc0;
+                buf
             },
 
             _ => panic!("value is too large for varint"),
-        }
+        };
 
-        Ok(())
+        Ok(buf)
     }
 
     /// Reads `len` bytes from the current offset without copying and advances

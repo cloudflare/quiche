@@ -585,22 +585,19 @@ impl Connection {
         headers: &[Header], fin: bool,
     ) -> Result<()> {
         let mut d = [42; 10];
+        let mut b = octets::Octets::with_slice(&mut d);
 
         let headers_len = headers
             .iter()
             .fold(0, |acc, h| acc + h.value().len() + h.name().len() + 32);
+
         let mut header_block = vec![0; headers_len];
         let len = self
             .qpack_encoder
             .encode(&headers, &mut header_block)
             .map_err(|_| Error::InternalError)?;
+
         header_block.truncate(len);
-
-        let mut b = octets::Octets::with_slice(&mut d);
-        b.put_varint(frame::HEADERS_FRAME_TYPE_ID)?;
-        b.put_varint(len as u64)?;
-
-        let off = b.off();
 
         if conn.grease {
             self.send_grease_frames(conn, stream_id)?;
@@ -609,12 +606,17 @@ impl Connection {
         trace!(
             "{} sending HEADERS of size {} on stream {}",
             conn.trace_id(),
-            off + len,
+            len,
             stream_id
         );
 
-        conn.stream_send(stream_id, &d[..off], fin)?;
+        conn.stream_send(
+            stream_id,
+            b.put_varint(frame::HEADERS_FRAME_TYPE_ID)?,
+            false,
+        )?;
 
+        conn.stream_send(stream_id, b.put_varint(len as u64)?, false)?;
         conn.stream_send(stream_id, &header_block, fin)?;
 
         Ok(())
@@ -628,21 +630,22 @@ impl Connection {
         fin: bool,
     ) -> Result<usize> {
         let mut d = [42; 10];
-
         let mut b = octets::Octets::with_slice(&mut d);
-        b.put_varint(frame::DATA_FRAME_TYPE_ID)?;
-        b.put_varint(body.len() as u64)?;
-
-        let off = b.off();
 
         trace!(
             "{} sending DATA frame of size {} on stream {}",
             conn.trace_id(),
-            off + body.len(),
+            body.len(),
             stream_id
         );
 
-        conn.stream_send(stream_id, &d[..off], false)?;
+        conn.stream_send(
+            stream_id,
+            b.put_varint(frame::DATA_FRAME_TYPE_ID)?,
+            false,
+        )?;
+
+        conn.stream_send(stream_id, b.put_varint(body.len() as u64)?, false)?;
 
         // Return how many bytes were written, excluding the frame header.
         let written = conn.stream_send(stream_id, body, fin)?;
@@ -924,10 +927,12 @@ impl Connection {
 
             let mut d = [42; 8];
             let mut b = octets::Octets::with_slice(&mut d);
-            b.put_varint(stream::HTTP3_CONTROL_STREAM_TYPE_ID)?;
-            let off = b.off();
 
-            conn.stream_send(stream_id, &d[..off], false)?;
+            conn.stream_send(
+                stream_id,
+                b.put_varint(stream::HTTP3_CONTROL_STREAM_TYPE_ID)?,
+                false,
+            )?;
 
             self.control_stream_id = Some(stream_id);
         }
@@ -942,10 +947,12 @@ impl Connection {
 
             let mut d = [0; 8];
             let mut b = octets::Octets::with_slice(&mut d);
-            b.put_varint(stream::QPACK_ENCODER_STREAM_TYPE_ID)?;
-            let off = b.off();
 
-            conn.stream_send(stream_id, &d[..off], false)?;
+            conn.stream_send(
+                stream_id,
+                b.put_varint(stream::QPACK_ENCODER_STREAM_TYPE_ID)?,
+                false,
+            )?;
 
             self.local_qpack_streams.encoder_stream_id = Some(stream_id);
         }
@@ -955,10 +962,12 @@ impl Connection {
 
             let mut d = [0; 8];
             let mut b = octets::Octets::with_slice(&mut d);
-            b.put_varint(stream::QPACK_DECODER_STREAM_TYPE_ID)?;
-            let off = b.off();
 
-            conn.stream_send(stream_id, &d[..off], false)?;
+            conn.stream_send(
+                stream_id,
+                b.put_varint(stream::QPACK_DECODER_STREAM_TYPE_ID)?,
+                false,
+            )?;
 
             self.local_qpack_streams.decoder_stream_id = Some(stream_id);
         }
@@ -966,27 +975,12 @@ impl Connection {
         Ok(())
     }
 
-    /// Generates an HTTP/3 GREASE variable length integer.
-    fn grease_value() -> u64 {
-        let n = std::cmp::min(super::rand::rand_u64(), 148_764_065_110_560_899);
-        31 * n + 33
-    }
-
     /// Send GREASE frames on the provided stream ID.
     fn send_grease_frames(
         &mut self, conn: &mut super::Connection, stream_id: u64,
     ) -> Result<()> {
         let mut d = [42; 128];
-
         let mut b = octets::Octets::with_slice(&mut d);
-
-        // Empty GREASE frame.
-        b.put_varint(Connection::grease_value())?;
-        b.put_varint(0)?;
-
-        // GREASE frame with payload.
-        b.put_varint(Connection::grease_value())?;
-        b.put_varint(18)?;
 
         trace!(
             "{} sending GREASE frames on stream id {}",
@@ -994,8 +988,13 @@ impl Connection {
             stream_id
         );
 
-        let off = b.off();
-        conn.stream_send(stream_id, &d[..off], false)?;
+        // Empty GREASE frame.
+        conn.stream_send(stream_id, b.put_varint(grease_value())?, false)?;
+        conn.stream_send(stream_id, b.put_varint(0)?, false)?;
+
+        // GREASE frame with payload.
+        conn.stream_send(stream_id, b.put_varint(grease_value())?, false)?;
+        conn.stream_send(stream_id, b.put_varint(18)?, false)?;
 
         conn.stream_send(stream_id, b"GREASE is the word", false)?;
 
@@ -1009,17 +1008,15 @@ impl Connection {
 
         let mut d = [0; 8];
         let mut b = octets::Octets::with_slice(&mut d);
-        b.put_varint(Connection::grease_value())?;
 
-        let off = b.off();
-
-        match conn.stream_send(stream_id, &d[..off], false) {
+        match conn.stream_send(stream_id, b.put_varint(grease_value())?, false) {
             Ok(_) => {
                 trace!(
                     "{} sending GREASE stream on stream id {}",
                     conn.trace_id(),
                     stream_id
                 );
+
                 conn.stream_send(stream_id, b"GREASE is the word", false)?;
             },
 
@@ -1053,7 +1050,7 @@ impl Connection {
         };
 
         let grease = if conn.grease {
-            Some((Connection::grease_value(), Connection::grease_value()))
+            Some((grease_value(), grease_value()))
         } else {
             None
         };
@@ -1232,6 +1229,12 @@ impl Connection {
     }
 }
 
+/// Generates an HTTP/3 GREASE variable length integer.
+fn grease_value() -> u64 {
+    let n = std::cmp::min(super::rand::rand_u64(), 148_764_065_110_560_899);
+    31 * n + 33
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1309,7 +1312,7 @@ mod tests {
 
     #[test]
     fn grease_value_in_varint_limit() {
-        assert!(Connection::grease_value() < 2u64.pow(62) - 1);
+        assert!(grease_value() < 2u64.pow(62) - 1);
     }
 
     #[test]
@@ -1382,14 +1385,17 @@ mod tests {
         s.handshake(&mut buf).unwrap();
 
         let stream_id = s.client.get_available_uni_stream().unwrap();
+
         let mut d = [42; 8];
         let mut b = octets::Octets::with_slice(&mut d);
-        b.put_varint(stream::HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
-        let off = b.off();
 
         s.pipe
             .client
-            .stream_send(stream_id, &d[..off], false)
+            .stream_send(
+                stream_id,
+                b.put_varint(stream::HTTP3_CONTROL_STREAM_TYPE_ID).unwrap(),
+                false,
+            )
             .unwrap();
 
         s.pipe.advance(&mut buf).ok();
