@@ -324,8 +324,8 @@ pub extern fn quiche_negotiate_version(
 #[no_mangle]
 pub extern fn quiche_retry(
     scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
-    new_scid: *const u8, new_scid_len: size_t, token: *const u8, token_len: size_t,
-    out: *mut u8, out_len: size_t,
+    new_scid: *const u8, new_scid_len: size_t, token: *const u8,
+    token_len: size_t, out: *mut u8, out_len: size_t,
 ) -> ssize_t {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
     let dcid = unsafe { slice::from_raw_parts(dcid, dcid_len) };
