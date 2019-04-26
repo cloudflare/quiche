@@ -558,7 +558,7 @@ pub struct Connection {
     local_transport_params: TransportParams,
 
     /// TLS handshake state.
-    tls_state: tls::Handshake,
+    handshake: tls::Handshake,
 
     /// Loss recovery and congestion control state.
     recovery: recovery::Recovery,
@@ -697,7 +697,7 @@ pub fn connect(
     let conn = Connection::new(scid, None, config, false)?;
 
     if server_name.is_some() {
-        conn.tls_state
+        conn.handshake
             .set_host_name(server_name.unwrap())
             .map_err(|_| Error::TlsFail)?;
     }
@@ -835,7 +835,7 @@ impl Connection {
 
             local_transport_params: config.local_transport_params.clone(),
 
-            tls_state: tls,
+            handshake: tls,
 
             recovery: recovery::Recovery::default(),
 
@@ -897,7 +897,7 @@ impl Connection {
                 Some(odcid.to_vec());
         }
 
-        conn.tls_state.init(&conn).map_err(|_| Error::TlsFail)?;
+        conn.handshake.init(&conn).map_err(|_| Error::TlsFail)?;
 
         conn.streams.update_local_max_streams_bidi(
             config.local_transport_params.initial_max_streams_bidi as usize,
@@ -1051,7 +1051,7 @@ impl Connection {
             self.got_peer_conn_id = false;
             self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
-            self.tls_state.clear().map_err(|_| Error::TlsFail)?;
+            self.handshake.clear().map_err(|_| Error::TlsFail)?;
 
             return Err(Error::Done);
         }
@@ -1095,7 +1095,7 @@ impl Connection {
             self.got_peer_conn_id = false;
             self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
-            self.tls_state.clear().map_err(|_| Error::TlsFail)?;
+            self.handshake.clear().map_err(|_| Error::TlsFail)?;
 
             return Err(Error::Done);
         }
@@ -1306,7 +1306,7 @@ impl Connection {
 
                     while let Ok((read, _)) = stream.recv.pop(&mut crypto_buf) {
                         let recv_buf = &crypto_buf[..read];
-                        self.tls_state
+                        self.handshake
                             .provide_data(level, &recv_buf)
                             .map_err(|_| Error::TlsFail)?;
                     }
@@ -2215,7 +2215,7 @@ impl Connection {
     ///
     /// If no protocol has been negotiated, the returned value is empty.
     pub fn application_proto(&self) -> &[u8] {
-        self.tls_state.get_alpn_protocol()
+        self.handshake.get_alpn_protocol()
     }
 
     /// Returns true if the connection handshake is complete.
@@ -2225,7 +2225,7 @@ impl Connection {
 
     /// Returns true if the connection is resumed.
     pub fn is_resumed(&self) -> bool {
-        self.tls_state.is_resumed()
+        self.handshake.is_resumed()
     }
 
     /// Returns true if the connection is closed.
@@ -2250,7 +2250,7 @@ impl Connection {
     /// If the connection is already established, it does nothing.
     fn do_handshake(&mut self) -> Result<()> {
         if !self.handshake_completed {
-            match self.tls_state.do_handshake() {
+            match self.handshake.do_handshake() {
                 Ok(_) => {
                     if self.application_proto().is_empty() {
                         // Send no_application_proto TLS alert when no protocol
@@ -2263,7 +2263,7 @@ impl Connection {
                     self.handshake_completed = true;
 
                     let mut raw_params =
-                        self.tls_state.get_quic_transport_params().to_vec();
+                        self.handshake.get_quic_transport_params().to_vec();
 
                     let peer_params =
                         TransportParams::decode(&mut raw_params, self.is_server)?;
@@ -2288,7 +2288,7 @@ impl Connection {
 
                     trace!("{} connection established: cipher={:?} proto={:?} resumed={} {:?}",
                            &self.trace_id,
-                           self.tls_state.cipher(),
+                           self.handshake.cipher(),
                            std::str::from_utf8(self.application_proto()),
                            self.is_resumed(),
                            self.peer_transport_params);
@@ -2315,7 +2315,7 @@ impl Connection {
     fn write_epoch(&self) -> Result<packet::Epoch> {
         // On error or probe, send packet in the latest space available.
         if self.error.is_some() || self.recovery.probes > 0 {
-            let epoch = match self.tls_state.get_write_level() {
+            let epoch = match self.handshake.get_write_level() {
                 crypto::Level::Initial => packet::EPOCH_INITIAL,
                 crypto::Level::ZeroRTT => unreachable!(),
                 crypto::Level::Handshake => packet::EPOCH_HANDSHAKE,
