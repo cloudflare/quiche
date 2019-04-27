@@ -80,17 +80,17 @@ fn stream(c: &mut Criterion) {
     let mut pipe = quiche::testing::Pipe::with_config(&mut config).unwrap();
     pipe.handshake(&mut buf).unwrap();
 
-    let mut send_buf = vec![0; 1000 * 128];
+    let mut send_buf = vec![0; 5_000_000];
     SystemRandom::new().fill(&mut send_buf[..]).unwrap();
 
     let mut recv_buf = vec![0; send_buf.len()];
 
-    c.bench_function("stream", move |b| b.iter(|| {
-        pipe.client.stream_send(4, &send_buf, false).unwrap();
+    c.bench_function_over_inputs("stream", move |b, &&size| b.iter(|| {
+        pipe.client.stream_send(4, &send_buf[..size], false).unwrap();
 
         let mut recv_len = 0;
 
-        while recv_len < send_buf.len() {
+        while recv_len < size {
             loop {
                 let len = match pipe.client.send(&mut buf) {
                     Ok(write) => write,
@@ -134,8 +134,8 @@ fn stream(c: &mut Criterion) {
             }
         }
 
-        assert_eq!(&recv_buf, &send_buf);
-    }));
+        assert_eq!(&recv_buf[..size], &send_buf[..size]);
+    }), &[128_000, 5_000_000]);
 }
 
 criterion_group!(benches, handshake, stream);
