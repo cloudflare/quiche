@@ -215,7 +215,9 @@ impl Recovery {
 
         let mut has_newly_acked = false;
 
-        for pn in ranges.flatten() {
+        // Processing ACKed packets in reverse order (from largest to smallest)
+        // appears to be faster, possibly due to the BTreeMap implementation.
+        for pn in ranges.flatten().rev() {
             let newly_acked = self.on_packet_acked(pn, epoch);
             has_newly_acked = cmp::max(has_newly_acked, newly_acked);
 
