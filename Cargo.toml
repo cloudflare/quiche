@@ -38,6 +38,7 @@ lazy_static = "1"
 mio = "0"
 url = "1"
 docopt = "1"
+criterion = "0"
 env_logger = "0"
 
 [profile.bench]
@@ -48,3 +49,7 @@ debug = true
 
 [lib]
 crate-type = ["lib", "staticlib"]
+
+[[bench]]
+name = "benches"
+harness = false

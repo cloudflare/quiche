@@ -24,124 +24,120 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#![feature(test)]
-extern crate test;
+#[macro_use]
+extern crate criterion;
 
-#[cfg(test)]
-mod tests {
-    use test::Bencher;
+use ring::rand::*;
 
-    use ring::rand::*;
+use criterion::Criterion;
 
-    #[bench]
-    fn bench_handshake(b: &mut Bencher) {
-        let mut buf = [0; 65535];
+fn handshake(c: &mut Criterion) {
+    let mut buf = [0; 65535];
 
-        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(b"\x06proto1\x06proto2")
-            .unwrap();
-        config.set_initial_max_data(2u64.pow(62) - 1);
-        config.set_initial_max_stream_data_bidi_local(2u64.pow(62) - 1);
-        config.set_initial_max_stream_data_bidi_remote(2u64.pow(62) - 1);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.verify_peer(false);
+    let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(b"\x06proto1\x06proto2")
+        .unwrap();
+    config.set_initial_max_data(2u64.pow(62) - 1);
+    config.set_initial_max_stream_data_bidi_local(2u64.pow(62) - 1);
+    config.set_initial_max_stream_data_bidi_remote(2u64.pow(62) - 1);
+    config.set_initial_max_streams_bidi(3);
+    config.set_initial_max_streams_uni(3);
+    config.verify_peer(false);
 
-        b.iter(|| {
-            let mut pipe = quiche::testing::Pipe::with_config(&mut config).unwrap();
-            pipe.handshake(&mut buf).unwrap();
-        });
-    }
-
-    #[bench]
-    fn bench_stream(b: &mut Bencher) {
-        let mut buf = [0; 65535];
-
-        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(b"\x06proto1\x06proto2")
-            .unwrap();
-        config.set_initial_max_data(2u64.pow(62) - 1);
-        config.set_initial_max_stream_data_bidi_local(2u64.pow(62) - 1);
-        config.set_initial_max_stream_data_bidi_remote(2u64.pow(62) - 1);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.verify_peer(false);
-
+    c.bench_function("handshake", move |b| b.iter(|| {
         let mut pipe = quiche::testing::Pipe::with_config(&mut config).unwrap();
         pipe.handshake(&mut buf).unwrap();
+    }));
+}
 
-        let mut send_buf = vec![0; 1000 * 128];
-        SystemRandom::new().fill(&mut send_buf[..]).unwrap();
+fn stream(c: &mut Criterion) {
+    let mut buf = [0; 65535];
 
-        let mut recv_buf = vec![0; send_buf.len()];
+    let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(b"\x06proto1\x06proto2")
+        .unwrap();
+    config.set_initial_max_data(2u64.pow(62) - 1);
+    config.set_initial_max_stream_data_bidi_local(2u64.pow(62) - 1);
+    config.set_initial_max_stream_data_bidi_remote(2u64.pow(62) - 1);
+    config.set_initial_max_streams_bidi(3);
+    config.set_initial_max_streams_uni(3);
+    config.verify_peer(false);
 
-        b.iter(|| {
-            pipe.client.stream_send(4, &send_buf, false).unwrap();
+    let mut pipe = quiche::testing::Pipe::with_config(&mut config).unwrap();
+    pipe.handshake(&mut buf).unwrap();
 
-            let mut recv_len = 0;
+    let mut send_buf = vec![0; 1000 * 128];
+    SystemRandom::new().fill(&mut send_buf[..]).unwrap();
 
-            while recv_len < send_buf.len() {
-                loop {
-                    let len = match pipe.client.send(&mut buf) {
-                        Ok(write) => write,
+    let mut recv_buf = vec![0; send_buf.len()];
 
-                        Err(quiche::Error::Done) => break,
+    c.bench_function("stream", move |b| b.iter(|| {
+        pipe.client.stream_send(4, &send_buf, false).unwrap();
 
-                        Err(e) => panic!("client send failed {}", e),
-                    };
+        let mut recv_len = 0;
 
-                    match pipe.server.recv(&mut buf[..len]) {
-                        Ok(_) => (),
+        while recv_len < send_buf.len() {
+            loop {
+                let len = match pipe.client.send(&mut buf) {
+                    Ok(write) => write,
 
-                        Err(quiche::Error::Done) => (),
+                    Err(quiche::Error::Done) => break,
 
-                        Err(e) => panic!("server recv failed {}", e),
-                    }
-                }
+                    Err(e) => panic!("client send failed {}", e),
+                };
 
-                let (len, _) = pipe
-                    .server
-                    .stream_recv(4, &mut recv_buf[recv_len..])
-                    .unwrap();
-                recv_len += len;
+                match pipe.server.recv(&mut buf[..len]) {
+                    Ok(_) => (),
 
-                loop {
-                    let len = match pipe.server.send(&mut buf) {
-                        Ok(write) => write,
+                    Err(quiche::Error::Done) => (),
 
-                        Err(quiche::Error::Done) => break,
-
-                        Err(e) => panic!("server send failed {}", e),
-                    };
-
-                    match pipe.client.recv(&mut buf[..len]) {
-                        Ok(_) => (),
-
-                        Err(quiche::Error::Done) => (),
-
-                        Err(e) => panic!("client recv failed {}", e),
-                    }
+                    Err(e) => panic!("server recv failed {}", e),
                 }
             }
 
-            assert_eq!(&recv_buf, &send_buf);
-        });
+            let (len, _) = pipe
+                .server
+                .stream_recv(4, &mut recv_buf[recv_len..])
+                .unwrap();
+            recv_len += len;
 
-        println!("Client stats: {:?}", pipe.client.stats());
-        println!("Server stats: {:?}", pipe.server.stats());
-    }
+            loop {
+                let len = match pipe.server.send(&mut buf) {
+                    Ok(write) => write,
+
+                    Err(quiche::Error::Done) => break,
+
+                    Err(e) => panic!("server send failed {}", e),
+                };
+
+                match pipe.client.recv(&mut buf[..len]) {
+                    Ok(_) => (),
+
+                    Err(quiche::Error::Done) => (),
+
+                    Err(e) => panic!("client recv failed {}", e),
+                }
+            }
+        }
+
+        assert_eq!(&recv_buf, &send_buf);
+    }));
 }
+
+criterion_group!(benches, handshake, stream);
+
+criterion_main!(benches);
