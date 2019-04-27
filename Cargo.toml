@@ -40,6 +40,9 @@ url = "1"
 docopt = "1"
 env_logger = "0"
 
+[profile.bench]
+debug = true
+
 [profile.release]
 debug = true
 
