@@ -70,6 +70,7 @@ fn stream(c: &mut Criterion) {
     config
         .set_application_protos(b"\x06proto1\x06proto2")
         .unwrap();
+    config.set_max_packet_size(1350);
     config.set_initial_max_data(2u64.pow(62) - 1);
     config.set_initial_max_stream_data_bidi_local(2u64.pow(62) - 1);
     config.set_initial_max_stream_data_bidi_remote(2u64.pow(62) - 1);
