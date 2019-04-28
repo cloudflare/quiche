@@ -528,7 +528,7 @@ pub fn decrypt_pkt<'a>(
     let payload_len =
         aead.open_with_u64_counter(pn, header.as_ref(), ciphertext.as_mut())?;
 
-    b.get_bytes(payload_len)
+    Ok(b.get_bytes(payload_len)?)
 }
 
 pub fn encrypt_hdr(

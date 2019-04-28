@@ -394,6 +394,12 @@ impl std::convert::From<super::Error> for Error {
     }
 }
 
+impl std::convert::From<octets::BufferTooShortError> for Error {
+    fn from(_err: octets::BufferTooShortError) -> Self {
+        Error::BufferTooShort
+    }
+}
+
 /// An HTTP/3 configuration.
 pub struct Config {
     num_placeholders: u64,

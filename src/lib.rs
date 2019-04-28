@@ -357,6 +357,12 @@ impl std::error::Error for Error {
     }
 }
 
+impl std::convert::From<octets::BufferTooShortError> for Error {
+    fn from(_err: octets::BufferTooShortError) -> Self {
+        Error::BufferTooShort
+    }
+}
+
 /// Stores configuration shared between multiple connections.
 pub struct Config {
     local_transport_params: TransportParams,
