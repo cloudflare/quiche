@@ -313,7 +313,7 @@ int64_t quiche_h3_send_request(quiche_h3_conn *conn, quiche_conn *quic_conn,
                                quiche_h3_header *headers, size_t headers_len,
                                bool fin);
 
-// sends an http/3 response on the specified stream.
+// Sends an HTTP/3 response on the specified stream.
 int quiche_h3_send_response(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t stream_id, quiche_h3_header *headers,
                             size_t headers_len, bool fin);
