@@ -52,7 +52,7 @@ Options:
 
 type ConnMap = HashMap<Vec<u8>, (net::SocketAddr, Box<quiche::Connection>)>;
 
-fn main() -> Result<(), Box<std::error::Error>> {
+fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
@@ -64,27 +64,34 @@ fn main() -> Result<(), Box<std::error::Error>> {
         .and_then(|dopt| dopt.parse())
         .unwrap_or_else(|e| e.exit());
 
-    let socket = net::UdpSocket::bind(args.get_str("--listen"))?;
+    let socket = net::UdpSocket::bind(args.get_str("--listen")).unwrap();
 
-    let poll = mio::Poll::new()?;
+    let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
-    let socket = mio::net::UdpSocket::from_socket(socket)?;
+    let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
     poll.register(
         &socket,
         mio::Token(0),
         mio::Ready::readable(),
         mio::PollOpt::edge(),
-    )?;
+    )
+    .unwrap();
 
     let mut connections = ConnMap::new();
 
-    let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 
-    config.load_cert_chain_from_pem_file(args.get_str("--cert"))?;
-    config.load_priv_key_from_pem_file(args.get_str("--key"))?;
+    config
+        .load_cert_chain_from_pem_file(args.get_str("--cert"))
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file(args.get_str("--key"))
+        .unwrap();
 
-    config.set_application_protos(b"\x05hq-19\x08http/0.9")?;
+    config
+        .set_application_protos(b"\x05hq-19\x08http/0.9")
+        .unwrap();
 
     config.set_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
@@ -104,7 +111,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
         // TODO: use event loop that properly supports timers
         let timeout = connections.values().filter_map(|(_, c)| c.timeout()).min();
 
-        poll.poll(&mut events, timeout)?;
+        poll.poll(&mut events, timeout).unwrap();
 
         'read: loop {
             if events.is_empty() {
@@ -160,18 +167,18 @@ fn main() -> Result<(), Box<std::error::Error>> {
                 if hdr.version != quiche::PROTOCOL_VERSION {
                     warn!("Doing version negotiation");
 
-                    let len = quiche::negotiate_version(
-                        &hdr.scid, &hdr.dcid, &mut out,
-                    )?;
+                    let len =
+                        quiche::negotiate_version(&hdr.scid, &hdr.dcid, &mut out)
+                            .unwrap();
 
                     let out = &out[..len];
 
-                    socket.send_to(out, &src)?;
+                    socket.send_to(out, &src).unwrap();
                     continue;
                 }
 
                 let mut scid = [0; quiche::MAX_CONN_ID_LEN];
-                SystemRandom::new().fill(&mut scid[..])?;
+                SystemRandom::new().fill(&mut scid[..]).unwrap();
 
                 let mut odcid = None;
 
@@ -186,11 +193,12 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
                         let len = quiche::retry(
                             &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
-                        )?;
+                        )
+                        .unwrap();
 
                         let out = &out[..len];
 
-                        socket.send_to(out, &src)?;
+                        socket.send_to(out, &src).unwrap();
                         continue;
                     }
 
@@ -210,7 +218,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
                     hex_dump(&scid)
                 );
 
-                let conn = quiche::accept(&scid, odcid, &mut config)?;
+                let conn = quiche::accept(&scid, odcid, &mut config).unwrap();
 
                 connections.insert(scid.to_vec(), (src, conn));
 
@@ -282,7 +290,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
                 };
 
                 // TODO: coalesce packets.
-                socket.send_to(&out[..write], &peer)?;
+                socket.send_to(&out[..write], &peer).unwrap();
 
                 debug!("{} written {} bytes", conn.trace_id(), write);
             }

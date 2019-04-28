@@ -42,14 +42,14 @@ Options:
   -h --help  Show this screen.
 ";
 
-fn main() -> Result<(), Box<std::error::Error>> {
+fn main() {
     env_logger::init();
 
     let args = docopt::Docopt::new(USAGE)
         .and_then(|dopt| dopt.parse())
         .unwrap_or_else(|e| e.exit());
 
-    let file = File::open(args.get_str("FILE"))?;
+    let file = File::open(args.get_str("FILE")).unwrap();
     let file = BufReader::new(&file);
 
     let mut enc = h3::qpack::Encoder::new();
@@ -66,13 +66,17 @@ fn main() -> Result<(), Box<std::error::Error>> {
         if line.is_empty() {
             let mut out = [0u8; 65535];
 
-            let len = enc.encode(&headers, &mut out)?;
+            let len = enc.encode(&headers, &mut out).unwrap();
 
             debug!("Writing header block stream={} len={}", stream_id, len);
 
-            std::io::stdout().write_all(&stream_id.to_be_bytes())?;
-            std::io::stdout().write_all(&(len as u32).to_be_bytes())?;
-            std::io::stdout().write_all(&out[..len])?;
+            std::io::stdout()
+                .write_all(&stream_id.to_be_bytes())
+                .unwrap();
+            std::io::stdout()
+                .write_all(&(len as u32).to_be_bytes())
+                .unwrap();
+            std::io::stdout().write_all(&out[..len]).unwrap();
 
             stream_id += 1;
 
@@ -86,6 +90,4 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
         headers.push(h3::Header::new(name, value));
     }
-
-    Ok(())
 }

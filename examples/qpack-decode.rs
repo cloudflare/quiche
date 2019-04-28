@@ -41,7 +41,7 @@ Options:
   -h --help  Show this screen.
 ";
 
-fn main() -> Result<(), Box<std::error::Error>> {
+fn main() {
     env_logger::init();
 
     let args = docopt::Docopt::new(USAGE)
@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
     // TODO: parse params from file name.
 
-    let mut file = File::open(args.get_str("FILE"))?;
+    let mut file = File::open(args.get_str("FILE")).unwrap();
 
     let mut dec = qpack::Decoder::new();
 
@@ -58,15 +58,15 @@ fn main() -> Result<(), Box<std::error::Error>> {
         let mut stream_id: [u8; 8] = [0; 8];
         let mut len: [u8; 4] = [0; 4];
 
-        let _ = file.read(&mut stream_id)?;
+        let _ = file.read(&mut stream_id).unwrap();
         let stream_id = u64::from_be_bytes(stream_id);
 
-        let _ = file.read(&mut len)?;
+        let _ = file.read(&mut len).unwrap();
         let len = u32::from_be_bytes(len) as usize;
 
         let mut data = vec![0; len as usize];
 
-        let data_len = file.read(&mut data)?;
+        let data_len = file.read(&mut data).unwrap();
 
         if data_len == 0 {
             break;
@@ -75,16 +75,14 @@ fn main() -> Result<(), Box<std::error::Error>> {
         debug!("Got stream={} len={}", stream_id, len);
 
         if stream_id == 0 {
-            dec.control(&mut data[..len])?;
+            dec.control(&mut data[..len]).unwrap();
             continue;
         }
 
-        for hdr in dec.decode(&mut data[..len])? {
+        for hdr in dec.decode(&mut data[..len]).unwrap() {
             println!("{}\t{}", hdr.name(), hdr.value());
         }
 
         println!();
     }
-
-    Ok(())
 }
