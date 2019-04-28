@@ -238,7 +238,6 @@ fn main() {
 
                 Err(e) => {
                     error!("{} recv failed: {:?}", conn.trace_id(), e);
-                    conn.close(false, e.to_wire(), b"fail").ok();
                     break 'read;
                 },
             };
@@ -284,7 +283,7 @@ fn main() {
 
                     Err(e) => {
                         error!("{} send failed: {:?}", conn.trace_id(), e);
-                        conn.close(false, e.to_wire(), b"fail").ok();
+                        conn.close(false, 0x1, b"fail").ok();
                         break;
                     },
                 };

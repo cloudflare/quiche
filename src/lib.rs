@@ -307,7 +307,7 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn to_wire(self) -> u16 {
+    fn to_wire(self) -> u16 {
         match self {
             Error::Done => 0x0,
             Error::InvalidFrame => 0x7,
@@ -951,7 +951,8 @@ impl Connection {
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
-    /// returned, or [`Done`].
+    /// returned, or [`Done`]. On error the connection will be closed by
+    /// calling [`close()`] with the appropriate error code.
     ///
     /// Coalesced packets will be processed as necessary.
     ///
@@ -959,6 +960,7 @@ impl Connection {
     /// this function due to, for example, in-place decryption.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    /// [`close()`]: struct.Connection.html#method.close
     ///
     /// ## Examples:
     ///
@@ -995,7 +997,18 @@ impl Connection {
 
         // Process coalesced packets.
         while left > 0 {
-            let read = self.recv_single(&mut buf[len - left..len])?;
+            let read = match self.recv_single(&mut buf[len - left..len]) {
+                Ok(v) => v,
+
+                Err(Error::Done) => return Err(Error::Done),
+
+                Err(e) => {
+                    // In case of error processing the incoming packet, close
+                    // the connection.
+                    self.close(false, e.to_wire(), b"").ok();
+                    return Err(e);
+                },
+            };
 
             done += read;
             left -= read;
