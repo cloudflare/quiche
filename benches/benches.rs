@@ -51,10 +51,13 @@ fn handshake(c: &mut Criterion) {
     config.set_initial_max_streams_uni(3);
     config.verify_peer(false);
 
-    c.bench_function("handshake", move |b| b.iter(|| {
-        let mut pipe = quiche::testing::Pipe::with_config(&mut config).unwrap();
-        pipe.handshake(&mut buf).unwrap();
-    }));
+    c.bench_function("handshake", move |b| {
+        b.iter(|| {
+            let mut pipe =
+                quiche::testing::Pipe::with_config(&mut config).unwrap();
+            pipe.handshake(&mut buf).unwrap();
+        })
+    });
 }
 
 fn stream(c: &mut Criterion) {
@@ -86,57 +89,65 @@ fn stream(c: &mut Criterion) {
 
     let mut recv_buf = vec![0; send_buf.len()];
 
-    c.bench_function_over_inputs("stream", move |b, &&size| b.iter(|| {
-        pipe.client.stream_send(4, &send_buf[..size], false).unwrap();
+    c.bench_function_over_inputs(
+        "stream",
+        move |b, &&size| {
+            b.iter(|| {
+                pipe.client
+                    .stream_send(4, &send_buf[..size], false)
+                    .unwrap();
 
-        let mut recv_len = 0;
+                let mut recv_len = 0;
 
-        while recv_len < size {
-            loop {
-                let len = match pipe.client.send(&mut buf) {
-                    Ok(write) => write,
+                while recv_len < size {
+                    loop {
+                        let len = match pipe.client.send(&mut buf) {
+                            Ok(write) => write,
 
-                    Err(quiche::Error::Done) => break,
+                            Err(quiche::Error::Done) => break,
 
-                    Err(e) => panic!("client send failed {}", e),
-                };
+                            Err(e) => panic!("client send failed {}", e),
+                        };
 
-                match pipe.server.recv(&mut buf[..len]) {
-                    Ok(_) => (),
+                        match pipe.server.recv(&mut buf[..len]) {
+                            Ok(_) => (),
 
-                    Err(quiche::Error::Done) => (),
+                            Err(quiche::Error::Done) => (),
 
-                    Err(e) => panic!("server recv failed {}", e),
+                            Err(e) => panic!("server recv failed {}", e),
+                        }
+                    }
+
+                    let (len, _) = pipe
+                        .server
+                        .stream_recv(4, &mut recv_buf[recv_len..])
+                        .unwrap();
+                    recv_len += len;
+
+                    loop {
+                        let len = match pipe.server.send(&mut buf) {
+                            Ok(write) => write,
+
+                            Err(quiche::Error::Done) => break,
+
+                            Err(e) => panic!("server send failed {}", e),
+                        };
+
+                        match pipe.client.recv(&mut buf[..len]) {
+                            Ok(_) => (),
+
+                            Err(quiche::Error::Done) => (),
+
+                            Err(e) => panic!("client recv failed {}", e),
+                        }
+                    }
                 }
-            }
 
-            let (len, _) = pipe
-                .server
-                .stream_recv(4, &mut recv_buf[recv_len..])
-                .unwrap();
-            recv_len += len;
-
-            loop {
-                let len = match pipe.server.send(&mut buf) {
-                    Ok(write) => write,
-
-                    Err(quiche::Error::Done) => break,
-
-                    Err(e) => panic!("server send failed {}", e),
-                };
-
-                match pipe.client.recv(&mut buf[..len]) {
-                    Ok(_) => (),
-
-                    Err(quiche::Error::Done) => (),
-
-                    Err(e) => panic!("client recv failed {}", e),
-                }
-            }
-        }
-
-        assert_eq!(&recv_buf[..size], &send_buf[..size]);
-    }), &[128_000, 5_000_000]);
+                assert_eq!(&recv_buf[..size], &send_buf[..size]);
+            })
+        },
+        &[128_000, 5_000_000],
+    );
 }
 
 criterion_group!(benches, handshake, stream);
