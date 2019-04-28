@@ -38,8 +38,9 @@
 //! Application Layer Protocol Negotiation (ALPN) Protocol ID:
 //!
 //! ```
-//! let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-//! config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL);
+//! let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+//! config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL)?;
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! The QUIC handshake is driven by [sending] and [receiving] QUIC packets.
@@ -48,7 +49,8 @@
 //! connection is creating its configuration object:
 //!
 //! ```
-//! let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
+//! let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! # Ok::<(), quiche::h3::Error>(())
 //! ```
 //!
 //! HTTP/3 client and server connections are both created using the
@@ -57,12 +59,11 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-//! # config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL).unwrap();
-//! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
-//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
-//! let h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config).unwrap();
+//! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
+//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! let h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
+//! # Ok::<(), quiche::h3::Error>(())
 //! ```
 //!
 //! ## Sending a request
@@ -73,12 +74,10 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-//! # config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL).unwrap();
-//! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
-//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
-//! # let mut conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
-//! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config).unwrap();
+//! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
+//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! let req = vec![
 //!     quiche::h3::Header::new(":method", "GET"),
 //!     quiche::h3::Header::new(":scheme", "https"),
@@ -87,7 +86,8 @@
 //!     quiche::h3::Header::new(":user-agent", "quiche"),
 //! ];
 //!
-//! h3_conn.send_request(&mut conn, &req, true).unwrap();
+//! h3_conn.send_request(&mut conn, &req, true)?;
+//! # Ok::<(), quiche::h3::Error>(())
 //! ```
 //!
 //! An HTTP/3 client can send a request with additional body data by using
@@ -95,12 +95,10 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-//! # config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL).unwrap();
-//! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
-//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
-//! # let mut conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
-//! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config).unwrap();
+//! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
+//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! let req = vec![
 //!     quiche::h3::Header::new(":method", "GET"),
 //!     quiche::h3::Header::new(":scheme", "https"),
@@ -109,8 +107,9 @@
 //!     quiche::h3::Header::new(":user-agent", "quiche"),
 //! ];
 //!
-//! let stream_id = h3_conn.send_request(&mut conn, &req, false).unwrap();
-//! h3_conn.send_body(&mut conn, stream_id, b"Hello World!", true).unwrap();
+//! let stream_id = h3_conn.send_request(&mut conn, &req, false)?;
+//! h3_conn.send_body(&mut conn, stream_id, b"Hello World!", true)?;
+//! # Ok::<(), quiche::h3::Error>(())
 //! ```
 //!
 //! ## Handling requests and responses
@@ -124,12 +123,10 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-//! # config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL).unwrap();
 //! # let scid = [0xba; 16];
-//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
-//! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn,
-//! #                                                       &h3_config).unwrap();
+//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! loop {
 //!     match h3_conn.poll(&mut conn) {
 //!         Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
@@ -147,14 +144,14 @@
 //!                     quiche::h3::Header::new("server", "quiche"),
 //!                 ];
 //!
-//!                 h3_conn.send_response(&mut conn, stream_id, &resp, false).unwrap();
-//!                 h3_conn.send_body(&mut conn, stream_id, b"Hello World!", true).unwrap();
+//!                 h3_conn.send_response(&mut conn, stream_id, &resp, false)?;
+//!                 h3_conn.send_body(&mut conn, stream_id, b"Hello World!", true)?;
 //!             }
 //!         },
 //!
 //!         Ok((stream_id, quiche::h3::Event::Data(data))) => {
 //!             // Request body data, handle it.
-//!             # return;
+//!             # return Ok(());
 //!         },
 //!
 //!         Err(quiche::h3::Error::Done) => {
@@ -168,19 +165,17 @@
 //!         },
 //!     }
 //! }
+//! # Ok::<(), quiche::h3::Error>(())
 //! ```
 //!
 //! An HTTP/3 client uses [`poll()`] to read responses:
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-//! # config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL).unwrap();
-//! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
-//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
-//! # let mut conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
-//! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn,
-//! #                                                       &h3_config).unwrap();
+//! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
+//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! loop {
 //!     match h3_conn.poll(&mut conn) {
 //!         Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
@@ -205,6 +200,7 @@
 //!         },
 //!     }
 //! }
+//! # Ok::<(), quiche::h3::Error>(())
 //! ```
 //!
 //! ## Detecting end of stream

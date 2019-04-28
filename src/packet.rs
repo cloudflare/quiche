@@ -154,8 +154,8 @@ impl Header {
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     /// let (len, src) = socket.recv_from(&mut buf).unwrap();
     ///
-    /// let hdr =
-    ///     quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN).unwrap();
+    /// let hdr = quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN)?;
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn from_slice(buf: &mut [u8], dcil: usize) -> Result<Header> {
         let mut b = octets::Octets::with_slice(buf);

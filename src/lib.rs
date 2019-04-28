@@ -42,7 +42,8 @@
 //! configuration object:
 //!
 //! ```
-//! let config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! let config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! This is shared among multiple connections and can be used to configure a
@@ -52,14 +53,15 @@
 //! a new connection, while [`accept()`] is for servers:
 //!
 //! ```
-//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
 //! // Client connection.
-//! let conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
+//! let conn = quiche::connect(Some(&server_name), &scid, &mut config)?;
 //!
 //! // Server connection.
-//! let conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! let conn = quiche::accept(&scid, None, &mut config)?;
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! ## Handling incoming packets
@@ -70,9 +72,9 @@
 //! ```no_run
 //! # let mut buf = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! loop {
 //!     let read = socket.recv(&mut buf).unwrap();
 //!
@@ -90,6 +92,7 @@
 //!         },
 //!     };
 //! }
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! ## Generating outgoing packets
@@ -100,9 +103,9 @@
 //! ```no_run
 //! # let mut out = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! loop {
 //!     let write = match conn.send(&mut out) {
 //!         Ok(v) => v,
@@ -120,6 +123,7 @@
 //!
 //!     socket.send(&out[..write]).unwrap();
 //! }
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! When packets are sent, the application is responsible for maintaining a
@@ -127,10 +131,11 @@
 //! obtained using the connection's [`timeout()`] method.
 //!
 //! ```
-//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! let timeout = conn.timeout();
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! The application is responsible for providing a timer implementation, which
@@ -141,9 +146,9 @@
 //! ```no_run
 //! # let mut out = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! // Timeout expired, handle it.
 //! conn.on_timeout();
 //!
@@ -165,6 +170,7 @@
 //!
 //!     socket.send(&out[..write]).unwrap();
 //! }
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! ## Sending and receiving stream data
@@ -175,13 +181,14 @@
 //! Data can be sent on a stream by using the [`stream_send()`] method:
 //!
 //! ```no_run
-//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! if conn.is_established() {
 //!     // Handshake completed, send some data on stream 0.
-//!     conn.stream_send(0, b"hello", true).unwrap();
+//!     conn.stream_send(0, b"hello", true)?;
 //! }
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! The application can check whether there are any readable streams by using
@@ -193,9 +200,9 @@
 //!
 //! ```no_run
 //! # let mut buf = [0; 512];
-//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! if conn.is_established() {
 //!     // Iterate over readable streams.
 //!     let streams: Vec<u64> = conn.readable().collect();
@@ -207,12 +214,13 @@
 //!         }
 //!     }
 //! }
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! ## HTTP/3
 //!
-//! The [HTTP/3 module]'s documentation provides a detailed description of
-//! quiche's HTTP/3 API that can be used to implement clients and servers.
+//! The quiche [HTTP/3 module] provides a high level API for sending and
+//! receiving HTTP requests and responses on top of the QUIC transport protocol.
 //!
 //! [`connect()`]: fn.connect.html
 //! [`accept()`]: fn.accept.html
@@ -368,7 +376,8 @@ impl Config {
     /// ## Examples:
     ///
     /// ```
-    /// let config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+    /// let config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn new(version: u32) -> Result<Config> {
         let tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
@@ -390,8 +399,9 @@ impl Config {
     /// ## Examples:
     ///
     /// ```no_run
-    /// # let mut config = quiche::Config::new(0xbabababa).unwrap();
-    /// config.load_cert_chain_from_pem_file("/path/to/cert.pem");
+    /// # let mut config = quiche::Config::new(0xbabababa)?;
+    /// config.load_cert_chain_from_pem_file("/path/to/cert.pem")?;
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn load_cert_chain_from_pem_file(&mut self, file: &str) -> Result<()> {
         self.tls_ctx
@@ -406,8 +416,9 @@ impl Config {
     /// ## Examples:
     ///
     /// ```no_run
-    /// # let mut config = quiche::Config::new(0xbabababa).unwrap();
-    /// config.load_priv_key_from_pem_file("/path/to/key.pem");
+    /// # let mut config = quiche::Config::new(0xbabababa)?;
+    /// config.load_priv_key_from_pem_file("/path/to/key.pem")?;
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn load_priv_key_from_pem_file(&mut self, file: &str) -> Result<()> {
         self.tls_ctx
@@ -450,8 +461,9 @@ impl Config {
     /// ## Examples:
     ///
     /// ```
-    /// # let mut config = quiche::Config::new(0xbabababa).unwrap();
-    /// config.set_application_protos(b"\x08http/1.1\x08http/0.9");
+    /// # let mut config = quiche::Config::new(0xbabababa)?;
+    /// config.set_application_protos(b"\x08http/1.1\x08http/0.9")?;
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn set_application_protos(&mut self, protos: &[u8]) -> Result<()> {
         let mut protos = protos.to_vec();
@@ -665,9 +677,10 @@ pub struct Connection {
 /// ## Examples:
 ///
 /// ```no_run
-/// # let mut config = quiche::Config::new(0xbabababa).unwrap();
+/// # let mut config = quiche::Config::new(0xbabababa)?;
 /// # let scid = [0xba; 16];
-/// let conn = quiche::accept(&scid, None, &mut config).unwrap();
+/// let conn = quiche::accept(&scid, None, &mut config)?;
+/// # Ok::<(), quiche::Error>(())
 /// ```
 pub fn accept(
     scid: &[u8], odcid: Option<&[u8]>, config: &mut Config,
@@ -686,10 +699,11 @@ pub fn accept(
 /// ## Examples:
 ///
 /// ```no_run
-/// # let mut config = quiche::Config::new(0xbabababa).unwrap();
+/// # let mut config = quiche::Config::new(0xbabababa)?;
 /// # let server_name = "quic.tech";
 /// # let scid = [0xba; 16];
-/// let conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
+/// let conn = quiche::connect(Some(&server_name), &scid, &mut config)?;
+/// # Ok::<(), quiche::Error>(())
 /// ```
 pub fn connect(
     server_name: Option<&str>, scid: &[u8], config: &mut Config,
@@ -720,14 +734,13 @@ pub fn connect(
 /// let (len, src) = socket.recv_from(&mut buf).unwrap();
 ///
 /// let hdr =
-///     quiche::Header::from_slice(&mut buf[..len], quiche::MAX_CONN_ID_LEN)
-///         .unwrap();
+///     quiche::Header::from_slice(&mut buf[..len], quiche::MAX_CONN_ID_LEN)?;
 ///
 /// if hdr.version != quiche::PROTOCOL_VERSION {
-///     let len =
-///         quiche::negotiate_version(&hdr.scid, &hdr.dcid, &mut out).unwrap();
+///     let len = quiche::negotiate_version(&hdr.scid, &hdr.dcid, &mut out)?;
 ///     socket.send_to(&out[..len], &src).unwrap();
 /// }
+/// # Ok::<(), quiche::Error>(())
 /// ```
 pub fn negotiate_version(
     scid: &[u8], dcid: &[u8], out: &mut [u8],
@@ -753,7 +766,7 @@ pub fn negotiate_version(
 /// ## Examples:
 ///
 /// ```no_run
-/// # let mut config = quiche::Config::new(0xbabababa).unwrap();
+/// # let mut config = quiche::Config::new(0xbabababa)?;
 /// # let mut buf = [0; 512];
 /// # let mut out = [0; 512];
 /// # let scid = [0xba; 16];
@@ -766,8 +779,7 @@ pub fn negotiate_version(
 /// # }
 /// let (len, src) = socket.recv_from(&mut buf).unwrap();
 ///
-/// let hdr =
-///     quiche::Header::from_slice(&mut buf[..len], quiche::MAX_CONN_ID_LEN).unwrap();
+/// let hdr = quiche::Header::from_slice(&mut buf[..len], quiche::MAX_CONN_ID_LEN)?;
 ///
 /// let token = hdr.token.as_ref().unwrap();
 ///
@@ -777,10 +789,10 @@ pub fn negotiate_version(
 ///
 ///     let len = quiche::retry(
 ///         &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
-///     ).unwrap();
+///     )?;
 ///
 ///     socket.send_to(&out[..len], &src).unwrap();
-///     return;
+///     return Ok(());
 /// }
 ///
 /// // Client sent token, validate it.
@@ -788,10 +800,11 @@ pub fn negotiate_version(
 ///
 /// if odcid == None {
 ///     // Invalid address validation token.
-///     return;
+///     return Ok(());
 /// }
 ///
-/// let conn = quiche::accept(&scid, odcid, &mut config).unwrap();
+/// let conn = quiche::accept(&scid, odcid, &mut config)?;
+/// # Ok::<(), quiche::Error>(())
 /// ```
 pub fn retry(
     scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], out: &mut [u8],
@@ -946,9 +959,9 @@ impl Connection {
     /// ```no_run
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
     /// # let scid = [0xba; 16];
-    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// loop {
     ///     let read = socket.recv(&mut buf).unwrap();
     ///
@@ -966,6 +979,7 @@ impl Connection {
     ///         },
     ///     };
     /// }
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         let len = buf.len();
@@ -1532,9 +1546,9 @@ impl Connection {
     /// ```no_run
     /// # let mut out = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
     /// # let scid = [0xba; 16];
-    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// loop {
     ///     let write = match conn.send(&mut out) {
     ///         Ok(v) => v,
@@ -1552,6 +1566,7 @@ impl Connection {
     ///
     ///     socket.send(&out[..write]).unwrap();
     /// }
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
@@ -1983,13 +1998,14 @@ impl Connection {
     /// ```no_run
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
     /// # let scid = [0xba; 16];
-    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// # let stream_id = 0;
     /// while let Ok((read, fin)) = conn.stream_recv(stream_id, &mut buf) {
     ///     println!("Got {} bytes on stream {}", read, stream_id);
     /// }
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn stream_recv(
         &mut self, stream_id: u64, out: &mut [u8],
@@ -2026,11 +2042,12 @@ impl Connection {
     /// ```no_run
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
     /// # let scid = [0xba; 16];
-    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// # let stream_id = 0;
-    /// conn.stream_send(stream_id, b"hello", true).unwrap();
+    /// conn.stream_send(stream_id, b"hello", true)?;
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn stream_send(
         &mut self, stream_id: u64, buf: &[u8], fin: bool,
@@ -2089,9 +2106,9 @@ impl Connection {
     /// ```no_run
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
     /// # let scid = [0xba; 16];
-    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// // Iterate over readable streams.
     /// let streams: Vec<u64> = conn.readable().collect();
     ///
@@ -2101,6 +2118,7 @@ impl Connection {
     ///         println!("Got {} bytes on stream {}", read, stream_id);
     ///     }
     /// }
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn readable(&mut self) -> Readable {
         self.streams.readable()
