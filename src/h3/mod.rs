@@ -326,6 +326,9 @@ pub enum Error {
 
     /// QPACK decoder stream error.
     QpackDecoderStreamError = -27,
+
+    /// Error originated from the transport layer.
+    TransportError       = -28,
 }
 
 impl Error {
@@ -359,6 +362,8 @@ impl Error {
             Error::QpackEncoderStreamError => 0x21,  // TODO: value is TBD
             Error::QpackDecoderStreamError => 0x22,  // TODO: value is TBD
             Error::BufferTooShort => 0x999,
+
+            Error::TransportError => 0xFF,
         }
     }
 
@@ -385,12 +390,8 @@ impl std::error::Error for Error {
 }
 
 impl std::convert::From<super::Error> for Error {
-    fn from(err: super::Error) -> Self {
-        match err {
-            super::Error::Done => Error::Done,
-            super::Error::BufferTooShort => Error::BufferTooShort,
-            _ => Error::GeneralProtocolError,
-        }
+    fn from(_err: super::Error) -> Self {
+        Error::TransportError
     }
 }
 
