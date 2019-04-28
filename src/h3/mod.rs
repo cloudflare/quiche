@@ -703,11 +703,14 @@ impl Connection {
     ///
     /// On success it returns an [`Event`] as well as the event's source stream
     /// ID. The stream ID can be used when calling [`send_response()`] and
-    /// [`send_body()`] when responding to incoming requests.
+    /// [`send_body()`] when responding to incoming requests. On error the
+    /// connection will be closed by calling [`close()`] with the appropriate
+    /// error code.
     ///
     /// [`Event`]: enum.Event.html
     /// [`send_response()`]: struct.Connection.html#method.send_response
     /// [`send_body()`]: struct.Connection.html#method.send_body
+    /// [`close()`]: ../struct.Connection.html#method.close
     pub fn poll(&mut self, conn: &mut super::Connection) -> Result<(u64, Event)> {
         self.critical_stream_closed(conn)?;
 
