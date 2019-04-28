@@ -76,13 +76,9 @@ impl std::error::Error for Error {
     }
 }
 
-impl std::convert::From<crate::Error> for Error {
-    fn from(err: crate::Error) -> Self {
-        match err {
-            crate::Error::BufferTooShort => Error::BufferTooShort,
-
-            _ => unreachable!(),
-        }
+impl std::convert::From<crate::octets::BufferTooShortError> for Error {
+    fn from(_err: crate::octets::BufferTooShortError) -> Self {
+        Error::BufferTooShort
     }
 }
 
