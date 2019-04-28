@@ -332,7 +332,7 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn to_wire(self) -> u16 {
+    fn to_wire(self) -> u16 {
         match self {
             Error::Done => 0x0,
             Error::WrongSettingDirection => 0x1,
