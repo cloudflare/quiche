@@ -25,6 +25,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -153,10 +154,8 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
     if (quiche_conn_is_established(conn_io->conn)) {
         uint64_t s = 0;
 
-        quiche_readable *iter = quiche_conn_readable(conn_io->conn);
-
-        while (quiche_readable_next(iter, &s)) {
-            fprintf(stderr, "stream %zu is readable\n", s);
+        while (quiche_readable_next(conn_io->conn, &s)) {
+            fprintf(stderr, "stream %" PRIu64 " is readable\n", s);
 
             bool fin = false;
             ssize_t recv_len = quiche_conn_stream_recv(conn_io->conn, s,
@@ -174,8 +173,6 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 }
             }
         }
-
-        quiche_readable_free(iter);
     }
 
     flush_egress(loop, conn_io);
@@ -196,7 +193,7 @@ static void timeout_cb(EV_P_ ev_timer *w, int revents) {
         quiche_conn_stats_lost(conn_io->conn, &lost);
         quiche_conn_stats_rtt_as_nanos(conn_io->conn, &rtt);
 
-        fprintf(stderr, "connection closed, sent=%ld lost=%ld rtt=%ldns\n",
+        fprintf(stderr, "connection closed, sent=%" PRIu64 " lost=%" PRIu64 " rtt=%" PRIu64 "ns\n",
                 sent, lost, rtt);
 
         ev_break(EV_A_ EVBREAK_ONE);
@@ -247,7 +244,7 @@ int main(int argc, char *argv[]) {
     quiche_config_set_application_protos(config,
         (uint8_t *) "\x05hq-18\x08http/0.9", 15);
 
-    quiche_config_set_idle_timeout(config, 30);
+    quiche_config_set_idle_timeout(config, 5000);
     quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);
     quiche_config_set_max_packet_size(config, 1460);
     quiche_config_set_initial_max_data(config, 10000000);

@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -173,7 +174,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                                                    conn_io->conn,
                                                    headers, 5, true);
 
-        fprintf(stderr, "sent HTTP request %zu\n", stream_id);
+        fprintf(stderr, "sent HTTP request %" PRId64 "\n", stream_id);
 
         req_sent = true;
     }
@@ -232,7 +233,7 @@ static void timeout_cb(EV_P_ ev_timer *w, int revents) {
         quiche_conn_stats_lost(conn_io->conn, &lost);
         quiche_conn_stats_rtt_as_nanos(conn_io->conn, &rtt);
 
-        fprintf(stderr, "connection closed, sent=%ld lost=%ld rtt=%ldns\n",
+        fprintf(stderr, "connection closed, sent=%" PRIu64 " lost=%" PRIu64 " rtt=%" PRIu64 "ns\n",
                 sent, lost, rtt);
 
         ev_break(EV_A_ EVBREAK_ONE);
@@ -284,7 +285,7 @@ int main(int argc, char *argv[]) {
         (uint8_t *) QUICHE_H3_APPLICATION_PROTOCOL,
         sizeof(QUICHE_H3_APPLICATION_PROTOCOL) - 1);
 
-    quiche_config_set_idle_timeout(config, 30);
+    quiche_config_set_idle_timeout(config, 5000);
     quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);
     quiche_config_set_initial_max_data(config, 10000000);
     quiche_config_set_initial_max_stream_data_bidi_local(config, 1000000);

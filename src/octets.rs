@@ -29,15 +29,40 @@
 use std::mem;
 use std::ptr;
 
-use crate::Error;
-use crate::Result;
+/// A specialized [`Result`] type for [`Octets`] operations.
+///
+/// [`Result`]: https://doc.rust-lang.org/std/result/enum.Result.html
+/// [`Octets`]: struct.Octets.html
+pub type Result<T> = std::result::Result<T, BufferTooShortError>;
+
+/// An error indicating that the provided [`Octets`] is not big enough.
+///
+/// [`Octets`]: struct.Octets.html
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BufferTooShortError;
+
+impl std::fmt::Display for BufferTooShortError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl std::error::Error for BufferTooShortError {
+    fn description(&self) -> &str {
+        "buffer is too short"
+    }
+
+    fn cause(&self) -> Option<&std::error::Error> {
+        None
+    }
+}
 
 macro_rules! peek_u {
     ($b:expr, $ty:ty, $len:expr) => {{
         let src = &$b.buf[$b.off..];
 
         if src.len() < $len {
-            return Err(Error::BufferTooShort);
+            return Err(BufferTooShortError);
         }
 
         let mut out: $ty = 0;
@@ -64,11 +89,12 @@ macro_rules! get_u {
 
 macro_rules! put_u {
     ($b:expr, $ty:ty, $v:expr, $len:expr) => {{
-        let dst = &mut $b.buf[$b.off..];
-
-        if dst.len() < $len {
-            return Err(Error::BufferTooShort);
+        if $b.buf.len() < $b.off + $len {
+            return Err(BufferTooShortError);
         }
+
+        #[allow(clippy::range_plus_one)]
+        let dst = &mut $b.buf[$b.off..($b.off + $len)];
 
         unsafe {
             let src = &<$ty>::to_be($v) as *const $ty as *const u8;
@@ -182,7 +208,7 @@ impl<'a> Octets<'a> {
         let len = varint_parse_len(first);
 
         if len > self.cap() {
-            return Err(Error::BufferTooShort);
+            return Err(BufferTooShortError);
         }
 
         let mut vec = self.get_bytes(len)?.to_vec();
@@ -205,48 +231,51 @@ impl<'a> Octets<'a> {
 
     /// Writes an unsigned variable-length integer in network byte-order at the
     /// current offset and advances the buffer.
-    pub fn put_varint(&mut self, v: u64) -> Result<()> {
+    pub fn put_varint(&mut self, v: u64) -> Result<&mut [u8]> {
         self.put_varint_with_len(v, varint_len(v))
     }
 
     /// Writes an unsigned variable-length integer of the specified length, in
     /// network byte-order at the current offset and advances the buffer.
-    pub fn put_varint_with_len(&mut self, v: u64, len: usize) -> Result<()> {
+    pub fn put_varint_with_len(
+        &mut self, v: u64, len: usize,
+    ) -> Result<&mut [u8]> {
         if self.cap() < len {
-            return Err(Error::BufferTooShort);
+            return Err(BufferTooShortError);
         }
 
-        match len {
-            1 => {
-                self.put_u8(v as u8)?;
-            },
+        let buf = match len {
+            1 => self.put_u8(v as u8)?,
 
             2 => {
                 let buf = self.put_u16(v as u16)?;
                 buf[0] |= 0x40;
+                buf
             },
 
             4 => {
                 let buf = self.put_u32(v as u32)?;
                 buf[0] |= 0x80;
+                buf
             },
 
             8 => {
                 let buf = self.put_u64(v)?;
                 buf[0] |= 0xc0;
+                buf
             },
 
             _ => panic!("value is too large for varint"),
-        }
+        };
 
-        Ok(())
+        Ok(buf)
     }
 
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer.
     pub fn get_bytes(&mut self, len: usize) -> Result<Octets> {
         if self.cap() < len {
-            return Err(Error::BufferTooShort);
+            return Err(BufferTooShortError);
         }
 
         let out = Octets {
@@ -286,7 +315,7 @@ impl<'a> Octets<'a> {
     /// advancing the buffer.
     pub fn peek_bytes(&mut self, len: usize) -> Result<Octets> {
         if self.cap() < len {
-            return Err(Error::BufferTooShort);
+            return Err(BufferTooShortError);
         }
 
         let out = Octets {
@@ -303,7 +332,7 @@ impl<'a> Octets<'a> {
         let len = v.len();
 
         if self.cap() < len {
-            return Err(Error::BufferTooShort);
+            return Err(BufferTooShortError);
         }
 
         if len == 0 {
@@ -320,7 +349,7 @@ impl<'a> Octets<'a> {
     /// Splits the buffer in two at the given absolute offset.
     pub fn split_at(&mut self, off: usize) -> Result<(Octets, Octets)> {
         if self.len() < off {
-            return Err(Error::BufferTooShort);
+            return Err(BufferTooShortError);
         }
 
         let (left, right) = self.buf.split_at_mut(off);
@@ -335,7 +364,7 @@ impl<'a> Octets<'a> {
     /// Returns a slice of `len` elements from the current offset.
     pub fn slice(&'a mut self, len: usize) -> Result<&'a mut [u8]> {
         if len > self.cap() {
-            return Err(Error::BufferTooShort);
+            return Err(BufferTooShortError);
         }
 
         Ok(&mut self.buf[self.off..self.off + len])
@@ -344,7 +373,7 @@ impl<'a> Octets<'a> {
     /// Returns a slice of `len` elements from the end of the buffer.
     pub fn slice_last(&'a mut self, len: usize) -> Result<&'a mut [u8]> {
         if len > self.cap() {
-            return Err(Error::BufferTooShort);
+            return Err(BufferTooShortError);
         }
 
         let cap = self.cap();

@@ -154,8 +154,8 @@ impl Header {
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     /// let (len, src) = socket.recv_from(&mut buf).unwrap();
     ///
-    /// let hdr =
-    ///     quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN).unwrap();
+    /// let hdr = quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN)?;
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn from_slice(buf: &mut [u8], dcil: usize) -> Result<Header> {
         let mut b = octets::Octets::with_slice(buf);
@@ -356,7 +356,9 @@ impl Header {
                 },
 
                 // No token, so length = 0.
-                None => out.put_varint(0)?,
+                None => {
+                    out.put_varint(0)?;
+                },
             }
         }
 
@@ -526,7 +528,7 @@ pub fn decrypt_pkt<'a>(
     let payload_len =
         aead.open_with_u64_counter(pn, header.as_ref(), ciphertext.as_mut())?;
 
-    b.get_bytes(payload_len)
+    Ok(b.get_bytes(payload_len)?)
 }
 
 pub fn encrypt_hdr(
@@ -610,7 +612,7 @@ pub fn negotiate_version(
     b.put_u8(cil)?;
     b.put_bytes(&scid)?;
     b.put_bytes(&dcid)?;
-    b.put_u32(crate::VERSION_DRAFT18)?;
+    b.put_u32(crate::PROTOCOL_VERSION)?;
 
     Ok(b.off())
 }
@@ -622,7 +624,7 @@ pub fn retry(
 
     let hdr = Header {
         ty: Type::Retry,
-        version: crate::VERSION_DRAFT18,
+        version: crate::PROTOCOL_VERSION,
         dcid: scid.to_vec(),
         scid: new_scid.to_vec(),
         pkt_num: 0,

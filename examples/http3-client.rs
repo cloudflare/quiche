@@ -29,8 +29,6 @@ extern crate log;
 
 use ring::rand::*;
 
-const LOCAL_CONN_ID_LEN: usize = 16;
-
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
 const USAGE: &str = "Usage:
@@ -46,7 +44,7 @@ Options:
   -h --help                Show this screen.
 ";
 
-fn main() -> Result<(), Box<std::error::Error>> {
+fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
@@ -58,41 +56,44 @@ fn main() -> Result<(), Box<std::error::Error>> {
         .and_then(|dopt| dopt.parse())
         .unwrap_or_else(|e| e.exit());
 
-    let url = url::Url::parse(args.get_str("URL"))?;
+    let url = url::Url::parse(args.get_str("URL")).unwrap();
 
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
-    socket.connect(&url)?;
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+    socket.connect(&url).unwrap();
 
-    let poll = mio::Poll::new()?;
+    let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
-    let socket = mio::net::UdpSocket::from_socket(socket)?;
+    let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
     poll.register(
         &socket,
         mio::Token(0),
         mio::Ready::readable(),
         mio::PollOpt::edge(),
-    )?;
+    )
+    .unwrap();
 
-    let mut scid = [0; LOCAL_CONN_ID_LEN];
-    SystemRandom::new().fill(&mut scid[..])?;
+    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
+    SystemRandom::new().fill(&mut scid[..]).unwrap();
 
     let max_data = args.get_str("--max-data");
-    let max_data = u64::from_str_radix(max_data, 10)?;
+    let max_data = u64::from_str_radix(max_data, 10).unwrap();
 
     let max_stream_data = args.get_str("--max-stream-data");
-    let max_stream_data = u64::from_str_radix(max_stream_data, 10)?;
+    let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
 
     let version = args.get_str("--wire-version");
-    let version = u32::from_str_radix(version, 16)?;
+    let version = u32::from_str_radix(version, 16).unwrap();
 
-    let mut config = quiche::Config::new(version)?;
+    let mut config = quiche::Config::new(version).unwrap();
 
     config.verify_peer(true);
 
-    config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL)?;
+    config
+        .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
+        .unwrap();
 
-    config.set_idle_timeout(30);
+    config.set_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
     config.set_initial_max_data(max_data);
     config.set_initial_max_stream_data_bidi_local(max_stream_data);
@@ -116,7 +117,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
         config.log_keys();
     }
 
-    let mut conn = quiche::connect(url.domain(), &scid, &mut config)?;
+    let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
 
     let write = match conn.send(&mut out) {
         Ok(v) => v,
@@ -124,14 +125,14 @@ fn main() -> Result<(), Box<std::error::Error>> {
         Err(e) => panic!("{} initial send failed: {:?}", conn.trace_id(), e),
     };
 
-    socket.send(&out[..write])?;
+    socket.send(&out[..write]).unwrap();
 
     debug!("{} written {}", conn.trace_id(), write);
 
     let req_start = std::time::Instant::now();
 
     loop {
-        poll.poll(&mut events, conn.timeout())?;
+        poll.poll(&mut events, conn.timeout()).unwrap();
 
         'read: loop {
             if events.is_empty() {
@@ -168,7 +169,6 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
                 Err(e) => {
                     error!("{} recv failed: {:?}", conn.trace_id(), e);
-                    conn.close(false, e.to_wire(), b"fail").ok();
                     break 'read;
                 },
             };
@@ -182,10 +182,11 @@ fn main() -> Result<(), Box<std::error::Error>> {
         }
 
         if conn.is_established() && http3_conn.is_none() {
-            let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+            let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
 
             let mut h3_conn =
-                quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
+                quiche::h3::Connection::with_transport(&mut conn, &h3_config)
+                    .unwrap();
 
             let mut path = String::from(url.path());
 
@@ -280,13 +281,13 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
                 Err(e) => {
                     error!("{} send failed: {:?}", conn.trace_id(), e);
-                    conn.close(false, e.to_wire(), b"fail").ok();
+                    conn.close(false, 0x1, b"fail").ok();
                     break;
                 },
             };
 
             // TODO: coalesce packets.
-            socket.send(&out[..write])?;
+            socket.send(&out[..write]).unwrap();
 
             debug!("{} written {}", conn.trace_id(), write);
         }
@@ -296,6 +297,4 @@ fn main() -> Result<(), Box<std::error::Error>> {
             break;
         }
     }
-
-    Ok(())
 }

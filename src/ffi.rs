@@ -33,6 +33,7 @@ use std::sync::atomic;
 use libc::c_char;
 use libc::c_int;
 use libc::c_void;
+use libc::size_t;
 use libc::ssize_t;
 
 use crate::*;
@@ -118,7 +119,7 @@ pub extern fn quiche_config_log_keys(config: &mut Config) {
 
 #[no_mangle]
 pub extern fn quiche_config_set_application_protos(
-    config: &mut Config, protos: *const u8, protos_len: usize,
+    config: &mut Config, protos: *const u8, protos_len: size_t,
 ) -> c_int {
     let protos = unsafe { slice::from_raw_parts(protos, protos_len) };
 
@@ -201,9 +202,9 @@ pub extern fn quiche_config_free(config: *mut Config) {
 
 #[no_mangle]
 pub extern fn quiche_header_info(
-    buf: *mut u8, buf_len: usize, dcil: usize, version: *mut u32, ty: *mut u8,
-    scid: *mut u8, scid_len: *mut usize, dcid: *mut u8, dcid_len: *mut usize,
-    token: *mut u8, token_len: *mut usize,
+    buf: *mut u8, buf_len: size_t, dcil: size_t, version: *mut u32, ty: *mut u8,
+    scid: *mut u8, scid_len: *mut size_t, dcid: *mut u8, dcid_len: *mut size_t,
+    token: *mut u8, token_len: *mut size_t,
 ) -> c_int {
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
     let hdr = match Header::from_slice(buf, dcil) {
@@ -266,7 +267,7 @@ pub extern fn quiche_header_info(
 
 #[no_mangle]
 pub extern fn quiche_accept(
-    scid: *const u8, scid_len: usize, odcid: *const u8, odcid_len: usize,
+    scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
     config: &mut Config,
 ) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
@@ -286,7 +287,7 @@ pub extern fn quiche_accept(
 
 #[no_mangle]
 pub extern fn quiche_connect(
-    server_name: *const c_char, scid: *const u8, scid_len: usize,
+    server_name: *const c_char, scid: *const u8, scid_len: size_t,
     config: &mut Config,
 ) -> *mut Connection {
     let server_name = if server_name.is_null() {
@@ -306,8 +307,8 @@ pub extern fn quiche_connect(
 
 #[no_mangle]
 pub extern fn quiche_negotiate_version(
-    scid: *const u8, scid_len: usize, dcid: *const u8, dcid_len: usize,
-    out: *mut u8, out_len: usize,
+    scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
+    out: *mut u8, out_len: size_t,
 ) -> ssize_t {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
     let dcid = unsafe { slice::from_raw_parts(dcid, dcid_len) };
@@ -322,9 +323,9 @@ pub extern fn quiche_negotiate_version(
 
 #[no_mangle]
 pub extern fn quiche_retry(
-    scid: *const u8, scid_len: usize, dcid: *const u8, dcid_len: usize,
-    new_scid: *const u8, new_scid_len: usize, token: *const u8, token_len: usize,
-    out: *mut u8, out_len: usize,
+    scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
+    new_scid: *const u8, new_scid_len: size_t, token: *const u8,
+    token_len: size_t, out: *mut u8, out_len: size_t,
 ) -> ssize_t {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
     let dcid = unsafe { slice::from_raw_parts(dcid, dcid_len) };
@@ -341,7 +342,7 @@ pub extern fn quiche_retry(
 
 #[no_mangle]
 pub extern fn quiche_conn_new_with_tls(
-    scid: *const u8, scid_len: usize, odcid: *const u8, odcid_len: usize,
+    scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
     config: &mut Config, ssl: *mut c_void, is_server: bool,
 ) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
@@ -363,8 +364,12 @@ pub extern fn quiche_conn_new_with_tls(
 
 #[no_mangle]
 pub extern fn quiche_conn_recv(
-    conn: &mut Connection, buf: *mut u8, buf_len: usize,
+    conn: &mut Connection, buf: *mut u8, buf_len: size_t,
 ) -> ssize_t {
+    if buf_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
 
     match conn.recv(buf) {
@@ -376,8 +381,12 @@ pub extern fn quiche_conn_recv(
 
 #[no_mangle]
 pub extern fn quiche_conn_send(
-    conn: &mut Connection, out: *mut u8, out_len: usize,
+    conn: &mut Connection, out: *mut u8, out_len: size_t,
 ) -> ssize_t {
+    if out_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
     match conn.send(out) {
@@ -389,10 +398,13 @@ pub extern fn quiche_conn_send(
 
 #[no_mangle]
 pub extern fn quiche_conn_stream_recv(
-    conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: usize,
+    conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: size_t,
     fin: &mut bool,
 ) -> ssize_t {
-    // TODO: limit out_len to MAX_SSIZE to allow the result to fit in ssize_t
+    if out_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
     let (out_len, out_fin) = match conn.stream_recv(stream_id, out) {
@@ -408,9 +420,13 @@ pub extern fn quiche_conn_stream_recv(
 
 #[no_mangle]
 pub extern fn quiche_conn_stream_send(
-    conn: &mut Connection, stream_id: u64, buf: *const u8, buf_len: usize,
+    conn: &mut Connection, stream_id: u64, buf: *const u8, buf_len: size_t,
     fin: bool,
 ) -> ssize_t {
+    if buf_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
     let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
 
     match conn.stream_send(stream_id, buf, fin) {
@@ -428,16 +444,10 @@ pub extern fn quiche_conn_stream_finished(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_readable(conn: &mut Connection) -> *mut Readable {
-    let iter = conn.readable();
-    Box::into_raw(Box::new(iter))
-}
-
-#[no_mangle]
 pub extern fn quiche_readable_next(
-    iter: &mut Readable, stream_id: *mut u64,
+    conn: &mut Connection, stream_id: *mut u64,
 ) -> bool {
-    if let Some(v) = iter.next() {
+    if let Some(v) = conn.readable().next() {
         unsafe { *stream_id = v };
         return true;
     }
@@ -446,14 +456,9 @@ pub extern fn quiche_readable_next(
 }
 
 #[no_mangle]
-pub extern fn quiche_readable_free(i: *mut Readable) {
-    unsafe { Box::from_raw(i) };
-}
-
-#[no_mangle]
 pub extern fn quiche_conn_close(
     conn: &mut Connection, app: bool, err: u16, reason: *const u8,
-    reason_len: usize,
+    reason_len: size_t,
 ) -> c_int {
     let reason = unsafe { slice::from_raw_parts(reason, reason_len) };
 
@@ -480,7 +485,7 @@ pub extern fn quiche_conn_on_timeout(conn: &mut Connection) {
 
 #[no_mangle]
 pub extern fn quiche_conn_application_proto(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut usize,
+    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let proto = conn.application_proto();
 
@@ -496,6 +501,11 @@ pub extern fn quiche_conn_is_established(conn: &mut Connection) -> bool {
 #[no_mangle]
 pub extern fn quiche_conn_is_closed(conn: &mut Connection) -> bool {
     conn.is_closed()
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_stats_recv(conn: &Connection, out: &mut u64) {
+    *out = conn.stats().recv as u64;
 }
 
 #[no_mangle]

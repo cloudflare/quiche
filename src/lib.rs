@@ -42,7 +42,8 @@
 //! configuration object:
 //!
 //! ```
-//! let config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! let config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! This is shared among multiple connections and can be used to configure a
@@ -52,14 +53,15 @@
 //! a new connection, while [`accept()`] is for servers:
 //!
 //! ```
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let server_name = "quic.tech";
 //! # let scid = [0xba; 16];
 //! // Client connection.
-//! let conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
+//! let conn = quiche::connect(Some(&server_name), &scid, &mut config)?;
 //!
 //! // Server connection.
-//! let conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! let conn = quiche::accept(&scid, None, &mut config)?;
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! ## Handling incoming packets
@@ -70,9 +72,9 @@
 //! ```no_run
 //! # let mut buf = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! loop {
 //!     let read = socket.recv(&mut buf).unwrap();
 //!
@@ -90,6 +92,7 @@
 //!         },
 //!     };
 //! }
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! ## Generating outgoing packets
@@ -100,9 +103,9 @@
 //! ```no_run
 //! # let mut out = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! loop {
 //!     let write = match conn.send(&mut out) {
 //!         Ok(v) => v,
@@ -120,6 +123,7 @@
 //!
 //!     socket.send(&out[..write]).unwrap();
 //! }
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! When packets are sent, the application is responsible for maintaining a
@@ -127,10 +131,11 @@
 //! obtained using the connection's [`timeout()`] method.
 //!
 //! ```
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! let timeout = conn.timeout();
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! The application is responsible for providing a timer implementation, which
@@ -141,9 +146,9 @@
 //! ```no_run
 //! # let mut out = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! // Timeout expired, handle it.
 //! conn.on_timeout();
 //!
@@ -165,6 +170,7 @@
 //!
 //!     socket.send(&out[..write]).unwrap();
 //! }
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! ## Sending and receiving stream data
@@ -175,13 +181,14 @@
 //! Data can be sent on a stream by using the [`stream_send()`] method:
 //!
 //! ```no_run
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! if conn.is_established() {
 //!     // Handshake completed, send some data on stream 0.
-//!     conn.stream_send(0, b"hello", true).unwrap();
+//!     conn.stream_send(0, b"hello", true)?;
 //! }
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! The application can check whether there are any readable streams by using
@@ -193,9 +200,9 @@
 //!
 //! ```no_run
 //! # let mut buf = [0; 512];
-//! # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let scid = [0xba; 16];
-//! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+//! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! if conn.is_established() {
 //!     // Iterate over readable streams.
 //!     let streams: Vec<u64> = conn.readable().collect();
@@ -207,12 +214,13 @@
 //!         }
 //!     }
 //! }
+//! # Ok::<(), quiche::Error>(())
 //! ```
 //!
 //! ## HTTP/3
 //!
-//! The [HTTP/3 module]'s documentation provides a detailed description of
-//! quiche's HTTP/3 API that can be used to implement clients and servers.
+//! The quiche [HTTP/3 module] provides a high level API for sending and
+//! receiving HTTP requests and responses on top of the QUIC transport protocol.
 //!
 //! [`connect()`]: fn.connect.html
 //! [`accept()`]: fn.accept.html
@@ -229,11 +237,10 @@
 extern crate log;
 
 use std::cmp;
-use std::mem;
 use std::time;
 
 /// The current QUIC wire version.
-pub const VERSION_DRAFT18: u32 = 0xff00_0012;
+pub const PROTOCOL_VERSION: u32 = 0xff00_0013;
 
 /// The maximum length of a connection ID.
 pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
@@ -300,7 +307,7 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn to_wire(self) -> u16 {
+    fn to_wire(self) -> u16 {
         match self {
             Error::Done => 0x0,
             Error::InvalidFrame => 0x7,
@@ -350,6 +357,12 @@ impl std::error::Error for Error {
     }
 }
 
+impl std::convert::From<octets::BufferTooShortError> for Error {
+    fn from(_err: octets::BufferTooShortError) -> Self {
+        Error::BufferTooShort
+    }
+}
+
 /// Stores configuration shared between multiple connections.
 pub struct Config {
     local_transport_params: TransportParams,
@@ -369,7 +382,8 @@ impl Config {
     /// ## Examples:
     ///
     /// ```
-    /// let config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+    /// let config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn new(version: u32) -> Result<Config> {
         let tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
@@ -391,8 +405,9 @@ impl Config {
     /// ## Examples:
     ///
     /// ```no_run
-    /// # let mut config = quiche::Config::new(0xbabababa).unwrap();
-    /// config.load_cert_chain_from_pem_file("/path/to/cert.pem");
+    /// # let mut config = quiche::Config::new(0xbabababa)?;
+    /// config.load_cert_chain_from_pem_file("/path/to/cert.pem")?;
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn load_cert_chain_from_pem_file(&mut self, file: &str) -> Result<()> {
         self.tls_ctx
@@ -407,8 +422,9 @@ impl Config {
     /// ## Examples:
     ///
     /// ```no_run
-    /// # let mut config = quiche::Config::new(0xbabababa).unwrap();
-    /// config.load_priv_key_from_pem_file("/path/to/key.pem");
+    /// # let mut config = quiche::Config::new(0xbabababa)?;
+    /// config.load_priv_key_from_pem_file("/path/to/key.pem")?;
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn load_priv_key_from_pem_file(&mut self, file: &str) -> Result<()> {
         self.tls_ctx
@@ -451,8 +467,9 @@ impl Config {
     /// ## Examples:
     ///
     /// ```
-    /// # let mut config = quiche::Config::new(0xbabababa).unwrap();
-    /// config.set_application_protos(b"\x08http/1.1\x08http/0.9");
+    /// # let mut config = quiche::Config::new(0xbabababa)?;
+    /// config.set_application_protos(b"\x08http/1.1\x08http/0.9")?;
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn set_application_protos(&mut self, protos: &[u8]) -> Result<()> {
         let mut protos = protos.to_vec();
@@ -559,13 +576,16 @@ pub struct Connection {
     local_transport_params: TransportParams,
 
     /// TLS handshake state.
-    tls_state: tls::Handshake,
+    handshake: tls::Handshake,
 
     /// Loss recovery and congestion control state.
     recovery: recovery::Recovery,
 
     /// List of supported application protocols.
     application_protos: Vec<Vec<u8>>,
+
+    /// Total number of received packets.
+    recv_count: usize,
 
     /// Total number of sent packets.
     sent_count: usize,
@@ -663,9 +683,10 @@ pub struct Connection {
 /// ## Examples:
 ///
 /// ```no_run
-/// # let mut config = quiche::Config::new(0xbabababa).unwrap();
+/// # let mut config = quiche::Config::new(0xbabababa)?;
 /// # let scid = [0xba; 16];
-/// let conn = quiche::accept(&scid, None, &mut config).unwrap();
+/// let conn = quiche::accept(&scid, None, &mut config)?;
+/// # Ok::<(), quiche::Error>(())
 /// ```
 pub fn accept(
     scid: &[u8], odcid: Option<&[u8]>, config: &mut Config,
@@ -684,10 +705,11 @@ pub fn accept(
 /// ## Examples:
 ///
 /// ```no_run
-/// # let mut config = quiche::Config::new(0xbabababa).unwrap();
+/// # let mut config = quiche::Config::new(0xbabababa)?;
 /// # let server_name = "quic.tech";
 /// # let scid = [0xba; 16];
-/// let conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
+/// let conn = quiche::connect(Some(&server_name), &scid, &mut config)?;
+/// # Ok::<(), quiche::Error>(())
 /// ```
 pub fn connect(
     server_name: Option<&str>, scid: &[u8], config: &mut Config,
@@ -695,7 +717,7 @@ pub fn connect(
     let conn = Connection::new(scid, None, config, false)?;
 
     if server_name.is_some() {
-        conn.tls_state
+        conn.handshake
             .set_host_name(server_name.unwrap())
             .map_err(|_| Error::TlsFail)?;
     }
@@ -712,20 +734,19 @@ pub fn connect(
 /// ## Examples:
 ///
 /// ```no_run
-/// # const LOCAL_CONN_ID_LEN: usize = 16;
 /// # let mut buf = [0; 512];
 /// # let mut out = [0; 512];
 /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
 /// let (len, src) = socket.recv_from(&mut buf).unwrap();
 ///
 /// let hdr =
-///     quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN).unwrap();
+///     quiche::Header::from_slice(&mut buf[..len], quiche::MAX_CONN_ID_LEN)?;
 ///
-/// if hdr.version != quiche::VERSION_DRAFT18 {
-///     let len =
-///         quiche::negotiate_version(&hdr.scid, &hdr.dcid, &mut out).unwrap();
+/// if hdr.version != quiche::PROTOCOL_VERSION {
+///     let len = quiche::negotiate_version(&hdr.scid, &hdr.dcid, &mut out)?;
 ///     socket.send_to(&out[..len], &src).unwrap();
 /// }
+/// # Ok::<(), quiche::Error>(())
 /// ```
 pub fn negotiate_version(
     scid: &[u8], dcid: &[u8], out: &mut [u8],
@@ -751,8 +772,7 @@ pub fn negotiate_version(
 /// ## Examples:
 ///
 /// ```no_run
-/// # const LOCAL_CONN_ID_LEN: usize = 16;
-/// # let mut config = quiche::Config::new(0xbabababa).unwrap();
+/// # let mut config = quiche::Config::new(0xbabababa)?;
 /// # let mut buf = [0; 512];
 /// # let mut out = [0; 512];
 /// # let scid = [0xba; 16];
@@ -765,8 +785,7 @@ pub fn negotiate_version(
 /// # }
 /// let (len, src) = socket.recv_from(&mut buf).unwrap();
 ///
-/// let hdr =
-///     quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN).unwrap();
+/// let hdr = quiche::Header::from_slice(&mut buf[..len], quiche::MAX_CONN_ID_LEN)?;
 ///
 /// let token = hdr.token.as_ref().unwrap();
 ///
@@ -776,10 +795,10 @@ pub fn negotiate_version(
 ///
 ///     let len = quiche::retry(
 ///         &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
-///     ).unwrap();
+///     )?;
 ///
 ///     socket.send_to(&out[..len], &src).unwrap();
-///     return;
+///     return Ok(());
 /// }
 ///
 /// // Client sent token, validate it.
@@ -787,10 +806,11 @@ pub fn negotiate_version(
 ///
 /// if odcid == None {
 ///     // Invalid address validation token.
-///     return;
+///     return Ok(());
 /// }
 ///
-/// let conn = quiche::accept(&scid, odcid, &mut config).unwrap();
+/// let conn = quiche::accept(&scid, odcid, &mut config)?;
+/// # Ok::<(), quiche::Error>(())
 /// ```
 pub fn retry(
     scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], out: &mut [u8],
@@ -834,12 +854,13 @@ impl Connection {
 
             local_transport_params: config.local_transport_params.clone(),
 
-            tls_state: tls,
+            handshake: tls,
 
             recovery: recovery::Recovery::default(),
 
             application_protos: config.application_protos.clone(),
 
+            recv_count: 0,
             sent_count: 0,
 
             rx_data: 0,
@@ -895,7 +916,7 @@ impl Connection {
                 Some(odcid.to_vec());
         }
 
-        conn.tls_state.init(&conn).map_err(|_| Error::TlsFail)?;
+        conn.handshake.init(&conn).map_err(|_| Error::TlsFail)?;
 
         conn.streams.update_local_max_streams_bidi(
             config.local_transport_params.initial_max_streams_bidi as usize,
@@ -930,7 +951,8 @@ impl Connection {
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
-    /// returned, or [`Done`].
+    /// returned, or [`Done`]. On error the connection will be closed by
+    /// calling [`close()`] with the appropriate error code.
     ///
     /// Coalesced packets will be processed as necessary.
     ///
@@ -938,15 +960,16 @@ impl Connection {
     /// this function due to, for example, in-place decryption.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    /// [`close()`]: struct.Connection.html#method.close
     ///
     /// ## Examples:
     ///
     /// ```no_run
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    /// # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
     /// # let scid = [0xba; 16];
-    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// loop {
     ///     let read = socket.recv(&mut buf).unwrap();
     ///
@@ -964,6 +987,7 @@ impl Connection {
     ///         },
     ///     };
     /// }
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         let len = buf.len();
@@ -973,7 +997,18 @@ impl Connection {
 
         // Process coalesced packets.
         while left > 0 {
-            let read = self.recv_single(&mut buf[len - left..len])?;
+            let read = match self.recv_single(&mut buf[len - left..len]) {
+                Ok(v) => v,
+
+                Err(Error::Done) => return Err(Error::Done),
+
+                Err(e) => {
+                    // In case of error processing the incoming packet, close
+                    // the connection.
+                    self.close(false, e.to_wire(), b"").ok();
+                    return Err(e);
+                },
+            };
 
             done += read;
             left -= read;
@@ -1032,7 +1067,7 @@ impl Connection {
 
             let mut new_version = 0;
             for v in versions.iter() {
-                if *v == VERSION_DRAFT18 {
+                if *v == PROTOCOL_VERSION {
                     new_version = *v;
                 }
             }
@@ -1049,7 +1084,7 @@ impl Connection {
             self.got_peer_conn_id = false;
             self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
-            self.tls_state.clear().map_err(|_| Error::TlsFail)?;
+            self.handshake.clear().map_err(|_| Error::TlsFail)?;
 
             return Err(Error::Done);
         }
@@ -1093,7 +1128,7 @@ impl Connection {
             self.got_peer_conn_id = false;
             self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
-            self.tls_state.clear().map_err(|_| Error::TlsFail)?;
+            self.handshake.clear().map_err(|_| Error::TlsFail)?;
 
             return Err(Error::Done);
         }
@@ -1304,7 +1339,7 @@ impl Connection {
 
                     while let Ok((read, _)) = stream.recv.pop(&mut crypto_buf) {
                         let recv_buf = &crypto_buf[..read];
-                        self.tls_state
+                        self.handshake
                             .provide_data(level, &recv_buf)
                             .map_err(|_| Error::TlsFail)?;
                     }
@@ -1387,12 +1422,20 @@ impl Connection {
                 },
 
                 frame::Frame::MaxStreamsBidi { max } => {
+                    if max > 2u64.pow(60) {
+                        return Err(Error::StreamLimit);
+                    }
+
                     self.streams.update_peer_max_streams_bidi(max as usize);
 
                     ack_elicited = true;
                 },
 
                 frame::Frame::MaxStreamsUni { max } => {
+                    if max > 2u64.pow(60) {
+                        return Err(Error::StreamLimit);
+                    }
+
                     self.streams.update_peer_max_streams_uni(max as usize);
 
                     ack_elicited = true;
@@ -1478,11 +1521,15 @@ impl Connection {
         self.pkt_num_spaces[epoch].largest_rx_pkt_num =
             cmp::max(self.pkt_num_spaces[epoch].largest_rx_pkt_num, pn);
 
-        self.idle_timer = Some(
-            now + time::Duration::from_secs(
-                self.local_transport_params.idle_timeout,
-            ),
-        );
+        if self.local_transport_params.idle_timeout > 0 {
+            self.idle_timer = Some(
+                now + time::Duration::from_millis(
+                    self.local_transport_params.idle_timeout,
+                ),
+            );
+        }
+
+        self.recv_count += 1;
 
         let read = b.off() + aead_tag_len;
 
@@ -1518,9 +1565,9 @@ impl Connection {
     /// ```no_run
     /// # let mut out = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    /// # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
     /// # let scid = [0xba; 16];
-    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// loop {
     ///     let write = match conn.send(&mut out) {
     ///         Ok(v) => v,
@@ -1538,6 +1585,7 @@ impl Connection {
     ///
     ///     socket.send(&out[..write]).unwrap();
     /// }
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
@@ -1969,13 +2017,14 @@ impl Connection {
     /// ```no_run
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    /// # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
     /// # let scid = [0xba; 16];
-    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// # let stream_id = 0;
     /// while let Ok((read, fin)) = conn.stream_recv(stream_id, &mut buf) {
     ///     println!("Got {} bytes on stream {}", read, stream_id);
     /// }
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn stream_recv(
         &mut self, stream_id: u64, out: &mut [u8],
@@ -2012,11 +2061,12 @@ impl Connection {
     /// ```no_run
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    /// # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
     /// # let scid = [0xba; 16];
-    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// # let stream_id = 0;
-    /// conn.stream_send(stream_id, b"hello", true).unwrap();
+    /// conn.stream_send(stream_id, b"hello", true)?;
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn stream_send(
         &mut self, stream_id: u64, buf: &[u8], fin: bool,
@@ -2075,9 +2125,9 @@ impl Connection {
     /// ```no_run
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-    /// # let mut config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
     /// # let scid = [0xba; 16];
-    /// # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// // Iterate over readable streams.
     /// let streams: Vec<u64> = conn.readable().collect();
     ///
@@ -2087,6 +2137,7 @@ impl Connection {
     ///         println!("Got {} bytes on stream {}", read, stream_id);
     ///     }
     /// }
+    /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn readable(&mut self) -> Readable {
         self.streams.readable()
@@ -2209,7 +2260,7 @@ impl Connection {
     ///
     /// If no protocol has been negotiated, the returned value is empty.
     pub fn application_proto(&self) -> &[u8] {
-        self.tls_state.get_alpn_protocol()
+        self.handshake.get_alpn_protocol()
     }
 
     /// Returns true if the connection handshake is complete.
@@ -2219,7 +2270,7 @@ impl Connection {
 
     /// Returns true if the connection is resumed.
     pub fn is_resumed(&self) -> bool {
-        self.tls_state.is_resumed()
+        self.handshake.is_resumed()
     }
 
     /// Returns true if the connection is closed.
@@ -2232,6 +2283,7 @@ impl Connection {
     /// Collects and returns statistics about the connection.
     pub fn stats(&self) -> Stats {
         Stats {
+            recv: self.recv_count,
             sent: self.sent_count,
             lost: self.recovery.lost_count,
             rtt: self.recovery.rtt(),
@@ -2243,7 +2295,7 @@ impl Connection {
     /// If the connection is already established, it does nothing.
     fn do_handshake(&mut self) -> Result<()> {
         if !self.handshake_completed {
-            match self.tls_state.do_handshake() {
+            match self.handshake.do_handshake() {
                 Ok(_) => {
                     if self.application_proto().is_empty() {
                         // Send no_application_proto TLS alert when no protocol
@@ -2256,13 +2308,10 @@ impl Connection {
                     self.handshake_completed = true;
 
                     let mut raw_params =
-                        self.tls_state.get_quic_transport_params().to_vec();
+                        self.handshake.get_quic_transport_params().to_vec();
 
-                    let peer_params = TransportParams::decode(
-                        &mut raw_params,
-                        self.version,
-                        self.is_server,
-                    )?;
+                    let peer_params =
+                        TransportParams::decode(&mut raw_params, self.is_server)?;
 
                     if peer_params.original_connection_id != self.odcid {
                         return Err(Error::InvalidTransportParam);
@@ -2284,19 +2333,13 @@ impl Connection {
 
                     trace!("{} connection established: cipher={:?} proto={:?} resumed={} {:?}",
                            &self.trace_id,
-                           self.tls_state.cipher(),
+                           self.handshake.cipher(),
                            std::str::from_utf8(self.application_proto()),
                            self.is_resumed(),
                            self.peer_transport_params);
                 },
 
-                Err(tls::Error::TlsFail) => {
-                    // If we have an error to send (e.g. a TLS alert), ignore
-                    // the error so we send a CONNECTION_CLOSE to the peer.
-                    if self.error.is_none() {
-                        return Err(Error::TlsFail);
-                    }
-                },
+                Err(tls::Error::TlsFail) => return Err(Error::TlsFail),
 
                 Err(tls::Error::SyscallFail) => return Err(Error::TlsFail),
 
@@ -2311,7 +2354,7 @@ impl Connection {
     fn write_epoch(&self) -> Result<packet::Epoch> {
         // On error or probe, send packet in the latest space available.
         if self.error.is_some() || self.recovery.probes > 0 {
-            let epoch = match self.tls_state.get_write_level() {
+            let epoch = match self.handshake.get_write_level() {
                 crypto::Level::Initial => packet::EPOCH_INITIAL,
                 crypto::Level::ZeroRTT => unreachable!(),
                 crypto::Level::Handshake => packet::EPOCH_HANDSHAKE,
@@ -2374,6 +2417,9 @@ impl Connection {
 /// [`stats()`]: struct.Connection.html#method.stats
 #[derive(Clone)]
 pub struct Stats {
+    /// The number of QUIC packets received on this connection.
+    pub recv: usize,
+
     /// The number of QUIC packets sent on this connection.
     pub sent: usize,
 
@@ -2388,8 +2434,8 @@ impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "sent={} lost={} rtt={:?}",
-            self.sent, self.lost, self.rtt
+            "recv={} sent={} lost={} rtt={:?}",
+            self.recv, self.sent, self.lost, self.rtt
         )
     }
 }
@@ -2433,18 +2479,8 @@ impl Default for TransportParams {
 }
 
 impl TransportParams {
-    fn decode(
-        buf: &mut [u8], _version: u32, is_server: bool,
-    ) -> Result<TransportParams> {
+    fn decode(buf: &mut [u8], is_server: bool) -> Result<TransportParams> {
         let mut b = octets::Octets::with_slice(buf);
-
-        // TODO: check version
-        let _tp_version = b.get_u32()?;
-
-        if !is_server {
-            // Ignore supported versions from server.
-            b.get_bytes_with_u8_length()?;
-        }
 
         let mut tp = TransportParams::default();
 
@@ -2499,19 +2535,43 @@ impl TransportParams {
                 },
 
                 0x0008 => {
-                    tp.initial_max_streams_bidi = val.get_varint()?;
+                    let max = val.get_varint()?;
+
+                    if max > 2u64.pow(60) {
+                        return Err(Error::StreamLimit);
+                    }
+
+                    tp.initial_max_streams_bidi = max;
                 },
 
                 0x0009 => {
-                    tp.initial_max_streams_uni = val.get_varint()?;
+                    let max = val.get_varint()?;
+
+                    if max > 2u64.pow(60) {
+                        return Err(Error::StreamLimit);
+                    }
+
+                    tp.initial_max_streams_uni = max;
                 },
 
                 0x000a => {
-                    tp.ack_delay_exponent = val.get_varint()?;
+                    let ack_delay_exponent = val.get_varint()?;
+
+                    if ack_delay_exponent > 20 {
+                        return Err(Error::InvalidTransportParam);
+                    }
+
+                    tp.ack_delay_exponent = ack_delay_exponent;
                 },
 
                 0x000b => {
-                    tp.max_ack_delay = val.get_varint()?;
+                    let max_ack_delay = val.get_varint()?;
+
+                    if max_ack_delay >= 2_u64.pow(14) {
+                        return Err(Error::InvalidTransportParam);
+                    }
+
+                    tp.max_ack_delay = max_ack_delay;
                 },
 
                 0x000c => {
@@ -2535,7 +2595,7 @@ impl TransportParams {
     }
 
     fn encode<'a>(
-        tp: &TransportParams, version: u32, is_server: bool, out: &'a mut [u8],
+        tp: &TransportParams, is_server: bool, out: &'a mut [u8],
     ) -> Result<&'a mut [u8]> {
         let mut params = [0; 128];
 
@@ -2637,13 +2697,6 @@ impl TransportParams {
         let out_len = {
             let mut b = octets::Octets::with_slice(out);
 
-            b.put_u32(version)?;
-
-            if is_server {
-                b.put_u8(mem::size_of::<u32>() as u8)?;
-                b.put_u32(version)?;
-            };
-
             b.put_u16(params_len as u16)?;
             b.put_bytes(&params[..params_len])?;
 
@@ -2692,8 +2745,8 @@ impl std::fmt::Debug for TransportParams {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod testing {
+#[doc(hidden)]
+pub mod testing {
     use super::*;
 
     pub struct Pipe {
@@ -2703,7 +2756,7 @@ pub(crate) mod testing {
 
     impl Pipe {
         pub fn default() -> Result<Pipe> {
-            let mut config = Config::new(crate::VERSION_DRAFT18)?;
+            let mut config = Config::new(crate::PROTOCOL_VERSION)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
             config.set_application_protos(b"\x06proto1\x06proto2")?;
@@ -2737,7 +2790,7 @@ pub(crate) mod testing {
             let mut server_scid = [0; 16];
             rand::rand_bytes(&mut server_scid[..]);
 
-            let mut config = Config::new(crate::VERSION_DRAFT18)?;
+            let mut config = Config::new(crate::PROTOCOL_VERSION)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
             config.set_application_protos(b"\x06proto1\x06proto2")?;
@@ -2760,7 +2813,7 @@ pub(crate) mod testing {
             let mut server_scid = [0; 16];
             rand::rand_bytes(&mut server_scid[..]);
 
-            let mut config = Config::new(crate::VERSION_DRAFT18)?;
+            let mut config = Config::new(crate::PROTOCOL_VERSION)?;
             config.set_application_protos(b"\x06proto1\x06proto2")?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
@@ -2961,20 +3014,17 @@ mod tests {
             initial_max_stream_data_uni: 2_461_234,
             initial_max_streams_bidi: 12_231,
             initial_max_streams_uni: 18_473,
-            ack_delay_exponent: 123,
-            max_ack_delay: 1234,
+            ack_delay_exponent: 20,
+            max_ack_delay: 2_u64.pow(14) - 1,
             disable_migration: true,
         };
 
         let mut raw_params = [42; 256];
         let mut raw_params =
-            TransportParams::encode(&tp, VERSION_DRAFT18, true, &mut raw_params)
-                .unwrap();
-        assert_eq!(raw_params.len(), 106);
+            TransportParams::encode(&tp, true, &mut raw_params).unwrap();
+        assert_eq!(raw_params.len(), 96);
 
-        let new_tp =
-            TransportParams::decode(&mut raw_params, VERSION_DRAFT18, false)
-                .unwrap();
+        let new_tp = TransportParams::decode(&mut raw_params, false).unwrap();
 
         assert_eq!(new_tp, tp);
     }
@@ -3031,7 +3081,7 @@ mod tests {
     fn handshake_alpn_mismatch() {
         let mut buf = [0; 65535];
 
-        let mut config = Config::new(VERSION_DRAFT18).unwrap();
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         config
             .set_application_protos(b"\x06proto3\x06proto4")
             .unwrap();
@@ -3049,7 +3099,7 @@ mod tests {
     fn limit_handshake_data() {
         let mut buf = [0; 65535];
 
-        let mut config = Config::new(VERSION_DRAFT18).unwrap();
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         config
             .load_cert_chain_from_pem_file("examples/cert-big.crt")
             .unwrap();
@@ -3191,6 +3241,30 @@ mod tests {
     }
 
     #[test]
+    fn stream_limit_max_bidi() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [frame::Frame::MaxStreamsBidi { max: 2u64.pow(60) }];
+
+        let pkt_type = packet::Type::Application;
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+        let frames = [frame::Frame::MaxStreamsBidi {
+            max: 2u64.pow(60) + 1,
+        }];
+
+        let pkt_type = packet::Type::Application;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::StreamLimit),
+        );
+    }
+
+    #[test]
     fn stream_limit_uni() {
         let mut buf = [0; 65535];
 
@@ -3228,6 +3302,30 @@ mod tests {
                 data: stream::RangeBuf::from(b"a", 0, false),
             },
         ];
+
+        let pkt_type = packet::Type::Application;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::StreamLimit),
+        );
+    }
+
+    #[test]
+    fn stream_limit_max_uni() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [frame::Frame::MaxStreamsUni { max: 2u64.pow(60) }];
+
+        let pkt_type = packet::Type::Application;
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+        let frames = [frame::Frame::MaxStreamsUni {
+            max: 2u64.pow(60) + 1,
+        }];
 
         let pkt_type = packet::Type::Application;
         assert_eq!(

@@ -39,7 +39,7 @@ extern "C" {
 //
 
 // The current QUIC wire version.
-#define QUICHE_VERSION_DRAFT18 0xff000012
+#define QUICHE_PROTOCOL_VERSION 0xff000013
 
 // The maximum length of a connection ID.
 #define QUICHE_MAX_CONN_ID_LEN 18
@@ -213,18 +213,9 @@ ssize_t quiche_conn_stream_send(quiche_conn *conn, uint64_t stream_id,
 // Returns true if all the data has been read from the specified stream.
 bool quiche_conn_stream_finished(quiche_conn *conn, uint64_t stream_id);
 
-// An iterator over the streams that have outstanding data to read.
-typedef struct Readable quiche_readable;
-
-// Creates an iterator of streams that have outstanding data to read.
-quiche_readable *quiche_conn_readable(quiche_conn *conn);
-
-// Fetches the next element from the stream iterator. Returns false if the
-// iterator is empty.
-bool quiche_readable_next(quiche_readable *iter, uint64_t *stream_id);
-
-// Frees the readable object.
-void quiche_readable_free(quiche_readable *r);
+// Fetches the next stream that has outstanding data to read. Returns false if
+// there are no readable streams.
+bool quiche_readable_next(quiche_conn *conn, uint64_t *stream_id);
 
 // Returns the amount of time until the next timeout event, as nanoseconds.
 uint64_t quiche_conn_timeout_as_nanos(quiche_conn *conn);
@@ -247,6 +238,7 @@ bool quiche_conn_is_established(quiche_conn *conn);
 bool quiche_conn_is_closed(quiche_conn *conn);
 
 // Collects and returns statistics about the connection.
+void quiche_conn_stats_recv(quiche_conn *conn, uint64_t *out);
 void quiche_conn_stats_sent(quiche_conn *conn, uint64_t *out);
 void quiche_conn_stats_lost(quiche_conn *conn, uint64_t *out);
 void quiche_conn_stats_rtt_as_nanos(quiche_conn *conn, uint64_t *out);
@@ -259,7 +251,7 @@ void quiche_conn_free(quiche_conn *conn);
 //
 
 /// The current HTTP/3 ALPN token.
-#define QUICHE_H3_APPLICATION_PROTOCOL "\x05h3-18"
+#define QUICHE_H3_APPLICATION_PROTOCOL "\x05h3-19"
 
 // Stores configuration shared between multiple connections.
 typedef struct Http3Config quiche_h3_config;
@@ -321,7 +313,7 @@ int64_t quiche_h3_send_request(quiche_h3_conn *conn, quiche_conn *quic_conn,
                                quiche_h3_header *headers, size_t headers_len,
                                bool fin);
 
-// sends an http/3 response on the specified stream.
+// Sends an HTTP/3 response on the specified stream.
 int quiche_h3_send_response(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t stream_id, quiche_h3_header *headers,
                             size_t headers_len, bool fin);

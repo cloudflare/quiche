@@ -34,7 +34,7 @@ The first step in establishing a QUIC connection using quiche is creating a
 configuration object:
 
 ```rust
-let config = quiche::Config::new(quiche::VERSION_DRAFT18).unwrap();
+let config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 ```
 
 This is shared among multiple connections and can be used to configure a
@@ -45,10 +45,10 @@ a new connection, while [`accept()`] is for servers:
 
 ```rust
 // Client connection.
-let conn = quiche::connect(Some(&server_name), &scid, &mut config).unwrap();
+let conn = quiche::connect(Some(&server_name), &scid, &mut config)?;
 
 // Server connection.
-let conn = quiche::accept(&scid, None, &mut config).unwrap();
+let conn = quiche::accept(&scid, None, &mut config)?;
 ```
 
 ### Handling incoming packets
@@ -148,7 +148,7 @@ Data can be sent on a stream by using the [`stream_send()`] method:
 ```rust
 if conn.is_established() {
     // Handshake completed, send some data on stream 0.
-    conn.stream_send(0, b"hello", true).unwrap();
+    conn.stream_send(0, b"hello", true)?;
 }
 ```
 
@@ -175,8 +175,8 @@ if conn.is_established() {
 
 ### HTTP/3
 
-The quiche [HTTP/3 module] provides a high level API for sending and receiving
-HTTP requests and responses on top of the QUIC transport protocol.
+The quiche [HTTP/3 module] provides a high level API for sending and
+receiving HTTP requests and responses on top of the QUIC transport protocol.
 
 [`connect()`]: https://docs.quic.tech/quiche/fn.connect.html
 [`accept()`]: https://docs.quic.tech/quiche/fn.accept.html

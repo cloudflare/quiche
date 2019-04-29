@@ -34,8 +34,6 @@ use std::collections::HashMap;
 
 use ring::rand::*;
 
-const LOCAL_CONN_ID_LEN: usize = 16;
-
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
 const USAGE: &str = "Usage:
@@ -54,7 +52,7 @@ Options:
 
 type ConnMap = HashMap<Vec<u8>, (net::SocketAddr, Box<quiche::Connection>)>;
 
-fn main() -> Result<(), Box<std::error::Error>> {
+fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
@@ -66,29 +64,36 @@ fn main() -> Result<(), Box<std::error::Error>> {
         .and_then(|dopt| dopt.parse())
         .unwrap_or_else(|e| e.exit());
 
-    let socket = net::UdpSocket::bind(args.get_str("--listen"))?;
+    let socket = net::UdpSocket::bind(args.get_str("--listen")).unwrap();
 
-    let poll = mio::Poll::new()?;
+    let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
-    let socket = mio::net::UdpSocket::from_socket(socket)?;
+    let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
     poll.register(
         &socket,
         mio::Token(0),
         mio::Ready::readable(),
         mio::PollOpt::edge(),
-    )?;
+    )
+    .unwrap();
 
     let mut connections = ConnMap::new();
 
-    let mut config = quiche::Config::new(quiche::VERSION_DRAFT18)?;
+    let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 
-    config.load_cert_chain_from_pem_file(args.get_str("--cert"))?;
-    config.load_priv_key_from_pem_file(args.get_str("--key"))?;
+    config
+        .load_cert_chain_from_pem_file(args.get_str("--cert"))
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file(args.get_str("--key"))
+        .unwrap();
 
-    config.set_application_protos(b"\x05hq-18\x08http/0.9")?;
+    config
+        .set_application_protos(b"\x05hq-19\x08http/0.9")
+        .unwrap();
 
-    config.set_idle_timeout(30);
+    config.set_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
     config.set_initial_max_data(10_000_000);
     config.set_initial_max_stream_data_bidi_local(1_000_000);
@@ -106,7 +111,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
         // TODO: use event loop that properly supports timers
         let timeout = connections.values().filter_map(|(_, c)| c.timeout()).min();
 
-        poll.poll(&mut events, timeout)?;
+        poll.poll(&mut events, timeout).unwrap();
 
         'read: loop {
             if events.is_empty() {
@@ -134,8 +139,10 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
             let pkt_buf = &mut buf[..len];
 
-            let hdr = match quiche::Header::from_slice(pkt_buf, LOCAL_CONN_ID_LEN)
-            {
+            let hdr = match quiche::Header::from_slice(
+                pkt_buf,
+                quiche::MAX_CONN_ID_LEN,
+            ) {
                 Ok(v) => v,
 
                 Err(e) => {
@@ -157,21 +164,21 @@ fn main() -> Result<(), Box<std::error::Error>> {
                     continue;
                 }
 
-                if hdr.version != quiche::VERSION_DRAFT18 {
+                if hdr.version != quiche::PROTOCOL_VERSION {
                     warn!("Doing version negotiation");
 
-                    let len = quiche::negotiate_version(
-                        &hdr.scid, &hdr.dcid, &mut out,
-                    )?;
+                    let len =
+                        quiche::negotiate_version(&hdr.scid, &hdr.dcid, &mut out)
+                            .unwrap();
 
                     let out = &out[..len];
 
-                    socket.send_to(out, &src)?;
+                    socket.send_to(out, &src).unwrap();
                     continue;
                 }
 
-                let mut scid = [0; LOCAL_CONN_ID_LEN];
-                SystemRandom::new().fill(&mut scid[..])?;
+                let mut scid = [0; quiche::MAX_CONN_ID_LEN];
+                SystemRandom::new().fill(&mut scid[..]).unwrap();
 
                 let mut odcid = None;
 
@@ -186,11 +193,12 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
                         let len = quiche::retry(
                             &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
-                        )?;
+                        )
+                        .unwrap();
 
                         let out = &out[..len];
 
-                        socket.send_to(out, &src)?;
+                        socket.send_to(out, &src).unwrap();
                         continue;
                     }
 
@@ -210,7 +218,7 @@ fn main() -> Result<(), Box<std::error::Error>> {
                     hex_dump(&scid)
                 );
 
-                let conn = quiche::accept(&scid, odcid, &mut config)?;
+                let conn = quiche::accept(&scid, odcid, &mut config).unwrap();
 
                 connections.insert(scid.to_vec(), (src, conn));
 
@@ -230,7 +238,6 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
                 Err(e) => {
                     error!("{} recv failed: {:?}", conn.trace_id(), e);
-                    conn.close(false, e.to_wire(), b"fail").ok();
                     break 'read;
                 },
             };
@@ -276,13 +283,13 @@ fn main() -> Result<(), Box<std::error::Error>> {
 
                     Err(e) => {
                         error!("{} send failed: {:?}", conn.trace_id(), e);
-                        conn.close(false, e.to_wire(), b"fail").ok();
+                        conn.close(false, 0x1, b"fail").ok();
                         break;
                     },
                 };
 
                 // TODO: coalesce packets.
-                socket.send_to(&out[..write], &peer)?;
+                socket.send_to(&out[..write], &peer).unwrap();
 
                 debug!("{} written {} bytes", conn.trace_id(), write);
             }

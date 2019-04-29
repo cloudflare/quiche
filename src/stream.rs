@@ -373,16 +373,6 @@ impl RecvBuf {
 
         buf.off == self.off
     }
-
-    #[allow(dead_code)]
-    fn off(&self) -> usize {
-        self.off
-    }
-
-    #[allow(dead_code)]
-    fn len(&self) -> usize {
-        self.len
-    }
 }
 
 #[derive(Default)]
@@ -442,7 +432,7 @@ impl SendBuf {
 
     pub fn pop(&mut self, max_len: usize) -> Result<RangeBuf> {
         let mut out = RangeBuf::default();
-        out.data = Vec::with_capacity(cmp::min(max_len, self.len()));
+        out.data = Vec::with_capacity(cmp::min(max_len, self.len));
 
         let mut out_len = max_len;
         let mut out_off = self.data.peek().map_or_else(|| 0, RangeBuf::off);
@@ -504,11 +494,6 @@ impl SendBuf {
 
             None => self.off,
         }
-    }
-
-    #[allow(dead_code)]
-    fn len(&self) -> usize {
-        self.len
     }
 }
 
@@ -608,7 +593,7 @@ mod tests {
     #[test]
     fn empty_read() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -618,7 +603,7 @@ mod tests {
     #[test]
     fn ordered_read() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -627,27 +612,27 @@ mod tests {
         let third = RangeBuf::from(b"something", 10, true);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 10);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 10);
+        assert_eq!(recv.off, 0);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
 
         assert!(recv.push(third).is_ok());
-        assert_eq!(recv.len(), 19);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 0);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 19);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 0);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 19);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"helloworldsomething");
-        assert_eq!(recv.len(), 19);
-        assert_eq!(recv.off(), 19);
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 19);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
     }
@@ -655,7 +640,7 @@ mod tests {
     #[test]
     fn split_read() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -663,39 +648,39 @@ mod tests {
         let second = RangeBuf::from(b"helloworld", 9, true);
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 19);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 0);
 
         let (len, fin) = recv.pop(&mut buf[..10]).unwrap();
         assert_eq!(len, 10);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"somethingh");
-        assert_eq!(recv.len(), 19);
-        assert_eq!(recv.off(), 10);
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 10);
 
         let (len, fin) = recv.pop(&mut buf[..5]).unwrap();
         assert_eq!(len, 5);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"ellow");
-        assert_eq!(recv.len(), 19);
-        assert_eq!(recv.off(), 15);
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 15);
 
         let (len, fin) = recv.pop(&mut buf[..10]).unwrap();
         assert_eq!(len, 4);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"orld");
-        assert_eq!(recv.len(), 19);
-        assert_eq!(recv.off(), 19);
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 19);
     }
 
     #[test]
     fn incomplete_read() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -703,27 +688,27 @@ mod tests {
         let second = RangeBuf::from(b"helloworld", 9, true);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 19);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 0);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 19);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 0);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 19);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"somethinghelloworld");
-        assert_eq!(recv.len(), 19);
-        assert_eq!(recv.off(), 19);
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 19);
     }
 
     #[test]
     fn zero_len_read() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -731,27 +716,27 @@ mod tests {
         let second = RangeBuf::from(b"", 9, true);
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 9);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"something");
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 9);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 9);
     }
 
     #[test]
     fn past_read() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -759,20 +744,20 @@ mod tests {
         let second = RangeBuf::from(b"hello", 3, true);
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 9);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"something");
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 9);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 9);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 9);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 9);
         assert_eq!(recv.data.len(), 0);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
@@ -781,7 +766,7 @@ mod tests {
     #[test]
     fn fully_overlapping_read() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -789,21 +774,21 @@ mod tests {
         let second = RangeBuf::from(b"hello", 4, false);
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 9);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"something");
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 9);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 9);
         assert_eq!(recv.data.len(), 0);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
@@ -812,7 +797,7 @@ mod tests {
     #[test]
     fn fully_overlapping_read2() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -820,13 +805,13 @@ mod tests {
         let second = RangeBuf::from(b"hello", 4, false);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 2);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
@@ -834,8 +819,8 @@ mod tests {
         assert_eq!(fin, false);
         println!("{}", std::str::from_utf8(&buf[..len]).unwrap());
         assert_eq!(&buf[..len], b"somehello");
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 9);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 9);
         assert_eq!(recv.data.len(), 0);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
@@ -844,7 +829,7 @@ mod tests {
     #[test]
     fn fully_overlapping_read3() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -852,13 +837,13 @@ mod tests {
         let second = RangeBuf::from(b"hello", 3, false);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 8);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 8);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 3);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
@@ -866,8 +851,8 @@ mod tests {
         assert_eq!(fin, false);
         println!("{}", std::str::from_utf8(&buf[..len]).unwrap());
         assert_eq!(&buf[..len], b"somhellog");
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 9);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 9);
         assert_eq!(recv.data.len(), 0);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
@@ -876,7 +861,7 @@ mod tests {
     #[test]
     fn fully_overlapping_read_multi() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -885,18 +870,18 @@ mod tests {
         let third = RangeBuf::from(b"hello", 12, false);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 8);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 8);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         assert!(recv.push(third).is_ok());
-        assert_eq!(recv.len(), 17);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 17);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 2);
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 18);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 18);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 5);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
@@ -904,8 +889,8 @@ mod tests {
         assert_eq!(fin, false);
         println!("{}", std::str::from_utf8(&buf[..len]).unwrap());
         assert_eq!(&buf[..len], b"somhellogsomhellog");
-        assert_eq!(recv.len(), 18);
-        assert_eq!(recv.off(), 18);
+        assert_eq!(recv.len, 18);
+        assert_eq!(recv.off, 18);
         assert_eq!(recv.data.len(), 0);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
@@ -914,7 +899,7 @@ mod tests {
     #[test]
     fn overlapping_start_read() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -922,21 +907,21 @@ mod tests {
         let second = RangeBuf::from(b"hello", 8, true);
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 13);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 13);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 2);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 13);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"somethingello");
-        assert_eq!(recv.len(), 13);
-        assert_eq!(recv.off(), 13);
+        assert_eq!(recv.len, 13);
+        assert_eq!(recv.off, 13);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
     }
@@ -944,7 +929,7 @@ mod tests {
     #[test]
     fn overlapping_end_read() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -952,21 +937,21 @@ mod tests {
         let second = RangeBuf::from(b"something", 3, true);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 12);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 12);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 12);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 12);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 2);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 12);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"helsomething");
-        assert_eq!(recv.len(), 12);
-        assert_eq!(recv.off(), 12);
+        assert_eq!(recv.len, 12);
+        assert_eq!(recv.off, 12);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
     }
@@ -974,7 +959,7 @@ mod tests {
     #[test]
     fn partially_multi_overlapping_reordered_read() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -983,26 +968,26 @@ mod tests {
         let third = RangeBuf::from(b"moar", 11, true);
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 13);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 13);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 13);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 13);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 2);
 
         assert!(recv.push(third).is_ok());
-        assert_eq!(recv.len(), 15);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 15);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 3);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 15);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"somethinhelloar");
-        assert_eq!(recv.len(), 15);
-        assert_eq!(recv.off(), 15);
+        assert_eq!(recv.len, 15);
+        assert_eq!(recv.off, 15);
         assert_eq!(recv.data.len(), 0);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
@@ -1011,7 +996,7 @@ mod tests {
     #[test]
     fn partially_multi_overlapping_reordered_read2() {
         let mut recv = RecvBuf::new(std::usize::MAX);
-        assert_eq!(recv.len(), 0);
+        assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
 
@@ -1023,33 +1008,33 @@ mod tests {
         let sixth = RangeBuf::from(b"fff", 11, false);
 
         assert!(recv.push(second).is_ok());
-        assert_eq!(recv.len(), 5);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 5);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         assert!(recv.push(fourth).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 2);
 
         assert!(recv.push(third).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 3);
 
         assert!(recv.push(first).is_ok());
-        assert_eq!(recv.len(), 9);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 4);
 
         assert!(recv.push(sixth).is_ok());
-        assert_eq!(recv.len(), 14);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 14);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 5);
 
         assert!(recv.push(fifth).is_ok());
-        assert_eq!(recv.len(), 14);
-        assert_eq!(recv.off(), 0);
+        assert_eq!(recv.len, 14);
+        assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 6);
 
         let (len, fin) = recv.pop(&mut buf).unwrap();
@@ -1057,8 +1042,8 @@ mod tests {
         assert_eq!(fin, false);
         println!("{}", std::str::from_utf8(&buf[..len]).unwrap());
         assert_eq!(&buf[..len], b"aabbbcdddeefff");
-        assert_eq!(recv.len(), 14);
-        assert_eq!(recv.off(), 14);
+        assert_eq!(recv.len, 14);
+        assert_eq!(recv.off, 14);
         assert_eq!(recv.data.len(), 0);
 
         assert_eq!(recv.pop(&mut buf), Err(Error::Done));
@@ -1067,7 +1052,7 @@ mod tests {
     #[test]
     fn empty_write() {
         let mut send = SendBuf::new(std::usize::MAX);
-        assert_eq!(send.len(), 0);
+        assert_eq!(send.len, 0);
 
         let write = send.pop(std::usize::MAX).unwrap();
         assert_eq!(write.len(), 0);
@@ -1077,64 +1062,64 @@ mod tests {
     #[test]
     fn multi_write() {
         let mut send = SendBuf::new(std::usize::MAX);
-        assert_eq!(send.len(), 0);
+        assert_eq!(send.len, 0);
 
         let first = *b"something";
         let second = *b"helloworld";
 
         assert!(send.push_slice(&first, false).is_ok());
-        assert_eq!(send.len(), 9);
+        assert_eq!(send.len, 9);
 
         assert!(send.push_slice(&second, true).is_ok());
-        assert_eq!(send.len(), 19);
+        assert_eq!(send.len, 19);
 
         let write = send.pop(128).unwrap();
         assert_eq!(write.len(), 19);
         assert_eq!(write.fin(), true);
         assert_eq!(&write[..], b"somethinghelloworld");
-        assert_eq!(send.len(), 0);
+        assert_eq!(send.len, 0);
     }
 
     #[test]
     fn split_write() {
         let mut send = SendBuf::new(std::usize::MAX);
-        assert_eq!(send.len(), 0);
+        assert_eq!(send.len, 0);
 
         let first = *b"something";
         let second = *b"helloworld";
 
         assert!(send.push_slice(&first, false).is_ok());
-        assert_eq!(send.len(), 9);
+        assert_eq!(send.len, 9);
 
         assert!(send.push_slice(&second, true).is_ok());
-        assert_eq!(send.len(), 19);
+        assert_eq!(send.len, 19);
 
         let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 10);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"somethingh");
-        assert_eq!(send.len(), 9);
+        assert_eq!(send.len, 9);
 
         let write = send.pop(5).unwrap();
         assert_eq!(write.off(), 10);
         assert_eq!(write.len(), 5);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"ellow");
-        assert_eq!(send.len(), 4);
+        assert_eq!(send.len, 4);
 
         let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 15);
         assert_eq!(write.len(), 4);
         assert_eq!(write.fin(), true);
         assert_eq!(&write[..], b"orld");
-        assert_eq!(send.len(), 0);
+        assert_eq!(send.len, 0);
     }
 
     #[test]
     fn resend() {
         let mut send = SendBuf::new(std::usize::MAX);
-        assert_eq!(send.len(), 0);
+        assert_eq!(send.len, 0);
         assert_eq!(send.off(), 0);
 
         let first = *b"something";
@@ -1151,7 +1136,7 @@ mod tests {
         assert_eq!(write1.len(), 4);
         assert_eq!(write1.fin(), false);
         assert_eq!(&write1[..], b"some");
-        assert_eq!(send.len(), 15);
+        assert_eq!(send.len, 15);
         assert_eq!(send.off(), 4);
 
         let write2 = send.pop(5).unwrap();
@@ -1159,7 +1144,7 @@ mod tests {
         assert_eq!(write2.len(), 5);
         assert_eq!(write2.fin(), false);
         assert_eq!(&write2[..], b"thing");
-        assert_eq!(send.len(), 10);
+        assert_eq!(send.len, 10);
         assert_eq!(send.off(), 9);
 
         let write3 = send.pop(5).unwrap();
@@ -1167,15 +1152,15 @@ mod tests {
         assert_eq!(write3.len(), 5);
         assert_eq!(write3.fin(), false);
         assert_eq!(&write3[..], b"hello");
-        assert_eq!(send.len(), 5);
+        assert_eq!(send.len, 5);
         assert_eq!(send.off(), 14);
 
         send.push(write2).unwrap();
-        assert_eq!(send.len(), 10);
+        assert_eq!(send.len, 10);
         assert_eq!(send.off(), 4);
 
         send.push(write1).unwrap();
-        assert_eq!(send.len(), 14);
+        assert_eq!(send.len, 14);
         assert_eq!(send.off(), 0);
 
         let write4 = send.pop(11).unwrap();
@@ -1183,7 +1168,7 @@ mod tests {
         assert_eq!(write4.len(), 9);
         assert_eq!(write4.fin(), false);
         assert_eq!(&write4[..], b"something");
-        assert_eq!(send.len(), 5);
+        assert_eq!(send.len, 5);
         assert_eq!(send.off(), 14);
 
         let write5 = send.pop(11).unwrap();
@@ -1191,23 +1176,23 @@ mod tests {
         assert_eq!(write5.len(), 5);
         assert_eq!(write5.fin(), true);
         assert_eq!(&write5[..], b"world");
-        assert_eq!(send.len(), 0);
+        assert_eq!(send.len, 0);
         assert_eq!(send.off(), 19);
     }
 
     #[test]
     fn write_blocked_by_off() {
         let mut send = SendBuf::default();
-        assert_eq!(send.len(), 0);
+        assert_eq!(send.len, 0);
 
         let first = *b"something";
         let second = *b"helloworld";
 
         assert!(send.push_slice(&first, false).is_ok());
-        assert_eq!(send.len(), 9);
+        assert_eq!(send.len, 9);
 
         assert!(send.push_slice(&second, true).is_ok());
-        assert_eq!(send.len(), 19);
+        assert_eq!(send.len, 19);
 
         send.update_max_len(5);
 
@@ -1216,14 +1201,14 @@ mod tests {
         assert_eq!(write.len(), 5);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"somet");
-        assert_eq!(send.len(), 14);
+        assert_eq!(send.len, 14);
 
         let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 0);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"");
-        assert_eq!(send.len(), 14);
+        assert_eq!(send.len, 14);
 
         send.update_max_len(15);
 
@@ -1232,7 +1217,7 @@ mod tests {
         assert_eq!(write.len(), 10);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"hinghellow");
-        assert_eq!(send.len(), 4);
+        assert_eq!(send.len, 4);
 
         send.update_max_len(25);
 
@@ -1241,28 +1226,28 @@ mod tests {
         assert_eq!(write.len(), 4);
         assert_eq!(write.fin(), true);
         assert_eq!(&write[..], b"orld");
-        assert_eq!(send.len(), 0);
+        assert_eq!(send.len, 0);
     }
 
     #[test]
     fn zero_len_write() {
         let mut send = SendBuf::new(std::usize::MAX);
-        assert_eq!(send.len(), 0);
+        assert_eq!(send.len, 0);
 
         let first = *b"something";
 
         assert!(send.push_slice(&first, false).is_ok());
-        assert_eq!(send.len(), 9);
+        assert_eq!(send.len, 9);
 
         assert!(send.push_slice(&[], true).is_ok());
-        assert_eq!(send.len(), 9);
+        assert_eq!(send.len, 9);
 
         let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 9);
         assert_eq!(write.fin(), true);
         assert_eq!(&write[..], b"something");
-        assert_eq!(send.len(), 0);
+        assert_eq!(send.len, 0);
     }
 
     #[test]
