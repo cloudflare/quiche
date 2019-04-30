@@ -1222,7 +1222,16 @@ impl Connection {
 
                 stream::State::FramePayload => {
                     if let Err(e) = stream.parse_frame() {
-                        conn.close(true, e.to_wire(), b"Error handling frame.")?;
+                        match e {
+                            Error::BufferTooShort => (),
+
+                            _ => conn.close(
+                                true,
+                                e.to_wire(),
+                                b"Error handling frame.",
+                            )?,
+                        };
+
                         return Err(e);
                     }
                 },
