@@ -390,8 +390,12 @@ impl std::error::Error for Error {
 }
 
 impl std::convert::From<super::Error> for Error {
-    fn from(_err: super::Error) -> Self {
-        Error::TransportError
+    fn from(err: super::Error) -> Self {
+        match err {
+            super::Error::Done => Error::Done,
+
+            _ => Error::TransportError,
+        }
     }
 }
 
