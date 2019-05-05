@@ -10,10 +10,6 @@ specified by the [IETF]. It provides a low level API for processing QUIC packets
 and handling connection state. The application is responsible for providing I/O
 (e.g. sockets handling) as well as an event loop with support for timers.
 
-Note that it is very experimental and unstable software, and many features are
-still in development. Refer to the [Status](#status) section to see what is
-currently implemented.
-
 A live QUIC server based on quiche is available at ``https://quic.tech:4433/``
 to be used for experimentation.
 
