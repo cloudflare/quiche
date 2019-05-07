@@ -433,8 +433,11 @@ pub struct Header(String, String);
 
 impl Header {
     /// Creates a new header.
+    ///
+    /// Both `name` and `value` will be cloned, and `name` will also be
+    /// converted into lower-case.
     pub fn new(name: &str, value: &str) -> Header {
-        Header(String::from(name), String::from(value))
+        Header(name.to_lowercase(), String::from(value))
     }
 
     /// Returns the header's name.
