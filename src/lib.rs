@@ -1808,21 +1808,23 @@ impl Connection {
 
         // Create APPLICAtiON_CLOSE frame.
         if let Some(err) = self.app_error {
-            let frame = frame::Frame::ApplicationClose {
-                error_code: err,
-                reason: self.app_reason.clone(),
-            };
+            if pkt_type == packet::Type::Application  {
+                let frame = frame::Frame::ApplicationClose {
+                    error_code: err,
+                    reason: self.app_reason.clone(),
+                };
 
-            payload_len += frame.wire_len();
-            left -= frame.wire_len();
+                payload_len += frame.wire_len();
+                left -= frame.wire_len();
 
-            frames.push(frame);
+                frames.push(frame);
 
-            self.draining = true;
-            self.draining_timer = Some(now + (self.recovery.pto() * 3));
+                self.draining = true;
+                self.draining_timer = Some(now + (self.recovery.pto() * 3));
 
-            ack_eliciting = true;
-            in_flight = true;
+                ack_eliciting = true;
+                in_flight = true;
+            }
         }
 
         // Create PATH_RESPONSE frame.
