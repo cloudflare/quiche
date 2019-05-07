@@ -163,11 +163,45 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         quiche_h3_config_free(config);
 
         quiche_h3_header headers[] = {
-            { ":method", "GET" },
-            { ":scheme", "https" },
-            { ":authority", "quich.tech" },
-            { ":path", "/" },
-            { "user-agent", "quiche" },
+            {
+                .name = (const uint8_t *) ":method",
+                .name_len = sizeof(":method") - 1,
+
+                .value = (const uint8_t *) "GET",
+                .value_len = sizeof("GET") - 1,
+            },
+
+            {
+                .name = (const uint8_t *) ":scheme",
+                .name_len = sizeof(":scheme") - 1,
+
+                .value = (const uint8_t *) "https",
+                .value_len = sizeof("https") - 1,
+            },
+
+            {
+                .name = (const uint8_t *) ":authority",
+                .name_len = sizeof(":authority") - 1,
+
+                .value = (const uint8_t *) "quich.tech",
+                .value_len = sizeof("quich.tech") - 1,
+            },
+
+            {
+                .name = (const uint8_t *) ":path",
+                .name_len = sizeof(":path") - 1,
+
+                .value = (const uint8_t *) "/",
+                .value_len = sizeof("/") - 1,
+            },
+
+            {
+                .name = (const uint8_t *) "user-agent",
+                .name_len = sizeof("user-agent") - 1,
+
+                .value = (const uint8_t *) "quiche",
+                .value_len = sizeof("quiche") - 1,
+            },
         };
 
         int64_t stream_id = quiche_h3_send_request(conn_io->http3,
