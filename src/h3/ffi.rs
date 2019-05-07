@@ -101,26 +101,34 @@ pub extern fn quiche_h3_event_for_each_header(
     cb: fn(
         name: *const u8,
         name_len: size_t,
+
         value: *const u8,
         value_len: size_t,
+
         argp: *mut c_void,
-    ),
+    ) -> c_int,
     argp: *mut c_void,
-) {
+) -> c_int {
     match ev {
         h3::Event::Headers(headers) =>
             for h in headers {
-                cb(
+                let rc = cb(
                     h.name().as_ptr(),
                     h.name().len(),
                     h.value().as_ptr(),
                     h.value().len(),
                     argp,
                 );
+
+                if rc != 0 {
+                    return rc;
+                }
             },
 
         h3::Event::Data { .. } => unreachable!(),
     }
+
+    0
 }
 
 #[no_mangle]

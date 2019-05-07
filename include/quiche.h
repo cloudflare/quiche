@@ -291,11 +291,15 @@ int quiche_h3_conn_poll(quiche_h3_conn *conn, quiche_conn *quic_conn,
 enum quiche_h3_event_type quiche_h3_event_type(quiche_h3_event *ev);
 
 // Iterates over the headers in the event.
-void quiche_h3_event_for_each_header(quiche_h3_event *ev,
-                                     void (*cb)(uint8_t *name, size_t name_len,
-                                                uint8_t *value, size_t value_len,
-                                                void *argp),
-                                     void *argp);
+//
+// The `cb` callback will be called for each header in `ev`. If `cb` returns
+// any value other than `0`, processing will be interrupted and the value is
+// returned to the caller.
+int quiche_h3_event_for_each_header(quiche_h3_event *ev,
+                                    int (*cb)(uint8_t *name, size_t name_len,
+                                              uint8_t *value, size_t value_len,
+                                              void *argp),
+                                    void *argp);
 
 // Returns the data from the event.
 size_t quiche_h3_event_data(quiche_h3_event *ev, uint8_t **out);
