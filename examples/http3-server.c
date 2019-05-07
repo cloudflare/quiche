@@ -364,9 +364,29 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                         quiche_h3_event_for_each_header(ev, for_each_header, NULL);
 
                         quiche_h3_header headers[] = {
-                            { ":status", "200" },
-                            { "server", "quiche" },
-                            { "content-length", "5" },
+                            {
+                                .name = (const uint8_t *) ":status",
+                                .name_len = sizeof(":status") - 1,
+
+                                .value = (const uint8_t *) "200",
+                                .value_len = sizeof("200") - 1,
+                            },
+
+                            {
+                                .name = (const uint8_t *) "server",
+                                .name_len = sizeof("server") - 1,
+
+                                .value = (const uint8_t *) "quiche",
+                                .value_len = sizeof("quiche") - 1,
+                            },
+
+                            {
+                                .name = (const uint8_t *) "content-length",
+                                .name_len = sizeof("content-length") - 1,
+
+                                .value = (const uint8_t *) "5",
+                                .value_len = sizeof("5") - 1,
+                            },
                         };
 
                         quiche_h3_send_response(conn_io->http3, conn_io->conn,

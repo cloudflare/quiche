@@ -304,8 +304,11 @@ size_t quiche_h3_event_data(quiche_h3_event *ev, uint8_t **out);
 void quiche_h3_event_free(quiche_h3_event *ev);
 
 typedef struct {
-    const char *name;
-    const char *value;
+    const uint8_t *name;
+    size_t name_len;
+
+    const uint8_t *value;
+    size_t value_len;
 } quiche_h3_header;
 
 // Sends an HTTP/3 request.

@@ -24,11 +24,10 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::ffi;
 use std::ptr;
 use std::slice;
+use std::str;
 
-use libc::c_char;
 use libc::c_int;
 use libc::c_void;
 use libc::size_t;
@@ -148,8 +147,11 @@ pub extern fn quiche_h3_event_free(ev: *mut h3::Event) {
 
 #[repr(C)]
 pub struct Header {
-    name: *mut c_char,
-    value: *mut c_char,
+    name: *mut u8,
+    name_len: usize,
+
+    value: *mut u8,
+    value_len: usize,
 }
 
 #[no_mangle]
@@ -157,27 +159,7 @@ pub extern fn quiche_h3_send_request(
     conn: &mut h3::Connection, quic_conn: &mut Connection,
     headers: *const Header, headers_len: size_t, fin: bool,
 ) -> i64 {
-    let headers = unsafe { slice::from_raw_parts(headers, headers_len) };
-
-    let mut req_headers = Vec::new();
-
-    for h in headers {
-        req_headers.push(unsafe {
-            let name = match ffi::CStr::from_ptr(h.name).to_str() {
-                Ok(v) => v,
-
-                Err(_) => return -1,
-            };
-
-            let value = match ffi::CStr::from_ptr(h.value).to_str() {
-                Ok(v) => v,
-
-                Err(_) => return -1,
-            };
-
-            h3::Header::new(name, value)
-        });
-    }
+    let req_headers = headers_from_ptr(headers, headers_len);
 
     match conn.send_request(quic_conn, &req_headers, fin) {
         Ok(v) => v as i64,
@@ -191,27 +173,7 @@ pub extern fn quiche_h3_send_response(
     conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
     headers: *const Header, headers_len: size_t, fin: bool,
 ) -> c_int {
-    let headers = unsafe { slice::from_raw_parts(headers, headers_len) };
-
-    let mut resp_headers = Vec::new();
-
-    for h in headers {
-        resp_headers.push(unsafe {
-            let name = match ffi::CStr::from_ptr(h.name).to_str() {
-                Ok(v) => v,
-
-                Err(_) => return -1,
-            };
-
-            let value = match ffi::CStr::from_ptr(h.value).to_str() {
-                Ok(v) => v,
-
-                Err(_) => return -1,
-            };
-
-            h3::Header::new(name, value)
-        });
-    }
+    let resp_headers = headers_from_ptr(headers, headers_len);
 
     match conn.send_response(quic_conn, stream_id, &resp_headers, fin) {
         Ok(_) => 0,
@@ -241,4 +203,28 @@ pub extern fn quiche_h3_send_body(
 #[no_mangle]
 pub extern fn quiche_h3_conn_free(conn: *mut h3::Connection) {
     unsafe { Box::from_raw(conn) };
+}
+
+fn headers_from_ptr(ptr: *const Header, len: size_t) -> Vec<h3::Header> {
+    let headers = unsafe { slice::from_raw_parts(ptr, len) };
+
+    let mut out = Vec::new();
+
+    for h in headers {
+        out.push({
+            let name = unsafe {
+                let slice = slice::from_raw_parts(h.name, h.name_len);
+                str::from_utf8_unchecked(slice)
+            };
+
+            let value = unsafe {
+                let slice = slice::from_raw_parts(h.value, h.value_len);
+                str::from_utf8_unchecked(slice)
+            };
+
+            h3::Header::new(name, value)
+        });
+    }
+
+    out
 }
