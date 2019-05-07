@@ -90,11 +90,13 @@ static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
     ev_timer_again(loop, &conn_io->timer);
 }
 
-static void for_each_header(uint8_t *name, size_t name_len,
-                            uint8_t *value, size_t value_len,
-                            void *argp) {
+static int for_each_header(uint8_t *name, size_t name_len,
+                           uint8_t *value, size_t value_len,
+                           void *argp) {
     fprintf(stderr, "got HTTP header: %.*s=%.*s\n",
             (int) name_len, name, (int) value_len, value);
+
+    return 0;
 }
 
 static void recv_cb(EV_P_ ev_io *w, int revents) {
@@ -226,9 +228,16 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             }
 
             switch (quiche_h3_event_type(ev)) {
-                case QUICHE_H3_EVENT_HEADERS:
-                    quiche_h3_event_for_each_header(ev, for_each_header, NULL);
+                case QUICHE_H3_EVENT_HEADERS: {
+                    int rc = quiche_h3_event_for_each_header(ev, for_each_header,
+                                                             NULL);
+
+                    if (rc != 0) {
+                        fprintf(stderr, "failed to process headers");
+                    }
+
                     break;
+                }
 
                 case QUICHE_H3_EVENT_DATA: {
                     uint8_t *data;
