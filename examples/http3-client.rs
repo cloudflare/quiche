@@ -38,6 +38,7 @@ const USAGE: &str = "Usage:
   http3-client -h | --help
 
 Options:
+  --method METHOD          Use the given HTTP request method [default: GET].
   --max-data BYTES         Connection-wide flow control limit [default: 10000000].
   --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
   --wire-version VERSION   The version number to send to the server [default: babababa].
@@ -232,7 +233,7 @@ fn main() {
             }
 
             let req = vec![
-                quiche::h3::Header::new(":method", "GET"),
+                quiche::h3::Header::new(":method", args.get_str("--method")),
                 quiche::h3::Header::new(":scheme", url.scheme()),
                 quiche::h3::Header::new(":authority", url.host_str().unwrap()),
                 quiche::h3::Header::new(":path", &path),
