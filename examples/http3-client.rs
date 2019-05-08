@@ -39,6 +39,7 @@ const USAGE: &str = "Usage:
 
 Options:
   --method METHOD          Use the given HTTP request method [default: GET].
+  --body FILE              Send the given file as request body.
   --max-data BYTES         Connection-wide flow control limit [default: 10000000].
   --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
   --wire-version VERSION   The version number to send to the server [default: babababa].
@@ -232,7 +233,7 @@ fn main() {
                 path.push_str(query);
             }
 
-            let req = vec![
+            let mut req = vec![
                 quiche::h3::Header::new(":method", args.get_str("--method")),
                 quiche::h3::Header::new(":scheme", url.scheme()),
                 quiche::h3::Header::new(":authority", url.host_str().unwrap()),
@@ -242,9 +243,33 @@ fn main() {
 
             info!("sending HTTP request {:?}", req);
 
-            if let Err(e) = h3_conn.send_request(&mut conn, &req, true) {
-                error!("failed to send request {:?}", e);
-                break;
+            let body = if args.get_bool("--body") {
+                std::fs::read(args.get_str("--body")).ok()
+            } else {
+                None
+            };
+
+            if body.is_some() {
+                req.push(quiche::h3::Header::new(
+                    "content-length",
+                    &body.as_ref().unwrap().len().to_string(),
+                ));
+            }
+
+            let s = match h3_conn.send_request(&mut conn, &req, body.is_none()) {
+                Ok(stream_id) => stream_id,
+
+                Err(e) => {
+                    error!("failed to send request {:?}", e);
+                    break;
+                },
+            };
+
+            if let Some(body) = body {
+                if let Err(e) = h3_conn.send_body(&mut conn, s, &body, true) {
+                    error!("failed to send request body {:?}", e);
+                    break;
+                }
             }
 
             http3_conn = Some(h3_conn);
