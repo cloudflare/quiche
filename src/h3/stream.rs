@@ -98,12 +98,10 @@ pub struct Stream {
 impl Stream {
     pub fn new(id: u64, is_local: bool) -> Stream {
         let mut ty = None;
-        let mut initialized = false;
         let mut state = State::StreamTypeLen;
 
         if crate::stream::is_bidi(id) {
             ty = Some(Type::Request);
-            initialized = true;
             state = State::FrameTypeLen;
         };
 
@@ -111,7 +109,7 @@ impl Stream {
             id,
             ty,
             is_local,
-            initialized,
+            initialized: false,
             is_peer_fin: false,
             state,
             stream_offset: 0,
@@ -163,7 +161,7 @@ impl Stream {
         Ok(())
     }
 
-    pub fn set_stream_type(&mut self, ty: Type) -> Result<()> {
+    pub fn set_ty(&mut self, ty: Type) -> Result<()> {
         if self.state != State::StreamType {
             return Err(Error::InternalError);
         }
@@ -188,6 +186,10 @@ impl Stream {
         }
 
         Ok(())
+    }
+
+    pub fn ty(&mut self) -> Option<Type> {
+        self.ty
     }
 
     pub fn set_next_varint_len(&mut self, len: usize) -> Result<()> {
@@ -276,29 +278,101 @@ impl Stream {
                     (frame::SETTINGS_FRAME_TYPE_ID, false) =>
                         self.initialized = true,
 
-                    // Duplicate SETTINGS frame.
+                    // Additional SETTINGS frame.
                     (frame::SETTINGS_FRAME_TYPE_ID, true) =>
                         return Err(Error::UnexpectedFrame),
 
+                    // Frames that can never be received on control streams.
+                    (frame::DATA_FRAME_TYPE_ID, _) =>
+                        return Err(Error::WrongStream),
+
+                    (frame::HEADERS_FRAME_TYPE_ID, _) =>
+                        return Err(Error::WrongStream),
+
+                    (frame::PUSH_PROMISE_FRAME_TYPE_ID, _) =>
+                        return Err(Error::WrongStream),
+
+                    (frame::DUPLICATE_PUSH_FRAME_TYPE_ID, _) =>
+                        return Err(Error::WrongStream),
+
                     (_, false) => return Err(Error::MissingSettings),
 
-                    (frame::GOAWAY_FRAME_TYPE_ID, true) => (),
-
-                    (frame::MAX_PUSH_FRAME_TYPE_ID, true) => (),
-
-                    (frame::CANCEL_PUSH_FRAME_TYPE_ID, true) => (),
-
-                    (frame::PRIORITY_FRAME_TYPE_ID, true) => (),
-
-                    (_, true) => return Err(Error::UnexpectedFrame),
+                    (_, true) => (),
                 }
 
                 self.state = State::FramePayloadLenLen;
             },
 
-            Some(Type::Request) => self.state = State::FramePayloadLenLen,
+            Some(Type::Request) => {
+                // Request stream starts uninitialized and only HEADERS or
+                // PRIORITY is accepted in that state. Other
+                // frames cause an error. Once initialized, no
+                // more PRIORITY frames are permitted.
+                if !self.is_local {
+                    match (ty, self.initialized) {
+                        (frame::HEADERS_FRAME_TYPE_ID, false) =>
+                            self.initialized = true,
 
-            Some(Type::Push) => self.state = State::FramePayloadLenLen,
+                        (frame::PRIORITY_FRAME_TYPE_ID, false) =>
+                            self.initialized = true,
+
+                        // Additional PRIORITY frame is error.
+                        (frame::PRIORITY_FRAME_TYPE_ID, true) =>
+                            return Err(Error::UnexpectedFrame),
+
+                        // Frames that can never be received on request streams.
+                        (frame::CANCEL_PUSH_FRAME_TYPE_ID, _) =>
+                            return Err(Error::WrongStream),
+
+                        (frame::SETTINGS_FRAME_TYPE_ID, _) =>
+                            return Err(Error::WrongStream),
+
+                        (frame::GOAWAY_FRAME_TYPE_ID, _) =>
+                            return Err(Error::WrongStream),
+
+                        (frame::MAX_PUSH_FRAME_TYPE_ID, _) =>
+                            return Err(Error::WrongStream),
+
+                        // All other frames can be ignored regardless of stream
+                        // state.
+                        (_, false) => (),
+
+                        (_, true) => (),
+                    }
+                }
+
+                self.state = State::FramePayloadLenLen;
+            },
+
+            Some(Type::Push) => {
+                match ty {
+                    // Frames that can never be received on request streams.
+                    frame::PRIORITY_FRAME_TYPE_ID =>
+                        return Err(Error::WrongStream),
+
+                    frame::CANCEL_PUSH_FRAME_TYPE_ID =>
+                        return Err(Error::WrongStream),
+
+                    frame::SETTINGS_FRAME_TYPE_ID =>
+                        return Err(Error::WrongStream),
+
+                    frame::PUSH_PROMISE_FRAME_TYPE_ID =>
+                        return Err(Error::WrongStream),
+
+                    frame::GOAWAY_FRAME_TYPE_ID =>
+                        return Err(Error::WrongStream),
+
+                    frame::MAX_PUSH_FRAME_TYPE_ID =>
+                        return Err(Error::WrongStream),
+
+                    frame::DUPLICATE_PUSH_FRAME_TYPE_ID =>
+                        return Err(Error::WrongStream),
+
+                    _ => (),
+                }
+
+                self.state = State::FramePayloadLenLen;
+            },
 
             _ => return Err(Error::UnexpectedFrame),
         }
@@ -381,7 +455,7 @@ mod tests {
         let stream_ty = stream.get_varint().unwrap();
         assert_eq!(stream_ty, HTTP3_CONTROL_STREAM_TYPE_ID);
         stream
-            .set_stream_type(Type::deserialize(stream_ty).unwrap())
+            .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
         assert_eq!(*stream.state(), State::FrameTypeLen);
 
@@ -448,7 +522,7 @@ mod tests {
         stream.set_next_varint_len(stream_ty_len).unwrap();
         let stream_ty = stream.get_varint().unwrap();
         stream
-            .set_stream_type(Type::deserialize(stream_ty).unwrap())
+            .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
 
         // Parse first SETTINGS frame.
@@ -510,7 +584,7 @@ mod tests {
         stream.set_next_varint_len(stream_ty_len).unwrap();
         let stream_ty = stream.get_varint().unwrap();
         stream
-            .set_stream_type(Type::deserialize(stream_ty).unwrap())
+            .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
 
         // Parse GOAWAY.
@@ -554,7 +628,7 @@ mod tests {
         stream.set_next_varint_len(stream_ty_len).unwrap();
         let stream_ty = stream.get_varint().unwrap();
         stream
-            .set_stream_type(Type::deserialize(stream_ty).unwrap())
+            .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
 
         // Parse first SETTINGS frame.
@@ -580,7 +654,7 @@ mod tests {
         stream.set_next_varint_len(frame_ty_len).unwrap();
 
         let frame_ty = stream.get_varint().unwrap();
-        assert_eq!(stream.set_frame_type(frame_ty), Err(Error::UnexpectedFrame));
+        assert_eq!(stream.set_frame_type(frame_ty), Err(Error::WrongStream));
     }
 
     #[test]
@@ -590,10 +664,7 @@ mod tests {
         assert_eq!(stream.ty, Some(Type::Request));
         assert_eq!(*stream.state(), State::FrameTypeLen);
 
-        assert_eq!(
-            stream.set_stream_type(Type::Request),
-            Err(Error::InternalError)
-        );
+        assert_eq!(stream.set_ty(Type::Request), Err(Error::InternalError));
 
         assert_eq!(stream.more(), false);
         assert_eq!(stream.get_varint(), Err(Error::Done));
@@ -713,7 +784,7 @@ mod tests {
         let stream_ty = stream.get_varint().unwrap();
         assert_eq!(stream_ty, HTTP3_PUSH_STREAM_TYPE_ID);
         stream
-            .set_stream_type(Type::deserialize(stream_ty).unwrap())
+            .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
         assert_eq!(*stream.state(), State::PushIdLen);
 
@@ -810,7 +881,7 @@ mod tests {
         let stream_ty = stream.get_varint().unwrap();
         assert_eq!(stream_ty, 33);
         stream
-            .set_stream_type(Type::deserialize(stream_ty).unwrap())
+            .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
         assert_eq!(*stream.state(), State::Done);
     }
