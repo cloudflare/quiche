@@ -296,7 +296,6 @@ impl Stream {
                         return Err(Error::WrongStream),
 
                     (_, false) => return Err(Error::MissingSettings),
-
                     (_, true) => (),
                 }
 
@@ -692,6 +691,126 @@ mod tests {
         let off = b.off();
 
         stream.push(&mut d[..off]).unwrap();
+
+        // parse the HEADERS frame
+        assert_eq!(stream.more(), true);
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_ty_len, 1);
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::FrameType);
+
+        let frame_ty = stream.get_varint().unwrap();
+        assert_eq!(frame_ty, frame::HEADERS_FRAME_TYPE_ID);
+
+        stream.set_frame_type(frame_ty).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+
+        let frame_payload_len_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_payload_len_len, 1);
+        stream.set_next_varint_len(frame_payload_len_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLen);
+
+        let frame_payload_len = stream.get_varint().unwrap();
+        assert_eq!(frame_payload_len, 12);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayload);
+
+        assert_eq!(stream.parse_frame(), Ok(()));
+        assert_eq!(*stream.state(), State::FrameTypeLen);
+
+        assert_eq!(stream.get_frame(), Some(hdrs));
+
+        // parse the DATA frame
+        assert_eq!(stream.more(), true);
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_ty_len, 1);
+
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::FrameType);
+
+        let frame_ty = stream.get_varint().unwrap();
+        assert_eq!(frame_ty, frame::DATA_FRAME_TYPE_ID);
+
+        stream.set_frame_type(frame_ty).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+
+        let frame_payload_len_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_payload_len_len, 1);
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLen);
+
+        let frame_payload_len = stream.get_varint().unwrap();
+        assert_eq!(frame_payload_len, 12);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayload);
+
+        assert_eq!(stream.parse_frame(), Ok(()));
+        assert_eq!(*stream.state(), State::FrameTypeLen);
+
+        assert_eq!(stream.get_frame(), Some(data));
+
+        assert_eq!(stream.more(), false);
+    }
+
+    #[test]
+    fn request_priority_good() {
+        let mut stream = Stream::new(0, false);
+
+        let mut d = [42; 1280];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let hdrs = frame::Frame::Headers { header_block };
+        let data = frame::Frame::Data { payload };
+        let priority = frame::Frame::Priority {
+            priority_elem: frame::PrioritizedElemType::CurrentStream,
+            elem_dependency: frame::ElemDependencyType::RootOfTree,
+            prioritized_element_id: None,
+            element_dependency_id: None,
+            weight: 16,
+        };
+
+        priority.to_bytes(&mut b).unwrap();
+        hdrs.to_bytes(&mut b).unwrap();
+        data.to_bytes(&mut b).unwrap();
+        let off = b.off();
+
+        stream.push(&mut d[..off]).unwrap();
+
+        // parse the PRIORITY frame
+        assert_eq!(stream.more(), true);
+        let frame_ty_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_ty_len, 1);
+        stream.set_next_varint_len(frame_ty_len).unwrap();
+        assert_eq!(*stream.state(), State::FrameType);
+
+        let frame_ty = stream.get_varint().unwrap();
+        assert_eq!(frame_ty, frame::PRIORITY_FRAME_TYPE_ID);
+
+        stream.set_frame_type(frame_ty).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+
+        let frame_payload_len_len =
+            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
+        assert_eq!(frame_payload_len_len, 1);
+        stream.set_next_varint_len(frame_payload_len_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayloadLen);
+
+        let frame_payload_len = stream.get_varint().unwrap();
+        assert_eq!(frame_payload_len, 2);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(*stream.state(), State::FramePayload);
+
+        assert_eq!(stream.parse_frame(), Ok(()));
+        assert_eq!(*stream.state(), State::FrameTypeLen);
+
+        assert_eq!(stream.get_frame(), Some(priority));
 
         // parse the HEADERS frame
         assert_eq!(stream.more(), true);

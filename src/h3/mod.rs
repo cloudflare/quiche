@@ -753,7 +753,7 @@ impl Connection {
             self.streams.iter_mut().filter(|s| !s.1.peer_fin())
         {
             if let Some(frame) = stream.get_frame() {
-                trace!(
+                println!(
                     "{} rx frm {:?} on stream {}",
                     conn.trace_id(),
                     frame,
@@ -802,6 +802,30 @@ impl Connection {
                             .decode(&mut header_block[..])
                             .map_err(|_| Error::QpackDecompressionFailed)?;
                         return Ok((*stream_id, Event::Headers(headers)));
+                    },
+
+                    frame::Frame::Priority {
+                        priority_elem,
+                        prioritized_element_id,
+                        ..
+                    } => {
+                        if priority_elem ==
+                            frame::PrioritizedElemType::Placeholder &&
+                            prioritized_element_id >
+                                self.local_settings.num_placeholders
+                        {
+                            conn.close(
+                                true,
+                                Error::LimitExceeded.to_wire(),
+                                b"Invalid placeholder ID used",
+                            )?;
+
+                            return Err(Error::LimitExceeded);
+                        }
+
+                        // TODO: more priority frame checks
+
+                        return Err(Error::Done);
                     },
 
                     frame::Frame::Data { payload } => {
@@ -1371,7 +1395,7 @@ mod tests {
             config.set_initial_max_streams_uni(5);
             config.verify_peer(false);
 
-            let mut h3_config = Config::new(0, 1024, 0, 0)?;
+            let mut h3_config = Config::new(16, 1024, 0, 0)?;
             Session::with_configs(&mut config, &mut h3_config)
         }
 

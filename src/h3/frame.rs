@@ -44,6 +44,96 @@ const SETTINGS_MAX_HEADER_LIST_SIZE: u64 = 0x6;
 const SETTINGS_QPACK_BLOCKED_STREAMS: u64 = 0x7;
 const SETTINGS_NUM_PLACEHOLDERS: u64 = 0x9;
 
+const ELEM_DEPENDENCY_TYPE_MASK: u8 = 0x30;
+
+/// HTTP/3 Prioritized Element type.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PrioritizedElemType {
+    RequestStream,
+    PushStream,
+    Placeholder,
+    CurrentStream,
+}
+
+impl PrioritizedElemType {
+    fn is_peid_absent(self) -> bool {
+        match self {
+            PrioritizedElemType::CurrentStream => true,
+            _ => false,
+        }
+    }
+
+    fn to_bits(self) -> Result<u8> {
+        match self {
+            PrioritizedElemType::RequestStream => Ok(0x00),
+
+            PrioritizedElemType::PushStream => Ok(0x01),
+
+            PrioritizedElemType::Placeholder => Ok(0x02),
+
+            PrioritizedElemType::CurrentStream => Ok(0x03),
+        }
+    }
+
+    fn from_bits(bits: u8) -> Result<PrioritizedElemType> {
+        match bits {
+            0x00 => Ok(PrioritizedElemType::RequestStream),
+
+            0x01 => Ok(PrioritizedElemType::PushStream),
+
+            0x02 => Ok(PrioritizedElemType::Placeholder),
+
+            0x03 => Ok(PrioritizedElemType::CurrentStream),
+
+            _ => Err(Error::InternalError),
+        }
+    }
+}
+
+/// HTTP/3 Element Dependency type.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ElemDependencyType {
+    RequestStream,
+    PushStream,
+    Placeholder,
+    RootOfTree,
+}
+
+impl ElemDependencyType {
+    fn is_edid_absent(self) -> bool {
+        match self {
+            ElemDependencyType::RootOfTree => true,
+            _ => false,
+        }
+    }
+
+    fn to_bits(self) -> Result<u8> {
+        match self {
+            ElemDependencyType::RequestStream => Ok(0x00),
+
+            ElemDependencyType::PushStream => Ok(0x01),
+
+            ElemDependencyType::Placeholder => Ok(0x02),
+
+            ElemDependencyType::RootOfTree => Ok(0x03),
+        }
+    }
+
+    fn from_bits(bits: u8) -> Result<ElemDependencyType> {
+        match bits {
+            0x00 => Ok(ElemDependencyType::RequestStream),
+
+            0x01 => Ok(ElemDependencyType::PushStream),
+
+            0x02 => Ok(ElemDependencyType::Placeholder),
+
+            0x03 => Ok(ElemDependencyType::RootOfTree),
+
+            _ => Err(Error::InternalError),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub enum Frame {
     Data {
@@ -52,6 +142,14 @@ pub enum Frame {
 
     Headers {
         header_block: Vec<u8>,
+    },
+
+    Priority {
+        priority_elem: PrioritizedElemType,
+        elem_dependency: ElemDependencyType,
+        prioritized_element_id: Option<u64>,
+        element_dependency_id: Option<u64>,
+        weight: u8,
     },
 
     CancelPush {
@@ -100,6 +198,8 @@ impl Frame {
                 header_block: b.get_bytes(payload_length as usize)?.to_vec(),
             },
 
+            PRIORITY_FRAME_TYPE_ID => parse_priority_frame(&mut b)?,
+
             CANCEL_PUSH_FRAME_TYPE_ID => Frame::CancelPush {
                 push_id: b.get_varint()?,
             },
@@ -144,6 +244,42 @@ impl Frame {
                 b.put_varint(header_block.len() as u64)?;
 
                 b.put_bytes(header_block.as_ref())?;
+            },
+
+            Frame::Priority {
+                priority_elem,
+                elem_dependency,
+                prioritized_element_id,
+                element_dependency_id,
+                weight,
+            } => {
+                b.put_varint(PRIORITY_FRAME_TYPE_ID)?;
+
+                let mut length = 2; // 2 u8s = (PT+DT+Empty) + Weight
+                if let Some(peid) = prioritized_element_id {
+                    length += octets::varint_len(*peid);
+                }
+
+                if let Some(edid) = element_dependency_id {
+                    length += octets::varint_len(*edid);
+                }
+
+                b.put_varint(length as u64)?;
+
+                let mut bitfield = priority_elem.to_bits()? << 6;
+                bitfield |= elem_dependency.to_bits()? << 4;
+
+                b.put_u8(bitfield)?;
+
+                if let Some(peid) = prioritized_element_id {
+                    b.put_varint(*peid)?;
+                }
+
+                if let Some(edid) = element_dependency_id {
+                    b.put_varint(*edid)?;
+                }
+
+                b.put_u8(*weight)?;
             },
 
             Frame::CancelPush { push_id } => {
@@ -265,6 +401,16 @@ impl std::fmt::Debug for Frame {
                 write!(f, "HEADERS len={}", header_block.len())?;
             },
 
+            Frame::Priority {
+                priority_elem,
+                elem_dependency,
+                prioritized_element_id,
+                element_dependency_id,
+                weight,
+            } => {
+                write!(f, "PRIORITY pri_type={:?} dep_type={:?} pri_id={:?} dep_id={:?} weight={:?}", priority_elem, elem_dependency, prioritized_element_id, element_dependency_id, weight)?;
+            },
+
             Frame::CancelPush { push_id } => {
                 write!(f, "CANCEL_PUSH push_id={}", push_id)?;
             },
@@ -364,6 +510,34 @@ fn parse_push_promise(
     })
 }
 
+fn parse_priority_frame(b: &mut octets::Octets) -> Result<Frame> {
+    let bitfield = b.get_u8()?;
+    let mut prioritized_element_id = None;
+    let mut element_dependency_id = None;
+
+    let priority_elem = PrioritizedElemType::from_bits(bitfield >> 6)?;
+
+    let elem_dependency = ElemDependencyType::from_bits(
+        (bitfield & ELEM_DEPENDENCY_TYPE_MASK) >> 4,
+    )?;
+
+    if !priority_elem.is_peid_absent() {
+        prioritized_element_id = Some(b.get_varint()?);
+    }
+
+    if !elem_dependency.is_edid_absent() {
+        element_dependency_id = Some(b.get_varint()?);
+    }
+
+    Ok(Frame::Priority {
+        priority_elem,
+        elem_dependency,
+        prioritized_element_id,
+        element_dependency_id,
+        weight: b.get_u8()?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,6 +547,34 @@ mod tests {
         let mut d = [42; 128];
 
         let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let frame_payload_len = payload.len();
+        let frame_header_len = 2;
+
+        let frame = Frame::Data { payload };
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, frame_header_len + frame_payload_len);
+
+        assert_eq!(
+            Frame::from_bytes(
+                DATA_FRAME_TYPE_ID,
+                frame_payload_len as u64,
+                &mut d[frame_header_len..]
+            )
+            .unwrap(),
+            frame
+        );
+    }
+
+    #[test]
+    fn data_zero_length() {
+        let mut d = [42; 128];
+
+        let payload = vec![];
         let frame_payload_len = payload.len();
         let frame_header_len = 2;
 
@@ -696,6 +898,105 @@ mod tests {
         assert_eq!(
             Frame::from_bytes(
                 DUPLICATE_PUSH_FRAME_TYPE_ID,
+                frame_payload_len as u64,
+                &mut d[frame_header_len..]
+            )
+            .unwrap(),
+            frame
+        );
+    }
+
+    #[test]
+    fn priority_current_stream_to_root() {
+        let mut d = [42; 128];
+
+        let frame = Frame::Priority {
+            priority_elem: PrioritizedElemType::CurrentStream,
+            elem_dependency: ElemDependencyType::RootOfTree,
+            prioritized_element_id: None,
+            element_dependency_id: None,
+            weight: 16,
+        };
+
+        let frame_payload_len = 2;
+        let frame_header_len = 2;
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, frame_header_len + frame_payload_len);
+
+        assert_eq!(
+            Frame::from_bytes(
+                PRIORITY_FRAME_TYPE_ID,
+                frame_payload_len as u64,
+                &mut d[frame_header_len..]
+            )
+            .unwrap(),
+            frame
+        );
+    }
+
+    #[test]
+    fn priority_placeholder_to_root() {
+        let mut d = [42; 128];
+
+        let frame = Frame::Priority {
+            priority_elem: PrioritizedElemType::Placeholder,
+            elem_dependency: ElemDependencyType::RootOfTree,
+            prioritized_element_id: Some(0),
+            element_dependency_id: None,
+            weight: 16,
+        };
+
+        let frame_payload_len = 3;
+        let frame_header_len = 2;
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, frame_header_len + frame_payload_len);
+
+        assert_eq!(
+            Frame::from_bytes(
+                PRIORITY_FRAME_TYPE_ID,
+                frame_payload_len as u64,
+                &mut d[frame_header_len..]
+            )
+            .unwrap(),
+            frame
+        );
+    }
+
+    #[test]
+    fn priority_current_stream_to_placeholder() {
+        let mut d = [42; 128];
+
+        let frame = Frame::Priority {
+            priority_elem: PrioritizedElemType::CurrentStream,
+            elem_dependency: ElemDependencyType::Placeholder,
+            prioritized_element_id: None,
+            element_dependency_id: Some(0),
+            weight: 16,
+        };
+
+        let frame_payload_len = 3;
+        let frame_header_len = 2;
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, frame_header_len + frame_payload_len);
+
+        assert_eq!(
+            Frame::from_bytes(
+                PRIORITY_FRAME_TYPE_ID,
                 frame_payload_len as u64,
                 &mut d[frame_header_len..]
             )
