@@ -1533,15 +1533,12 @@ impl Connection {
 
         let read = b.off() + aead_tag_len;
 
-        // On the server, drop initial state after receiving and successfully
-        // processing an Handshake packet.
+        // An Handshake packet has been received from the client and has been
+        // successfully processed, so we can drop the initial state and consider
+        // the client's address to be verified.
         if self.is_server && hdr.ty == packet::Type::Handshake {
             self.drop_initial_state();
-        }
 
-        // If we already received bytes from the peer, it means this is not
-        // the first flight, so consider the peer's address verified.
-        if self.max_send_bytes > 0 {
             self.verified_peer_address = true;
         }
 
