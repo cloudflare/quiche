@@ -1149,6 +1149,8 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
+        let header_len = b.off();
+
         if !self.is_server && !self.got_peer_conn_id {
             // Replace the randomly generated destination connection ID with
             // the one supplied by the server.
@@ -1188,7 +1190,7 @@ impl Connection {
                     payload_len
                 );
 
-                return Ok(b.off() + payload_len);
+                return Ok(header_len + payload_len);
             },
         };
 
@@ -1220,10 +1222,6 @@ impl Connection {
             Ok(v) => v,
 
             Err(Error::CryptoFail) => {
-                // The packet number has already been parsed, so its length
-                // needs to be removed from the payload length.
-                let payload_len = payload_len - hdr.pkt_num_len;
-
                 trace!(
                     "{} dropped undecryptable packet type={:?} len={}",
                     self.trace_id,
@@ -1231,7 +1229,7 @@ impl Connection {
                     payload_len,
                 );
 
-                return Ok(b.off() + payload_len);
+                return Ok(header_len + payload_len);
             },
 
             Err(e) => return Err(e),
@@ -1240,6 +1238,15 @@ impl Connection {
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
             return Err(Error::Done);
+        }
+
+        // Keep track of how many bytes we received from the client, so we
+        // can limit bytes sent back before address validation, to a multiple
+        // of this. The limit needs to be increased early on, so that if there
+        // is an error there is enough credit to send a CONNECTION_CLOSE.
+        if !self.verified_peer_address {
+            self.max_send_bytes +=
+                (header_len + payload_len) * MAX_AMPLIFICATION_FACTOR;
         }
 
         // To avoid sending an ACK in response to an ACK-only packet, we need
@@ -1541,11 +1548,6 @@ impl Connection {
 
             self.verified_peer_address = true;
         }
-
-        // Keep track of how many bytes we received from the client, so we
-        // can limit bytes sent back before address validation to a multiple
-        // of this.
-        self.max_send_bytes += read * MAX_AMPLIFICATION_FACTOR;
 
         Ok(read)
     }
