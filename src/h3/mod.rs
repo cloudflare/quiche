@@ -431,6 +431,7 @@ pub struct Config {
 }
 
 impl Config {
+    /// Creates a new configuration object with the specified parameters.
     pub fn new(
         num_placeholders: u64, max_header_list_size: u64,
         qpack_max_table_capacity: u64, qpack_blocked_streams: u64,
@@ -477,7 +478,7 @@ pub enum Event {
     /// Data was received.
     Data(Vec<u8>),
 
-    // Stream was closed,
+    /// Stream was closed,
     Finished,
 }
 

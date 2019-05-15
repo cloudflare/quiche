@@ -63,16 +63,27 @@ pub type Epoch = usize;
 /// QUIC packet type.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Type {
+    /// Initial packet.
     Initial,
+
+    /// Retry packet.
     Retry,
+
+    /// Handshake packet.
     Handshake,
+
+    /// 0-RTT packet.
     ZeroRTT,
+
+    /// Version negotiation packet.
     VersionNegotiation,
+
+    /// Short header packet.
     Application,
 }
 
 impl Type {
-    pub fn from_epoch(e: Epoch) -> Type {
+    pub(crate) fn from_epoch(e: Epoch) -> Type {
         match e {
             EPOCH_INITIAL => Type::Initial,
 
@@ -84,7 +95,7 @@ impl Type {
         }
     }
 
-    pub fn to_epoch(self) -> Result<Epoch> {
+    pub(crate) fn to_epoch(self) -> Result<Epoch> {
         match self {
             Type::Initial => Ok(EPOCH_INITIAL),
 
