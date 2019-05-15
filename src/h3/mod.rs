@@ -1338,16 +1338,16 @@ mod tests {
     /// Session is an HTTP/3 test helper structure. It holds a client, server
     /// and pipe that allows them to communicate.
     ///
-    /// default() creates a session with some sensible default
-    /// configuration. [`with_configs()`] allows for providing a specific
+    /// `default()` creates a session with some sensible default
+    /// configuration. `with_configs()` allows for providing a specific
     /// configuration.
     ///
-    /// handshake() performs all the steps needed to create a valid HTTP/3
+    /// `handshake()` performs all the steps needed to establish an HTTP/3
     /// connection.
     ///
     /// Some utility functions are provided that make it less verbose to send
-    /// request, responses and individual headers. The full quiche API remains a
-    /// avaialable for any tests that need to do unconventional things (such as
+    /// request, responses and individual headers. The full quiche API remains
+    /// avaialable for any test that need to do unconventional things (such as
     /// bad behaviour that triggers errors).
     struct Session {
         pipe: testing::Pipe,
@@ -1437,22 +1437,22 @@ mod tests {
             Ok(())
         }
 
-        /// Advance the session pipe over the buffer.
+        /// Advances the session pipe over the buffer.
         fn advance(&mut self) -> crate::Result<()> {
             self.pipe.advance(&mut self.buf)
         }
 
-        /// Poll the client for events.
+        /// Polls the client for events.
         fn poll_client(&mut self) -> Result<(u64, Event)> {
             self.client.poll(&mut self.pipe.client)
         }
 
-        /// Poll the server for events.
+        /// Polls the server for events.
         fn poll_server(&mut self) -> Result<(u64, Event)> {
             self.server.poll(&mut self.pipe.server)
         }
 
-        /// Send a request from client with default headers.
+        /// Sends a request from client with default headers.
         ///
         /// On success it returns the newly allocated stream and the headers.
         fn send_request(&mut self, fin: bool) -> Result<(u64, Vec<Header>)> {
@@ -1474,7 +1474,7 @@ mod tests {
             Ok((stream, req))
         }
 
-        /// Send a response from server with default headers.
+        /// Sends a response from server with default headers.
         ///
         /// On success it returns the headers.
         fn send_response(
@@ -1496,7 +1496,7 @@ mod tests {
             Ok(resp)
         }
 
-        /// Send some default payload from client.
+        /// Sends some default payload from client.
         ///
         /// On success it returns the payload.
         fn send_body_client(
@@ -1512,7 +1512,7 @@ mod tests {
             Ok(bytes)
         }
 
-        /// Send some default payload from server.
+        /// Sends some default payload from server.
         ///
         /// On success it returns the payload.
         fn send_body_server(
@@ -1528,7 +1528,7 @@ mod tests {
             Ok(bytes)
         }
 
-        /// Send a single HTTP/3 frame from the client.
+        /// Sends a single HTTP/3 frame from the client.
         fn send_frame_client(
             &mut self, frame: frame::Frame, stream_id: u64, fin: bool,
         ) -> Result<()> {
@@ -1546,7 +1546,7 @@ mod tests {
             Ok(())
         }
 
-        /// Send a single HTTP/3 frame from the server.
+        /// Sends a single HTTP/3 frame from the server.
         fn send_frame_server(
             &mut self, frame: frame::Frame, stream_id: u64, fin: bool,
         ) -> Result<()> {
@@ -1566,7 +1566,7 @@ mod tests {
     }
 
     #[test]
-    /// Make sue that random GREASE values sit within the specified limit.
+    /// Make sure that random GREASE values is within the specified limit.
     fn grease_value_in_varint_limit() {
         assert!(grease_value() < 2u64.pow(62) - 1);
     }
@@ -2051,7 +2051,7 @@ mod tests {
     }
 
     #[test]
-    // Client opens multiple control streams, which is forbidden.
+    /// Client opens multiple control streams, which is forbidden.
     fn open_multiple_control_streams() {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
@@ -2076,7 +2076,7 @@ mod tests {
     }
 
     #[test]
-    // Client closes the control stream, which is forbidden.
+    /// Client closes the control stream, which is forbidden.
     fn close_control_stream() {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
@@ -2111,7 +2111,7 @@ mod tests {
     }
 
     #[test]
-    // Client closes a qpack stream, which is forbidden.
+    /// Client closes a qpack stream, which is forbidden.
     fn close_qpack_stream() {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
