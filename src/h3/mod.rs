@@ -573,11 +573,16 @@ impl Connection {
         let mut http3_conn = Connection::new(config, conn.is_server)?;
 
         http3_conn.send_settings(conn)?;
-        http3_conn.open_qpack_encoder_stream(conn)?;
-        http3_conn.open_qpack_decoder_stream(conn)?;
+
+        // Try opening QPACK streams, but ignore errors if it fails since we
+        // don't need them right now.
+        http3_conn.open_qpack_encoder_stream(conn).ok();
+        http3_conn.open_qpack_decoder_stream(conn).ok();
 
         if conn.grease {
-            http3_conn.open_grease_stream(conn)?;
+            // Try opening a GREASE stream, but ignore errors since it's not
+            // critical.
+            http3_conn.open_grease_stream(conn).ok();
         }
 
         Ok(http3_conn)
