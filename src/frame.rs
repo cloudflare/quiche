@@ -1204,7 +1204,7 @@ mod tests {
     fn max_streams_uni() {
         let mut d = [42; 128];
 
-        let frame = Frame::MaxStreamsBidi { max: 128_318_273 };
+        let frame = Frame::MaxStreamsUni { max: 128_318_273 };
 
         let wire_len = {
             let mut b = octets::Octets::with_slice(&mut d);
