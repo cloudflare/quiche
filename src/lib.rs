@@ -1454,6 +1454,10 @@ impl Connection {
                     ack_elicited = true;
                 },
 
+                frame::Frame::StreamDataBlocked { .. } => {
+                    ack_elicited = true;
+                },
+
                 frame::Frame::StreamsBlockedBidi { .. } => {
                     ack_elicited = true;
                 },

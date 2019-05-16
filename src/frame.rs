@@ -94,6 +94,11 @@ pub enum Frame {
         limit: u64,
     },
 
+    StreamDataBlocked {
+        stream_id: u64,
+        limit: u64,
+    },
+
     StreamsBlockedBidi {
         limit: u64,
     },
@@ -200,6 +205,11 @@ impl Frame {
             },
 
             0x14 => Frame::DataBlocked {
+                limit: b.get_varint()?,
+            },
+
+            0x15 => Frame::StreamDataBlocked {
+                stream_id: b.get_varint()?,
                 limit: b.get_varint()?,
             },
 
@@ -404,6 +414,13 @@ impl Frame {
                 b.put_varint(*limit)?;
             },
 
+            Frame::StreamDataBlocked { stream_id, limit } => {
+                b.put_varint(0x15)?;
+
+                b.put_varint(*stream_id)?;
+                b.put_varint(*limit)?;
+            },
+
             Frame::StreamsBlockedBidi { limit } => {
                 b.put_varint(0x16)?;
 
@@ -569,6 +586,12 @@ impl Frame {
                 octets::varint_len(*limit) // limit
             },
 
+            Frame::StreamDataBlocked { stream_id, limit } => {
+                1 + // frame type
+                octets::varint_len(*stream_id) + // stream_id
+                octets::varint_len(*limit) // limit
+            },
+
             Frame::StreamsBlockedBidi { limit } => {
                 1 + // frame type
                 octets::varint_len(*limit) // limit
@@ -701,6 +724,14 @@ impl std::fmt::Debug for Frame {
 
             Frame::DataBlocked { limit } => {
                 write!(f, "DATA_BLOCKED limit={}", limit)?;
+            },
+
+            Frame::StreamDataBlocked { stream_id, limit } => {
+                write!(
+                    f,
+                    "STREAM_DATA_BLOCKED stream={} limit={}",
+                    stream_id, limit
+                )?;
             },
 
             Frame::StreamsBlockedBidi { limit } => {
@@ -1241,6 +1272,38 @@ mod tests {
         };
 
         assert_eq!(wire_len, 5);
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn stream_data_blocked() {
+        let mut d = [42; 128];
+
+        let frame = Frame::StreamDataBlocked {
+            stream_id: 12_321,
+            limit: 128_318_273,
+        };
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 7);
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert_eq!(
