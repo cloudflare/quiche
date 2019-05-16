@@ -237,11 +237,25 @@ bool quiche_conn_is_established(quiche_conn *conn);
 // Returns true if the connection is closed.
 bool quiche_conn_is_closed(quiche_conn *conn);
 
+typedef struct {
+    // The number of QUIC packets received on this connection.
+    size_t recv;
+
+    // The number of QUIC packets sent on this connection.
+    size_t sent;
+
+    // The number of QUIC packets that were lost.
+    size_t lost;
+
+    // The estimated round-trip time of the connection (in nanoseconds).
+    uint64_t rtt;
+
+    // The size in bytes of the connection's congestion window.
+    size_t cwnd;
+} quiche_stats;
+
 // Collects and returns statistics about the connection.
-void quiche_conn_stats_recv(quiche_conn *conn, uint64_t *out);
-void quiche_conn_stats_sent(quiche_conn *conn, uint64_t *out);
-void quiche_conn_stats_lost(quiche_conn *conn, uint64_t *out);
-void quiche_conn_stats_rtt_as_nanos(quiche_conn *conn, uint64_t *out);
+void quiche_conn_stats(quiche_conn *conn, quiche_stats *out);
 
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);

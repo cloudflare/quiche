@@ -129,13 +129,13 @@ impl Default for Recovery {
 
             time_of_last_sent_ack_eliciting_pkt: now,
 
-            largest_acked_pkt: [0; packet::EPOCH_COUNT],
+            largest_acked_pkt: [std::u64::MAX; packet::EPOCH_COUNT],
 
             latest_rtt: Duration::new(0, 0),
 
             smoothed_rtt: None,
 
-            min_rtt: Duration::from_secs(std::u64::MAX),
+            min_rtt: Duration::new(0, 0),
 
             rttvar: Duration::new(0, 0),
 
@@ -202,13 +202,25 @@ impl Recovery {
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
         epoch: packet::Epoch, now: Instant, trace_id: &str,
     ) {
-        self.largest_acked_pkt[epoch] =
-            cmp::max(self.largest_acked_pkt[epoch], ranges.largest().unwrap());
+        let largest_acked = ranges.largest().unwrap();
+
+        if self.largest_acked_pkt[epoch] == std::u64::MAX {
+            self.largest_acked_pkt[epoch] = largest_acked;
+        } else {
+            self.largest_acked_pkt[epoch] =
+                cmp::max(self.largest_acked_pkt[epoch], largest_acked);
+        }
 
         if let Some(pkt) = self.sent[epoch].get(&self.largest_acked_pkt[epoch]) {
             if pkt.ack_eliciting {
-                let ack_delay = Duration::from_micros(ack_delay);
-                let latest_rtt = pkt.time.elapsed();
+                let latest_rtt = now - pkt.time;
+
+                let ack_delay = if epoch == packet::EPOCH_APPLICATION {
+                    Duration::from_micros(ack_delay)
+                } else {
+                    Duration::from_micros(0)
+                };
+
                 self.update_rtt(latest_rtt, ack_delay);
             }
         }
@@ -312,29 +324,33 @@ impl Recovery {
     }
 
     fn update_rtt(&mut self, latest_rtt: Duration, ack_delay: Duration) {
-        let ack_delay = cmp::min(self.max_ack_delay, ack_delay);
-
-        self.min_rtt = cmp::min(self.min_rtt, latest_rtt);
-
-        self.latest_rtt = if latest_rtt - self.min_rtt > ack_delay {
-            latest_rtt - ack_delay
-        } else {
-            latest_rtt
-        };
+        self.latest_rtt = latest_rtt;
 
         match self.smoothed_rtt {
+            // First RTT sample.
             None => {
-                self.rttvar = self.latest_rtt / 2;
+                self.min_rtt = latest_rtt;
 
-                self.smoothed_rtt = Some(self.latest_rtt);
+                self.smoothed_rtt = Some(latest_rtt);
+
+                self.rttvar = latest_rtt / 2;
             },
 
             Some(srtt) => {
-                let rttvar_sample = sub_abs(srtt, self.latest_rtt);
+                self.min_rtt = cmp::min(self.min_rtt, latest_rtt);
 
-                self.rttvar = (self.rttvar * 3 + rttvar_sample) / 4;
+                let ack_delay = cmp::min(self.max_ack_delay, ack_delay);
 
-                self.smoothed_rtt = Some((srtt * 7 + self.latest_rtt) / 8);
+                // Adjust for ack delay if plausible.
+                let adjusted_rtt = if latest_rtt > self.min_rtt + ack_delay {
+                    latest_rtt - ack_delay
+                } else {
+                    latest_rtt
+                };
+
+                self.rttvar = (self.rttvar * 3 + sub_abs(srtt, adjusted_rtt)) / 4;
+
+                self.smoothed_rtt = Some((srtt * 7 + adjusted_rtt) / 8);
             },
         }
     }
@@ -356,11 +372,6 @@ impl Recovery {
     }
 
     fn set_loss_detection_timer(&mut self) {
-        if self.bytes_in_flight == 0 {
-            self.loss_detection_timer = None;
-            return;
-        }
-
         let (loss_time, _) = self.earliest_loss_time();
         if loss_time.is_some() {
             // Time threshold loss detection.
@@ -381,6 +392,11 @@ impl Recovery {
             return;
         }
 
+        if self.bytes_in_flight == 0 {
+            self.loss_detection_timer = None;
+            return;
+        }
+
         // PTO timer.
         let timeout = self.pto() * 2_u32.pow(self.pto_count);
 
@@ -396,15 +412,16 @@ impl Recovery {
         let largest_acked = self.largest_acked_pkt[epoch];
 
         let loss_delay = (cmp::max(self.latest_rtt, self.rtt()) * 9) / 8;
+        let loss_delay = cmp::max(loss_delay, GRANULARITY);
 
         let lost_send_time = now - loss_delay;
-
-        let lost_pkt_num = largest_acked.saturating_sub(PACKET_THRESHOLD);
 
         self.loss_time[epoch] = None;
 
         for (_, unacked) in self.sent[epoch].range(..=largest_acked) {
-            if unacked.time <= lost_send_time || unacked.pkt_num <= lost_pkt_num {
+            if unacked.time <= lost_send_time ||
+                largest_acked >= unacked.pkt_num + PACKET_THRESHOLD
+            {
                 if unacked.in_flight {
                     trace!(
                         "{} packet {} lost on epoch {}",
