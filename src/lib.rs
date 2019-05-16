@@ -2289,6 +2289,7 @@ impl Connection {
             recv: self.recv_count,
             sent: self.sent_count,
             lost: self.recovery.lost_count,
+            cwnd: self.recovery.cwnd(),
             rtt: self.recovery.rtt(),
         }
     }
@@ -2431,6 +2432,9 @@ pub struct Stats {
 
     /// The estimated round-trip time of the connection.
     pub rtt: time::Duration,
+
+    /// The size in bytes of the connection's congestion window.
+    pub cwnd: usize,
 }
 
 impl std::fmt::Debug for Stats {
