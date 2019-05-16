@@ -1329,8 +1329,8 @@ fn grease_value() -> u64 {
     31 * n + 33
 }
 
-#[cfg(test)]
-mod tests {
+#[doc(hidden)]
+pub mod testing {
     use super::*;
 
     use crate::testing;
@@ -1349,16 +1349,16 @@ mod tests {
     /// request, responses and individual headers. The full quiche API remains
     /// avaialable for any test that need to do unconventional things (such as
     /// bad behaviour that triggers errors).
-    struct Session {
-        pipe: testing::Pipe,
-        client: Connection,
-        server: Connection,
+    pub struct Session {
+        pub pipe: testing::Pipe,
+        pub client: Connection,
+        pub server: Connection,
 
         buf: [u8; 65535],
     }
 
     impl Session {
-        fn default() -> Result<Session> {
+        pub fn default() -> Result<Session> {
             let mut config = crate::Config::new(crate::PROTOCOL_VERSION)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
@@ -1375,7 +1375,7 @@ mod tests {
             Session::with_configs(&mut config, &mut h3_config)
         }
 
-        fn with_configs(
+        pub fn with_configs(
             config: &mut crate::Config, h3_config: &mut Config,
         ) -> Result<Session> {
             Ok(Session {
@@ -1387,7 +1387,7 @@ mod tests {
         }
 
         /// Do the HTTP/3 handshake so both ends are in sane initial state.
-        fn handshake(&mut self) -> Result<()> {
+        pub fn handshake(&mut self) -> Result<()> {
             self.pipe.handshake(&mut self.buf)?;
 
             // Client streams.
@@ -1438,24 +1438,24 @@ mod tests {
         }
 
         /// Advances the session pipe over the buffer.
-        fn advance(&mut self) -> crate::Result<()> {
+        pub fn advance(&mut self) -> crate::Result<()> {
             self.pipe.advance(&mut self.buf)
         }
 
         /// Polls the client for events.
-        fn poll_client(&mut self) -> Result<(u64, Event)> {
+        pub fn poll_client(&mut self) -> Result<(u64, Event)> {
             self.client.poll(&mut self.pipe.client)
         }
 
         /// Polls the server for events.
-        fn poll_server(&mut self) -> Result<(u64, Event)> {
+        pub fn poll_server(&mut self) -> Result<(u64, Event)> {
             self.server.poll(&mut self.pipe.server)
         }
 
         /// Sends a request from client with default headers.
         ///
         /// On success it returns the newly allocated stream and the headers.
-        fn send_request(&mut self, fin: bool) -> Result<(u64, Vec<Header>)> {
+        pub fn send_request(&mut self, fin: bool) -> Result<(u64, Vec<Header>)> {
             let req = vec![
                 Header::new(":method", "GET"),
                 Header::new(":scheme", "https"),
@@ -1477,7 +1477,7 @@ mod tests {
         /// Sends a response from server with default headers.
         ///
         /// On success it returns the headers.
-        fn send_response(
+        pub fn send_response(
             &mut self, stream: u64, fin: bool,
         ) -> Result<Vec<Header>> {
             let resp = vec![
@@ -1499,7 +1499,7 @@ mod tests {
         /// Sends some default payload from client.
         ///
         /// On success it returns the payload.
-        fn send_body_client(
+        pub fn send_body_client(
             &mut self, stream: u64, fin: bool,
         ) -> Result<Vec<u8>> {
             let bytes = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -1515,7 +1515,7 @@ mod tests {
         /// Sends some default payload from server.
         ///
         /// On success it returns the payload.
-        fn send_body_server(
+        pub fn send_body_server(
             &mut self, stream: u64, fin: bool,
         ) -> Result<Vec<u8>> {
             let bytes = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -1529,7 +1529,7 @@ mod tests {
         }
 
         /// Sends a single HTTP/3 frame from the client.
-        fn send_frame_client(
+        pub fn send_frame_client(
             &mut self, frame: frame::Frame, stream_id: u64, fin: bool,
         ) -> Result<()> {
             let mut d = [42; 65535];
@@ -1547,7 +1547,7 @@ mod tests {
         }
 
         /// Sends a single HTTP/3 frame from the server.
-        fn send_frame_server(
+        pub fn send_frame_server(
             &mut self, frame: frame::Frame, stream_id: u64, fin: bool,
         ) -> Result<()> {
             let mut d = [42; 65535];
@@ -1564,6 +1564,13 @@ mod tests {
             Ok(())
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use super::testing::*;
 
     #[test]
     /// Make sure that random GREASE values is within the specified limit.
