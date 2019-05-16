@@ -503,24 +503,22 @@ pub extern fn quiche_conn_is_closed(conn: &mut Connection) -> bool {
     conn.is_closed()
 }
 
-#[no_mangle]
-pub extern fn quiche_conn_stats_recv(conn: &Connection, out: &mut u64) {
-    *out = conn.stats().recv as u64;
+#[repr(C)]
+pub struct Stats {
+    pub recv: usize,
+    pub sent: usize,
+    pub lost: usize,
+    pub rtt: u64,
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stats_sent(conn: &Connection, out: &mut u64) {
-    *out = conn.stats().sent as u64;
-}
+pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
+    let stats = conn.stats();
 
-#[no_mangle]
-pub extern fn quiche_conn_stats_lost(conn: &Connection, out: &mut u64) {
-    *out = conn.stats().lost as u64;
-}
-
-#[no_mangle]
-pub extern fn quiche_conn_stats_rtt_as_nanos(conn: &Connection, out: &mut u64) {
-    *out = conn.stats().rtt.as_nanos() as u64;
+    out.recv = stats.recv;
+    out.sent = stats.sent;
+    out.lost = stats.lost;
+    out.rtt = stats.rtt.as_nanos() as u64;
 }
 
 #[no_mangle]
