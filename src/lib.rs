@@ -1450,6 +1450,14 @@ impl Connection {
                     ack_elicited = true;
                 },
 
+                frame::Frame::StreamsBlockedBidi { .. } => {
+                    ack_elicited = true;
+                },
+
+                frame::Frame::StreamsBlockedUni { .. } => {
+                    ack_elicited = true;
+                },
+
                 // TODO: implement connection migration
                 frame::Frame::NewConnectionId { .. } => {
                     ack_elicited = true;

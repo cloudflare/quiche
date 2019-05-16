@@ -90,6 +90,14 @@ pub enum Frame {
         max: u64,
     },
 
+    StreamsBlockedBidi {
+        limit: u64,
+    },
+
+    StreamsBlockedUni {
+        limit: u64,
+    },
+
     NewConnectionId {
         seq_num: u64,
         conn_id: Vec<u8>,
@@ -185,6 +193,14 @@ impl Frame {
 
             0x13 => Frame::MaxStreamsUni {
                 max: b.get_varint()?,
+            },
+
+            0x16 => Frame::StreamsBlockedBidi {
+                limit: b.get_varint()?,
+            },
+
+            0x17 => Frame::StreamsBlockedUni {
+                limit: b.get_varint()?,
             },
 
             0x18 => Frame::NewConnectionId {
@@ -374,6 +390,18 @@ impl Frame {
                 b.put_varint(*max)?;
             },
 
+            Frame::StreamsBlockedBidi { limit } => {
+                b.put_varint(0x16)?;
+
+                b.put_varint(*limit)?;
+            },
+
+            Frame::StreamsBlockedUni { limit } => {
+                b.put_varint(0x17)?;
+
+                b.put_varint(*limit)?;
+            },
+
             Frame::NewConnectionId {
                 seq_num,
                 conn_id,
@@ -522,6 +550,16 @@ impl Frame {
                 octets::varint_len(*max) // max
             },
 
+            Frame::StreamsBlockedBidi { limit } => {
+                1 + // frame type
+                octets::varint_len(*limit) // limit
+            },
+
+            Frame::StreamsBlockedUni { limit } => {
+                1 + // frame type
+                octets::varint_len(*limit) // limit
+            },
+
             Frame::NewConnectionId {
                 seq_num,
                 conn_id,
@@ -640,6 +678,14 @@ impl std::fmt::Debug for Frame {
 
             Frame::MaxStreamsUni { max } => {
                 write!(f, "MAX_STREAMS type=uni max={}", max)?;
+            },
+
+            Frame::StreamsBlockedBidi { limit } => {
+                write!(f, "STREAMS_BLOCKED type=bidi limit={}", limit)?;
+            },
+
+            Frame::StreamsBlockedUni { limit } => {
+                write!(f, "STREAMS_BLOCKED type=uni limit={}", limit)?;
             },
 
             Frame::NewConnectionId { .. } => {
@@ -1136,6 +1182,64 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::MaxStreamsBidi { max: 128_318_273 };
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 5);
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn streams_blocked_bidi() {
+        let mut d = [42; 128];
+
+        let frame = Frame::StreamsBlockedBidi { limit: 128_318_273 };
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 5);
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Application),
+            Ok(frame)
+        );
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn streams_blocked_uni() {
+        let mut d = [42; 128];
+
+        let frame = Frame::StreamsBlockedUni { limit: 128_318_273 };
 
         let wire_len = {
             let mut b = octets::Octets::with_slice(&mut d);
