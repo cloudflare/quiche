@@ -2029,6 +2029,71 @@ mod tests {
     }
 
     #[test]
+    /// Send a prioritized request from the client, ensure server accepts it
+    fn priority_request() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        let mut d = [42; 128];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        // Create an approximate PRIORITY frame in the buffer
+        b.put_varint(frame::PRIORITY_FRAME_TYPE_ID).unwrap();
+        b.put_varint(2).unwrap(); // 2 u8s = Bitfield + Weight
+        b.put_u8(0).unwrap(); // bitfield
+        b.put_u8(16).unwrap(); // weight
+        let off = b.off();
+
+        let stream = 0;
+        s.pipe.client.stream_send(stream, &d[..off], false).unwrap();
+        s.advance().ok();
+
+        let req = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":authority", "quic.tech"),
+            Header::new(":path", "/test"),
+            Header::new("user-agent", "quiche-test"),
+        ];
+
+        s.client
+            .send_headers(&mut s.pipe.client, stream, &req, true)
+            .unwrap();
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Headers(req))));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+    }
+
+    #[test]
+    /// Send a PRIORITY frame from the client, ensure server accepts it
+    fn priority_control_stream() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        let mut d = [42; 128];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        // Create an approximate PRIORITY frame in the buffer
+        b.put_varint(frame::PRIORITY_FRAME_TYPE_ID).unwrap();
+        b.put_varint(1 + octets::varint_parse_len(1) as u64 + 1)
+            .unwrap(); // 2 u8s = Bitfield + varint + Weight
+        b.put_u8(128).unwrap(); // bitfield
+        b.put_varint(1).unwrap();
+        b.put_u8(16).unwrap(); // weight
+        let off = b.off();
+
+        s.pipe
+            .client
+            .stream_send(s.client.control_stream_id.unwrap(), &d[..off], false)
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
     /// Ensure quiche allocates streams for client and server roles as expected.
     fn uni_stream_local_counting() {
         let config = Config::new(0, 1024, 0, 0).unwrap();
