@@ -43,7 +43,7 @@ pub struct BufferTooShortError;
 
 impl std::fmt::Display for BufferTooShortError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "BufferTooShortError", self)
+        write!(f, "BufferTooShortError")
     }
 }
 
