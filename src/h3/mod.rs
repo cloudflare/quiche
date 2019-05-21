@@ -2029,7 +2029,7 @@ mod tests {
     }
 
     #[test]
-    /// Send a prioritized request from the client, ensure server accepts it
+    /// Send a prioritized request from the client, ensure server accepts it.
     fn priority_request() {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
@@ -2037,7 +2037,7 @@ mod tests {
         let mut d = [42; 128];
         let mut b = octets::Octets::with_slice(&mut d);
 
-        // Create an approximate PRIORITY frame in the buffer
+        // Create an approximate PRIORITY frame in the buffer.
         b.put_varint(frame::PRIORITY_FRAME_TYPE_ID).unwrap();
         b.put_varint(2).unwrap(); // 2 u8s = Bitfield + Weight
         b.put_u8(0).unwrap(); // bitfield
@@ -2066,7 +2066,7 @@ mod tests {
     }
 
     #[test]
-    /// Send a PRIORITY frame from the client, ensure server accepts it
+    /// Send a PRIORITY frame from the client, ensure server accepts it.
     fn priority_control_stream() {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
@@ -2074,7 +2074,7 @@ mod tests {
         let mut d = [42; 128];
         let mut b = octets::Octets::with_slice(&mut d);
 
-        // Create an approximate PRIORITY frame in the buffer
+        // Create an approximate PRIORITY frame in the buffer.
         b.put_varint(frame::PRIORITY_FRAME_TYPE_ID).unwrap();
         b.put_varint(1 + octets::varint_parse_len(1) as u64 + 1)
             .unwrap(); // 2 u8s = Bitfield + varint + Weight

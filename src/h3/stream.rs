@@ -769,7 +769,7 @@ mod tests {
         let hdrs = frame::Frame::Headers { header_block };
         let data = frame::Frame::Data { payload };
 
-        // Create an approximate PRIORITY frame in the buffer
+        // Create an approximate PRIORITY frame in the buffer.
         b.put_varint(frame::PRIORITY_FRAME_TYPE_ID).unwrap();
         b.put_varint(2).unwrap(); // 2 u8s = Bitfield + Weight
         b.put_u8(0).unwrap(); // bitfield
@@ -781,7 +781,7 @@ mod tests {
 
         stream.push(&mut d[..off]).unwrap();
 
-        // parse the PRIORITY frame
+        // Parse the PRIORITY frame.
         assert_eq!(stream.more(), true);
         let frame_ty_len =
             octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
@@ -812,7 +812,7 @@ mod tests {
         // TODO: if/when PRIRORITY frame is fully implemented, test it
         // e.g. `assert_eq!(stream.get_frame(), Some(priority));`
 
-        // parse the HEADERS frame
+        // Parse the HEADERS frame.
         assert_eq!(stream.more(), true);
         let frame_ty_len =
             octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
@@ -842,7 +842,7 @@ mod tests {
 
         assert_eq!(stream.get_frame(), Some(hdrs));
 
-        // parse the DATA frame
+        // Parse the DATA frame.
         assert_eq!(stream.more(), true);
         let frame_ty_len =
             octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
@@ -894,7 +894,7 @@ mod tests {
         b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
         settings.to_bytes(&mut b).unwrap();
 
-        // Create an approximate PRIORITY frame in the buffer
+        // Create an approximate PRIORITY frame in the buffer.
         b.put_varint(frame::PRIORITY_FRAME_TYPE_ID).unwrap();
         b.put_varint(1 + octets::varint_parse_len(1) as u64 + 1)
             .unwrap(); // 2 u8s = Bitfield + varint + Weight
@@ -952,7 +952,7 @@ mod tests {
 
         assert_eq!(stream.get_frame(), Some(settings));
 
-        // parse the PRIORITY frame
+        // Parse the PRIORITY frame.
         assert_eq!(stream.more(), true);
         let frame_ty_len =
             octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
