@@ -50,17 +50,26 @@ pub enum Type {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum State {
-    StreamTypeLen,
+    /// Reading the stream's type.
     StreamType,
-    FrameTypeLen,
+
+    /// Reading the stream's current frame's type.
     FrameType,
-    FramePayloadLenLen,
+
+    /// Reading the stream's current frame's payload length.
     FramePayloadLen,
+
+    /// Reading the stream's current frame's payload.
     FramePayload,
-    PushIdLen,
+
+    /// Reading the push ID.
     PushId,
+
+    /// Reading a QPACK instruction.
     QpackInstruction,
-    Done,
+
+    /// Reading and discarding data.
+    Drain,
 }
 
 impl Type {
@@ -76,56 +85,102 @@ impl Type {
     }
 }
 
-/// An HTTP/3 Stream
+/// An HTTP/3 stream.
+///
+/// This maintains the HTTP/3 state for streams of any type (control, request,
+/// QPACK, ...).
+///
+/// A number of bytes, depending on the current stream's state, is read from the
+/// transport stream into the HTTP/3 stream's "state buffer". This intermediate
+/// buffering is required due to the fact that data read from the transport
+/// might not be complete (e.g. a varint might be split across multiple QUIC
+/// packets).
+///
+/// When enough data to complete the current state has been buffered, it is
+/// consumed from the state buffer and the stream is transitioned to the next
+/// state (see `State` for a list of possible states).
 #[derive(Debug)]
 pub struct Stream {
+    /// The corresponding transport stream's ID.
     id: u64,
+
+    /// The stream's type (if known).
     ty: Option<Type>,
-    is_local: bool,
-    initialized: bool,
-    is_peer_fin: bool,
+
+    /// The current stream state.
     state: State,
-    stream_offset: u64,
-    buf: Vec<u8>,
-    buf_read_off: u64,
-    buf_end_pos: u64,
-    next_varint_len: usize,
-    frame_payload_len: u64,
+
+    /// The buffer holding partial data for the current state.
+    state_buf: Vec<u8>,
+
+    /// The expected amount of bytes required to complete the state.
+    state_len: usize,
+
+    /// The write offset in the state buffer, that is, how many bytes have
+    /// already been read from the transport for the current state. When
+    /// it reaches `stream_len` the state can be completed.
+    state_off: usize,
+
+    /// The type of the frame currently being parsed.
     frame_type: Option<u64>,
+
+    /// List of frames that have already been parsed, but not yet processed.
     frames: VecDeque<frame::Frame>,
+
+    /// Whether the stream was created locally, or by the peer.
+    is_local: bool,
+
+    /// Whether the stream has been initialized.
+    initialized: bool,
+
+    /// Whether the peer has finished sending data on this stream.
+    is_peer_fin: bool,
 }
 
 impl Stream {
+    /// Creates a new HTTP/3 stream.
+    ///
+    /// The `is_local` parameter indicates whether the stream was created by the
+    /// local endpoint, or by the peer.
     pub fn new(id: u64, is_local: bool) -> Stream {
-        let mut ty = None;
-        let mut state = State::StreamTypeLen;
-
-        if crate::stream::is_bidi(id) {
-            ty = Some(Type::Request);
-            state = State::FrameTypeLen;
+        let (ty, state) = if crate::stream::is_bidi(id) {
+            // All bidirectional streams are "request" streams, so we don't
+            // need to read the stream type.
+            (Some(Type::Request), State::FrameType)
+        } else {
+            // The stream's type is yet to be determined.
+            (None, State::StreamType)
         };
 
         Stream {
             id,
             ty,
+
+            state,
+
+            // Pre-allocate a buffer to avoid multiple tiny early allocations.
+            state_buf: vec![0; 16],
+
+            // Expect one byte for the initial state, to parse the initial
+            // varint length.
+            state_len: 1,
+            state_off: 0,
+
+            frame_type: None,
+            frames: VecDeque::new(),
+
             is_local,
             initialized: false,
             is_peer_fin: false,
-            state,
-            stream_offset: 0,
-            // TODO: need a more elegant approach to buffer management.
-            buf: Vec::new(),
-            buf_read_off: 0,
-            buf_end_pos: 0,
-            next_varint_len: 0,
-            frame_payload_len: 0,
-            frame_type: None,
-            frames: VecDeque::new(),
         }
     }
 
-    pub fn state(&mut self) -> &State {
-        &self.state
+    pub fn state(&self) -> State {
+        self.state
+    }
+
+    pub fn ty(&self) -> Option<Type> {
+        self.ty
     }
 
     pub fn peer_fin(&self) -> bool {
@@ -140,132 +195,45 @@ impl Stream {
         self.frames.pop_front()
     }
 
-    pub fn buf_bytes(&mut self, size: usize) -> Result<&mut [u8]> {
-        let desired_end_index = self.buf_read_off as usize + size;
-
-        // Check there are enough meaningful bytes to read.
-        if desired_end_index < self.buf_end_pos as usize + 1 {
-            return Ok(
-                &mut self.buf[self.buf_read_off as usize..desired_end_index]
-            );
-        }
-
-        Err(Error::BufferTooShort)
-    }
-
-    // TODO: this function needs improvement (e.g. avoid copies)
-    pub fn push(&mut self, d: &[u8]) -> Result<()> {
-        self.buf_end_pos += d.len() as u64;
-        self.buf.extend_from_slice(d);
-
-        Ok(())
-    }
-
+    /// Sets the stream's type and transitions to the next state.
     pub fn set_ty(&mut self, ty: Type) -> Result<()> {
-        if self.state != State::StreamType {
-            return Err(Error::InternalError);
-        }
+        assert_eq!(self.state, State::StreamType);
 
         self.ty = Some(ty);
 
-        match ty {
-            Type::Request => self.state = State::FrameTypeLen,
+        let state = match ty {
+            Type::Control | Type::Request => State::FrameType,
 
-            Type::Control => self.state = State::FrameTypeLen,
-
-            Type::Push => self.state = State::PushIdLen,
+            Type::Push => State::PushId,
 
             Type::QpackEncoder | Type::QpackDecoder => {
-                self.state = State::QpackInstruction;
                 self.initialized = true;
+
+                State::QpackInstruction
             },
 
-            Type::Unknown => {
-                self.state = State::Done;
-            },
-        }
+            Type::Unknown => State::Drain,
+        };
+
+        self.state_transition(state, 1);
 
         Ok(())
     }
 
-    pub fn ty(&mut self) -> Option<Type> {
-        self.ty
-    }
+    /// Sets the push ID and transitions to the next state.
+    pub fn set_push_id(&mut self, _id: u64) -> Result<()> {
+        assert_eq!(self.state, State::PushId);
 
-    pub fn set_next_varint_len(&mut self, len: usize) -> Result<()> {
-        match self.state {
-            State::StreamTypeLen => self.state = State::StreamType,
+        // TODO: implement push ID.
 
-            State::FramePayloadLenLen => self.state = State::FramePayloadLen,
-
-            State::FrameTypeLen => self.state = State::FrameType,
-
-            State::PushIdLen => self.state = State::PushId,
-
-            State::PushId => self.state = State::FrameTypeLen,
-
-            _ => return Err(Error::InternalError),
-        }
-
-        self.next_varint_len = len;
+        self.state_transition(State::FrameType, 1);
 
         Ok(())
     }
 
-    pub fn get_varint(&mut self) -> Result<u64> {
-        if self.next_varint_len == 0 {
-            return Err(Error::Done);
-        }
-
-        if self.buf.len() - self.buf_read_off as usize >=
-            self.next_varint_len as usize
-        {
-            let n = self.buf_read_off as usize + self.next_varint_len;
-            let varint = octets::Octets::with_slice(
-                &mut self.buf[self.buf_read_off as usize..n],
-            )
-            .get_varint()?;
-
-            self.stream_offset += self.next_varint_len as u64;
-            self.buf_read_off += self.next_varint_len as u64;
-
-            // Reset next_varint_len so we avoid incorrect multiple calls.
-            self.next_varint_len = 0;
-
-            // If processing push, progress the state machine appropriately.
-            if self.state == State::PushId {
-                self.state = State::FrameTypeLen;
-            }
-
-            return Ok(varint);
-        }
-
-        Err(Error::Done)
-    }
-
-    pub fn set_frame_payload_len(&mut self, len: u64) -> Result<()> {
-        if self.state != State::FramePayloadLen {
-            return Err(Error::InternalError);
-        }
-
-        // Only expect frames on Control, Request and Push streams.
-        if self.ty == Some(Type::Control) ||
-            self.ty == Some(Type::Request) ||
-            self.ty == Some(Type::Push)
-        {
-            self.frame_payload_len = len;
-            self.state = State::FramePayload;
-
-            return Ok(());
-        }
-
-        Err(Error::InternalError)
-    }
-
+    /// Sets the frame type and transitions to the next state.
     pub fn set_frame_type(&mut self, ty: u64) -> Result<()> {
-        if self.state != State::FrameType {
-            return Err(Error::InternalError);
-        }
+        assert_eq!(self.state, State::FrameType);
 
         // Only expect frames on Control, Request and Push streams.
         match self.ty {
@@ -299,8 +267,6 @@ impl Stream {
 
                     (_, true) => (),
                 }
-
-                self.state = State::FramePayloadLenLen;
             },
 
             Some(Type::Request) => {
@@ -340,8 +306,6 @@ impl Stream {
                         (_, true) => (),
                     }
                 }
-
-                self.state = State::FramePayloadLenLen;
             },
 
             Some(Type::Push) => {
@@ -370,8 +334,6 @@ impl Stream {
 
                     _ => (),
                 }
-
-                self.state = State::FramePayloadLenLen;
             },
 
             _ => return Err(Error::UnexpectedFrame),
@@ -379,42 +341,123 @@ impl Stream {
 
         self.frame_type = Some(ty);
 
+        self.state_transition(State::FramePayloadLen, 1);
+
         Ok(())
     }
 
-    pub fn parse_frame(&mut self) -> Result<()> {
-        // Parse the whole frame payload but only if there is enough data in
-        // the stream buffer. stream.buf_bytes() returns an error if we don't
-        // have enough.
-        if self.frame_type.is_none() {
-            return Err(Error::InternalError);
+    /// Sets the frame's payload length and transitions to the next state.
+    pub fn set_frame_payload_len(&mut self, len: u64) -> Result<()> {
+        assert_eq!(self.state, State::FramePayloadLen);
+
+        // Only expect frames on Control, Request and Push streams.
+        if self.ty == Some(Type::Control) ||
+            self.ty == Some(Type::Request) ||
+            self.ty == Some(Type::Push)
+        {
+            self.state_transition(State::FramePayload, len as usize);
+
+            return Ok(());
         }
 
+        Err(Error::InternalError)
+    }
+
+    /// Tries to fill the state buffer by reading data from the corresponding
+    /// transport stream.
+    ///
+    /// When not enough data can be read to complete the state, this returns
+    /// `Error::Done`.
+    pub fn try_fill_buffer(
+        &mut self, conn: &mut crate::Connection,
+    ) -> Result<()> {
+        let buf = &mut self.state_buf[self.state_off..self.state_len];
+
+        let (read, _) = conn.stream_recv(self.id, buf)?;
+
+        trace!(
+            "{} read {} bytes on stream {}",
+            conn.trace_id(),
+            read,
+            self.id,
+        );
+
+        self.state_off += read;
+
+        if !self.state_buffer_complete() {
+            return Err(Error::Done);
+        }
+
+        Ok(())
+    }
+
+    /// Tries to fill the state buffer by reading data from the given cursor.
+    ///
+    /// This is intended to replace `try_fill_buffer()` in tests, in order to
+    /// avoid having to setup a transport connection.
+    #[cfg(test)]
+    fn try_fill_buffer_for_tests(
+        &mut self, stream: &mut std::io::Cursor<Vec<u8>>,
+    ) -> Result<()> {
+        let buf = &mut self.state_buf[self.state_off..self.state_len];
+
+        let read = std::io::Read::read(stream, buf).unwrap();
+
+        self.state_off += read;
+
+        if !self.state_buffer_complete() {
+            return Err(Error::Done);
+        }
+
+        Ok(())
+    }
+
+    /// Tries to parse a varint (including length) from the state buffer.
+    pub fn try_consume_varint(&mut self) -> Result<u64> {
+        if self.state_off == 1 {
+            self.state_len = octets::varint_parse_len(self.state_buf[0]);
+            self.state_buf.resize(self.state_len, 0);
+        }
+
+        // Return early if we don't have enough data in the state buffer to
+        // parse the whole varint.
+        if !self.state_buffer_complete() {
+            return Err(Error::Done);
+        }
+
+        let varint =
+            octets::Octets::with_slice(&mut self.state_buf).get_varint()?;
+
+        Ok(varint)
+    }
+
+    /// Tries to parse a frame from the state buffer.
+    pub fn try_consume_frame(&mut self) -> Result<()> {
+        // TODO: properly propagate frame parsing errors.
         if let Ok(frame) = frame::Frame::from_bytes(
             self.frame_type.unwrap(),
-            self.frame_payload_len,
-            self.buf_bytes(self.frame_payload_len as usize)?,
+            self.state_len as u64,
+            &mut self.state_buf,
         ) {
             self.frames.push_back(frame);
         }
 
-        // TODO: bytes in the buffer are no longer needed, so we can remove
-        // them and set the offset back to 0?
-        self.buf_read_off += self.frame_payload_len;
-
-        // Stream offset always increases, so we can track how many total
-        // bytes were seen by the application layer.
-        self.stream_offset += self.frame_payload_len;
-
-        // Set state to parse next frame
-        self.state = State::FrameTypeLen;
+        self.state_transition(State::FrameType, 1);
 
         Ok(())
     }
 
-    pub fn more(&self) -> bool {
-        let rem_bytes = self.buf_end_pos - self.buf_read_off;
-        rem_bytes > 0
+    /// Returns true if the state buffer has enough data to complete the state.
+    fn state_buffer_complete(&self) -> bool {
+        self.state_off == self.state_len
+    }
+
+    /// Transitions the stream to a new state, and resets the state buffer.
+    fn state_transition(&mut self, new_state: State, expected_len: usize) {
+        self.state = new_state;
+        self.state_off = 0;
+        self.state_len = expected_len;
+        self.state_buf.resize(self.state_len, 0);
     }
 }
 
@@ -423,11 +466,12 @@ mod tests {
     use super::*;
 
     #[test]
+    /// Process incoming SETTINGS frame on control stream.
     fn control_good() {
         let mut stream = Stream::new(3, false);
-        assert_eq!(*stream.state(), State::StreamTypeLen);
+        assert_eq!(stream.state, State::StreamType);
 
-        let mut d = [42; 40];
+        let mut d = vec![42; 40];
         let mut b = octets::Octets::with_slice(&mut d);
 
         let frame = frame::Frame::Settings {
@@ -440,65 +484,52 @@ mod tests {
 
         b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
         frame.to_bytes(&mut b).unwrap();
-        let off = b.off();
 
-        stream.push(&mut d[..off]).unwrap();
+        let mut cursor = std::io::Cursor::new(d);
 
         // Parse stream type.
-        assert_eq!(stream.more(), true);
-        let stream_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(stream_ty_len, 1);
-        stream.set_next_varint_len(stream_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::StreamType);
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let stream_ty = stream.get_varint().unwrap();
+        let stream_ty = stream.try_consume_varint().unwrap();
         assert_eq!(stream_ty, HTTP3_CONTROL_STREAM_TYPE_ID);
         stream
             .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        assert_eq!(stream.state, State::FrameType);
 
-        // Parse the SETTINGS frame.
-        assert_eq!(stream.more(), true);
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_ty_len, 1);
+        // Parse the SETTINGS frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FrameType);
-
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(frame_ty, frame::SETTINGS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+        assert_eq!(stream.state, State::FramePayloadLen);
 
-        let frame_payload_len_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_payload_len_len, 1);
-        stream.set_next_varint_len(frame_payload_len_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLen);
+        // Parse the SETTINGS frame payload length.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_payload_len = stream.get_varint().unwrap();
+        let frame_payload_len = stream.try_consume_varint().unwrap();
         assert_eq!(frame_payload_len, 8);
         stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayload);
+        assert_eq!(stream.state, State::FramePayload);
 
-        assert_eq!(stream.parse_frame(), Ok(()));
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        // Parse the SETTINGS frame payload.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.state, State::FrameType);
 
         assert_eq!(stream.get_frame(), Some(frame));
-
-        assert_eq!(stream.more(), false);
     }
 
     #[test]
+    /// Process duplicate SETTINGS frame on control stream.
     fn control_bad_multiple_settings() {
         let mut stream = Stream::new(3, false);
-        assert_eq!(*stream.state(), State::StreamTypeLen);
+        assert_eq!(stream.state, State::StreamType);
 
-        let mut d = [42; 40];
+        let mut d = vec![42; 40];
         let mut b = octets::Octets::with_slice(&mut d);
 
         let frame = frame::Frame::Settings {
@@ -512,53 +543,58 @@ mod tests {
         b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
         frame.to_bytes(&mut b).unwrap();
         frame.to_bytes(&mut b).unwrap();
-        let off = b.off();
 
-        stream.push(&mut d[..off]).unwrap();
+        let mut cursor = std::io::Cursor::new(d);
 
         // Parse stream type.
-        let stream_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        stream.set_next_varint_len(stream_ty_len).unwrap();
-        let stream_ty = stream.get_varint().unwrap();
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        let stream_ty = stream.try_consume_varint().unwrap();
+        assert_eq!(stream_ty, HTTP3_CONTROL_STREAM_TYPE_ID);
         stream
             .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
+        assert_eq!(stream.state, State::FrameType);
 
-        // Parse first SETTINGS frame.
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
+        // Parse the SETTINGS frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
+        assert_eq!(frame_ty, frame::SETTINGS_FRAME_TYPE_ID);
+
         stream.set_frame_type(frame_ty).unwrap();
+        assert_eq!(stream.state, State::FramePayloadLen);
 
-        let frame_payload_len_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        stream.set_next_varint_len(frame_payload_len_len).unwrap();
+        // Parse the SETTINGS frame payload length.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_payload_len = stream.get_varint().unwrap();
+        let frame_payload_len = stream.try_consume_varint().unwrap();
+        assert_eq!(frame_payload_len, 8);
         stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(stream.parse_frame(), Ok(()));
-        stream.get_frame();
+        assert_eq!(stream.state, State::FramePayload);
 
-        assert_eq!(stream.more(), true);
+        // Parse the SETTINGS frame payload.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        // Parse second SETTINGS frame.
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
+        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.state, State::FrameType);
 
-        let frame_ty = stream.get_varint().unwrap();
+        assert_eq!(stream.get_frame(), Some(frame));
+
+        // Parse the second SETTINGS frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(stream.set_frame_type(frame_ty), Err(Error::UnexpectedFrame));
     }
 
     #[test]
+    /// Process other frame before SETTINGS frame on control stream.
     fn control_bad_late_settings() {
         let mut stream = Stream::new(3, false);
-        assert_eq!(*stream.state(), State::StreamTypeLen);
+        assert_eq!(stream.state, State::StreamType);
 
-        let mut d = [42; 40];
+        let mut d = vec![42; 40];
         let mut b = octets::Octets::with_slice(&mut d);
 
         let goaway = frame::Frame::GoAway { stream_id: 0 };
@@ -574,34 +610,33 @@ mod tests {
         b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
         goaway.to_bytes(&mut b).unwrap();
         settings.to_bytes(&mut b).unwrap();
-        let off = b.off();
 
-        stream.push(&mut d[..off]).unwrap();
+        let mut cursor = std::io::Cursor::new(d);
 
         // Parse stream type.
-        let stream_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        stream.set_next_varint_len(stream_ty_len).unwrap();
-        let stream_ty = stream.get_varint().unwrap();
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        let stream_ty = stream.try_consume_varint().unwrap();
+        assert_eq!(stream_ty, HTTP3_CONTROL_STREAM_TYPE_ID);
         stream
             .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
+        assert_eq!(stream.state, State::FrameType);
 
         // Parse GOAWAY.
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(stream.set_frame_type(frame_ty), Err(Error::MissingSettings));
     }
 
     #[test]
+    /// Process not-allowed frame on control stream.
     fn control_bad_frame() {
         let mut stream = Stream::new(3, false);
-        assert_eq!(*stream.state(), State::StreamTypeLen);
+        assert_eq!(stream.state, State::StreamType);
 
-        let mut d = [42; 40];
+        let mut d = vec![42; 40];
         let mut b = octets::Octets::with_slice(&mut d);
 
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -618,42 +653,37 @@ mod tests {
         b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
         settings.to_bytes(&mut b).unwrap();
         hdrs.to_bytes(&mut b).unwrap();
-        let off = b.off();
 
-        stream.push(&mut d[..off]).unwrap();
+        let mut cursor = std::io::Cursor::new(d);
 
         // Parse stream type.
-        let stream_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        stream.set_next_varint_len(stream_ty_len).unwrap();
-        let stream_ty = stream.get_varint().unwrap();
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        let stream_ty = stream.try_consume_varint().unwrap();
         stream
             .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
 
         // Parse first SETTINGS frame.
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
         stream.set_frame_type(frame_ty).unwrap();
 
-        let frame_payload_len_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        stream.set_next_varint_len(frame_payload_len_len).unwrap();
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_payload_len = stream.get_varint().unwrap();
+        let frame_payload_len = stream.try_consume_varint().unwrap();
         stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(stream.parse_frame(), Ok(()));
+
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        assert_eq!(stream.try_consume_frame(), Ok(()));
         stream.get_frame();
 
         // Parse HEADERS.
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(stream.set_frame_type(frame_ty), Err(Error::WrongStream));
     }
 
@@ -662,24 +692,17 @@ mod tests {
         let mut stream = Stream::new(0, false);
 
         assert_eq!(stream.ty, Some(Type::Request));
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        assert_eq!(stream.state, State::FrameType);
 
-        assert_eq!(stream.set_ty(Type::Request), Err(Error::InternalError));
-
-        assert_eq!(stream.more(), false);
-        assert_eq!(stream.get_varint(), Err(Error::Done));
-        assert_eq!(stream.set_frame_payload_len(100), Err(Error::InternalError));
+        assert_eq!(stream.try_consume_varint(), Err(Error::Done));
         assert_eq!(stream.get_frame(), None);
-        assert_eq!(stream.parse_frame(), Err(Error::InternalError));
-
-        assert_eq!(stream.set_frame_type(1), Err(Error::InternalError));
     }
 
     #[test]
     fn request_good() {
         let mut stream = Stream::new(0, false);
 
-        let mut d = [42; 128];
+        let mut d = vec![42; 128];
         let mut b = octets::Octets::with_slice(&mut d);
 
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -689,79 +712,67 @@ mod tests {
 
         hdrs.to_bytes(&mut b).unwrap();
         data.to_bytes(&mut b).unwrap();
-        let off = b.off();
 
-        stream.push(&mut d[..off]).unwrap();
+        let mut cursor = std::io::Cursor::new(d);
 
-        // parse the HEADERS frame
-        assert_eq!(stream.more(), true);
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_ty_len, 1);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FrameType);
+        // Parse the HEADERS frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(frame_ty, frame::HEADERS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+        assert_eq!(stream.state, State::FramePayloadLen);
 
-        let frame_payload_len_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_payload_len_len, 1);
-        stream.set_next_varint_len(frame_payload_len_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLen);
+        // Parse the HEADERS frame payload length.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_payload_len = stream.get_varint().unwrap();
+        let frame_payload_len = stream.try_consume_varint().unwrap();
         assert_eq!(frame_payload_len, 12);
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayload);
 
-        assert_eq!(stream.parse_frame(), Ok(()));
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(stream.state, State::FramePayload);
+
+        // Parse the HEADERS frame.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.state, State::FrameType);
 
         assert_eq!(stream.get_frame(), Some(hdrs));
 
-        // parse the DATA frame
-        assert_eq!(stream.more(), true);
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_ty_len, 1);
+        // Parse the DATA frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FrameType);
-
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(frame_ty, frame::DATA_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+        assert_eq!(stream.state, State::FramePayloadLen);
 
-        let frame_payload_len_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_payload_len_len, 1);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLen);
+        // Parse the DATA frame payload length.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_payload_len = stream.get_varint().unwrap();
+        let frame_payload_len = stream.try_consume_varint().unwrap();
         assert_eq!(frame_payload_len, 12);
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayload);
 
-        assert_eq!(stream.parse_frame(), Ok(()));
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(stream.state, State::FramePayload);
+
+        // Parse the DATA frame.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.state, State::FrameType);
 
         assert_eq!(stream.get_frame(), Some(data));
-
-        assert_eq!(stream.more(), false);
     }
 
     #[test]
     fn priority_request_good() {
         let mut stream = Stream::new(0, false);
 
-        let mut d = [42; 1280];
+        let mut d = vec![42; 1280];
         let mut b = octets::Octets::with_slice(&mut d);
 
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -777,110 +788,94 @@ mod tests {
 
         hdrs.to_bytes(&mut b).unwrap();
         data.to_bytes(&mut b).unwrap();
-        let off = b.off();
 
-        stream.push(&mut d[..off]).unwrap();
+        let mut cursor = std::io::Cursor::new(d);
 
-        // Parse the PRIORITY frame.
-        assert_eq!(stream.more(), true);
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_ty_len, 1);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FrameType);
+        // Parse the PRIORITY frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(frame_ty, frame::PRIORITY_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+        assert_eq!(stream.state, State::FramePayloadLen);
 
-        let frame_payload_len_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_payload_len_len, 1);
-        stream.set_next_varint_len(frame_payload_len_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLen);
+        // Parse the PRIORITY frame payload length.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_payload_len = stream.get_varint().unwrap();
+        let frame_payload_len = stream.try_consume_varint().unwrap();
         assert_eq!(frame_payload_len, 2);
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayload);
 
-        assert_eq!(stream.parse_frame(), Ok(()));
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(stream.state, State::FramePayload);
+
+        // Parse the PRIORITY frame.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.state, State::FrameType);
 
         // TODO: if/when PRIRORITY frame is fully implemented, test it
         // e.g. `assert_eq!(stream.get_frame(), Some(priority));`
 
-        // Parse the HEADERS frame.
-        assert_eq!(stream.more(), true);
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_ty_len, 1);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FrameType);
+        // Parse the HEADERS frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(frame_ty, frame::HEADERS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+        assert_eq!(stream.state, State::FramePayloadLen);
 
-        let frame_payload_len_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_payload_len_len, 1);
-        stream.set_next_varint_len(frame_payload_len_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLen);
+        // Parse the HEADERS frame payload length.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_payload_len = stream.get_varint().unwrap();
+        let frame_payload_len = stream.try_consume_varint().unwrap();
         assert_eq!(frame_payload_len, 12);
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayload);
 
-        assert_eq!(stream.parse_frame(), Ok(()));
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(stream.state, State::FramePayload);
+
+        // Parse the HEADERS frame.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.state, State::FrameType);
 
         assert_eq!(stream.get_frame(), Some(hdrs));
 
-        // Parse the DATA frame.
-        assert_eq!(stream.more(), true);
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_ty_len, 1);
+        // Parse the DATA frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FrameType);
-
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(frame_ty, frame::DATA_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+        assert_eq!(stream.state, State::FramePayloadLen);
 
-        let frame_payload_len_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_payload_len_len, 1);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLen);
+        // Parse the DATA frame payload length.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_payload_len = stream.get_varint().unwrap();
+        let frame_payload_len = stream.try_consume_varint().unwrap();
         assert_eq!(frame_payload_len, 12);
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayload);
 
-        assert_eq!(stream.parse_frame(), Ok(()));
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(stream.state, State::FramePayload);
+
+        // Parse the DATA frame.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.state, State::FrameType);
 
         assert_eq!(stream.get_frame(), Some(data));
-
-        assert_eq!(stream.more(), false);
     }
 
     #[test]
     fn priority_control_good() {
         let mut stream = Stream::new(2, false);
 
-        let mut d = [42; 1280];
+        let mut d = vec![42; 1280];
         let mut b = octets::Octets::with_slice(&mut d);
 
         let settings = frame::Frame::Settings {
@@ -902,95 +897,74 @@ mod tests {
         b.put_varint(1).unwrap();
         b.put_u8(16).unwrap(); // weight
 
-        let off = b.off();
-
-        stream.push(&mut d[..off]).unwrap();
+        let mut cursor = std::io::Cursor::new(d);
 
         // Parse stream type.
-        assert_eq!(stream.more(), true);
-        let stream_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(stream_ty_len, 1);
-        stream.set_next_varint_len(stream_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::StreamType);
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let stream_ty = stream.get_varint().unwrap();
+        let stream_ty = stream.try_consume_varint().unwrap();
         assert_eq!(stream_ty, HTTP3_CONTROL_STREAM_TYPE_ID);
         stream
             .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        assert_eq!(stream.state, State::FrameType);
 
-        // Parse the SETTINGS frame.
-        assert_eq!(stream.more(), true);
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_ty_len, 1);
+        // Parse the SETTINGS frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FrameType);
-
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(frame_ty, frame::SETTINGS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+        assert_eq!(stream.state, State::FramePayloadLen);
 
-        let frame_payload_len_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_payload_len_len, 1);
-        stream.set_next_varint_len(frame_payload_len_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLen);
+        // Parse the SETTINGS frame payload length.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_payload_len = stream.get_varint().unwrap();
+        let frame_payload_len = stream.try_consume_varint().unwrap();
         assert_eq!(frame_payload_len, 8);
         stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayload);
+        assert_eq!(stream.state, State::FramePayload);
 
-        assert_eq!(stream.parse_frame(), Ok(()));
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        // Parse the SETTINGS frame payload.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        assert_eq!(stream.get_frame(), Some(settings));
+        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.state, State::FrameType);
 
-        // Parse the PRIORITY frame.
-        assert_eq!(stream.more(), true);
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_ty_len, 1);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FrameType);
+        // Parse the PRIORITY frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(frame_ty, frame::PRIORITY_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+        assert_eq!(stream.state, State::FramePayloadLen);
 
-        let frame_payload_len_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_payload_len_len, 1);
-        stream.set_next_varint_len(frame_payload_len_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLen);
+        // Parse the PRIORITY frame payload length.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_payload_len = stream.get_varint().unwrap();
+        let frame_payload_len = stream.try_consume_varint().unwrap();
         assert_eq!(frame_payload_len, 3);
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayload);
 
-        assert_eq!(stream.parse_frame(), Ok(()));
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(stream.state, State::FramePayload);
+
+        // Parse the PRIORITY frame.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.state, State::FrameType);
 
         // TODO: if/when PRIRORITY frame is fully implemented, test it
         // e.g. `assert_eq!(stream.get_frame(), Some(priority));`
-
-        assert_eq!(stream.more(), false);
     }
 
     #[test]
     fn push_good() {
         let mut stream = Stream::new(2, false);
 
-        let mut d = [42; 128];
+        let mut d = vec![42; 128];
         let mut b = octets::Octets::with_slice(&mut d);
 
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -1002,116 +976,100 @@ mod tests {
         b.put_varint(1).unwrap();
         hdrs.to_bytes(&mut b).unwrap();
         data.to_bytes(&mut b).unwrap();
-        let off = b.off();
 
-        stream.push(&mut d[..off]).unwrap();
+        let mut cursor = std::io::Cursor::new(d);
 
-        // parse stream type
-        let stream_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        stream.set_next_varint_len(stream_ty_len).unwrap();
-        let stream_ty = stream.get_varint().unwrap();
+        // Parse stream type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        let stream_ty = stream.try_consume_varint().unwrap();
         assert_eq!(stream_ty, HTTP3_PUSH_STREAM_TYPE_ID);
         stream
             .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
-        assert_eq!(*stream.state(), State::PushIdLen);
+        assert_eq!(stream.state, State::PushId);
 
-        // parse push ID
-        let push_id_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        stream.set_next_varint_len(push_id_len).unwrap();
-        assert_eq!(*stream.state(), State::PushId);
-        let push_id = stream.get_varint().unwrap();
+        // Parse push ID.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        let push_id = stream.try_consume_varint().unwrap();
         assert_eq!(push_id, 1);
 
-        // parse the HEADERS frame
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_ty_len, 1);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FrameType);
+        stream.set_push_id(push_id).unwrap();
+        assert_eq!(stream.state, State::FrameType);
 
-        let frame_ty = stream.get_varint().unwrap();
+        // Parse the HEADERS frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(frame_ty, frame::HEADERS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+        assert_eq!(stream.state, State::FramePayloadLen);
 
-        let frame_payload_len_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_payload_len_len, 1);
-        stream.set_next_varint_len(frame_payload_len_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLen);
+        // Parse the HEADERS frame payload length.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_payload_len = stream.get_varint().unwrap();
+        let frame_payload_len = stream.try_consume_varint().unwrap();
         assert_eq!(frame_payload_len, 12);
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayload);
 
-        assert_eq!(stream.parse_frame(), Ok(()));
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(stream.state, State::FramePayload);
+
+        // Parse the HEADERS frame.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.state, State::FrameType);
 
         assert_eq!(stream.get_frame(), Some(hdrs));
 
-        // parse the DATA frame
-        assert_eq!(stream.more(), true);
-        let frame_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_ty_len, 1);
+        // Parse the DATA frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FrameType);
-
-        let frame_ty = stream.get_varint().unwrap();
+        let frame_ty = stream.try_consume_varint().unwrap();
         assert_eq!(frame_ty, frame::DATA_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLenLen);
+        assert_eq!(stream.state, State::FramePayloadLen);
 
-        let frame_payload_len_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(frame_payload_len_len, 1);
-        stream.set_next_varint_len(frame_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayloadLen);
+        // Parse the DATA frame payload length.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let frame_payload_len = stream.get_varint().unwrap();
+        let frame_payload_len = stream.try_consume_varint().unwrap();
         assert_eq!(frame_payload_len, 12);
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(*stream.state(), State::FramePayload);
 
-        assert_eq!(stream.parse_frame(), Ok(()));
-        assert_eq!(*stream.state(), State::FrameTypeLen);
+        stream.set_frame_payload_len(frame_payload_len).unwrap();
+        assert_eq!(stream.state, State::FramePayload);
+
+        // Parse the DATA frame.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.state, State::FrameType);
 
         assert_eq!(stream.get_frame(), Some(data));
-
-        assert_eq!(stream.more(), false);
     }
 
     #[test]
     fn grease() {
         let mut stream = Stream::new(2, false);
 
-        let mut d = [42; 20];
+        let mut d = vec![42; 20];
         let mut b = octets::Octets::with_slice(&mut d);
 
         b.put_varint(33).unwrap();
 
-        stream.push(&mut d).unwrap();
+        let mut cursor = std::io::Cursor::new(d);
 
-        // parse stream type
-        assert_eq!(stream.more(), true);
-        let stream_ty_len =
-            octets::varint_parse_len(stream.buf_bytes(1).unwrap()[0]);
-        assert_eq!(stream_ty_len, 1);
-        stream.set_next_varint_len(stream_ty_len).unwrap();
-        assert_eq!(*stream.state(), State::StreamType);
+        // Parse stream type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        let stream_ty = stream.get_varint().unwrap();
+        let stream_ty = stream.try_consume_varint().unwrap();
         assert_eq!(stream_ty, 33);
         stream
             .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
-        assert_eq!(*stream.state(), State::Done);
+        assert_eq!(stream.state, State::Drain);
     }
 }
