@@ -2863,6 +2863,50 @@ pub mod testing {
             Ok(())
         }
 
+        pub fn flush_client(&mut self, buf: &mut [u8]) -> Result<()> {
+            loop {
+                let len = match self.client.send(buf) {
+                    Ok(write) => write,
+
+                    Err(Error::Done) => break,
+
+                    Err(e) => return Err(e),
+                };
+
+                match self.server.recv(&mut buf[..len]) {
+                    Ok(_) => (),
+
+                    Err(Error::Done) => (),
+
+                    Err(e) => return Err(e),
+                }
+            }
+
+            Ok(())
+        }
+
+        pub fn flush_server(&mut self, buf: &mut [u8]) -> Result<()> {
+            loop {
+                let len = match self.server.send(buf) {
+                    Ok(write) => write,
+
+                    Err(Error::Done) => break,
+
+                    Err(e) => return Err(e),
+                };
+
+                match self.client.recv(&mut buf[..len]) {
+                    Ok(_) => (),
+
+                    Err(Error::Done) => (),
+
+                    Err(e) => return Err(e),
+                }
+            }
+
+            Ok(())
+        }
+
         pub fn advance(&mut self, buf: &mut [u8]) -> Result<()> {
             let mut client_done = false;
             let mut server_done = false;
