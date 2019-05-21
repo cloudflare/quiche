@@ -1472,7 +1472,15 @@ impl Connection {
 
                     self.tx_data -= data.len();
 
+                    let was_writable = stream.writable();
+
                     stream.send.push(data)?;
+
+                    // If the stream is now writable push it to the writable
+                    // queue, but only if it wasn't already queued.
+                    if stream.writable() && !was_writable {
+                        self.streams.push_writable(stream_id);
+                    }
                 },
 
                 frame::Frame::ACK { .. } => {
@@ -1699,10 +1707,9 @@ impl Connection {
             self.max_tx_data > self.tx_data &&
             left > frame::MAX_STREAM_OVERHEAD
         {
-            // TODO: round-robin selected stream instead of picking the first
-            for (id, stream) in
-                self.streams.iter_mut().filter(|(_, s)| s.writable())
-            {
+            while let Some(stream_id) = self.streams.pop_writable() {
+                let stream = self.streams.get_mut(stream_id).unwrap();
+
                 // Make sure we can fit the data in the packet.
                 let stream_len = cmp::min(
                     left - frame::MAX_STREAM_OVERHEAD,
@@ -1718,7 +1725,7 @@ impl Connection {
                 self.tx_data += stream_buf.len();
 
                 let frame = frame::Frame::Stream {
-                    stream_id: *id,
+                    stream_id,
                     data: stream_buf,
                 };
 
@@ -1729,6 +1736,13 @@ impl Connection {
 
                 ack_eliciting = true;
                 in_flight = true;
+
+                // If the stream is still writable, push it to the back of the
+                // queue again.
+                if stream.writable() {
+                    self.streams.push_writable(stream_id);
+                }
+
                 break;
             }
         }
@@ -1927,7 +1941,15 @@ impl Connection {
 
         // TODO: implement backpressure based on peer's flow control
 
+        let was_writable = stream.writable();
+
         stream.send.push_slice(buf, fin)?;
+
+        // If the stream is now writable push it to the writable queue, but
+        // only if it wasn't already queued.
+        if stream.writable() && !was_writable {
+            self.streams.push_writable(stream_id);
+        }
 
         Ok(buf.len())
     }
@@ -2421,7 +2443,15 @@ impl Connection {
                     self.is_server,
                 )?;
 
+                let was_writable = stream.writable();
+
                 stream.send.update_max_data(max as usize);
+
+                // If the stream is now writable push it to the writable queue,
+                // but only if it wasn't already queued.
+                if stream.writable() && !was_writable {
+                    self.streams.push_writable(stream_id);
+                }
             },
 
             frame::Frame::MaxStreamsBidi { max } => {
@@ -3369,6 +3399,47 @@ mod tests {
     }
 
     #[test]
+    /// Tests that sending STREAM frames for a stream that is out of flow
+    /// control credits is resumed when the stream receives more credits.
+    fn stream_flow_control_resume_send_after_update() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", true), Ok(5));
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert!(!pipe.server.stream_finished(4));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        let mut b = [0; 20];
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((15, false)));
+        assert_eq!(&b[..15], b"aaaaaaaaaaaaaaa");
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert!(!pipe.server.stream_finished(4));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
+        assert_eq!(&b[..5], b"aaaaa");
+
+        assert!(pipe.server.stream_finished(4));
+    }
+
+    #[test]
     fn stream_flow_control_update() {
         let mut buf = [0; 65535];
 
@@ -3852,6 +3923,60 @@ mod tests {
 
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), None);
+    }
+
+    #[test]
+    /// Tests that the order of writable streams scheduled on the wire is the
+    /// same as the order of `stream_send()` calls done by the application.
+    fn stream_round_robin() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
+
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        let frames =
+            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert_eq!(
+            frames.iter().next(),
+            Some(&frame::Frame::Stream {
+                stream_id: 8,
+                data: stream::RangeBuf::from(b"aaaaa", 0, false),
+            })
+        );
+
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        let frames =
+            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert_eq!(
+            frames.iter().next(),
+            Some(&frame::Frame::Stream {
+                stream_id: 0,
+                data: stream::RangeBuf::from(b"aaaaa", 0, false),
+            })
+        );
+
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        let frames =
+            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert_eq!(
+            frames.iter().next(),
+            Some(&frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"aaaaa", 0, false),
+            })
+        );
     }
 }
 

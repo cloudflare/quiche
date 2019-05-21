@@ -30,6 +30,7 @@ use std::cmp;
 use std::collections::hash_map;
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 
 use crate::Error;
 use crate::Result;
@@ -53,6 +54,13 @@ pub struct StreamMap {
 
     /// Local maximum unidirectional stream count limit.
     local_max_streams_uni: usize,
+
+    /// Queue of stream IDs corresponding to streams that have outstanding
+    /// data to send and enough flow control credits to send at least some of
+    /// it.
+    ///
+    /// Streams are added to the back of the list, and removed from the front.
+    writable: VecDeque<u64>,
 }
 
 impl StreamMap {
@@ -119,6 +127,26 @@ impl StreamMap {
         Ok(stream)
     }
 
+    /// Pushes the stream ID to the back of the writable streams queue.
+    ///
+    /// Note that the caller is responsible for checking that the specified
+    /// stream ID was not in the queue already before calling this.
+    ///
+    /// Queueing a stream multiple times simultaneously means that it might be
+    /// unfairly scheduled more often than other streams, and might also cause
+    /// spurious cycles through the queue, so it should be avoided.
+    pub fn push_writable(&mut self, stream_id: u64) {
+        self.writable.push_back(stream_id);
+    }
+
+    /// Removes and returns the first stream ID from the writable streams queue.
+    ///
+    /// Note that if the stream is still writable after sending some of its
+    /// outstanding data, it needs to be added back to the queu.
+    pub fn pop_writable(&mut self) -> Option<u64> {
+        self.writable.pop_front()
+    }
+
     /// Updates the local maximum bidirectional stream count limit.
     pub fn update_local_max_streams_bidi(&mut self, v: usize) {
         self.local_max_streams_bidi = cmp::max(self.local_max_streams_bidi, v);
@@ -151,7 +179,7 @@ impl StreamMap {
 
     /// Returns true if there are any streams that have data to write.
     pub fn has_writable(&self) -> bool {
-        self.streams.values().any(Stream::writable)
+        !self.writable.is_empty()
     }
 
     /// Returns true if there are any streams that need to update the local
@@ -185,9 +213,10 @@ impl Stream {
         self.recv.ready()
     }
 
-    /// Returns true if the stream has data to write.
+    /// Returns true if the stream has data to send and is allowed to send at
+    /// least some of it.
     pub fn writable(&self) -> bool {
-        self.send.ready() && self.send.off() <= self.send.max_data
+        self.send.ready() && self.send.off() < self.send.max_data
     }
 }
 
