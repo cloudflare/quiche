@@ -734,19 +734,11 @@ impl Connection {
         for s in streams {
             trace!("{} stream id {} is readable", conn.trace_id(), s);
 
-            loop {
-                match self.handle_stream(conn, s) {
-                    Ok(_) => break,
+            match self.handle_stream(conn, s) {
+                Ok(_) | Err(Error::Done) => continue,
 
-                    Err(Error::Done) => break,
-
-                    Err(Error::BufferTooShort) => {
-                        // Keep processing transport stream.
-                    },
-
-                    Err(e) => return Err(e),
-                };
-            }
+                Err(e) => return Err(e),
+            };
         }
 
         for (stream_id, stream) in
@@ -1139,37 +1131,21 @@ impl Connection {
     fn handle_stream(
         &mut self, conn: &mut super::Connection, stream_id: u64,
     ) -> Result<()> {
-        let mut d = [0; 32768];
-
         let stream = self
             .streams
             .entry(stream_id)
             .or_insert_with(|| stream::Stream::new(stream_id, false));
 
-        let (read, _fin) = conn.stream_recv(stream_id, &mut d)?;
-        stream.push(&d[..read])?;
-
-        trace!(
-            "{} read {} bytes on stream {}",
-            conn.trace_id(),
-            read,
-            stream_id
-        );
-
-        while stream.more() {
+        while stream.try_fill_buffer(conn).is_ok() {
             match stream.state() {
-                stream::State::StreamTypeLen => {
-                    let varint_byte = stream.buf_bytes(1)?[0];
-                    stream.set_next_varint_len(octets::varint_parse_len(
-                        varint_byte,
-                    ))?;
-                },
-
                 stream::State::StreamType => {
-                    let varint = stream.get_varint()?;
+                    let varint = match stream.try_consume_varint() {
+                        Ok(v) => v,
+
+                        Err(_) => continue,
+                    };
 
                     let ty = stream::Type::deserialize(varint)?;
-
                     stream.set_ty(ty)?;
 
                     match &ty {
@@ -1250,27 +1226,23 @@ impl Connection {
                     }
                 },
 
-                stream::State::FramePayloadLenLen => {
-                    let varint_byte = stream.buf_bytes(1)?[0];
-                    stream.set_next_varint_len(octets::varint_parse_len(
-                        varint_byte,
-                    ))?
-                },
+                stream::State::PushId => {
+                    let varint = match stream.try_consume_varint() {
+                        Ok(v) => v,
 
-                stream::State::FramePayloadLen => {
-                    let varint = stream.get_varint()?;
-                    stream.set_frame_payload_len(varint)?;
-                },
+                        Err(_) => continue,
+                    };
 
-                stream::State::FrameTypeLen => {
-                    let varint_byte = stream.buf_bytes(1)?[0];
-                    stream.set_next_varint_len(octets::varint_parse_len(
-                        varint_byte,
-                    ))?
+                    stream.set_push_id(varint)?;
                 },
 
                 stream::State::FrameType => {
-                    let varint = stream.get_varint()?;
+                    let varint = match stream.try_consume_varint() {
+                        Ok(v) => v,
+
+                        Err(_) => continue,
+                    };
+
                     match stream.set_frame_type(varint) {
                         Err(Error::UnexpectedFrame) => {
                             let msg = format!("Unexpected frame type {}", varint);
@@ -1295,10 +1267,20 @@ impl Connection {
                     }
                 },
 
+                stream::State::FramePayloadLen => {
+                    let varint = match stream.try_consume_varint() {
+                        Ok(v) => v,
+
+                        Err(_) => continue,
+                    };
+
+                    stream.set_frame_payload_len(varint)?;
+                },
+
                 stream::State::FramePayload => {
-                    if let Err(e) = stream.parse_frame() {
+                    if let Err(e) = stream.try_consume_frame() {
                         match e {
-                            Error::BufferTooShort => (),
+                            Error::Done => (),
 
                             _ => conn.close(
                                 true,
@@ -1311,11 +1293,29 @@ impl Connection {
                     }
                 },
 
-                stream::State::QpackInstruction => return Err(Error::Done),
+                stream::State::QpackInstruction => {
+                    let e = match stream.ty() {
+                        Some(stream::Type::QpackEncoder) =>
+                            Error::QpackEncoderStreamError,
+                        Some(stream::Type::QpackDecoder) =>
+                            Error::QpackDecoderStreamError,
 
-                stream::State::Done => return Err(Error::Done),
+                        _ => unreachable!(),
+                    };
 
-                _ => (),
+                    conn.close(true, e.to_wire(), b"")?;
+
+                    return Err(e);
+                },
+
+                stream::State::Drain => {
+                    let mut d = [0; 4096];
+
+                    // Read data from the stream and discard immediately.
+                    loop {
+                        conn.stream_recv(stream_id, &mut d)?;
+                    }
+                },
             }
         }
 
@@ -2183,8 +2183,10 @@ mod tests {
     }
 
     #[test]
-    /// Client closes a qpack stream, which is forbidden.
+    /// Client sends data on a QPACK stream, which we don't allow.
     fn close_qpack_stream() {
+        // TODO: once we add support for QPACK dynamic table, this test should
+        // be changed to testing for critical stream being closed.
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
@@ -2205,7 +2207,7 @@ mod tests {
                     break;
                 },
 
-                Err(Error::ClosedCriticalStream) => {
+                Err(Error::QpackEncoderStreamError) => {
                     qpack_stream_closed = true;
                     break;
                 },
