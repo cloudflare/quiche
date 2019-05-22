@@ -507,6 +507,7 @@ fn build_response(
 ) -> Result<(std::vec::Vec<quiche::h3::Header>, std::vec::Vec<u8>), ()> {
     let mut file_path = std::path::PathBuf::from(root);
     let mut path = std::path::Path::new("");
+    let mut method = "";
 
     // Look for the request's path and method.
     for hdr in request {
@@ -515,25 +516,30 @@ fn build_response(
                 path = std::path::Path::new(hdr.value());
             },
 
-            ":method" =>
-                if hdr.value() != "GET" {
-                    return Err(());
-                },
+            ":method" => {
+                method = hdr.value();
+            },
 
             _ => (),
         }
     }
 
-    for c in path.components() {
-        if let std::path::Component::Normal(v) = c {
-            file_path.push(v)
-        }
-    }
+    let (status, body) = match method {
+        "GET" => {
+            for c in path.components() {
+                if let std::path::Component::Normal(v) = c {
+                    file_path.push(v)
+                }
+            }
 
-    let (status, body) = match std::fs::read(file_path.as_path()) {
-        Ok(data) => (200, data),
+            match std::fs::read(file_path.as_path()) {
+                Ok(data) => (200, data),
 
-        Err(_) => (404, b"Not Found!".to_vec()),
+                Err(_) => (404, b"Not Found!".to_vec()),
+            }
+        },
+
+        _ => (405, Vec::new()),
     };
 
     Ok((
