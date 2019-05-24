@@ -663,9 +663,6 @@ pub struct Connection {
     /// Whether the connection handshake has completed.
     handshake_completed: bool,
 
-    /// Whether the connection is in the draining state.
-    draining: bool,
-
     /// Whether the connection is closed.
     closed: bool,
 
@@ -906,8 +903,6 @@ impl Connection {
 
             handshake_completed: false,
 
-            draining: false,
-
             closed: false,
 
             grease: config.grease,
@@ -1027,7 +1022,7 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
-        if self.draining {
+        if self.draining_timer.is_some() {
             return Err(Error::Done);
         }
 
@@ -1487,12 +1482,10 @@ impl Connection {
                 },
 
                 frame::Frame::ConnectionClose { .. } => {
-                    self.draining = true;
                     self.draining_timer = Some(now + (self.recovery.pto() * 3));
                 },
 
                 frame::Frame::ApplicationClose { .. } => {
-                    self.draining = true;
                     self.draining_timer = Some(now + (self.recovery.pto() * 3));
                 },
             }
@@ -1611,7 +1604,7 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
-        if self.draining {
+        if self.draining_timer.is_some() {
             return Err(Error::Done);
         }
 
@@ -1816,7 +1809,6 @@ impl Connection {
 
             frames.push(frame);
 
-            self.draining = true;
             self.draining_timer = Some(now + (self.recovery.pto() * 3));
 
             ack_eliciting = true;
@@ -1836,7 +1828,6 @@ impl Connection {
 
                 frames.push(frame);
 
-                self.draining = true;
                 self.draining_timer = Some(now + (self.recovery.pto() * 3));
 
                 ack_eliciting = true;
@@ -2173,7 +2164,7 @@ impl Connection {
             return None;
         }
 
-        let timeout = if self.draining {
+        let timeout = if self.draining_timer.is_some() {
             self.draining_timer
         } else if self.recovery.loss_detection_timer().is_some() {
             self.recovery.loss_detection_timer()
@@ -2202,10 +2193,8 @@ impl Connection {
     pub fn on_timeout(&mut self) {
         let now = time::Instant::now();
 
-        if self.draining {
-            if self.draining_timer.is_some() &&
-                self.draining_timer.unwrap() <= now
-            {
+        if let Some(draining_timer) = self.draining_timer {
+            if draining_timer <= now {
                 trace!("{} draining timeout expired", self.trace_id);
 
                 self.closed = true;
@@ -2249,7 +2238,7 @@ impl Connection {
     /// [`timeout()`]: struct.Connection.html#method.timeout
     /// [`is_closed()`]: struct.Connection.html#method.is_closed
     pub fn close(&mut self, app: bool, err: u16, reason: &[u8]) -> Result<()> {
-        if self.draining {
+        if self.draining_timer.is_some() {
             return Err(Error::Done);
         }
 
