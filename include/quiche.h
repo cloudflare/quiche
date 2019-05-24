@@ -45,7 +45,7 @@ extern "C" {
 #define QUICHE_MAX_CONN_ID_LEN 18
 
 // The minimum length of Initial packets sent by a client.
-#define MIN_CLIENT_INITIAL_LEN 1200
+#define QUICHE_MIN_CLIENT_INITIAL_LEN 1200
 
 enum quiche_error {
     // There is no more work to do.
