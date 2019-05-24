@@ -248,7 +248,7 @@ pub const PROTOCOL_VERSION: u32 = 0xff00_0014;
 pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
 
 /// The minimum length of Initial packets sent by a client.
-const MIN_CLIENT_INITIAL_LEN: usize = 1200;
+pub const MIN_CLIENT_INITIAL_LEN: usize = 1200;
 
 const PAYLOAD_MIN_LEN: usize = 4;
 
