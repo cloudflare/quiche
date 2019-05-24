@@ -247,7 +247,8 @@ pub const PROTOCOL_VERSION: u32 = 0xff00_0014;
 /// The maximum length of a connection ID.
 pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
 
-const CLIENT_INITIAL_MIN_LEN: usize = 1200;
+/// The minimum length of Initial packets sent by a client.
+const MIN_CLIENT_INITIAL_LEN: usize = 1200;
 
 const PAYLOAD_MIN_LEN: usize = 4;
 
@@ -1921,7 +1922,7 @@ impl Connection {
             let pkt_len = pn_len + payload_len + overhead;
 
             let frame = frame::Frame::Padding {
-                len: cmp::min(CLIENT_INITIAL_MIN_LEN - pkt_len, left),
+                len: cmp::min(MIN_CLIENT_INITIAL_LEN - pkt_len, left),
             };
 
             payload_len += frame.wire_len();
