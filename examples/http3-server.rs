@@ -319,11 +319,10 @@ fn main() {
                             );
                         },
 
-                        Ok((stream_id, quiche::h3::Event::Data(data))) => {
+                        Ok((stream_id, quiche::h3::Event::Data)) => {
                             info!(
-                                "{} got data of length {} on stream id {}",
+                                "{} got data on stream id {}",
                                 client.conn.trace_id(),
-                                data.len(),
                                 stream_id
                             );
                         },

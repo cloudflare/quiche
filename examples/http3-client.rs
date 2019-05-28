@@ -241,17 +241,21 @@ fn main() {
                         );
                     },
 
-                    Ok((stream_id, quiche::h3::Event::Data(data))) => {
-                        debug!(
-                            "{} got response data of length {} in stream id {}",
-                            conn.trace_id(),
-                            data.len(),
-                            stream_id
-                        );
+                    Ok((stream_id, quiche::h3::Event::Data)) => {
+                        if let Ok(read) =
+                            http3_conn.recv_body(&mut conn, stream_id, &mut buf)
+                        {
+                            debug!(
+                                "{} got {} bytes of response data on stream {}",
+                                conn.trace_id(),
+                                read,
+                                stream_id
+                            );
 
-                        print!("{}", unsafe {
-                            std::str::from_utf8_unchecked(&data)
-                        });
+                            print!("{}", unsafe {
+                                std::str::from_utf8_unchecked(&buf[..read])
+                            });
+                        }
                     },
 
                     Ok((_stream_id, quiche::h3::Event::Finished)) => {
