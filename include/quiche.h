@@ -319,9 +319,6 @@ int quiche_h3_event_for_each_header(quiche_h3_event *ev,
                                               void *argp),
                                     void *argp);
 
-// Returns the data from the event.
-size_t quiche_h3_event_data(quiche_h3_event *ev, uint8_t **out);
-
 // Frees the HTTP/3 event object.
 void quiche_h3_event_free(quiche_h3_event *ev);
 
@@ -347,6 +344,10 @@ int quiche_h3_send_response(quiche_h3_conn *conn, quiche_conn *quic_conn,
 ssize_t quiche_h3_send_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t stream_id, uint8_t *body, size_t body_len,
                             bool fin);
+
+// Reads request or response body data into the provided buffer.
+ssize_t quiche_h3_recv_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
+                            uint64_t stream_id, uint8_t *out, size_t out_len);
 
 // Frees the HTTP/3 connection object.
 void quiche_h3_conn_free(quiche_h3_conn *conn);

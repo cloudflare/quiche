@@ -149,7 +149,7 @@
 //!             }
 //!         },
 //!
-//!         Ok((stream_id, quiche::h3::Event::Data(data))) => {
+//!         Ok((stream_id, quiche::h3::Event::Data)) => {
 //!             // Request body data, handle it.
 //!             # return Ok(());
 //!         },
@@ -188,9 +188,15 @@
 //!                      status.value(), stream_id);
 //!         },
 //!
-//!         Ok((stream_id, quiche::h3::Event::Data(data))) => {
-//!             println!("Received {} bytes of payload on stream {}",
-//!                      data.len(), stream_id);
+//!         Ok((stream_id, quiche::h3::Event::Data)) => {
+//!             let mut body = vec![0; 4096];
+//!
+//!             if let Ok(read) =
+//!                 h3_conn.recv_body(&mut conn, stream_id, &mut body)
+//!             {
+//!                 println!("Received {} bytes of payload on stream {}",
+//!                          read, stream_id);
+//!             }
 //!         },
 //!
 //!         Ok((stream_id, quiche::h3::Event::Finished)) => {
@@ -476,7 +482,15 @@ pub enum Event {
     Headers(Vec<Header>),
 
     /// Data was received.
-    Data(Vec<u8>),
+    ///
+    /// This indicates that the application can use the [`recv_body()`] method
+    /// to retrieve the data from the stream.
+    ///
+    /// This event will keep being reported until all the available data is
+    /// retrieved by the application.
+    ///
+    /// [`recv_body()`]: struct.Connection.html#method.recv_body
+    Data,
 
     /// Stream was closed,
     Finished,
@@ -715,6 +729,29 @@ impl Connection {
         Ok(written)
     }
 
+    /// Reads request or response body data into the provided buffer.
+    ///
+    /// Applications should call this method whenever the [`poll()`] method
+    /// returns a [`Data`] event.
+    ///
+    /// On success the amount of bytes read is returned, or [`Done`] if there
+    /// is no data to read.
+    ///
+    /// [`poll()`]: struct.Connection.html#method.poll
+    /// [`Data`]: enum.Event.html#variant.Data
+    /// [`Done`]: enum.Error.html#variant.Done
+    pub fn recv_body(
+        &mut self, conn: &mut super::Connection, stream_id: u64, out: &mut [u8],
+    ) -> Result<usize> {
+        let stream = self.streams.get_mut(&stream_id).ok_or(Error::Done)?;
+
+        if stream.state() != stream::State::Data {
+            return Err(Error::Done);
+        }
+
+        Ok(stream.try_consume_data(conn, out)?)
+    }
+
     /// Processes HTTP/3 data received from the peer.
     ///
     /// On success it returns an [`Event`] as well as the event's source stream
@@ -796,7 +833,7 @@ impl Connection {
                         return Ok((*stream_id, Event::Headers(headers)));
                     },
 
-                    frame::Frame::Data { payload } => {
+                    frame::Frame::Data { .. } => {
                         if Some(*stream_id) == self.peer_control_stream_id {
                             conn.close(
                                 true,
@@ -807,7 +844,7 @@ impl Connection {
                             return Err(Error::UnexpectedFrame);
                         }
 
-                        return Ok((*stream_id, Event::Data(payload)));
+                        // Do nothing. The Data event is returned separately.
                     },
 
                     frame::Frame::GoAway {
@@ -947,6 +984,14 @@ impl Connection {
                         // TODO: implement CANCEL_PUSH frame
                     },
                 }
+            }
+
+            // Report a Data event if we have a pending incoming DATA
+            // notification active.
+            if stream.has_incoming_data() {
+                stream.notify_incoming_data(false);
+
+                return Ok((*stream_id, Event::Data));
             }
 
             if conn.stream_finished(*stream_id) {
@@ -1136,9 +1181,11 @@ impl Connection {
             .entry(stream_id)
             .or_insert_with(|| stream::Stream::new(stream_id, false));
 
-        while stream.try_fill_buffer(conn).is_ok() {
+        loop {
             match stream.state() {
                 stream::State::StreamType => {
+                    stream.try_fill_buffer(conn)?;
+
                     let varint = match stream.try_consume_varint() {
                         Ok(v) => v,
 
@@ -1227,6 +1274,8 @@ impl Connection {
                 },
 
                 stream::State::PushId => {
+                    stream.try_fill_buffer(conn)?;
+
                     let varint = match stream.try_consume_varint() {
                         Ok(v) => v,
 
@@ -1237,6 +1286,8 @@ impl Connection {
                 },
 
                 stream::State::FrameType => {
+                    stream.try_fill_buffer(conn)?;
+
                     let varint = match stream.try_consume_varint() {
                         Ok(v) => v,
 
@@ -1268,6 +1319,8 @@ impl Connection {
                 },
 
                 stream::State::FramePayloadLen => {
+                    stream.try_fill_buffer(conn)?;
+
                     let varint = match stream.try_consume_varint() {
                         Ok(v) => v,
 
@@ -1278,6 +1331,8 @@ impl Connection {
                 },
 
                 stream::State::FramePayload => {
+                    stream.try_fill_buffer(conn)?;
+
                     if let Err(e) = stream.try_consume_frame() {
                         match e {
                             Error::Done => (),
@@ -1293,7 +1348,23 @@ impl Connection {
                     }
                 },
 
+                stream::State::Data => {
+                    // If the stream is readable and we are in the Data state
+                    // it means that there is some DATA payload (even if only
+                    // partial) in the transport stream.
+                    //
+                    // This can either be newly received data, or data that
+                    // was previously received but not yet read by the
+                    // application. We don't really have a way to tell either
+                    // way, so we set the incoming data flag in both cases in
+                    // a "level-triggered" fashion.
+                    stream.notify_incoming_data(true);
+                    break;
+                },
+
                 stream::State::QpackInstruction => {
+                    stream.try_fill_buffer(conn)?;
+
                     let e = match stream.ty() {
                         Some(stream::Type::QpackEncoder) =>
                             Error::QpackEncoderStreamError,
@@ -1512,6 +1583,15 @@ pub mod testing {
             Ok(bytes)
         }
 
+        /// Fetches DATA payload from the server.
+        ///
+        /// On success it returns the number of bytes received.
+        pub fn recv_body_client(
+            &mut self, stream: u64, buf: &mut [u8],
+        ) -> Result<usize> {
+            self.client.recv_body(&mut self.pipe.client, stream, buf)
+        }
+
         /// Sends some default payload from server.
         ///
         /// On success it returns the payload.
@@ -1526,6 +1606,15 @@ pub mod testing {
             self.advance().ok();
 
             Ok(bytes)
+        }
+
+        /// Fetches DATA payload from the client.
+        ///
+        /// On success it returns the number of bytes received.
+        pub fn recv_body_server(
+            &mut self, stream: u64, buf: &mut [u8],
+        ) -> Result<usize> {
+            self.server.recv_body(&mut self.pipe.server, stream, buf)
         }
 
         /// Sends a single HTTP/3 frame from the client.
@@ -1614,8 +1703,13 @@ mod tests {
 
         let body = s.send_body_server(stream, true).unwrap();
 
+        let mut recv_buf = vec![0; body.len()];
+
         assert_eq!(s.poll_client(), Ok((stream, Event::Headers(resp))));
-        assert_eq!(s.poll_client(), Ok((stream, Event::Data(body))));
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_client(stream, &mut recv_buf), Ok(body.len()));
+
         assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
         assert_eq!(s.poll_client(), Err(Error::Done));
     }
@@ -1632,24 +1726,24 @@ mod tests {
         assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
 
         let total_data_frames = 4;
-        let mut sent_frames = 0;
-        let mut received_frames = 0;
 
         let resp = s.send_response(stream, false).unwrap();
 
-        while sent_frames < total_data_frames - 1 {
+        for _ in 0..total_data_frames - 1 {
             s.send_body_server(stream, false).unwrap();;
-
-            sent_frames += 1;
         }
 
         let body = s.send_body_server(stream, true).unwrap();
 
+        let mut recv_buf = vec![0; body.len()];
+
         assert_eq!(s.poll_client(), Ok((stream, Event::Headers(resp))));
-        while received_frames < total_data_frames {
-            assert_eq!(s.poll_client(), Ok((stream, Event::Data(body.clone()))));
-            received_frames += 1;
+
+        for _ in 0..total_data_frames {
+            assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+            assert_eq!(s.recv_body_client(stream, &mut recv_buf), Ok(body.len()));
         }
+
         assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
         assert_eq!(s.poll_client(), Err(Error::Done));
     }
@@ -1664,8 +1758,13 @@ mod tests {
 
         let body = s.send_body_client(stream, true).unwrap();;
 
+        let mut recv_buf = vec![0; body.len()];
+
         assert_eq!(s.poll_server(), Ok((stream, Event::Headers(req))));
-        assert_eq!(s.poll_server(), Ok((stream, Event::Data(body))));
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
+
         assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
 
         let resp = s.send_response(stream, true).unwrap();
@@ -1683,22 +1782,22 @@ mod tests {
         let (stream, req) = s.send_request(false).unwrap();
 
         let total_data_frames = 4;
-        let mut sent_frames = 0;
-        let mut received_frames = 0;
 
-        while sent_frames < total_data_frames - 1 {
-            s.send_body_client(stream, false).unwrap();;
-
-            sent_frames += 1;
+        for _ in 0..total_data_frames - 1 {
+            s.send_body_client(stream, false).unwrap();
         }
 
         let body = s.send_body_client(stream, true).unwrap();
 
+        let mut recv_buf = vec![0; body.len()];
+
         assert_eq!(s.poll_server(), Ok((stream, Event::Headers(req))));
-        while received_frames < total_data_frames {
-            assert_eq!(s.poll_server(), Ok((stream, Event::Data(body.clone()))));
-            received_frames += 1;
+
+        for _ in 0..total_data_frames {
+            assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+            assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
         }
+
         assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
 
         let resp = s.send_response(stream, true).unwrap();
@@ -1727,6 +1826,8 @@ mod tests {
         s.send_body_client(stream2, false).unwrap();
         s.send_body_client(stream3, false).unwrap();
 
+        let mut recv_buf = vec![0; body.len()];
+
         // Reverse order of writes.
 
         s.send_body_client(stream3, true).unwrap();
@@ -1734,18 +1835,24 @@ mod tests {
         s.send_body_client(stream1, true).unwrap();
 
         assert_eq!(s.poll_server(), Ok((stream1, Event::Headers(req1))));
-        assert_eq!(s.poll_server(), Ok((stream1, Event::Data(body.clone()))));
-        assert_eq!(s.poll_server(), Ok((stream1, Event::Data(body.clone()))));
+        assert_eq!(s.poll_server(), Ok((stream1, Event::Data)));
+        assert_eq!(s.recv_body_server(stream1, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((stream1, Event::Data)));
+        assert_eq!(s.recv_body_server(stream1, &mut recv_buf), Ok(body.len()));
         assert_eq!(s.poll_server(), Ok((stream1, Event::Finished)));
 
         assert_eq!(s.poll_server(), Ok((stream2, Event::Headers(req2))));
-        assert_eq!(s.poll_server(), Ok((stream2, Event::Data(body.clone()))));
-        assert_eq!(s.poll_server(), Ok((stream2, Event::Data(body.clone()))));
+        assert_eq!(s.poll_server(), Ok((stream2, Event::Data)));
+        assert_eq!(s.recv_body_server(stream2, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((stream2, Event::Data)));
+        assert_eq!(s.recv_body_server(stream2, &mut recv_buf), Ok(body.len()));
         assert_eq!(s.poll_server(), Ok((stream2, Event::Finished)));
 
         assert_eq!(s.poll_server(), Ok((stream3, Event::Headers(req3))));
-        assert_eq!(s.poll_server(), Ok((stream3, Event::Data(body.clone()))));
-        assert_eq!(s.poll_server(), Ok((stream3, Event::Data(body.clone()))));
+        assert_eq!(s.poll_server(), Ok((stream3, Event::Data)));
+        assert_eq!(s.recv_body_server(stream3, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((stream3, Event::Data)));
+        assert_eq!(s.recv_body_server(stream3, &mut recv_buf), Ok(body.len()));
         assert_eq!(s.poll_server(), Ok((stream3, Event::Finished)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 

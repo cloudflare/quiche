@@ -134,23 +134,6 @@ pub extern fn quiche_h3_event_for_each_header(
 }
 
 #[no_mangle]
-pub extern fn quiche_h3_event_data(
-    ev: &h3::Event, out: *mut *const u8,
-) -> size_t {
-    match ev {
-        h3::Event::Data(data) => {
-            unsafe {
-                *out = (&data).as_ptr();
-            }
-
-            data.len()
-        },
-
-        _ => unreachable!(),
-    }
-}
-
-#[no_mangle]
 pub extern fn quiche_h3_event_free(ev: *mut h3::Event) {
     unsafe { Box::from_raw(ev) };
 }
@@ -204,6 +187,24 @@ pub extern fn quiche_h3_send_body(
     let body = unsafe { slice::from_raw_parts(body, body_len) };
 
     match conn.send_body(quic_conn, stream_id, body, fin) {
+        Ok(v) => v as ssize_t,
+
+        Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_h3_recv_body(
+    conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
+    out: *mut u8, out_len: size_t,
+) -> ssize_t {
+    if out_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
+    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+
+    match conn.recv_body(quic_conn, stream_id, out) {
         Ok(v) => v as ssize_t,
 
         Err(e) => e.to_c(),

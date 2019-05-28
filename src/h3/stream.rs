@@ -62,6 +62,9 @@ pub enum State {
     /// Reading the stream's current frame's payload.
     FramePayload,
 
+    /// Reading DATA payload.
+    Data,
+
     /// Reading the push ID.
     PushId,
 
@@ -135,6 +138,9 @@ pub struct Stream {
 
     /// Whether the peer has finished sending data on this stream.
     is_peer_fin: bool,
+
+    /// Whether we have DATA frame data buffered and ready to be read.
+    has_incoming_data: bool,
 }
 
 impl Stream {
@@ -172,6 +178,7 @@ impl Stream {
             is_local,
             initialized: false,
             is_peer_fin: false,
+            has_incoming_data: false,
         }
     }
 
@@ -355,7 +362,13 @@ impl Stream {
             self.ty == Some(Type::Request) ||
             self.ty == Some(Type::Push)
         {
-            self.state_transition(State::FramePayload, len as usize);
+            let state = match self.frame_type {
+                Some(frame::DATA_FRAME_TYPE_ID) => State::Data,
+
+                _ => State::FramePayload,
+            };
+
+            self.state_transition(state, len as usize);
 
             return Ok(());
         }
@@ -445,6 +458,52 @@ impl Stream {
         self.state_transition(State::FrameType, 1);
 
         Ok(())
+    }
+
+    /// Tries to read DATA payload from the transport stream.
+    pub fn try_consume_data(
+        &mut self, conn: &mut crate::Connection, out: &mut [u8],
+    ) -> Result<usize> {
+        let left = std::cmp::min(out.len(), self.state_len - self.state_off);
+
+        let (len, _) = conn.stream_recv(self.id, &mut out[..left])?;
+
+        self.state_off += len;
+
+        if self.state_buffer_complete() {
+            self.state_transition(State::FrameType, 1);
+        }
+
+        Ok(len)
+    }
+
+    /// Tries to read DATA payload from the given cursor.
+    ///
+    /// This is intended to replace `try_consume_data()` in tests, in order to
+    /// avoid having to setup a transport connection.
+    #[cfg(test)]
+    fn try_consume_data_for_tests(
+        &mut self, stream: &mut std::io::Cursor<Vec<u8>>, out: &mut [u8],
+    ) -> Result<usize> {
+        let left = std::cmp::min(out.len(), self.state_len - self.state_off);
+
+        let len = std::io::Read::read(stream, &mut out[..left]).unwrap();
+
+        self.state_off += len;
+
+        if self.state_buffer_complete() {
+            self.state_transition(State::FrameType, 1);
+        }
+
+        Ok(len)
+    }
+
+    pub fn notify_incoming_data(&mut self, has_data: bool) {
+        self.has_incoming_data = has_data;
+    }
+
+    pub fn has_incoming_data(&self) -> bool {
+        self.has_incoming_data
     }
 
     /// Returns true if the state buffer has enough data to complete the state.
@@ -708,7 +767,9 @@ mod tests {
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let hdrs = frame::Frame::Headers { header_block };
-        let data = frame::Frame::Data { payload };
+        let data = frame::Frame::Data {
+            payload: payload.clone(),
+        };
 
         hdrs.to_bytes(&mut b).unwrap();
         data.to_bytes(&mut b).unwrap();
@@ -757,15 +818,17 @@ mod tests {
         assert_eq!(frame_payload_len, 12);
 
         stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(stream.state, State::FramePayload);
+        assert_eq!(stream.state, State::Data);
 
-        // Parse the DATA frame.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+        // Parse the DATA payload.
+        let mut recv_buf = vec![0; payload.len()];
+        assert_eq!(
+            stream.try_consume_data_for_tests(&mut cursor, &mut recv_buf),
+            Ok(payload.len())
+        );
+        assert_eq!(payload, recv_buf);
 
-        assert_eq!(stream.try_consume_frame(), Ok(()));
         assert_eq!(stream.state, State::FrameType);
-
-        assert_eq!(stream.get_frame(), Some(data));
     }
 
     #[test]
@@ -778,7 +841,9 @@ mod tests {
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let hdrs = frame::Frame::Headers { header_block };
-        let data = frame::Frame::Data { payload };
+        let data = frame::Frame::Data {
+            payload: payload.clone(),
+        };
 
         // Create an approximate PRIORITY frame in the buffer.
         b.put_varint(frame::PRIORITY_FRAME_TYPE_ID).unwrap();
@@ -860,15 +925,17 @@ mod tests {
         assert_eq!(frame_payload_len, 12);
 
         stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(stream.state, State::FramePayload);
+        assert_eq!(stream.state, State::Data);
 
-        // Parse the DATA frame.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+        // Parse the DATA payload.
+        let mut recv_buf = vec![0; payload.len()];
+        assert_eq!(
+            stream.try_consume_data_for_tests(&mut cursor, &mut recv_buf),
+            Ok(payload.len())
+        );
+        assert_eq!(payload, recv_buf);
 
-        assert_eq!(stream.try_consume_frame(), Ok(()));
         assert_eq!(stream.state, State::FrameType);
-
-        assert_eq!(stream.get_frame(), Some(data));
     }
 
     #[test]
@@ -970,7 +1037,9 @@ mod tests {
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let hdrs = frame::Frame::Headers { header_block };
-        let data = frame::Frame::Data { payload };
+        let data = frame::Frame::Data {
+            payload: payload.clone(),
+        };
 
         b.put_varint(HTTP3_PUSH_STREAM_TYPE_ID).unwrap();
         b.put_varint(1).unwrap();
@@ -1040,15 +1109,17 @@ mod tests {
         assert_eq!(frame_payload_len, 12);
 
         stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(stream.state, State::FramePayload);
+        assert_eq!(stream.state, State::Data);
 
-        // Parse the DATA frame.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+        // Parse the DATA payload.
+        let mut recv_buf = vec![0; payload.len()];
+        assert_eq!(
+            stream.try_consume_data_for_tests(&mut cursor, &mut recv_buf),
+            Ok(payload.len())
+        );
+        assert_eq!(payload, recv_buf);
 
-        assert_eq!(stream.try_consume_frame(), Ok(()));
         assert_eq!(stream.state, State::FrameType);
-
-        assert_eq!(stream.get_frame(), Some(data));
     }
 
     #[test]
