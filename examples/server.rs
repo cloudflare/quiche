@@ -114,8 +114,7 @@ fn main() {
         // Find the shorter timeout from all the active connections.
         //
         // TODO: use event loop that properly supports timers
-        let timeout =
-            clients.values().filter_map(|(_, c)| c.conn.timeout()).min();
+        let timeout = connections.values().filter_map(|(_, c)| c.timeout()).min();
 
         poll.poll(&mut events, timeout).unwrap();
 
