@@ -64,10 +64,12 @@ fn main() {
         .and_then(|dopt| dopt.parse())
         .unwrap_or_else(|e| e.exit());
 
-    let socket = net::UdpSocket::bind(args.get_str("--listen")).unwrap();
-
+    // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
+
+    // Create the UDP listening socket, and register it with the event loop.
+    let socket = net::UdpSocket::bind(args.get_str("--listen")).unwrap();
 
     let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
     poll.register(
@@ -78,8 +80,7 @@ fn main() {
     )
     .unwrap();
 
-    let mut connections = ConnMap::new();
-
+    // Create the configuration for the QUIC connections.
     let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 
     config
@@ -107,13 +108,23 @@ fn main() {
         config.log_keys();
     }
 
+    let mut connections = ConnMap::new();
+
     loop {
+        // Find the shorter timeout from all the active connections.
+        //
         // TODO: use event loop that properly supports timers
-        let timeout = connections.values().filter_map(|(_, c)| c.timeout()).min();
+        let timeout =
+            clients.values().filter_map(|(_, c)| c.conn.timeout()).min();
 
         poll.poll(&mut events, timeout).unwrap();
 
+        // Read incoming UDP packets from the socket and feed them to quiche,
+        // until there are no more packets to read.
         'read: loop {
+            // If the event loop reported no events, it means that the timeout
+            // has expired, so handle it without attempting to read packets. We
+            // will then proceed with the send loop.
             if events.is_empty() {
                 debug!("timed out");
 
@@ -126,6 +137,8 @@ fn main() {
                 Ok(v) => v,
 
                 Err(e) => {
+                    // There are no more UDP packets to read, so end the read
+                    // loop.
                     if e.kind() == std::io::ErrorKind::WouldBlock {
                         debug!("recv() would block");
                         break 'read;
@@ -139,6 +152,7 @@ fn main() {
 
             let pkt_buf = &mut buf[..len];
 
+            // Parse the QUIC packet's header.
             let hdr = match quiche::Header::from_slice(
                 pkt_buf,
                 quiche::MAX_CONN_ID_LEN,
@@ -158,6 +172,8 @@ fn main() {
                 continue;
             }
 
+            // Lookup a connection based on the packet's connection ID. If there
+            // is no connection matching, create a new one.
             let (_, conn) = if !connections.contains_key(&hdr.dcid) {
                 if hdr.ty != quiche::Type::Initial {
                     error!("Packet is not Initial");
@@ -177,6 +193,7 @@ fn main() {
                     continue;
                 }
 
+                // Generate a random source connection ID for the connection.
                 let mut scid = [0; quiche::MAX_CONN_ID_LEN];
                 SystemRandom::new().fill(&mut scid[..]).unwrap();
 
@@ -186,6 +203,7 @@ fn main() {
                     // Token is always present in Initial packets.
                     let token = hdr.token.as_ref().unwrap();
 
+                    // Do stateless retry if the client didn't send a token.
                     if token.is_empty() {
                         warn!("Doing stateless retry");
 
@@ -204,11 +222,15 @@ fn main() {
 
                     odcid = validate_token(&src, token);
 
+                    // The token was not valid, meaning the retry failed, so
+                    // drop the packet.
                     if odcid == None {
                         error!("Invalid address validation token");
                         continue;
                     }
 
+                    // Reuse the source connection ID we sent in the Retry
+                    // packet, instead of changing it again.
                     scid.copy_from_slice(&hdr.dcid);
                 }
 
@@ -245,6 +267,7 @@ fn main() {
             debug!("{} processed {} bytes", conn.trace_id(), read);
 
             if conn.is_established() {
+                // Process all readable streams.
                 let streams: Vec<u64> = conn.readable().collect();
                 for s in streams {
                     while let Ok((read, fin)) = conn.stream_recv(s, &mut buf) {
@@ -271,6 +294,9 @@ fn main() {
             }
         }
 
+        // Generate outgoing QUIC packets for all active connections and send
+        // them on the UDP socket, until quiche reports that there are no more
+        // packets to be sent.
         for (peer, conn) in connections.values_mut() {
             loop {
                 let write = match conn.send(&mut out) {
@@ -308,6 +334,65 @@ fn main() {
     }
 }
 
+/// Generate a stateless retry token.
+///
+/// The token includes the static string `"quiche"` followed by the IP address
+/// of the client and by the original destination connection ID generated by the
+/// client.
+///
+/// Note that this function is only an example and doesn't do any cryptographic
+/// authenticate of the token. *It should not be used in production system*.
+fn mint_token(hdr: &quiche::Header, src: &net::SocketAddr) -> Vec<u8> {
+    let mut token = Vec::new();
+
+    token.extend_from_slice(b"quiche");
+
+    let addr = match src.ip() {
+        std::net::IpAddr::V4(a) => a.octets().to_vec(),
+        std::net::IpAddr::V6(a) => a.octets().to_vec(),
+    };
+
+    token.extend_from_slice(&addr);
+    token.extend_from_slice(&hdr.dcid);
+
+    token
+}
+
+/// Validates a stateless retry token.
+///
+/// This checks that the ticket includes the `"quiche"` static string, and that
+/// the client IP address matches the address stored in the ticket.
+///
+/// Note that this function is only an example and doesn't do any cryptographic
+/// authenticate of the token. *It should not be used in production system*.
+fn validate_token<'a>(
+    src: &net::SocketAddr, token: &'a [u8],
+) -> Option<&'a [u8]> {
+    if token.len() < 6 {
+        return None;
+    }
+
+    if &token[..6] != b"quiche" {
+        return None;
+    }
+
+    let token = &token[6..];
+
+    let addr = match src.ip() {
+        std::net::IpAddr::V4(a) => a.octets().to_vec(),
+        std::net::IpAddr::V6(a) => a.octets().to_vec(),
+    };
+
+    if token.len() < addr.len() || &token[..addr.len()] != addr.as_slice() {
+        return None;
+    }
+
+    let token = &token[addr.len()..];
+
+    Some(&token[..])
+}
+
+/// Handles incoming HTTP/0.9 requests.
 fn handle_stream(
     conn: &mut quiche::Connection, stream: u64, buf: &[u8], root: &str,
 ) {
@@ -345,49 +430,6 @@ fn handle_stream(
             error!("{} stream send failed {:?}", conn.trace_id(), e);
         }
     }
-}
-
-fn mint_token(hdr: &quiche::Header, src: &net::SocketAddr) -> Vec<u8> {
-    let mut token = Vec::new();
-
-    token.extend_from_slice(b"quiche");
-
-    let addr = match src.ip() {
-        std::net::IpAddr::V4(a) => a.octets().to_vec(),
-        std::net::IpAddr::V6(a) => a.octets().to_vec(),
-    };
-
-    token.extend_from_slice(&addr);
-    token.extend_from_slice(&hdr.dcid);
-
-    token
-}
-
-fn validate_token<'a>(
-    src: &net::SocketAddr, token: &'a [u8],
-) -> Option<&'a [u8]> {
-    if token.len() < 6 {
-        return None;
-    }
-
-    if &token[..6] != b"quiche" {
-        return None;
-    }
-
-    let token = &token[6..];
-
-    let addr = match src.ip() {
-        std::net::IpAddr::V4(a) => a.octets().to_vec(),
-        std::net::IpAddr::V6(a) => a.octets().to_vec(),
-    };
-
-    if token.len() < addr.len() || &token[..addr.len()] != addr.as_slice() {
-        return None;
-    }
-
-    let token = &token[addr.len()..];
-
-    Some(&token[..])
 }
 
 fn hex_dump(buf: &[u8]) -> String {

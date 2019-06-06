@@ -69,10 +69,12 @@ fn main() {
         .and_then(|dopt| dopt.parse())
         .unwrap_or_else(|e| e.exit());
 
-    let socket = net::UdpSocket::bind(args.get_str("--listen")).unwrap();
-
+    // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
+
+    // Create the UDP listening socket, and register it with the event loop.
+    let socket = net::UdpSocket::bind(args.get_str("--listen")).unwrap();
 
     let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
     poll.register(
@@ -83,8 +85,7 @@ fn main() {
     )
     .unwrap();
 
-    let mut clients = ClientMap::new();
-
+    // Create the configuration for the QUIC connections.
     let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 
     config
@@ -116,14 +117,25 @@ fn main() {
         config.grease(false);
     }
 
+    let h3_config = quiche::h3::Config::new(16, 1024, 0, 0).unwrap();
+
+    let mut clients = ClientMap::new();
+
     loop {
+        // Find the shorter timeout from all the active connections.
+        //
         // TODO: use event loop that properly supports timers
         let timeout =
             clients.values().filter_map(|(_, c)| c.conn.timeout()).min();
 
         poll.poll(&mut events, timeout).unwrap();
 
+        // Read incoming UDP packets from the socket and feed them to quiche,
+        // until there are no more packets to read.
         'read: loop {
+            // If the event loop reported no events, it means that the timeout
+            // has expired, so handle it without attempting to read packets. We
+            // will then proceed with the send loop.
             if events.is_empty() {
                 debug!("timed out");
 
@@ -136,6 +148,8 @@ fn main() {
                 Ok(v) => v,
 
                 Err(e) => {
+                    // There are no more UDP packets to read, so end the read
+                    // loop.
                     if e.kind() == std::io::ErrorKind::WouldBlock {
                         debug!("recv() would block");
                         break 'read;
@@ -149,6 +163,7 @@ fn main() {
 
             let pkt_buf = &mut buf[..len];
 
+            // Parse the QUIC packet's header.
             let hdr = match quiche::Header::from_slice(
                 pkt_buf,
                 quiche::MAX_CONN_ID_LEN,
@@ -168,6 +183,8 @@ fn main() {
                 continue;
             }
 
+            // Lookup a connection based on the packet's connection ID. If there
+            // is no connection matching, create a new one.
             let (_, client) = if !clients.contains_key(&hdr.dcid) {
                 if hdr.ty != quiche::Type::Initial {
                     error!("Packet is not Initial");
@@ -187,6 +204,7 @@ fn main() {
                     continue;
                 }
 
+                // Generate a random source connection ID for the connection.
                 let mut scid = [0; quiche::MAX_CONN_ID_LEN];
                 SystemRandom::new().fill(&mut scid[..]).unwrap();
 
@@ -196,6 +214,7 @@ fn main() {
                     // Token is always present in Initial packets.
                     let token = hdr.token.as_ref().unwrap();
 
+                    // Do stateless retry if the client didn't send a token.
                     if token.is_empty() {
                         warn!("Doing stateless retry");
 
@@ -213,11 +232,15 @@ fn main() {
 
                     odcid = validate_token(&src, token);
 
+                    // The token was not valid, meaning the retry failed, so
+                    // drop the packet.
                     if odcid == None {
                         error!("Invalid address validation token");
                         continue;
                     }
 
+                    // Reuse the source connection ID we sent in the Retry
+                    // packet, instead of changing it again.
                     scid.copy_from_slice(&hdr.dcid);
                 }
 
@@ -258,13 +281,13 @@ fn main() {
 
             debug!("{} processed {} bytes", client.conn.trace_id(), read);
 
+            // Create a new HTTP/3 connection as soon as the QUIC connection
+            // is established.
             if client.conn.is_established() && client.http3_conn.is_none() {
                 debug!(
                     "{} QUIC handshake completed, now trying HTTP/3",
                     client.conn.trace_id()
                 );
-
-                let h3_config = quiche::h3::Config::new(16, 1024, 0, 0).unwrap();
 
                 let h3_conn = match quiche::h3::Connection::with_transport(
                     &mut client.conn,
@@ -283,38 +306,51 @@ fn main() {
             }
 
             if let Some(http3_conn) = &mut client.http3_conn {
-                match http3_conn.poll(client.conn.as_mut()) {
-                    Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
-                        handle_request(
-                            &mut client.conn,
-                            http3_conn,
-                            stream_id,
-                            &headers,
-                            args.get_str("--root"),
-                        );
-                    },
+                // Process HTTP/3 events.
+                loop {
+                    match http3_conn.poll(client.conn.as_mut()) {
+                        Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
+                            handle_request(
+                                &mut client.conn,
+                                http3_conn,
+                                stream_id,
+                                &headers,
+                                args.get_str("--root"),
+                            );
+                        },
 
-                    Ok((stream_id, quiche::h3::Event::Data(data))) => {
-                        info!(
-                            "{} got request data of length {} in stream id {}",
-                            client.conn.trace_id(),
-                            data.len(),
-                            stream_id
-                        );
-                    },
+                        Ok((stream_id, quiche::h3::Event::Data(data))) => {
+                            info!(
+                                "{} got data of length {} on stream id {}",
+                                client.conn.trace_id(),
+                                data.len(),
+                                stream_id
+                            );
+                        },
 
-                    Ok((_stream_id, quiche::h3::Event::Finished)) => {},
+                        Ok((_stream_id, quiche::h3::Event::Finished)) => (),
 
-                    Err(quiche::h3::Error::Done) => {},
+                        Err(quiche::h3::Error::Done) => {
+                            break;
+                        },
 
-                    Err(e) => {
-                        error!("{} HTTP/3 error {:?}", client.conn.trace_id(), e);
-                        break;
-                    },
+                        Err(e) => {
+                            error!(
+                                "{} HTTP/3 error {:?}",
+                                client.conn.trace_id(),
+                                e
+                            );
+
+                            break 'read;
+                        },
+                    }
                 }
             }
         }
 
+        // Generate outgoing QUIC packets for all active connections and send
+        // them on the UDP socket, until quiche reports that there are no more
+        // packets to be sent.
         for (peer, client) in clients.values_mut() {
             loop {
                 let write = match client.conn.send(&mut out) {
@@ -356,6 +392,14 @@ fn main() {
     }
 }
 
+/// Generate a stateless retry token.
+///
+/// The token includes the static string `"quiche"` followed by the IP address
+/// of the client and by the original destination connection ID generated by the
+/// client.
+///
+/// Note that this function is only an example and doesn't do any cryptographic
+/// authenticate of the token. *It should not be used in production system*.
 fn mint_token(hdr: &quiche::Header, src: &net::SocketAddr) -> Vec<u8> {
     let mut token = Vec::new();
 
@@ -372,6 +416,13 @@ fn mint_token(hdr: &quiche::Header, src: &net::SocketAddr) -> Vec<u8> {
     token
 }
 
+/// Validates a stateless retry token.
+///
+/// This checks that the ticket includes the `"quiche"` static string, and that
+/// the client IP address matches the address stored in the ticket.
+///
+/// Note that this function is only an example and doesn't do any cryptographic
+/// authenticate of the token. *It should not be used in production system*.
 fn validate_token<'a>(
     src: &net::SocketAddr, token: &'a [u8],
 ) -> Option<&'a [u8]> {
@@ -399,12 +450,7 @@ fn validate_token<'a>(
     Some(&token[..])
 }
 
-fn hex_dump(buf: &[u8]) -> String {
-    let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
-
-    vec.join("")
-}
-
+/// Handles incoming HTTP/3 requests.
 fn handle_request(
     conn: &mut quiche::Connection, http3_conn: &mut quiche::h3::Connection,
     stream_id: u64, headers: &[quiche::h3::Header], root: &str,
@@ -435,12 +481,14 @@ fn handle_request(
     }
 }
 
+/// Builds an HTTP/3 response given a request.
 fn build_response(
     root: &str, request: &[quiche::h3::Header],
 ) -> Result<(std::vec::Vec<quiche::h3::Header>, std::vec::Vec<u8>), ()> {
     let mut file_path = std::path::PathBuf::from(root);
     let mut path = std::path::Path::new("");
 
+    // Look for the request's path and method.
     for hdr in request {
         match hdr.name() {
             ":path" => {
@@ -464,6 +512,7 @@ fn build_response(
 
     let (status, body) = match std::fs::read(file_path.as_path()) {
         Ok(data) => (200, data),
+
         Err(_) => (404, b"Not Found!".to_vec()),
     };
 
@@ -475,4 +524,10 @@ fn build_response(
         ],
         body,
     ))
+}
+
+fn hex_dump(buf: &[u8]) -> String {
+    let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
+
+    vec.join("")
 }

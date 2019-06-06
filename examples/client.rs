@@ -58,13 +58,25 @@ fn main() {
         .and_then(|dopt| dopt.parse())
         .unwrap_or_else(|e| e.exit());
 
+    let max_data = args.get_str("--max-data");
+    let max_data = u64::from_str_radix(max_data, 10).unwrap();
+
+    let max_stream_data = args.get_str("--max-stream-data");
+    let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
+
+    let version = args.get_str("--wire-version");
+    let version = u32::from_str_radix(version, 16).unwrap();
+
     let url = url::Url::parse(args.get_str("URL")).unwrap();
 
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
-    socket.connect(&url).unwrap();
-
+    // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
+
+    // Create the UDP socket backing the QUIC connection, and register it with
+    // the event loop.
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+    socket.connect(&url).unwrap();
 
     let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
     poll.register(
@@ -75,18 +87,7 @@ fn main() {
     )
     .unwrap();
 
-    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
-    SystemRandom::new().fill(&mut scid[..]).unwrap();
-
-    let max_data = args.get_str("--max-data");
-    let max_data = u64::from_str_radix(max_data, 10).unwrap();
-
-    let max_stream_data = args.get_str("--max-stream-data");
-    let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
-
-    let version = args.get_str("--wire-version");
-    let version = u32::from_str_radix(version, 16).unwrap();
-
+    // Create the configuration for the QUIC connection.
     let mut config = quiche::Config::new(version).unwrap();
 
     config.verify_peer(true);
@@ -112,6 +113,11 @@ fn main() {
         config.log_keys();
     }
 
+    // Generate a random source connection ID for the connection.
+    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
+    SystemRandom::new().fill(&mut scid[..]).unwrap();
+
+    // Create a QUIC connection and initiate handshake.
     let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
 
     let write = match conn.send(&mut out) {
@@ -131,7 +137,12 @@ fn main() {
     loop {
         poll.poll(&mut events, conn.timeout()).unwrap();
 
+        // Read incoming UDP packets from the socket and feed them to quiche,
+        // until there are no more packets to read.
         'read: loop {
+            // If the event loop reported no events, it means that the timeout
+            // has expired, so handle it without attempting to read packets. We
+            // will then proceed with the send loop.
             if events.is_empty() {
                 debug!("timed out");
 
@@ -144,6 +155,8 @@ fn main() {
                 Ok(v) => v,
 
                 Err(e) => {
+                    // There are no more UDP packets to read, so end the read
+                    // loop.
                     if e.kind() == std::io::ErrorKind::WouldBlock {
                         debug!("recv() would block");
                         break 'read;
@@ -178,6 +191,7 @@ fn main() {
             break;
         }
 
+        // Send an HTTP request as soon as the connection is established.
         if conn.is_established() && !req_sent {
             info!(
                 "{} sending HTTP request for {}",
@@ -192,6 +206,7 @@ fn main() {
             req_sent = true;
         }
 
+        // Process all readable streams.
         let streams: Vec<u64> = conn.readable().collect();
         for s in streams {
             while let Ok((read, fin)) = conn.stream_recv(s, &mut buf) {
@@ -211,6 +226,8 @@ fn main() {
                     std::str::from_utf8_unchecked(&stream_buf)
                 });
 
+                // The server reported that it has no more data to send, which
+                // we got the full response. Close the connection.
                 if s == HTTP_REQ_STREAM_ID && fin {
                     info!(
                         "{} response received in {:?}, closing...",
@@ -223,6 +240,8 @@ fn main() {
             }
         }
 
+        // Generate outgoing QUIC packets and send them on the UDP socket, until
+        // quiche reports that there are no more packets to be sent.
         loop {
             let write = match conn.send(&mut out) {
                 Ok(v) => v,
@@ -239,7 +258,6 @@ fn main() {
                 },
             };
 
-            // TODO: coalesce packets.
             socket.send(&out[..write]).unwrap();
 
             debug!("{} written {}", conn.trace_id(), write);
