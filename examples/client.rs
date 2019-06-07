@@ -75,7 +75,7 @@ fn main() {
 
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+    let socket = std::net::UdpSocket::bind("[::]:0").unwrap();
     socket.connect(&url).unwrap();
 
     let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
