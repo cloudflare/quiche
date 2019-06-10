@@ -601,7 +601,7 @@ pub struct Connection {
 
     /// Updated local flow control limit for the connection. This is used to
     /// trigger sending MAX_DATA frames after a certain threshold.
-    new_max_rx_data: usize,
+    max_rx_data_next: usize,
 
     /// Total number of bytes sent to the peer.
     tx_data: usize,
@@ -865,7 +865,7 @@ impl Connection {
 
             rx_data: 0,
             max_rx_data: max_rx_data as usize,
-            new_max_rx_data: max_rx_data as usize,
+            max_rx_data_next: max_rx_data as usize,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -1421,7 +1421,7 @@ impl Connection {
                         self.is_server,
                     )?;
 
-                    stream.send.update_max_len(max as usize);
+                    stream.send.update_max_data(max as usize);
 
                     ack_elicited = true;
                 },
@@ -1736,15 +1736,15 @@ impl Connection {
         // amount of data that can be received before blocking.
         if pkt_type == packet::Type::Application &&
             !is_closing &&
-            (self.new_max_rx_data != self.max_rx_data &&
-                self.new_max_rx_data / 2 > self.max_rx_data - self.rx_data)
+            (self.max_rx_data_next != self.max_rx_data &&
+                self.max_rx_data_next / 2 > self.max_rx_data - self.rx_data)
         {
             let frame = frame::Frame::MaxData {
-                max: self.new_max_rx_data as u64,
+                max: self.max_rx_data_next as u64,
             };
 
             if frame.wire_len() <= left {
-                self.max_rx_data = self.new_max_rx_data;
+                self.max_rx_data = self.max_rx_data_next;
 
                 payload_len += frame.wire_len();
                 left -= frame.wire_len();
@@ -1765,7 +1765,7 @@ impl Connection {
             {
                 let frame = frame::Frame::MaxStreamData {
                     stream_id: *id,
-                    max: stream.recv.update_max_len() as u64,
+                    max: stream.recv.update_max_data() as u64,
                 };
 
                 if frame.wire_len() > left {
@@ -2058,7 +2058,7 @@ impl Connection {
 
         let (read, fin) = stream.recv.pop(out)?;
 
-        self.new_max_rx_data = self.max_rx_data + read;
+        self.max_rx_data_next = self.max_rx_data + read;
 
         Ok((read, fin))
     }

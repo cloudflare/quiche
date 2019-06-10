@@ -155,7 +155,7 @@ impl Stream {
     }
 
     pub fn writable(&self) -> bool {
-        self.send.ready() && self.send.off() <= self.send.max_len
+        self.send.ready() && self.send.off() <= self.send.max_data
     }
 }
 
@@ -203,16 +203,16 @@ pub struct RecvBuf {
     data: BinaryHeap<RangeBuf>,
     off: usize,
     len: usize,
-    max_len: usize,
-    max_len_new: usize,
+    max_data: usize,
+    max_data_next: usize,
     fin_off: Option<usize>,
 }
 
 impl RecvBuf {
-    fn new(max_len: usize) -> RecvBuf {
+    fn new(max_data: usize) -> RecvBuf {
         RecvBuf {
-            max_len,
-            max_len_new: max_len,
+            max_data,
+            max_data_next: max_data,
             ..RecvBuf::default()
         }
     }
@@ -223,7 +223,7 @@ impl RecvBuf {
             return Ok(());
         }
 
-        if buf.max_off() > self.max_len {
+        if buf.max_off() > self.max_data {
             return Err(Error::FlowControl);
         }
 
@@ -318,7 +318,7 @@ impl RecvBuf {
             cap -= buf.len();
         }
 
-        self.max_len_new = self.max_len_new.saturating_add(len);
+        self.max_data_next = self.max_data_next.saturating_add(len);
 
         Ok((len, self.is_fin()))
     }
@@ -343,18 +343,18 @@ impl RecvBuf {
         Ok(final_size - self.len)
     }
 
-    pub fn update_max_len(&mut self) -> usize {
-        self.max_len = self.max_len_new;
+    pub fn update_max_data(&mut self) -> usize {
+        self.max_data = self.max_data_next;
 
-        self.max_len
+        self.max_data
     }
 
     pub fn more_credit(&self) -> bool {
         // Send MAX_STREAM_DATA when the new limit is at least double the
         // amount of data that can be received before blocking.
         self.fin_off.is_none() &&
-            self.max_len_new != self.max_len &&
-            self.max_len_new / 2 > self.max_len - self.len
+            self.max_data_next != self.max_data &&
+            self.max_data_next / 2 > self.max_data - self.len
     }
 
     pub fn is_fin(&self) -> bool {
@@ -380,14 +380,14 @@ pub struct SendBuf {
     data: BinaryHeap<RangeBuf>,
     off: usize,
     len: usize,
-    max_len: usize,
+    max_data: usize,
     off_ack: usize,
 }
 
 impl SendBuf {
-    fn new(max_len: usize) -> SendBuf {
+    fn new(max_data: usize) -> SendBuf {
         SendBuf {
-            max_len,
+            max_data,
             ..SendBuf::default()
         }
     }
@@ -430,25 +430,25 @@ impl SendBuf {
         Ok(())
     }
 
-    pub fn pop(&mut self, max_len: usize) -> Result<RangeBuf> {
+    pub fn pop(&mut self, max_data: usize) -> Result<RangeBuf> {
         let mut out = RangeBuf::default();
-        out.data = Vec::with_capacity(cmp::min(max_len, self.len));
+        out.data = Vec::with_capacity(cmp::min(max_data, self.len));
 
-        let mut out_len = max_len;
+        let mut out_len = max_data;
         let mut out_off = self.data.peek().map_or_else(|| 0, RangeBuf::off);
 
         while out_len > 0 &&
             self.ready() &&
             self.off() == out_off &&
-            self.off() < self.max_len
+            self.off() < self.max_data
         {
             let mut buf = match self.data.pop() {
                 Some(v) => v,
                 None => break,
             };
 
-            if buf.len() > out_len || buf.max_off() >= self.max_len {
-                let new_len = cmp::min(out_len, self.max_len - buf.off());
+            if buf.len() > out_len || buf.max_off() >= self.max_data {
+                let new_len = cmp::min(out_len, self.max_data - buf.off());
                 let new_buf = buf.split_off(new_len);
 
                 self.data.push(new_buf);
@@ -471,8 +471,8 @@ impl SendBuf {
         Ok(out)
     }
 
-    pub fn update_max_len(&mut self, max_len: usize) {
-        self.max_len = cmp::max(self.max_len, max_len);
+    pub fn update_max_data(&mut self, max_data: usize) {
+        self.max_data = cmp::max(self.max_data, max_data);
     }
 
     pub fn ack(&mut self, off: usize, len: usize) {
@@ -1194,7 +1194,7 @@ mod tests {
         assert!(send.push_slice(&second, true).is_ok());
         assert_eq!(send.len, 19);
 
-        send.update_max_len(5);
+        send.update_max_data(5);
 
         let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
@@ -1210,7 +1210,7 @@ mod tests {
         assert_eq!(&write[..], b"");
         assert_eq!(send.len, 14);
 
-        send.update_max_len(15);
+        send.update_max_data(15);
 
         let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 5);
@@ -1219,7 +1219,7 @@ mod tests {
         assert_eq!(&write[..], b"hinghellow");
         assert_eq!(send.len, 4);
 
-        send.update_max_len(25);
+        send.update_max_data(25);
 
         let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 15);
@@ -1273,7 +1273,7 @@ mod tests {
 
         assert!(stream.recv.more_credit());
 
-        assert_eq!(stream.recv.update_max_len(), 25);
+        assert_eq!(stream.recv.update_max_data(), 25);
         assert!(!stream.recv.more_credit());
 
         let third = RangeBuf::from(b"something", 10, false);
