@@ -2058,7 +2058,7 @@ impl Connection {
 
         let (read, fin) = stream.recv.pop(out)?;
 
-        self.max_rx_data_next = self.max_rx_data + read;
+        self.max_rx_data_next = self.max_rx_data_next.saturating_add(read);
 
         Ok((read, fin))
     }
@@ -3202,7 +3202,7 @@ mod tests {
     }
 
     #[test]
-    fn flow_control() {
+    fn flow_control_limit() {
         let mut buf = [0; 65535];
 
         let mut pipe = testing::Pipe::default().unwrap();
@@ -3232,7 +3232,61 @@ mod tests {
     }
 
     #[test]
-    fn stream_flow_control() {
+    fn flow_control_update() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [
+            frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 8,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+        ];
+
+        let pkt_type = packet::Type::Application;
+
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+        pipe.server.stream_recv(4, &mut buf).unwrap();
+        pipe.server.stream_recv(8, &mut buf).unwrap();
+
+        let frames = [
+            frame::Frame::Stream {
+                stream_id: 8,
+                data: stream::RangeBuf::from(b"a", 1, false),
+            },
+        ];
+
+        let len = pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        assert!(len > 0);
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+        let mut iter = frames.iter();
+
+        // Ignore ACK.
+        iter.next().unwrap();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::MaxData {
+                max: 46,
+            })
+        );
+    }
+
+    #[test]
+    fn stream_flow_control_limit() {
         let mut buf = [0; 65535];
 
         let mut pipe = testing::Pipe::default().unwrap();
@@ -3248,6 +3302,56 @@ mod tests {
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FlowControl),
+        );
+    }
+
+    #[test]
+    fn stream_flow_control_update() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [
+            frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"aaaaaaa", 0, false),
+            },
+        ];
+
+        let pkt_type = packet::Type::Application;
+
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+        pipe.server.stream_recv(4, &mut buf).unwrap();
+
+        let frames = [
+            frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"a", 7, false),
+            },
+        ];
+
+        let len = pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        assert!(len > 0);
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+        let mut iter = frames.iter();
+
+        // Ignore ACK.
+        iter.next().unwrap();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::MaxStreamData {
+                stream_id: 4,
+                max: 22,
+            })
         );
     }
 
@@ -3512,6 +3616,7 @@ mod tests {
             testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
         let mut iter = frames.iter();
 
+        // Ignore ACK.
         iter.next().unwrap();
 
         assert_eq!(
