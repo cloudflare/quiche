@@ -3257,12 +3257,10 @@ mod tests {
         pipe.server.stream_recv(4, &mut buf).unwrap();
         pipe.server.stream_recv(8, &mut buf).unwrap();
 
-        let frames = [
-            frame::Frame::Stream {
-                stream_id: 8,
-                data: stream::RangeBuf::from(b"a", 1, false),
-            },
-        ];
+        let frames = [frame::Frame::Stream {
+            stream_id: 8,
+            data: stream::RangeBuf::from(b"a", 1, false),
+        }];
 
         let len = pipe
             .send_pkt_to_server(pkt_type, &frames, &mut buf)
@@ -3277,12 +3275,7 @@ mod tests {
         // Ignore ACK.
         iter.next().unwrap();
 
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::MaxData {
-                max: 46,
-            })
-        );
+        assert_eq!(iter.next(), Some(&frame::Frame::MaxData { max: 46 }));
     }
 
     #[test]
@@ -3313,12 +3306,10 @@ mod tests {
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
-        let frames = [
-            frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(b"aaaaaaa", 0, false),
-            },
-        ];
+        let frames = [frame::Frame::Stream {
+            stream_id: 4,
+            data: stream::RangeBuf::from(b"aaaaaaa", 0, false),
+        }];
 
         let pkt_type = packet::Type::Application;
 
@@ -3326,12 +3317,10 @@ mod tests {
 
         pipe.server.stream_recv(4, &mut buf).unwrap();
 
-        let frames = [
-            frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(b"a", 7, false),
-            },
-        ];
+        let frames = [frame::Frame::Stream {
+            stream_id: 4,
+            data: stream::RangeBuf::from(b"a", 7, false),
+        }];
 
         let len = pipe
             .send_pkt_to_server(pkt_type, &frames, &mut buf)
