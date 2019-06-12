@@ -222,7 +222,7 @@ impl Stream {
             Type::Unknown => State::Drain,
         };
 
-        self.state_transition(state, 1);
+        self.state_transition(state, 1, true);
 
         Ok(())
     }
@@ -233,7 +233,7 @@ impl Stream {
 
         // TODO: implement push ID.
 
-        self.state_transition(State::FrameType, 1);
+        self.state_transition(State::FrameType, 1, true);
 
         Ok(())
     }
@@ -348,7 +348,7 @@ impl Stream {
 
         self.frame_type = Some(ty);
 
-        self.state_transition(State::FramePayloadLen, 1);
+        self.state_transition(State::FramePayloadLen, 1, true);
 
         Ok(())
     }
@@ -362,13 +362,13 @@ impl Stream {
             self.ty == Some(Type::Request) ||
             self.ty == Some(Type::Push)
         {
-            let state = match self.frame_type {
-                Some(frame::DATA_FRAME_TYPE_ID) => State::Data,
+            let (state, resize) = match self.frame_type {
+                Some(frame::DATA_FRAME_TYPE_ID) => (State::Data, false),
 
-                _ => State::FramePayload,
+                _ => (State::FramePayload, true),
             };
 
-            self.state_transition(state, len as usize);
+            self.state_transition(state, len as usize, resize);
 
             return Ok(());
         }
@@ -455,7 +455,7 @@ impl Stream {
             self.frames.push_back(frame);
         }
 
-        self.state_transition(State::FrameType, 1);
+        self.state_transition(State::FrameType, 1, true);
 
         Ok(())
     }
@@ -471,7 +471,7 @@ impl Stream {
         self.state_off += len;
 
         if self.state_buffer_complete() {
-            self.state_transition(State::FrameType, 1);
+            self.state_transition(State::FrameType, 1, true);
         }
 
         Ok(len)
@@ -511,12 +511,19 @@ impl Stream {
         self.state_off == self.state_len
     }
 
-    /// Transitions the stream to a new state, and resets the state buffer.
-    fn state_transition(&mut self, new_state: State, expected_len: usize) {
+    /// Transitions the stream to a new state, and optionally resets the state buffer.
+    fn state_transition(
+        &mut self, new_state: State, expected_len: usize, resize: bool,
+    ) {
         self.state = new_state;
         self.state_off = 0;
         self.state_len = expected_len;
-        self.state_buf.resize(self.state_len, 0);
+
+        // Some states don't need the state buffer, so don't resize it if not
+        // necessary.
+        if resize {
+            self.state_buf.resize(self.state_len, 0);
+        }
     }
 }
 
