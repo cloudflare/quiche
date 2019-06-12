@@ -492,7 +492,7 @@ impl Stream {
         self.state_off += len;
 
         if self.state_buffer_complete() {
-            self.state_transition(State::FrameType, 1);
+            self.state_transition(State::FrameType, 1, true);
         }
 
         Ok(len)
