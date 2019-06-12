@@ -511,7 +511,8 @@ impl Stream {
         self.state_off == self.state_len
     }
 
-    /// Transitions the stream to a new state, and optionally resets the state buffer.
+    /// Transitions the stream to a new state, and optionally resets the state
+    /// buffer.
     fn state_transition(
         &mut self, new_state: State, expected_len: usize, resize: bool,
     ) {
