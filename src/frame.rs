@@ -185,7 +185,7 @@ impl Frame {
                 token: b.get_bytes_with_varint_length()?.to_vec(),
             },
 
-            0x08...0x0f => parse_stream_frame(frame_type, b)?,
+            0x08..=0x0f => parse_stream_frame(frame_type, b)?,
 
             0x10 => Frame::MaxData {
                 max: b.get_varint()?,

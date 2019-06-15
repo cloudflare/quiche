@@ -240,10 +240,14 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 }
 
                 case QUICHE_H3_EVENT_DATA: {
-                    uint8_t *data;
-                    size_t len = quiche_h3_event_data(ev, &data);
+                    ssize_t len = quiche_h3_recv_body(conn_io->http3,
+                                                      conn_io->conn, s,
+                                                      buf, sizeof(buf));
+                    if (len <= 0) {
+                        break;
+                    }
 
-                    printf("%.*s", (int) len, data);
+                    printf("%.*s", (int) len, buf);
                     break;
                 }
 

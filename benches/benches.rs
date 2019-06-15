@@ -84,7 +84,7 @@ fn stream(c: &mut Criterion) {
                 assert_eq!(&recv_buf[..size], &send_buf[..size]);
             })
         },
-        &[128_000, 5_000_000],
+        &[128_000, 256_000, 512_000, 1_000_000, 5_000_000],
     );
 }
 
@@ -159,10 +159,16 @@ fn http3(c: &mut Criterion) {
 
                     while let Ok(ev) = s.client.poll(&mut s.pipe.client) {
                         match ev {
-                            (_, quiche::h3::Event::Data(data)) => {
-                                &mut recv_buf[recv_len..recv_len + data.len()]
-                                    .copy_from_slice(&data);
-                                recv_len += data.len();
+                            (stream_id, quiche::h3::Event::Data) => {
+                                let b = &mut recv_buf[recv_len..size];
+
+                                if let Ok(r) = s.client.recv_body(
+                                    &mut s.pipe.client,
+                                    stream_id,
+                                    b,
+                                ) {
+                                    recv_len += r;
+                                }
                             },
 
                             _ => (),
@@ -174,7 +180,7 @@ fn http3(c: &mut Criterion) {
                 assert_eq!(&recv_buf[..size], &send_buf[..size]);
             })
         },
-        &[0, 128_000, 5_000_000],
+        &[128_000, 256_000, 512_000, 1_000_000, 5_000_000],
     );
 }
 

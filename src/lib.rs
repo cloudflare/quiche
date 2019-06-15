@@ -355,7 +355,7 @@ impl std::error::Error for Error {
         }
     }
 
-    fn cause(&self) -> Option<&std::error::Error> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
     }
 }
@@ -601,7 +601,7 @@ pub struct Connection {
 
     /// Updated local flow control limit for the connection. This is used to
     /// trigger sending MAX_DATA frames after a certain threshold.
-    new_max_rx_data: usize,
+    max_rx_data_next: usize,
 
     /// Total number of bytes sent to the peer.
     tx_data: usize,
@@ -865,7 +865,7 @@ impl Connection {
 
             rx_data: 0,
             max_rx_data: max_rx_data as usize,
-            new_max_rx_data: max_rx_data as usize,
+            max_rx_data_next: max_rx_data as usize,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -1421,7 +1421,7 @@ impl Connection {
                         self.is_server,
                     )?;
 
-                    stream.send.update_max_len(max as usize);
+                    stream.send.update_max_data(max as usize);
 
                     ack_elicited = true;
                 },
@@ -1736,15 +1736,15 @@ impl Connection {
         // amount of data that can be received before blocking.
         if pkt_type == packet::Type::Application &&
             !is_closing &&
-            (self.new_max_rx_data != self.max_rx_data &&
-                self.new_max_rx_data / 2 > self.max_rx_data - self.rx_data)
+            (self.max_rx_data_next != self.max_rx_data &&
+                self.max_rx_data_next / 2 > self.max_rx_data - self.rx_data)
         {
             let frame = frame::Frame::MaxData {
-                max: self.new_max_rx_data as u64,
+                max: self.max_rx_data_next as u64,
             };
 
             if frame.wire_len() <= left {
-                self.max_rx_data = self.new_max_rx_data;
+                self.max_rx_data = self.max_rx_data_next;
 
                 payload_len += frame.wire_len();
                 left -= frame.wire_len();
@@ -1765,7 +1765,7 @@ impl Connection {
             {
                 let frame = frame::Frame::MaxStreamData {
                     stream_id: *id,
-                    max: stream.recv.update_max_len() as u64,
+                    max: stream.recv.update_max_data() as u64,
                 };
 
                 if frame.wire_len() > left {
@@ -2058,7 +2058,7 @@ impl Connection {
 
         let (read, fin) = stream.recv.pop(out)?;
 
-        self.new_max_rx_data = self.max_rx_data + read;
+        self.max_rx_data_next = self.max_rx_data_next.saturating_add(read);
 
         Ok((read, fin))
     }
@@ -3202,7 +3202,7 @@ mod tests {
     }
 
     #[test]
-    fn flow_control() {
+    fn flow_control_limit() {
         let mut buf = [0; 65535];
 
         let mut pipe = testing::Pipe::default().unwrap();
@@ -3232,7 +3232,54 @@ mod tests {
     }
 
     #[test]
-    fn stream_flow_control() {
+    fn flow_control_update() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [
+            frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 8,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+        ];
+
+        let pkt_type = packet::Type::Application;
+
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+        pipe.server.stream_recv(4, &mut buf).unwrap();
+        pipe.server.stream_recv(8, &mut buf).unwrap();
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 8,
+            data: stream::RangeBuf::from(b"a", 1, false),
+        }];
+
+        let len = pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        assert!(len > 0);
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+        let mut iter = frames.iter();
+
+        // Ignore ACK.
+        iter.next().unwrap();
+
+        assert_eq!(iter.next(), Some(&frame::Frame::MaxData { max: 46 }));
+    }
+
+    #[test]
+    fn stream_flow_control_limit() {
         let mut buf = [0; 65535];
 
         let mut pipe = testing::Pipe::default().unwrap();
@@ -3248,6 +3295,52 @@ mod tests {
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FlowControl),
+        );
+    }
+
+    #[test]
+    fn stream_flow_control_update() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 4,
+            data: stream::RangeBuf::from(b"aaaaaaa", 0, false),
+        }];
+
+        let pkt_type = packet::Type::Application;
+
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+        pipe.server.stream_recv(4, &mut buf).unwrap();
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 4,
+            data: stream::RangeBuf::from(b"a", 7, false),
+        }];
+
+        let len = pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        assert!(len > 0);
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+        let mut iter = frames.iter();
+
+        // Ignore ACK.
+        iter.next().unwrap();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::MaxStreamData {
+                stream_id: 4,
+                max: 22,
+            })
         );
     }
 
@@ -3512,6 +3605,7 @@ mod tests {
             testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
         let mut iter = frames.iter();
 
+        // Ignore ACK.
         iter.next().unwrap();
 
         assert_eq!(

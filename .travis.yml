@@ -35,8 +35,6 @@ matrix:
       - cargo fmt -- --check
       - cargo doc --no-deps
       - make -C examples
-  allow_failures:
-   - rust: nightly
 
 deploy:
   provider: pages
