@@ -28,6 +28,7 @@
 extern crate log;
 
 use ring::rand::*;
+use std::net::ToSocketAddrs;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
@@ -71,9 +72,27 @@ fn main() {
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
+    // Take a look at server address resolved to check if it's ipv4 or ipv6
+    // Depending on the IP family, bind_addr will be default address of
+    // v4 or v6
+    // To work with MacOS (or BSD). Linux v6 socket can handle v4 connection
+    // as well so not required but this should work both.
+    let mut addrs_iter = url.to_socket_addrs().unwrap();
+    let addr = addrs_iter.next();
+    let mut bind_addr = "[::]:0"; // ipv6 by default
+    match addr {
+        Some(ip) => {
+            println!("addr = {:?}", ip);
+            if ip.is_ipv4() {
+                bind_addr = "0.0.0.0:0";
+            }
+        },
+        None => panic!("IP address not found"),
+    }
+
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
-    let socket = std::net::UdpSocket::bind("[::]:0").unwrap();
+    let socket = std::net::UdpSocket::bind(bind_addr).unwrap();
     socket.connect(&url).unwrap();
 
     let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
