@@ -82,7 +82,7 @@ fn main() {
     let mut bind_addr = "[::]:0"; // ipv6 by default
     match addr {
         Some(ip) => {
-            println!("addr = {:?}", ip);
+            debug!("addr = {:?}", ip);
             if ip.is_ipv4() {
                 bind_addr = "0.0.0.0:0";
             }
