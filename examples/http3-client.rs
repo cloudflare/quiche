@@ -72,11 +72,13 @@ fn main() {
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
-    // Take a look at server address resolved to check if it's ipv4 or ipv6
+    // Take a look at server address resolved to check if it's ipv4 or ipv6.
     // Depending on the IP family, bind_addr will be default address of
-    // v4 or v6
-    // To work with MacOS (or BSD). Linux v6 socket can handle v4 connection
-    // as well so not required but this should work both.
+    // v4 or v6 for calling bind() later.
+    // This workaround is to work with MacOS (or BSD variants which
+    // doesn't allow v4 and v6 can be bind() in one socket).
+    // Note that linux doesn't need this because it can handle v4 and v6 socket
+    // when bind() with "::".
     let mut addrs_iter = url.to_socket_addrs().unwrap();
     let addr = addrs_iter.next(); // get next IP address resolved from URL hostname
     let bind_addr;
