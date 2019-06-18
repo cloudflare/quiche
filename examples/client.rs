@@ -28,6 +28,8 @@
 #[macro_use]
 extern crate log;
 
+use std::net::ToSocketAddrs;
+
 use ring::rand::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
@@ -73,10 +75,22 @@ fn main() {
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
+    // Resolve server address.
+    let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
+    info!("connecting to {:?}...", peer_addr);
+
+    // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
+    // server address. This is needed on macOS and BSD variants that don't
+    // support binding to IN6ADDR_ANY for both v4 and v6.
+    let bind_addr = match peer_addr {
+        std::net::SocketAddr::V4(_) => "0.0.0.0:0",
+        std::net::SocketAddr::V6(_) => "[::]:0",
+    };
+
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
-    let socket = std::net::UdpSocket::bind("[::]:0").unwrap();
-    socket.connect(&url).unwrap();
+    let socket = std::net::UdpSocket::bind(bind_addr).unwrap();
+    socket.connect(peer_addr).unwrap();
 
     let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
     poll.register(
