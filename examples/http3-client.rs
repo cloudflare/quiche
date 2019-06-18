@@ -78,14 +78,16 @@ fn main() {
     // To work with MacOS (or BSD). Linux v6 socket can handle v4 connection
     // as well so not required but this should work both.
     let mut addrs_iter = url.to_socket_addrs().unwrap();
-    let addr = addrs_iter.next();
-    let mut bind_addr = "[::]:0"; // ipv6 by default
+    let addr = addrs_iter.next(); // get next IP address resolved from URL hostname
+    let bind_addr;
     match addr {
         Some(ip) => {
             debug!("addr = {:?}", ip);
-            if ip.is_ipv4() {
-                bind_addr = "0.0.0.0:0";
-            }
+            bind_addr = if ip.is_ipv4() {
+                "0.0.0.0:0" // v4
+            } else {
+                "[::]:0" // v6
+           }
         },
         None => panic!("IP address not found"),
     }
