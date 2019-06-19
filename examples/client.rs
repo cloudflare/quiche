@@ -29,6 +29,7 @@
 extern crate log;
 
 use ring::rand::*;
+use std::net::ToSocketAddrs;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
