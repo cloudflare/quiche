@@ -73,10 +73,26 @@ fn main() {
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
+    // Take a look at server address resolved to check if it's ipv4 or ipv6.
+    // Depending on the IP family, bind_addr will be default address of
+    // v4 or v6 for calling bind() later.
+    // This workaround is to work with MacOS (or BSD variants which
+    // doesn't allow v4 and v6 can be bind() in one socket).
+    // Note that linux doesn't need this because it can handle v4 and v6 socket
+    // when bind() with "::".
+
+    // resolve server address
+    let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
+    info!("connecting to {:?}...", peer_addr);
+    let bind_addr = match peer_addr {
+        std::net::SocketAddr::V4(_) => "0.0.0.0:0",
+        std::net::SocketAddr::V6(_) => "[::]:0",
+    };
+
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
-    let socket = std::net::UdpSocket::bind("[::]:0").unwrap();
-    socket.connect(&url).unwrap();
+    let socket = std::net::UdpSocket::bind(bind_addr).unwrap();
+    socket.connect(peer_addr).unwrap();
 
     let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
     poll.register(
