@@ -79,25 +79,19 @@ fn main() {
     // doesn't allow v4 and v6 can be bind() in one socket).
     // Note that linux doesn't need this because it can handle v4 and v6 socket
     // when bind() with "::".
-    let mut addrs_iter = url.to_socket_addrs().unwrap();
-    let addr = addrs_iter.next(); // get next IP address resolved from URL hostname
-    let bind_addr;
-    match addr {
-        Some(ip) => {
-            debug!("addr = {:?}", ip);
-            bind_addr = if ip.is_ipv4() {
-                "0.0.0.0:0" // v4
-            } else {
-                "[::]:0" // v6
-           }
-        },
-        None => panic!("IP address not found"),
-    }
+
+    // resolve server address
+    let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
+    info!("connecting to {:?}...", peer_addr);
+    let bind_addr = match peer_addr {
+        std::net::SocketAddr::V4(_) => "0.0.0.0:0",
+        std::net::SocketAddr::V6(_) => "[::]:0",
+    };
 
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
     let socket = std::net::UdpSocket::bind(bind_addr).unwrap();
-    socket.connect(&url).unwrap();
+    socket.connect(peer_addr).unwrap();
 
     let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
     poll.register(
