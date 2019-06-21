@@ -2349,7 +2349,15 @@ impl Connection {
                            self.peer_transport_params);
                 },
 
-                Err(tls::Error::TlsFail) => return Err(Error::TlsFail),
+                Err(tls::Error::TlsFail) => {
+                    if self.application_proto().is_empty() {
+                        // Send no_application_proto TLS alert when no protocol
+                        // can be negotiated.
+                        self.error = Some(0x178);
+                    }
+
+                    return Err(Error::TlsFail);
+                },
 
                 Err(tls::Error::SyscallFail) => return Err(Error::TlsFail),
 
@@ -2362,6 +2370,11 @@ impl Connection {
 
     /// Selects the packet number space for outgoing packets.
     fn write_epoch(&self) -> Result<packet::Epoch> {
+        // On error during handshake, latest space is always Initial
+        if self.error.is_some() && !self.handshake_completed {
+            return Ok(packet::EPOCH_INITIAL);
+        }
+
         // On error or probe, send packet in the latest space available.
         if self.error.is_some() || self.recovery.probes > 0 {
             let epoch = match self.handshake.get_write_level() {

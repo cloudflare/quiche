@@ -333,7 +333,16 @@ impl Handshake {
     }
 
     pub fn do_handshake(&self) -> Result<()> {
-        map_result_ssl(self, unsafe { SSL_do_handshake(self.as_ptr()) })
+        let mut r =
+            map_result_ssl(self, unsafe { SSL_do_handshake(self.as_ptr()) });
+
+        // ALPN may have resulted in no protocol getting selected by the serer
+        let is_server = unsafe { SSL_is_server(self.as_ptr()) } == 1;
+        if is_server && self.get_alpn_protocol().is_empty() {
+            r = Err(Error::TlsFail);
+        }
+
+        r
     }
 
     pub fn get_write_level(&self) -> crypto::Level {
@@ -585,7 +594,7 @@ extern fn select_alpn(
         }
     }
 
-    3 // SSL_TLSEXT_ERR_NOACK
+    2 // SSL_TLSEXT_ERR_ALERT_FATAL
 }
 
 fn map_result(bssl_result: c_int) -> Result<()> {
@@ -714,6 +723,8 @@ extern {
 
     fn SSL_set_accept_state(ssl: *mut SSL);
     fn SSL_set_connect_state(ssl: *mut SSL);
+
+    fn SSL_is_server(ssl: *mut SSL) -> c_int;
 
     fn SSL_get0_param(ssl: *mut SSL) -> *mut X509_VERIFY_PARAM;
 
