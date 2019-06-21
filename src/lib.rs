@@ -2341,6 +2341,26 @@ impl Connection {
 
                     self.peer_transport_params = peer_params;
 
+                    // Update max_data of current sender streams with some data
+                    // already written. This can happen when there is a
+                    // Handshake packet loss but received actual request already,
+                    // so the stream (usually id 0) is already opened and have some
+                    // data to write, but actual packetization is prevented because of
+                    // max_tx_data = 0.
+                    // What we do here is update max_data if max_data=0
+                    // In normal situation (handshake is complete before getting
+                    // request) it will not do anything.
+                    for (id, stream) in self.streams.iter_mut() {
+                        if stream.send.get_max_data() == 0 {
+                            stream.send.update_max_data(self.max_tx_data);
+                            trace!(
+                                "stream_id={} update max_data={}",
+                                id,
+                                self.max_tx_data
+                            );
+                        }
+                    }
+
                     trace!("{} connection established: cipher={:?} proto={:?} resumed={} {:?}",
                            &self.trace_id,
                            self.handshake.cipher(),

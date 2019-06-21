@@ -110,6 +110,12 @@ impl StreamMap {
                 };
 
                 let s = Stream::new(max_rx_data, max_tx_data);
+                trace!(
+                    "new stream_id={} max_rx={} max_tx={}",
+                    id,
+                    max_rx_data,
+                    max_tx_data
+                );
                 v.insert(s)
             },
 
@@ -562,6 +568,11 @@ impl SendBuf {
         }
 
         Ok(out)
+    }
+
+    /// Return current max_data
+    pub fn get_max_data(&mut self) -> usize {
+        self.max_data
     }
 
     /// Updates the max_data limit to the given value.
