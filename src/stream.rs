@@ -571,7 +571,7 @@ impl SendBuf {
     }
 
     /// Return current max_data
-    pub fn get_max_data(&mut self) -> usize {
+    pub fn get_max_data(&self) -> usize {
         self.max_data
     }
 
