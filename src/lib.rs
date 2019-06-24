@@ -2347,20 +2347,28 @@ impl Connection {
                     // so the stream (usually id 0) is already opened and have
                     // some data to write, but actual
                     // packetization is prevented because of
-                    // max_tx_data = 0.
-                    // What we do here is update max_data if max_data=0
-                    // In normal situation (handshake is complete before getting
-                    // request) it will not do anything.
+                    // stream.send.max_tx_data = 0.
+                    // What we do here is update stream.send.max_data if
+                    // max_data=0 to its initial value used in
+                    // Stream::new(). In normal situation
+                    // (handshake is complete before getting
+                    // request) it will not do anything because
+                    // send.get_max_data() != 0
                     for (id, stream) in self
                         .streams
                         .iter_mut()
                         .filter(|(_, s)| s.send.get_max_data() == 0)
                     {
-                        stream.send.update_max_data(self.max_tx_data);
+                        // we use same value of Stream::new()
+                        stream.send.update_max_data(
+                            self.peer_transport_params
+                                .initial_max_stream_data_bidi_local
+                                as usize,
+                        );
                         trace!(
-                            "stream_id={} update max_data={}",
+                            "stream_id={} update stream.send.max_data={}",
                             id,
-                            self.max_tx_data
+                            stream.send.get_max_data()
                         );
                     }
 
