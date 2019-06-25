@@ -77,7 +77,7 @@ fn main() {
 
     // Resolve server address.
     let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
-    info!("connecting to {:?}...", peer_addr);
+    info!("connecting to {:}", peer_addr);
 
     // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
     // server address. This is needed on macOS and BSD variants that don't
