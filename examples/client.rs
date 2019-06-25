@@ -137,12 +137,12 @@ fn main() {
     let write = match conn.send(&mut out) {
         Ok(v) => v,
 
-        Err(e) => panic!("{} initial send failed: {:?}", conn.trace_id(), e),
+        Err(e) => panic!("initial send failed: {:?}", e),
     };
 
     socket.send(&out[..write]).unwrap();
 
-    debug!("{} written {}", conn.trace_id(), write);
+    debug!("written {}", write);
 
     let req_start = std::time::Instant::now();
 
@@ -180,38 +180,34 @@ fn main() {
                 },
             };
 
-            debug!("{} got {} bytes", conn.trace_id(), len);
+            debug!("got {} bytes", len);
 
             // Process potentially coalesced packets.
             let read = match conn.recv(&mut buf[..len]) {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
-                    debug!("{} done reading", conn.trace_id());
+                    debug!("done reading");
                     break;
                 },
 
                 Err(e) => {
-                    error!("{} recv failed: {:?}", conn.trace_id(), e);
+                    error!("recv failed: {:?}", e);
                     break 'read;
                 },
             };
 
-            debug!("{} processed {} bytes", conn.trace_id(), read);
+            debug!("processed {} bytes", read);
         }
 
         if conn.is_closed() {
-            info!("{} connection closed, {:?}", conn.trace_id(), conn.stats());
+            info!("connection closed, {:?}", conn.stats());
             break;
         }
 
         // Send an HTTP request as soon as the connection is established.
         if conn.is_established() && !req_sent {
-            info!(
-                "{} sending HTTP request for {}",
-                conn.trace_id(),
-                url.path()
-            );
+            info!("sending HTTP request for {}", url.path());
 
             let req = format!("GET {}\r\n", url.path());
             conn.stream_send(HTTP_REQ_STREAM_ID, req.as_bytes(), true)
@@ -224,13 +220,12 @@ fn main() {
         let streams: Vec<u64> = conn.readable().collect();
         for s in streams {
             while let Ok((read, fin)) = conn.stream_recv(s, &mut buf) {
-                debug!("{} received {} bytes", conn.trace_id(), read);
+                debug!("received {} bytes", read);
 
                 let stream_buf = &buf[..read];
 
                 debug!(
-                    "{} stream {} has {} bytes (fin? {})",
-                    conn.trace_id(),
+                    "stream {} has {} bytes (fin? {})",
                     s,
                     stream_buf.len(),
                     fin
@@ -244,8 +239,7 @@ fn main() {
                 // we got the full response. Close the connection.
                 if s == HTTP_REQ_STREAM_ID && fin {
                     info!(
-                        "{} response received in {:?}, closing...",
-                        conn.trace_id(),
+                        "response received in {:?}, closing...",
                         req_start.elapsed()
                     );
 
@@ -261,12 +255,12 @@ fn main() {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
-                    debug!("{} done writing", conn.trace_id());
+                    debug!("done writing");
                     break;
                 },
 
                 Err(e) => {
-                    error!("{} send failed: {:?}", conn.trace_id(), e);
+                    error!("send failed: {:?}", e);
                     conn.close(false, 0x1, b"fail").ok();
                     break;
                 },
@@ -274,11 +268,11 @@ fn main() {
 
             socket.send(&out[..write]).unwrap();
 
-            debug!("{} written {}", conn.trace_id(), write);
+            debug!("written {}", write);
         }
 
         if conn.is_closed() {
-            info!("{} connection closed, {:?}", conn.trace_id(), conn.stats());
+            info!("connection closed, {:?}", conn.stats());
             break;
         }
     }

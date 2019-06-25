@@ -142,12 +142,12 @@ fn main() {
     let write = match conn.send(&mut out) {
         Ok(v) => v,
 
-        Err(e) => panic!("{} initial send failed: {:?}", conn.trace_id(), e),
+        Err(e) => panic!("initial send failed: {:?}", e),
     };
 
     socket.send(&out[..write]).unwrap();
 
-    debug!("{} written {}", conn.trace_id(), write);
+    debug!("written {}", write);
 
     let req_start = std::time::Instant::now();
 
@@ -183,28 +183,28 @@ fn main() {
                 },
             };
 
-            debug!("{} got {} bytes", conn.trace_id(), len);
+            debug!("got {} bytes", len);
 
             // Process potentially coalesced packets.
             let read = match conn.recv(&mut buf[..len]) {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
-                    debug!("{} done reading", conn.trace_id());
+                    debug!("done reading");
                     break;
                 },
 
                 Err(e) => {
-                    error!("{} recv failed: {:?}", conn.trace_id(), e);
+                    error!("recv failed: {:?}", e);
                     break 'read;
                 },
             };
 
-            debug!("{} processed {} bytes", conn.trace_id(), read);
+            debug!("processed {} bytes", read);
         }
 
         if conn.is_closed() {
-            info!("{} connection closed, {:?}", conn.trace_id(), conn.stats());
+            info!("connection closed, {:?}", conn.stats());
             break;
         }
 
@@ -232,10 +232,10 @@ fn main() {
                 quiche::h3::Header::new("user-agent", "quiche"),
             ];
 
-            info!("{} sending HTTP request {:?}", conn.trace_id(), req);
+            info!("sending HTTP request {:?}", req);
 
             if let Err(e) = h3_conn.send_request(&mut conn, &req, true) {
-                error!("{} failed to send request {:?}", conn.trace_id(), e);
+                error!("failed to send request {:?}", e);
                 break;
             }
 
@@ -248,10 +248,8 @@ fn main() {
                 match http3_conn.poll(&mut conn) {
                     Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
                         info!(
-                            "{} got response headers {:?} on stream id {}",
-                            conn.trace_id(),
-                            headers,
-                            stream_id
+                            "got response headers {:?} on stream id {}",
+                            headers, stream_id
                         );
                     },
 
@@ -260,10 +258,8 @@ fn main() {
                             http3_conn.recv_body(&mut conn, stream_id, &mut buf)
                         {
                             debug!(
-                                "{} got {} bytes of response data on stream {}",
-                                conn.trace_id(),
-                                read,
-                                stream_id
+                                "got {} bytes of response data on stream {}",
+                                read, stream_id
                             );
 
                             print!("{}", unsafe {
@@ -274,8 +270,7 @@ fn main() {
 
                     Ok((_stream_id, quiche::h3::Event::Finished)) => {
                         info!(
-                            "{} response received in {:?}, closing...",
-                            conn.trace_id(),
+                            "response received in {:?}, closing...",
                             req_start.elapsed()
                         );
 
@@ -294,11 +289,7 @@ fn main() {
                     },
 
                     Err(e) => {
-                        error!(
-                            "{} HTTP/3 processing failed: {:?}",
-                            conn.trace_id(),
-                            e
-                        );
+                        error!("HTTP/3 processing failed: {:?}", e);
 
                         break;
                     },
@@ -313,12 +304,12 @@ fn main() {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
-                    debug!("{} done writing", conn.trace_id());
+                    debug!("done writing");
                     break;
                 },
 
                 Err(e) => {
-                    error!("{} send failed: {:?}", conn.trace_id(), e);
+                    error!("send failed: {:?}", e);
                     conn.close(false, 0x1, b"fail").ok();
                     break;
                 },
@@ -326,11 +317,11 @@ fn main() {
 
             socket.send(&out[..write]).unwrap();
 
-            debug!("{} written {}", conn.trace_id(), write);
+            debug!("written {}", write);
         }
 
         if conn.is_closed() {
-            info!("{} connection closed, {:?}", conn.trace_id(), conn.stats());
+            info!("connection closed, {:?}", conn.stats());
             break;
         }
     }
