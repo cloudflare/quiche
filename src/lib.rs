@@ -2357,7 +2357,6 @@ impl Connection {
                     for (id, stream) in self
                         .streams
                         .iter_mut()
-                        .filter(|(_, s)| s.send.get_max_data() == 0)
                     {
                         // we use same value of Stream::new()
                         stream.send.update_max_data(
@@ -2366,7 +2365,8 @@ impl Connection {
                                 as usize,
                         );
                         trace!(
-                            "stream_id={} update stream.send.max_data={}",
+                            "{} stream_id={} update stream.send.max_data={}",
+                            &self.trace_id,
                             id,
                             stream.send.get_max_data()
                         );
