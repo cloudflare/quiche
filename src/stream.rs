@@ -110,12 +110,6 @@ impl StreamMap {
                 };
 
                 let s = Stream::new(max_rx_data, max_tx_data);
-                trace!(
-                    "new stream_id={} max_rx={} max_tx={}",
-                    id,
-                    max_rx_data,
-                    max_tx_data
-                );
                 v.insert(s)
             },
 
