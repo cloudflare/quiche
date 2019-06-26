@@ -647,6 +647,14 @@ impl Frame {
             },
         }
     }
+
+    pub fn ack_eliciting(&self) -> bool {
+        match self {
+            Frame::Padding { .. } | Frame::ACK { .. } => false,
+
+            _ => true,
+        }
+    }
 }
 
 impl std::fmt::Debug for Frame {

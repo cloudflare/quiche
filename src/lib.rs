@@ -1256,240 +1256,11 @@ impl Connection {
         while payload.cap() > 0 {
             let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
 
-            trace!("{} rx frm {:?}", self.trace_id, frame);
-
-            match frame {
-                frame::Frame::Padding { .. } => (),
-
-                frame::Frame::Ping => {
-                    ack_elicited = true;
-                },
-
-                frame::Frame::ACK { ranges, ack_delay } => {
-                    let ack_delay = ack_delay *
-                        2_u64.pow(
-                            self.peer_transport_params.ack_delay_exponent as u32,
-                        );
-
-                    self.recovery.on_ack_received(
-                        &ranges,
-                        ack_delay,
-                        epoch,
-                        now,
-                        &self.trace_id,
-                    );
-                },
-
-                frame::Frame::ResetStream {
-                    stream_id,
-                    final_size,
-                    ..
-                } => {
-                    // Peer can't send on our unidirectional streams.
-                    if !stream::is_bidi(stream_id) &&
-                        stream::is_local(stream_id, self.is_server)
-                    {
-                        return Err(Error::InvalidStreamState);
-                    }
-
-                    let max_rx_data = self
-                        .local_transport_params
-                        .initial_max_stream_data_bidi_remote
-                        as usize;
-                    let max_tx_data = self
-                        .peer_transport_params
-                        .initial_max_stream_data_bidi_local
-                        as usize;
-
-                    // Get existing stream or create a new one.
-                    let stream = self.streams.get_or_create(
-                        stream_id,
-                        max_rx_data,
-                        max_tx_data,
-                        false,
-                        self.is_server,
-                    )?;
-
-                    self.rx_data += stream.recv.reset(final_size as usize)?;
-
-                    if self.rx_data > self.max_rx_data {
-                        return Err(Error::FlowControl);
-                    }
-
-                    ack_elicited = true;
-                },
-
-                frame::Frame::StopSending { stream_id, .. } => {
-                    // STOP_SENDING on a receive-only stream is a fatal error.
-                    if !stream::is_local(stream_id, self.is_server) &&
-                        !stream::is_bidi(stream_id)
-                    {
-                        return Err(Error::InvalidStreamState);
-                    }
-
-                    ack_elicited = true;
-                },
-
-                frame::Frame::Crypto { data } => {
-                    // Push the data to the stream so it can be re-ordered.
-                    self.pkt_num_spaces[epoch].crypto_stream.recv.push(data)?;
-
-                    // Feed crypto data to the TLS state, if there's data
-                    // available at the expected offset.
-                    let mut crypto_buf = [0; 512];
-
-                    let level = crypto::Level::from_epoch(epoch);
-
-                    let stream = &mut self.pkt_num_spaces[epoch].crypto_stream;
-
-                    while let Ok((read, _)) = stream.recv.pop(&mut crypto_buf) {
-                        let recv_buf = &crypto_buf[..read];
-                        self.handshake
-                            .provide_data(level, &recv_buf)
-                            .map_err(|_| Error::TlsFail)?;
-                    }
-
-                    self.do_handshake()?;
-
-                    ack_elicited = true;
-                },
-
-                // TODO: implement stateless retry
-                frame::Frame::NewToken { .. } => {
-                    ack_elicited = true;
-                },
-
-                frame::Frame::Stream { stream_id, data } => {
-                    // Peer can't send on our unidirectional streams.
-                    if !stream::is_bidi(stream_id) &&
-                        stream::is_local(stream_id, self.is_server)
-                    {
-                        return Err(Error::InvalidStreamState);
-                    }
-
-                    let max_rx_data = self
-                        .local_transport_params
-                        .initial_max_stream_data_bidi_remote
-                        as usize;
-                    let max_tx_data = self
-                        .peer_transport_params
-                        .initial_max_stream_data_bidi_local
-                        as usize;
-
-                    // Get existing stream or create a new one.
-                    let stream = self.streams.get_or_create(
-                        stream_id,
-                        max_rx_data,
-                        max_tx_data,
-                        false,
-                        self.is_server,
-                    )?;
-
-                    self.rx_data += data.len();
-
-                    if self.rx_data > self.max_rx_data {
-                        return Err(Error::FlowControl);
-                    }
-
-                    stream.recv.push(data)?;
-
-                    ack_elicited = true;
-                },
-
-                frame::Frame::MaxData { max } => {
-                    self.max_tx_data = cmp::max(self.max_tx_data, max as usize);
-
-                    ack_elicited = true;
-                },
-
-                frame::Frame::MaxStreamData { stream_id, max } => {
-                    let max_rx_data = self
-                        .local_transport_params
-                        .initial_max_stream_data_bidi_remote
-                        as usize;
-                    let max_tx_data = self
-                        .peer_transport_params
-                        .initial_max_stream_data_bidi_local
-                        as usize;
-
-                    // Get existing stream or create a new one.
-                    let stream = self.streams.get_or_create(
-                        stream_id,
-                        max_rx_data,
-                        max_tx_data,
-                        false,
-                        self.is_server,
-                    )?;
-
-                    stream.send.update_max_data(max as usize);
-
-                    ack_elicited = true;
-                },
-
-                frame::Frame::MaxStreamsBidi { max } => {
-                    if max > 2u64.pow(60) {
-                        return Err(Error::StreamLimit);
-                    }
-
-                    self.streams.update_peer_max_streams_bidi(max as usize);
-
-                    ack_elicited = true;
-                },
-
-                frame::Frame::MaxStreamsUni { max } => {
-                    if max > 2u64.pow(60) {
-                        return Err(Error::StreamLimit);
-                    }
-
-                    self.streams.update_peer_max_streams_uni(max as usize);
-
-                    ack_elicited = true;
-                },
-
-                frame::Frame::DataBlocked { .. } => {
-                    ack_elicited = true;
-                },
-
-                frame::Frame::StreamDataBlocked { .. } => {
-                    ack_elicited = true;
-                },
-
-                frame::Frame::StreamsBlockedBidi { .. } => {
-                    ack_elicited = true;
-                },
-
-                frame::Frame::StreamsBlockedUni { .. } => {
-                    ack_elicited = true;
-                },
-
-                // TODO: implement connection migration
-                frame::Frame::NewConnectionId { .. } => {
-                    ack_elicited = true;
-                },
-
-                // TODO: implement connection migration
-                frame::Frame::RetireConnectionId { .. } => {
-                    ack_elicited = true;
-                },
-
-                frame::Frame::PathChallenge { data } => {
-                    self.challenge = Some(data);
-
-                    ack_elicited = true;
-                },
-
-                frame::Frame::PathResponse { .. } => {
-                    ack_elicited = true;
-                },
-
-                frame::Frame::ConnectionClose { .. } => {
-                    self.draining_timer = Some(now + (self.recovery.pto() * 3));
-                },
-
-                frame::Frame::ApplicationClose { .. } => {
-                    self.draining_timer = Some(now + (self.recovery.pto() * 3));
-                },
+            if frame.ack_eliciting() {
+                ack_elicited = true;
             }
+
+            self.process_frame(frame, epoch, now)?;
         }
 
         // Process ACK'd frames.
@@ -2400,6 +2171,213 @@ impl Connection {
         }
 
         Err(Error::Done)
+    }
+
+    /// Processes an incoming frame.
+    fn process_frame(
+        &mut self, frame: frame::Frame, epoch: packet::Epoch,
+        now: std::time::Instant,
+    ) -> Result<()> {
+        trace!("{} rx frm {:?}", self.trace_id, frame);
+
+        match frame {
+            frame::Frame::Padding { .. } => (),
+
+            frame::Frame::Ping => (),
+
+            frame::Frame::ACK { ranges, ack_delay } => {
+                let ack_delay = ack_delay *
+                    2_u64.pow(
+                        self.peer_transport_params.ack_delay_exponent as u32,
+                    );
+
+                self.recovery.on_ack_received(
+                    &ranges,
+                    ack_delay,
+                    epoch,
+                    now,
+                    &self.trace_id,
+                );
+            },
+
+            frame::Frame::ResetStream {
+                stream_id,
+                final_size,
+                ..
+            } => {
+                // Peer can't send on our unidirectional streams.
+                if !stream::is_bidi(stream_id) &&
+                    stream::is_local(stream_id, self.is_server)
+                {
+                    return Err(Error::InvalidStreamState);
+                }
+
+                let max_rx_data = self
+                    .local_transport_params
+                    .initial_max_stream_data_bidi_remote
+                    as usize;
+                let max_tx_data = self
+                    .peer_transport_params
+                    .initial_max_stream_data_bidi_local
+                    as usize;
+
+                // Get existing stream or create a new one.
+                let stream = self.streams.get_or_create(
+                    stream_id,
+                    max_rx_data,
+                    max_tx_data,
+                    false,
+                    self.is_server,
+                )?;
+
+                self.rx_data += stream.recv.reset(final_size as usize)?;
+
+                if self.rx_data > self.max_rx_data {
+                    return Err(Error::FlowControl);
+                }
+            },
+
+            frame::Frame::StopSending { stream_id, .. } => {
+                // STOP_SENDING on a receive-only stream is a fatal error.
+                if !stream::is_local(stream_id, self.is_server) &&
+                    !stream::is_bidi(stream_id)
+                {
+                    return Err(Error::InvalidStreamState);
+                }
+            },
+
+            frame::Frame::Crypto { data } => {
+                // Push the data to the stream so it can be re-ordered.
+                self.pkt_num_spaces[epoch].crypto_stream.recv.push(data)?;
+
+                // Feed crypto data to the TLS state, if there's data
+                // available at the expected offset.
+                let mut crypto_buf = [0; 512];
+
+                let level = crypto::Level::from_epoch(epoch);
+
+                let stream = &mut self.pkt_num_spaces[epoch].crypto_stream;
+
+                while let Ok((read, _)) = stream.recv.pop(&mut crypto_buf) {
+                    let recv_buf = &crypto_buf[..read];
+                    self.handshake
+                        .provide_data(level, &recv_buf)
+                        .map_err(|_| Error::TlsFail)?;
+                }
+
+                self.do_handshake()?;
+            },
+
+            // TODO: implement stateless retry
+            frame::Frame::NewToken { .. } => (),
+
+            frame::Frame::Stream { stream_id, data } => {
+                // Peer can't send on our unidirectional streams.
+                if !stream::is_bidi(stream_id) &&
+                    stream::is_local(stream_id, self.is_server)
+                {
+                    return Err(Error::InvalidStreamState);
+                }
+
+                let max_rx_data = self
+                    .local_transport_params
+                    .initial_max_stream_data_bidi_remote
+                    as usize;
+                let max_tx_data = self
+                    .peer_transport_params
+                    .initial_max_stream_data_bidi_local
+                    as usize;
+
+                // Get existing stream or create a new one.
+                let stream = self.streams.get_or_create(
+                    stream_id,
+                    max_rx_data,
+                    max_tx_data,
+                    false,
+                    self.is_server,
+                )?;
+
+                self.rx_data += data.len();
+
+                if self.rx_data > self.max_rx_data {
+                    return Err(Error::FlowControl);
+                }
+
+                stream.recv.push(data)?;
+            },
+
+            frame::Frame::MaxData { max } => {
+                self.max_tx_data = cmp::max(self.max_tx_data, max as usize);
+            },
+
+            frame::Frame::MaxStreamData { stream_id, max } => {
+                let max_rx_data = self
+                    .local_transport_params
+                    .initial_max_stream_data_bidi_remote
+                    as usize;
+                let max_tx_data = self
+                    .peer_transport_params
+                    .initial_max_stream_data_bidi_local
+                    as usize;
+
+                // Get existing stream or create a new one.
+                let stream = self.streams.get_or_create(
+                    stream_id,
+                    max_rx_data,
+                    max_tx_data,
+                    false,
+                    self.is_server,
+                )?;
+
+                stream.send.update_max_data(max as usize);
+            },
+
+            frame::Frame::MaxStreamsBidi { max } => {
+                if max > 2u64.pow(60) {
+                    return Err(Error::StreamLimit);
+                }
+
+                self.streams.update_peer_max_streams_bidi(max as usize);
+            },
+
+            frame::Frame::MaxStreamsUni { max } => {
+                if max > 2u64.pow(60) {
+                    return Err(Error::StreamLimit);
+                }
+
+                self.streams.update_peer_max_streams_uni(max as usize);
+            },
+
+            frame::Frame::DataBlocked { .. } => (),
+
+            frame::Frame::StreamDataBlocked { .. } => (),
+
+            frame::Frame::StreamsBlockedBidi { .. } => (),
+
+            frame::Frame::StreamsBlockedUni { .. } => (),
+
+            // TODO: implement connection migration
+            frame::Frame::NewConnectionId { .. } => (),
+
+            // TODO: implement connection migration
+            frame::Frame::RetireConnectionId { .. } => (),
+
+            frame::Frame::PathChallenge { data } => {
+                self.challenge = Some(data);
+            },
+
+            frame::Frame::PathResponse { .. } => (),
+
+            frame::Frame::ConnectionClose { .. } => {
+                self.draining_timer = Some(now + (self.recovery.pto() * 3));
+            },
+
+            frame::Frame::ApplicationClose { .. } => {
+                self.draining_timer = Some(now + (self.recovery.pto() * 3));
+            },
+        }
+
+        Ok(())
     }
 
     /// Drops the initial keys and recovery state.
