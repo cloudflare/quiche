@@ -2348,12 +2348,11 @@ impl Connection {
                     // some data to write, but actual
                     // packetization is prevented because of
                     // stream.send.max_tx_data = 0.
-                    // What we do here is update stream.send.max_data if
-                    // max_data=0 to its initial value used in
-                    // Stream::new(). In normal situation
-                    // (handshake is complete before getting
+                    // What we do here is update stream.send.max_data
+                    // to its initial value used in Stream::new().
+                    // In normal situation (handshake is complete before getting
                     // request) it will not do anything because
-                    // send.get_max_data() != 0
+                    // send.get_max_data() > 0
                     for (id, stream) in self.streams.iter_mut() {
                         // we use same value of Stream::new()
                         stream.send.update_max_data(
@@ -2951,9 +2950,9 @@ pub mod testing {
         }
     }
 
-    // receive and send packet
+    // Receive and send packets
     // read until consuming all "len" bytes of packets (can be multiple)
-    // and send 0 or more packets and return sent size
+    // and send 0 or more packets and return total bytes sent
     pub fn recv_send(
         conn: &mut Connection, buf: &mut [u8], len: usize,
     ) -> Result<usize> {
@@ -2963,7 +2962,7 @@ pub mod testing {
         testing::send(conn, buf, 0)
     }
 
-    // read packets up to "len" size
+    // Read packets up to "len" size
     pub fn recv(
         conn: &mut Connection, buf: &mut [u8], len: usize,
     ) -> Result<usize> {
@@ -2982,9 +2981,10 @@ pub mod testing {
         Ok(left)
     }
 
-    // write packets and return total size sent
+    // Write packets and return total bytes sent
     // count is the number of packets to be sent.
-    // if count = 0, no limit
+    // when count = 0, no limit of packets sent.
+    // when count = 1, send 1 packet and return
     pub fn send(
         conn: &mut Connection, buf: &mut [u8], count: i32,
     ) -> Result<usize> {
@@ -3262,18 +3262,19 @@ mod tests {
 
         let mut pipe = testing::Pipe::default().unwrap();
 
-        // Start connection and do handshake
+        // Start connection and handshake
         let mut len = pipe.client.send(&mut buf).unwrap();
         println!("I client_send={}", len);
 
         while !pipe.client.is_established() && !pipe.server.is_established() {
             len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
-            println!("XXX H server_recv_send={}", len);
+            println!("H server_recv_send={}", len);
 
             len = testing::recv(&mut pipe.client, &mut buf, len).unwrap();
             assert_eq!(len, 0);
 
-            // Send only 1 packet (CRYPTO). We don't send 2nd packet which is ACK,
+            // Now client need to send CRYPTO and ACK, but
+            // send only 1 packet (CRYPTO). We don't send 2nd packet (ACK),
             // simulating packet loss.
             let sent = testing::send(&mut pipe.client, &mut buf, 1).unwrap();
             println!("H client_send={}", sent);
@@ -3296,6 +3297,7 @@ mod tests {
         let pkt_type = packet::Type::Application;
         assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
+        // Make server receive this packet. Server will create stream #0
         pipe.server.stream_recv(0, &mut buf).unwrap();
 
         // Check max_data is zero (before handshake complete)
@@ -3308,21 +3310,21 @@ mod tests {
             stream_count += 1;
         }
 
-        // Make sure should be only one stream (0)
+        // Make sure server have only one stream (0)
         assert_eq!(stream_count, 1);
 
         // Now, we send a pending ACK for server to complete Handshake
         len = testing::send(&mut pipe.client, &mut buf, 0).unwrap();
-        println!("A client_send={}", len);
+        println!("A client sending ACK={}", len);
 
         len = testing::recv(&mut pipe.server, &mut buf, len).unwrap();
-        println!("A server_recv={}", len);
+        println!("A server receiving ACK={}", len);
         assert_eq!(len, 0);
 
         // Now server should complete Handshake.
         assert_eq!(pipe.server.handshake_completed, true);
 
-        // At this point max_data is updated
+        // At this point max_data is updated now. Check if max_data > 0
         let mut stream_count = 0;
         for (id, stream) in pipe.server.streams.iter_mut() {
             // id should be 0 because there is only on stream with id 0
