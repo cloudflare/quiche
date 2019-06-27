@@ -27,63 +27,135 @@
 #[macro_use]
 extern crate log;
 
-use std::net::ToSocketAddrs;
+#[macro_use]
+extern crate clap;
 
+use env_logger::Builder;
 use ring::rand::*;
+use std::fs::File;
+use std::io::prelude::*;
+use std::io::stdout;
+use std::net::ToSocketAddrs;
+use std::path::Path;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
-
-const USAGE: &str = "Usage:
-  http3-client [options] URL
-  http3-client -h | --help
-
-Options:
-  --max-data BYTES         Connection-wide flow control limit [default: 10000000].
-  --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
-  --wire-version VERSION   The version number to send to the server [default: babababa].
-  --no-verify              Don't verify server's certificate.
-  --no-grease              Don't send GREASE.
-  -h --help                Show this screen.
-";
 
 fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
-    env_logger::builder()
-        .default_format_timestamp_nanos(true)
-        .init();
+    let matches =
+        clap_app!(http3_client =>
+                  (about: "A simple QUIC client using HTTP/3")
+                  (@arg no_verify: -k --("no-verify") "Don't verify server's certificate.")
+                  (@arg no_grease: --("no-grease") "Don't send GREASE.")
+                  (@arg show_timing: --("show-timing") "Show basic timing of the request.")
+                  (@arg send_loss_n: --("send-loss") +takes_value "Make Nth sending packet lost [default: 0]")
+                  (@arg recv_loss_n: --("recv-loss") +takes_value "Make N-th receiving packet lost [default: 0].")
+                  (@arg dump_header: -D --("dump-header") +takes_value "Write a response header into file. Default is stdout.")
+                  (@arg output: -O --output +takes_value "Write a response body into file. Default is stdout.")
+                  (@arg header: ... -H --header +takes_value "Set a request header (\"Field: Value\")")
+                  (@arg max_data: --("max-data") +takes_value "Connection-wide flow control limit [default: 10000000].")
+                  (@arg max_stream_data: --("max-stream-data") +takes_value "Per-stream flow control limit [default: 1000000].")
+                  (@arg wire_version: --("wire-version") +takes_value "The version number to send to the server [default: babababa].")
+                  (@arg verbose: -v --verbose "Be verbose")
+                  (@arg URL: +required ... "URL to download")
+        ).get_matches();
 
-    let args = docopt::Docopt::new(USAGE)
-        .and_then(|dopt| dopt.parse())
-        .unwrap_or_else(|e| e.exit());
+    // init logging
+    let mut log_builder = Builder::from_default_env();
+    log_builder.default_format_timestamp_nanos(true);
 
-    let max_data = args.get_str("--max-data");
-    let max_data = u64::from_str_radix(max_data, 10).unwrap();
+    // verbose logging - set to info level
+    if matches.is_present("verbose") {
+        use log::LevelFilter;
+        log_builder.filter(None, LevelFilter::Info);
+    }
 
-    let max_stream_data = args.get_str("--max-stream-data");
-    let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
+    log_builder.init();
 
-    let version = args.get_str("--wire-version");
+    // argument processing
+    let max_data = value_t!(matches.value_of("max_data"), u64).unwrap_or(1000000);
+    let max_stream_data =
+        value_t!(matches.value_of("max_stream_data"), u64).unwrap_or(1000000);
+    let version = matches.value_of("wire_version").unwrap_or("babababa");
     let version = u32::from_str_radix(version, 16).unwrap();
 
-    let url = url::Url::parse(args.get_str("URL")).unwrap();
+    // packet loss simulation (simple)
+    let send_loss_n = value_t!(matches.value_of("send_loss"), u32).unwrap_or(0);
+    let recv_loss_n = value_t!(matches.value_of("recv_loss"), u32).unwrap_or(0);
+
+    // can be multiple
+    let mut req_headers: Vec<&str> = [].to_vec();
+
+    match matches.values_of("header") {
+        Some(h) => req_headers = h.collect(),
+        None => {},
+    }
+
+    let urls: Vec<&str> = matches.values_of("URL").unwrap().collect();
+    let url = url::Url::parse(urls[0]).unwrap();
 
     // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
-    // Resolve server address.
-    let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
-    info!("connecting to {:}", peer_addr);
+    // packet counter
+    let mut send_pkt_n = 0;
+    let mut recv_pkt_n = 0;
 
-    // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
-    // server address. This is needed on macOS and BSD variants that don't
-    // support binding to IN6ADDR_ANY for both v4 and v6.
+    // write to files
+    let header_path = matches.value_of("dump_header").unwrap_or("");
+    let mut header_writer = match header_path {
+        "" => Box::new(stdout()) as Box<Write>,
+        filename => {
+            let path = Path::new(filename);
+            Box::new(File::create(&path).unwrap()) as Box<Write>
+        },
+    };
+
+    let body_path = matches.value_of("output").unwrap_or("");
+    let mut body_writer = match body_path {
+        "" => Box::new(stdout()) as Box<Write>,
+        filename => {
+            let path = Path::new(filename);
+            Box::new(File::create(&path).unwrap()) as Box<Write>
+        },
+    };
+
+    // other options
+    let no_verify = matches.is_present("no_verify");
+    let no_grease = matches.is_present("no_grease");
+
+    // timers
+    let ts_start = std::time::Instant::now();
+    let ts_dns;
+    let mut ts_connect = std::time::Instant::now();
+    let mut ts_req = std::time::Instant::now();
+    let mut ts_resp = std::time::Instant::now();
+    let ts_end;
+    let mut body_len = 0;
+    let mut http_status: i32 = 0;
+    let show_timing = matches.is_present("show_timing");
+
+    // Take a look at server address resolved to check if it's ipv4 or ipv6.
+    // Depending on the IP family, bind_addr will be default address of
+    // v4 or v6 for calling bind() later.
+    // This workaround is to work with MacOS (or BSD variants which
+    // doesn't allow v4 and v6 can be bind() in one socket).
+    // Note that linux doesn't need this because it can handle v4 and v6 socket
+    // when bind() with "::".
+
+    // resolve server address
+    let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
+    info!("* Connecting to {:?}...", peer_addr);
     let bind_addr = match peer_addr {
         std::net::SocketAddr::V4(_) => "0.0.0.0:0",
         std::net::SocketAddr::V6(_) => "[::]:0",
     };
+
+    // end of dns query
+    ts_dns = std::time::Instant::now();
 
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
@@ -120,11 +192,11 @@ fn main() {
 
     let mut http3_conn = None;
 
-    if args.get_bool("--no-verify") {
+    if no_verify {
         config.verify_peer(false);
     }
 
-    if args.get_bool("--no-grease") {
+    if no_grease {
         config.grease(false);
     }
 
@@ -142,14 +214,17 @@ fn main() {
     let write = match conn.send(&mut out) {
         Ok(v) => v,
 
-        Err(e) => panic!("initial send failed: {:?}", e),
+        Err(e) => panic!("{} initial send failed: {:?}", conn.trace_id(), e),
     };
 
-    socket.send(&out[..write]).unwrap();
+    send_pkt_n += 1;
+    if send_loss_n == 0 || send_pkt_n != send_loss_n {
+        socket.send(&out[..write]).unwrap();
+    } else {
+        info!("* {} send: lost packet# {}", conn.trace_id(), send_loss_n);
+    }
 
-    debug!("written {}", write);
-
-    let req_start = std::time::Instant::now();
+    debug!("{} written {}", conn.trace_id(), write);
 
     loop {
         poll.poll(&mut events, conn.timeout()).unwrap();
@@ -169,7 +244,10 @@ fn main() {
             }
 
             let len = match socket.recv(&mut buf) {
-                Ok(v) => v,
+                Ok(v) => {
+                    recv_pkt_n += 1;
+                    v
+                },
 
                 Err(e) => {
                     // There are no more UDP packets to read, so end the read
@@ -183,34 +261,45 @@ fn main() {
                 },
             };
 
-            debug!("got {} bytes", len);
+            debug!("{} got {} bytes", conn.trace_id(), len);
 
             // Process potentially coalesced packets.
-            let read = match conn.recv(&mut buf[..len]) {
-                Ok(v) => v,
+            recv_pkt_n += 1;
+            if recv_loss_n == 0 || recv_pkt_n != recv_loss_n {
+                let read = match conn.recv(&mut buf[..len]) {
+                    Ok(v) => v,
 
-                Err(quiche::Error::Done) => {
-                    debug!("done reading");
-                    break;
-                },
+                    Err(quiche::Error::Done) => {
+                        debug!("{} done reading", conn.trace_id());
+                        break;
+                    },
 
-                Err(e) => {
-                    error!("recv failed: {:?}", e);
-                    break 'read;
-                },
-            };
+                    Err(e) => {
+                        error!("{} recv failed: {:?}", conn.trace_id(), e);
+                        break 'read;
+                    },
+                };
 
-            debug!("processed {} bytes", read);
+                debug!("{} processed {} bytes", conn.trace_id(), read);
+            } else {
+                info!("* {} recv: lost packet# {}", conn.trace_id(), recv_loss_n);
+            }
         }
 
         if conn.is_closed() {
-            info!("connection closed, {:?}", conn.stats());
+            info!(
+                "* {} connection closed, {:?}",
+                conn.trace_id(),
+                conn.stats()
+            );
             break;
         }
 
         // Create a new HTTP/3 connection and end an HTTP request as soon as
         // the QUIC connection is established.
         if conn.is_established() && http3_conn.is_none() {
+            ts_connect = std::time::Instant::now();
+
             let h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
 
             let mut h3_conn =
@@ -224,7 +313,7 @@ fn main() {
                 path.push_str(query);
             }
 
-            let req = vec![
+            let mut req = vec![
                 quiche::h3::Header::new(":method", "GET"),
                 quiche::h3::Header::new(":scheme", url.scheme()),
                 quiche::h3::Header::new(":authority", url.host_str().unwrap()),
@@ -232,14 +321,29 @@ fn main() {
                 quiche::h3::Header::new("user-agent", "quiche"),
             ];
 
-            info!("sending HTTP request {:?}", req);
+            // construct additional headers
+            for header in &req_headers {
+                let h_parsed: Vec<&str> = header.split(": ").collect();
+                // header field is lowercase
+                let (h_field, h_value) =
+                    (&h_parsed[0].to_lowercase().to_string(), h_parsed[1]);
+
+                req.push(quiche::h3::Header::new(h_field, h_value));
+            }
+
+            info!("{} sending HTTP request", conn.trace_id());
+
+            for h in &req {
+                info!("{} request {}: {}", conn.trace_id(), h.name(), h.value());
+            }
 
             if let Err(e) = h3_conn.send_request(&mut conn, &req, true) {
-                error!("failed to send request {:?}", e);
+                error!("{} failed to send request {:?}", conn.trace_id(), e);
                 break;
             }
 
             http3_conn = Some(h3_conn);
+            ts_req = std::time::Instant::now();
         }
 
         if let Some(http3_conn) = &mut http3_conn {
@@ -247,10 +351,25 @@ fn main() {
             loop {
                 match http3_conn.poll(&mut conn) {
                     Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
+                        ts_resp = std::time::Instant::now();
                         info!(
-                            "got response headers {:?} on stream id {}",
-                            headers, stream_id
+                            "{} got response headers on stream id {}",
+                            conn.trace_id(),
+                            stream_id
                         );
+                        for header in headers.iter() {
+                            if header.name() == ":status" {
+                                http_status = header.value().parse().unwrap();
+                            }
+
+                            writeln!(
+                                header_writer,
+                                "{}: {}",
+                                header.name(),
+                                header.value()
+                            )
+                            .unwrap();
+                        }
                     },
 
                     Ok((stream_id, quiche::h3::Event::Data)) => {
@@ -258,20 +377,23 @@ fn main() {
                             http3_conn.recv_body(&mut conn, stream_id, &mut buf)
                         {
                             debug!(
-                                "got {} bytes of response data on stream {}",
-                                read, stream_id
+                                "{} got {} bytes of response data on stream {}",
+                                conn.trace_id(),
+                                read,
+                                stream_id
                             );
 
-                            print!("{}", unsafe {
-                                std::str::from_utf8_unchecked(&buf[..read])
-                            });
+                            body_len += read;
+
+                            body_writer.write(&buf[..read]).unwrap();
                         }
                     },
 
                     Ok((_stream_id, quiche::h3::Event::Finished)) => {
                         info!(
-                            "response received in {:?}, closing...",
-                            req_start.elapsed()
+                            "{} response received in {:?}, closing...",
+                            conn.trace_id(),
+                            ts_start.elapsed()
                         );
 
                         match conn.close(true, 0x00, b"kthxbye") {
@@ -289,7 +411,11 @@ fn main() {
                     },
 
                     Err(e) => {
-                        error!("HTTP/3 processing failed: {:?}", e);
+                        error!(
+                            "{} HTTP/3 processing failed: {:?}",
+                            conn.trace_id(),
+                            e
+                        );
 
                         break;
                     },
@@ -304,25 +430,52 @@ fn main() {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
-                    debug!("done writing");
+                    debug!("{} done writing", conn.trace_id());
                     break;
                 },
 
                 Err(e) => {
-                    error!("send failed: {:?}", e);
+                    error!("{} send failed: {:?}", conn.trace_id(), e);
                     conn.close(false, 0x1, b"fail").ok();
                     break;
                 },
             };
 
-            socket.send(&out[..write]).unwrap();
+            send_pkt_n += 1;
+            if send_loss_n == 0 || send_pkt_n != send_loss_n {
+                socket.send(&out[..write]).unwrap();
+            } else {
+                info!("{} send: lost packet# {}", conn.trace_id(), send_loss_n);
+            }
 
-            debug!("written {}", write);
+            debug!("{} written {}", conn.trace_id(), write);
         }
 
         if conn.is_closed() {
-            info!("connection closed, {:?}", conn.stats());
+            info!("{} connection closed, {:?}", conn.trace_id(), conn.stats());
             break;
         }
+    }
+
+    // bytes/sec
+    ts_end = std::time::Instant::now();
+
+    if show_timing {
+        let down_bw = ((body_len as f32) /
+            (ts_end.duration_since(ts_req).as_millis() as f32 / 1000.0))
+            as i32;
+        println!("{{ \"url\": \"{}\", \"http_code\": {}, \"ts_dns\": {}, \"ts_connect\": {}, \"ts_req\": {}, \"ts_firstbyte\": {}, \"ts_total\": {}, \"body_len\": {}, \"bw_down\": {}, \"pkts_send\": {}, \"pkts_recv\": {} }}",
+                 url.as_str(),
+                 http_status,
+                 ts_dns.duration_since(ts_start).as_millis() as f32 / 1000.0, // tdns
+                 ts_connect.duration_since(ts_start).as_millis() as f32 / 1000.0, // tconnect
+                 ts_req.duration_since(ts_start).as_millis() as f32 / 1000.0, // treq
+                 ts_resp.duration_since(ts_start).as_millis() as f32 / 1000.0, // ttfb
+                 ts_end.duration_since(ts_start).as_millis() as f32 / 1000.0, // ttotal
+                 body_len,
+                 down_bw,
+                 send_pkt_n,
+                 recv_pkt_n
+        );
     }
 }
