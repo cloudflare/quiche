@@ -27,9 +27,6 @@
 #[macro_use]
 extern crate log;
 
-#[macro_use]
-extern crate clap;
-
 use env_logger::Builder;
 use ring::rand::*;
 use std::fs::File;
@@ -40,72 +37,69 @@ use std::path::Path;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
+const USAGE: &str = "Usage:
+  http3-client [options] URL
+  http3-client -h | --help
+
+Options:
+  --max-data BYTES         Connection-wide flow control limit [default: 10000000].
+  --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
+  --wire-version VERSION   The version number to send to the server [default: babababa].
+  --no-verify              Don't verify server's certificate.
+  --no-grease              Don't send GREASE.
+  -H --header HEADER ...   Add a request header.
+  -D --dump-header FILE    Write a response header into file. Default is stdout.
+  -O --output FILE         Write a response body into file. Default is stdout.
+  --send-loss N            Make Nth sending packet lost [default: 0]
+  --recv-loss N            Make N-th receiving packet lost [default: 0].
+  --show-timing            Show basic timing of the request.
+  -v --verbose             Be verbose.
+  -h --help                Show this screen.
+";
+
 fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
-    let matches =
-        clap_app!(http3_client =>
-                  (about: "A simple QUIC client using HTTP/3")
-                  (@arg no_verify: -k --("no-verify") "Don't verify server's certificate.")
-                  (@arg no_grease: --("no-grease") "Don't send GREASE.")
-                  (@arg show_timing: --("show-timing") "Show basic timing of the request.")
-                  (@arg send_loss_n: --("send-loss") +takes_value "Make Nth sending packet lost [default: 0]")
-                  (@arg recv_loss_n: --("recv-loss") +takes_value "Make N-th receiving packet lost [default: 0].")
-                  (@arg dump_header: -D --("dump-header") +takes_value "Write a response header into file. Default is stdout.")
-                  (@arg output: -O --output +takes_value "Write a response body into file. Default is stdout.")
-                  (@arg header: ... -H --header +takes_value "Set a request header (\"Field: Value\")")
-                  (@arg max_data: --("max-data") +takes_value "Connection-wide flow control limit [default: 10000000].")
-                  (@arg max_stream_data: --("max-stream-data") +takes_value "Per-stream flow control limit [default: 1000000].")
-                  (@arg wire_version: --("wire-version") +takes_value "The version number to send to the server [default: babababa].")
-                  (@arg verbose: -v --verbose "Be verbose")
-                  (@arg URL: +required ... "URL to download")
-        ).get_matches();
+    let args = docopt::Docopt::new(USAGE)
+        .and_then(|dopt| dopt.parse())
+        .unwrap_or_else(|e| e.exit());
 
-    // init logging
+    // Initalize logging right after command line processing
     let mut log_builder = Builder::from_default_env();
     log_builder.default_format_timestamp_nanos(true);
 
-    // verbose logging - set to info level
-    if matches.is_present("verbose") {
+    // If verbose logging is set, change to Info level
+    if args.get_bool("--verbose") {
         use log::LevelFilter;
         log_builder.filter(None, LevelFilter::Info);
     }
-
     log_builder.init();
 
-    // argument processing
-    let max_data = value_t!(matches.value_of("max_data"), u64).unwrap_or(1000000);
-    let max_stream_data =
-        value_t!(matches.value_of("max_stream_data"), u64).unwrap_or(1000000);
-    let version = matches.value_of("wire_version").unwrap_or("babababa");
+    // Command line arguments
+    let max_data = args.get_str("--max-data");
+    let max_data = u64::from_str_radix(max_data, 10).unwrap();
+
+    let max_stream_data = args.get_str("--max-stream-data");
+    let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
+
+    let version = args.get_str("--wire-version");
     let version = u32::from_str_radix(version, 16).unwrap();
 
-    // packet loss simulation (simple)
-    let send_loss_n = value_t!(matches.value_of("send_loss"), u32).unwrap_or(0);
-    let recv_loss_n = value_t!(matches.value_of("recv_loss"), u32).unwrap_or(0);
+    // A simple packet loss simulation
+    let send_loss_n = args.get_str("--send-loss");
+    let send_loss_n = u64::from_str_radix(send_loss_n, 10).unwrap();
+    let recv_loss_n = args.get_str("--recv-loss");
+    let recv_loss_n = u64::from_str_radix(recv_loss_n, 10).unwrap();
 
-    // can be multiple
-    let mut req_headers: Vec<&str> = [].to_vec();
+    // Request headers (can be multiple)
+    let req_headers = args.get_vec("--header");
 
-    match matches.values_of("header") {
-        Some(h) => req_headers = h.collect(),
-        None => {},
-    }
+    // URL to load
+    let url = url::Url::parse(args.get_str("URL")).unwrap();
 
-    let urls: Vec<&str> = matches.values_of("URL").unwrap().collect();
-    let url = url::Url::parse(urls[0]).unwrap();
-
-    // Setup the event loop.
-    let poll = mio::Poll::new().unwrap();
-    let mut events = mio::Events::with_capacity(1024);
-
-    // packet counter
-    let mut send_pkt_n = 0;
-    let mut recv_pkt_n = 0;
-
-    // write to files
-    let header_path = matches.value_of("dump_header").unwrap_or("");
+    // Write to files
+    let header_path = args.get_str("--dump-header");
     let mut header_writer = match header_path {
         "" => Box::new(stdout()) as Box<Write>,
         filename => {
@@ -114,7 +108,7 @@ fn main() {
         },
     };
 
-    let body_path = matches.value_of("output").unwrap_or("");
+    let body_path = args.get_str("--output");
     let mut body_writer = match body_path {
         "" => Box::new(stdout()) as Box<Write>,
         filename => {
@@ -123,11 +117,7 @@ fn main() {
         },
     };
 
-    // other options
-    let no_verify = matches.is_present("no_verify");
-    let no_grease = matches.is_present("no_grease");
-
-    // timers
+    // Timers
     let ts_start = std::time::Instant::now();
     let ts_dns;
     let mut ts_connect = std::time::Instant::now();
@@ -136,19 +126,22 @@ fn main() {
     let ts_end;
     let mut body_len = 0;
     let mut http_status: i32 = 0;
-    let show_timing = matches.is_present("show_timing");
+    let show_timing = args.get_bool("--show-timing");
 
-    // Take a look at server address resolved to check if it's ipv4 or ipv6.
-    // Depending on the IP family, bind_addr will be default address of
-    // v4 or v6 for calling bind() later.
-    // This workaround is to work with MacOS (or BSD variants which
-    // doesn't allow v4 and v6 can be bind() in one socket).
-    // Note that linux doesn't need this because it can handle v4 and v6 socket
-    // when bind() with "::".
+    // Packet counter
+    let mut send_pkt_n = 0;
+    let mut recv_pkt_n = 0;
 
-    // resolve server address
+    // Setup the event loop.
+    let poll = mio::Poll::new().unwrap();
+    let mut events = mio::Events::with_capacity(1024);
+
+    // Resolve server address.
     let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
-    info!("* Connecting to {:?}...", peer_addr);
+
+    // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
+    // server address. This is needed on macOS and BSD variants that don't
+    // support binding to IN6ADDR_ANY for both v4 and v6.
     let bind_addr = match peer_addr {
         std::net::SocketAddr::V4(_) => "0.0.0.0:0",
         std::net::SocketAddr::V6(_) => "[::]:0",
@@ -159,6 +152,7 @@ fn main() {
 
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
+    info!("* Connecting to {:?}...", peer_addr);
     let socket = std::net::UdpSocket::bind(bind_addr).unwrap();
     socket.connect(peer_addr).unwrap();
 
@@ -192,11 +186,11 @@ fn main() {
 
     let mut http3_conn = None;
 
-    if no_verify {
+    if args.get_bool("--no-verify") {
         config.verify_peer(false);
     }
 
-    if no_grease {
+    if args.get_bool("--no-grease") {
         config.grease(false);
     }
 
