@@ -200,7 +200,14 @@ fn main() {
 
                     let out = &out[..len];
 
-                    socket.send_to(out, &src).unwrap();
+                    if let Err(e) = socket.send_to(out, &src) {
+                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                            debug!("send() would block");
+                            break;
+                        }
+
+                        panic!("send() failed: {:?}", e);
+                    }
                     continue;
                 }
 
@@ -226,7 +233,14 @@ fn main() {
                         .unwrap();
                         let out = &out[..len];
 
-                        socket.send_to(out, &src).unwrap();
+                        if let Err(e) = socket.send_to(out, &src) {
+                            if e.kind() == std::io::ErrorKind::WouldBlock {
+                                debug!("send() would block");
+                                break;
+                            }
+
+                            panic!("send() failed: {:?}", e);
+                        }
                         continue;
                     }
 
@@ -368,7 +382,14 @@ fn main() {
                 };
 
                 // TODO: coalesce packets.
-                socket.send_to(&out[..write], &peer).unwrap();
+                if let Err(e) = socket.send_to(&out[..write], &peer) {
+                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                        debug!("send() would block");
+                        break;
+                    }
+
+                    panic!("send() failed: {:?}", e);
+                }
 
                 debug!("{} written {} bytes", client.conn.trace_id(), write);
             }
