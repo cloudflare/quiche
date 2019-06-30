@@ -623,6 +623,14 @@ pub struct Connection {
     /// Received address verification token.
     token: Option<Vec<u8>>,
 
+    /// List of frames from Application packets received before the handshake
+    /// was completed.
+    early_app_frames: Vec<frame::Frame>,
+
+    /// Number of Application packets received before the handshake was
+    /// completed.
+    early_app_pkts: usize,
+
     /// Error code to be sent to the peer in CONNECTION_CLOSE.
     error: Option<u16>,
 
@@ -877,6 +885,10 @@ impl Connection {
             odcid: None,
 
             token: None,
+
+            early_app_frames: Vec::new(),
+
+            early_app_pkts: 0,
 
             error: None,
 
@@ -1238,6 +1250,22 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        // Keep track of the number of Application packets received before the
+        // handshake is completed, and drop any that exceed the initial
+        // congestion window packet count.
+        if hdr.ty == packet::Type::Application && !self.is_established() {
+            self.early_app_pkts += 1;
+
+            if self.early_app_pkts > recovery::INITIAL_WINDOW_PACKETS {
+                error!(
+                    "{} dropped early application packet len={} pn={}",
+                    self.trace_id, payload_len, pn,
+                );
+
+                return Ok(header_len + payload_len);
+            }
+        }
+
         // Keep track of how many bytes we received from the client, so we
         // can limit bytes sent back before address validation, to a multiple
         // of this. The limit needs to be increased early on, so that if there
@@ -1258,6 +1286,13 @@ impl Connection {
 
             if frame.ack_eliciting() {
                 ack_elicited = true;
+            }
+
+            // If the packet this frame belongs to is an early Application one,
+            // buffer the frame for later processing.
+            if hdr.ty == packet::Type::Application && !self.is_established() {
+                self.early_app_frames.push(frame);
+                continue;
             }
 
             self.process_frame(frame, epoch, now)?;
@@ -1383,7 +1418,7 @@ impl Connection {
         let is_closing = self.error.is_some() || self.app_error.is_some();
 
         if !is_closing {
-            self.do_handshake()?;
+            self.do_handshake(now)?;
         }
 
         // Use max_packet_size as sent by the peer, except during the handshake
@@ -2074,7 +2109,7 @@ impl Connection {
     /// Continues the handshake.
     ///
     /// If the connection is already established, it does nothing.
-    fn do_handshake(&mut self) -> Result<()> {
+    fn do_handshake(&mut self, now: time::Instant) -> Result<()> {
         if !self.handshake_completed {
             match self.handshake.do_handshake() {
                 Ok(_) => {
@@ -2118,6 +2153,15 @@ impl Connection {
                            std::str::from_utf8(self.application_proto()),
                            self.is_resumed(),
                            self.peer_transport_params);
+
+                    // Process outstanding frames from early Application packets.
+                    for f in self
+                        .early_app_frames
+                        .drain(..)
+                        .collect::<Vec<frame::Frame>>()
+                    {
+                        self.process_frame(f, packet::EPOCH_APPLICATION, now)?;
+                    }
                 },
 
                 Err(tls::Error::TlsFail) => return Err(Error::TlsFail),
@@ -2265,7 +2309,7 @@ impl Connection {
                         .map_err(|_| Error::TlsFail)?;
                 }
 
-                self.do_handshake()?;
+                self.do_handshake(now)?;
             },
 
             // TODO: implement stateless retry
@@ -3592,6 +3636,115 @@ mod tests {
                 data: vec![0xba; 8],
             })
         );
+    }
+
+    #[test]
+    /// Simulates reception of an early Application packet on the server, by
+    /// delaying the client's Handshake packet that completes the handshake.
+    fn buffer_early_app_frames() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Client sends initial flight
+        let mut len = pipe.client.send(&mut buf).unwrap();
+
+        // Server sends initial flight..
+        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        // Client sends Handshake packet.
+        len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+
+        // Emulate handshake packet delay by not making server process client
+        // packet.
+        let mut delayed = (&buf[..len]).to_vec();
+        testing::recv_send(&mut pipe.server, &mut buf, 0).unwrap();
+
+        assert!(pipe.client.is_established());
+        assert_eq!(pipe.client.streams.iter_mut().len(), 0);
+
+        assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.streams.iter_mut().len(), 1);
+
+        assert!(!pipe.server.is_established());
+        assert_eq!(pipe.server.streams.iter_mut().len(), 0);
+
+        // Process delayed packet.
+        pipe.server.recv(&mut delayed).unwrap();
+
+        assert!(pipe.server.is_established());
+        assert_eq!(pipe.server.streams.iter_mut().len(), 1);
+
+        assert_eq!(pipe.client.stats().sent, pipe.server.stats().recv);
+    }
+
+    #[test]
+    /// Simulates reception of multiple early Application packets on the server
+    /// exceeding the limit imposed for buffering of their frames.
+    fn buffer_early_app_frames_limit() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(256);
+        config.set_initial_max_stream_data_bidi_local(256);
+        config.set_initial_max_stream_data_bidi_remote(256);
+        config.set_initial_max_streams_bidi(13);
+        config.set_initial_max_streams_uni(13);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        // Client sends initial flight
+        let mut len = pipe.client.send(&mut buf).unwrap();
+
+        // Server sends initial flight..
+        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        // Client sends Handshake packet.
+        len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+
+        // Emulate handshake packet delay by not making server process client
+        // packet.
+        let mut delayed = (&buf[..len]).to_vec();
+        testing::recv_send(&mut pipe.server, &mut buf, 0).unwrap();
+
+        assert!(pipe.client.is_established());
+        assert_eq!(pipe.client.streams.iter_mut().len(), 0);
+
+        // Client sends `INITIAL_WINDOW_PACKETS` + 1 Application packets to
+        // trigger the server's limit.
+        for i in 1..=recovery::INITIAL_WINDOW_PACKETS + 1 {
+            pipe.client
+                .stream_send(i as u64 * 4, b"hello, world", true)
+                .unwrap();
+            pipe.advance(&mut buf).unwrap();
+        }
+
+        assert_eq!(pipe.client.streams.iter_mut().len(), 11);
+
+        assert!(!pipe.server.is_established());
+        assert_eq!(pipe.server.streams.iter_mut().len(), 0);
+
+        // Process delayed packet.
+        pipe.server.recv(&mut delayed).unwrap();
+
+        // Server received `INITIAL_WINDOW_PACKETS` Application packets and
+        // dropped the 11th.
+        assert!(pipe.server.is_established());
+        assert_eq!(pipe.server.streams.iter_mut().len(), 10);
+
+        assert_eq!(pipe.client.stats().sent, pipe.server.stats().recv + 1);
     }
 }
 
