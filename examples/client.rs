@@ -140,14 +140,14 @@ fn main() {
         Err(e) => panic!("initial send failed: {:?}", e),
     };
 
-    
-    while let Err(e) = socket.send(&out[..write]) {    
+    while let Err(e) = socket.send(&out[..write]) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
             debug!("send() would block");
+            continue;
         }
 
-        panic!("send() failed: {:?}", e);            
-    } 
+        panic!("send() failed: {:?}", e);
+    }
 
     debug!("written {}", write);
 
