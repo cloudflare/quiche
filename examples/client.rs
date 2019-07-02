@@ -140,7 +140,14 @@ fn main() {
         Err(e) => panic!("initial send failed: {:?}", e),
     };
 
-    socket.send(&out[..write]).unwrap();
+    while let Err(e) = socket.send(&out[..write]) {
+        if e.kind() == std::io::ErrorKind::WouldBlock {
+            debug!("send() would block");
+            continue;
+        }
+
+        panic!("send() failed: {:?}", e);
+    }
 
     debug!("written {}", write);
 
@@ -266,7 +273,14 @@ fn main() {
                 },
             };
 
-            socket.send(&out[..write]).unwrap();
+            if let Err(e) = socket.send(&out[..write]) {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
+                    debug!("send() would block");
+                    break;
+                }
+
+                panic!("send() failed: {:?}", e);
+            }
 
             debug!("written {}", write);
         }
