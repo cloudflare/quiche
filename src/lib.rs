@@ -366,6 +366,20 @@ impl std::convert::From<octets::BufferTooShortError> for Error {
     }
 }
 
+/// The stream's side to shutdown.
+///
+/// This should be used when calling [`stream_shutdown()`].
+///
+/// [`stream_shutdown()`]: struct.Connection.html#method.stream_shutdown
+#[repr(C)]
+pub enum Shutdown {
+    /// Stop receiving stream data.
+    Read  = 0,
+
+    /// Stop sending stream data.
+    Write = 1,
+}
+
 /// Stores configuration shared between multiple connections.
 pub struct Config {
     local_transport_params: TransportParams,
@@ -1916,6 +1930,40 @@ impl Connection {
         stream.send.push_slice(buf, fin)?;
 
         Ok(buf.len())
+    }
+
+    /// Shuts down reading or writing from/to the specified stream.
+    ///
+    /// When the `direction` argument is set to [`Shutdown::Read`], outstanding
+    /// data in the stream's receive buffer is dropped, and no additional data
+    /// is added to it. Data received after calling this method is still
+    /// validated and ACKed but not stored, and [`stream_recv()`] will not
+    /// return it to the application.
+    ///
+    /// When the `direction` argument is set to [`Shutdown::Write`], outstanding
+    /// data in the stream's send buffer is dropped, and no additional data
+    /// is added to it. Data passed to [`stream_send()`] after calling this
+    /// method will be ignored.
+    ///
+    /// [`Shutdown::Read`]: enum.Shutdown.html#variant.Read
+    /// [`Shutdown::Write`]: enum.Shutdown.html#variant.Write
+    /// [`stream_recv()`]: struct.Connection.html#method.stream_recv
+    /// [`stream_send()`]: struct.Connection.html#method.stream_send
+    pub fn stream_shutdown(
+        &mut self, stream_id: u64, direction: Shutdown, _err: u64,
+    ) -> Result<()> {
+        // Get existing stream.
+        let stream = self.streams.get_mut(stream_id).ok_or(Error::Done)?;
+
+        match direction {
+            // TODO: send STOP_SENDING
+            Shutdown::Read => stream.recv.shutdown(),
+
+            // TODO: send RESET_STREAM
+            Shutdown::Write => stream.send.shutdown(),
+        }
+
+        Ok(())
     }
 
     /// Returns true if all the data has been read from the specified stream.
@@ -3745,6 +3793,65 @@ mod tests {
         assert_eq!(pipe.server.streams.iter_mut().len(), 10);
 
         assert_eq!(pipe.client.stats().sent, pipe.server.stats().recv + 1);
+    }
+
+    #[test]
+    fn stream_shutdown_read() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 0), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+    }
+
+    #[test]
+    fn stream_shutdown_write() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        let mut b = [0; 15];
+        pipe.server.stream_recv(4, &mut b).unwrap();
+
+        assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
+        assert_eq!(pipe.client.stream_shutdown(4, Shutdown::Write, 0), Ok(()));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
     }
 }
 

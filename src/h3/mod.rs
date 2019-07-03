@@ -1380,12 +1380,10 @@ impl Connection {
                 },
 
                 stream::State::Drain => {
-                    let mut d = [0; 4096];
+                    // Discard incoming data on the stream.
+                    conn.stream_shutdown(stream_id, crate::Shutdown::Read, 0)?;
 
-                    // Read data from the stream and discard immediately.
-                    loop {
-                        conn.stream_recv(stream_id, &mut d)?;
-                    }
+                    break;
                 },
             }
         }
