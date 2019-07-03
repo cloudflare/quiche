@@ -9,6 +9,12 @@ To get android build, you need the following:
 export ANDROID_NDK_HOME=/usr/local/share/android-ndk
 ```
 
+- Install android architectures for rust
+
+```
+rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android
+```
+
 Then, to prepare cross compiling chain, run the following command:
 
 ```
