@@ -23,7 +23,8 @@ sh setup_android.sh
 
 It will create a standalone toolchain for arm64/arm/x86 architecture under
 `$TOOLCHAIN_DIR/arch` directory. If you didn't set `TOOLCHAIN_DIR` environment
-variable, current directory will be used.
+variable, current directory will be used. Note that minimum API level is
+21 for all target architecture.
 
 When it run successfully, run the following script to build libquiche:
 
@@ -31,4 +32,10 @@ When it run successfully, run the following script to build libquiche:
 sh build_android.sh
 ```
 
-It will build aarch64, armv7 and i686 binary.
+It will build aarch64, armv7 and i686 binary. You can give a parameter to this
+script for cargo build. For example if you want to build a release binary with
+more logs, do the following:
+
+```
+sh build_android.sh --release -vv
+```

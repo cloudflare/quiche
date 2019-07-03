@@ -32,8 +32,8 @@ echo "> Toolchain Directory: ${TOOLCHAIN_DIR}"
 
 mkdir -p ${TOOLCHAIN_DIR}/arch
 make_standalone_toolchain arm64 21
-make_standalone_toolchain arm 14
-make_standalone_toolchain x86 14
+make_standalone_toolchain arm 21
+make_standalone_toolchain x86 21
 
 CARGO_CONFIG=cargo-config.toml
 sed 's@$TOOLCHAIN_DIR@'"${TOOLCHAIN_DIR}"'@g' > $CARGO_CONFIG <<CARGO_CONFIG_EOF

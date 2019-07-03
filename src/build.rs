@@ -12,7 +12,7 @@ const CMAKE_PARAMS_ANDROID: &[(&str, &[(&str, &str)])] = &[
     ]),
     ("arm", &[
         ("ANDROID_TOOLCHAIN_NAME", "arm-linux-androideabi-4.9"),
-        ("ANDROID_NATIVE_API_LEVEL", "14"),
+        ("ANDROID_NATIVE_API_LEVEL", "21"),
         (
             "CMAKE_TOOLCHAIN_FILE",
             "${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
@@ -20,7 +20,7 @@ const CMAKE_PARAMS_ANDROID: &[(&str, &[(&str, &str)])] = &[
     ]),
     ("x86", &[
         ("ANDROID_TOOLCHAIN_NAME", "x86-linux-android-4.9"),
-        ("ANDROID_NATIVE_API_LEVEL", "14"),
+        ("ANDROID_NATIVE_API_LEVEL", "21"),
         (
             "CMAKE_TOOLCHAIN_FILE",
             "${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
