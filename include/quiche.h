@@ -213,6 +213,15 @@ ssize_t quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
 ssize_t quiche_conn_stream_send(quiche_conn *conn, uint64_t stream_id,
                                 const uint8_t *buf, size_t buf_len, bool fin);
 
+enum quiche_shutdown {
+    QUICHE_SHUTDOWN_READ = 0,
+    QUICHE_SHUTDOWN_WRITE = 1,
+};
+
+// Shuts down reading or writing from/to the specified stream.
+int quiche_conn_stream_shutdown(quiche_conn *conn, uint64_t stream_id,
+                                enum quiche_shutdown direction, uint64_t err);
+
 // Returns true if all the data has been read from the specified stream.
 bool quiche_conn_stream_finished(quiche_conn *conn, uint64_t stream_id);
 

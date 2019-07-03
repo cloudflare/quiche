@@ -257,6 +257,9 @@ pub struct RecvBuf {
 
     /// The final stream offset received from the peer, if any.
     fin_off: Option<usize>,
+
+    /// Whether incoming data is validated but not buffered.
+    drain: bool,
 }
 
 impl RecvBuf {
@@ -308,6 +311,10 @@ impl RecvBuf {
         // We already saved the final offset, so there's nothing else we
         // need to keep from the RangeBuf if it's empty.
         if buf.is_empty() {
+            return Ok(());
+        }
+
+        if self.drain {
             return Ok(());
         }
 
@@ -417,6 +424,13 @@ impl RecvBuf {
         self.max_data
     }
 
+    /// Shuts down receiving data.
+    pub fn shutdown(&mut self) {
+        self.drain = true;
+
+        self.data.clear();
+    }
+
     /// Returns true if we need to update the local flow control limit.
     pub fn more_credit(&self) -> bool {
         // Send MAX_STREAM_DATA when the new limit is at least double the
@@ -471,6 +485,9 @@ pub struct SendBuf {
 
     /// The highest contiguous ACK'd offset.
     off_ack: usize,
+
+    /// Whether the stream's send-side has been shut down.
+    shutdown: bool,
 }
 
 impl SendBuf {
@@ -485,6 +502,10 @@ impl SendBuf {
     /// Inserts the given slice of data at the end of the buffer.
     pub fn push_slice(&mut self, data: &[u8], fin: bool) -> Result<()> {
         let mut len = 0;
+
+        if self.shutdown {
+            return Ok(());
+        }
 
         if data.is_empty() {
             let buf = RangeBuf::from(&[], self.off, fin);
@@ -510,6 +531,10 @@ impl SendBuf {
 
     /// Inserts the given chunk of data in the buffer.
     pub fn push(&mut self, buf: RangeBuf) -> Result<()> {
+        if self.shutdown {
+            return Ok(());
+        }
+
         // Don't queue data that was already fully ACK'd.
         if self.off_ack >= buf.max_off() {
             return Ok(());
@@ -577,6 +602,13 @@ impl SendBuf {
         if self.off_ack == off {
             self.off_ack += len;
         }
+    }
+
+    /// Shuts down sending data.
+    pub fn shutdown(&mut self) {
+        self.shutdown = true;
+
+        self.data.clear();
     }
 
     /// Returns true if there is data to be written.
