@@ -282,6 +282,40 @@ more logs, do the following:
 sh build_android.sh --release -vv
 ```
 
+### How to build quiche for iOS
+
+To build quiche for iOS, you need the following:
+
+- Install xcode command line tools: you can install it with Xcode or the following command:
+
+```
+xcode-select --install
+```
+
+- Install the Rust toolchain for iOS architectures:
+
+```
+rustup target add aarch64-apple-ios armv7-apple-ios armv7s-apple-ios x86_64-apple-ios i386-apple-ios
+```
+
+- Install `cargo-lipo`.
+
+```
+cargo install cargo-lipo
+```
+
+To build iOS binary, please run the following command:
+
+```
+cargo lipo
+```
+
+or
+
+```
+cargo lipo --release
+```
+
 Copyright
 ---------
 
