@@ -17,9 +17,9 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 RUN update-ca-certificates
-WORKDIR /usr/src/
-COPY --from=build /usr/src/quiche/target/release/examples/http3-client ./
-COPY --from=build /usr/src/quiche/target/release/examples/http3-server ./
-COPY --from=build /usr/src/quiche/target/release/examples/client ./
-COPY --from=build /usr/src/quiche/target/release/examples/server ./
-ENV RUST_LOG=trace
+COPY --from=build /usr/src/quiche/target/release/examples/http3-client /usr/local/quiche/bin/
+COPY --from=build /usr/src/quiche/target/release/examples/http3-server /usr/local/quiche/bin/
+COPY --from=build /usr/src/quiche/target/release/examples/client /usr/local/quiche/bin/
+COPY --from=build /usr/src/quiche/target/release/examples/server /usr/local/quiche/bin/
+ENV PATH="/usr/local/quiche/bin/:${PATH}"
+ENV RUST_LOG=info
