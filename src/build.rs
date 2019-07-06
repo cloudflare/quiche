@@ -53,10 +53,9 @@ fn platform_output_path(lib: &str) -> String {
     };
 }
 
-fn main() {
-    #[cfg(feature = "no_bssl")]
-    return;
-
+// Returns a new cmake::Config for boringssl
+// It will add platform-specific parameters if needed.
+fn get_boringssl_cmake_config() -> cmake::Config {
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
 
@@ -64,7 +63,7 @@ fn main() {
     let mut boringssl_cmake = cmake::Config::new("deps/boringssl");
 
     // Add platform-specific parameters
-    match os.as_ref() {
+    return match os.as_ref() {
         "android" => {
             // We need ANDROID_NDK_HOME to be set properly.
             let android_ndk_home = std::env::var("ANDROID_NDK_HOME")
@@ -79,12 +78,19 @@ fn main() {
                     }
                 }
             }
+
+            boringssl_cmake
         },
-        _ => {},
-    }
+        _ => boringssl_cmake,
+    };
+}
+
+fn main() {
+    #[cfg(feature = "no_bssl")]
+    return;
 
     let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
-        boringssl_cmake
+        get_boringssl_cmake_config()
             .cflag("-fPIC")
             .build_target("bssl")
             .build()
