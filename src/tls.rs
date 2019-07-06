@@ -81,6 +81,16 @@ struct SSL_CIPHER(c_void);
 #[repr(transparent)]
 struct X509_VERIFY_PARAM(c_void);
 
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
+#[cfg(windows)]
+struct X509_STORE(c_void);
+
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
+#[cfg(windows)]
+struct X509(c_void);
+
 #[repr(C)]
 #[allow(non_camel_case_types)]
 struct SSL_QUIC_METHOD {
@@ -123,11 +133,13 @@ pub struct Context(*mut SSL_CTX);
 impl Context {
     pub fn new() -> Result<Context> {
         unsafe {
-            let ctx = SSL_CTX_new(TLS_method());
+            let ctx_raw = SSL_CTX_new(TLS_method());
 
-            map_result(SSL_CTX_set_default_verify_paths(ctx))?;
+            let mut ctx = Context(ctx_raw);
 
-            Ok(Context(ctx))
+            ctx.load_ca_certs()?;
+
+            Ok(ctx)
         }
     }
 
@@ -150,6 +162,60 @@ impl Context {
         map_result(unsafe {
             SSL_CTX_use_PrivateKey_file(self.as_ptr(), cstr.as_ptr(), 1)
         })
+    }
+
+    #[cfg(not(windows))]
+    fn load_ca_certs(&mut self) -> Result<()> {
+        unsafe { map_result(SSL_CTX_set_default_verify_paths(ctx_raw)) }
+    }
+
+    #[cfg(windows)]
+    fn load_ca_certs(&mut self) -> Result<()> {
+        unsafe {
+            let cstr = ffi::CString::new("Root").map_err(|_| Error::TlsFail)?;
+            let sys_store = winapi::um::wincrypt::CertOpenSystemStoreA(
+                0,
+                cstr.as_ptr() as winapi::um::winnt::LPCSTR,
+            );
+            if sys_store.is_null() {
+                return Err(Error::TlsFail);
+            }
+
+            let ctx_store = SSL_CTX_get_cert_store(self.as_ptr());
+            if ctx_store.is_null() {
+                return Err(Error::TlsFail);
+            }
+
+            let mut ctx_p = winapi::um::wincrypt::CertEnumCertificatesInStore(
+                sys_store,
+                ptr::null(),
+            );
+
+            while !ctx_p.is_null() {
+                let in_p = (*ctx_p).pbCertEncoded as *const u8;
+
+                let cert = d2i_X509(
+                    ptr::null_mut(),
+                    &in_p,
+                    (*ctx_p).cbCertEncoded as i32,
+                );
+                if !cert.is_null() {
+                    X509_STORE_add_cert(ctx_store, cert);
+                }
+
+                X509_free(cert);
+
+                ctx_p = winapi::um::wincrypt::CertEnumCertificatesInStore(
+                    sys_store, ctx_p,
+                );
+            }
+
+            // tidy up
+            winapi::um::wincrypt::CertFreeCertificateContext(ctx_p);
+            winapi::um::wincrypt::CertCloseStore(sys_store, 0);
+        }
+
+        Ok(())
     }
 
     pub fn set_verify(&mut self, verify: bool) {
@@ -677,7 +743,11 @@ extern {
         ctx: *mut SSL_CTX, file: *const c_char, ty: c_int,
     ) -> c_int;
 
+    #[cfg(not(windows))]
     fn SSL_CTX_set_default_verify_paths(ctx: *mut SSL_CTX) -> c_int;
+
+    #[cfg(windows)]
+    fn SSL_CTX_get_cert_store(ctx: *mut SSL_CTX) -> *mut X509_STORE;
 
     fn SSL_CTX_set_verify(ctx: *mut SSL_CTX, mode: c_int, cb: *const c_void);
 
@@ -766,6 +836,16 @@ extern {
     fn X509_VERIFY_PARAM_set1_host(
         param: *mut X509_VERIFY_PARAM, name: *const c_char, namelen: size_t,
     ) -> c_int;
+
+    // X509_STORE
+    #[cfg(windows)]
+    fn X509_STORE_add_cert(ctx: *mut X509_STORE, x: *mut X509) -> c_int;
+
+    // X509
+    #[cfg(windows)]
+    fn X509_free(x: *mut X509);
+    #[cfg(windows)]
+    fn d2i_X509(px: *mut X509, input: *const *const u8, len: c_int) -> *mut X509;
 
     // ERR
     fn ERR_peek_error() -> c_uint;
