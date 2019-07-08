@@ -1,6 +1,6 @@
 use cmake;
 
-// Additional parameters for Android build of boringssl
+// Additional parameters for Android build of BoringSSL.
 const CMAKE_PARAMS_ANDROID: &[(&str, &[(&str, &str)])] = &[
     ("aarch64", &[
         ("ANDROID_TOOLCHAIN_NAME", "aarch64-linux-android-4.9"),
@@ -53,16 +53,16 @@ fn platform_output_path(lib: &str) -> String {
     };
 }
 
-// Returns a new cmake::Config for boringssl
+// Returns a new cmake::Config for building BoringSSL.
+//
 // It will add platform-specific parameters if needed.
 fn get_boringssl_cmake_config() -> cmake::Config {
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
 
-    // It doesn't execute cmake until .build(), so initialize here
     let mut boringssl_cmake = cmake::Config::new("deps/boringssl");
 
-    // Add platform-specific parameters
+    // Add platform-specific parameters.
     return match os.as_ref() {
         "android" => {
             // We need ANDROID_NDK_HOME to be set properly.
