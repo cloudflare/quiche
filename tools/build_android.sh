@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Setup Android cross compile environment.
+# Build quiche for Android
 #
 # ANDROID_NDK_HOME : android ndk location
 # TOOLCHAIN_DIR : where create a toolchain (optional)
