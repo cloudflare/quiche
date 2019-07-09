@@ -240,80 +240,81 @@ the BoringSSL directory with the ``QUICHE_BSSL_PATH`` environment variable:
 
 [BoringSSL]: https://boringssl.googlesource.com/boringssl/
 
-### How to build quiche for Android
+### Building for Android
 
 To build quiche for Android, you need the following:
 
-- Android NDK (13b or higher), using Android Studio or install it directly
-- Set `ANDROID_NDK_HOME` environment variable to NDK path. For example when using bash,
+- Install Android NDK (13b or higher), using Android Studio or directly.
+- Set `ANDROID_NDK_HOME` environment variable to NDK path, e.g. using bash:
 
-```
-export ANDROID_NDK_HOME=/usr/local/share/android-ndk
+```bash
+ $ export ANDROID_NDK_HOME=/usr/local/share/android-ndk
 ```
 
 - Install the Rust toolchain for Android architectures:
 
-```
-rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android
-```
-
-Then, to prepare cross compiling chain, run the following command:
-
-```
-sh setup_android.sh
+```bash
+ $ rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android
 ```
 
-It will create a standalone toolchain for arm64/arm/x86 architecture under
+Then, to prepare the cross-compiling toolchain, run the following command:
+
+```bash
+ $ tools/setup_android.sh
+```
+
+It will create a standalone toolchain for arm64/arm/x86 architectures under the
 `$TOOLCHAIN_DIR/arch` directory. If you didn't set `TOOLCHAIN_DIR` environment
-variable, current directory will be used. Note that minimum API level is
+variable, the current directory will be used. Note that the minimum API level is
 21 for all target architectures.
 
-When it run successfully, run the following script to build libquiche:
+After it run successfully, run the following script to build libquiche:
 
-```
-sh build_android.sh
-```
-
-It will build binaries for aarch64, armv7 and i686. You can pass parameters to this
-script for cargo build. For example if you want to build a release binary with
-more logs, do the following:
-
-```
-sh build_android.sh --release -vv
+```bash
+ $ tools/build_android.sh
 ```
 
-### How to build quiche for iOS
+It will build binaries for aarch64, armv7 and i686. You can pass parameters to
+this script for cargo build. For example if you want to build a release binary
+with verbose logs, do the following:
+
+```bash
+ $ tools/build_android.sh --release -vv
+```
+
+### Building for iOS
 
 To build quiche for iOS, you need the following:
 
-- Install xcode command line tools: you can install it with Xcode or the following command:
+- Install Xcode command-line tools. You can install them with Xcode or with the
+  following command:
 
-```
-xcode-select --install
+```bash
+ $ xcode-select --install
 ```
 
 - Install the Rust toolchain for iOS architectures:
 
-```
-rustup target add aarch64-apple-ios armv7-apple-ios armv7s-apple-ios x86_64-apple-ios i386-apple-ios
-```
-
-- Install `cargo-lipo`.
-
-```
-cargo install cargo-lipo
+```bash
+ $ rustup target add aarch64-apple-ios armv7-apple-ios armv7s-apple-ios x86_64-apple-ios i386-apple-ios
 ```
 
-To build iOS binary, please run the following command:
+- Install `cargo-lipo`:
 
+```bash
+ $ cargo install cargo-lipo
 ```
-cargo lipo
+
+To build libquiche, run the following command:
+
+```bash
+ $ cargo lipo
 ```
 
 or
 
-```
-cargo lipo --release
+```bash
+ $ cargo lipo --release
 ```
 
 Copyright
