@@ -1,5 +1,41 @@
 use cmake;
 
+// Additional parameters for Android build of BoringSSL.
+const CMAKE_PARAMS_ANDROID: &[(&str, &[(&str, &str)])] = &[
+    ("aarch64", &[
+        ("ANDROID_TOOLCHAIN_NAME", "aarch64-linux-android-4.9"),
+        ("ANDROID_NATIVE_API_LEVEL", "21"),
+        (
+            "CMAKE_TOOLCHAIN_FILE",
+            "${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+        ),
+    ]),
+    ("arm", &[
+        ("ANDROID_TOOLCHAIN_NAME", "arm-linux-androideabi-4.9"),
+        ("ANDROID_NATIVE_API_LEVEL", "21"),
+        (
+            "CMAKE_TOOLCHAIN_FILE",
+            "${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+        ),
+    ]),
+    ("x86", &[
+        ("ANDROID_TOOLCHAIN_NAME", "x86-linux-android-4.9"),
+        ("ANDROID_NATIVE_API_LEVEL", "21"),
+        (
+            "CMAKE_TOOLCHAIN_FILE",
+            "${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+        ),
+    ]),
+    ("x86_64", &[
+        ("ANDROID_TOOLCHAIN_NAME", "x86_64-linux-android-4.9"),
+        ("ANDROID_NATIVE_API_LEVEL", "21"),
+        (
+            "CMAKE_TOOLCHAIN_FILE",
+            "${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+        ),
+    ]),
+];
+
 /// Generate the platform-specific output path for lib
 ///
 /// MSVC generator on Windows place static libs in a target sub-folder,
@@ -17,12 +53,44 @@ fn platform_output_path(lib: &str) -> String {
     };
 }
 
+// Returns a new cmake::Config for building BoringSSL.
+//
+// It will add platform-specific parameters if needed.
+fn get_boringssl_cmake_config() -> cmake::Config {
+    let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+    let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
+
+    let mut boringssl_cmake = cmake::Config::new("deps/boringssl");
+
+    // Add platform-specific parameters.
+    return match os.as_ref() {
+        "android" => {
+            // We need ANDROID_NDK_HOME to be set properly.
+            let android_ndk_home = std::env::var("ANDROID_NDK_HOME")
+                .expect("Please set ANDROID_NDK_HOME for Android build");
+            for (android_arch, params) in CMAKE_PARAMS_ANDROID {
+                if *android_arch == arch {
+                    for (name, value) in *params {
+                        let value = value
+                            .replace("${ANDROID_NDK_HOME}", &android_ndk_home);
+                        eprintln!("arch={} add {}={}", arch, name, value);
+                        boringssl_cmake.define(name, value);
+                    }
+                }
+            }
+
+            boringssl_cmake
+        },
+        _ => boringssl_cmake,
+    };
+}
+
 fn main() {
     #[cfg(feature = "no_bssl")]
     return;
 
     let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
-        cmake::Config::new("deps/boringssl")
+        get_boringssl_cmake_config()
             .cflag("-fPIC")
             .build_target("bssl")
             .build()
