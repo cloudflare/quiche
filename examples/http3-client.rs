@@ -45,6 +45,7 @@ Options:
   --wire-version VERSION   The version number to send to the server [default: babababa].
   --no-verify              Don't verify server's certificate.
   --no-grease              Don't send GREASE.
+  -H --header HEADER ...   Add a request header.
   -h --help                Show this screen.
 ";
 
@@ -70,6 +71,9 @@ fn main() {
     let version = u32::from_str_radix(version, 16).unwrap();
 
     let url = url::Url::parse(args.get_str("URL")).unwrap();
+
+    // Request headers (can be multiple).
+    let req_headers = args.get_vec("--header");
 
     // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
@@ -240,6 +244,15 @@ fn main() {
                 quiche::h3::Header::new(":path", &path),
                 quiche::h3::Header::new("user-agent", "quiche"),
             ];
+
+            // Add custom headers to the request.
+            for header in &req_headers {
+                let header_split: Vec<&str> = header.splitn(2, ": ").collect();
+                // Convert header field to lowercase
+                let (field, value) =
+                    (&header_split[0].to_lowercase().to_string(), header_split[1]);
+                req.push(quiche::h3::Header::new(field, value));
+            }
 
             info!("sending HTTP request {:?}", req);
 
