@@ -248,10 +248,10 @@ fn main() {
             // Add custom headers to the request.
             for header in &req_headers {
                 let header_split: Vec<&str> = header.splitn(2, ": ").collect();
-                // Convert header field to lowercase
-                let (field, value) =
-                    (&header_split[0].to_lowercase().to_string(), header_split[1]);
-                req.push(quiche::h3::Header::new(field, value));
+                req.push(quiche::h3::Header::new(
+                    header_split[0],
+                    header_split[1],
+                ));
             }
 
             info!("sending HTTP request {:?}", req);
