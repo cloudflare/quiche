@@ -209,7 +209,7 @@ Building
 --------
 
 quiche requires Rust 1.35 or later to build. The latest stable Rust release can
-be installed using [rustup](https://rustup.rs/)).
+be installed using [rustup](https://rustup.rs/).
 
 Once the Rust build environment is setup, the quiche source code can be fetched
 using git:
