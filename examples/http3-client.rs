@@ -343,10 +343,10 @@ fn main() {
                                 Ok(_) | Err(quiche::Error::Done) => (),
 
                                 Err(e) => panic!("error closing conn: {:?}", e),
-                            }
-                        }
+                            }                        
 
-                        break;
+                            break;
+                        }
                     },
 
                     Err(quiche::h3::Error::Done) => {
