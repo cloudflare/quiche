@@ -208,28 +208,32 @@ be linked directly into C/C++ applications.
 Building
 --------
 
-The first step after cloning the git repo is updating the git submodules:
+quiche requires Rust 1.35 or later to build. The latest stable Rust release can
+be installed using [rustup](https://rustup.rs/)).
+
+Once the Rust build environment is setup, the quiche source code can be fetched
+using git:
 
 ```bash
- $ git submodule update --init
+ $ git clone --recursive https://github.com/cloudflare/quiche
 ```
 
-You can now build quiche using cargo:
+and then built using cargo:
 
 ```bash
  $ cargo build --examples
 ```
 
-As well as run its tests:
+cargo can also be used to run the testsuite:
 
 ```bash
  $ cargo test
 ```
 
-Note that [BoringSSL], used to implement QUIC's cryptographic handshake based on
-TLS, needs to be built and linked to quiche. This is done automatically when
-building quiche using cargo, but requires the `cmake` and `go` commands to be
-available during the build process.
+Note that [BoringSSL], which is used to implement QUIC's cryptographic handshake
+based on TLS, needs to be built and linked to quiche. This is done automatically
+when building quiche using cargo, but requires the `cmake` and `go` commands to
+be available during the build process.
 
 In alternative you can use your own custom build of BoringSSL by configuring
 the BoringSSL directory with the ``QUICHE_BSSL_PATH`` environment variable:
