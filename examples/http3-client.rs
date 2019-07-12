@@ -248,7 +248,7 @@ fn main() {
             // Add custom headers to the request.
             for header in &req_headers {
                 let header_split: Vec<&str> = header.splitn(2, ": ").collect();
-                if header_split.len() == 1 {
+                if header_split.len() != 2 {
                     panic!("malformed header provided - \"{}\"", header);
                 }
 
