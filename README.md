@@ -258,7 +258,7 @@ To build quiche for Android, you need the following:
 - Install the Rust toolchain for Android architectures:
 
 ```bash
- $ rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android
+ $ rustup target add aarch64-linux-android arm-linux-androideabi armv7-linux-androideabi i686-linux-android
 ```
 
 Then, to prepare the cross-compiling toolchain, run the following command:
