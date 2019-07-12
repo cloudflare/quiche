@@ -248,6 +248,10 @@ fn main() {
             // Add custom headers to the request.
             for header in &req_headers {
                 let header_split: Vec<&str> = header.splitn(2, ": ").collect();
+                if header_split.len() == 1 {
+                    panic!("malformed header provided - \"{}\"", header);
+                }
+
                 req.push(quiche::h3::Header::new(
                     header_split[0],
                     header_split[1],
