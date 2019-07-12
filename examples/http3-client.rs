@@ -46,6 +46,7 @@ Options:
   --no-verify              Don't verify server's certificate.
   --no-grease              Don't send GREASE.
   -H --header HEADER ...   Add a request header.
+  -n --requests REQUESTS   Send the given number of identical requests [default: 1].
   -h --help                Show this screen.
 ";
 
@@ -74,6 +75,11 @@ fn main() {
 
     // Request headers (can be multiple).
     let req_headers = args.get_vec("--header");
+
+    let reqs_count = args.get_str("--requests");
+    let reqs_count = u64::from_str_radix(reqs_count, 10).unwrap();
+
+    let mut reqs_complete = 0;
 
     // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
@@ -258,8 +264,6 @@ fn main() {
                 ));
             }
 
-            info!("sending HTTP request {:?}", req);
-
             let body = if args.get_bool("--body") {
                 std::fs::read(args.get_str("--body")).ok()
             } else {
@@ -273,19 +277,24 @@ fn main() {
                 ));
             }
 
-            let s = match h3_conn.send_request(&mut conn, &req, body.is_none()) {
-                Ok(stream_id) => stream_id,
+            for _ in 0..reqs_count {
+                info!("sending HTTP request {:?}", req);
 
-                Err(e) => {
-                    error!("failed to send request {:?}", e);
-                    break;
-                },
-            };
+                let s =
+                    match h3_conn.send_request(&mut conn, &req, body.is_none()) {
+                        Ok(stream_id) => stream_id,
 
-            if let Some(body) = body {
-                if let Err(e) = h3_conn.send_body(&mut conn, s, &body, true) {
-                    error!("failed to send request body {:?}", e);
-                    break;
+                        Err(e) => {
+                            error!("failed to send request {:?}", e);
+                            break;
+                        },
+                    };
+
+                if let Some(body) = &body {
+                    if let Err(e) = h3_conn.send_body(&mut conn, s, body, true) {
+                        error!("failed to send request body {:?}", e);
+                        break;
+                    }
                 }
             }
 
@@ -319,19 +328,30 @@ fn main() {
                     },
 
                     Ok((_stream_id, quiche::h3::Event::Finished)) => {
-                        info!(
-                            "response received in {:?}, closing...",
-                            req_start.elapsed()
+                        reqs_complete += 1;
+
+                        debug!(
+                            "{}/{} responses received",
+                            reqs_complete, reqs_count
                         );
 
-                        match conn.close(true, 0x00, b"kthxbye") {
-                            // Already closed.
-                            Ok(_) | Err(quiche::Error::Done) => (),
+                        if reqs_complete == reqs_count {
+                            info!(
+                                "{}/{} response(s) received in {:?}, closing...",
+                                reqs_complete,
+                                reqs_count,
+                                req_start.elapsed()
+                            );
 
-                            Err(e) => panic!("error closing conn: {:?}", e),
+                            match conn.close(true, 0x00, b"kthxbye") {
+                                // Already closed.
+                                Ok(_) | Err(quiche::Error::Done) => (),
+
+                                Err(e) => panic!("error closing conn: {:?}", e),
+                            }
+
+                            break;
                         }
-
-                        break;
                     },
 
                     Err(quiche::h3::Error::Done) => {
