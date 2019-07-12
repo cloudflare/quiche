@@ -41,6 +41,10 @@ sed 's@$TOOLCHAIN_DIR@'"${TOOLCHAIN_DIR}"'@g' > $CARGO_CONFIG <<CARGO_CONFIG_EOF
 ar = "$TOOLCHAIN_DIR/arch/arm64/bin/aarch64-linux-android-ar"
 linker = "$TOOLCHAIN_DIR/arch/arm64/bin/aarch64-linux-android-clang"
 
+[target.arm-linux-androideabi]
+ar = "$TOOLCHAIN_DIR/arch/arm/bin/arm-linux-androideabi-ar"
+linker = "$TOOLCHAIN_DIR/arch/arm/bin/arm-linux-androideabi-clang"
+
 [target.armv7-linux-androideabi]
 ar = "$TOOLCHAIN_DIR/arch/arm/bin/arm-linux-androideabi-ar"
 linker = "$TOOLCHAIN_DIR/arch/arm/bin/arm-linux-androideabi-clang"
