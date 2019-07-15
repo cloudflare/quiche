@@ -277,23 +277,17 @@ impl Stream {
             },
 
             Some(Type::Request) => {
-                // Request stream starts uninitialized and only HEADERS or
-                // PRIORITY is accepted in that state. Other
-                // frames cause an error. Once initialized, no
-                // more PRIORITY frames are permitted.
+                // Request stream starts uninitialized and only HEADERS
+                // is accepted. Other frames cause an error.
                 if !self.is_local {
                     match (ty, self.initialized) {
                         (frame::HEADERS_FRAME_TYPE_ID, false) =>
                             self.initialized = true,
 
-                        (frame::PRIORITY_FRAME_TYPE_ID, false) =>
-                            self.initialized = true,
-
-                        // Additional PRIORITY frame is error.
-                        (frame::PRIORITY_FRAME_TYPE_ID, true) =>
-                            return Err(Error::UnexpectedFrame),
-
                         // Frames that can never be received on request streams.
+                        (frame::PRIORITY_FRAME_TYPE_ID, _) =>
+                            return Err(Error::WrongStream),
+
                         (frame::CANCEL_PUSH_FRAME_TYPE_ID, _) =>
                             return Err(Error::WrongStream),
 
@@ -840,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn priority_request_good() {
+    fn priority_request_bad() {
         let mut stream = Stream::new(0, false);
 
         let mut d = vec![42; 1280];
@@ -868,81 +862,12 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
+
+        // PRIORITY frame not allowed on request stream, so ensure
+        // error is returned.
         assert_eq!(frame_ty, frame::PRIORITY_FRAME_TYPE_ID);
 
-        stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(stream.state, State::FramePayloadLen);
-
-        // Parse the PRIORITY frame payload length.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        let frame_payload_len = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_payload_len, 2);
-
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(stream.state, State::FramePayload);
-
-        // Parse the PRIORITY frame.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        assert_eq!(stream.try_consume_frame(), Ok(()));
-        assert_eq!(stream.state, State::FrameType);
-
-        // TODO: if/when PRIRORITY frame is fully implemented, test it
-        // e.g. `assert_eq!(stream.get_frame(), Some(priority));`
-
-        // Parse the HEADERS frame type.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::HEADERS_FRAME_TYPE_ID);
-
-        stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(stream.state, State::FramePayloadLen);
-
-        // Parse the HEADERS frame payload length.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        let frame_payload_len = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_payload_len, 12);
-
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(stream.state, State::FramePayload);
-
-        // Parse the HEADERS frame.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        assert_eq!(stream.try_consume_frame(), Ok(()));
-        assert_eq!(stream.state, State::FrameType);
-
-        assert_eq!(stream.get_frame(), Some(hdrs));
-
-        // Parse the DATA frame type.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::DATA_FRAME_TYPE_ID);
-
-        stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(stream.state, State::FramePayloadLen);
-
-        // Parse the DATA frame payload length.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        let frame_payload_len = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_payload_len, 12);
-
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(stream.state, State::Data);
-
-        // Parse the DATA payload.
-        let mut recv_buf = vec![0; payload.len()];
-        assert_eq!(
-            stream.try_consume_data_for_tests(&mut cursor, &mut recv_buf),
-            Ok(payload.len())
-        );
-        assert_eq!(payload, recv_buf);
-
+        assert_eq!(stream.set_frame_type(frame_ty), Err(Error::WrongStream));
         assert_eq!(stream.state, State::FrameType);
     }
 
