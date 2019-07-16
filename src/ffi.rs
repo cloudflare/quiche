@@ -468,7 +468,7 @@ pub extern fn quiche_readable_next(
 
 #[no_mangle]
 pub extern fn quiche_conn_close(
-    conn: &mut Connection, app: bool, err: u16, reason: *const u8,
+    conn: &mut Connection, app: bool, err: u64, reason: *const u8,
     reason_len: size_t,
 ) -> c_int {
     let reason = unsafe { slice::from_raw_parts(reason, reason_len) };

@@ -57,7 +57,7 @@ pub enum Frame {
 
     StopSending {
         stream_id: u64,
-        error_code: u16,
+        error_code: u64,
     },
 
     Crypto {
@@ -109,6 +109,7 @@ pub enum Frame {
 
     NewConnectionId {
         seq_num: u64,
+        retire_prior_to: u64,
         conn_id: Vec<u8>,
         reset_token: Vec<u8>,
     },
@@ -126,13 +127,13 @@ pub enum Frame {
     },
 
     ConnectionClose {
-        error_code: u16,
+        error_code: u64,
         frame_type: u64,
         reason: Vec<u8>,
     },
 
     ApplicationClose {
-        error_code: u16,
+        error_code: u64,
         reason: Vec<u8>,
     },
 }
@@ -170,7 +171,7 @@ impl Frame {
 
             0x05 => Frame::StopSending {
                 stream_id: b.get_varint()?,
-                error_code: b.get_u16()?,
+                error_code: b.get_varint()?,
             },
 
             0x06 => {
@@ -223,6 +224,7 @@ impl Frame {
 
             0x18 => Frame::NewConnectionId {
                 seq_num: b.get_varint()?,
+                retire_prior_to: b.get_varint()?,
                 conn_id: b.get_bytes_with_u8_length()?.to_vec(),
                 reset_token: b.get_bytes(16)?.to_vec(),
             },
@@ -240,13 +242,13 @@ impl Frame {
             },
 
             0x1c => Frame::ConnectionClose {
-                error_code: b.get_u16()?,
+                error_code: b.get_varint()?,
                 frame_type: b.get_varint()?,
                 reason: b.get_bytes_with_varint_length()?.to_vec(),
             },
 
             0x1d => Frame::ApplicationClose {
-                error_code: b.get_u16()?,
+                error_code: b.get_varint()?,
                 reason: b.get_bytes_with_varint_length()?.to_vec(),
             },
 
@@ -344,7 +346,7 @@ impl Frame {
                 b.put_varint(0x05)?;
 
                 b.put_varint(*stream_id)?;
-                b.put_u16(*error_code)?;
+                b.put_varint(*error_code)?;
             },
 
             Frame::Crypto { data } => {
@@ -435,12 +437,14 @@ impl Frame {
 
             Frame::NewConnectionId {
                 seq_num,
+                retire_prior_to,
                 conn_id,
                 reset_token,
             } => {
                 b.put_varint(0x18)?;
 
                 b.put_varint(*seq_num)?;
+                b.put_varint(*retire_prior_to)?;
                 b.put_u8(conn_id.len() as u8)?;
                 b.put_bytes(conn_id.as_ref())?;
                 b.put_bytes(reset_token.as_ref())?;
@@ -471,7 +475,7 @@ impl Frame {
             } => {
                 b.put_varint(0x1c)?;
 
-                b.put_u16(*error_code)?;
+                b.put_varint(*error_code)?;
                 b.put_varint(*frame_type)?;
                 b.put_varint(reason.len() as u64)?;
                 b.put_bytes(reason.as_ref())?;
@@ -480,7 +484,7 @@ impl Frame {
             Frame::ApplicationClose { error_code, reason } => {
                 b.put_varint(0x1d)?;
 
-                b.put_u16(*error_code)?;
+                b.put_varint(*error_code)?;
                 b.put_varint(reason.len() as u64)?;
                 b.put_bytes(reason.as_ref())?;
             },
@@ -533,10 +537,13 @@ impl Frame {
                 octets::varint_len(*final_size) // final_size
             },
 
-            Frame::StopSending { stream_id, .. } => {
+            Frame::StopSending {
+                stream_id,
+                error_code,
+            } => {
                 1 + // frame type
                 octets::varint_len(*stream_id) + // stream_id
-                2 // error_code
+                octets::varint_len(*error_code) // error_code
             },
 
             Frame::Crypto { data } => {
@@ -604,11 +611,13 @@ impl Frame {
 
             Frame::NewConnectionId {
                 seq_num,
+                retire_prior_to,
                 conn_id,
                 reset_token,
             } => {
                 1 + // frame type
                 octets::varint_len(*seq_num) + // seq_num
+                octets::varint_len(*retire_prior_to) + // retire_prior_to
                 1 + // conn_id length
                 conn_id.len() + // conn_id
                 reset_token.len() // reset_token
@@ -630,18 +639,21 @@ impl Frame {
             },
 
             Frame::ConnectionClose {
-                frame_type, reason, ..
+                frame_type,
+                error_code,
+                reason,
+                ..
             } => {
                 1 + // frame type
-                2 + // error_code
+                octets::varint_len(*error_code) + // error_code
                 octets::varint_len(*frame_type) + // frame_type
                 octets::varint_len(reason.len() as u64) + // reason_len
                 reason.len() // reason
             },
 
-            Frame::ApplicationClose { reason, .. } => {
+            Frame::ApplicationClose { reason, error_code } => {
                 1 + // frame type
-                2 + // error_code
+                octets::varint_len(*error_code) + // error_code
                 octets::varint_len(reason.len() as u64) + // reason_len
                 reason.len() // reason
             },
@@ -1393,6 +1405,7 @@ mod tests {
 
         let frame = Frame::NewConnectionId {
             seq_num: 123_213,
+            retire_prior_to: 122_211,
             conn_id: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             reset_token: vec![0x42; 16],
         };
@@ -1402,7 +1415,7 @@ mod tests {
             frame.to_bytes(&mut b).unwrap()
         };
 
-        assert_eq!(wire_len, 37);
+        assert_eq!(wire_len, 41);
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert_eq!(
@@ -1526,7 +1539,7 @@ mod tests {
             frame.to_bytes(&mut b).unwrap()
         };
 
-        assert_eq!(wire_len, 20);
+        assert_eq!(wire_len, 22);
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert_eq!(
@@ -1558,7 +1571,7 @@ mod tests {
             frame.to_bytes(&mut b).unwrap()
         };
 
-        assert_eq!(wire_len, 16);
+        assert_eq!(wire_len, 18);
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert_eq!(

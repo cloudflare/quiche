@@ -242,7 +242,7 @@ use std::cmp;
 use std::time;
 
 /// The current QUIC wire version.
-pub const PROTOCOL_VERSION: u32 = 0xff00_0014;
+pub const PROTOCOL_VERSION: u32 = 0xff00_0016;
 
 /// The maximum length of a connection ID.
 pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
@@ -310,7 +310,7 @@ pub enum Error {
 }
 
 impl Error {
-    fn to_wire(self) -> u16 {
+    fn to_wire(self) -> u64 {
         match self {
             Error::Done => 0x0,
             Error::InvalidFrame => 0x7,
@@ -646,10 +646,10 @@ pub struct Connection {
     early_app_pkts: usize,
 
     /// Error code to be sent to the peer in CONNECTION_CLOSE.
-    error: Option<u16>,
+    error: Option<u64>,
 
     /// Error code to be sent to the peer in APPLICATION_CLOSE.
-    app_error: Option<u16>,
+    app_error: Option<u64>,
 
     /// Error reason to be sent to the peer in APPLICATION_CLOSE.
     app_reason: Vec<u8>,
@@ -2113,7 +2113,7 @@ impl Connection {
     /// [`send()`]: struct.Connection.html#method.send
     /// [`timeout()`]: struct.Connection.html#method.timeout
     /// [`is_closed()`]: struct.Connection.html#method.is_closed
-    pub fn close(&mut self, app: bool, err: u16, reason: &[u8]) -> Result<()> {
+    pub fn close(&mut self, app: bool, err: u64, reason: &[u8]) -> Result<()> {
         if self.draining_timer.is_some() {
             return Err(Error::Done);
         }
@@ -2567,7 +2567,8 @@ struct TransportParams {
     pub ack_delay_exponent: u64,
     pub max_ack_delay: u64,
     pub disable_migration: bool,
-    // pub preferred_address: ...
+    // pub preferred_address: ...,
+    pub active_conn_id_limit: u64,
 }
 
 impl Default for TransportParams {
@@ -2586,6 +2587,7 @@ impl Default for TransportParams {
             ack_delay_exponent: 3,
             max_ack_delay: 25,
             disable_migration: false,
+            active_conn_id_limit: 0,
         }
     }
 }
@@ -2698,6 +2700,10 @@ impl TransportParams {
                     // TODO: decode preferred_address
                 },
 
+                0x000e => {
+                    tp.active_conn_id_limit = val.get_varint()?;
+                },
+
                 // Ignore unknown parameters.
                 _ => (),
             }
@@ -2802,6 +2808,12 @@ impl TransportParams {
             }
 
             // TODO: encode preferred_address
+
+            if tp.active_conn_id_limit != 0 {
+                b.put_u16(0x000e)?;
+                b.put_u16(octets::varint_len(tp.active_conn_id_limit) as u16)?;
+                b.put_varint(tp.active_conn_id_limit)?;
+            }
 
             b.off()
         };
@@ -3173,12 +3185,13 @@ mod tests {
             ack_delay_exponent: 20,
             max_ack_delay: 2_u64.pow(14) - 1,
             disable_migration: true,
+            active_conn_id_limit: 8,
         };
 
         let mut raw_params = [42; 256];
         let mut raw_params =
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 96);
+        assert_eq!(raw_params.len(), 101);
 
         let new_tp = TransportParams::decode(&mut raw_params, false).unwrap();
 

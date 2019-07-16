@@ -1718,7 +1718,7 @@ mod tests {
         let resp = s.send_response(stream, false).unwrap();
 
         for _ in 0..total_data_frames - 1 {
-            s.send_body_server(stream, false).unwrap();;
+            s.send_body_server(stream, false).unwrap();
         }
 
         let body = s.send_body_server(stream, true).unwrap();
