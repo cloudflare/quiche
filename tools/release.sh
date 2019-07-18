@@ -16,7 +16,7 @@ VERSION=$1
 
 cargo package
 
-sed -i "/version/ s/\"\(.*\)\"/\"$VERSION\"/" Cargo.toml
+sed -i "0,/^version/ s/version = \"\(.*\)\"/version = \"$VERSION\"/" Cargo.toml
 git add Cargo.toml
 git commit -m $VERSION
 git tag -a $VERSION -m "quiche $VERSION" --sign
