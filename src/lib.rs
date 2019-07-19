@@ -848,8 +848,7 @@ impl Connection {
         Connection::with_tls(scid, odcid, config, tls, is_server)
     }
 
-    #[doc(hidden)]
-    pub fn with_tls(
+    fn with_tls(
         scid: &[u8], odcid: Option<&[u8]>, config: &mut Config,
         tls: tls::Handshake, is_server: bool,
     ) -> Result<Box<Connection>> {
