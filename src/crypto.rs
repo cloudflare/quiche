@@ -64,8 +64,6 @@ impl Level {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Algorithm {
-    Null,
-
     #[allow(non_camel_case_types)]
     AES128_GCM,
 
@@ -82,7 +80,6 @@ impl Algorithm {
             Algorithm::AES128_GCM => &aead::AES_128_GCM,
             Algorithm::AES256_GCM => &aead::AES_256_GCM,
             Algorithm::ChaCha20_Poly1305 => &aead::CHACHA20_POLY1305,
-            Algorithm::Null => panic!("Not a valid AEAD"),
         }
     }
 
@@ -91,7 +88,6 @@ impl Algorithm {
             Algorithm::AES128_GCM => &aead::quic::AES_128,
             Algorithm::AES256_GCM => &aead::quic::AES_256,
             Algorithm::ChaCha20_Poly1305 => &aead::quic::CHACHA20,
-            Algorithm::Null => panic!("Not a valid AEAD"),
         }
     }
 
@@ -100,7 +96,6 @@ impl Algorithm {
             Algorithm::AES128_GCM => &digest::SHA256,
             Algorithm::AES256_GCM => &digest::SHA384,
             Algorithm::ChaCha20_Poly1305 => &digest::SHA256,
-            Algorithm::Null => panic!("Not a valid AEAD"),
         }
     }
 
