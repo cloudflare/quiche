@@ -273,7 +273,7 @@ impl Drop for Context {
 pub struct Handshake(*mut SSL);
 
 impl Handshake {
-    pub fn from_void(ssl: *mut c_void) -> Handshake {
+    pub unsafe fn from_ptr(ssl: *mut c_void) -> Handshake {
         let ssl = ssl as *mut SSL;
         Handshake(ssl)
     }

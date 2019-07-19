@@ -353,7 +353,7 @@ pub extern fn quiche_conn_new_with_tls(
         None
     };
 
-    let tls = tls::Handshake::from_void(ssl);
+    let tls = unsafe { tls::Handshake::from_ptr(ssl) };
 
     match Connection::with_tls(scid, odcid, config, tls, is_server) {
         Ok(c) => Box::into_raw(c),
