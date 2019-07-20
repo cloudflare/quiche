@@ -1601,7 +1601,7 @@ impl Connection {
             }
         }
 
-        // Create PING and PADDING for TLP.
+        // Create PING for PTO probe.
         if self.recovery.probes > 0 && left >= 1 {
             let frame = frame::Frame::Ping;
 
