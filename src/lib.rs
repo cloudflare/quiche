@@ -1469,8 +1469,6 @@ impl Connection {
                         None => continue,
                     };
 
-                    self.tx_data -= data.len();
-
                     let was_writable = stream.writable();
 
                     stream.send.push(data)?;
@@ -1683,7 +1681,7 @@ impl Connection {
         // Create CRYPTO frame.
         if self.pkt_num_spaces[epoch].crypto_stream.writable() && !is_closing {
             let crypto_len = left - frame::MAX_CRYPTO_OVERHEAD;
-            let crypto_buf = self.pkt_num_spaces[epoch]
+            let (crypto_buf, _) = self.pkt_num_spaces[epoch]
                 .crypto_stream
                 .send
                 .pop(crypto_len)?;
@@ -1715,13 +1713,13 @@ impl Connection {
                     self.max_tx_data - self.tx_data,
                 );
 
-                let stream_buf = stream.send.pop(stream_len)?;
+                let (stream_buf, tx_off_delta) = stream.send.pop(stream_len)?;
 
                 if stream_buf.is_empty() {
                     continue;
                 }
 
-                self.tx_data += stream_buf.len();
+                self.tx_data += tx_off_delta;
 
                 let frame = frame::Frame::Stream {
                     stream_id,
@@ -3976,6 +3974,35 @@ mod tests {
                 data: stream::RangeBuf::from(b"aaaaa", 0, false),
             })
         );
+    }
+
+    #[test]
+    /// Tests that we don't exceed the per-connection flow control limit set by
+    /// the peer.
+    fn flow_control_limit_send() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(
+            pipe.client.stream_send(0, b"aaaaaaaaaaaaaaa", false),
+            Ok(15)
+        );
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+        assert_eq!(
+            pipe.client.stream_send(4, b"aaaaaaaaaaaaaaa", false),
+            Ok(15)
+        );
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+        assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert!(r.next().is_some());
+        assert!(r.next().is_some());
+        assert!(r.next().is_none());
     }
 }
 

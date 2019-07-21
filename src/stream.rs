@@ -506,6 +506,9 @@ pub struct SendBuf {
     /// The maximum offset of data buffered in the stream.
     off: usize,
 
+    /// The maximum offset that has been sent to the peer.
+    tx_off: usize,
+
     /// The amount of data that was ever written to this stream.
     len: usize,
 
@@ -576,8 +579,12 @@ impl SendBuf {
         Ok(())
     }
 
-    /// Returns contiguous data from the send buffer as a single `RangeBuf`.
-    pub fn pop(&mut self, max_data: usize) -> Result<RangeBuf> {
+    /// Pops contiguous data from the send buffer as a single `RangeBuf`.
+    ///
+    /// This returns a tuple with a `RangeBuf` for the data to be sent, as well
+    /// as the delta between the stream's maximum send offset, and the maximum
+    /// offset of the buffer to be sent.
+    pub fn pop(&mut self, max_data: usize) -> Result<(RangeBuf, usize)> {
         let mut out = RangeBuf::default();
         out.data = Vec::with_capacity(cmp::min(max_data, self.len));
 
@@ -615,7 +622,11 @@ impl SendBuf {
             out.data.extend_from_slice(&buf.data);
         }
 
-        Ok(out)
+        let tx_off_delta = out.max_off().saturating_sub(self.tx_off);
+
+        self.tx_off = cmp::max(self.tx_off, out.max_off());
+
+        Ok((out, tx_off_delta))
     }
 
     /// Updates the max_data limit to the given value.
@@ -1213,7 +1224,7 @@ mod tests {
         let mut send = SendBuf::new(std::usize::MAX);
         assert_eq!(send.len, 0);
 
-        let write = send.pop(std::usize::MAX).unwrap();
+        let (write, _) = send.pop(std::usize::MAX).unwrap();
         assert_eq!(write.len(), 0);
         assert_eq!(write.fin(), false);
     }
@@ -1232,7 +1243,7 @@ mod tests {
         assert!(send.push_slice(&second, true).is_ok());
         assert_eq!(send.len, 19);
 
-        let write = send.pop(128).unwrap();
+        let (write, _) = send.pop(128).unwrap();
         assert_eq!(write.len(), 19);
         assert_eq!(write.fin(), true);
         assert_eq!(&write[..], b"somethinghelloworld");
@@ -1253,21 +1264,21 @@ mod tests {
         assert!(send.push_slice(&second, true).is_ok());
         assert_eq!(send.len, 19);
 
-        let write = send.pop(10).unwrap();
+        let (write, _) = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 10);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"somethingh");
         assert_eq!(send.len, 9);
 
-        let write = send.pop(5).unwrap();
+        let (write, _) = send.pop(5).unwrap();
         assert_eq!(write.off(), 10);
         assert_eq!(write.len(), 5);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"ellow");
         assert_eq!(send.len, 4);
 
-        let write = send.pop(10).unwrap();
+        let (write, _) = send.pop(10).unwrap();
         assert_eq!(write.off(), 15);
         assert_eq!(write.len(), 4);
         assert_eq!(write.fin(), true);
@@ -1290,7 +1301,7 @@ mod tests {
         assert!(send.push_slice(&second, true).is_ok());
         assert_eq!(send.off(), 0);
 
-        let write1 = send.pop(4).unwrap();
+        let (write1, _) = send.pop(4).unwrap();
         assert_eq!(write1.off(), 0);
         assert_eq!(write1.len(), 4);
         assert_eq!(write1.fin(), false);
@@ -1298,7 +1309,7 @@ mod tests {
         assert_eq!(send.len, 15);
         assert_eq!(send.off(), 4);
 
-        let write2 = send.pop(5).unwrap();
+        let (write2, _) = send.pop(5).unwrap();
         assert_eq!(write2.off(), 4);
         assert_eq!(write2.len(), 5);
         assert_eq!(write2.fin(), false);
@@ -1306,7 +1317,7 @@ mod tests {
         assert_eq!(send.len, 10);
         assert_eq!(send.off(), 9);
 
-        let write3 = send.pop(5).unwrap();
+        let (write3, _) = send.pop(5).unwrap();
         assert_eq!(write3.off(), 9);
         assert_eq!(write3.len(), 5);
         assert_eq!(write3.fin(), false);
@@ -1322,7 +1333,7 @@ mod tests {
         assert_eq!(send.len, 14);
         assert_eq!(send.off(), 0);
 
-        let write4 = send.pop(11).unwrap();
+        let (write4, _) = send.pop(11).unwrap();
         assert_eq!(write4.off(), 0);
         assert_eq!(write4.len(), 9);
         assert_eq!(write4.fin(), false);
@@ -1330,7 +1341,7 @@ mod tests {
         assert_eq!(send.len, 5);
         assert_eq!(send.off(), 14);
 
-        let write5 = send.pop(11).unwrap();
+        let (write5, _) = send.pop(11).unwrap();
         assert_eq!(write5.off(), 14);
         assert_eq!(write5.len(), 5);
         assert_eq!(write5.fin(), true);
@@ -1355,14 +1366,14 @@ mod tests {
 
         send.update_max_data(5);
 
-        let write = send.pop(10).unwrap();
+        let (write, _) = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 5);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"somet");
         assert_eq!(send.len, 14);
 
-        let write = send.pop(10).unwrap();
+        let (write, _) = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 0);
         assert_eq!(write.fin(), false);
@@ -1371,7 +1382,7 @@ mod tests {
 
         send.update_max_data(15);
 
-        let write = send.pop(10).unwrap();
+        let (write, _) = send.pop(10).unwrap();
         assert_eq!(write.off(), 5);
         assert_eq!(write.len(), 10);
         assert_eq!(write.fin(), false);
@@ -1380,7 +1391,7 @@ mod tests {
 
         send.update_max_data(25);
 
-        let write = send.pop(10).unwrap();
+        let (write, _) = send.pop(10).unwrap();
         assert_eq!(write.off(), 15);
         assert_eq!(write.len(), 4);
         assert_eq!(write.fin(), true);
@@ -1401,7 +1412,7 @@ mod tests {
         assert!(send.push_slice(&[], true).is_ok());
         assert_eq!(send.len, 9);
 
-        let write = send.pop(10).unwrap();
+        let (write, _) = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 9);
         assert_eq!(write.fin(), true);
@@ -1571,13 +1582,13 @@ mod tests {
         assert_eq!(stream.send.push_slice(second, false), Ok(()));
         assert_eq!(stream.send.push_slice(third, false), Ok(()));
 
-        let write = stream.send.pop(25).unwrap();
+        let (write, _) = stream.send.pop(25).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 15);
         assert_eq!(write.fin(), false);
         assert_eq!(write.data, b"helloworldsomet");
 
-        let write = stream.send.pop(25).unwrap();
+        let (write, _) = stream.send.pop(25).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 0);
         assert_eq!(write.fin(), false);
@@ -1586,13 +1597,13 @@ mod tests {
         let first = RangeBuf::from(b"helloworldsomet", 0, false);
         assert_eq!(stream.send.push(first), Ok(()));
 
-        let write = stream.send.pop(10).unwrap();
+        let (write, _) = stream.send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 10);
         assert_eq!(write.fin(), false);
         assert_eq!(write.data, b"helloworld");
 
-        let write = stream.send.pop(10).unwrap();
+        let (write, _) = stream.send.pop(10).unwrap();
         assert_eq!(write.off(), 10);
         assert_eq!(write.len(), 5);
         assert_eq!(write.fin(), false);
