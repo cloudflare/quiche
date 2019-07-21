@@ -246,7 +246,7 @@
 //! [`send_response()`]: struct.Connection.html#method.send_response
 //! [`send_body()`]: struct.Connection.html#method.send_body
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use crate::octets;
 
@@ -515,7 +515,7 @@ pub struct Connection {
     highest_request_stream_id: u64,
     highest_uni_stream_id: u64,
 
-    streams: BTreeMap<u64, stream::Stream>,
+    streams: HashMap<u64, stream::Stream>,
 
     local_settings: ConnectionSettings,
     peer_settings: ConnectionSettings,
@@ -542,7 +542,7 @@ impl Connection {
             highest_request_stream_id: 0,
             highest_uni_stream_id: initial_uni_stream_id,
 
-            streams: BTreeMap::new(),
+            streams: HashMap::new(),
 
             local_settings: ConnectionSettings {
                 num_placeholders: Some(config.num_placeholders),
