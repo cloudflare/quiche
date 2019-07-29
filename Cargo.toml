@@ -39,7 +39,7 @@ winapi = {version = "0", features = ["wincrypt"] }
 
 [dev-dependencies]
 mio = "0"
-url = "1"
+url = "2"
 docopt = "1"
 criterion = "0"
 env_logger = "0"
