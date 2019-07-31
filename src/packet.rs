@@ -212,13 +212,13 @@ impl Header {
         };
 
         let dcid_len = b.get_u8()?;
-        if version == crate::PROTOCOL_VERSION && dcid_len > 20 {
+        if version == crate::PROTOCOL_VERSION && dcid_len > MAX_CID_LEN {
             return Err(Error::InvalidPacket);
         }
         let dcid = b.get_bytes(dcid_len as usize)?.to_vec();
 
         let scid_len = b.get_u8()?;
-        if version == crate::PROTOCOL_VERSION && scid_len > 20 {
+        if version == crate::PROTOCOL_VERSION && scid_len > MAX_CID_LEN {
             return Err(Error::InvalidPacket);
         }
         let scid = b.get_bytes(scid_len as usize)?.to_vec();
