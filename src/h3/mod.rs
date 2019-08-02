@@ -2233,7 +2233,7 @@ mod tests {
     }
 
     #[test]
-    /// Client closes QPACK stream, which is forbidden
+    /// Client closes QPACK stream, which is forbidden.
     fn close_qpack_stream() {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
