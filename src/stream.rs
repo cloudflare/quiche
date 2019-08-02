@@ -78,7 +78,7 @@ impl StreamMap {
     /// a new one otherwise.
     ///
     /// The `local` parameter indicates whether the stream's creation was
-    /// requested byt the local application rather than the peer, and is
+    /// requested by the local application rather than the peer, and is
     /// used to validate the requested stream ID, and to select the initial
     /// flow control values from the local and remote transport parameters
     /// (also passed as arguments).
@@ -103,7 +103,7 @@ impl StreamMap {
                         peer_params.initial_max_stream_data_bidi_remote,
                     ),
 
-                    // Locally-initiated unirectional stream.
+                    // Locally-initiated unidirectional stream.
                     (true, false) => (0, peer_params.initial_max_stream_data_uni),
 
                     // Remotely-initiated bidirectional stream.
@@ -112,7 +112,7 @@ impl StreamMap {
                         peer_params.initial_max_stream_data_bidi_local,
                     ),
 
-                    // Remotely-initiated unirectional stream.
+                    // Remotely-initiated unidirectional stream.
                     (false, false) =>
                         (local_params.initial_max_stream_data_uni, 0),
                 };
