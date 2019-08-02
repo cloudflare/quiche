@@ -77,18 +77,45 @@ impl StreamMap {
     /// Returns the mutable stream with the given ID if it exists, or creates
     /// a new one otherwise.
     ///
+    /// The `local` parameter indicates whether the stream's creation was
+    /// requested by the local application rather than the peer, and is
+    /// used to validate the requested stream ID, and to select the initial
+    /// flow control values from the local and remote transport parameters
+    /// (also passed as arguments).
+    ///
     /// This also takes care of enforcing both local and the peer's stream
     /// count limits. If one of these limits is violated, the `StreamLimit`
     /// error is returned.
-    pub fn get_or_create(
-        &mut self, id: u64, max_rx_data: usize, max_tx_data: usize, local: bool,
-        is_server: bool,
+    pub(crate) fn get_or_create(
+        &mut self, id: u64, local_params: &crate::TransportParams,
+        peer_params: &crate::TransportParams, local: bool, is_server: bool,
     ) -> Result<&mut Stream> {
         let stream = match self.streams.entry(id) {
             hash_map::Entry::Vacant(v) => {
                 if local != is_local(id, is_server) {
                     return Err(Error::InvalidStreamState);
                 }
+
+                let (max_rx_data, max_tx_data) = match (local, is_bidi(id)) {
+                    // Locally-initiated bidirectional stream.
+                    (true, true) => (
+                        local_params.initial_max_stream_data_bidi_local,
+                        peer_params.initial_max_stream_data_bidi_remote,
+                    ),
+
+                    // Locally-initiated unidirectional stream.
+                    (true, false) => (0, peer_params.initial_max_stream_data_uni),
+
+                    // Remotely-initiated bidirectional stream.
+                    (false, true) => (
+                        local_params.initial_max_stream_data_bidi_remote,
+                        peer_params.initial_max_stream_data_bidi_local,
+                    ),
+
+                    // Remotely-initiated unidirectional stream.
+                    (false, false) =>
+                        (local_params.initial_max_stream_data_uni, 0),
+                };
 
                 // Enforce stream count limits.
                 match (is_local(id, is_server), is_bidi(id)) {
@@ -117,7 +144,7 @@ impl StreamMap {
                             .ok_or(Error::StreamLimit)?,
                 };
 
-                let s = Stream::new(max_rx_data, max_tx_data);
+                let s = Stream::new(max_rx_data as usize, max_tx_data as usize);
                 v.insert(s)
             },
 

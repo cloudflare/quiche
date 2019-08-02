@@ -1922,21 +1922,8 @@ impl Connection {
             return Err(Error::InvalidStreamState);
         }
 
-        let max_rx_data =
-            self.local_transport_params
-                .initial_max_stream_data_bidi_local as usize;
-        let max_tx_data =
-            self.peer_transport_params
-                .initial_max_stream_data_bidi_remote as usize;
-
         // Get existing stream or create a new one.
-        let stream = self.streams.get_or_create(
-            stream_id,
-            max_rx_data,
-            max_tx_data,
-            true,
-            self.is_server,
-        )?;
+        let stream = self.get_or_create_stream(stream_id, true)?;
 
         // TODO: implement backpressure based on peer's flow control
 
@@ -2286,6 +2273,20 @@ impl Connection {
         Err(Error::Done)
     }
 
+    /// Returns the mutable stream with the given ID if it exists, or creates
+    /// a new one otherwise.
+    fn get_or_create_stream(
+        &mut self, id: u64, local: bool,
+    ) -> Result<&mut stream::Stream> {
+        self.streams.get_or_create(
+            id,
+            &self.local_transport_params,
+            &self.peer_transport_params,
+            local,
+            self.is_server,
+        )
+    }
+
     /// Processes an incoming frame.
     fn process_frame(
         &mut self, frame: frame::Frame, epoch: packet::Epoch,
@@ -2325,23 +2326,8 @@ impl Connection {
                     return Err(Error::InvalidStreamState);
                 }
 
-                let max_rx_data = self
-                    .local_transport_params
-                    .initial_max_stream_data_bidi_remote
-                    as usize;
-                let max_tx_data = self
-                    .peer_transport_params
-                    .initial_max_stream_data_bidi_local
-                    as usize;
-
                 // Get existing stream or create a new one.
-                let stream = self.streams.get_or_create(
-                    stream_id,
-                    max_rx_data,
-                    max_tx_data,
-                    false,
-                    self.is_server,
-                )?;
+                let stream = self.get_or_create_stream(stream_id, false)?;
 
                 self.rx_data += stream.recv.reset(final_size as usize)?;
 
@@ -2392,31 +2378,19 @@ impl Connection {
                     return Err(Error::InvalidStreamState);
                 }
 
-                let max_rx_data = self
-                    .local_transport_params
-                    .initial_max_stream_data_bidi_remote
-                    as usize;
-                let max_tx_data = self
-                    .peer_transport_params
-                    .initial_max_stream_data_bidi_local
-                    as usize;
+                // Check for flow control limits.
+                let data_len = data.len();
 
-                // Get existing stream or create a new one.
-                let stream = self.streams.get_or_create(
-                    stream_id,
-                    max_rx_data,
-                    max_tx_data,
-                    false,
-                    self.is_server,
-                )?;
-
-                self.rx_data += data.len();
-
-                if self.rx_data > self.max_rx_data {
+                if self.rx_data + data_len > self.max_rx_data {
                     return Err(Error::FlowControl);
                 }
 
+                // Get existing stream or create a new one.
+                let stream = self.get_or_create_stream(stream_id, false)?;
+
                 stream.recv.push(data)?;
+
+                self.rx_data += data_len;
             },
 
             frame::Frame::MaxData { max } => {
@@ -2424,23 +2398,8 @@ impl Connection {
             },
 
             frame::Frame::MaxStreamData { stream_id, max } => {
-                let max_rx_data = self
-                    .local_transport_params
-                    .initial_max_stream_data_bidi_remote
-                    as usize;
-                let max_tx_data = self
-                    .peer_transport_params
-                    .initial_max_stream_data_bidi_local
-                    as usize;
-
                 // Get existing stream or create a new one.
-                let stream = self.streams.get_or_create(
-                    stream_id,
-                    max_rx_data,
-                    max_tx_data,
-                    false,
-                    self.is_server,
-                )?;
+                let stream = self.get_or_create_stream(stream_id, false)?;
 
                 let was_writable = stream.writable();
 
@@ -2887,6 +2846,7 @@ pub mod testing {
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
             config.set_initial_max_stream_data_bidi_remote(15);
+            config.set_initial_max_stream_data_uni(10);
             config.set_initial_max_streams_bidi(3);
             config.set_initial_max_streams_uni(3);
             config.verify_peer(false);
@@ -3391,7 +3351,7 @@ mod tests {
     }
 
     #[test]
-    fn stream_flow_control_limit() {
+    fn stream_flow_control_limit_bidi() {
         let mut buf = [0; 65535];
 
         let mut pipe = testing::Pipe::default().unwrap();
@@ -3401,6 +3361,26 @@ mod tests {
         let frames = [frame::Frame::Stream {
             stream_id: 4,
             data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaaa", 0, true),
+        }];
+
+        let pkt_type = packet::Type::Application;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::FlowControl),
+        );
+    }
+
+    #[test]
+    fn stream_flow_control_limit_uni() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 2,
+            data: stream::RangeBuf::from(b"aaaaaaaaaaa", 0, true),
         }];
 
         let pkt_type = packet::Type::Application;
