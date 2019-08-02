@@ -334,11 +334,6 @@ impl RecvBuf {
     /// as handling incoming data that overlaps data that is already in the
     /// buffer.
     pub fn push(&mut self, buf: RangeBuf) -> Result<()> {
-        if self.off >= buf.max_off() {
-            // Data is fully duplicate.
-            return Ok(());
-        }
-
         if buf.max_off() > self.max_data {
             return Err(Error::FlowControl);
         }
@@ -360,14 +355,32 @@ impl RecvBuf {
             return Err(Error::FinalSize);
         }
 
+        // We already saved the final offset, so there's nothing else we
+        // need to keep from the RangeBuf if it's empty.
+        if self.fin_off.is_some() && buf.is_empty() {
+            return Ok(());
+        }
+
         if buf.fin() {
             self.fin_off = Some(buf.max_off());
         }
 
-        // We already saved the final offset, so there's nothing else we
-        // need to keep from the RangeBuf if it's empty.
-        if buf.is_empty() {
+        // No need to store empty buffer that doesn't carry the fin flag.
+        if !buf.fin() && buf.is_empty() {
             return Ok(());
+        }
+
+        // Check if data is fully duplicate, that is the buffer's max offset is
+        // lower or equal to the offset already stored in the recv buffer.
+        if self.off >= buf.max_off() {
+            // An exception is applied to empty range buffers, because an empty
+            // buffer's max offset matches the max offset of the recv buffer.
+            //
+            // By this point all spurious empty buffers should have already been
+            // discarded, so allowing empty buffers here should be safe.
+            if !buf.is_empty() {
+                return Ok(());
+            }
         }
 
         if self.drain {
@@ -787,6 +800,62 @@ mod tests {
     }
 
     #[test]
+    fn empty_stream_frame() {
+        let mut recv = RecvBuf::new(15);
+        assert_eq!(recv.len, 0);
+
+        let buf = RangeBuf::from(b"hello", 0, false);
+        assert!(recv.push(buf).is_ok());
+        assert_eq!(recv.len, 5);
+        assert_eq!(recv.off, 0);
+        assert_eq!(recv.data.len(), 1);
+
+        let mut buf = [0; 32];
+        assert_eq!(recv.pop(&mut buf), Ok((5, false)));
+
+        // Don't store non-fin empty buffer.
+        let buf = RangeBuf::from(b"", 10, false);
+        assert!(recv.push(buf).is_ok());
+        assert_eq!(recv.len, 5);
+        assert_eq!(recv.off, 5);
+        assert_eq!(recv.data.len(), 0);
+
+        // Check flow control for empty buffer.
+        let buf = RangeBuf::from(b"", 16, false);
+        assert_eq!(recv.push(buf), Err(Error::FlowControl));
+
+        // Store fin empty buffer.
+        let buf = RangeBuf::from(b"", 5, true);
+        assert!(recv.push(buf).is_ok());
+        assert_eq!(recv.len, 5);
+        assert_eq!(recv.off, 5);
+        assert_eq!(recv.data.len(), 1);
+
+        // Don't store additional fin empty buffers.
+        let buf = RangeBuf::from(b"", 5, true);
+        assert!(recv.push(buf).is_ok());
+        assert_eq!(recv.len, 5);
+        assert_eq!(recv.off, 5);
+        assert_eq!(recv.data.len(), 1);
+
+        // Don't store additional fin non-empty buffers.
+        let buf = RangeBuf::from(b"aa", 3, true);
+        assert!(recv.push(buf).is_ok());
+        assert_eq!(recv.len, 5);
+        assert_eq!(recv.off, 5);
+        assert_eq!(recv.data.len(), 1);
+
+        // Validate final size with fin empty buffers.
+        let buf = RangeBuf::from(b"", 6, true);
+        assert_eq!(recv.push(buf), Err(Error::FinalSize));
+        let buf = RangeBuf::from(b"", 4, true);
+        assert_eq!(recv.push(buf), Err(Error::FinalSize));
+
+        let mut buf = [0; 32];
+        assert_eq!(recv.pop(&mut buf), Ok((0, true)));
+    }
+
+    #[test]
     fn ordered_read() {
         let mut recv = RecvBuf::new(std::usize::MAX);
         assert_eq!(recv.len, 0);
@@ -927,7 +996,9 @@ mod tests {
         let mut buf = [0; 32];
 
         let first = RangeBuf::from(b"something", 0, false);
-        let second = RangeBuf::from(b"hello", 3, true);
+        let second = RangeBuf::from(b"hello", 3, false);
+        let third = RangeBuf::from(b"ello", 4, true);
+        let fourth = RangeBuf::from(b"ello", 5, true);
 
         assert!(recv.push(first).is_ok());
         assert_eq!(recv.len, 9);
@@ -942,6 +1013,13 @@ mod tests {
         assert_eq!(recv.off, 9);
 
         assert!(recv.push(second).is_ok());
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 9);
+        assert_eq!(recv.data.len(), 0);
+
+        assert_eq!(recv.push(third), Err(Error::FinalSize));
+
+        assert!(recv.push(fourth).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
         assert_eq!(recv.data.len(), 0);
@@ -1003,7 +1081,6 @@ mod tests {
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 9);
         assert_eq!(fin, false);
-        println!("{}", std::str::from_utf8(&buf[..len]).unwrap());
         assert_eq!(&buf[..len], b"somehello");
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
@@ -1035,7 +1112,6 @@ mod tests {
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 9);
         assert_eq!(fin, false);
-        println!("{}", std::str::from_utf8(&buf[..len]).unwrap());
         assert_eq!(&buf[..len], b"somhellog");
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
@@ -1073,7 +1149,6 @@ mod tests {
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 18);
         assert_eq!(fin, false);
-        println!("{}", std::str::from_utf8(&buf[..len]).unwrap());
         assert_eq!(&buf[..len], b"somhellogsomhellog");
         assert_eq!(recv.len, 18);
         assert_eq!(recv.off, 18);
@@ -1226,7 +1301,6 @@ mod tests {
         let (len, fin) = recv.pop(&mut buf).unwrap();
         assert_eq!(len, 14);
         assert_eq!(fin, false);
-        println!("{}", std::str::from_utf8(&buf[..len]).unwrap());
         assert_eq!(&buf[..len], b"aabbbcdddeefff");
         assert_eq!(recv.len, 14);
         assert_eq!(recv.off, 14);
