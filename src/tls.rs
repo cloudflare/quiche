@@ -59,7 +59,7 @@ pub enum Error {
 }
 
 const TLS1_3_VERSION: u16 = 0x0304;
-const TLS_ALERT_ERROR: u16 = 0x100;
+const TLS_ALERT_ERROR: u64 = 0x100;
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
@@ -589,7 +589,7 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int {
         alert
     );
 
-    let error: u16 = TLS_ALERT_ERROR + u16::from(alert);
+    let error: u64 = TLS_ALERT_ERROR + u64::from(alert);
     conn.error = Some(error);
 
     1

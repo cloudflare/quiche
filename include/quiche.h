@@ -236,7 +236,7 @@ uint64_t quiche_conn_timeout_as_nanos(quiche_conn *conn);
 void quiche_conn_on_timeout(quiche_conn *conn);
 
 // Closes the connection with the given error and reason.
-int quiche_conn_close(quiche_conn *conn, bool app, uint16_t err,
+int quiche_conn_close(quiche_conn *conn, bool app, uint64_t err,
                       const uint8_t *reason, size_t reason_len);
 
 // Returns the negotiated ALPN protocol.
@@ -277,7 +277,7 @@ void quiche_conn_free(quiche_conn *conn);
 //
 
 /// The current HTTP/3 ALPN token.
-#define QUICHE_H3_APPLICATION_PROTOCOL "\x05h3-20"
+#define QUICHE_H3_APPLICATION_PROTOCOL "\x05h3-22"
 
 // Stores configuration shared between multiple connections.
 typedef struct Http3Config quiche_h3_config;

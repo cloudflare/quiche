@@ -251,7 +251,7 @@ use std::collections::BTreeMap;
 use crate::octets;
 
 /// The current HTTP/3 ALPN token.
-pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-20";
+pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-22";
 
 /// A specialized [`Result`] type for quiche HTTP/3 operations.
 ///
@@ -271,17 +271,13 @@ pub enum Error {
     /// The provided buffer is too short.
     BufferTooShort       = -2,
 
-    /// Setting sent in wrong direction.
-    WrongSettingDirection = -3,
-
-    /// The server attempted to push content that the client will not accept.
-    PushRefused          = -4,
+    /// Peer violated protocol requirements in a way which doesn’t match a
+    /// more specific error code, or endpoint declines to use the more
+    /// specific error code.
+    GeneralProtocolError = -3,
 
     /// Internal error in the HTTP/3 stack.
     InternalError        = -5,
-
-    /// The server attempted to push something the client already has.
-    PushAlreadyInCache   = -6,
 
     /// The client no longer needs the requested data.
     RequestCancelled     = -7,
@@ -302,24 +298,17 @@ pub enum Error {
     /// Frame received on stream where it is not permitted.
     WrongStream          = -12,
 
-    /// Stream ID, Push ID or Placeholder Id greater that current maximum was.
-    /// used
-    LimitExceeded        = -13,
+    /// Stream ID, Push ID or Placeholder Id greater that current maximum was
+    /// used incorrectly, such as exceeding a limit, reducing a limit,
+    /// or being reused.
+    IdError              = -13,
 
-    /// Push ID used in two different stream headers.
-    DuplicatePush        = -14,
-
-    /// Unknown unidirection stream type.
-    UnknownStreamType    = -15,
-
-    /// Too many unidirectional streams of a type were created.
-    WrongStreamCount     = -16,
+    /// The endpoint detected that its peer created a stream that it will not
+    /// accept.
+    StreamCreationError  = -15,
 
     /// A required critical stream was closed.
     ClosedCriticalStream = -17,
-
-    /// Unidirectional stream type opened at peer that is prohibited.
-    WrongStreamDirection = -18,
 
     /// Inform client that remainder of request is not needed. Used in
     /// STOP_SENDING only.
@@ -334,9 +323,10 @@ pub enum Error {
     /// Server rejected request without performing any application processing.
     RequestRejected      = -22,
 
-    /// Peer violated protocol requirements in a way that doesn't match a more
-    /// specific code.
-    GeneralProtocolError = -23,
+    /// An endpoint detected an error in the payload of a SETTINGS frame:
+    /// a duplicate setting was detected, a client-only setting was sent by a
+    /// server, or a server-only setting by a client.
+    SettingsError        = -23,
 
     /// TODO: malformed frame where last on-wire byte is the frame type.
     MalformedFrame       = -24,
@@ -355,30 +345,30 @@ pub enum Error {
 }
 
 impl Error {
-    fn to_wire(self) -> u16 {
+    fn to_wire(self) -> u64 {
         match self {
             Error::Done => 0x0,
-            Error::WrongSettingDirection => 0x1,
-            Error::PushRefused => 0x2,
+            Error::GeneralProtocolError => 0x1,
+            // reserved in draft 22 => 0x2,
             Error::InternalError => 0x3,
-            Error::PushAlreadyInCache => 0x4,
+            // reserved in draft 22 => 0x4,
             Error::RequestCancelled => 0x5,
             Error::IncompleteRequest => 0x6,
             Error::ConnectError => 0x07,
             Error::ExcessiveLoad => 0x08,
             Error::VersionFallback => 0x09,
             Error::WrongStream => 0xA,
-            Error::LimitExceeded => 0xB,
-            Error::DuplicatePush => 0xC,
-            Error::UnknownStreamType => 0xD,
-            Error::WrongStreamCount => 0xE,
+            Error::IdError => 0xB,
+            // reserved in draft 22 => 0xC,
+            Error::StreamCreationError => 0xD,
+            // reserved in draft 22 => 0xE,
             Error::ClosedCriticalStream => 0xF,
-            Error::WrongStreamDirection => 0x10,
+            // reserved in draft 22 => 0x10,
             Error::EarlyResponse => 0x11,
             Error::MissingSettings => 0x12,
             Error::UnexpectedFrame => 0x13,
             Error::RequestRejected => 0x14,
-            Error::GeneralProtocolError => 0xFF,
+            Error::SettingsError => 0xFF,
             Error::MalformedFrame => 0x10,
 
             Error::QpackDecompressionFailed => 0x200,
@@ -800,11 +790,11 @@ impl Connection {
                         if self.is_server && num_placeholders.is_some() {
                             conn.close(
                                 true,
-                                Error::WrongSettingDirection.to_wire(),
+                                Error::SettingsError.to_wire(),
                                 b"Num placeholder setting received by server.",
                             )?;
 
-                            return Err(Error::WrongSettingDirection);
+                            return Err(Error::SettingsError);
                         }
 
                         self.peer_settings = ConnectionSettings {
@@ -1031,7 +1021,7 @@ impl Connection {
             return Ok(ret);
         }
 
-        Err(Error::LimitExceeded)
+        Err(Error::IdError)
     }
 
     /// Allocates a new unidirectional stream ID for the local endpoint to use.
@@ -1042,7 +1032,7 @@ impl Connection {
             return Ok(ret);
         }
 
-        Err(Error::LimitExceeded)
+        Err(Error::IdError)
     }
 
     fn open_uni_stream(
@@ -1118,7 +1108,7 @@ impl Connection {
                 conn.stream_send(stream_id, b"GREASE is the word", false)?;
             },
 
-            Err(Error::LimitExceeded) => {
+            Err(Error::IdError) => {
                 trace!("{} sending GREASE stream was blocked", conn.trace_id(),);
 
                 return Ok(());
@@ -1201,11 +1191,11 @@ impl Connection {
                             if self.peer_control_stream_id.is_some() {
                                 conn.close(
                                     true,
-                                    Error::WrongStreamCount.to_wire(),
+                                    Error::StreamCreationError.to_wire(),
                                     b"Received multiple control streams",
                                 )?;
 
-                                return Err(Error::WrongStreamCount);
+                                return Err(Error::StreamCreationError);
                             }
 
                             trace!(
@@ -1222,11 +1212,11 @@ impl Connection {
                             if self.is_server {
                                 conn.close(
                                     true,
-                                    Error::WrongStreamDirection.to_wire(),
+                                    Error::StreamCreationError.to_wire(),
                                     b"Server received push stream.",
                                 )?;
 
-                                return Err(Error::WrongStreamDirection);
+                                return Err(Error::StreamCreationError);
                             }
                         },
 
@@ -1236,11 +1226,11 @@ impl Connection {
                             {
                                 conn.close(
                                     true,
-                                    Error::WrongStreamCount.to_wire(),
+                                    Error::StreamCreationError.to_wire(),
                                     b"Received multiple QPACK encoder streams",
                                 )?;
 
-                                return Err(Error::WrongStreamCount);
+                                return Err(Error::StreamCreationError);
                             }
 
                             self.peer_qpack_streams.encoder_stream_id =
@@ -1253,11 +1243,11 @@ impl Connection {
                             {
                                 conn.close(
                                     true,
-                                    Error::WrongStreamCount.to_wire(),
+                                    Error::StreamCreationError.to_wire(),
                                     b"Received multiple QPACK decoder streams",
                                 )?;
 
-                                return Err(Error::WrongStreamCount);
+                                return Err(Error::StreamCreationError);
                             }
 
                             self.peer_qpack_streams.decoder_stream_id =
@@ -1728,7 +1718,7 @@ mod tests {
         let resp = s.send_response(stream, false).unwrap();
 
         for _ in 0..total_data_frames - 1 {
-            s.send_body_server(stream, false).unwrap();;
+            s.send_body_server(stream, false).unwrap();
         }
 
         let body = s.send_body_server(stream, true).unwrap();
@@ -2141,43 +2131,6 @@ mod tests {
     }
 
     #[test]
-    /// Send a prioritized request from the client, ensure server accepts it.
-    fn priority_request() {
-        let mut s = Session::default().unwrap();
-        s.handshake().unwrap();
-
-        let mut d = [42; 128];
-        let mut b = octets::Octets::with_slice(&mut d);
-
-        // Create an approximate PRIORITY frame in the buffer.
-        b.put_varint(frame::PRIORITY_FRAME_TYPE_ID).unwrap();
-        b.put_varint(2).unwrap(); // 2 u8s = Bitfield + Weight
-        b.put_u8(0).unwrap(); // bitfield
-        b.put_u8(16).unwrap(); // weight
-        let off = b.off();
-
-        let stream = 0;
-        s.pipe.client.stream_send(stream, &d[..off], false).unwrap();
-        s.advance().ok();
-
-        let req = vec![
-            Header::new(":method", "GET"),
-            Header::new(":scheme", "https"),
-            Header::new(":authority", "quic.tech"),
-            Header::new(":path", "/test"),
-            Header::new("user-agent", "quiche-test"),
-        ];
-
-        s.client
-            .send_headers(&mut s.pipe.client, stream, &req, true)
-            .unwrap();
-        s.advance().ok();
-
-        assert_eq!(s.poll_server(), Ok((stream, Event::Headers(req))));
-        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
-    }
-
-    #[test]
     /// Send a PRIORITY frame from the client, ensure server accepts it.
     fn priority_control_stream() {
         let mut s = Session::default().unwrap();
@@ -2249,7 +2202,7 @@ mod tests {
 
         s.advance().ok();
 
-        assert_eq!(s.poll_server(), Err(Error::WrongStreamCount));
+        assert_eq!(s.poll_server(), Err(Error::StreamCreationError));
     }
 
     #[test]
