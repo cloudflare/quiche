@@ -1469,7 +1469,10 @@ impl Connection {
                         None => continue,
                     };
 
-                    self.tx_data -= data.len();
+                    // TODO: due to a packet loss edge case the following could
+                    // go negative, though it's not clear why, so will need to
+                    // figure it out.
+                    self.tx_data = self.tx_data.saturating_sub(data.len());
 
                     let was_writable = stream.writable();
 
@@ -4015,6 +4018,35 @@ mod tests {
                 data: stream::RangeBuf::from(b"aaaaa", 0, false),
             })
         );
+    }
+
+    #[test]
+    /// Tests that we don't exceed the per-connection flow control limit set by
+    /// the peer.
+    fn flow_control_limit_send() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(
+            pipe.client.stream_send(0, b"aaaaaaaaaaaaaaa", false),
+            Ok(15)
+        );
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+        assert_eq!(
+            pipe.client.stream_send(4, b"aaaaaaaaaaaaaaa", false),
+            Ok(15)
+        );
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+        assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert!(r.next().is_some());
+        assert!(r.next().is_some());
+        assert!(r.next().is_none());
     }
 }
 
