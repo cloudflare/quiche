@@ -240,7 +240,7 @@ int main(int argc, char *argv[]) {
     }
 
     quiche_config_set_application_protos(config,
-        (uint8_t *) "\x05hq-20\x08http/0.9", 15);
+        (uint8_t *) "\x05hq-22\x08http/0.9", 15);
 
     quiche_config_set_idle_timeout(config, 5000);
     quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);
