@@ -1353,20 +1353,12 @@ impl Connection {
                 },
 
                 stream::State::QpackInstruction => {
-                    stream.try_fill_buffer(conn)?;
+                    let mut d = [0; 4096];
 
-                    let e = match stream.ty() {
-                        Some(stream::Type::QpackEncoder) =>
-                            Error::QpackEncoderStreamError,
-                        Some(stream::Type::QpackDecoder) =>
-                            Error::QpackDecoderStreamError,
-
-                        _ => unreachable!(),
-                    };
-
-                    conn.close(true, e.to_wire(), b"")?;
-
-                    return Err(e);
+                    // Read data from the stream and discard immediately.
+                    loop {
+                        conn.stream_recv(stream_id, &mut d)?;
+                    }
                 },
 
                 stream::State::Drain => {
@@ -2241,21 +2233,20 @@ mod tests {
     }
 
     #[test]
-    /// Client sends data on a QPACK stream, which we don't allow.
+    /// Client closes QPACK stream, which is forbidden.
     fn close_qpack_stream() {
-        // TODO: once we add support for QPACK dynamic table, this test should
-        // be changed to testing for critical stream being closed.
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
         let mut qpack_stream_closed = false;
 
-        s.send_frame_client(
-            frame::Frame::MaxPushId { push_id: 1 },
-            s.client.local_qpack_streams.encoder_stream_id.unwrap(),
-            true,
-        )
-        .unwrap();
+        let stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
+        let d = [0; 1];
+
+        s.pipe.client.stream_send(stream_id, &d, false).unwrap();
+        s.pipe.client.stream_send(stream_id, &d, true).unwrap();
+
+        s.advance().ok();
 
         loop {
             match s.server.poll(&mut s.pipe.server) {
@@ -2265,7 +2256,7 @@ mod tests {
                     break;
                 },
 
-                Err(Error::QpackEncoderStreamError) => {
+                Err(Error::ClosedCriticalStream) => {
                     qpack_stream_closed = true;
                     break;
                 },
@@ -2275,6 +2266,38 @@ mod tests {
         }
 
         assert!(qpack_stream_closed);
+    }
+
+    #[test]
+    /// Client sends QPACK data.
+    fn qpack_data() {
+        // TODO: QPACK instructions are ignored until dynamic table support is
+        // added so we just test that the data is safely ignored.
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        let e_stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
+        let d_stream_id = s.client.local_qpack_streams.decoder_stream_id.unwrap();
+        let d = [0; 20];
+
+        s.pipe.client.stream_send(e_stream_id, &d, false).unwrap();
+        s.pipe.client.stream_send(d_stream_id, &d, false).unwrap();
+
+        s.advance().ok();
+
+        loop {
+            match s.server.poll(&mut s.pipe.server) {
+                Ok(_) => (),
+
+                Err(Error::Done) => {
+                    break;
+                },
+
+                Err(_) => {
+                    panic!();
+                },
+            }
+        }
     }
 }
 
