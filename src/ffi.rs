@@ -38,6 +38,12 @@ use libc::ssize_t;
 
 use crate::*;
 
+#[no_mangle]
+pub extern fn quiche_version() -> *const u8 {
+    static VERSION: &'static str = concat!(env!("CARGO_PKG_VERSION"), "\0");
+    VERSION.as_ptr()
+}
+
 struct Logger {
     cb: extern fn(line: *const u8, argp: *mut c_void),
     argp: std::sync::atomic::AtomicPtr<c_void>,

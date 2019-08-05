@@ -91,6 +91,9 @@ enum quiche_error {
     QUICHE_ERR_FINAL_SIZE = -13,
 };
 
+// Returns a human readable string with the quiche version number.
+const char *quiche_version(void);
+
 // Enables logging. |cb| will be called with log messages
 void quiche_enable_debug_logging(void (*cb)(const char *line, void *argp),
                                  void *argp);
