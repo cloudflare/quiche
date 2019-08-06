@@ -1,0 +1,30 @@
+#!/bin/bash
+
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test get $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test ip $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test useragent $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test headers $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test post $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test put $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test patch $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test delete $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test encode-utf8 $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test gzip $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test deflate $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test status $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test response-headers $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test redirect $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test cookies $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test basic-auth $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test stream $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test delay --no-concurrent $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test drip --no-concurrent $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test range $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test cache $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test bytes $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test stream-bytes $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test image $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test form $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test html $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test robots $1
+RUST_LOG=info ./target/release/http3bin-client --no-verify --test links $1
