@@ -123,7 +123,7 @@ void quiche_config_log_keys(quiche_config *config);
 
 // Configures the list of supported application protocols.
 int quiche_config_set_application_protos(quiche_config *config,
-                                         uint8_t *protos,
+                                         const uint8_t *protos,
                                          size_t protos_len);
 
 // Sets the `idle_timeout` transport parameter.
