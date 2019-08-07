@@ -278,10 +278,10 @@ pub extern fn quiche_accept(
 ) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
 
-    let odcid = if !odcid.is_null() || odcid_len == 0 {
-        Some(unsafe { slice::from_raw_parts(odcid, odcid_len) })
-    } else {
+    let odcid = if odcid.is_null() || odcid_len == 0 {
         None
+    } else {
+        Some(unsafe { slice::from_raw_parts(odcid, odcid_len) })
     };
 
     match accept(scid, odcid, config) {
