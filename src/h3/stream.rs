@@ -38,6 +38,8 @@ pub const HTTP3_PUSH_STREAM_TYPE_ID: u64 = 0x1;
 pub const QPACK_ENCODER_STREAM_TYPE_ID: u64 = 0x2;
 pub const QPACK_DECODER_STREAM_TYPE_ID: u64 = 0x3;
 
+const MAX_STATE_BUF_SIZE: usize = (1 << 24) - 1;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Type {
     Control,
@@ -222,7 +224,7 @@ impl Stream {
             Type::Unknown => State::Drain,
         };
 
-        self.state_transition(state, 1, true);
+        self.state_transition(state, 1, true)?;
 
         Ok(())
     }
@@ -233,7 +235,7 @@ impl Stream {
 
         // TODO: implement push ID.
 
-        self.state_transition(State::FrameType, 1, true);
+        self.state_transition(State::FrameType, 1, true)?;
 
         Ok(())
     }
@@ -342,7 +344,7 @@ impl Stream {
 
         self.frame_type = Some(ty);
 
-        self.state_transition(State::FramePayloadLen, 1, true);
+        self.state_transition(State::FramePayloadLen, 1, true)?;
 
         Ok(())
     }
@@ -362,7 +364,7 @@ impl Stream {
                 _ => (State::FramePayload, true),
             };
 
-            self.state_transition(state, len as usize, resize);
+            self.state_transition(state, len as usize, resize)?;
 
             return Ok(());
         }
@@ -449,7 +451,7 @@ impl Stream {
             self.frames.push_back(frame);
         }
 
-        self.state_transition(State::FrameType, 1, true);
+        self.state_transition(State::FrameType, 1, true)?;
 
         Ok(())
     }
@@ -465,7 +467,7 @@ impl Stream {
         self.state_off += len;
 
         if self.state_buffer_complete() {
-            self.state_transition(State::FrameType, 1, true);
+            self.state_transition(State::FrameType, 1, true)?;
         }
 
         Ok(len)
@@ -486,7 +488,7 @@ impl Stream {
         self.state_off += len;
 
         if self.state_buffer_complete() {
-            self.state_transition(State::FrameType, 1, true);
+            self.state_transition(State::FrameType, 1, true)?;
         }
 
         Ok(len)
@@ -509,7 +511,7 @@ impl Stream {
     /// buffer.
     fn state_transition(
         &mut self, new_state: State, expected_len: usize, resize: bool,
-    ) {
+    ) -> Result<()> {
         self.state = new_state;
         self.state_off = 0;
         self.state_len = expected_len;
@@ -517,8 +519,17 @@ impl Stream {
         // Some states don't need the state buffer, so don't resize it if not
         // necessary.
         if resize {
+            // A peer can influence the size of the state buffer (e.g. with the
+            // payload size of a GREASE frame), so we need to limit the maximum
+            // size to avoid DoS.
+            if self.state_len > MAX_STATE_BUF_SIZE {
+                return Err(Error::InternalError);
+            }
+
             self.state_buf.resize(self.state_len, 0);
         }
+
+        Ok(())
     }
 }
 

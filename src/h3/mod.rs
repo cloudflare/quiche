@@ -2299,6 +2299,48 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    /// Tests limits for the stream state buffer maximum size.
+    fn max_state_buf_size() {
+        // DATA frames don't consume the state buffer, so can be of any size.
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        let mut d = [42; 128];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        let frame_type = b.put_varint(frame::DATA_FRAME_TYPE_ID).unwrap();
+        s.pipe.client.stream_send(0, frame_type, false).unwrap();
+
+        let frame_len = b.put_varint(1 << 24).unwrap();
+        s.pipe.client.stream_send(0, frame_len, false).unwrap();
+
+        s.pipe.client.stream_send(0, &d, false).unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.server.poll(&mut s.pipe.server), Ok((0, Event::Data)));
+
+        // GREASE frames consume the state buffer, so need to be limited.
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        let mut d = [42; 128];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        let frame_type = b.put_varint(148_764_065_110_560_899).unwrap();
+        s.pipe.client.stream_send(0, frame_type, false).unwrap();
+
+        let frame_len = b.put_varint(1 << 24).unwrap();
+        s.pipe.client.stream_send(0, frame_len, false).unwrap();
+
+        s.pipe.client.stream_send(0, &d, false).unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::InternalError));
+    }
 }
 
 mod ffi;
