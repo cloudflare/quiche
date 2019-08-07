@@ -651,10 +651,11 @@ impl Connection {
         }
 
         trace!(
-            "{} sending HEADERS of size {} on stream {}",
+            "{} tx frm HEADERS stream={} len={} fin={}",
             conn.trace_id(),
+            stream_id,
             header_block.len(),
-            stream_id
+            fin
         );
 
         conn.stream_send(
@@ -689,10 +690,11 @@ impl Connection {
         }
 
         trace!(
-            "{} sending DATA frame of size {} on stream {}",
+            "{} tx frm DATA stream={} len={} fin={}",
             conn.trace_id(),
+            stream_id,
             body.len(),
-            stream_id
+            fin
         );
 
         conn.stream_send(
@@ -773,7 +775,7 @@ impl Connection {
         {
             if let Some(frame) = stream.get_frame() {
                 trace!(
-                    "{} rx frm {:?} on stream {}",
+                    "{} rx frm {:?} stream={}",
                     conn.trace_id(),
                     frame,
                     stream_id
@@ -1075,11 +1077,7 @@ impl Connection {
         let mut d = [42; 128];
         let mut b = octets::Octets::with_slice(&mut d);
 
-        trace!(
-            "{} sending GREASE frames on stream id {}",
-            conn.trace_id(),
-            stream_id
-        );
+        trace!("{} tx frm GREASE stream={}", conn.trace_id(), stream_id);
 
         // Empty GREASE frame.
         conn.stream_send(stream_id, b.put_varint(grease_value())?, false)?;
@@ -1099,17 +1097,13 @@ impl Connection {
     fn open_grease_stream(&mut self, conn: &mut super::Connection) -> Result<()> {
         match self.open_uni_stream(conn, grease_value()) {
             Ok(stream_id) => {
-                trace!(
-                    "{} sending GREASE stream on stream id {}",
-                    conn.trace_id(),
-                    stream_id
-                );
+                trace!("{} open GREASE stream {}", conn.trace_id(), stream_id);
 
                 conn.stream_send(stream_id, b"GREASE is the word", false)?;
             },
 
             Err(Error::IdError) => {
-                trace!("{} sending GREASE stream was blocked", conn.trace_id(),);
+                trace!("{} GREASE stream blocked", conn.trace_id(),);
 
                 return Ok(());
             },
@@ -1203,7 +1197,7 @@ impl Connection {
                             }
 
                             trace!(
-                                "{} peer's control stream: {}",
+                                "{} open peer's control stream {}",
                                 conn.trace_id(),
                                 stream_id
                             );
