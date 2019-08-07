@@ -1183,7 +1183,11 @@ impl Connection {
                     };
 
                     let ty = stream::Type::deserialize(varint)?;
-                    stream.set_ty(ty)?;
+
+                    if let Err(e) = stream.set_ty(ty) {
+                        conn.close(true, e.to_wire(), b"")?;
+                        return Err(e);
+                    }
 
                     match &ty {
                         stream::Type::Control => {
@@ -1272,7 +1276,10 @@ impl Connection {
                         Err(_) => continue,
                     };
 
-                    stream.set_push_id(varint)?;
+                    if let Err(e) = stream.set_push_id(varint) {
+                        conn.close(true, e.to_wire(), b"")?;
+                        return Err(e);
+                    }
                 },
 
                 stream::State::FrameType => {
@@ -1287,11 +1294,13 @@ impl Connection {
                     match stream.set_frame_type(varint) {
                         Err(Error::UnexpectedFrame) => {
                             let msg = format!("Unexpected frame type {}", varint);
+
                             conn.close(
                                 true,
                                 Error::UnexpectedFrame.to_wire(),
                                 msg.as_bytes(),
                             )?;
+
                             return Err(Error::UnexpectedFrame);
                         },
 
@@ -1301,6 +1310,7 @@ impl Connection {
                                 e.to_wire(),
                                 b"Error handling frame.",
                             )?;
+
                             return Err(e);
                         },
 
@@ -1317,7 +1327,10 @@ impl Connection {
                         Err(_) => continue,
                     };
 
-                    stream.set_frame_payload_len(varint)?;
+                    if let Err(e) = stream.set_frame_payload_len(varint) {
+                        conn.close(true, e.to_wire(), b"")?;
+                        return Err(e);
+                    }
                 },
 
                 stream::State::FramePayload => {
