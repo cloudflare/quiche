@@ -1570,9 +1570,9 @@ impl Connection {
         // Create MAX_DATA frame, when the new limit is at least double the
         // amount of data that can be received before blocking.
         if pkt_type == packet::Type::Application &&
-            !is_closing &&
             (self.max_rx_data_next != self.max_rx_data &&
-                self.max_rx_data_next / 2 > self.max_rx_data - self.rx_data)
+                self.max_rx_data_next / 2 > self.max_rx_data - self.rx_data) &&
+            !is_closing
         {
             let frame = frame::Frame::MaxData {
                 max: self.max_rx_data_next as u64,
@@ -1689,7 +1689,10 @@ impl Connection {
         }
 
         // Create CRYPTO frame.
-        if self.pkt_num_spaces[epoch].crypto_stream.writable() && !is_closing {
+        if self.pkt_num_spaces[epoch].crypto_stream.writable() &&
+            left > frame::MAX_CRYPTO_OVERHEAD &&
+            !is_closing
+        {
             let crypto_len = left - frame::MAX_CRYPTO_OVERHEAD;
             let crypto_buf = self.pkt_num_spaces[epoch]
                 .crypto_stream
@@ -1710,9 +1713,9 @@ impl Connection {
 
         // Create a single STREAM frame for the first stream that is writable.
         if pkt_type == packet::Type::Application &&
-            !is_closing &&
             self.max_tx_data > self.tx_data &&
-            left > frame::MAX_STREAM_OVERHEAD
+            left > frame::MAX_STREAM_OVERHEAD &&
+            !is_closing
         {
             while let Some(stream_id) = self.streams.pop_writable() {
                 let stream = self.streams.get_mut(stream_id).unwrap();
