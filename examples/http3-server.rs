@@ -499,6 +499,13 @@ fn handle_request(
             error!("{} failed to build response {:?}", conn.trace_id(), e);
         },
     }
+
+    // We decide the response based on headers alone.
+    // Stop reading the request stream so that any
+    // body is ignored and pointless Data events
+    // are not generated.
+    conn.stream_shutdown(stream_id, quiche::Shutdown::Read, 0)
+        .unwrap();
 }
 
 /// Builds an HTTP/3 response given a request.
