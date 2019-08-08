@@ -35,6 +35,7 @@ use crate::stream;
 
 pub const MAX_CRYPTO_OVERHEAD: usize = 8;
 pub const MAX_STREAM_OVERHEAD: usize = 12;
+pub const MAX_STREAM_SIZE: u64 = 1 << 62;
 
 #[derive(Clone, PartialEq)]
 pub enum Frame {
@@ -860,7 +861,7 @@ fn parse_stream_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
         b.cap()
     };
 
-    if offset + len > 2usize.pow(62) {
+    if offset + len >= MAX_STREAM_SIZE  {
         return Err(Error::InvalidFrame);
     }
 
@@ -1144,7 +1145,7 @@ mod tests {
 
         let frame = Frame::Stream {
             stream_id: 32,
-            data: stream::RangeBuf::from(&data, 2usize.pow(62) - 11, true),
+            data: stream::RangeBuf::from(&data, MAX_STREAM_SIZE - 11, true),
         };
 
         let wire_len = {
