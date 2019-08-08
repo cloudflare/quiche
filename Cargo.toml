@@ -26,23 +26,23 @@ no_bssl = []
 features = ["no_bssl"]
 
 [build-dependencies]
-cmake = "0"
+cmake = "0.1"
 
 [dependencies]
-log = "0"
-libc = "0"
+log = "0.4"
+libc = "0.2"
 ring = "0.14"
 lazy_static = "1"
 
 [target."cfg(windows)".dependencies]
-winapi = {version = "0", features = ["wincrypt"] }
+winapi = {version = "0.3", features = ["wincrypt"] }
 
 [dev-dependencies]
-mio = "0"
+mio = "0.6"
 url = "1"
 docopt = "1"
-criterion = "0"
-env_logger = "0"
+criterion = "0.2"
+env_logger = "0.6"
 
 [profile.bench]
 debug = true
