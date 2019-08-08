@@ -2480,7 +2480,7 @@ impl Connection {
     }
 
     /// Drops the keys and recovery state for the given epoch.
-    fn drop_epoch_state(&mut self, epoch: usize) {
+    fn drop_epoch_state(&mut self, epoch: packet::Epoch) {
         if self.pkt_num_spaces[epoch].crypto_open.is_none() {
             return;
         }
