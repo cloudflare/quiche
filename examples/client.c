@@ -132,7 +132,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
     }
 
     if (quiche_conn_is_established(conn_io->conn) && !req_sent) {
-        uint8_t *app_proto;
+        const uint8_t *app_proto;
         size_t app_proto_len;
 
         quiche_conn_application_proto(conn_io->conn, &app_proto, &app_proto_len);
