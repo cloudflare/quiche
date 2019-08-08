@@ -686,6 +686,9 @@ pub struct Connection {
     /// Whether the connection handshake has completed.
     handshake_completed: bool,
 
+    /// Whether the connection handshake has been confirmed.
+    handshake_confirmed: bool,
+
     /// Whether the connection is closed.
     closed: bool,
 
@@ -928,6 +931,8 @@ impl Connection {
             verified_peer_address: odcid.is_some(),
 
             handshake_completed: false,
+
+            handshake_confirmed: false,
 
             closed: false,
 
@@ -1375,7 +1380,7 @@ impl Connection {
         // successfully processed, so we can drop the initial state and consider
         // the client's address to be verified.
         if self.is_server && hdr.ty == packet::Type::Handshake {
-            self.drop_initial_state();
+            self.drop_epoch_state(packet::EPOCH_INITIAL);
 
             self.verified_peer_address = true;
         }
@@ -1841,7 +1846,7 @@ impl Connection {
 
         // On the client, drop initial state after sending an Handshake packet.
         if !self.is_server && hdr.ty == packet::Type::Handshake {
-            self.drop_initial_state();
+            self.drop_epoch_state(packet::EPOCH_INITIAL);
         }
 
         self.max_send_bytes = self.max_send_bytes.saturating_sub(written);
@@ -2315,6 +2320,17 @@ impl Connection {
                     now,
                     &self.trace_id,
                 );
+
+                // When we receive an ACK for a 1-RTT packet after handshake
+                // completion, it means the handshake has been confirmed.
+                if epoch == packet::EPOCH_APPLICATION && self.handshake_completed
+                {
+                    self.handshake_confirmed = true;
+
+                    // Once the handshake is confirmed, we can drop Handshake
+                    // keys.
+                    self.drop_epoch_state(packet::EPOCH_HANDSHAKE);
+                }
             },
 
             frame::Frame::ResetStream {
@@ -2463,21 +2479,18 @@ impl Connection {
         Ok(())
     }
 
-    /// Drops the initial keys and recovery state.
-    fn drop_initial_state(&mut self) {
-        if self.pkt_num_spaces[packet::EPOCH_INITIAL]
-            .crypto_open
-            .is_none()
-        {
+    /// Drops the keys and recovery state for the given epoch.
+    fn drop_epoch_state(&mut self, epoch: packet::Epoch) {
+        if self.pkt_num_spaces[epoch].crypto_open.is_none() {
             return;
         }
 
-        self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open = None;
-        self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_seal = None;
-        self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
-        self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
+        self.pkt_num_spaces[epoch].crypto_open = None;
+        self.pkt_num_spaces[epoch].crypto_seal = None;
+        self.pkt_num_spaces[epoch].clear();
+        self.recovery.drop_unacked_data(epoch);
 
-        trace!("{} dropped initial state", self.trace_id);
+        trace!("{} dropped epoch {} state", self.trace_id, epoch);
     }
 }
 
@@ -3207,6 +3220,61 @@ mod tests {
             pipe.client.application_proto(),
             pipe.server.application_proto()
         );
+    }
+
+    #[test]
+    fn handshake_confirmation() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Client sends initial flight
+        let mut len = pipe.client.send(&mut buf).unwrap();
+
+        // Server sends initial flight..
+        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert!(!pipe.client.handshake_completed);
+        assert!(!pipe.client.handshake_confirmed);
+
+        assert!(!pipe.server.handshake_completed);
+        assert!(!pipe.server.handshake_confirmed);
+
+        // Client sends Handshake packet.
+        len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+
+        assert!(pipe.client.handshake_completed);
+        assert!(!pipe.client.handshake_confirmed);
+
+        assert!(!pipe.server.handshake_completed);
+        assert!(!pipe.server.handshake_confirmed);
+
+        // Server completes handshake, and sends first 1-RTT packet.
+        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert!(pipe.client.handshake_completed);
+        assert!(!pipe.client.handshake_confirmed);
+
+        assert!(pipe.server.handshake_completed);
+        assert!(!pipe.server.handshake_confirmed);
+
+        // Client ACKs 1-RTT packet.
+        len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+
+        assert!(pipe.client.handshake_completed);
+        assert!(!pipe.client.handshake_confirmed);
+
+        assert!(pipe.server.handshake_completed);
+        assert!(!pipe.server.handshake_confirmed);
+
+        // Server handshake is confirmed.
+        testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert!(pipe.client.handshake_completed);
+        assert!(!pipe.client.handshake_confirmed);
+
+        assert!(pipe.server.handshake_completed);
+        assert!(pipe.server.handshake_confirmed);
     }
 
     #[test]
