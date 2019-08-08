@@ -123,24 +123,24 @@ fn get_boringssl_cmake_config() -> cmake::Config {
 }
 
 fn main() {
-    #[cfg(feature = "no_bssl")]
-    return;
+    if !cfg!(feature = "no_bssl") {
+        let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
+            get_boringssl_cmake_config()
+                .cflag("-fPIC")
+                .build_target("bssl")
+                .build()
+                .display()
+                .to_string()
+        });
 
-    let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
-        get_boringssl_cmake_config()
-            .cflag("-fPIC")
-            .build_target("bssl")
-            .build()
-            .display()
-            .to_string()
-    });
+        let crypto_dir =
+            format!("{}/build/{}", bssl_dir, platform_output_path("crypto"));
+        println!("cargo:rustc-link-search=native={}", crypto_dir);
+        println!("cargo:rustc-link-lib=static=crypto");
 
-    let crypto_dir =
-        format!("{}/build/{}", bssl_dir, platform_output_path("crypto"));
-    println!("cargo:rustc-link-search=native={}", crypto_dir);
-    println!("cargo:rustc-link-lib=static=crypto");
-
-    let ssl_dir = format!("{}/build/{}", bssl_dir, platform_output_path("ssl"));
-    println!("cargo:rustc-link-search=native={}", ssl_dir);
-    println!("cargo:rustc-link-lib=static=ssl");
+        let ssl_dir =
+            format!("{}/build/{}", bssl_dir, platform_output_path("ssl"));
+        println!("cargo:rustc-link-search=native={}", ssl_dir);
+        println!("cargo:rustc-link-lib=static=ssl");
+    }
 }
