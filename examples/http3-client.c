@@ -278,7 +278,7 @@ static void timeout_cb(EV_P_ ev_timer *w, int revents) {
 
         quiche_conn_stats(conn_io->conn, &stats);
 
-        fprintf(stderr, "connection closed, recv=%" PRIu64 " sent=%" PRIu64 " lost=%" PRIu64 " rtt=%" PRIu64 "ns\n",
+        fprintf(stderr, "connection closed, recv=%zu sent=%zu lost=%zu rtt=%" PRIu64 "ns\n",
                 stats.recv, stats.sent, stats.lost, stats.rtt);
 
         ev_break(EV_A_ EVBREAK_ONE);
