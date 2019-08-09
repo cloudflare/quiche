@@ -340,6 +340,10 @@ int main(int argc, char *argv[]) {
     quiche_config_set_initial_max_streams_uni(config, 100);
     quiche_config_set_disable_migration(config, true);
 
+    if (getenv("SSLKEYLOGFILE")) {
+      quiche_config_log_keys(config);
+    }
+
     // ABC: old config creation here
 
     uint8_t scid[LOCAL_CONN_ID_LEN];
