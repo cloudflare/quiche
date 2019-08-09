@@ -303,7 +303,7 @@ pub struct RecvBuf {
     off: u64,
 
     /// The total length of data received on this stream.
-    len: usize,
+    len: u64,
 
     /// The maximum offset the peer is allowed to send us.
     max_data: u64,
@@ -351,7 +351,7 @@ impl RecvBuf {
         }
 
         // Stream's known size is lower than data already received.
-        if buf.fin() && buf.max_off() < self.len as u64 {
+        if buf.fin() && buf.max_off() < self.len {
             return Err(Error::FinalSize);
         }
 
@@ -409,7 +409,7 @@ impl RecvBuf {
                 }
             }
 
-            self.len = cmp::max(self.len as u64, buf.max_off()) as usize;
+            self.len = cmp::max(self.len, buf.max_off());
 
             self.data.push(buf);
         }
@@ -475,7 +475,7 @@ impl RecvBuf {
         }
 
         // Stream's known size is lower than data already received.
-        if final_size < self.len as u64 {
+        if final_size < self.len {
             return Err(Error::FinalSize);
         }
 
@@ -483,7 +483,7 @@ impl RecvBuf {
 
         // Return how many bytes need to be removed from the connection flow
         // control.
-        Ok((final_size - self.len as u64) as usize)
+        Ok((final_size - self.len) as usize)
     }
 
     /// Commits the new max_data limit and returns it.
@@ -506,7 +506,7 @@ impl RecvBuf {
         // amount of data that can be received before blocking.
         self.fin_off.is_none() &&
             self.max_data_next != self.max_data &&
-            self.max_data_next / 2 > self.max_data - self.len as u64
+            self.max_data_next / 2 > self.max_data - self.len
     }
 
     /// Returns true if the receive-side of the stream is complete.
@@ -547,7 +547,7 @@ pub struct SendBuf {
     off: u64,
 
     /// The amount of data that was ever written to this stream.
-    len: usize,
+    len: u64,
 
     /// The maximum offset we are allowed to send to the peer.
     max_data: u64,
@@ -609,7 +609,7 @@ impl SendBuf {
             return Ok(());
         }
 
-        self.len += buf.len();
+        self.len += buf.len() as u64;
 
         self.data.push(buf);
 
@@ -620,7 +620,7 @@ impl SendBuf {
     pub fn pop(&mut self, max_data: u64) -> Result<RangeBuf> {
         let mut out = RangeBuf::default();
         out.data =
-            Vec::with_capacity(cmp::min(max_data, self.len as u64) as usize);
+            Vec::with_capacity(cmp::min(max_data, self.len) as usize);
 
         let mut out_len = max_data;
         let mut out_off = self.data.peek().map_or_else(|| 0, RangeBuf::off);
@@ -647,7 +647,7 @@ impl SendBuf {
                 out.off = buf.off;
             }
 
-            self.len -= buf.len();
+            self.len -= buf.len() as u64;
 
             out_len -= buf.len() as u64;
             out_off = buf.max_off();

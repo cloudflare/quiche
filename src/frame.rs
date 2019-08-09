@@ -33,8 +33,8 @@ use crate::packet;
 use crate::ranges;
 use crate::stream;
 
-pub const MAX_CRYPTO_OVERHEAD: u64 = 8;
-pub const MAX_STREAM_OVERHEAD: u64 = 12;
+pub const MAX_CRYPTO_OVERHEAD: usize = 8;
+pub const MAX_STREAM_OVERHEAD: usize = 12;
 pub const MAX_STREAM_SIZE: u64 = 1 << 62;
 
 #[derive(Clone, PartialEq)]
