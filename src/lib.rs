@@ -1499,7 +1499,7 @@ impl Connection {
         }
 
         // Calculate available space in the packet based on congestion window.
-        let mut left:u64 = cmp::min(self.recovery.cwnd(), b.cap()) as u64;
+        let mut left: u64 = cmp::min(self.recovery.cwnd(), b.cap()) as u64;
 
         // Limit data sent by the server based on the amount of data received
         // from the client before its address is validated.
@@ -1766,7 +1766,8 @@ impl Connection {
             let pkt_len = pn_len + payload_len + overhead;
 
             let frame = frame::Frame::Padding {
-                len: cmp::min((MIN_CLIENT_INITIAL_LEN - pkt_len) as u64, left) as usize,
+                len: cmp::min((MIN_CLIENT_INITIAL_LEN - pkt_len) as u64, left)
+                    as usize,
             };
 
             payload_len += frame.wire_len();
@@ -3319,7 +3320,10 @@ mod tests {
         let server_sent =
             testing::recv_send(&mut pipe.server, &mut buf, client_sent).unwrap();
 
-        assert_eq!(server_sent, (client_sent - 1) * MAX_AMPLIFICATION_FACTOR as usize);
+        assert_eq!(
+            server_sent,
+            (client_sent - 1) * MAX_AMPLIFICATION_FACTOR as usize
+        );
     }
 
     #[test]
