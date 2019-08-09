@@ -617,10 +617,10 @@ impl SendBuf {
     }
 
     /// Returns contiguous data from the send buffer as a single `RangeBuf`.
-    pub fn pop(&mut self, max_data: u64) -> Result<RangeBuf> {
+    pub fn pop(&mut self, max_data: usize) -> Result<RangeBuf> {
         let mut out = RangeBuf::default();
         out.data =
-            Vec::with_capacity(cmp::min(max_data, self.len) as usize);
+            Vec::with_capacity(cmp::min(max_data as u64, self.len) as usize);
 
         let mut out_len = max_data;
         let mut out_off = self.data.peek().map_or_else(|| 0, RangeBuf::off);
@@ -635,9 +635,9 @@ impl SendBuf {
                 None => break,
             };
 
-            if buf.len() as u64 > out_len || buf.max_off() >= self.max_data {
+            if buf.len() > out_len || buf.max_off() >= self.max_data {
                 let new_len =
-                    cmp::min(out_len, self.max_data - buf.off()) as usize;
+                    cmp::min(out_len, (self.max_data - buf.off()) as usize);
                 let new_buf = buf.split_off(new_len);
 
                 self.data.push(new_buf);
@@ -649,7 +649,7 @@ impl SendBuf {
 
             self.len -= buf.len() as u64;
 
-            out_len -= buf.len() as u64;
+            out_len -= buf.len();
             out_off = buf.max_off();
 
             out.fin = out.fin || buf.fin();
@@ -1316,7 +1316,7 @@ mod tests {
         let mut send = SendBuf::new(std::u64::MAX);
         assert_eq!(send.len, 0);
 
-        let write = send.pop(std::u64::MAX).unwrap();
+        let write = send.pop(std::usize::MAX).unwrap();
         assert_eq!(write.len(), 0);
         assert_eq!(write.fin(), false);
     }

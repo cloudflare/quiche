@@ -1697,7 +1697,7 @@ impl Connection {
             let crypto_buf = self.pkt_num_spaces[epoch]
                 .crypto_stream
                 .send
-                .pop(crypto_len as u64)?;
+                .pop(crypto_len)?;
 
             let frame = frame::Frame::Crypto { data: crypto_buf };
 
@@ -1726,7 +1726,7 @@ impl Connection {
                     (self.max_tx_data - self.tx_data) as usize
                 );
 
-                let stream_buf = stream.send.pop(stream_len as u64)?;
+                let stream_buf = stream.send.pop(stream_len)?;
 
                 if stream_buf.is_empty() {
                     continue;
