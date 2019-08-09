@@ -1723,7 +1723,7 @@ impl Connection {
                 // Make sure we can fit the data in the packet.
                 let stream_len = cmp::min(
                     left - frame::MAX_STREAM_OVERHEAD,
-                    (self.max_tx_data - self.tx_data) as usize
+                    (self.max_tx_data - self.tx_data) as usize,
                 );
 
                 let stream_buf = stream.send.pop(stream_len as u64)?;
@@ -3319,10 +3319,7 @@ mod tests {
         let server_sent =
             testing::recv_send(&mut pipe.server, &mut buf, client_sent).unwrap();
 
-        assert_eq!(
-            server_sent,
-            (client_sent - 1) * MAX_AMPLIFICATION_FACTOR
-        );
+        assert_eq!(server_sent, (client_sent - 1) * MAX_AMPLIFICATION_FACTOR);
     }
 
     #[test]

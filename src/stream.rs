@@ -619,8 +619,7 @@ impl SendBuf {
     /// Returns contiguous data from the send buffer as a single `RangeBuf`.
     pub fn pop(&mut self, max_data: u64) -> Result<RangeBuf> {
         let mut out = RangeBuf::default();
-        out.data =
-            Vec::with_capacity(cmp::min(max_data, self.len) as usize);
+        out.data = Vec::with_capacity(cmp::min(max_data, self.len) as usize);
 
         let mut out_len = max_data;
         let mut out_off = self.data.peek().map_or_else(|| 0, RangeBuf::off);
