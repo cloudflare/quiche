@@ -72,7 +72,7 @@ static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
         }
 
         if (written < 0) {
-            fprintf(stderr, "failed to create packet: %ld\n", written);
+            fprintf(stderr, "failed to create packet: %zd\n", written);
             return;
         }
 
@@ -82,7 +82,7 @@ static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
             return;
         }
 
-        fprintf(stderr, "sent %lu bytes\n", sent);
+        fprintf(stderr, "sent %zd bytes\n", sent);
     }
 
     double t = quiche_conn_timeout_as_nanos(conn_io->conn) / 1e9f;
@@ -127,11 +127,11 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         }
 
         if (done < 0) {
-            fprintf(stderr, "failed to process packet: %ld\n", done);
+            fprintf(stderr, "failed to process packet: %zd\n", done);
             return;
         }
 
-        fprintf(stderr, "recv %lu bytes\n", done);
+        fprintf(stderr, "recv %zd bytes\n", done);
     }
 
     if (quiche_conn_is_closed(conn_io->conn)) {
