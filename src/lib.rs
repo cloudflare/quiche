@@ -889,7 +889,7 @@ impl Connection {
 
             rx_data: 0,
             max_rx_data: max_rx_data as u64,
-            max_rx_data_next: max_rx_data as u64,
+            max_rx_data_next: max_rx_data,
 
             tx_data: 0,
             max_tx_data: 0,
