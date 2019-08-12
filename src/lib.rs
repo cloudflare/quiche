@@ -608,20 +608,20 @@ pub struct Connection {
     sent_count: usize,
 
     /// Total number of bytes received from the peer.
-    rx_data: usize,
+    rx_data: u64,
 
     /// Local flow control limit for the connection.
-    max_rx_data: usize,
+    max_rx_data: u64,
 
     /// Updated local flow control limit for the connection. This is used to
     /// trigger sending MAX_DATA frames after a certain threshold.
-    max_rx_data_next: usize,
+    max_rx_data_next: u64,
 
     /// Total number of bytes sent to the peer.
-    tx_data: usize,
+    tx_data: u64,
 
     /// Peer's flow control limit for the connection.
-    max_tx_data: usize,
+    max_tx_data: u64,
 
     /// Total number of bytes the server can send before the peer's address
     /// is verified.
@@ -888,8 +888,8 @@ impl Connection {
             sent_count: 0,
 
             rx_data: 0,
-            max_rx_data: max_rx_data as usize,
-            max_rx_data_next: max_rx_data as usize,
+            max_rx_data,
+            max_rx_data_next: max_rx_data,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -1477,7 +1477,7 @@ impl Connection {
                     // TODO: due to a packet loss edge case the following could
                     // go negative, though it's not clear why, so will need to
                     // figure it out.
-                    self.tx_data = self.tx_data.saturating_sub(data.len());
+                    self.tx_data = self.tx_data.saturating_sub(data.len() as u64);
 
                     let was_writable = stream.writable();
 
@@ -1575,7 +1575,7 @@ impl Connection {
             !is_closing
         {
             let frame = frame::Frame::MaxData {
-                max: self.max_rx_data_next as u64,
+                max: self.max_rx_data_next,
             };
 
             if frame.wire_len() <= left {
@@ -1723,7 +1723,7 @@ impl Connection {
                 // Make sure we can fit the data in the packet.
                 let stream_len = cmp::min(
                     left - frame::MAX_STREAM_OVERHEAD,
-                    self.max_tx_data - self.tx_data,
+                    (self.max_tx_data - self.tx_data) as usize,
                 );
 
                 let stream_buf = stream.send.pop(stream_len)?;
@@ -1732,7 +1732,7 @@ impl Connection {
                     continue;
                 }
 
-                self.tx_data += stream_buf.len();
+                self.tx_data += stream_buf.len() as u64;
 
                 let frame = frame::Frame::Stream {
                     stream_id,
@@ -1902,7 +1902,7 @@ impl Connection {
 
         let (read, fin) = stream.recv.pop(out)?;
 
-        self.max_rx_data_next = self.max_rx_data_next.saturating_add(read);
+        self.max_rx_data_next = self.max_rx_data_next.saturating_add(read as u64);
 
         Ok((read, fin))
     }
@@ -2200,7 +2200,7 @@ impl Connection {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    self.max_tx_data = peer_params.initial_max_data as usize;
+                    self.max_tx_data = peer_params.initial_max_data;
 
                     self.streams.update_peer_max_streams_bidi(
                         peer_params.initial_max_streams_bidi as usize,
@@ -2351,7 +2351,7 @@ impl Connection {
                 // Get existing stream or create a new one.
                 let stream = self.get_or_create_stream(stream_id, false)?;
 
-                self.rx_data += stream.recv.reset(final_size as usize)?;
+                self.rx_data += stream.recv.reset(final_size)? as u64;
 
                 if self.rx_data > self.max_rx_data {
                     return Err(Error::FlowControl);
@@ -2401,7 +2401,7 @@ impl Connection {
                 }
 
                 // Check for flow control limits.
-                let data_len = data.len();
+                let data_len = data.len() as u64;
 
                 if self.rx_data + data_len > self.max_rx_data {
                     return Err(Error::FlowControl);
@@ -2416,7 +2416,7 @@ impl Connection {
             },
 
             frame::Frame::MaxData { max } => {
-                self.max_tx_data = cmp::max(self.max_tx_data, max as usize);
+                self.max_tx_data = cmp::max(self.max_tx_data, max);
             },
 
             frame::Frame::MaxStreamData { stream_id, max } => {
@@ -2425,7 +2425,7 @@ impl Connection {
 
                 let was_writable = stream.writable();
 
-                stream.send.update_max_data(max as usize);
+                stream.send.update_max_data(max);
 
                 // If the stream is now writable push it to the writable queue,
                 // but only if it wasn't already queued.

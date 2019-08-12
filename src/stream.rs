@@ -144,7 +144,7 @@ impl StreamMap {
                             .ok_or(Error::StreamLimit)?,
                 };
 
-                let s = Stream::new(max_rx_data as usize, max_tx_data as usize);
+                let s = Stream::new(max_rx_data, max_tx_data);
                 v.insert(s)
             },
 
@@ -228,7 +228,7 @@ pub struct Stream {
 
 impl Stream {
     /// Creates a new stream with the given flow control limits.
-    pub fn new(max_rx_data: usize, max_tx_data: usize) -> Stream {
+    pub fn new(max_rx_data: u64, max_tx_data: u64) -> Stream {
         Stream {
             recv: RecvBuf::new(max_rx_data),
             send: SendBuf::new(max_tx_data),
@@ -300,19 +300,19 @@ pub struct RecvBuf {
     data: BinaryHeap<RangeBuf>,
 
     /// The lowest data offset that has yet to be read by the application.
-    off: usize,
+    off: u64,
 
     /// The total length of data received on this stream.
-    len: usize,
+    len: u64,
 
     /// The maximum offset the peer is allowed to send us.
-    max_data: usize,
+    max_data: u64,
 
     /// The updated maximum offset the peer is allowed to send us.
-    max_data_next: usize,
+    max_data_next: u64,
 
     /// The final stream offset received from the peer, if any.
-    fin_off: Option<usize>,
+    fin_off: Option<u64>,
 
     /// Whether incoming data is validated but not buffered.
     drain: bool,
@@ -320,7 +320,7 @@ pub struct RecvBuf {
 
 impl RecvBuf {
     /// Creates a new receive buffer.
-    fn new(max_data: usize) -> RecvBuf {
+    fn new(max_data: u64) -> RecvBuf {
         RecvBuf {
             max_data,
             max_data_next: max_data,
@@ -400,12 +400,12 @@ impl RecvBuf {
 
                 // New buffer's start overlaps existing buffer.
                 if buf.off() >= b.off() && buf.off() < b.max_off() {
-                    buf = buf.split_off(b.max_off() - buf.off());
+                    buf = buf.split_off((b.max_off() - buf.off()) as usize);
                 }
 
                 // New buffer's end overlaps existing buffer.
                 if buf.off() < b.off() && buf.max_off() > b.off() {
-                    tmp_buf = Some(buf.split_off(b.off() - buf.off()));
+                    tmp_buf = Some(buf.split_off((b.off() - buf.off()) as usize));
                 }
             }
 
@@ -443,7 +443,7 @@ impl RecvBuf {
             if buf.len() > cap {
                 let new_buf = RangeBuf {
                     data: buf.data.split_off(cap),
-                    off: buf.off + cap,
+                    off: buf.off + cap as u64,
                     fin: buf.fin,
                 };
 
@@ -454,19 +454,19 @@ impl RecvBuf {
 
             out[len..len + buf.len()].copy_from_slice(&buf.data);
 
-            self.off += buf.len();
+            self.off += buf.len() as u64;
 
             len += buf.len();
             cap -= buf.len();
         }
 
-        self.max_data_next = self.max_data_next.saturating_add(len);
+        self.max_data_next = self.max_data_next.saturating_add(len as u64);
 
         Ok((len, self.is_fin()))
     }
 
     /// Resets the stream at the given offset.
-    pub fn reset(&mut self, final_size: usize) -> Result<usize> {
+    pub fn reset(&mut self, final_size: u64) -> Result<usize> {
         // Stream's size is already known, forbid changing it.
         if let Some(fin_off) = self.fin_off {
             if fin_off != final_size {
@@ -483,11 +483,11 @@ impl RecvBuf {
 
         // Return how many bytes need to be removed from the connection flow
         // control.
-        Ok(final_size - self.len)
+        Ok((final_size - self.len) as usize)
     }
 
     /// Commits the new max_data limit and returns it.
-    pub fn update_max_data(&mut self) -> usize {
+    pub fn update_max_data(&mut self) -> u64 {
         self.max_data = self.max_data_next;
 
         self.max_data
@@ -544,16 +544,16 @@ pub struct SendBuf {
     data: BinaryHeap<RangeBuf>,
 
     /// The maximum offset of data buffered in the stream.
-    off: usize,
+    off: u64,
 
     /// The amount of data that was ever written to this stream.
-    len: usize,
+    len: u64,
 
     /// The maximum offset we are allowed to send to the peer.
-    max_data: usize,
+    max_data: u64,
 
     /// The highest contiguous ACK'd offset.
-    off_ack: usize,
+    off_ack: u64,
 
     /// Whether the stream's send-side has been shut down.
     shutdown: bool,
@@ -561,7 +561,7 @@ pub struct SendBuf {
 
 impl SendBuf {
     /// Creates a new send buffer.
-    fn new(max_data: usize) -> SendBuf {
+    fn new(max_data: u64) -> SendBuf {
         SendBuf {
             max_data,
             ..SendBuf::default()
@@ -592,7 +592,7 @@ impl SendBuf {
             let buf = RangeBuf::from(chunk, self.off, fin);
             self.push(buf)?;
 
-            self.off += chunk.len();
+            self.off += chunk.len() as u64;
         }
 
         Ok(())
@@ -609,7 +609,7 @@ impl SendBuf {
             return Ok(());
         }
 
-        self.len += buf.len();
+        self.len += buf.len() as u64;
 
         self.data.push(buf);
 
@@ -619,7 +619,8 @@ impl SendBuf {
     /// Returns contiguous data from the send buffer as a single `RangeBuf`.
     pub fn pop(&mut self, max_data: usize) -> Result<RangeBuf> {
         let mut out = RangeBuf::default();
-        out.data = Vec::with_capacity(cmp::min(max_data, self.len));
+        out.data =
+            Vec::with_capacity(cmp::min(max_data as u64, self.len) as usize);
 
         let mut out_len = max_data;
         let mut out_off = self.data.peek().map_or_else(|| 0, RangeBuf::off);
@@ -635,7 +636,8 @@ impl SendBuf {
             };
 
             if buf.len() > out_len || buf.max_off() >= self.max_data {
-                let new_len = cmp::min(out_len, self.max_data - buf.off());
+                let new_len =
+                    cmp::min(out_len, (self.max_data - buf.off()) as usize);
                 let new_buf = buf.split_off(new_len);
 
                 self.data.push(new_buf);
@@ -645,7 +647,7 @@ impl SendBuf {
                 out.off = buf.off;
             }
 
-            self.len -= buf.len();
+            self.len -= buf.len() as u64;
 
             out_len -= buf.len();
             out_off = buf.max_off();
@@ -659,17 +661,17 @@ impl SendBuf {
     }
 
     /// Updates the max_data limit to the given value.
-    pub fn update_max_data(&mut self, max_data: usize) {
+    pub fn update_max_data(&mut self, max_data: u64) {
         self.max_data = cmp::max(self.max_data, max_data);
     }
 
     /// Increments the ACK'd data offset.
-    pub fn ack(&mut self, off: usize, len: usize) {
+    pub fn ack(&mut self, off: u64, len: usize) {
         // Keep track of the highest contiguously ACK'd offset. This can be
         // used to avoid spurious retransmissions of data that has already
         // been ACK'd.
         if self.off_ack == off {
-            self.off_ack += len;
+            self.off_ack += len as u64;
         }
     }
 
@@ -686,7 +688,7 @@ impl SendBuf {
     }
 
     /// Returns the lowest offset of data buffered.
-    fn off(&self) -> usize {
+    fn off(&self) -> u64 {
         match self.data.peek() {
             Some(v) => v.off(),
 
@@ -699,13 +701,13 @@ impl SendBuf {
 #[derive(Clone, Debug, Default, Eq)]
 pub struct RangeBuf {
     data: Vec<u8>,
-    off: usize,
+    off: u64,
     fin: bool,
 }
 
 impl RangeBuf {
     /// Creates a new `RangeBuf` from the given slice.
-    pub(crate) fn from(buf: &[u8], off: usize, fin: bool) -> RangeBuf {
+    pub(crate) fn from(buf: &[u8], off: u64, fin: bool) -> RangeBuf {
         RangeBuf {
             data: Vec::from(buf),
             off,
@@ -719,13 +721,13 @@ impl RangeBuf {
     }
 
     /// Returns the starting offset of `self`.
-    pub fn off(&self) -> usize {
+    pub fn off(&self) -> u64 {
         self.off
     }
 
     /// Returns the final offset of `self`.
-    pub fn max_off(&self) -> usize {
-        self.off() + self.len()
+    pub fn max_off(&self) -> u64 {
+        self.off() + self.len() as u64
     }
 
     /// Returns the length of `self`.
@@ -742,7 +744,7 @@ impl RangeBuf {
     pub fn split_off(&mut self, at: usize) -> RangeBuf {
         let buf = RangeBuf {
             data: self.data.split_off(at),
-            off: self.off + at,
+            off: self.off + at as u64,
             fin: self.fin,
         };
 
@@ -791,7 +793,7 @@ mod tests {
 
     #[test]
     fn empty_read() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -857,7 +859,7 @@ mod tests {
 
     #[test]
     fn ordered_read() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -894,7 +896,7 @@ mod tests {
 
     #[test]
     fn split_read() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -934,7 +936,7 @@ mod tests {
 
     #[test]
     fn incomplete_read() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -962,7 +964,7 @@ mod tests {
 
     #[test]
     fn zero_len_read() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -990,7 +992,7 @@ mod tests {
 
     #[test]
     fn past_read() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1029,7 +1031,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1060,7 +1062,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read2() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1091,7 +1093,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read3() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1122,7 +1124,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read_multi() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1159,7 +1161,7 @@ mod tests {
 
     #[test]
     fn overlapping_start_read() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1189,7 +1191,7 @@ mod tests {
 
     #[test]
     fn overlapping_end_read() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1219,7 +1221,7 @@ mod tests {
 
     #[test]
     fn partially_multi_overlapping_reordered_read() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1256,7 +1258,7 @@ mod tests {
 
     #[test]
     fn partially_multi_overlapping_reordered_read2() {
-        let mut recv = RecvBuf::new(std::usize::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1311,7 +1313,7 @@ mod tests {
 
     #[test]
     fn empty_write() {
-        let mut send = SendBuf::new(std::usize::MAX);
+        let mut send = SendBuf::new(std::u64::MAX);
         assert_eq!(send.len, 0);
 
         let write = send.pop(std::usize::MAX).unwrap();
@@ -1321,7 +1323,7 @@ mod tests {
 
     #[test]
     fn multi_write() {
-        let mut send = SendBuf::new(std::usize::MAX);
+        let mut send = SendBuf::new(std::u64::MAX);
         assert_eq!(send.len, 0);
 
         let first = *b"something";
@@ -1342,7 +1344,7 @@ mod tests {
 
     #[test]
     fn split_write() {
-        let mut send = SendBuf::new(std::usize::MAX);
+        let mut send = SendBuf::new(std::u64::MAX);
         assert_eq!(send.len, 0);
 
         let first = *b"something";
@@ -1378,7 +1380,7 @@ mod tests {
 
     #[test]
     fn resend() {
-        let mut send = SendBuf::new(std::usize::MAX);
+        let mut send = SendBuf::new(std::u64::MAX);
         assert_eq!(send.len, 0);
         assert_eq!(send.off(), 0);
 
@@ -1491,7 +1493,7 @@ mod tests {
 
     #[test]
     fn zero_len_write() {
-        let mut send = SendBuf::new(std::usize::MAX);
+        let mut send = SendBuf::new(std::u64::MAX);
         assert_eq!(send.len, 0);
 
         let first = *b"something";
