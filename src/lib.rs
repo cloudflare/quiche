@@ -1390,10 +1390,27 @@ impl Connection {
 
     /// Writes a single QUIC packet to be sent to the peer.
     ///
-    /// On success the number of bytes processed from the input buffer is
-    /// returned, or [`Done`].
+    /// On success the number of bytes written to the output buffer is
+    /// returned, or [`Done`] if there was nothing to write.
+    ///
+    /// The application should call `send()` multiple times until [`Done`] is
+    /// returned, indicating that there are no more packets to send. It is
+    /// recommended that `send()` be called in the following cases:
+    ///
+    ///  * When the application receives QUIC packets from the peer (that is,
+    ///    any time [`recv()`] is also called).
+    ///
+    ///  * When the connection timer expires (that is, any time [`on_timeout()`]
+    ///    is also called).
+    ///
+    ///  * When the application sends data to the peer (for examples, any time
+    ///    [`stream_send()`] or [`stream_shutdown()`] are called).
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    /// [`recv()`]: struct.Connection.html#method.recv
+    /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
+    /// [`stream_send()`]: struct.Connection.html#method.stream_send
+    /// [`stream_shutdown()`]: struct.Connection.html#method.stream_shutdown
     ///
     /// ## Examples:
     ///
