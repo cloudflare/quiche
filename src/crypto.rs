@@ -26,14 +26,11 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use ring::aead;
-use ring::digest;
 use ring::hkdf;
-use ring::hmac;
 
 use crate::Error;
 use crate::Result;
 
-use crate::octets;
 use crate::packet;
 
 #[repr(C)]
@@ -91,11 +88,11 @@ impl Algorithm {
         }
     }
 
-    fn get_ring_digest(self) -> &'static digest::Algorithm {
+    fn get_ring_digest(self) -> hkdf::Algorithm {
         match self {
-            Algorithm::AES128_GCM => &digest::SHA256,
-            Algorithm::AES256_GCM => &digest::SHA384,
-            Algorithm::ChaCha20_Poly1305 => &digest::SHA256,
+            Algorithm::AES128_GCM => hkdf::HKDF_SHA256,
+            Algorithm::AES256_GCM => hkdf::HKDF_SHA384,
+            Algorithm::ChaCha20_Poly1305 => hkdf::HKDF_SHA256,
         }
     }
 
@@ -114,8 +111,11 @@ impl Algorithm {
 
 pub struct Open {
     alg: Algorithm,
+
     hp_key: aead::quic::HeaderProtectionKey,
-    key: aead::OpeningKey,
+
+    key: aead::LessSafeKey,
+
     nonce: Vec<u8>,
 }
 
@@ -130,8 +130,10 @@ impl Open {
             )
             .map_err(|_| Error::CryptoFail)?,
 
-            key: aead::OpeningKey::new(alg.get_ring_aead(), &key)
-                .map_err(|_| Error::CryptoFail)?,
+            key: aead::LessSafeKey::new(
+                aead::UnboundKey::new(alg.get_ring_aead(), key)
+                    .map_err(|_| Error::CryptoFail)?,
+            ),
 
             nonce: Vec::from(iv),
 
@@ -146,7 +148,9 @@ impl Open {
 
         let ad = aead::Aad::from(ad);
 
-        let plain = aead::open_in_place(&self.key, nonce, ad, 0, buf)
+        let plain = self
+            .key
+            .open_in_place(nonce, ad, buf)
             .map_err(|_| Error::CryptoFail)?;
 
         Ok(plain.len())
@@ -168,8 +172,11 @@ impl Open {
 
 pub struct Seal {
     alg: Algorithm,
+
     hp_key: aead::quic::HeaderProtectionKey,
-    key: aead::SealingKey,
+
+    key: aead::LessSafeKey,
+
     nonce: Vec<u8>,
 }
 
@@ -184,8 +191,10 @@ impl Seal {
             )
             .map_err(|_| Error::CryptoFail)?,
 
-            key: aead::SealingKey::new(alg.get_ring_aead(), key)
-                .map_err(|_| Error::CryptoFail)?,
+            key: aead::LessSafeKey::new(
+                aead::UnboundKey::new(alg.get_ring_aead(), key)
+                    .map_err(|_| Error::CryptoFail)?,
+            ),
 
             nonce: Vec::from(iv),
 
@@ -195,13 +204,27 @@ impl Seal {
 
     pub fn seal_with_u64_counter(
         &self, counter: u64, ad: &[u8], buf: &mut [u8],
-    ) -> Result<usize> {
+    ) -> Result<()> {
         let nonce = make_nonce(&self.nonce, counter);
 
         let ad = aead::Aad::from(ad);
 
-        aead::seal_in_place(&self.key, nonce, ad, buf, self.alg().tag_len())
-            .map_err(|_| Error::CryptoFail)
+        let tag_len = self.alg().tag_len();
+
+        let in_out_len =
+            buf.len().checked_sub(tag_len).ok_or(Error::CryptoFail)?;
+
+        let (in_out, tag_out) = buf.split_at_mut(in_out_len);
+
+        let tag = self
+            .key
+            .seal_in_place_separate_tag(nonce, ad, in_out)
+            .map_err(|_| Error::CryptoFail)?;
+
+        // Append the AEAD tag to the end of the sealed buffer.
+        tag_out.copy_from_slice(tag.as_ref());
+
+        Ok(())
     }
 
     pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
@@ -265,26 +288,22 @@ pub fn derive_initial_key_material(
     Ok((open, seal))
 }
 
-fn derive_initial_secret(secret: &[u8]) -> Result<hmac::SigningKey> {
+fn derive_initial_secret(secret: &[u8]) -> Result<hkdf::Prk> {
     const INITIAL_SALT: [u8; 20] = [
         0x7f, 0xbc, 0xdb, 0x0e, 0x7c, 0x66, 0xbb, 0xe9, 0x19, 0x3a, 0x96, 0xcd,
         0x21, 0x51, 0x9e, 0xbd, 0x7a, 0x02, 0x64, 0x4a,
     ];
 
-    let salt = hmac::SigningKey::new(&digest::SHA256, &INITIAL_SALT);
-    Ok(hkdf::extract(&salt, secret))
+    let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, &INITIAL_SALT);
+    Ok(salt.extract(secret))
 }
 
-fn derive_client_initial_secret(
-    prk: &hmac::SigningKey, out: &mut [u8],
-) -> Result<()> {
+fn derive_client_initial_secret(prk: &hkdf::Prk, out: &mut [u8]) -> Result<()> {
     const LABEL: &[u8] = b"client in";
     hkdf_expand_label(prk, LABEL, out)
 }
 
-fn derive_server_initial_secret(
-    prk: &hmac::SigningKey, out: &mut [u8],
-) -> Result<()> {
+fn derive_server_initial_secret(prk: &hkdf::Prk, out: &mut [u8]) -> Result<()> {
     const LABEL: &[u8] = b"server in";
     hkdf_expand_label(prk, LABEL, out)
 }
@@ -300,7 +319,7 @@ pub fn derive_hdr_key(
         return Err(Error::CryptoFail);
     }
 
-    let secret = hmac::SigningKey::new(aead.get_ring_digest(), secret);
+    let secret = hkdf::Prk::new_less_safe(aead.get_ring_digest(), secret);
     hkdf_expand_label(&secret, LABEL, &mut out[..key_len])
 }
 
@@ -315,7 +334,7 @@ pub fn derive_pkt_key(
         return Err(Error::CryptoFail);
     }
 
-    let secret = hmac::SigningKey::new(aead.get_ring_digest(), secret);
+    let secret = hkdf::Prk::new_less_safe(aead.get_ring_digest(), secret);
     hkdf_expand_label(&secret, LABEL, &mut out[..key_len])
 }
 
@@ -330,33 +349,24 @@ pub fn derive_pkt_iv(
         return Err(Error::CryptoFail);
     }
 
-    let secret = hmac::SigningKey::new(aead.get_ring_digest(), secret);
+    let secret = hkdf::Prk::new_less_safe(aead.get_ring_digest(), secret);
     hkdf_expand_label(&secret, LABEL, &mut out[..nonce_len])
 }
 
 fn hkdf_expand_label(
-    prk: &hmac::SigningKey, label: &[u8], out: &mut [u8],
+    prk: &hkdf::Prk, label: &[u8], out: &mut [u8],
 ) -> Result<()> {
     const LABEL_PREFIX: &[u8] = b"tls13 ";
 
-    let mut info = [0; 24];
+    let out_len = (out.len() as u16).to_be_bytes();
+    let label_len = (LABEL_PREFIX.len() + label.len()) as u8;
 
-    let info_len = {
-        let mut b = octets::Octets::with_slice(&mut info);
+    let info = [&out_len, &[label_len][..], LABEL_PREFIX, label, &[0][..]];
 
-        if b.put_u16(out.len() as u16).is_err() ||
-            b.put_u8((LABEL_PREFIX.len() + label.len()) as u8).is_err() ||
-            b.put_bytes(LABEL_PREFIX).is_err() ||
-            b.put_bytes(label).is_err() ||
-            b.put_u8(0).is_err()
-        {
-            return Err(Error::CryptoFail);
-        }
-
-        b.off()
-    };
-
-    hkdf::expand(prk, &info[..info_len], out);
+    prk.expand(&info, ArbitraryOutputLen(out.len()))
+        .map_err(|_| Error::CryptoFail)?
+        .fill(out)
+        .map_err(|_| Error::CryptoFail)?;
 
     Ok(())
 }
@@ -372,6 +382,17 @@ fn make_nonce(iv: &[u8], counter: u64) -> aead::Nonce {
     }
 
     aead::Nonce::assume_unique_for_key(nonce)
+}
+
+// The ring HKDF expand() API does not accept an arbitrary output length, so we
+// need to hide the `usize` length as part of a type that implements the trait
+// `ring::hkdf::KeyType` in order to trick ring into accepting it.
+struct ArbitraryOutputLen(usize);
+
+impl hkdf::KeyType for ArbitraryOutputLen {
+    fn len(&self) -> usize {
+        self.0
+    }
 }
 
 #[cfg(test)]
