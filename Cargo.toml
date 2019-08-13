@@ -31,7 +31,7 @@ cmake = "0.1"
 [dependencies]
 log = "0.4"
 libc = "0.2"
-ring = "0.14"
+ring = "0.16"
 lazy_static = "1"
 
 [target."cfg(windows)".dependencies]
