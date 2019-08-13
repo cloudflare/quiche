@@ -454,6 +454,17 @@ pub extern fn quiche_conn_stream_shutdown(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_stream_capacity(
+    conn: &mut Connection, stream_id: u64,
+) -> ssize_t {
+    match conn.stream_capacity(stream_id) {
+        Ok(v) => v as ssize_t,
+
+        Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_stream_finished(
     conn: &mut Connection, stream_id: u64,
 ) -> bool {

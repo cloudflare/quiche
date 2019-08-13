@@ -50,9 +50,18 @@ Options:
   -h --help         Show this screen.
 ";
 
+struct PartialResponse {
+    body: Vec<u8>,
+
+    written: usize,
+}
+
 struct Client {
     conn: Box<quiche::Connection>,
+
     http3_conn: Option<quiche::h3::Connection>,
+
+    partial_responses: HashMap<u64, PartialResponse>,
 }
 
 type ClientMap = HashMap<Vec<u8>, (net::SocketAddr, Client)>;
@@ -269,6 +278,7 @@ fn main() {
                 let client = Client {
                     conn,
                     http3_conn: None,
+                    partial_responses: HashMap::new(),
                 };
 
                 clients.insert(scid.to_vec(), (src, client));
@@ -319,14 +329,20 @@ fn main() {
                 client.http3_conn = Some(h3_conn);
             }
 
-            if let Some(http3_conn) = &mut client.http3_conn {
+            if client.http3_conn.is_some() {
+                // Handle writable streams.
+                for stream_id in client.conn.writable() {
+                    handle_writable(client, stream_id);
+                }
+
                 // Process HTTP/3 events.
                 loop {
+                    let http3_conn = client.http3_conn.as_mut().unwrap();
+
                     match http3_conn.poll(client.conn.as_mut()) {
                         Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
                             handle_request(
-                                &mut client.conn,
-                                http3_conn,
+                                client,
                                 stream_id,
                                 &headers,
                                 args.get_str("--root"),
@@ -472,9 +488,12 @@ fn validate_token<'a>(
 
 /// Handles incoming HTTP/3 requests.
 fn handle_request(
-    conn: &mut quiche::Connection, http3_conn: &mut quiche::h3::Connection,
-    stream_id: u64, headers: &[quiche::h3::Header], root: &str,
+    client: &mut Client, stream_id: u64, headers: &[quiche::h3::Header],
+    root: &str,
 ) {
+    let conn = &mut client.conn;
+    let http3_conn = &mut client.http3_conn.as_mut().unwrap();
+
     info!(
         "{} got request {:?} on stream id {}",
         conn.trace_id(),
@@ -482,21 +501,33 @@ fn handle_request(
         stream_id
     );
 
+    // We decide the response based on headers alone, so stop reading the
+    // request stream so that any body is ignored and pointless Data events
+    // are not generated.
+    conn.stream_shutdown(stream_id, quiche::Shutdown::Read, 0)
+        .unwrap();
+
     let (headers, body) = build_response(root, headers);
 
     if let Err(e) = http3_conn.send_response(conn, stream_id, &headers, false) {
         error!("{} stream send failed {:?}", conn.trace_id(), e);
     }
 
-    if let Err(e) = http3_conn.send_body(conn, stream_id, &body, true) {
-        error!("{} stream send failed {:?}", conn.trace_id(), e);
-    }
+    let written = match http3_conn.send_body(conn, stream_id, &body, true) {
+        Ok(v) => v,
 
-    // We decide the response based on headers alone, so stop reading the
-    // request stream so that any body is ignored and pointless Data events
-    // are not generated.
-    conn.stream_shutdown(stream_id, quiche::Shutdown::Read, 0)
-        .unwrap();
+        Err(quiche::h3::Error::Done) => 0,
+
+        Err(e) => {
+            error!("{} stream send failed {:?}", conn.trace_id(), e);
+            return;
+        },
+    };
+
+    if written < body.len() {
+        let response = PartialResponse { body, written };
+        client.partial_responses.insert(stream_id, response);
+    }
 }
 
 /// Builds an HTTP/3 response given a request.
@@ -547,6 +578,39 @@ fn build_response(
     ];
 
     (headers, body)
+}
+
+/// Handles newly writable streams.
+fn handle_writable(client: &mut Client, stream_id: u64) {
+    let conn = &mut client.conn;
+    let http3_conn = &mut client.http3_conn.as_mut().unwrap();
+
+    debug!("{} stream {} is writable", conn.trace_id(), stream_id);
+
+    if !client.partial_responses.contains_key(&stream_id) {
+        return;
+    }
+
+    let resp = client.partial_responses.get_mut(&stream_id).unwrap();
+    let body = &resp.body[resp.written..];
+
+    let written = match http3_conn.send_body(conn, stream_id, body, true) {
+        Ok(v) => v,
+
+        Err(quiche::h3::Error::Done) => 0,
+
+        Err(e) => {
+            error!("{} stream send failed {:?}", conn.trace_id(), e);
+
+            return;
+        },
+    };
+
+    resp.written += written;
+
+    if resp.written == resp.body.len() {
+        client.partial_responses.remove(&stream_id);
+    }
 }
 
 fn hex_dump(buf: &[u8]) -> String {

@@ -1926,7 +1926,15 @@ impl Connection {
 
     /// Writes data to a stream.
     ///
-    /// On success the number of bytes written is returned.
+    /// On success the number of bytes written is returned, or [`Done`] if no
+    /// data was written (e.g. because the stream has no capacity).
+    ///
+    /// Note that in order to avoid buffering an infinite amount of data in the
+    /// stream's send buffer, streams are only allowed to buffer outgoing data
+    /// up to the amount that the peer allows it to send (that is, up to the
+    /// stream's outgoing flow control capacity).
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
     ///
     /// ## Examples:
     ///
@@ -1957,7 +1965,7 @@ impl Connection {
 
         let was_flushable = stream.flushable();
 
-        stream.send.push_slice(buf, fin)?;
+        let sent = stream.send.push_slice(buf, fin)?;
 
         // If the stream is now flushable push it to the flushable queue, but
         // only if it wasn't already queued.
@@ -1965,7 +1973,7 @@ impl Connection {
             self.streams.push_flushable(stream_id);
         }
 
-        Ok(buf.len())
+        Ok(sent)
     }
 
     /// Shuts down reading or writing from/to the specified stream.
@@ -2000,6 +2008,15 @@ impl Connection {
         }
 
         Ok(())
+    }
+
+    /// Returns the stream's outgoing flow control capacity in bytes.
+    pub fn stream_capacity(&self, stream_id: u64) -> Result<usize> {
+        if let Some(stream) = self.streams.get(stream_id) {
+            return Ok(stream.send.cap());
+        };
+
+        Err(Error::InvalidStreamState)
     }
 
     /// Returns true if all the data has been read from the specified stream.
@@ -3570,47 +3587,6 @@ mod tests {
     }
 
     #[test]
-    /// Tests that sending STREAM frames for a stream that is out of flow
-    /// control credits is resumed when the stream receives more credits.
-    fn stream_flow_control_resume_send_after_update() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::default().unwrap();
-
-        assert_eq!(pipe.handshake(&mut buf), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", true), Ok(5));
-
-        assert_eq!(pipe.advance(&mut buf), Ok(()));
-
-        assert!(!pipe.server.stream_finished(4));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        let mut b = [0; 20];
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((15, false)));
-        assert_eq!(&b[..15], b"aaaaaaaaaaaaaaa");
-
-        assert_eq!(pipe.advance(&mut buf), Ok(()));
-
-        assert!(!pipe.server.stream_finished(4));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
-        assert_eq!(&b[..5], b"aaaaa");
-
-        assert!(pipe.server.stream_finished(4));
-    }
-
-    #[test]
     fn stream_flow_control_update() {
         let mut buf = [0; 65535];
 
@@ -4057,7 +4033,7 @@ mod tests {
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
+        assert_eq!(pipe.client.stream_send(4, b"bye", false), Ok(3));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         let mut r = pipe.server.readable();
@@ -4082,14 +4058,14 @@ mod tests {
         let mut b = [0; 15];
         pipe.server.stream_recv(4, &mut b).unwrap();
 
-        assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
+        assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
         assert_eq!(pipe.client.stream_shutdown(4, Shutdown::Write, 0), Ok(()));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
+        assert_eq!(pipe.client.stream_send(4, b"bye", false), Ok(3));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         let mut r = pipe.server.readable();
