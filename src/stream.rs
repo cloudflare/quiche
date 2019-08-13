@@ -593,16 +593,34 @@ impl SendBuf {
     }
 
     /// Inserts the given slice of data at the end of the buffer.
-    pub fn push_slice(&mut self, data: &[u8], fin: bool) -> Result<()> {
+    ///
+    /// The number of bytes that were actually stored in the buffer is returned
+    /// (this may be lower than the size of the input buffer, in case of partial
+    /// writes).
+    pub fn push_slice(
+        &mut self, mut data: &[u8], mut fin: bool,
+    ) -> Result<usize> {
         let mut len = 0;
 
         if self.shutdown {
-            return Ok(());
+            // Since we won't write any more data anyway, pretend that we sent
+            // all data that was passed in.
+            return Ok(data.len());
         }
 
         if data.is_empty() {
             let buf = RangeBuf::from(&[], self.off, fin);
-            return self.push(buf);
+
+            return self.push(buf).map(|_| 0);
+        }
+
+        if data.len() > self.cap() {
+            // Truncate the input buffer according to the stream's capacity.
+            let len = self.cap();
+            data = &data[..len];
+
+            // We are not buffering the full input, so clear the fin flag.
+            fin = false;
         }
 
         // Split the input buffer into multiple RangeBufs. Otherwise a big
@@ -619,7 +637,7 @@ impl SendBuf {
             self.off += chunk.len() as u64;
         }
 
-        Ok(())
+        Ok(data.len())
     }
 
     /// Inserts the given chunk of data in the buffer.
@@ -746,6 +764,11 @@ impl SendBuf {
 
             None => self.off,
         }
+    }
+
+    /// Returns the outgoing flow control capacity.
+    pub fn cap(&self) -> usize {
+        (self.max_data - self.off) as usize
     }
 }
 
@@ -1502,38 +1525,53 @@ mod tests {
         let first = b"something";
         let second = b"helloworld";
 
-        assert!(send.push_slice(first, false).is_ok());
-        assert_eq!(send.len, 9);
+        assert_eq!(send.push_slice(first, false), Ok(0));
+        assert_eq!(send.len, 0);
 
-        assert!(send.push_slice(second, true).is_ok());
-        assert_eq!(send.len, 19);
+        assert_eq!(send.push_slice(second, true), Ok(0));
+        assert_eq!(send.len, 0);
 
         send.update_max_data(5);
+
+        assert_eq!(send.push_slice(first, false), Ok(5));
+        assert_eq!(send.len, 5);
+
+        assert_eq!(send.push_slice(second, true), Ok(0));
+        assert_eq!(send.len, 5);
 
         let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 5);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"somet");
-        assert_eq!(send.len, 14);
+        assert_eq!(send.len, 0);
 
         let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 0);
         assert_eq!(write.len(), 0);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"");
-        assert_eq!(send.len, 14);
+        assert_eq!(send.len, 0);
 
         send.update_max_data(15);
+
+        assert_eq!(send.push_slice(&first[5..], false), Ok(4));
+        assert_eq!(send.len, 4);
+
+        assert_eq!(send.push_slice(second, true), Ok(6));
+        assert_eq!(send.len, 10);
 
         let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 5);
         assert_eq!(write.len(), 10);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"hinghellow");
-        assert_eq!(send.len, 4);
+        assert_eq!(send.len, 0);
 
         send.update_max_data(25);
+
+        assert_eq!(send.push_slice(&second[6..], true), Ok(4));
+        assert_eq!(send.len, 4);
 
         let write = send.pop(10).unwrap();
         assert_eq!(write.off(), 15);
@@ -1722,9 +1760,9 @@ mod tests {
         let second = b"world";
         let third = b"something";
 
-        assert_eq!(stream.send.push_slice(first, false), Ok(()));
-        assert_eq!(stream.send.push_slice(second, false), Ok(()));
-        assert_eq!(stream.send.push_slice(third, false), Ok(()));
+        assert!(stream.send.push_slice(first, false).is_ok());
+        assert!(stream.send.push_slice(second, false).is_ok());
+        assert!(stream.send.push_slice(third, false).is_ok());
 
         let write = stream.send.pop(25).unwrap();
         assert_eq!(write.off(), 0);
@@ -1762,9 +1800,9 @@ mod tests {
         let second = b"world";
         let third = b"third";
 
-        assert_eq!(stream.send.push_slice(first, false), Ok(()));
+        assert_eq!(stream.send.push_slice(first, false), Ok(5));
 
-        assert_eq!(stream.send.push_slice(second, true), Ok(()));
+        assert_eq!(stream.send.push_slice(second, true), Ok(5));
         assert!(stream.send.is_fin());
 
         assert_eq!(stream.send.push_slice(third, false), Err(Error::FinalSize));
@@ -1788,7 +1826,7 @@ mod tests {
         let first = b"hello";
         let second = RangeBuf::from(b"hello", 0, false);
 
-        assert_eq!(stream.send.push_slice(first, true), Ok(()));
+        assert_eq!(stream.send.push_slice(first, true), Ok(5));
         assert!(stream.send.is_fin());
 
         assert_eq!(stream.send.push(second), Err(Error::FinalSize));

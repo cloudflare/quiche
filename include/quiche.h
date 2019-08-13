@@ -225,6 +225,8 @@ enum quiche_shutdown {
 int quiche_conn_stream_shutdown(quiche_conn *conn, uint64_t stream_id,
                                 enum quiche_shutdown direction, uint64_t err);
 
+ssize_t quiche_conn_stream_capacity(quiche_conn *conn, uint64_t stream_id);
+
 // Returns true if all the data has been read from the specified stream.
 bool quiche_conn_stream_finished(quiche_conn *conn, uint64_t stream_id);
 
