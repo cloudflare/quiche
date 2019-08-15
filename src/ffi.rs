@@ -40,7 +40,7 @@ use crate::*;
 
 #[no_mangle]
 pub extern fn quiche_version() -> *const u8 {
-    static VERSION: &'static str = concat!(env!("CARGO_PKG_VERSION"), "\0");
+    static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
     VERSION.as_ptr()
 }
 
