@@ -332,7 +332,9 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         if (quiche_conn_is_established(conn_io->conn)) {
             uint64_t s = 0;
 
-            while (quiche_readable_next(conn_io->conn, &s)) {
+            quiche_readable *readable = quiche_conn_readable(conn_io->conn);
+
+            while (quiche_readable_next(readable, &s)) {
                 fprintf(stderr, "stream %" PRIu64 " is readable\n", s);
 
                 bool fin = false;
@@ -349,6 +351,8 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                                             5, true);
                 }
             }
+
+            quiche_readable_free(readable);
         }
     }
 

@@ -224,8 +224,7 @@ fn main() {
         }
 
         // Process all readable streams.
-        let streams: Vec<u64> = conn.readable().collect();
-        for s in streams {
+        for s in conn.readable() {
             while let Ok((read, fin)) = conn.stream_recv(s, &mut buf) {
                 debug!("received {} bytes", read);
 
