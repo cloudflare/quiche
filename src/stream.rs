@@ -200,6 +200,11 @@ impl StreamMap {
         Readable::new(&self.streams)
     }
 
+    /// Creates an iterator over streams that can be written to.
+    pub fn writable(&self) -> Writable {
+        Writable::new(&self.streams)
+    }
+
     /// Creates an iterator over all streams.
     pub fn iter_mut(&mut self) -> hash_map::IterMut<u64, Stream> {
         self.streams.iter_mut()
@@ -241,6 +246,12 @@ impl Stream {
         self.recv.ready()
     }
 
+    /// Returns true if the stream has enough flow control capacity to be
+    /// written to.
+    pub fn writable(&self) -> bool {
+        !self.send.shutdown && self.send.off < self.send.max_data
+    }
+
     /// Returns true if the stream has data to send and is allowed to send at
     /// least some of it.
     pub fn flushable(&self) -> bool {
@@ -269,6 +280,7 @@ pub fn is_bidi(stream_id: u64) -> bool {
 /// again.
 ///
 /// [`readable()`]: struct.Connection.html#method.readable
+#[derive(Default)]
 pub struct Readable {
     streams: Vec<u64>,
 }
@@ -294,6 +306,53 @@ impl Iterator for Readable {
 }
 
 impl ExactSizeIterator for Readable {
+    fn len(&self) -> usize {
+        self.streams.len()
+    }
+}
+
+/// An iterator over the streams that can be written to.
+///
+/// This can be obtained by calling a connection's [`writable()`] method.
+///
+/// A "writable" stream is a stream that has enough flow control capacity to
+/// send data to the peer. To avoid buffering an infinite amount of data,
+/// streams are only allowed to buffer outgoing data up to the amount that the
+/// peer allows to send.
+///
+/// Note that the iterator will only include streams that were writable at the
+/// time the iterator itself was created (i.e. when [`writable()`] was called).
+///
+/// To account for newly writable streams, the iterator needs to be created
+/// again.
+///
+/// [`writable()`]: struct.Connection.html#method.writable
+#[derive(Default)]
+pub struct Writable {
+    streams: Vec<u64>,
+}
+
+impl Writable {
+    fn new(streams: &HashMap<u64, Stream>) -> Writable {
+        Writable {
+            streams: streams
+                .iter()
+                .filter(|(_, s)| s.writable())
+                .map(|(&id, _)| id)
+                .collect(),
+        }
+    }
+}
+
+impl Iterator for Writable {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.streams.pop()
+    }
+}
+
+impl ExactSizeIterator for Writable {
     fn len(&self) -> usize {
         self.streams.len()
     }

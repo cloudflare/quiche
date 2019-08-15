@@ -530,6 +530,28 @@ pub extern fn quiche_readable_free(readable: *mut Readable) {
     unsafe { Box::from_raw(readable) };
 }
 
+#[no_mangle]
+pub extern fn quiche_conn_writable(conn: &Connection) -> *mut Writable {
+    Box::into_raw(Box::new(conn.writable()))
+}
+
+#[no_mangle]
+pub extern fn quiche_writable_next(
+    writable: &mut Writable, stream_id: *mut u64,
+) -> bool {
+    if let Some(v) = writable.next() {
+        unsafe { *stream_id = v };
+        return true;
+    }
+
+    false
+}
+
+#[no_mangle]
+pub extern fn quiche_writable_free(writable: *mut Writable) {
+    unsafe { Box::from_raw(writable) };
+}
+
 #[repr(C)]
 pub struct Stats {
     pub recv: usize,
