@@ -260,6 +260,18 @@ bool quiche_readable_next(quiche_readable *readable, uint64_t *stream_id);
 // Frees the readable iterator object.
 void quiche_readable_free(quiche_readable *readable);
 
+typedef struct Writable quiche_writable;
+
+// Returns an iterator over streams that can be written to.
+quiche_writable *quiche_conn_writable(quiche_conn *conn);
+
+// Fetches the next stream from the given iterator. Returns false if there are
+// no more elements in the iterator.
+bool quiche_writable_next(quiche_writable *writable, uint64_t *stream_id);
+
+// Frees the writable iterator object.
+void quiche_writable_free(quiche_writable *writable);
+
 typedef struct {
     // The number of QUIC packets received on this connection.
     size_t recv;

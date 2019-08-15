@@ -2042,6 +2042,35 @@ impl Connection {
         self.streams.readable()
     }
 
+    /// Returns an iterator over streams that can be written to.
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
+    /// // Iterate over writable streams.
+    /// for stream_id in conn.writable() {
+    ///     // Stream is writable, write some data.
+    ///     if let Ok(written) = conn.stream_send(stream_id, &buf, false) {
+    ///         println!("Written {} bytes on stream {}", written, stream_id);
+    ///     }
+    /// }
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn writable(&self) -> Writable {
+        // If there is not enough connection-level flow control capacity, none
+        // of the streams are writable, so return an empty iterator.
+        if self.max_tx_data <= self.tx_data {
+            return Writable::default();
+        }
+
+        self.streams.writable()
+    }
+
     /// Returns the amount of time until the next timeout event.
     ///
     /// Once the given duration has elapsed, the [`on_timeout()`] method should
@@ -4177,6 +4206,77 @@ mod tests {
     }
 
     #[test]
+    /// Tests the writable iterator.
+    fn stream_writable() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // No writable streams.
+        let mut w = pipe.client.writable();
+        assert_eq!(w.next(), None);
+
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
+
+        // Client created stream.
+        let mut w = pipe.client.writable();
+        assert_eq!(w.next(), Some(4));
+        assert_eq!(w.next(), None);
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server created stream.
+        let mut w = pipe.server.writable();
+        assert_eq!(w.next(), Some(4));
+        assert_eq!(w.next(), None);
+
+        assert_eq!(
+            pipe.server.stream_send(4, b"aaaaaaaaaaaaaaa", false),
+            Ok(15)
+        );
+
+        // Server stream is full.
+        let mut w = pipe.server.writable();
+        assert_eq!(w.next(), None);
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Client drains stream.
+        let mut b = [0; 15];
+        pipe.client.stream_recv(4, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server stream is writable again.
+        let mut w = pipe.server.writable();
+        assert_eq!(w.next(), Some(4));
+        assert_eq!(w.next(), None);
+
+        // Server suts down stream.
+        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 0), Ok(()));
+
+        let mut w = pipe.server.writable();
+        assert_eq!(w.next(), None);
+
+        // Client creates multiple streams.
+        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(12, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut w = pipe.server.writable();
+        assert_eq!(w.len(), 2);
+
+        assert!(w.next().is_some());
+        assert!(w.next().is_some());
+        assert!(w.next().is_none());
+
+        assert_eq!(w.len(), 0);
+    }
+
+    #[test]
     /// Tests that we don't exceed the per-connection flow control limit set by
     /// the peer.
     fn flow_control_limit_send() {
@@ -4209,6 +4309,7 @@ mod tests {
 pub use crate::packet::Header;
 pub use crate::packet::Type;
 pub use crate::stream::Readable;
+pub use crate::stream::Writable;
 
 mod crypto;
 mod ffi;
