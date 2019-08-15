@@ -196,7 +196,7 @@ impl StreamMap {
     }
 
     /// Creates an iterator over streams that have outstanding data to read.
-    pub fn readable(&mut self) -> Readable {
+    pub fn readable(&self) -> Readable {
         Readable::new(&self.streams)
     }
 
@@ -262,30 +262,34 @@ pub fn is_bidi(stream_id: u64) -> bool {
 ///
 /// This can be obtained by calling a connection's [`readable()`] method.
 ///
+/// Note that the iterator will only include streams that were readable at the
+/// time the iterator itself was created (i.e. when [`readable()`] was called).
+///
+/// To account for newly readable streams, the iterator needs to be created
+/// again.
+///
 /// [`readable()`]: struct.Connection.html#method.readable
-pub struct Readable<'a> {
-    streams: hash_map::Iter<'a, u64, Stream>,
+pub struct Readable {
+    streams: Vec<u64>,
 }
 
-impl<'a> Readable<'a> {
+impl Readable {
     fn new(streams: &HashMap<u64, Stream>) -> Readable {
         Readable {
-            streams: streams.iter(),
+            streams: streams
+                .iter()
+                .filter(|(_, s)| s.readable())
+                .map(|(&id, _)| id)
+                .collect(),
         }
     }
 }
 
-impl<'a> Iterator for Readable<'a> {
+impl Iterator for Readable {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
-        for (id, s) in &mut self.streams {
-            if s.readable() {
-                return Some(*id);
-            }
-        }
-
-        None
+        self.streams.pop()
     }
 }
 

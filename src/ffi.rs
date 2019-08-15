@@ -461,18 +461,6 @@ pub extern fn quiche_conn_stream_finished(
 }
 
 #[no_mangle]
-pub extern fn quiche_readable_next(
-    conn: &mut Connection, stream_id: *mut u64,
-) -> bool {
-    if let Some(v) = conn.readable().next() {
-        unsafe { *stream_id = v };
-        return true;
-    }
-
-    false
-}
-
-#[no_mangle]
 pub extern fn quiche_conn_close(
     conn: &mut Connection, app: bool, err: u64, reason: *const u8,
     reason_len: size_t,
@@ -518,6 +506,28 @@ pub extern fn quiche_conn_is_established(conn: &mut Connection) -> bool {
 #[no_mangle]
 pub extern fn quiche_conn_is_closed(conn: &mut Connection) -> bool {
     conn.is_closed()
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_readable(conn: &Connection) -> *mut Readable {
+    Box::into_raw(Box::new(conn.readable()))
+}
+
+#[no_mangle]
+pub extern fn quiche_readable_next(
+    readable: &mut Readable, stream_id: *mut u64,
+) -> bool {
+    if let Some(v) = readable.next() {
+        unsafe { *stream_id = v };
+        return true;
+    }
+
+    false
+}
+
+#[no_mangle]
+pub extern fn quiche_readable_free(readable: *mut Readable) {
+    unsafe { Box::from_raw(readable) };
 }
 
 #[repr(C)]

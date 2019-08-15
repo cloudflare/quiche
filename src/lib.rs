@@ -2019,7 +2019,7 @@ impl Connection {
         stream.recv.is_fin()
     }
 
-    /// Creates an iterator over streams that have outstanding data to read.
+    /// Returns an iterator over streams that have outstanding data to read.
     ///
     /// ## Examples:
     ///
@@ -2030,9 +2030,7 @@ impl Connection {
     /// # let scid = [0xba; 16];
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// // Iterate over readable streams.
-    /// let streams: Vec<u64> = conn.readable().collect();
-    ///
-    /// for stream_id in streams {
+    /// for stream_id in conn.readable() {
     ///     // Stream is readable, read until there's no more data.
     ///     while let Ok((read, fin)) = conn.stream_recv(stream_id, &mut buf) {
     ///         println!("Got {} bytes on stream {}", read, stream_id);
@@ -2040,7 +2038,7 @@ impl Connection {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn readable(&mut self) -> Readable {
+    pub fn readable(&self) -> Readable {
         self.streams.readable()
     }
 

@@ -757,10 +757,8 @@ impl Connection {
     /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`close()`]: ../struct.Connection.html#method.close
     pub fn poll(&mut self, conn: &mut super::Connection) -> Result<(u64, Event)> {
-        let streams: Vec<u64> = conn.readable().collect();
-
         // Process HTTP/3 data from readable streams.
-        for s in streams {
+        for s in conn.readable() {
             trace!("{} stream id {} is readable", conn.trace_id(), s);
 
             match self.handle_stream(conn, s) {

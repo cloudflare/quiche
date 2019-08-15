@@ -228,10 +228,6 @@ int quiche_conn_stream_shutdown(quiche_conn *conn, uint64_t stream_id,
 // Returns true if all the data has been read from the specified stream.
 bool quiche_conn_stream_finished(quiche_conn *conn, uint64_t stream_id);
 
-// Fetches the next stream that has outstanding data to read. Returns false if
-// there are no readable streams.
-bool quiche_readable_next(quiche_conn *conn, uint64_t *stream_id);
-
 // Returns the amount of time until the next timeout event, as nanoseconds.
 uint64_t quiche_conn_timeout_as_nanos(quiche_conn *conn);
 
@@ -251,6 +247,18 @@ bool quiche_conn_is_established(quiche_conn *conn);
 
 // Returns true if the connection is closed.
 bool quiche_conn_is_closed(quiche_conn *conn);
+
+typedef struct Readable quiche_readable;
+
+// Returns an iterator over streams that have outstanding data to read.
+quiche_readable *quiche_conn_readable(quiche_conn *conn);
+
+// Fetches the next stream from the given iterator. Returns false if there are
+// no more elements in the iterator.
+bool quiche_readable_next(quiche_readable *readable, uint64_t *stream_id);
+
+// Frees the readable iterator object.
+void quiche_readable_free(quiche_readable *readable);
 
 typedef struct {
     // The number of QUIC packets received on this connection.
