@@ -25,6 +25,9 @@ default = ["boringssl-vendored"]
 # Build vendored BoringSSL library.
 boringssl-vendored = []
 
+# Build quiche against OpenSSL instead of BoringSSL.
+openssl = ["pkg-config"]
+
 # Generate pkg-config metadata file for libquiche.
 pkg-config-meta = []
 
@@ -33,6 +36,7 @@ default-features = false
 
 [build-dependencies]
 cmake = "0.1"
+pkg-config = { version = "0.3", optional = true }
 
 [dependencies]
 log = "0.4"

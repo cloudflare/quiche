@@ -153,7 +153,7 @@ Cflags: -I${{includedir}}
 }
 
 fn main() {
-    if cfg!(feature = "boringssl-vendored") {
+    if cfg!(feature = "boringssl-vendored") && !cfg!(feature = "openssl") {
         let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
             get_boringssl_cmake_config()
                 .build_target("bssl")
@@ -171,6 +171,14 @@ fn main() {
         let ssl_dir = format!("{}/build/{}", bssl_dir, ssl_path);
         println!("cargo:rustc-link-search=native={}", ssl_dir);
         println!("cargo:rustc-link-lib=static=ssl");
+    }
+
+    if cfg!(feature = "openssl") {
+        #[cfg(feature = "openssl")]
+        pkg_config::probe_library("libcrypto").unwrap();
+
+        #[cfg(feature = "openssl")]
+        pkg_config::probe_library("libssl").unwrap();
     }
 
     if cfg!(feature = "pkg-config-meta") {
