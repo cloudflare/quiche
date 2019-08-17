@@ -35,7 +35,7 @@ ring = "0.16"
 lazy_static = "1"
 
 [target."cfg(windows)".dependencies]
-winapi = {version = "0.3", features = ["wincrypt"] }
+winapi = { version = "0.3", features = ["wincrypt"] }
 
 [dev-dependencies]
 mio = "0.6"
