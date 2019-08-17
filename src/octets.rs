@@ -701,7 +701,7 @@ mod tests {
 
     #[test]
     fn split() {
-        let mut d = *b"helloworld";
+        let mut d = b"helloworld".to_vec();
 
         let mut b = Octets::with_slice(&mut d);
         assert_eq!(b.cap(), 10);
@@ -727,16 +727,16 @@ mod tests {
 
     #[test]
     fn split_at() {
-        let mut d = *b"helloworld";
+        let mut d = b"helloworld".to_vec();
 
         {
             let mut b = Octets::with_slice(&mut d);
             let (first, second) = b.split_at(5).unwrap();
 
-            let mut exp1 = *b"hello";
+            let mut exp1 = b"hello".to_vec();
             assert_eq!(first.as_ref(), &mut exp1[..]);
 
-            let mut exp2 = *b"world";
+            let mut exp2 = b"world".to_vec();
             assert_eq!(second.as_ref(), &mut exp2[..]);
         }
 
@@ -744,10 +744,10 @@ mod tests {
             let mut b = Octets::with_slice(&mut d);
             let (first, second) = b.split_at(10).unwrap();
 
-            let mut exp1 = *b"helloworld";
+            let mut exp1 = b"helloworld".to_vec();
             assert_eq!(first.as_ref(), &mut exp1[..]);
 
-            let mut exp2 = *b"";
+            let mut exp2 = b"".to_vec();
             assert_eq!(second.as_ref(), &mut exp2[..]);
         }
 
@@ -755,10 +755,10 @@ mod tests {
             let mut b = Octets::with_slice(&mut d);
             let (first, second) = b.split_at(9).unwrap();
 
-            let mut exp1 = *b"helloworl";
+            let mut exp1 = b"helloworl".to_vec();
             assert_eq!(first.as_ref(), &mut exp1[..]);
 
-            let mut exp2 = *b"d";
+            let mut exp2 = b"d".to_vec();
             assert_eq!(second.as_ref(), &mut exp2[..]);
         }
 
@@ -770,17 +770,17 @@ mod tests {
 
     #[test]
     fn slice() {
-        let mut d = *b"helloworld";
+        let mut d = b"helloworld".to_vec();
 
         {
             let mut b = Octets::with_slice(&mut d);
-            let mut exp = *b"hello";
+            let mut exp = b"hello".to_vec();
             assert_eq!(b.slice(5), Ok(&mut exp[..]));
         }
 
         {
             let mut b = Octets::with_slice(&mut d);
-            let mut exp = *b"";
+            let mut exp = b"".to_vec();
             assert_eq!(b.slice(0), Ok(&mut exp[..]));
         }
 
@@ -788,7 +788,7 @@ mod tests {
             let mut b = Octets::with_slice(&mut d);
             b.get_bytes(5).unwrap();
 
-            let mut exp = *b"world";
+            let mut exp = b"world".to_vec();
             assert_eq!(b.slice(5), Ok(&mut exp[..]));
         }
 
@@ -800,29 +800,29 @@ mod tests {
 
     #[test]
     fn slice_last() {
-        let mut d = *b"helloworld";
+        let mut d = b"helloworld".to_vec();
 
         {
             let mut b = Octets::with_slice(&mut d);
-            let mut exp = *b"orld";
+            let mut exp = b"orld".to_vec();
             assert_eq!(b.slice_last(4), Ok(&mut exp[..]));
         }
 
         {
             let mut b = Octets::with_slice(&mut d);
-            let mut exp = *b"d";
+            let mut exp = b"d".to_vec();
             assert_eq!(b.slice_last(1), Ok(&mut exp[..]));
         }
 
         {
             let mut b = Octets::with_slice(&mut d);
-            let mut exp = *b"";
+            let mut exp = b"".to_vec();
             assert_eq!(b.slice_last(0), Ok(&mut exp[..]));
         }
 
         {
             let mut b = Octets::with_slice(&mut d);
-            let mut exp = *b"helloworld";
+            let mut exp = b"helloworld".to_vec();
             assert_eq!(b.slice_last(10), Ok(&mut exp[..]));
         }
 
