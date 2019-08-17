@@ -166,7 +166,8 @@ impl StreamMap {
         self.flushable.push_back(stream_id);
     }
 
-    /// Removes and returns the first stream ID from the flushable streams queue.
+    /// Removes and returns the first stream ID from the flushable streams
+    /// queue.
     ///
     /// Note that if the stream is still flushable after sending some of its
     /// outstanding data, it needs to be added back to the queu.
