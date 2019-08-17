@@ -1743,7 +1743,7 @@ mod tests {
 
         let (stream, req) = s.send_request(false).unwrap();
 
-        let body = s.send_body_client(stream, true).unwrap();;
+        let body = s.send_body_client(stream, true).unwrap();
 
         let mut recv_buf = vec![0; body.len()];
 
