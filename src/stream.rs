@@ -553,7 +553,7 @@ pub struct SendBuf {
     max_data: u64,
 
     /// The highest contiguous ACK'd offset.
-    off_ack: u64,
+    ack_off: u64,
 
     /// Whether the stream's send-side has been shut down.
     shutdown: bool,
@@ -605,7 +605,7 @@ impl SendBuf {
         }
 
         // Don't queue data that was already fully ACK'd.
-        if self.off_ack >= buf.max_off() {
+        if self.ack_off >= buf.max_off() {
             return Ok(());
         }
 
@@ -670,8 +670,8 @@ impl SendBuf {
         // Keep track of the highest contiguously ACK'd offset. This can be
         // used to avoid spurious retransmissions of data that has already
         // been ACK'd.
-        if self.off_ack == off {
-            self.off_ack += len as u64;
+        if self.ack_off == off {
+            self.ack_off += len as u64;
         }
     }
 
