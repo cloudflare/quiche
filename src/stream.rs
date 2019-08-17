@@ -1326,13 +1326,13 @@ mod tests {
         let mut send = SendBuf::new(std::u64::MAX);
         assert_eq!(send.len, 0);
 
-        let first = *b"something";
-        let second = *b"helloworld";
+        let first = b"something";
+        let second = b"helloworld";
 
-        assert!(send.push_slice(&first, false).is_ok());
+        assert!(send.push_slice(first, false).is_ok());
         assert_eq!(send.len, 9);
 
-        assert!(send.push_slice(&second, true).is_ok());
+        assert!(send.push_slice(second, true).is_ok());
         assert_eq!(send.len, 19);
 
         let write = send.pop(128).unwrap();
@@ -1347,13 +1347,13 @@ mod tests {
         let mut send = SendBuf::new(std::u64::MAX);
         assert_eq!(send.len, 0);
 
-        let first = *b"something";
-        let second = *b"helloworld";
+        let first = b"something";
+        let second = b"helloworld";
 
-        assert!(send.push_slice(&first, false).is_ok());
+        assert!(send.push_slice(first, false).is_ok());
         assert_eq!(send.len, 9);
 
-        assert!(send.push_slice(&second, true).is_ok());
+        assert!(send.push_slice(second, true).is_ok());
         assert_eq!(send.len, 19);
 
         let write = send.pop(10).unwrap();
@@ -1384,13 +1384,13 @@ mod tests {
         assert_eq!(send.len, 0);
         assert_eq!(send.off(), 0);
 
-        let first = *b"something";
-        let second = *b"helloworld";
+        let first = b"something";
+        let second = b"helloworld";
 
-        assert!(send.push_slice(&first, false).is_ok());
+        assert!(send.push_slice(first, false).is_ok());
         assert_eq!(send.off(), 0);
 
-        assert!(send.push_slice(&second, true).is_ok());
+        assert!(send.push_slice(second, true).is_ok());
         assert_eq!(send.off(), 0);
 
         let write1 = send.pop(4).unwrap();
@@ -1447,13 +1447,13 @@ mod tests {
         let mut send = SendBuf::default();
         assert_eq!(send.len, 0);
 
-        let first = *b"something";
-        let second = *b"helloworld";
+        let first = b"something";
+        let second = b"helloworld";
 
-        assert!(send.push_slice(&first, false).is_ok());
+        assert!(send.push_slice(first, false).is_ok());
         assert_eq!(send.len, 9);
 
-        assert!(send.push_slice(&second, true).is_ok());
+        assert!(send.push_slice(second, true).is_ok());
         assert_eq!(send.len, 19);
 
         send.update_max_data(5);
@@ -1496,9 +1496,9 @@ mod tests {
         let mut send = SendBuf::new(std::u64::MAX);
         assert_eq!(send.len, 0);
 
-        let first = *b"something";
+        let first = b"something";
 
-        assert!(send.push_slice(&first, false).is_ok());
+        assert!(send.push_slice(first, false).is_ok());
         assert_eq!(send.len, 9);
 
         assert!(send.push_slice(&[], true).is_ok());
