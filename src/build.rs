@@ -121,7 +121,7 @@ fn get_boringssl_cmake_config() -> cmake::Config {
 }
 
 fn main() {
-    if !cfg!(feature = "no_bssl") {
+    if cfg!(feature = "boringssl-vendored") {
         let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
             get_boringssl_cmake_config()
                 .build_target("bssl")
