@@ -947,11 +947,11 @@ impl Connection {
         conn.handshake.init(&conn).map_err(|_| Error::TlsFail)?;
 
         conn.streams.update_local_max_streams_bidi(
-            config.local_transport_params.initial_max_streams_bidi as usize,
+            config.local_transport_params.initial_max_streams_bidi,
         );
 
         conn.streams.update_local_max_streams_uni(
-            config.local_transport_params.initial_max_streams_uni as usize,
+            config.local_transport_params.initial_max_streams_uni,
         );
 
         // Derive initial secrets for the client. We can do this here because
@@ -2220,10 +2220,10 @@ impl Connection {
                     self.max_tx_data = peer_params.initial_max_data;
 
                     self.streams.update_peer_max_streams_bidi(
-                        peer_params.initial_max_streams_bidi as usize,
+                        peer_params.initial_max_streams_bidi,
                     );
                     self.streams.update_peer_max_streams_uni(
-                        peer_params.initial_max_streams_uni as usize,
+                        peer_params.initial_max_streams_uni,
                     );
 
                     self.recovery.max_ack_delay =
@@ -2456,7 +2456,7 @@ impl Connection {
                     return Err(Error::StreamLimit);
                 }
 
-                self.streams.update_peer_max_streams_bidi(max as usize);
+                self.streams.update_peer_max_streams_bidi(max);
             },
 
             frame::Frame::MaxStreamsUni { max } => {
@@ -2464,7 +2464,7 @@ impl Connection {
                     return Err(Error::StreamLimit);
                 }
 
-                self.streams.update_peer_max_streams_uni(max as usize);
+                self.streams.update_peer_max_streams_uni(max);
             },
 
             frame::Frame::DataBlocked { .. } => (),

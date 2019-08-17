@@ -44,16 +44,16 @@ pub struct StreamMap {
     streams: HashMap<u64, Stream>,
 
     /// Peer's maximum bidirectional stream count limit.
-    peer_max_streams_bidi: usize,
+    peer_max_streams_bidi: u64,
 
     /// Peer's maximum unidirectional stream count limit.
-    peer_max_streams_uni: usize,
+    peer_max_streams_uni: u64,
 
     /// Local maximum bidirectional stream count limit.
-    local_max_streams_bidi: usize,
+    local_max_streams_bidi: u64,
 
     /// Local maximum unidirectional stream count limit.
-    local_max_streams_uni: usize,
+    local_max_streams_uni: u64,
 
     /// Queue of stream IDs corresponding to streams that have buffered data
     /// ready to be sent to the peer. This also implies that the stream has
@@ -175,22 +175,22 @@ impl StreamMap {
     }
 
     /// Updates the local maximum bidirectional stream count limit.
-    pub fn update_local_max_streams_bidi(&mut self, v: usize) {
+    pub fn update_local_max_streams_bidi(&mut self, v: u64) {
         self.local_max_streams_bidi = cmp::max(self.local_max_streams_bidi, v);
     }
 
     /// Updates the local maximum unidirectional stream count limit.
-    pub fn update_local_max_streams_uni(&mut self, v: usize) {
+    pub fn update_local_max_streams_uni(&mut self, v: u64) {
         self.local_max_streams_uni = cmp::max(self.local_max_streams_uni, v);
     }
 
     /// Updates the peer's maximum bidirectional stream count limit.
-    pub fn update_peer_max_streams_bidi(&mut self, v: usize) {
+    pub fn update_peer_max_streams_bidi(&mut self, v: u64) {
         self.peer_max_streams_bidi = cmp::max(self.peer_max_streams_bidi, v);
     }
 
     /// Updates the peer's maximum unidirectional stream count limit.
-    pub fn update_peer_max_streams_uni(&mut self, v: usize) {
+    pub fn update_peer_max_streams_uni(&mut self, v: u64) {
         self.peer_max_streams_uni = cmp::max(self.peer_max_streams_uni, v);
     }
 
