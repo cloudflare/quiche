@@ -55,12 +55,12 @@ pub struct StreamMap {
     /// Local maximum unidirectional stream count limit.
     local_max_streams_uni: usize,
 
-    /// Queue of stream IDs corresponding to streams that have outstanding
-    /// data to send and enough flow control credits to send at least some of
-    /// it.
+    /// Queue of stream IDs corresponding to streams that have buffered data
+    /// ready to be sent to the peer. This also implies that the stream has
+    /// enough flow control credits to send at least some of that data.
     ///
     /// Streams are added to the back of the list, and removed from the front.
-    writable: VecDeque<u64>,
+    flushable: VecDeque<u64>,
 }
 
 impl StreamMap {
@@ -154,7 +154,7 @@ impl StreamMap {
         Ok(stream)
     }
 
-    /// Pushes the stream ID to the back of the writable streams queue.
+    /// Pushes the stream ID to the back of the flushable streams queue.
     ///
     /// Note that the caller is responsible for checking that the specified
     /// stream ID was not in the queue already before calling this.
@@ -162,16 +162,16 @@ impl StreamMap {
     /// Queueing a stream multiple times simultaneously means that it might be
     /// unfairly scheduled more often than other streams, and might also cause
     /// spurious cycles through the queue, so it should be avoided.
-    pub fn push_writable(&mut self, stream_id: u64) {
-        self.writable.push_back(stream_id);
+    pub fn push_flushable(&mut self, stream_id: u64) {
+        self.flushable.push_back(stream_id);
     }
 
-    /// Removes and returns the first stream ID from the writable streams queue.
+    /// Removes and returns the first stream ID from the flushable streams queue.
     ///
-    /// Note that if the stream is still writable after sending some of its
+    /// Note that if the stream is still flushable after sending some of its
     /// outstanding data, it needs to be added back to the queu.
-    pub fn pop_writable(&mut self) -> Option<u64> {
-        self.writable.pop_front()
+    pub fn pop_flushable(&mut self) -> Option<u64> {
+        self.flushable.pop_front()
     }
 
     /// Updates the local maximum bidirectional stream count limit.
@@ -205,8 +205,8 @@ impl StreamMap {
     }
 
     /// Returns true if there are any streams that have data to write.
-    pub fn has_writable(&self) -> bool {
-        !self.writable.is_empty()
+    pub fn has_flushable(&self) -> bool {
+        !self.flushable.is_empty()
     }
 
     /// Returns true if there are any streams that need to update the local
@@ -242,7 +242,7 @@ impl Stream {
 
     /// Returns true if the stream has data to send and is allowed to send at
     /// least some of it.
-    pub fn writable(&self) -> bool {
+    pub fn flushable(&self) -> bool {
         self.send.ready() && self.send.off() < self.send.max_data
     }
 }

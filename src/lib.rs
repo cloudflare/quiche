@@ -1496,14 +1496,14 @@ impl Connection {
                     // figure it out.
                     self.tx_data = self.tx_data.saturating_sub(data.len() as u64);
 
-                    let was_writable = stream.writable();
+                    let was_flushable = stream.flushable();
 
                     stream.send.push(data)?;
 
-                    // If the stream is now writable push it to the writable
+                    // If the stream is now flushable push it to the flushable
                     // queue, but only if it wasn't already queued.
-                    if stream.writable() && !was_writable {
-                        self.streams.push_writable(stream_id);
+                    if stream.flushable() && !was_flushable {
+                        self.streams.push_flushable(stream_id);
                     }
                 },
 
@@ -1706,7 +1706,7 @@ impl Connection {
         }
 
         // Create CRYPTO frame.
-        if self.pkt_num_spaces[epoch].crypto_stream.writable() &&
+        if self.pkt_num_spaces[epoch].crypto_stream.flushable() &&
             left > frame::MAX_CRYPTO_OVERHEAD &&
             !is_closing
         {
@@ -1728,13 +1728,13 @@ impl Connection {
             is_crypto = true;
         }
 
-        // Create a single STREAM frame for the first stream that is writable.
+        // Create a single STREAM frame for the first stream that is flushable.
         if pkt_type == packet::Type::Application &&
             self.max_tx_data > self.tx_data &&
             left > frame::MAX_STREAM_OVERHEAD &&
             !is_closing
         {
-            while let Some(stream_id) = self.streams.pop_writable() {
+            while let Some(stream_id) = self.streams.pop_flushable() {
                 let stream = self.streams.get_mut(stream_id).unwrap();
 
                 // Make sure we can fit the data in the packet.
@@ -1764,10 +1764,10 @@ impl Connection {
                 ack_eliciting = true;
                 in_flight = true;
 
-                // If the stream is still writable, push it to the back of the
+                // If the stream is still flushable, push it to the back of the
                 // queue again.
-                if stream.writable() {
-                    self.streams.push_writable(stream_id);
+                if stream.flushable() {
+                    self.streams.push_flushable(stream_id);
                 }
 
                 break;
@@ -1955,14 +1955,14 @@ impl Connection {
 
         // TODO: implement backpressure based on peer's flow control
 
-        let was_writable = stream.writable();
+        let was_flushable = stream.flushable();
 
         stream.send.push_slice(buf, fin)?;
 
-        // If the stream is now writable push it to the writable queue, but
+        // If the stream is now flushable push it to the flushable queue, but
         // only if it wasn't already queued.
-        if stream.writable() && !was_writable {
-            self.streams.push_writable(stream_id);
+        if stream.flushable() && !was_flushable {
+            self.streams.push_flushable(stream_id);
         }
 
         Ok(buf.len())
@@ -2291,9 +2291,9 @@ impl Connection {
             }
         }
 
-        // If there are writable streams, use Application.
+        // If there are flushable streams, use Application.
         if self.handshake_completed &&
-            (self.streams.has_writable() || self.streams.has_out_of_credit())
+            (self.streams.has_flushable() || self.streams.has_out_of_credit())
         {
             return Ok(packet::EPOCH_APPLICATION);
         }
@@ -2440,14 +2440,14 @@ impl Connection {
                 // Get existing stream or create a new one.
                 let stream = self.get_or_create_stream(stream_id, false)?;
 
-                let was_writable = stream.writable();
+                let was_flushable = stream.flushable();
 
                 stream.send.update_max_data(max);
 
-                // If the stream is now writable push it to the writable queue,
+                // If the stream is now flushable push it to the flushable queue,
                 // but only if it wasn't already queued.
-                if stream.writable() && !was_writable {
-                    self.streams.push_writable(stream_id);
+                if stream.flushable() && !was_flushable {
+                    self.streams.push_flushable(stream_id);
                 }
             },
 
@@ -4055,7 +4055,7 @@ mod tests {
     }
 
     #[test]
-    /// Tests that the order of writable streams scheduled on the wire is the
+    /// Tests that the order of flushable streams scheduled on the wire is the
     /// same as the order of `stream_send()` calls done by the application.
     fn stream_round_robin() {
         let mut buf = [0; 65535];
