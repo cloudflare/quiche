@@ -20,10 +20,12 @@ exclude = [
 ]
 
 [features]
-no_bssl = []
+default = ["boringssl-vendored"]
+
+boringssl-vendored = []
 
 [package.metadata.docs.rs]
-features = ["no_bssl"]
+default-features = false
 
 [build-dependencies]
 cmake = "0.1"
