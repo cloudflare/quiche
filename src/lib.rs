@@ -4274,6 +4274,13 @@ mod tests {
         assert!(w.next().is_none());
 
         assert_eq!(w.len(), 0);
+
+        // Server finishes stream.
+        assert_eq!(pipe.server.stream_send(12, b"aaaaa", true), Ok(5));
+
+        let mut w = pipe.server.writable();
+        assert_eq!(w.next(), Some(8));
+        assert_eq!(w.next(), None);
     }
 
     #[test]
