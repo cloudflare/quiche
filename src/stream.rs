@@ -510,6 +510,9 @@ impl RecvBuf {
     }
 
     /// Returns true if the receive-side of the stream is complete.
+    ///
+    /// This happens when the stream's receive final size is knwon, and the
+    /// application has read all data from the stream.
     pub fn is_fin(&self) -> bool {
         if self.fin_off == Some(self.off) {
             return true;
@@ -555,6 +558,9 @@ pub struct SendBuf {
     /// The highest contiguous ACK'd offset.
     ack_off: u64,
 
+    /// The final stream offset written to the stream, if any.
+    fin_off: Option<u64>,
+
     /// Whether the stream's send-side has been shut down.
     shutdown: bool,
 }
@@ -571,6 +577,10 @@ impl SendBuf {
     /// Inserts the given slice of data at the end of the buffer.
     pub fn push_slice(&mut self, data: &[u8], fin: bool) -> Result<()> {
         let mut len = 0;
+
+        if fin && self.fin_off.is_some() {
+            return Err(Error::FinalSize);
+        }
 
         if self.shutdown {
             return Ok(());
@@ -593,6 +603,10 @@ impl SendBuf {
             self.push(buf)?;
 
             self.off += chunk.len() as u64;
+
+            if fin {
+                self.fin_off = Some(self.off);
+            }
         }
 
         Ok(())
@@ -680,6 +694,18 @@ impl SendBuf {
         self.shutdown = true;
 
         self.data.clear();
+    }
+
+    /// Returns true if the send-side of the stream is complete.
+    ///
+    /// This happens when the stream's send final size is knwon, and the
+    /// application has already written data up to that point.
+    pub fn is_fin(&self) -> bool {
+        if self.fin_off == Some(self.off) {
+            return true;
+        }
+
+        false
     }
 
     /// Returns true if there is data to be written.
@@ -1700,5 +1726,21 @@ mod tests {
         assert_eq!(write.len(), 5);
         assert_eq!(write.fin(), false);
         assert_eq!(write.data, b"somet");
+    }
+
+    #[test]
+    fn send_final_size() {
+        let mut stream = Stream::new(0, 15);
+
+        let first = b"hello";
+        let second = b"world";
+        let third = b"something";
+
+        assert_eq!(stream.send.push_slice(first, false), Ok(()));
+
+        assert_eq!(stream.send.push_slice(second, true), Ok(()));
+        assert!(stream.send.is_fin());
+
+        assert_eq!(stream.send.push_slice(third, false), Err(Error::FinalSize));
     }
 }
