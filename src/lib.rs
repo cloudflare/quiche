@@ -4107,6 +4107,76 @@ mod tests {
     }
 
     #[test]
+    /// Tests the readable iterator.
+    fn stream_readable() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // No readable streams.
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
+
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server received stream.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(
+            pipe.server.stream_send(4, b"aaaaaaaaaaaaaaa", false),
+            Ok(15)
+        );
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        // Client drains stream.
+        let mut b = [0; 15];
+        pipe.client.stream_recv(4, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), None);
+
+        // Server suts down stream.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 0), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
+        // Client creates multiple streams.
+        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(12, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.len(), 2);
+
+        assert!(r.next().is_some());
+        assert!(r.next().is_some());
+        assert!(r.next().is_none());
+
+        assert_eq!(r.len(), 0);
+    }
+
+    #[test]
     /// Tests that we don't exceed the per-connection flow control limit set by
     /// the peer.
     fn flow_control_limit_send() {
