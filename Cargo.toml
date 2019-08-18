@@ -22,7 +22,11 @@ exclude = [
 [features]
 default = ["boringssl-vendored"]
 
+# Build vendored BoringSSL library.
 boringssl-vendored = []
+
+# Generate pkg-config metadata file for libquiche.
+pkg-config-meta = []
 
 [package.metadata.docs.rs]
 default-features = false
