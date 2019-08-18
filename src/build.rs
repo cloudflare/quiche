@@ -120,6 +120,38 @@ fn get_boringssl_cmake_config() -> cmake::Config {
     };
 }
 
+fn write_pkg_config() {
+    use std::io::prelude::*;
+
+    let profile = std::env::var("PROFILE").unwrap();
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let target_dir = format!("{}/target/{}", manifest_dir, profile);
+
+    let out_path = std::path::Path::new(&target_dir).join("quiche.pc");
+    let mut out_file = std::fs::File::create(&out_path).unwrap();
+
+    let include_dir = format!("{}/include", manifest_dir);
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap();
+
+    let output = format!(
+        "# quiche
+
+includedir={}
+libdir={}
+
+Name: quiche
+Description: quiche library
+URL: https://github.com/cloudflare/quiche
+Version: {}
+Libs: -Wl,-rpath,${{libdir}} -L${{libdir}} -lquiche
+Cflags: -I${{includedir}}
+",
+        include_dir, target_dir, version
+    );
+
+    out_file.write_all(output.as_bytes()).unwrap();
+}
+
 fn main() {
     if cfg!(feature = "boringssl-vendored") {
         let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
@@ -139,5 +171,9 @@ fn main() {
         let ssl_dir = format!("{}/build/{}", bssl_dir, ssl_path);
         println!("cargo:rustc-link-search=native={}", ssl_dir);
         println!("cargo:rustc-link-lib=static=ssl");
+    }
+
+    if cfg!(feature = "pkg-config-meta") {
+        write_pkg_config();
     }
 }
