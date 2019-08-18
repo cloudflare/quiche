@@ -293,6 +293,12 @@ impl Iterator for Readable {
     }
 }
 
+impl ExactSizeIterator for Readable {
+    fn len(&self) -> usize {
+        self.streams.len()
+    }
+}
+
 /// Receive-side stream buffer.
 ///
 /// Stream data received by the peer is buffered in a list of data chunks
