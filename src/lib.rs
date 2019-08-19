@@ -1634,7 +1634,6 @@ impl Connection {
 
         let mut ack_eliciting = false;
         let mut in_flight = false;
-        let mut is_crypto = false;
 
         let mut payload_len = 0;
 
@@ -1835,7 +1834,6 @@ impl Connection {
 
             ack_eliciting = true;
             in_flight = true;
-            is_crypto = true;
         }
 
         // Create a single STREAM frame for the first stream that is flushable.
@@ -1968,7 +1966,6 @@ impl Connection {
             size: if ack_eliciting { written } else { 0 },
             ack_eliciting,
             in_flight,
-            is_crypto,
         };
 
         self.recovery
