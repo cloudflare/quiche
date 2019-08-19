@@ -70,20 +70,14 @@ pub struct Sent {
     pub ack_eliciting: bool,
 
     pub in_flight: bool,
-
-    pub is_crypto: bool,
 }
 
 pub struct Recovery {
     loss_detection_timer: Option<Instant>,
 
-    crypto_count: u32,
-
     pto_count: u32,
 
     time_of_last_sent_ack_eliciting_pkt: Instant,
-
-    time_of_last_sent_crypto_pkt: Instant,
 
     largest_acked_pkt: [u64; packet::EPOCH_COUNT],
 
@@ -111,8 +105,6 @@ pub struct Recovery {
 
     bytes_in_flight: usize,
 
-    crypto_bytes_in_flight: usize,
-
     cwnd: usize,
 
     recovery_start_time: Option<Instant>,
@@ -129,11 +121,7 @@ impl Default for Recovery {
         Recovery {
             loss_detection_timer: None,
 
-            crypto_count: 0,
-
             pto_count: 0,
-
-            time_of_last_sent_crypto_pkt: now,
 
             time_of_last_sent_ack_eliciting_pkt: now,
 
@@ -163,8 +151,6 @@ impl Default for Recovery {
 
             bytes_in_flight: 0,
 
-            crypto_bytes_in_flight: 0,
-
             cwnd: INITIAL_WINDOW,
 
             recovery_start_time: None,
@@ -180,24 +166,16 @@ impl Recovery {
     pub fn on_packet_sent(
         &mut self, pkt: Sent, epoch: packet::Epoch, now: Instant, trace_id: &str,
     ) {
-        let pkt_num = pkt.pkt_num;
         let ack_eliciting = pkt.ack_eliciting;
         let in_flight = pkt.in_flight;
-        let is_crypto = pkt.is_crypto;
         let sent_bytes = pkt.size;
 
         self.largest_sent_pkt[epoch] =
             cmp::max(self.largest_sent_pkt[epoch], pkt.pkt_num);
 
-        self.sent[epoch].insert(pkt_num, pkt);
+        self.sent[epoch].insert(pkt.pkt_num, pkt);
 
         if in_flight {
-            if is_crypto {
-                self.time_of_last_sent_crypto_pkt = now;
-
-                self.crypto_bytes_in_flight += sent_bytes;
-            }
-
             if ack_eliciting {
                 self.time_of_last_sent_ack_eliciting_pkt = now;
             }
@@ -268,7 +246,6 @@ impl Recovery {
 
         self.detect_lost_packets(epoch, now, trace_id);
 
-        self.crypto_count = 0;
         self.pto_count = 0;
 
         self.set_loss_detection_timer();
@@ -283,21 +260,17 @@ impl Recovery {
 
         if loss_time.is_some() {
             self.detect_lost_packets(epoch, now, trace_id);
-        } else if self.crypto_bytes_in_flight > 0 {
-            // Retransmit unacked data from all packet number spaces.
-            for e in packet::EPOCH_INITIAL..packet::EPOCH_COUNT {
-                for p in self.sent[e].values().filter(|p| p.is_crypto) {
-                    self.lost[e].extend_from_slice(&p.frames);
-                }
-            }
+            self.set_loss_detection_timer();
 
-            trace!("{} resend unacked crypto data ({:?})", trace_id, self);
-
-            self.crypto_count += 1;
-        } else {
-            self.pto_count += 1;
-            self.probes = 2;
+            trace!("{} {:?}", trace_id, self);
+            return;
         }
+
+        // TODO: handle client without 1-RTT keys case.
+
+        self.probes = 2;
+
+        self.pto_count += 1;
 
         self.set_loss_detection_timer();
 
@@ -306,17 +279,11 @@ impl Recovery {
 
     pub fn drop_unacked_data(&mut self, epoch: packet::Epoch) {
         let mut unacked_bytes = 0;
-        let mut crypto_unacked_bytes = 0;
 
         for p in self.sent[epoch].values_mut().filter(|p| p.in_flight) {
             unacked_bytes += p.size;
-
-            if p.is_crypto {
-                crypto_unacked_bytes += p.size;
-            }
         }
 
-        self.crypto_bytes_in_flight -= crypto_unacked_bytes;
         self.bytes_in_flight -= unacked_bytes;
 
         self.sent[epoch].clear();
@@ -402,32 +369,25 @@ impl Recovery {
 
     fn set_loss_detection_timer(&mut self) {
         let (loss_time, _) = self.earliest_loss_time();
+
         if loss_time.is_some() {
             // Time threshold loss detection.
             self.loss_detection_timer = loss_time;
             return;
         }
 
-        if self.crypto_bytes_in_flight > 0 {
-            // Crypto retransmission timer.
-            let mut timeout = self.rtt() * 2;
-
-            timeout = cmp::max(timeout, GRANULARITY);
-            timeout *= 2_u32.pow(self.crypto_count);
-
-            self.loss_detection_timer =
-                Some(self.time_of_last_sent_crypto_pkt + timeout);
-
-            return;
-        }
-
         if self.bytes_in_flight == 0 {
+            // TODO: check if peer is awaiting address validation.
             self.loss_detection_timer = None;
             return;
         }
 
         // PTO timer.
-        let timeout = self.pto() * 2_u32.pow(self.pto_count);
+        let timeout = match self.smoothed_rtt {
+            None => INITIAL_RTT * 2,
+
+            Some(_) => self.pto() * 2_u32.pow(self.pto_count),
+        };
 
         self.loss_detection_timer =
             Some(self.time_of_last_sent_ack_eliciting_pkt + timeout);
@@ -436,19 +396,23 @@ impl Recovery {
     fn detect_lost_packets(
         &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
     ) {
-        let mut lost_pkt: Vec<u64> = Vec::new();
-
         let largest_acked = self.largest_acked_pkt[epoch];
 
-        let loss_delay =
-            cmp::max(self.latest_rtt, self.rtt()).mul_f64(TIME_THRESHOLD);
-        let loss_delay = cmp::max(loss_delay, GRANULARITY);
-
-        let lost_send_time = now - loss_delay;
+        let mut lost_pkt: Vec<u64> = Vec::new();
 
         self.loss_time[epoch] = None;
 
+        let loss_delay =
+            cmp::max(self.latest_rtt, self.rtt()).mul_f64(TIME_THRESHOLD);
+
+        // Minimum time of kGranularity before packets are deemed lost.
+        let loss_delay = cmp::max(loss_delay, GRANULARITY);
+
+        // Packets sent before this time are deemed lost.
+        let lost_send_time = now - loss_delay;
+
         for (_, unacked) in self.sent[epoch].range(..=largest_acked) {
+            // Mark packet as lost, or set time when it should be marked.
             if unacked.time <= lost_send_time ||
                 largest_acked >= unacked.pkt_num + PACKET_THRESHOLD
             {
@@ -498,10 +462,6 @@ impl Recovery {
                 // OnPacketAckedCC
                 self.bytes_in_flight -= p.size;
 
-                if p.is_crypto {
-                    self.crypto_bytes_in_flight -= p.size;
-                }
-
                 if self.in_recovery(p.time) {
                     return true;
                 }
@@ -549,10 +509,6 @@ impl Recovery {
 
             self.bytes_in_flight -= p.size;
 
-            if p.is_crypto {
-                self.crypto_bytes_in_flight -= p.size;
-            }
-
             self.lost[epoch].append(&mut p.frames);
 
             largest_lost_pkt = Some(p);
@@ -594,7 +550,6 @@ impl std::fmt::Debug for Recovery {
             },
         };
 
-        write!(f, "crypto={} ", self.crypto_bytes_in_flight)?;
         write!(f, "inflight={} ", self.bytes_in_flight)?;
         write!(f, "cwnd={} ", self.cwnd)?;
         write!(f, "latest_rtt={:?} ", self.latest_rtt)?;
