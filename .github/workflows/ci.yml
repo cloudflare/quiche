@@ -1,0 +1,25 @@
+name: ci
+
+on: "push"
+
+jobs:
+  stable:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v1
+    - name: Init submodules
+      run: git submodule update --init --recursive
+    - name: Build
+      run: cargo build --release --verbose
+      env:
+        RUSTFLAGS: "-D warnings"
+    - name: Run tests
+      run: cargo test --verbose
+      env:
+        RUSTFLAGS: "-D warnings"
+    - name: Run clippy
+      run: cargo clippy --examples -- -D warnings
+    - name: Build docs
+      run: cargo doc --no-deps
