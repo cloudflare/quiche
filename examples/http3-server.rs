@@ -482,27 +482,18 @@ fn handle_request(
         stream_id
     );
 
-    match build_response(root, headers) {
-        Ok((headers, body)) => {
-            if let Err(e) =
-                http3_conn.send_response(conn, stream_id, &headers, false)
-            {
-                error!("{} stream send failed {:?}", conn.trace_id(), e);
-            }
+    let (headers, body) = build_response(root, headers);
 
-            if let Err(e) = http3_conn.send_body(conn, stream_id, &body, true) {
-                error!("{} stream send failed {:?}", conn.trace_id(), e);
-            }
-        },
-
-        Err(e) => {
-            error!("{} failed to build response {:?}", conn.trace_id(), e);
-        },
+    if let Err(e) = http3_conn.send_response(conn, stream_id, &headers, false) {
+        error!("{} stream send failed {:?}", conn.trace_id(), e);
     }
 
-    // We decide the response based on headers alone.
-    // Stop reading the request stream so that any
-    // body is ignored and pointless Data events
+    if let Err(e) = http3_conn.send_body(conn, stream_id, &body, true) {
+        error!("{} stream send failed {:?}", conn.trace_id(), e);
+    }
+
+    // We decide the response based on headers alone, so stop reading the
+    // request stream so that any body is ignored and pointless Data events
     // are not generated.
     conn.stream_shutdown(stream_id, quiche::Shutdown::Read, 0)
         .unwrap();
@@ -511,7 +502,7 @@ fn handle_request(
 /// Builds an HTTP/3 response given a request.
 fn build_response(
     root: &str, request: &[quiche::h3::Header],
-) -> Result<(std::vec::Vec<quiche::h3::Header>, std::vec::Vec<u8>), ()> {
+) -> (Vec<quiche::h3::Header>, Vec<u8>) {
     let mut file_path = std::path::PathBuf::from(root);
     let mut path = std::path::Path::new("");
     let mut method = "";
@@ -549,14 +540,13 @@ fn build_response(
         _ => (405, Vec::new()),
     };
 
-    Ok((
-        vec![
-            quiche::h3::Header::new(":status", &status.to_string()),
-            quiche::h3::Header::new("server", "quiche"),
-            quiche::h3::Header::new("content-length", &body.len().to_string()),
-        ],
-        body,
-    ))
+    let headers = vec![
+        quiche::h3::Header::new(":status", &status.to_string()),
+        quiche::h3::Header::new("server", "quiche"),
+        quiche::h3::Header::new("content-length", &body.len().to_string()),
+    ];
+
+    (headers, body)
 }
 
 fn hex_dump(buf: &[u8]) -> String {
