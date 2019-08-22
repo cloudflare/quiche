@@ -395,6 +395,9 @@ pub struct Stream {
 
     /// Whether the stream was created by the local endpoint.
     pub local: bool,
+
+    /// Application data.
+    pub data: Option<Box<dyn std::any::Any>>,
 }
 
 impl Stream {
@@ -407,6 +410,7 @@ impl Stream {
             send: SendBuf::new(max_tx_data),
             bidi,
             local,
+            data: None,
         }
     }
 
