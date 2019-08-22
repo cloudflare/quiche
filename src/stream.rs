@@ -196,13 +196,13 @@ impl StreamMap {
     }
 
     /// Creates an iterator over streams that have outstanding data to read.
-    pub fn readable(&self) -> Readable {
-        Readable::new(&self.streams)
+    pub fn readable(&self) -> StreamIter {
+        StreamIter::new(&self.streams, Stream::readable)
     }
 
     /// Creates an iterator over streams that can be written to.
-    pub fn writable(&self) -> Writable {
-        Writable::new(&self.streams)
+    pub fn writable(&self) -> StreamIter {
+        StreamIter::new(&self.streams, Stream::writable)
     }
 
     /// Creates an iterator over all streams.
@@ -271,35 +271,28 @@ pub fn is_bidi(stream_id: u64) -> bool {
     (stream_id & 0x2) == 0
 }
 
-/// An iterator over the streams that have outstanding data to read.
-///
-/// This can be obtained by calling a connection's [`readable()`] method.
-///
-/// Note that the iterator will only include streams that were readable at the
-/// time the iterator itself was created (i.e. when [`readable()`] was called).
-///
-/// To account for newly readable streams, the iterator needs to be created
-/// again.
-///
-/// [`readable()`]: struct.Connection.html#method.readable
+/// An iterator over QUIC streams.
 #[derive(Default)]
-pub struct Readable {
+pub struct StreamIter {
     streams: Vec<u64>,
 }
 
-impl Readable {
-    fn new(streams: &HashMap<u64, Stream>) -> Readable {
-        Readable {
+impl StreamIter {
+    fn new<F>(streams: &HashMap<u64, Stream>, f: F) -> StreamIter
+    where
+        F: Fn(&Stream) -> bool,
+    {
+        StreamIter {
             streams: streams
                 .iter()
-                .filter(|(_, s)| s.readable())
+                .filter(|(_, s)| f(s))
                 .map(|(&id, _)| id)
                 .collect(),
         }
     }
 }
 
-impl Iterator for Readable {
+impl Iterator for StreamIter {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -307,54 +300,7 @@ impl Iterator for Readable {
     }
 }
 
-impl ExactSizeIterator for Readable {
-    fn len(&self) -> usize {
-        self.streams.len()
-    }
-}
-
-/// An iterator over the streams that can be written to.
-///
-/// This can be obtained by calling a connection's [`writable()`] method.
-///
-/// A "writable" stream is a stream that has enough flow control capacity to
-/// send data to the peer. To avoid buffering an infinite amount of data,
-/// streams are only allowed to buffer outgoing data up to the amount that the
-/// peer allows to send.
-///
-/// Note that the iterator will only include streams that were writable at the
-/// time the iterator itself was created (i.e. when [`writable()`] was called).
-///
-/// To account for newly writable streams, the iterator needs to be created
-/// again.
-///
-/// [`writable()`]: struct.Connection.html#method.writable
-#[derive(Default)]
-pub struct Writable {
-    streams: Vec<u64>,
-}
-
-impl Writable {
-    fn new(streams: &HashMap<u64, Stream>) -> Writable {
-        Writable {
-            streams: streams
-                .iter()
-                .filter(|(_, s)| s.writable())
-                .map(|(&id, _)| id)
-                .collect(),
-        }
-    }
-}
-
-impl Iterator for Writable {
-    type Item = u64;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.streams.pop()
-    }
-}
-
-impl ExactSizeIterator for Writable {
+impl ExactSizeIterator for StreamIter {
     fn len(&self) -> usize {
         self.streams.len()
     }

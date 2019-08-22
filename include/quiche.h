@@ -228,6 +228,14 @@ int quiche_conn_stream_shutdown(quiche_conn *conn, uint64_t stream_id,
 // Returns true if all the data has been read from the specified stream.
 bool quiche_conn_stream_finished(quiche_conn *conn, uint64_t stream_id);
 
+typedef struct StreamIter quiche_stream_iter;
+
+// Returns an iterator over streams that have outstanding data to read.
+quiche_stream_iter *quiche_conn_readable(quiche_conn *conn);
+
+// Returns an iterator over streams that can be written to.
+quiche_stream_iter *quiche_conn_writable(quiche_conn *conn);
+
 // Returns the amount of time until the next timeout event, as nanoseconds.
 uint64_t quiche_conn_timeout_as_nanos(quiche_conn *conn);
 
@@ -248,29 +256,12 @@ bool quiche_conn_is_established(quiche_conn *conn);
 // Returns true if the connection is closed.
 bool quiche_conn_is_closed(quiche_conn *conn);
 
-typedef struct Readable quiche_readable;
-
-// Returns an iterator over streams that have outstanding data to read.
-quiche_readable *quiche_conn_readable(quiche_conn *conn);
-
 // Fetches the next stream from the given iterator. Returns false if there are
 // no more elements in the iterator.
-bool quiche_readable_next(quiche_readable *readable, uint64_t *stream_id);
+bool quiche_stream_iter_next(quiche_stream_iter *iter, uint64_t *stream_id);
 
-// Frees the readable iterator object.
-void quiche_readable_free(quiche_readable *readable);
-
-typedef struct Writable quiche_writable;
-
-// Returns an iterator over streams that can be written to.
-quiche_writable *quiche_conn_writable(quiche_conn *conn);
-
-// Fetches the next stream from the given iterator. Returns false if there are
-// no more elements in the iterator.
-bool quiche_writable_next(quiche_writable *writable, uint64_t *stream_id);
-
-// Frees the writable iterator object.
-void quiche_writable_free(quiche_writable *writable);
+// Frees the given stream iterator object.
+void quiche_stream_iter_free(quiche_stream_iter *iter);
 
 typedef struct {
     // The number of QUIC packets received on this connection.
