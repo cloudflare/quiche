@@ -2021,6 +2021,11 @@ impl Connection {
 
     /// Returns an iterator over streams that have outstanding data to read.
     ///
+    /// Note that the iterator will only include streams that were readable at
+    /// the time the iterator itself was created (i.e. when `readable()` was
+    /// called). To account for newly readable streams, the iterator needs to
+    /// be created again.
+    ///
     /// ## Examples:
     ///
     /// ```no_run
@@ -2038,11 +2043,21 @@ impl Connection {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn readable(&self) -> Readable {
+    pub fn readable(&self) -> StreamIter {
         self.streams.readable()
     }
 
     /// Returns an iterator over streams that can be written to.
+    ///
+    /// A "writable" stream is a stream that has enough flow control capacity to
+    /// send data to the peer. To avoid buffering an infinite amount of data,
+    /// streams are only allowed to buffer outgoing data up to the amount that
+    /// the peer allows to send.
+    ///
+    /// Note that the iterator will only include streams that were writable at
+    /// the time the iterator itself was created (i.e. when `writable()` was
+    /// called). To account for newly writable streams, the iterator needs to
+    /// be created again.
     ///
     /// ## Examples:
     ///
@@ -2061,11 +2076,11 @@ impl Connection {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn writable(&self) -> Writable {
+    pub fn writable(&self) -> StreamIter {
         // If there is not enough connection-level flow control capacity, none
         // of the streams are writable, so return an empty iterator.
         if self.max_tx_data <= self.tx_data {
-            return Writable::default();
+            return StreamIter::default();
         }
 
         self.streams.writable()
@@ -4315,8 +4330,7 @@ mod tests {
 
 pub use crate::packet::Header;
 pub use crate::packet::Type;
-pub use crate::stream::Readable;
-pub use crate::stream::Writable;
+pub use crate::stream::StreamIter;
 
 mod crypto;
 mod ffi;

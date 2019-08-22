@@ -461,6 +461,16 @@ pub extern fn quiche_conn_stream_finished(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_readable(conn: &Connection) -> *mut StreamIter {
+    Box::into_raw(Box::new(conn.readable()))
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_writable(conn: &Connection) -> *mut StreamIter {
+    Box::into_raw(Box::new(conn.writable()))
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_close(
     conn: &mut Connection, app: bool, err: u64, reason: *const u8,
     reason_len: size_t,
@@ -509,15 +519,10 @@ pub extern fn quiche_conn_is_closed(conn: &mut Connection) -> bool {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_readable(conn: &Connection) -> *mut Readable {
-    Box::into_raw(Box::new(conn.readable()))
-}
-
-#[no_mangle]
-pub extern fn quiche_readable_next(
-    readable: &mut Readable, stream_id: *mut u64,
+pub extern fn quiche_stream_iter_next(
+    iter: &mut StreamIter, stream_id: *mut u64,
 ) -> bool {
-    if let Some(v) = readable.next() {
+    if let Some(v) = iter.next() {
         unsafe { *stream_id = v };
         return true;
     }
@@ -526,30 +531,8 @@ pub extern fn quiche_readable_next(
 }
 
 #[no_mangle]
-pub extern fn quiche_readable_free(readable: *mut Readable) {
-    unsafe { Box::from_raw(readable) };
-}
-
-#[no_mangle]
-pub extern fn quiche_conn_writable(conn: &Connection) -> *mut Writable {
-    Box::into_raw(Box::new(conn.writable()))
-}
-
-#[no_mangle]
-pub extern fn quiche_writable_next(
-    writable: &mut Writable, stream_id: *mut u64,
-) -> bool {
-    if let Some(v) = writable.next() {
-        unsafe { *stream_id = v };
-        return true;
-    }
-
-    false
-}
-
-#[no_mangle]
-pub extern fn quiche_writable_free(writable: *mut Writable) {
-    unsafe { Box::from_raw(writable) };
+pub extern fn quiche_stream_iter_free(iter: *mut StreamIter) {
+    unsafe { Box::from_raw(iter) };
 }
 
 #[repr(C)]
