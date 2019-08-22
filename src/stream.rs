@@ -583,7 +583,7 @@ impl RecvBuf {
 
     /// Returns true if the receive-side of the stream is complete.
     ///
-    /// This happens when the stream's receive final size is knwon, and the
+    /// This happens when the stream's receive final size is known, and the
     /// application has read all data from the stream.
     pub fn is_fin(&self) -> bool {
         if self.fin_off == Some(self.off) {
