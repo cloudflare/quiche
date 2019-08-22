@@ -498,6 +498,28 @@ pub extern fn quiche_conn_writable(conn: &Connection) -> *mut StreamIter {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_stream_init_application_data(
+    conn: &mut Connection, stream_id: u64, data: *mut c_void,
+) -> c_int {
+    match conn.stream_init_application_data(stream_id, data) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_stream_application_data(
+    conn: &mut Connection, stream_id: u64,
+) -> *mut c_void {
+    match conn.stream_application_data(stream_id) {
+        Some(v) => *v.downcast_mut::<*mut c_void>().unwrap(),
+
+        None => ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_close(
     conn: &mut Connection, app: bool, err: u64, reason: *const u8,
     reason_len: size_t,

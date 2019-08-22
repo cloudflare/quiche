@@ -2228,6 +2228,53 @@ impl Connection {
         stream.recv.is_fin()
     }
 
+    /// Initializes the stream's application data.
+    ///
+    /// This can be used by applications to store per-stream information without
+    /// having to maintain their own stream map.
+    ///
+    /// Stream data can only be initialized once. Additional calls to this
+    /// method will return [`Done`].
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    pub fn stream_init_application_data<T>(
+        &mut self, stream_id: u64, data: T,
+    ) -> Result<()>
+    where
+        T: std::any::Any,
+    {
+        // Get existing stream.
+        let stream = self.streams.get_mut(stream_id).ok_or(Error::Done)?;
+
+        if stream.data.is_some() {
+            return Err(Error::Done);
+        }
+
+        stream.data = Some(Box::new(data));
+
+        Ok(())
+    }
+
+    /// Returns the stream's application data, if any was initialized.
+    ///
+    /// This returns a reference to the application data that was initialized
+    /// by calling [`stream_init_application_data()`].
+    ///
+    /// [`stream_init_application_data()`]:
+    /// struct.Connection.html#method.stream_init_application_data
+    pub fn stream_application_data(
+        &mut self, stream_id: u64,
+    ) -> Option<&mut dyn std::any::Any> {
+        // Get existing stream.
+        let stream = self.streams.get_mut(stream_id)?;
+
+        if let Some(ref mut stream_data) = stream.data {
+            return Some(stream_data.as_mut());
+        }
+
+        None
+    }
+
     /// Returns an iterator over streams that have outstanding data to read.
     ///
     /// Note that the iterator will only include streams that were readable at
