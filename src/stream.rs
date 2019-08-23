@@ -30,6 +30,7 @@ use std::cmp;
 use std::collections::hash_map;
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use crate::Error;
@@ -61,6 +62,12 @@ pub struct StreamMap {
     ///
     /// Streams are added to the back of the list, and removed from the front.
     flushable: VecDeque<u64>,
+
+    /// Set of stream IDs corresponding to streams that are almost out of flow
+    /// control credit and need to send MAX_STREAM_DATA. This is used to
+    /// generate a `StreamIter` of streams without having to iterate over the
+    /// full list of streams.
+    almost_full: HashSet<u64>,
 }
 
 impl StreamMap {
@@ -175,6 +182,17 @@ impl StreamMap {
         self.flushable.pop_front()
     }
 
+    /// Adds or removes the stream ID to/from the almost full streams set.
+    ///
+    /// If the stream was already in the list, this does nothing.
+    pub fn mark_almost_full(&mut self, stream_id: u64, almost_full: bool) {
+        if almost_full {
+            self.almost_full.insert(stream_id);
+        } else {
+            self.almost_full.remove(&stream_id);
+        }
+    }
+
     /// Updates the local maximum bidirectional stream count limit.
     pub fn update_local_max_streams_bidi(&mut self, v: u64) {
         self.local_max_streams_bidi = cmp::max(self.local_max_streams_bidi, v);
@@ -207,7 +225,7 @@ impl StreamMap {
 
     /// Creates an iterator over streams that need to send MAX_STREAM_DATA.
     pub fn almost_full(&self) -> StreamIter {
-        StreamIter::new(&self.streams, |s| s.recv.almost_full())
+        StreamIter::from(&self.almost_full)
     }
 
     /// Returns true if there are any streams that have data to write.
@@ -218,7 +236,7 @@ impl StreamMap {
     /// Returns true if there are any streams that need to update the local
     /// flow control limit.
     pub fn has_almost_full(&self) -> bool {
-        self.streams.values().any(|s| s.recv.almost_full())
+        !self.almost_full.is_empty()
     }
 
     /// Creates an iterator over all streams.
@@ -309,6 +327,14 @@ impl Iterator for StreamIter {
 impl ExactSizeIterator for StreamIter {
     fn len(&self) -> usize {
         self.streams.len()
+    }
+}
+
+impl From<&HashSet<u64>> for StreamIter {
+    fn from(streams: &HashSet<u64>) -> Self {
+        StreamIter {
+            streams: streams.iter().copied().collect(),
+        }
     }
 }
 

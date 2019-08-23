@@ -1616,13 +1616,20 @@ impl Connection {
                 let stream = match self.streams.get_mut(stream_id) {
                     Some(v) => v,
 
-                    None => continue,
+                    None => {
+                        // The stream doesn't exist anymore, so remove it from
+                        // the almost full set.
+                        self.streams.mark_almost_full(stream_id, false);
+                        continue;
+                    },
                 };
 
                 let frame = frame::Frame::MaxStreamData {
                     stream_id,
                     max: stream.recv.update_max_data() as u64,
                 };
+
+                self.streams.mark_almost_full(stream_id, false);
 
                 if frame.wire_len() > left {
                     break;
@@ -1924,6 +1931,10 @@ impl Connection {
         let (read, fin) = stream.recv.pop(out)?;
 
         self.max_rx_data_next = self.max_rx_data_next.saturating_add(read as u64);
+
+        if stream.recv.almost_full() {
+            self.streams.mark_almost_full(stream_id, true);
+        }
 
         Ok((read, fin))
     }
