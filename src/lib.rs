@@ -1932,8 +1932,14 @@ impl Connection {
 
         self.max_rx_data_next = self.max_rx_data_next.saturating_add(read as u64);
 
+        let readable = stream.readable();
+
         if stream.recv.almost_full() {
             self.streams.mark_almost_full(stream_id, true);
+        }
+
+        if !readable {
+            self.streams.mark_readable(stream_id, false);
         }
 
         Ok((read, fin))
@@ -2016,7 +2022,13 @@ impl Connection {
 
         match direction {
             // TODO: send STOP_SENDING
-            Shutdown::Read => stream.recv.shutdown(),
+            Shutdown::Read => {
+                stream.recv.shutdown();
+
+                if !stream.readable() {
+                    self.streams.mark_readable(stream_id, false);
+                }
+            },
 
             // TODO: send RESET_STREAM
             Shutdown::Write => stream.send.shutdown(),
@@ -2503,6 +2515,10 @@ impl Connection {
                 let stream = self.get_or_create_stream(stream_id, false)?;
 
                 stream.recv.push(data)?;
+
+                if stream.readable() {
+                    self.streams.mark_readable(stream_id, true);
+                }
 
                 self.rx_data += data_len;
             },
