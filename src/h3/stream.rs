@@ -24,8 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::VecDeque;
-
 use super::Error;
 use super::Result;
 
@@ -129,20 +127,11 @@ pub struct Stream {
     /// The type of the frame currently being parsed.
     frame_type: Option<u64>,
 
-    /// List of frames that have already been parsed, but not yet processed.
-    frames: VecDeque<frame::Frame>,
-
     /// Whether the stream was created locally, or by the peer.
     is_local: bool,
 
     /// Whether the stream has been initialized.
     initialized: bool,
-
-    /// Whether the peer has finished sending data on this stream.
-    is_peer_fin: bool,
-
-    /// Whether we have DATA frame data buffered and ready to be read.
-    has_incoming_data: bool,
 }
 
 impl Stream {
@@ -175,33 +164,14 @@ impl Stream {
             state_off: 0,
 
             frame_type: None,
-            frames: VecDeque::new(),
 
             is_local,
             initialized: false,
-            is_peer_fin: false,
-            has_incoming_data: false,
         }
     }
 
     pub fn state(&self) -> State {
         self.state
-    }
-
-    pub fn ty(&self) -> Option<Type> {
-        self.ty
-    }
-
-    pub fn peer_fin(&self) -> bool {
-        self.is_peer_fin
-    }
-
-    pub fn set_peer_fin(&mut self, fin: bool) {
-        self.is_peer_fin = fin;
-    }
-
-    pub fn get_frame(&mut self) -> Option<frame::Frame> {
-        self.frames.pop_front()
     }
 
     /// Sets the stream's type and transitions to the next state.
@@ -441,19 +411,17 @@ impl Stream {
     }
 
     /// Tries to parse a frame from the state buffer.
-    pub fn try_consume_frame(&mut self) -> Result<()> {
+    pub fn try_consume_frame(&mut self) -> Result<frame::Frame> {
         // TODO: properly propagate frame parsing errors.
-        if let Ok(frame) = frame::Frame::from_bytes(
+        let frame = frame::Frame::from_bytes(
             self.frame_type.unwrap(),
             self.state_len as u64,
             &mut self.state_buf,
-        ) {
-            self.frames.push_back(frame);
-        }
+        )?;
 
         self.state_transition(State::FrameType, 1, true)?;
 
-        Ok(())
+        Ok(frame)
     }
 
     /// Tries to read DATA payload from the transport stream.
@@ -492,14 +460,6 @@ impl Stream {
         }
 
         Ok(len)
-    }
-
-    pub fn notify_incoming_data(&mut self, has_data: bool) {
-        self.has_incoming_data = has_data;
-    }
-
-    pub fn has_incoming_data(&self) -> bool {
-        self.has_incoming_data
     }
 
     /// Returns true if the state buffer has enough data to complete the state.
@@ -589,10 +549,8 @@ mod tests {
         // Parse the SETTINGS frame payload.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.try_consume_frame(), Ok(frame));
         assert_eq!(stream.state, State::FrameType);
-
-        assert_eq!(stream.get_frame(), Some(frame));
     }
 
     #[test]
@@ -648,10 +606,8 @@ mod tests {
         // Parse the SETTINGS frame payload.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.try_consume_frame(), Ok(frame));
         assert_eq!(stream.state, State::FrameType);
-
-        assert_eq!(stream.get_frame(), Some(frame));
 
         // Parse the second SETTINGS frame type.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
@@ -749,8 +705,7 @@ mod tests {
 
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        assert_eq!(stream.try_consume_frame(), Ok(()));
-        stream.get_frame();
+        assert!(stream.try_consume_frame().is_ok());
 
         // Parse HEADERS.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
@@ -767,7 +722,6 @@ mod tests {
         assert_eq!(stream.state, State::FrameType);
 
         assert_eq!(stream.try_consume_varint(), Err(Error::Done));
-        assert_eq!(stream.get_frame(), None);
     }
 
     #[test]
@@ -810,10 +764,8 @@ mod tests {
         // Parse the HEADERS frame.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.try_consume_frame(), Ok(hdrs));
         assert_eq!(stream.state, State::FrameType);
-
-        assert_eq!(stream.get_frame(), Some(hdrs));
 
         // Parse the DATA frame type.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
@@ -940,7 +892,7 @@ mod tests {
         // Parse the SETTINGS frame payload.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert!(stream.try_consume_frame().is_ok());
         assert_eq!(stream.state, State::FrameType);
 
         // Parse the PRIORITY frame type.
@@ -964,7 +916,7 @@ mod tests {
         // Parse the PRIORITY frame.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert!(stream.try_consume_frame().is_ok());
         assert_eq!(stream.state, State::FrameType);
 
         // TODO: if/when PRIRORITY frame is fully implemented, test it
@@ -1032,10 +984,8 @@ mod tests {
         // Parse the HEADERS frame.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        assert_eq!(stream.try_consume_frame(), Ok(()));
+        assert_eq!(stream.try_consume_frame(), Ok(hdrs));
         assert_eq!(stream.state, State::FrameType);
-
-        assert_eq!(stream.get_frame(), Some(hdrs));
 
         // Parse the DATA frame type.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();

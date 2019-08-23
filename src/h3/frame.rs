@@ -24,7 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use super::Error;
 use super::Result;
 
 use crate::octets;
@@ -82,6 +81,8 @@ pub enum Frame {
     DuplicatePush {
         push_id: u64,
     },
+
+    Unknown,
 }
 
 impl Frame {
@@ -122,7 +123,7 @@ impl Frame {
                 push_id: b.get_varint()?,
             },
 
-            _ => return Err(Error::Done),
+            _ => Frame::Unknown,
         };
 
         Ok(frame)
@@ -248,6 +249,8 @@ impl Frame {
 
                 b.put_varint(*push_id)?;
             },
+
+            Frame::Unknown => unreachable!(),
         }
 
         Ok(before - b.cap())
@@ -301,6 +304,10 @@ impl std::fmt::Debug for Frame {
 
             Frame::DuplicatePush { push_id } => {
                 write!(f, "DUPLICATE_PUSH push_id={}", push_id)?;
+            },
+
+            Frame::Unknown => {
+                write!(f, "UNKNOWN")?;
             },
         }
 
@@ -708,6 +715,9 @@ mod tests {
     fn unknown_type() {
         let mut d = [42; 12];
 
-        assert_eq!(Frame::from_bytes(255, 12345, &mut d[..]), Err(Error::Done));
+        assert_eq!(
+            Frame::from_bytes(255, 12345, &mut d[..]),
+            Ok(Frame::Unknown)
+        );
     }
 }
