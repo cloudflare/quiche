@@ -63,6 +63,11 @@ pub struct StreamMap {
     /// Streams are added to the back of the list, and removed from the front.
     flushable: VecDeque<u64>,
 
+    /// Set of stream IDs corresponding to streams that have outstanding data
+    /// to read. This is used to generate a `StreamIter` of streams without
+    /// having to iterate over the full list of streams.
+    readable: HashSet<u64>,
+
     /// Set of stream IDs corresponding to streams that are almost out of flow
     /// control credit and need to send MAX_STREAM_DATA. This is used to
     /// generate a `StreamIter` of streams without having to iterate over the
@@ -182,6 +187,17 @@ impl StreamMap {
         self.flushable.pop_front()
     }
 
+    /// Adds or removes the stream ID to/from the readable streams set.
+    ///
+    /// If the stream was already in the list, this does nothing.
+    pub fn mark_readable(&mut self, stream_id: u64, readable: bool) {
+        if readable {
+            self.readable.insert(stream_id);
+        } else {
+            self.readable.remove(&stream_id);
+        }
+    }
+
     /// Adds or removes the stream ID to/from the almost full streams set.
     ///
     /// If the stream was already in the list, this does nothing.
@@ -215,7 +231,7 @@ impl StreamMap {
 
     /// Creates an iterator over streams that have outstanding data to read.
     pub fn readable(&self) -> StreamIter {
-        StreamIter::new(&self.streams, Stream::readable)
+        StreamIter::from(&self.readable)
     }
 
     /// Creates an iterator over streams that can be written to.
