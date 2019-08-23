@@ -205,9 +205,9 @@ impl StreamMap {
         StreamIter::new(&self.streams, Stream::writable)
     }
 
-    /// Creates an iterator over all streams.
-    pub fn iter_mut(&mut self) -> hash_map::IterMut<u64, Stream> {
-        self.streams.iter_mut()
+    /// Creates an iterator over streams that need to send MAX_STREAM_DATA.
+    pub fn almost_full(&self) -> StreamIter {
+        StreamIter::new(&self.streams, |s| s.recv.almost_full())
     }
 
     /// Returns true if there are any streams that have data to write.
@@ -217,8 +217,14 @@ impl StreamMap {
 
     /// Returns true if there are any streams that need to update the local
     /// flow control limit.
-    pub fn has_out_of_credit(&self) -> bool {
-        self.streams.values().any(|s| s.recv.more_credit())
+    pub fn has_almost_full(&self) -> bool {
+        self.streams.values().any(|s| s.recv.almost_full())
+    }
+
+    /// Creates an iterator over all streams.
+    #[cfg(test)]
+    pub fn iter_mut(&mut self) -> hash_map::IterMut<u64, Stream> {
+        self.streams.iter_mut()
     }
 }
 
@@ -520,7 +526,7 @@ impl RecvBuf {
     }
 
     /// Returns true if we need to update the local flow control limit.
-    pub fn more_credit(&self) -> bool {
+    pub fn almost_full(&self) -> bool {
         // Send MAX_STREAM_DATA when the new limit is at least double the
         // amount of data that can be received before blocking.
         self.fin_off.is_none() &&
@@ -1608,7 +1614,7 @@ mod tests {
     #[test]
     fn recv_flow_control() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
 
         let mut buf = [0; 32];
 
@@ -1618,7 +1624,7 @@ mod tests {
 
         assert_eq!(stream.recv.push(second), Ok(()));
         assert_eq!(stream.recv.push(first), Ok(()));
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
 
         assert_eq!(stream.recv.push(third), Err(Error::FlowControl));
 
@@ -1626,10 +1632,10 @@ mod tests {
         assert_eq!(&buf[..len], b"helloworld");
         assert_eq!(fin, false);
 
-        assert!(stream.recv.more_credit());
+        assert!(stream.recv.almost_full());
 
         assert_eq!(stream.recv.update_max_data(), 25);
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
 
         let third = RangeBuf::from(b"something", 10, false);
         assert_eq!(stream.recv.push(third), Ok(()));
@@ -1638,7 +1644,7 @@ mod tests {
     #[test]
     fn recv_past_fin() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
         let second = RangeBuf::from(b"world", 5, false);
@@ -1650,7 +1656,7 @@ mod tests {
     #[test]
     fn recv_fin_dup() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
         let second = RangeBuf::from(b"hello", 0, true);
@@ -1668,7 +1674,7 @@ mod tests {
     #[test]
     fn recv_fin_change() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
         let second = RangeBuf::from(b"world", 5, true);
@@ -1680,7 +1686,7 @@ mod tests {
     #[test]
     fn recv_fin_lower_than_received() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
         let second = RangeBuf::from(b"world", 5, false);
@@ -1692,7 +1698,7 @@ mod tests {
     #[test]
     fn recv_fin_flow_control() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
 
         let mut buf = [0; 32];
 
@@ -1706,13 +1712,13 @@ mod tests {
         assert_eq!(&buf[..len], b"helloworld");
         assert_eq!(fin, true);
 
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
     }
 
     #[test]
     fn recv_fin_reset_mismatch() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
 
@@ -1723,7 +1729,7 @@ mod tests {
     #[test]
     fn recv_reset_dup() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, false);
 
@@ -1735,7 +1741,7 @@ mod tests {
     #[test]
     fn recv_reset_change() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, false);
 
@@ -1747,7 +1753,7 @@ mod tests {
     #[test]
     fn recv_reset_lower_than_received() {
         let mut stream = Stream::new(15, 0);
-        assert!(!stream.recv.more_credit());
+        assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, false);
 

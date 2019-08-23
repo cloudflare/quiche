@@ -1612,13 +1612,15 @@ impl Connection {
 
         // Create MAX_STREAM_DATA frames as needed.
         if pkt_type == packet::Type::Application && !is_closing {
-            for (id, stream) in self
-                .streams
-                .iter_mut()
-                .filter(|(_, s)| s.recv.more_credit())
-            {
+            for stream_id in self.streams.almost_full() {
+                let stream = match self.streams.get_mut(stream_id) {
+                    Some(v) => v,
+
+                    None => continue,
+                };
+
                 let frame = frame::Frame::MaxStreamData {
-                    stream_id: *id,
+                    stream_id,
                     max: stream.recv.update_max_data() as u64,
                 };
 
@@ -2355,7 +2357,7 @@ impl Connection {
 
         // If there are flushable streams, use Application.
         if self.handshake_completed &&
-            (self.streams.has_flushable() || self.streams.has_out_of_credit())
+            (self.streams.has_flushable() || self.streams.has_almost_full())
         {
             return Ok(packet::EPOCH_APPLICATION);
         }
