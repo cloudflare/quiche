@@ -20,16 +20,16 @@ matrix:
       - cargo clippy --examples -- -D warnings
       - cargo doc --no-deps
       - make -C examples
-      - cd tools/http3bin_client
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
+        --manifest-path tools/httpbintest/Cargo.toml
    - rust: beta
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
       - cargo doc --no-deps
       - make -C examples
-      - cd tools/http3bin_client
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
+        --manifest-path tools/httpbintest/Cargo.toml
    - rust: nightly
      install:
       - rustup component add rustfmt
@@ -39,8 +39,8 @@ matrix:
       - cargo fmt -- --check
       - cargo doc --no-deps
       - make -C examples
-      - cd tools/http3bin_client
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
+        --manifest-path tools/httpbintest/Cargo.toml
 
 deploy:
   provider: pages

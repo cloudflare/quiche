@@ -24,56 +24,23 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#[macro_use]
-extern crate log;
-
 use std::net::ToSocketAddrs;
 
 use ring::rand::*;
 
-const MAX_DATAGRAM_SIZE: usize = 1350;
+#[allow(dead_code)]
+pub fn run(bin_test: &mut crate::HttpBinTest) {
+    const MAX_DATAGRAM_SIZE: usize = 1350;
 
-const USAGE: &str = "Usage:
-  http3bin-client [options] URL
-  http3bin-client -h | --help
-
-Options:
-  --max-data BYTES         Connection-wide flow control limit [default: 10000000].
-  --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
-  --wire-version VERSION   The version number to send to the server [default: babababa].
-  --no-verify              Don't verify server's certificate.
-  --no-grease              Don't send GREASE.
-  --no-concurrent          Don't send test requests concurrently.
-  --test TEST              Test the given HTTPBin path [default: get]
-  -h --help                Show this screen.
-";
-
-fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
-    env_logger::builder()
-        .default_format_timestamp_nanos(true)
-        .init();
+    let max_data = 1_000_000;
 
-    let args = docopt::Docopt::new(USAGE)
-        .and_then(|dopt| dopt.parse())
-        .unwrap_or_else(|e| e.exit());
+    let max_stream_data = 1_000_000;
 
-    let max_data = args.get_str("--max-data");
-    let max_data = u64::from_str_radix(max_data, 10).unwrap();
-
-    let max_stream_data = args.get_str("--max-stream-data");
-    let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
-
-    let version = args.get_str("--wire-version");
+    let version = "babababa";
     let version = u32::from_str_radix(version, 16).unwrap();
-
-    let mut url = url::Url::parse(args.get_str("URL")).unwrap();
-
-    let test = args.get_str("--test");
-    let mut bin_test = http3bin_client::HttpBinTest::new(&mut url, test);
-    bin_test.set_concurrency(!args.get_bool("--no-concurrent"));
 
     let mut reqs_count = 0;
 
@@ -84,7 +51,9 @@ fn main() {
     let mut events = mio::Events::with_capacity(1024);
 
     // Resolve server address.
+    let url = &bin_test.endpoint();
     let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
+    info!("connecting to {:}", peer_addr);
     info!("connecting to {:}", peer_addr);
 
     // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
@@ -129,14 +98,6 @@ fn main() {
     config.set_disable_migration(true);
 
     let mut http3_conn = None;
-
-    if args.get_bool("--no-verify") {
-        config.verify_peer(false);
-    }
-
-    if args.get_bool("--no-grease") {
-        config.grease(false);
-    }
 
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
         config.log_keys();
@@ -277,8 +238,7 @@ fn main() {
 
                         if reqs_complete == reqs_count {
                             info!(
-                                "Completed test \"{}\". {}/{} response(s) received in {:?}, closing...",
-                                test,
+                                "Completed test run. {}/{} response(s) received in {:?}, closing...",
                                 reqs_complete,
                                 reqs_count,
                                 req_start.elapsed()
@@ -291,10 +251,7 @@ fn main() {
                                 Err(e) => panic!("error closing conn: {:?}", e),
                             }
 
-                            if !bin_test.assert() {
-                                error!("The test failed :(");
-                                std::process::exit(-1);
-                            }
+                            bin_test.assert();
 
                             break;
                         }
