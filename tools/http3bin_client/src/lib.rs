@@ -39,8 +39,8 @@
 //!
 //! ```
 //! let server = "https://cloudflare-quic.com/b";
-//! let url = url::Url::parse(server);
-//! let test = "get"
+//! let mut url = url::Url::parse(server).unwrap();
+//! let test = "get";
 //! let mut httpbin_test = http3bin_client::HttpBinTest::new(&mut url, test);
 //! ```
 //!
@@ -56,8 +56,12 @@
 //! Example:
 //!
 //! ```
-//! let request_count = httpbin_test.request_count();
-//! htttpbin_test.set_concurrent(false);
+//! # let server = "https://cloudflare-quic.com/b";
+//! # let mut url = url::Url::parse(server).unwrap();
+//! # let test = "get";
+//! # let mut httpbin_test = http3bin_client::HttpBinTest::new(&mut url, test);
+//! let request_count = httpbin_test.requests_count();
+//! httpbin_test.set_concurrency(false);
 //! ```
 //!
 //! ## Sending test requests
@@ -70,15 +74,22 @@
 //!
 //! Example:
 //!
-//! ```
-//! let mut conn = quiche::connect(/*..*/);
-//! let mut http3_conn =
-//!     quiche::h3::Connection::with_transport(&mut conn /* .. */);
+//! ```no_run
+//! # let server = "https://cloudflare-quic.com/b";
+//! # let mut url = url::Url::parse(server).unwrap();
+//! # let test = "get";
+//! # let mut httpbin_test = http3bin_client::HttpBinTest::new(&mut url, test);
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! # let scid = [0xba; 16];
+//! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
+//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! let mut http3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //!
 //! // Create test as described above, then
 //! httpbin_test
 //!     .send_requests(&mut conn, &mut http3_conn)
 //!     .unwrap();
+//! # Ok::<(), quiche::h3::Error>(())
 //! ```
 //!
 //! ## Handling responses
@@ -91,8 +102,17 @@
 //!
 //! For example, when handling HTTP/3 connection events using `poll()`:
 //!
-//! ```
-//! match http3_conn.poll() {
+//! ```no_run
+//! # let server = "https://cloudflare-quic.com/b";
+//! # let mut url = url::Url::parse(server).unwrap();
+//! # let test = "get";
+//! # let mut httpbin_test = http3bin_client::HttpBinTest::new(&mut url, test);
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! # let scid = [0xba; 16];
+//! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
+//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! # let mut http3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
+//! match http3_conn.poll(&mut conn) {
 //!     Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
 //!         httpbin_test.add_response_headers(stream_id, &headers);
 //!     },
@@ -104,7 +124,10 @@
 //!             httpbin_test.add_response_body(stream_id, &buf, read);
 //!         }
 //!     },
+//!
+//!     _ => ()
 //! }
+//! # Ok::<(), quiche::h3::Error>(())
 //! ```
 //!
 //! ## Tests assertion
@@ -117,18 +140,30 @@
 //! Calling [`assert()`] prematurely will always return false. So it helps to
 //! track requests as so:
 //!
-//! ```
+//! ```no_run
+//! # let server = "https://cloudflare-quic.com/b";
+//! # let mut url = url::Url::parse(server).unwrap();
+//! # let test = "get";
+//! # let mut httpbin_test = http3bin_client::HttpBinTest::new(&mut url, test);
+//! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! # let scid = [0xba; 16];
+//! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
+//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! # let mut http3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! let mut requests_complete = 0;
-//! let request_count = httpbin_test.request_count();
-//! match http3_conn.poll() {
+//! let request_count = httpbin_test.requests_count();
+//! match http3_conn.poll(&mut conn) {
 //!     Ok((_stream_id, quiche::h3::Event::Finished)) => {
 //!         requests_complete += 1;
 //!         if requests_complete == request_count {
-//!             if !bin_test.assert() {
+//!             if !httpbin_test.assert() {
 //!                 // handle test failure
 //!             }
 //!         }
+//!     },
+//!     _ => ()
 //! }
+//! # Ok::<(), quiche::h3::Error>(())
 //! ```
 //!
 //! [quiche]: https://github.com/cloudflare/quiche/
@@ -255,8 +290,8 @@ pub struct HttpBinTest {
 }
 
 impl HttpBinTest {
-    /// A factory method for building the test cases and assertions 
-    /// for a particular httpbin server and test path. 
+    /// A factory method for building the test cases and assertions
+    /// for a particular httpbin server and test path.
     pub fn new(mut url: &mut url::Url, test: &str) -> HttpBinTest {
         match test {
             "get" => Self::new_test(Self::test_get(url), Self::assert_get),
