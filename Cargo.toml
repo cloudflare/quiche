@@ -47,7 +47,7 @@ winapi = { version = "0.3", features = ["wincrypt"] }
 mio = "0.6"
 url = "1"
 docopt = "1"
-criterion = "0.2"
+criterion = "0.3"
 env_logger = "0.6"
 
 [profile.bench]
