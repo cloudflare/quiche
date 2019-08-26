@@ -392,6 +392,7 @@ fn main() {
 
                     Err(e) => {
                         error!("{} send failed: {:?}", client.conn.trace_id(), e);
+
                         client.conn.close(false, 0x1, b"fail").ok();
                         break;
                     },
@@ -601,7 +602,6 @@ fn handle_writable(client: &mut Client, stream_id: u64) {
 
         Err(e) => {
             error!("{} stream send failed {:?}", conn.trace_id(), e);
-
             return;
         },
     };

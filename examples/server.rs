@@ -350,6 +350,7 @@ fn main() {
 
                     Err(e) => {
                         error!("{} send failed: {:?}", client.conn.trace_id(), e);
+
                         client.conn.close(false, 0x1, b"fail").ok();
                         break;
                     },

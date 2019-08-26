@@ -455,6 +455,7 @@ impl RecvBuf {
         while cap > 0 && self.ready() {
             let mut buf = match self.data.pop() {
                 Some(v) => v,
+
                 None => break,
             };
 
@@ -543,6 +544,7 @@ impl RecvBuf {
     fn ready(&self) -> bool {
         let buf = match self.data.peek() {
             Some(v) => v,
+
             None => return false,
         };
 
@@ -690,6 +692,7 @@ impl SendBuf {
         {
             let mut buf = match self.data.pop() {
                 Some(v) => v,
+
                 None => break,
             };
 

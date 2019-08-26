@@ -458,6 +458,7 @@ extern fn set_encryption_secrets(
     let conn =
         match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
             Some(v) => v,
+
             None => return 0,
         };
 
@@ -479,6 +480,7 @@ extern fn set_encryption_secrets(
 
     let aead = match get_cipher_from_ptr(ssl) {
         Ok(v) => v,
+
         Err(_) => return 0,
     };
 
@@ -505,6 +507,7 @@ extern fn set_encryption_secrets(
 
     let open = match crypto::Open::new(aead, &key, &iv, &pn_key) {
         Ok(v) => v,
+
         Err(_) => return 0,
     };
 
@@ -526,6 +529,7 @@ extern fn set_encryption_secrets(
 
     let seal = match crypto::Seal::new(aead, &key, &iv, &pn_key) {
         Ok(v) => v,
+
         Err(_) => return 0,
     };
 
@@ -540,6 +544,7 @@ extern fn add_handshake_data(
     let conn =
         match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
             Some(v) => v,
+
             None => return 0,
         };
 
@@ -579,6 +584,7 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int {
     let conn =
         match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
             Some(v) => v,
+
             None => return 0,
         };
 
@@ -619,6 +625,7 @@ extern fn select_alpn(
     let conn =
         match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
             Some(v) => v,
+
             None => return 3, // SSL_TLSEXT_ERR_NOACK
         };
 

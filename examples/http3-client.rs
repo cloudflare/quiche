@@ -151,11 +151,7 @@ fn main() {
     // Create a QUIC connection and initiate handshake.
     let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
 
-    let write = match conn.send(&mut out) {
-        Ok(v) => v,
-
-        Err(e) => panic!("initial send failed: {:?}", e),
-    };
+    let write = conn.send(&mut out).expect("initial send failed");
 
     while let Err(e) = socket.send(&out[..write]) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
@@ -282,7 +278,7 @@ fn main() {
 
                 let s =
                     match h3_conn.send_request(&mut conn, &req, body.is_none()) {
-                        Ok(stream_id) => stream_id,
+                        Ok(v) => v,
 
                         Err(e) => {
                             error!("failed to send request {:?}", e);
@@ -380,6 +376,7 @@ fn main() {
 
                 Err(e) => {
                     error!("send failed: {:?}", e);
+
                     conn.close(false, 0x1, b"fail").ok();
                     break;
                 },

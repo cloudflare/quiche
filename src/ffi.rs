@@ -214,7 +214,7 @@ pub extern fn quiche_header_info(
 ) -> c_int {
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
     let hdr = match Header::from_slice(buf, dcil) {
-        Ok(h) => h,
+        Ok(v) => v,
 
         Err(e) => return e.to_c() as c_int,
     };

@@ -1339,6 +1339,7 @@ impl Connection {
                 frame::Frame::Stream { stream_id, data } => {
                     let stream = match self.streams.get_mut(stream_id) {
                         Some(v) => v,
+
                         None => continue,
                     };
 
@@ -1488,6 +1489,7 @@ impl Connection {
                 frame::Frame::Stream { stream_id, data } => {
                     let stream = match self.streams.get_mut(stream_id) {
                         Some(v) => v,
+
                         None => continue,
                     };
 
@@ -1908,10 +1910,10 @@ impl Connection {
             return Err(Error::InvalidStreamState);
         }
 
-        let stream = match self.streams.get_mut(stream_id) {
-            Some(v) => v,
-            None => return Err(Error::InvalidStreamState),
-        };
+        let stream = self
+            .streams
+            .get_mut(stream_id)
+            .ok_or(Error::InvalidStreamState)?;
 
         if !stream.readable() {
             return Err(Error::Done);
@@ -2030,6 +2032,7 @@ impl Connection {
     pub fn stream_finished(&self, stream_id: u64) -> bool {
         let stream = match self.streams.get(stream_id) {
             Some(v) => v,
+
             None => return true,
         };
 
@@ -3022,7 +3025,7 @@ pub mod testing {
         pub fn flush_client(&mut self, buf: &mut [u8]) -> Result<()> {
             loop {
                 let len = match self.client.send(buf) {
-                    Ok(write) => write,
+                    Ok(v) => v,
 
                     Err(Error::Done) => break,
 
@@ -3044,7 +3047,7 @@ pub mod testing {
         pub fn flush_server(&mut self, buf: &mut [u8]) -> Result<()> {
             loop {
                 let len = match self.server.send(buf) {
-                    Ok(write) => write,
+                    Ok(v) => v,
 
                     Err(Error::Done) => break,
 
