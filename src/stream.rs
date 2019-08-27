@@ -68,6 +68,12 @@ pub struct StreamMap {
     /// having to iterate over the full list of streams.
     readable: HashSet<u64>,
 
+    /// Set of stream IDs corresponding to streams that have enough flow control
+    /// capacity to be written to, and is not finished. This is used to generate
+    /// a `StreamIter` of streams without having to iterate over the full list
+    /// of streams.
+    writable: HashSet<u64>,
+
     /// Set of stream IDs corresponding to streams that are almost out of flow
     /// control credit and need to send MAX_STREAM_DATA. This is used to
     /// generate a `StreamIter` of streams without having to iterate over the
@@ -163,6 +169,11 @@ impl StreamMap {
             hash_map::Entry::Occupied(v) => v.into_mut(),
         };
 
+        // Stream might already be writable due to initial flow control limits.
+        if stream.writable() {
+            self.writable.insert(id);
+        }
+
         Ok(stream)
     }
 
@@ -195,6 +206,20 @@ impl StreamMap {
             self.readable.insert(stream_id);
         } else {
             self.readable.remove(&stream_id);
+        }
+    }
+
+    /// Adds or removes the stream ID to/from the writable streams set.
+    ///
+    /// This should also be called anytime a new stream is created, in addition
+    /// to when an existing stream becomes writable (or stops being writable).
+    ///
+    /// If the stream was already in the list, this does nothing.
+    pub fn mark_writable(&mut self, stream_id: u64, writable: bool) {
+        if writable {
+            self.writable.insert(stream_id);
+        } else {
+            self.writable.remove(&stream_id);
         }
     }
 
@@ -236,7 +261,7 @@ impl StreamMap {
 
     /// Creates an iterator over streams that can be written to.
     pub fn writable(&self) -> StreamIter {
-        StreamIter::new(&self.streams, Stream::writable)
+        StreamIter::from(&self.writable)
     }
 
     /// Creates an iterator over streams that need to send MAX_STREAM_DATA.
@@ -315,21 +340,6 @@ pub fn is_bidi(stream_id: u64) -> bool {
 #[derive(Default)]
 pub struct StreamIter {
     streams: Vec<u64>,
-}
-
-impl StreamIter {
-    fn new<F>(streams: &HashMap<u64, Stream>, f: F) -> StreamIter
-    where
-        F: Fn(&Stream) -> bool,
-    {
-        StreamIter {
-            streams: streams
-                .iter()
-                .filter(|(_, s)| f(s))
-                .map(|(&id, _)| id)
-                .collect(),
-        }
-    }
 }
 
 impl Iterator for StreamIter {
