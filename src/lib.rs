@@ -1988,10 +1988,16 @@ impl Connection {
 
         let sent = stream.send.push_slice(buf, fin)?;
 
+        let writable = stream.writable();
+
         // If the stream is now flushable push it to the flushable queue, but
         // only if it wasn't already queued.
         if stream.flushable() && !was_flushable {
             self.streams.push_flushable(stream_id);
+        }
+
+        if !writable {
+            self.streams.mark_writable(stream_id, false);
         }
 
         Ok(sent)
@@ -2025,13 +2031,17 @@ impl Connection {
             Shutdown::Read => {
                 stream.recv.shutdown();
 
-                if !stream.readable() {
-                    self.streams.mark_readable(stream_id, false);
-                }
+                // Once shutdown, the stream is guaranteed to be non-readable.
+                self.streams.mark_readable(stream_id, false);
             },
 
             // TODO: send RESET_STREAM
-            Shutdown::Write => stream.send.shutdown(),
+            Shutdown::Write => {
+                stream.send.shutdown();
+
+                // Once shutdown, the stream is guaranteed to be non-writable.
+                self.streams.mark_writable(stream_id, false);
+            },
         }
 
         Ok(())
@@ -2535,10 +2545,16 @@ impl Connection {
 
                 stream.send.update_max_data(max);
 
+                let writable = stream.writable();
+
                 // If the stream is now flushable push it to the flushable queue,
                 // but only if it wasn't already queued.
                 if stream.flushable() && !was_flushable {
                     self.streams.push_flushable(stream_id);
+                }
+
+                if writable {
+                    self.streams.mark_writable(stream_id, true);
                 }
             },
 
