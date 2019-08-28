@@ -3426,10 +3426,10 @@ mod tests {
 
         let mut pipe = testing::Pipe::default().unwrap();
 
-        // Client sends initial flight
+        // Client sends initial flight.
         let mut len = pipe.client.send(&mut buf).unwrap();
 
-        // Server sends initial flight..
+        // Server sends initial flight.
         len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
         assert!(!pipe.client.handshake_completed);
@@ -3438,7 +3438,7 @@ mod tests {
         assert!(!pipe.server.handshake_completed);
         assert!(!pipe.server.handshake_confirmed);
 
-        // Client sends Handshake packet.
+        // Client sends Handshake packet and completes handshake.
         len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
 
         assert!(pipe.client.handshake_completed);
@@ -3447,7 +3447,7 @@ mod tests {
         assert!(!pipe.server.handshake_completed);
         assert!(!pipe.server.handshake_confirmed);
 
-        // Server completes handshake, and sends first 1-RTT packet.
+        // Server completes handshake.
         len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
         assert!(pipe.client.handshake_completed);
@@ -3466,10 +3466,33 @@ mod tests {
         assert!(!pipe.server.handshake_confirmed);
 
         // Server handshake is confirmed.
-        testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
         assert!(pipe.client.handshake_completed);
         assert!(!pipe.client.handshake_confirmed);
+
+        assert!(pipe.server.handshake_completed);
+        assert!(pipe.server.handshake_confirmed);
+
+        // Client sends 1-RTT ACK-eliciting packet.
+        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+
+        len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+
+        // Server ACKs 1-RTT packet.
+        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert!(pipe.client.handshake_completed);
+        assert!(!pipe.client.handshake_confirmed);
+
+        assert!(pipe.server.handshake_completed);
+        assert!(pipe.server.handshake_confirmed);
+
+        // Client handshake is confirmed.
+        testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+
+        assert!(pipe.client.handshake_completed);
+        assert!(pipe.client.handshake_confirmed);
 
         assert!(pipe.server.handshake_completed);
         assert!(pipe.server.handshake_confirmed);
