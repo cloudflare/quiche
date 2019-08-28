@@ -262,6 +262,11 @@ fn main() {
                         continue;
                     }
 
+                    if scid.len() != hdr.dcid.len() {
+                        error!("Invalid destination connection ID");
+                        continue;
+                    }
+
                     // Reuse the source connection ID we sent in the Retry
                     // packet, instead of changing it again.
                     scid.copy_from_slice(&hdr.dcid);
