@@ -1450,7 +1450,7 @@ pub mod testing {
     ///
     /// Some utility functions are provided that make it less verbose to send
     /// request, responses and individual headers. The full quiche API remains
-    /// avaialable for any test that need to do unconventional things (such as
+    /// available for any test that need to do unconventional things (such as
     /// bad behaviour that triggers errors).
     pub struct Session {
         pub pipe: testing::Pipe,
