@@ -29,7 +29,7 @@ use std::net::ToSocketAddrs;
 use ring::rand::*;
 
 #[allow(dead_code)]
-pub fn run(bin_test: &mut crate::HttpBinTest) {
+pub fn run(bin_test: &mut crate::Http3Test) {
     const MAX_DATAGRAM_SIZE: usize = 1350;
 
     let mut buf = [0; 65535];

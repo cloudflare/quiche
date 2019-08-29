@@ -21,7 +21,7 @@ matrix:
       - cargo doc --no-deps
       - make -C examples
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
-        --manifest-path tools/httpbintest/Cargo.toml
+        --manifest-path tools/http3-test/Cargo.toml
    - rust: beta
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
@@ -29,7 +29,7 @@ matrix:
       - cargo doc --no-deps
       - make -C examples
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
-        --manifest-path tools/httpbintest/Cargo.toml
+        --manifest-path tools/http3-test/Cargo.toml
    - rust: nightly
      install:
       - rustup component add rustfmt
@@ -40,7 +40,7 @@ matrix:
       - cargo doc --no-deps
       - make -C examples
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
-        --manifest-path tools/httpbintest/Cargo.toml
+        --manifest-path tools/http3-test/Cargo.toml
 
 deploy:
   provider: pages

@@ -1,5 +1,5 @@
 [package]
-name = "httpbintest"
+name = "http3test"
 version = "0.1.0"
 authors = ["Lucas Pardue <lucaspardue.24.7@gmail.com>"]
 edition = "2018"
