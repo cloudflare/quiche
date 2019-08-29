@@ -238,8 +238,11 @@ quiche_stream_iter *quiche_conn_readable(quiche_conn *conn);
 // Returns an iterator over streams that can be written to.
 quiche_stream_iter *quiche_conn_writable(quiche_conn *conn);
 
-// Returns the amount of time until the next timeout event, as nanoseconds.
+// Returns the amount of time until the next timeout event, in nanoseconds.
 uint64_t quiche_conn_timeout_as_nanos(quiche_conn *conn);
+
+// Returns the amount of time until the next timeout event, in milliseconds.
+uint64_t quiche_conn_timeout_as_millis(quiche_conn *conn);
 
 // Processes a timeout event.
 void quiche_conn_on_timeout(quiche_conn *conn);

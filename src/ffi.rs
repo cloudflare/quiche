@@ -505,6 +505,15 @@ pub extern fn quiche_conn_timeout_as_nanos(conn: &mut Connection) -> u64 {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_timeout_as_millis(conn: &mut Connection) -> u64 {
+    match conn.timeout() {
+        Some(timeout) => timeout.as_millis() as u64,
+
+        None => std::u64::MAX,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_on_timeout(conn: &mut Connection) {
     conn.on_timeout()
 }
