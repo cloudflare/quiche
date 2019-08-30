@@ -342,6 +342,14 @@ pub struct StreamIter {
     streams: Vec<u64>,
 }
 
+impl StreamIter {
+    fn from(streams: &HashSet<u64>) -> Self {
+        StreamIter {
+            streams: streams.iter().copied().collect(),
+        }
+    }
+}
+
 impl Iterator for StreamIter {
     type Item = u64;
 
@@ -353,14 +361,6 @@ impl Iterator for StreamIter {
 impl ExactSizeIterator for StreamIter {
     fn len(&self) -> usize {
         self.streams.len()
-    }
-}
-
-impl From<&HashSet<u64>> for StreamIter {
-    fn from(streams: &HashSet<u64>) -> Self {
-        StreamIter {
-            streams: streams.iter().copied().collect(),
-        }
     }
 }
 
