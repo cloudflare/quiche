@@ -29,7 +29,7 @@ use std::net::ToSocketAddrs;
 use ring::rand::*;
 
 #[allow(dead_code)]
-pub fn run(bin_test: &mut crate::Http3Test) {
+pub fn run(test: &mut crate::Http3Test, verify_peer: bool) {
     const MAX_DATAGRAM_SIZE: usize = 1350;
 
     let mut buf = [0; 65535];
@@ -51,7 +51,7 @@ pub fn run(bin_test: &mut crate::Http3Test) {
     let mut events = mio::Events::with_capacity(1024);
 
     // Resolve server address.
-    let url = &bin_test.endpoint();
+    let url = &test.endpoint();
     let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
     info!("connecting to {:}", peer_addr);
     info!("connecting to {:}", peer_addr);
@@ -81,7 +81,7 @@ pub fn run(bin_test: &mut crate::Http3Test) {
     // Create the configuration for the QUIC connection.
     let mut config = quiche::Config::new(version).unwrap();
 
-    config.verify_peer(true);
+    config.verify_peer(verify_peer);
 
     config
         .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
@@ -195,9 +195,9 @@ pub fn run(bin_test: &mut crate::Http3Test) {
                 quiche::h3::Connection::with_transport(&mut conn, &h3_config)
                     .unwrap();
 
-            reqs_count = bin_test.requests_count();
+            reqs_count = test.requests_count();
 
-            bin_test.send_requests(&mut conn, &mut h3_conn).unwrap();
+            test.send_requests(&mut conn, &mut h3_conn).unwrap();
 
             http3_conn = Some(h3_conn);
         }
@@ -212,7 +212,7 @@ pub fn run(bin_test: &mut crate::Http3Test) {
                             headers, stream_id
                         );
 
-                        bin_test.add_response_headers(stream_id, &headers);
+                        test.add_response_headers(stream_id, &headers);
                     },
 
                     Ok((stream_id, quiche::h3::Event::Data)) => {
@@ -224,7 +224,7 @@ pub fn run(bin_test: &mut crate::Http3Test) {
                                 read, stream_id
                             );
 
-                            bin_test.add_response_body(stream_id, &buf, read);
+                            test.add_response_body(stream_id, &buf, read);
                         }
                     },
 
@@ -251,12 +251,12 @@ pub fn run(bin_test: &mut crate::Http3Test) {
                                 Err(e) => panic!("error closing conn: {:?}", e),
                             }
 
-                            bin_test.assert();
+                            test.assert();
 
                             break;
                         }
 
-                        match bin_test.send_requests(&mut conn, http3_conn) {
+                        match test.send_requests(&mut conn, http3_conn) {
                             Ok(_) => (),
                             Err(quiche::h3::Error::Done) => (),
                             Err(e) => panic!("error sending request {:?}", e),

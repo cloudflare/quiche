@@ -242,7 +242,7 @@ pub struct Http3Req {
     pub url: url::Url,
     pub hdrs: Vec<Header>,
     body: Option<Vec<u8>>,
-    expect_resp_hdrs: Option<Vec<Header>>,
+    pub expect_resp_hdrs: Option<Vec<Header>>,
     pub resp_hdrs: Vec<Header>,
     pub resp_body: Vec<u8>,
 }
@@ -279,18 +279,44 @@ impl Http3Req {
             resp_body: Vec::new(),
         }
     }
+}
 
-    pub fn assert_hdrs(&self) {
-        if let Some(expect_hdrs) = &self.expect_resp_hdrs {
+/// Asserts that the Http3Req received response headers match the expected response headers.
+///
+/// Header values are compared with [`assert_eq!`] and this macro will panic similarly.
+///
+/// If an expected header is not present this macro will panic and print the missing header name.AsMut
+///
+/// [`assert_eq!`]: std/macro.assert.html
+#[macro_export]
+macro_rules! assert_headers {
+    ($req:expr) => ({
+        if let Some(expect_hdrs) = &$req.expect_resp_hdrs {
             for hdr in expect_hdrs {
-                match self.resp_hdrs.iter().find(|&x| x.name() == hdr.name()) {
+                match $req.resp_hdrs.iter().find(|&x| x.name() == hdr.name()) {
                     Some(h) => { assert_eq!(hdr.value(), h.value());},
 
-                    None => { panic!(format!("Response header field {} not found!", hdr.name()));}
+                    None => {
+                        panic!(format!("assertion failed: expected response header field {} not present!", hdr.name()));
+                    }
                 }
             }
         }
-    }
+    });
+    ($req:expr,) => ({ $crate::assert_headers!($req)});
+    ($req:expr, $($arg:tt)+) => ({
+        if let Some(expect_hdrs) = &$req.expect_resp_hdrs {
+            for hdr in expect_hdrs {
+                match $req.resp_hdrs.iter().find(|&x| x.name() == hdr.name()) {
+                    Some(h) => { assert_eq!(hdr.value(), h.value(), $($arg)+);},
+
+                    None => {
+                        panic!(format!("assertion failed: expected response header field {} not present! {}", hdr.name(), $($arg)+));
+                    }
+                }
+            }
+        }
+    });
 }
 
 // A helper function pointer type for assertions.

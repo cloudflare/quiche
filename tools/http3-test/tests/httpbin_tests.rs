@@ -9,21 +9,6 @@ mod httpbin_tests {
 
     static INIT: Once = Once::new();
 
-    fn run_test<T>(test: T) -> ()
-    where
-        T: FnOnce() -> () + std::panic::UnwindSafe,
-    {
-        INIT.call_once(|| {
-            env_logger::builder()
-                .default_format_timestamp_nanos(true)
-                .init()
-        });
-
-        let result = std::panic::catch_unwind(|| test());
-
-        assert!(result.is_ok())
-    }
-
     fn endpoint(testpoint: Option<&str>) -> url::Url {
         let endpoint = match std::env::var_os("HTTPBIN_ENDPOINT") {
             Some(val) => val.into_string().unwrap(),
@@ -39,6 +24,19 @@ mod httpbin_tests {
         }
 
         url
+    }
+
+    fn verify_peer() -> bool {
+        match std::env::var_os("VERIFY_PEER") {
+            Some(val) => {
+                match val.to_str().unwrap() {
+                    "false" => {return false;},
+                    _ => {return true;},
+                }
+            },
+
+            None => {return true;},
+        };
     }
 
     // A rudimentary structure to hold httpbin response data
@@ -66,8 +64,14 @@ mod httpbin_tests {
     fn do_test(
         reqs: Vec<Http3Req>, assert: Http3Assert, concurrent: bool,
     ) {
+        INIT.call_once(|| {
+            env_logger::builder()
+                .default_format_timestamp_nanos(true)
+                .init()
+        });
+
         let mut test = Http3Test::new(endpoint(None), reqs, assert, concurrent);
-        runner::run(&mut test);
+        runner::run(&mut test, verify_peer());
     }
 
     // Build a single request and expected response with status code
@@ -101,7 +105,7 @@ mod httpbin_tests {
     }
 
     fn assert_request_body(reqs: &[Http3Req]) {
-        reqs[0].assert_hdrs();
+        assert_headers!(reqs[0]);
 
         let json = jsonify(&reqs[0].resp_body).json.unwrap();
 
@@ -111,7 +115,7 @@ mod httpbin_tests {
 
     fn assert_headers_only(reqs: &[Http3Req]) {
         for req in reqs {
-            req.assert_hdrs();
+            assert_headers!(req);
         }
     }
 
@@ -130,19 +134,17 @@ mod httpbin_tests {
         reqs.push(Http3Req::new("GET", &url, None, expect_hdrs.clone()));
 
         let assert = |reqs: &[Http3Req]| {
-            reqs[0].assert_hdrs();
-            reqs[1].assert_hdrs();
+            assert_headers!(reqs[0]);
+            assert_headers!(reqs[1]);
 
             let json = jsonify(&reqs[1].resp_body);
             if let Some(args) = json.args {
                 assert_eq!(args["key1"], "value1");
-                assert_eq!(args["key2"], "value2");
+                assert_eq!(args["key2"], "value2")
             }
         };
 
-        run_test(|| {
-            do_test(reqs, assert, true);
-        })
+        do_test(reqs, assert, true);
     }
 
     #[test]
@@ -150,15 +152,14 @@ mod httpbin_tests {
         let reqs = request_check_status("ip", 200);
 
         let assert = |reqs: &[Http3Req]| {
-            reqs[0].assert_hdrs();
+            assert_headers!(reqs[0]);
 
             let json = jsonify(&reqs[0].resp_body);
-            assert!(json.origin.is_some());
+            assert!(json.origin.is_some())
         };
 
-        run_test(|| {
-            do_test(reqs, assert, true);
-        })
+
+        do_test(reqs, assert, true);
     }
 
     #[test]
@@ -166,15 +167,13 @@ mod httpbin_tests {
         let reqs = request_check_status("user-agent", 200);
 
         let assert = |reqs: &[Http3Req]| {
-            reqs[0].assert_hdrs();
+            assert_headers!(reqs[0]);
 
             let json = jsonify(&reqs[0].resp_body);
             assert_eq!(json.user_agent, Some(USER_AGENT.to_string()));
         };
 
-        run_test(|| {
-            do_test(reqs, assert, true);
-        })
+        do_test(reqs, assert, true);
     }
 
     #[test]
@@ -182,7 +181,7 @@ mod httpbin_tests {
         let reqs = request_check_status("headers", 200);
 
         let assert = |reqs: &[Http3Req]| {
-            reqs[0].assert_hdrs();
+            assert_headers!(reqs[0]);
 
             let json = jsonify(&reqs[0].resp_body);
             if let Some(args) = json.args {
@@ -190,43 +189,31 @@ mod httpbin_tests {
             }
         };
 
-        run_test(|| {
-            do_test(reqs, assert, true);
-        })
+        do_test(reqs, assert, true);
     }
 
     #[test]
     fn post() {
         let reqs = request_with_body("post");
-
-        run_test(|| {
-            do_test(reqs, assert_request_body, true);
-        })
+        do_test(reqs, assert_request_body, true);
     }
 
     #[test]
     fn put() {
         let reqs = request_with_body("put");
-
-        run_test(|| {
-            do_test(reqs, assert_request_body, true);
-        })
+        do_test(reqs, assert_request_body, true);
     }
 
     #[test]
     fn patch() {
         let reqs = request_with_body("patch");
-        run_test(|| {
-            do_test(reqs, assert_request_body, true);
-        })
+        do_test(reqs, assert_request_body, true);
     }
 
     #[test]
     fn delete() {
         let reqs = request_with_body("delete");
-        run_test(|| {
-            do_test(reqs, assert_request_body, true);
-        })
+        do_test(reqs, assert_request_body, true);
     }
 
     #[test]
@@ -242,9 +229,7 @@ mod httpbin_tests {
 
         reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -263,9 +248,7 @@ mod httpbin_tests {
 
         reqs.push(req);
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -280,12 +263,9 @@ mod httpbin_tests {
 
         let mut req = Http3Req::new("GET", &url, None, expect_hdrs);
         req.hdrs.push(Header::new("accept-encoding", "deflate"));
-
         reqs.push(req);
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -304,9 +284,7 @@ mod httpbin_tests {
             }
         }
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, false);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -321,7 +299,7 @@ mod httpbin_tests {
         reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
 
         let assert = |reqs: &[Http3Req]| {
-            reqs[0].assert_hdrs();
+            assert_headers!(reqs[0]);
             let json = jsonify(&reqs[0].resp_body);
 
             let server = json.server.unwrap();
@@ -332,9 +310,7 @@ mod httpbin_tests {
             assert_eq!(content_type[1], "text/plain; charset=UTF-8");
         };
 
-        run_test(|| {
-            do_test(reqs, assert, true);
-        })
+        do_test(reqs, assert, true);
     }
 
     #[test]
@@ -366,9 +342,7 @@ mod httpbin_tests {
         let url = endpoint(Some("relative-redirect/3"));
         reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -391,9 +365,7 @@ mod httpbin_tests {
 
         reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -408,9 +380,7 @@ mod httpbin_tests {
 
         reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -430,9 +400,9 @@ mod httpbin_tests {
         }
 
         let assert = |reqs: &[Http3Req]| {
-            reqs[0].assert_hdrs();
-            reqs[1].assert_hdrs();
-            reqs[2].assert_hdrs();
+            assert_headers!(reqs[0]);
+            assert_headers!(reqs[1]);
+            assert_headers!(reqs[2]);
 
             let line_count = std::str::from_utf8(&reqs[0].resp_body)
                 .unwrap()
@@ -453,9 +423,7 @@ mod httpbin_tests {
             assert_eq!(line_count, 100);
         };
 
-        run_test(|| {
-            do_test(reqs, assert, true);
-        })
+        do_test(reqs, assert, true);
     }
 
     #[test]
@@ -473,9 +441,7 @@ mod httpbin_tests {
             reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
         }
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, false);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -496,9 +462,7 @@ mod httpbin_tests {
             reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
         }
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, false);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -532,9 +496,7 @@ mod httpbin_tests {
         req.hdrs.push(Header::new("range", "bytes=100-10000"));
         reqs.push(req);
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -565,9 +527,7 @@ mod httpbin_tests {
         req.hdrs.push(Header::new("if-none-match", "*"));
         reqs.push(req);
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -588,9 +548,7 @@ mod httpbin_tests {
             reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
         }
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -608,9 +566,7 @@ mod httpbin_tests {
             reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
         }
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -667,9 +623,7 @@ mod httpbin_tests {
             reqs.push(req);
         }
 
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
@@ -695,7 +649,7 @@ mod httpbin_tests {
         reqs.push(req);
 
         let assert = |reqs: &[Http3Req]| {
-            reqs[0].assert_hdrs();
+            assert_headers!(reqs[0]);
 
             let json = jsonify(&reqs[0].resp_body);
             if let Some(form) = json.form {
@@ -709,44 +663,30 @@ mod httpbin_tests {
             }
         };
 
-        run_test(|| {
-            do_test(reqs, assert, true);
-        })
+        do_test(reqs, assert, true);
     }
 
     #[test]
     fn html() {
         let reqs = request_check_status("html", 200);
-
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
     fn xml() {
         let reqs = request_check_status("xml", 200);
-
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
     fn robots() {
         let reqs = request_check_status("robots.txt", 200);
-
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 
     #[test]
     fn links() {
         let reqs = request_check_status("links/10", 302);
-
-        run_test(|| {
-            do_test(reqs, assert_headers_only, true);
-        })
+        do_test(reqs, assert_headers_only, true);
     }
 }
