@@ -43,7 +43,7 @@
 //! let mut url = url::Url::parse("https://cloudflare-quic.com/b/get").unwrap();
 //! let mut reqs = Vec::new();
 //!
-//! reqs.push(http3-test::Http3Req::new("GET", &url, None, None));
+//! reqs.push(http3_test::Http3Req::new("GET", &url, None, None));
 //! ```
 //!
 //! Assertions are used to check the received response headers and body
@@ -52,8 +52,12 @@
 //! status code is a 200 we could write the function:
 //!
 //! ```no_run
-//! fn assert_status(reqs: &[http3-test::Http3Req]) {
-//!     let status = reqs[0].resp_hdrs.iter().find(|&x| x.name() == ":status").unwrap();
+//! fn assert_status(reqs: &[http3_test::Http3Req]) {
+//!     let status = reqs[0]
+//!         .resp_hdrs
+//!         .iter()
+//!         .find(|&x| x.name() == ":status")
+//!         .unwrap();
 //!     assert_eq!(status.value(), "200");
 //! }
 //! ```
@@ -66,15 +70,15 @@
 //! let mut reqs = Vec::new();
 //!
 //! let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! reqs.push(http3-test::Http3Req::new("GET", &url, None, expect_hdrs));
+//! reqs.push(http3_test::Http3Req::new("GET", &url, None, expect_hdrs));
 //! ```
 //!
 //! The [`assert_headers!`] macro can be used to validate the received headers,
 //! this means we can write a much simpler assertion:
 //!
 //! ```no_run
-//! fn assert_status(reqs: &[http3-test::Http3Req]) {
-//!     assert_headers!(reqs[0]);
+//! fn assert_status(reqs: &[http3_test::Http3Req]) {
+//!     http3_test::assert_headers!(reqs[0]);
 //! }
 //! ```
 //!
@@ -86,39 +90,36 @@
 //! let mut reqs = Vec::new();
 //!
 //! let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! reqs.push(http3-test::Http3Req::new("GET", &url, None, expect_hdrs));
+//! reqs.push(http3_test::Http3Req::new("GET", &url, None, expect_hdrs));
 //!
 //! // Using a closure...
-//! let assert = |reqs: &[http3-test::Http3Req]| assert_headers!(reqs[0]);
+//! let assert =
+//!     |reqs: &[http3_test::Http3Req]| http3_test::assert_headers!(reqs[0]);
 //!
-//! let mut test = http3-test::Http3Test::new(url, reqs, assert, true);
+//! let mut test = http3_test::Http3Test::new(url, reqs, assert, true);
 //! ```
 //!
 //! ## Sending test requests
 //!
-//! Testing a server requires a quiche connection and a HTTP/3 connection.
+//! Testing a server requires a quiche connection and an HTTP/3 connection.
 //!
-//! Request are issued with the [`send_requests()`] method. By default, all
-//! requests are made concurrently. This can be disabled with the
-//! [`set_concurrency()`] method, which causes  [`send_request()`] to send a
-//! single request and return. Call the method multiple times to issue more
-//! test requests. Once all requests have been sent, further calls will return
-//! `quiche::h3:Error::Done`.
+//! Request are issued with the [`send_requests()`] method. The concurrency
+//! of requests within a single Http3Test is set in [`new()`]. If concurrency is
+//! disabled [`send_requests()`] will to send a single request and return.
+//! So call the method multiple times to issue more requests. Once all
+//! requests have been sent, further calls will return `quiche::h3:Error::Done`.
 //!
 //! Example:
 //! ```no_run
 //! # let mut url = url::Url::parse("https://cloudflare-quic.com/b/get").unwrap();
 //! # let mut reqs = Vec::new();
-//!
 //! # let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! # reqs.push(http3-test::Http3Req::new("GET", &url, None, expect_hdrs));
-//!
+//! # reqs.push(http3_test::Http3Req::new("GET", &url, None, expect_hdrs));
 //! # // Using a closure...
-//! # let assert = |reqs: &[http3-test::Http3Req]| {
-//! #   assert_headers!(reqs[0]);
+//! # let assert = |reqs: &[http3_test::Http3Req]| {
+//! #   http3_test::assert_headers!(reqs[0]);
 //! # };
-//!
-//! let mut test = http3-test::Http3Test::new(url, reqs, assert, true);
+//! let mut test = http3_test::Http3Test::new(url, reqs, assert, true);
 //!
 //! let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! let scid = [0xba; 16];
@@ -143,16 +144,13 @@
 //! ```no_run
 //! # let mut url = url::Url::parse("https://cloudflare-quic.com/b/get").unwrap();
 //! # let mut reqs = Vec::new();
-//!
 //! # let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! # reqs.push(http3-test::Http3Req::new("GET", &url, None, expect_hdrs));
-//!
+//! # reqs.push(http3_test::Http3Req::new("GET", &url, None, expect_hdrs));
 //! # // Using a closure...
-//! # let assert = |reqs: &[http3-test::Http3Req]| {
-//! #   assert_headers!(reqs[0]);
+//! # let assert = |reqs: &[http3_test::Http3Req]| {
+//! #   http3_test::assert_headers!(reqs[0]);
 //! # };
-//!
-//! # let mut test = http3-test::Http3Test::new(url, reqs, assert, true);
+//! # let mut test = http3_test::Http3Test::new(url, reqs, assert, true);
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
@@ -186,16 +184,13 @@
 //! ```no_run
 //! # let mut url = url::Url::parse("https://cloudflare-quic.com/b/get").unwrap();
 //! # let mut reqs = Vec::new();
-//!
 //! # let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! # reqs.push(http3-test::Http3Req::new("GET", &url, None, expect_hdrs));
-//!
+//! # reqs.push(http3_test::Http3Req::new("GET", &url, None, expect_hdrs));
 //! # // Using a closure...
-//! # let assert = |reqs: &[http3-test::Http3Req]| {
-//! #   assert_headers!(reqs[0]);
+//! # let assert = |reqs: &[http3_test::Http3Req]| {
+//! #   http3_test::assert_headers!(reqs[0]);
 //! # };
-//!
-//! # let mut test = http3-test::Http3Test::new(url, reqs, assert, true);
+//! # let mut test = http3_test::Http3Test::new(url, reqs, assert, true);
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
@@ -215,15 +210,19 @@
 //! # Ok::<(), quiche::h3::Error>(())
 //! ```
 //!
-//! [quiche]: https://github.com/cloudflare/quiche/
+//! [`quiche`]: https://github.com/cloudflare/quiche/
 //! [test]: struct.Http3Test.html
 //! [`Http3Test`]: struct.Http3Test.html
+//! [`Http3Assert`]: struct.Http3Assert.html
+//! [`Http3req`]: struct.Http3Req.html
 //! [`assert_headers!`]: macro.assert_headers.html
+//! [`new()`]: struct.Http3Test.html#method.new
+//! [`send_requests()`]: struct.Http3Test.html#method.send_requests
 //! [`requests_count()`]: struct.Http3Test.html#method.requests_count
-//! [`set_concurrency()`]: struct.Http3Test.html#method.set_concurrency
-//! [`add_response_headers()`]: struct.Http3Test.html#method.add_response_headers
-//! [`add_response_body()`]: struct.Http3Test.html#method.add_response_body
 //! [`assert()`]: struct.Http3Test.html#method.assert
+//! [`add_response_headers()`]:
+//! struct.Http3Test.html#method.add_response_headers [`add_response_body()`]:
+//! struct.Http3Test.html#method.add_response_body
 
 #[macro_use]
 extern crate log;
@@ -236,8 +235,8 @@ pub const USER_AGENT: &str = "quiche-http3-integration-client";
 
 /// Stores the request, the expected response headers, and the actual response.
 ///
-/// The assert_headers! macro is provided for convenience to validate the received
-/// headers match the expected headers.
+/// The assert_headers! macro is provided for convenience to validate the
+/// received headers match the expected headers.
 #[derive(Clone)]
 pub struct Http3Req {
     pub url: url::Url,
@@ -282,11 +281,14 @@ impl Http3Req {
     }
 }
 
-/// Asserts that the Http3Req received response headers match the expected response headers.
+/// Asserts that the Http3Req received response headers match the expected
+/// response headers.
 ///
-/// Header values are compared with [`assert_eq!`] and this macro will panic similarly.
+/// Header values are compared with [`assert_eq!`] and this macro will panic
+/// similarly.
 ///
-/// If an expected header is not present this macro will panic and print the missing header name.AsMut
+/// If an expected header is not present this macro will panic and print the
+/// missing header name.AsMut
 ///
 /// [`assert_eq!`]: std/macro.assert.html
 #[macro_export]

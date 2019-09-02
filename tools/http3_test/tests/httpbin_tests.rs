@@ -27,14 +27,19 @@ mod httpbin_tests {
 
     fn verify_peer() -> bool {
         match std::env::var_os("VERIFY_PEER") {
-            Some(val) => {
-                match val.to_str().unwrap() {
-                    "false" => {return false;},
-                    _ => {return true;},
-                }
+            Some(val) => match val.to_str().unwrap() {
+                "false" => {
+                    return false;
+                },
+
+                _ => {
+                    return true;
+                },
             },
 
-            None => {return true;},
+            None => {
+                return true;
+            },
         };
     }
 
@@ -60,9 +65,7 @@ mod httpbin_tests {
         serde_json::from_slice(&data).unwrap()
     }
 
-    fn do_test(
-        reqs: Vec<Http3Req>, assert: Http3Assert, concurrent: bool,
-    ) {
+    fn do_test(reqs: Vec<Http3Req>, assert: Http3Assert, concurrent: bool) {
         INIT.call_once(|| {
             env_logger::builder()
                 .default_format_timestamp_nanos(true)
@@ -156,7 +159,6 @@ mod httpbin_tests {
             let json = jsonify(&reqs[0].resp_body);
             assert!(json.origin.is_some())
         };
-
 
         do_test(reqs, assert, true);
     }

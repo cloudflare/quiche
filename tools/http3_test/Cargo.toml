@@ -1,5 +1,5 @@
 [package]
-name = "http3-test"
+name = "http3_test"
 version = "0.1.0"
 authors = ["Lucas Pardue <lucaspardue.24.7@gmail.com>"]
 edition = "2018"
