@@ -1,8 +1,9 @@
 [package]
-name = "http3test"
+name = "http3-test"
 version = "0.1.0"
 authors = ["Lucas Pardue <lucaspardue.24.7@gmail.com>"]
 edition = "2018"
+publish = false
 
 [dependencies]
 docopt = "1"

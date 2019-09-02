@@ -28,7 +28,6 @@ use std::net::ToSocketAddrs;
 
 use ring::rand::*;
 
-#[allow(dead_code)]
 pub fn run(test: &mut crate::Http3Test, verify_peer: bool) {
     const MAX_DATAGRAM_SIZE: usize = 1350;
 

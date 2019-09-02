@@ -1,8 +1,7 @@
-#[cfg(test)]
 mod httpbin_tests {
     use std::collections::HashMap;
 
-    use http3test::*;
+    use http3_test::*;
     use quiche::h3::*;
 
     use std::sync::Once;
@@ -284,7 +283,7 @@ mod httpbin_tests {
             }
         }
 
-        do_test(reqs, assert_headers_only, true);
+        do_test(reqs, assert_headers_only, false);
     }
 
     #[test]
@@ -441,7 +440,7 @@ mod httpbin_tests {
             reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
         }
 
-        do_test(reqs, assert_headers_only, true);
+        do_test(reqs, assert_headers_only, false);
     }
 
     #[test]
@@ -462,7 +461,7 @@ mod httpbin_tests {
             reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
         }
 
-        do_test(reqs, assert_headers_only, true);
+        do_test(reqs, assert_headers_only, false);
     }
 
     #[test]

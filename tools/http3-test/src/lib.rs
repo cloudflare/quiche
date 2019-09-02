@@ -43,7 +43,7 @@
 //! let mut url = url::Url::parse("https://cloudflare-quic.com/b/get").unwrap();
 //! let mut reqs = Vec::new();
 //!
-//! reqs.push(http3test::Http3Req::new("GET", &url, None, None));
+//! reqs.push(http3-test::Http3Req::new("GET", &url, None, None));
 //! ```
 //!
 //! Assertions are used to check the received response headers and body
@@ -52,7 +52,7 @@
 //! status code is a 200 we could write the function:
 //!
 //! ```no_run
-//! fn assert_status(reqs: &[http3test::Http3Req]) {
+//! fn assert_status(reqs: &[http3-test::Http3Req]) {
 //!     let status = reqs[0].resp_hdrs.iter().find(|&x| x.name() == ":status").unwrap();
 //!     assert_eq!(status.value(), "200");
 //! }
@@ -66,15 +66,15 @@
 //! let mut reqs = Vec::new();
 //!
 //! let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! reqs.push(http3test::Http3Req::new("GET", &url, None, expect_hdrs));
+//! reqs.push(http3-test::Http3Req::new("GET", &url, None, expect_hdrs));
 //! ```
 //!
-//! The [`assert_hdrs()`] method can be used to validate the received headers,
+//! The [`assert_headers!`] macro can be used to validate the received headers,
 //! this means we can write a much simpler assertion:
 //!
 //! ```no_run
-//! fn assert_status(reqs: &[http3test::Http3Req]) {
-//!     reqs[0].assert_hdrs();
+//! fn assert_status(reqs: &[http3-test::Http3Req]) {
+//!     assert_headers!(reqs[0]);
 //! }
 //! ```
 //!
@@ -86,19 +86,19 @@
 //! let mut reqs = Vec::new();
 //!
 //! let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! reqs.push(http3test::Http3Req::new("GET", &url, None, expect_hdrs));
+//! reqs.push(http3-test::Http3Req::new("GET", &url, None, expect_hdrs));
 //!
 //! // Using a closure...
-//! let assert = |reqs: &[http3test::Http3Req]| reqs[0].assert_hdrs();
+//! let assert = |reqs: &[http3-test::Http3Req]| assert_headers!(reqs[0]);
 //!
-//! let mut test = http3test::Http3Test::new(url, reqs, assert, true);
+//! let mut test = http3-test::Http3Test::new(url, reqs, assert, true);
 //! ```
 //!
 //! ## Sending test requests
 //!
 //! Testing a server requires a quiche connection and a HTTP/3 connection.
 //!
-//! Request are issued with the [`send_request()`] method. By default, all
+//! Request are issued with the [`send_requests()`] method. By default, all
 //! requests are made concurrently. This can be disabled with the
 //! [`set_concurrency()`] method, which causes  [`send_request()`] to send a
 //! single request and return. Call the method multiple times to issue more
@@ -111,14 +111,14 @@
 //! # let mut reqs = Vec::new();
 //!
 //! # let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! # reqs.push(http3test::Http3Req::new("GET", &url, None, expect_hdrs));
+//! # reqs.push(http3-test::Http3Req::new("GET", &url, None, expect_hdrs));
 //!
 //! # // Using a closure...
-//! # let assert = |reqs: &[http3test::Http3Req]| {
-//! #   reqs[0].assert_hdrs()
+//! # let assert = |reqs: &[http3-test::Http3Req]| {
+//! #   assert_headers!(reqs[0]);
 //! # };
 //!
-//! let mut test = http3test::Http3Test::new(url, reqs, assert, true);
+//! let mut test = http3-test::Http3Test::new(url, reqs, assert, true);
 //!
 //! let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! let scid = [0xba; 16];
@@ -145,14 +145,14 @@
 //! # let mut reqs = Vec::new();
 //!
 //! # let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! # reqs.push(http3test::Http3Req::new("GET", &url, None, expect_hdrs));
+//! # reqs.push(http3-test::Http3Req::new("GET", &url, None, expect_hdrs));
 //!
 //! # // Using a closure...
-//! # let assert = |reqs: &[http3test::Http3Req]| {
-//! #   reqs[0].assert_hdrs()
+//! # let assert = |reqs: &[http3-test::Http3Req]| {
+//! #   assert_headers!(reqs[0]);
 //! # };
 //!
-//! # let mut test = http3test::Http3Test::new(url, reqs, assert, true);
+//! # let mut test = http3-test::Http3Test::new(url, reqs, assert, true);
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
@@ -188,14 +188,14 @@
 //! # let mut reqs = Vec::new();
 //!
 //! # let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! # reqs.push(http3test::Http3Req::new("GET", &url, None, expect_hdrs));
+//! # reqs.push(http3-test::Http3Req::new("GET", &url, None, expect_hdrs));
 //!
 //! # // Using a closure...
-//! # let assert = |reqs: &[http3test::Http3Req]| {
-//! #   reqs[0].assert_hdrs()
+//! # let assert = |reqs: &[http3-test::Http3Req]| {
+//! #   assert_headers!(reqs[0]);
 //! # };
 //!
-//! # let mut test = http3test::Http3Test::new(url, reqs, assert, true);
+//! # let mut test = http3-test::Http3Test::new(url, reqs, assert, true);
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
@@ -218,7 +218,7 @@
 //! [quiche]: https://github.com/cloudflare/quiche/
 //! [test]: struct.Http3Test.html
 //! [`Http3Test`]: struct.Http3Test.html
-//! [`assert_hdrs()`]: struct.Http3Test.html#method.assert_hdrs
+//! [`assert_headers!`]: macro.assert_headers.html
 //! [`requests_count()`]: struct.Http3Test.html#method.requests_count
 //! [`set_concurrency()`]: struct.Http3Test.html#method.set_concurrency
 //! [`add_response_headers()`]: struct.Http3Test.html#method.add_response_headers
@@ -234,9 +234,10 @@ use quiche::h3::Header;
 
 pub const USER_AGENT: &str = "quiche-http3-integration-client";
 
-// Stores the request, the expected response headers, and the actual response.
-// The assert_hdrs() method is provided for convenience to validate the received
-// headers match the expected headers.
+/// Stores the request, the expected response headers, and the actual response.
+///
+/// The assert_headers! macro is provided for convenience to validate the received
+/// headers match the expected headers.
 #[derive(Clone)]
 pub struct Http3Req {
     pub url: url::Url,
@@ -319,20 +320,22 @@ macro_rules! assert_headers {
     });
 }
 
-// A helper function pointer type for assertions.
-// Each test assertion can check the set of Http3Req
-// however they like.
+/// A helper function pointer type for assertions.
+///
+/// Each test assertion can check the set of Http3Req
+/// however they like.
 pub type Http3Assert = fn(&[Http3Req]);
 
-// The main object for getting things done. The factory method
-// new() is used to set up a vector of Http3Req objects
-// and map them to a test assertion function. The public functions
-// are used to send requests and store response data. Internally
-// we track some other state to make sure everything goes smoothly.
-//
-// Many tests have similar inputs or assertions, so utility functions
-// help cover many of the common cases like testing different status
-// codes or checking that a response body is echoed back.
+/// The main object for getting things done.
+///
+/// The factory method new() is used to set up a vector of Http3Req objects and
+/// map them to a test assertion function. The public functions are used to send
+/// requests and store response data. Internally we track some other state to
+/// make sure everything goes smoothly.
+///
+/// Many tests have similar inputs or assertions, so utility functions help
+/// cover many of the common cases like testing different status codes or
+/// checking that a response body is echoed back.
 pub struct Http3Test {
     endpoint: url::Url,
     reqs: Vec<Http3Req>,
