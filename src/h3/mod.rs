@@ -1086,25 +1086,6 @@ impl Connection {
         }
     }
 
-    // A helper function for determining if there is a DATAGRAM event.
-    fn process_dgrams(
-        &mut self, conn: &mut super::Connection,
-    ) -> Result<(u64, Event)> {
-        let mut d = [0; 8];
-
-        match conn.dgram_recv_peek(&mut d, 8) {
-            Ok(_) => {
-                let mut b = octets::Octets::with_slice(&d);
-                let flow_id = b.get_varint()?;
-                Ok((flow_id, Event::Datagram))
-            },
-
-            Err(crate::Error::Done) => Err(Error::Done),
-
-            Err(e) => Err(Error::TransportError(e)),
-        }
-    }
-
     /// Reads request or response body data into the provided buffer.
     ///
     /// Applications should call this method whenever the [`poll()`] method
@@ -1146,9 +1127,9 @@ impl Connection {
     ///
     /// The event [`Datagram`] returns a flow ID.
     ///
-    /// The event [`GoAway`] returns an ID that depends on the connection role.
-    /// A client receives the largest processed stream ID. A server receives the
-    /// the largest permitted push ID.
+    /// The event [`GoAway`] returns an ID that depends on the connection's
+    /// role. A client receives the largest processed stream ID. A server
+    /// receives the the largest permitted push ID.
     ///
     /// If an error occurs while processing data, the connection is closed with
     /// the appropriate error code, using the transport's [`close()`] method.
@@ -1165,48 +1146,16 @@ impl Connection {
     /// [`recv_dgram()`]: struct.Connection.html#method.recv_dgram
     /// [`close()`]: ../struct.Connection.html#method.close
     pub fn poll(&mut self, conn: &mut super::Connection) -> Result<(u64, Event)> {
-        // When connection close is initiated by the local application (e.g. due
-        // to a protocol error), the connection itself might be in a broken
-        // state, so return early.
-        if conn.error.is_some() || conn.app_error.is_some() {
-            return Err(Error::Done);
-        }
+        let mut event = None;
 
-        // Process control streams first.
-        if let Some(stream_id) = self.peer_control_stream_id {
-            match self.process_control_stream(conn, stream_id) {
-                Ok(ev) => return Ok(ev),
-
-                Err(Error::Done) => (),
-
-                Err(e) => return Err(e),
-            };
-        }
-
-        if let Some(stream_id) = self.peer_qpack_streams.encoder_stream_id {
-            match self.process_control_stream(conn, stream_id) {
-                Ok(ev) => return Ok(ev),
-
-                Err(Error::Done) => (),
-
-                Err(e) => return Err(e),
-            };
-        }
-
-        if let Some(stream_id) = self.peer_qpack_streams.decoder_stream_id {
-            match self.process_control_stream(conn, stream_id) {
-                Ok(ev) => return Ok(ev),
-
-                Err(Error::Done) => (),
-
-                Err(e) => return Err(e),
-            };
-        }
-
-        // Process finished streams list.
-        if let Some(finished) = self.finished_streams.pop_front() {
-            return Ok((finished, Event::Finished));
-        }
+        // When no primary event is issued (e.g. due to stream or DATAGRAM poll
+        // thresholds), we need to fallback to the first stream or datagram
+        // event regardless of thresholds.
+        //
+        // For example, if the DATAGRAM threshold is reached, but no stream
+        // events are being generated (e.g. because there are no readable stream),
+        // we should return a DATAGRAM event if available.
+        let mut fallback_event = None;
 
         // Both stream and DATAGRAM event limits have been reached,
         // so reset and start again.
@@ -1217,15 +1166,115 @@ impl Connection {
             self.stream_event_count = 0;
         }
 
-        // Process queued DATAGRAMs if the poll threshold allows it.
-        if self.dgram_event_count < self.dgram_poll_threshold &&
-            conn.dgram_recv_front_len().is_some()
-        {
-            match self.process_dgrams(conn) {
-                Ok(v) => {
-                    self.dgram_event_count += 1;
-                    return Ok(v);
+        let do_poll = |h3: &mut Connection, _: &mut crate::Connection, s, ev| {
+            match ev {
+                Event::Headers { .. } | Event::Data => {
+                    if h3.stream_event_count < h3.stream_poll_threshold {
+                        event = Some((s, ev));
+
+                        h3.stream_event_count += 1;
+                    } else if fallback_event.is_none() {
+                        fallback_event = Some((s, ev));
+                    }
                 },
+
+                Event::Datagram => {
+                    if h3.dgram_event_count < h3.dgram_poll_threshold {
+                        event = Some((s, ev));
+
+                        h3.dgram_event_count += 1;
+                    } else if fallback_event.is_none() {
+                        fallback_event = Some((s, ev));
+                    }
+                },
+
+                _ => event = Some((s, ev)),
+            }
+
+            if event.is_some() {
+                return Err(Error::Done);
+            }
+
+            Ok(())
+        };
+
+        if let Err(e) = self.poll_with(conn, do_poll) {
+            if e != Error::Done {
+                return Err(e);
+            }
+        }
+
+        if let Some(ev) = event {
+            return Ok(ev);
+        }
+
+        // Return the fallback event if a primary event is not available.
+        if let Some(ev) = fallback_event {
+            return Ok(ev);
+        }
+
+        Err(Error::Done)
+    }
+
+    /// Processes HTTP/3 data received from the peer.
+    ///
+    /// This works in a similar way to [`poll()`], but instead of returning
+    /// [`Event`] and ID tuples one by one for each call, this method processes
+    /// all available events at once by passing them to the provided
+    /// closure.
+    ///
+    /// The application can choose to process events immediately or delay their
+    /// processing to a later time. Events that are not immediately processed
+    /// (e.g. by calling [`recv_body()`] / [`recv_dgram()`]) will be issued
+    /// again in the following calls to `poll_with()` until they are processed.
+    ///
+    /// The events [`Headers`], [`Data`] and [`Finished`] are associated with a
+    /// stream ID, which is used in methods [`recv_body()`], [`send_response()`]
+    /// or [`send_body()`].
+    ///
+    /// The event [`Datagram`] is associated with a flow ID.
+    ///
+    /// The event [`GoAway`] is associated with an ID that depends on the
+    /// connection's role. A client receives the largest processed stream ID. A
+    /// server receives the the largest permitted push ID.
+    ///
+    /// If an error occurs while processing data, the connection is closed with
+    /// the appropriate error code, using the transport's [`close()`] method.
+    ///
+    /// [`Event`]: enum.Event.html
+    /// [`Headers`]: enum.Event.html#variant.Headers
+    /// [`Data`]: enum.Event.html#variant.Data
+    /// [`Finished`]: enum.Event.html#variant.Finished
+    /// [`Datagram`]: enum.Event.html#variant.Datagram
+    /// [`GoAway`]: enum.Event.html#variant.GoAWay
+    /// [`poll()`]: struct.Connection.html#method.poll
+    /// [`recv_body()`]: struct.Connection.html#method.recv_body
+    /// [`send_response()`]: struct.Connection.html#method.send_response
+    /// [`send_body()`]: struct.Connection.html#method.send_body
+    /// [`recv_dgram()`]: struct.Connection.html#method.recv_dgram
+    /// [`close()`]: ../struct.Connection.html#method.close
+    pub fn poll_with<F>(
+        &mut self, conn: &mut super::Connection, mut f: F,
+    ) -> Result<()>
+    where
+        F: FnMut(
+            &mut Connection,
+            &mut super::Connection,
+            u64,
+            Event,
+        ) -> Result<()>,
+    {
+        // When connection close is initiated by the local application (e.g. due
+        // to a protocol error), the connection itself might be in a broken
+        // state, so return early.
+        if conn.error.is_some() || conn.app_error.is_some() {
+            return Err(Error::Done);
+        }
+
+        // Process control streams first.
+        if let Some(stream_id) = self.peer_control_stream_id {
+            match self.process_control_stream(conn, stream_id) {
+                Ok(ev) => f(self, conn, ev.0, ev.1)?,
 
                 Err(Error::Done) => (),
 
@@ -1233,55 +1282,77 @@ impl Connection {
             };
         }
 
+        if let Some(stream_id) = self.peer_qpack_streams.encoder_stream_id {
+            match self.process_control_stream(conn, stream_id) {
+                Ok(ev) => f(self, conn, ev.0, ev.1)?,
+
+                Err(Error::Done) => (),
+
+                Err(e) => return Err(e),
+            };
+        }
+
+        if let Some(stream_id) = self.peer_qpack_streams.decoder_stream_id {
+            match self.process_control_stream(conn, stream_id) {
+                Ok(ev) => f(self, conn, ev.0, ev.1)?,
+
+                Err(Error::Done) => (),
+
+                Err(e) => return Err(e),
+            };
+        }
+
+        // Process finished streams list.
+        while let Some(finished) = self.finished_streams.pop_front() {
+            f(self, conn, finished, Event::Finished)?;
+        }
+
+        if conn.dgram_recv_front_len().is_some() {
+            let mut flow_ids = Vec::new();
+
+            for dgram in conn.dgram_recv_queue.iter_internal() {
+                let mut b = octets::Octets::with_slice(dgram);
+                let flow_id = b.get_varint()?;
+
+                flow_ids.push(flow_id);
+            }
+
+            for flow_id in flow_ids {
+                f(self, conn, flow_id, Event::Datagram)?;
+            }
+        }
+
         // Process HTTP/3 data from readable streams.
         for s in conn.readable() {
-            if self.stream_event_count < self.stream_poll_threshold ||
-                conn.dgram_recv_front_len().is_none()
-            {
-                trace!("{} stream id {} is readable", conn.trace_id(), s);
+            trace!("{} stream id {} is readable", conn.trace_id(), s);
 
-                let ev = match self.process_readable_stream(conn, s) {
-                    Ok(v) => Some(v),
+            let ev = match self.process_readable_stream(conn, s) {
+                Ok(v) => Some(v),
 
-                    Err(Error::Done) => None,
+                Err(Error::Done) => None,
 
-                    Err(e) => return Err(e),
-                };
+                Err(e) => return Err(e),
+            };
 
-                if conn.stream_finished(s) {
-                    self.finished_streams.push_back(s);
-                }
+            if conn.stream_finished(s) {
+                self.finished_streams.push_back(s);
+            }
 
-                // TODO: check if stream is completed so it can be freed
-                if let Some(ev) = ev {
-                    self.stream_event_count += 1;
-                    return Ok(ev);
-                }
+            // TODO: check if stream is completed so it can be freed
+
+            if let Some(ev) = ev {
+                f(self, conn, ev.0, ev.1)?;
             }
         }
 
         // Process finished streams list once again, to make sure `Finished`
         // events are returned when receiving empty stream frames with the fin
         // flag set.
-        if let Some(finished) = self.finished_streams.pop_front() {
-            return Ok((finished, Event::Finished));
+        while let Some(finished) = self.finished_streams.pop_front() {
+            f(self, conn, finished, Event::Finished)?;
         }
 
-        // No event generated at this point, so try dgram again.
-        if conn.dgram_recv_front_len().is_some() {
-            match self.process_dgrams(conn) {
-                Ok(v) => {
-                    self.dgram_event_count += 1;
-                    return Ok(v);
-                },
-
-                Err(Error::Done) => (),
-
-                Err(e) => return Err(e),
-            };
-        }
-
-        Err(Error::Done)
+        Ok(())
     }
 
     /// Sends a GOAWAY frame to initiate graceful connection closure.

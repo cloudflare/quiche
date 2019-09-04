@@ -85,6 +85,10 @@ impl DatagramQueue {
         None
     }
 
+    pub fn iter_internal(&self) -> std::collections::vec_deque::Iter<Vec<u8>> {
+        self.queue.iter()
+    }
+
     pub fn has_pending(&self) -> bool {
         !self.queue.is_empty()
     }
