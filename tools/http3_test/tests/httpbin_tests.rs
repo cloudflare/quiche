@@ -1,5 +1,6 @@
 mod httpbin_tests {
     use std::collections::HashMap;
+    use std::net::ToSocketAddrs;
 
     use http3_test::*;
     use quiche::h3::*;
@@ -23,6 +24,21 @@ mod httpbin_tests {
         }
 
         url
+    }
+
+    fn host() -> std::net::SocketAddr {
+        let url = match std::env::var_os("HTTPBIN_HOST") {
+            Some(val) => {
+                let host = val.into_string().unwrap();
+                let url = format!("{}{}", "https://", host);
+
+                url::Url::parse(&url).unwrap()
+            },
+
+            None => endpoint(None),
+        };
+
+        url.to_socket_addrs().unwrap().next().unwrap()
     }
 
     fn verify_peer() -> bool {
@@ -73,7 +89,7 @@ mod httpbin_tests {
         });
 
         let mut test = Http3Test::new(endpoint(None), reqs, assert, concurrent);
-        runner::run(&mut test, verify_peer());
+        runner::run(&mut test, host(), verify_peer());
     }
 
     // Build a single request and expected response with status code

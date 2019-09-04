@@ -24,11 +24,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::net::ToSocketAddrs;
-
 use ring::rand::*;
 
-pub fn run(test: &mut crate::Http3Test, verify_peer: bool) {
+pub fn run(
+    test: &mut crate::Http3Test, peer_addr: std::net::SocketAddr,
+    verify_peer: bool,
+) {
     const MAX_DATAGRAM_SIZE: usize = 1350;
 
     let mut buf = [0; 65535];
@@ -49,10 +50,6 @@ pub fn run(test: &mut crate::Http3Test, verify_peer: bool) {
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
-    // Resolve server address.
-    let url = &test.endpoint();
-    let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
-    info!("connecting to {:}", peer_addr);
     info!("connecting to {:}", peer_addr);
 
     // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
@@ -107,6 +104,7 @@ pub fn run(test: &mut crate::Http3Test, verify_peer: bool) {
     SystemRandom::new().fill(&mut scid[..]).unwrap();
 
     // Create a QUIC connection and initiate handshake.
+    let url = &test.endpoint();
     let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
 
     let write = match conn.send(&mut out) {
