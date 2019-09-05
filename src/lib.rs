@@ -689,6 +689,10 @@ pub struct Connection {
     /// Whether the connection handshake has been confirmed.
     handshake_confirmed: bool,
 
+    /// Whether an ACK-eliciting packet has been sent since last receiving a
+    /// packet.
+    ack_eliciting_sent: bool,
+
     /// Whether the connection is closed.
     closed: bool,
 
@@ -933,6 +937,8 @@ impl Connection {
             handshake_completed: false,
 
             handshake_confirmed: false,
+
+            ack_eliciting_sent: false,
 
             closed: false,
 
@@ -1385,6 +1391,8 @@ impl Connection {
 
             self.verified_peer_address = true;
         }
+
+        self.ack_eliciting_sent = false;
 
         Ok(read)
     }
@@ -1881,6 +1889,23 @@ impl Connection {
         }
 
         self.max_send_bytes = self.max_send_bytes.saturating_sub(written);
+
+        // (Re)start the idle timer if we are sending the first ACK-eliciting
+        // packet since last receiving a packet.
+        if ack_eliciting &&
+            !self.ack_eliciting_sent &&
+            self.local_transport_params.idle_timeout > 0
+        {
+            self.idle_timer = Some(
+                now + time::Duration::from_millis(
+                    self.local_transport_params.idle_timeout,
+                ),
+            );
+        }
+
+        if ack_eliciting {
+            self.ack_eliciting_sent = true;
+        }
 
         Ok(written)
     }
