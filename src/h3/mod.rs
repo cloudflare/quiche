@@ -523,6 +523,8 @@ pub struct Connection {
     max_push_id: u64,
 
     finished_streams: VecDeque<u64>,
+
+    frames_greased: bool,
 }
 
 impl Connection {
@@ -570,6 +572,8 @@ impl Connection {
             max_push_id: 0,
 
             finished_streams: VecDeque::new(),
+
+            frames_greased: false,
         })
     }
 
@@ -651,8 +655,9 @@ impl Connection {
 
         let header_block = self.encode_header_block(headers)?;
 
-        if conn.grease {
+        if !self.frames_greased && conn.grease {
             self.send_grease_frames(conn, stream_id)?;
+            self.frames_greased = true;
         }
 
         trace!(
