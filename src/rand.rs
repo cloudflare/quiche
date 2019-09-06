@@ -24,29 +24,37 @@
 // LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+extern crate ring;
 
-pub fn rand_bytes(buf: &mut [u8]) {
-    unsafe {
-        RAND_bytes(buf.as_mut_ptr(), buf.len());
+use ring::rand::{
+    SecureRandom,
+    SystemRandom,
+};
+
+fn rng() -> &'static dyn SecureRandom {
+    use std::ops::Deref;
+
+    lazy_static! {
+        static ref RANDOM: SystemRandom = SystemRandom::new();
     }
+
+    RANDOM.deref()
+}
+
+pub fn rand_bytes(mut buf: &mut [u8]) {
+    rng().fill(&mut buf).unwrap();
 }
 
 pub fn rand_u8() -> u8 {
     let mut buf = [0; 1];
-
-    rand_bytes(&mut buf);
+    rng().fill(&mut buf).unwrap();
 
     buf[0]
 }
 
 pub fn rand_u64() -> u64 {
     let mut buf = [0; 8];
-
-    rand_bytes(&mut buf);
+    rng().fill(&mut buf).unwrap();
 
     u64::from_ne_bytes(buf)
-}
-
-extern {
-    fn RAND_bytes(buf: *mut u8, len: libc::size_t) -> libc::c_int;
 }
