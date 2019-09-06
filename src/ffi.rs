@@ -70,7 +70,6 @@ pub extern fn quiche_enable_debug_logging(
     let logger = Box::new(Logger { cb, argp });
 
     log::set_boxed_logger(logger).unwrap();
-    log::set_max_level(log::LevelFilter::Trace);
 }
 
 #[no_mangle]
