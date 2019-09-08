@@ -432,6 +432,16 @@ fn main() {
             break;
         }
     }
+
+    let qlog_log = qlog::Qlog {
+        qlog_version: "draft-01".to_string(),
+        title: Some("Quiche http3-client qlog log".to_string()),
+        description: Some("Quiche qlog log description".to_string()),
+        summary: None,
+        traces: vec![conn.qlog_trace],
+    };
+
+    trace!("{}", serde_json::to_string(&qlog_log).unwrap());
 }
 
 fn hex_dump(buf: &[u8]) -> String {

@@ -494,6 +494,60 @@ impl Frame {
         Ok(before - b.cap())
     }
 
+    pub fn to_qlog(&self) -> Result<qlog::QuicFrame> {
+        let qlog_frame = match self {
+            Frame::Padding { .. } => qlog::QuicFrame::padding(),
+
+            Frame::ACK { ack_delay, ranges } => {
+                // TODO: formatting acked ranges sucks
+                let mut ack_ranges = Vec::new();
+                let qlog_ranges = ranges
+                    .iter()
+                    .map(|mut r| {
+                        r.end -= 1;
+                        r
+                    })
+                    .collect::<Vec<std::ops::Range<u64>>>();
+                for range in qlog_ranges {
+                    ack_ranges.push((range.start, range.end));
+                }
+                qlog::QuicFrame::ack(
+                    Some(ack_delay.to_string()),
+                    Some(ack_ranges),
+                    None,
+                    None,
+                    None,
+                )
+            },
+
+            Frame::Crypto { data } => qlog::QuicFrame::crypto(
+                data.off().to_string(),
+                data.len().to_string(),
+            ),
+
+            Frame::ApplicationClose { error_code, reason } =>
+                qlog::QuicFrame::connection_close(
+                    qlog::ErrorSpace::ApplicationError,
+                    *error_code,
+                    *error_code,
+                    String::from_utf8(reason.clone()).unwrap(),
+                    None,
+                ),
+
+            Frame::Stream { stream_id, data } => qlog::QuicFrame::stream(
+                stream_id.to_string(),
+                data.off().to_string(),
+                data.len().to_string(),
+                data.fin(),
+                None,
+            ),
+
+            _ => qlog::QuicFrame::unknown(0),
+        };
+
+        Ok(qlog_frame)
+    }
+
     pub fn wire_len(&self) -> usize {
         match self {
             Frame::Padding { len } => *len,

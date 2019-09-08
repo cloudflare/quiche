@@ -55,6 +55,10 @@ libc = "0.2"
 ring = "0.16"
 lazy_static = "1"
 
+serde_json = "1"
+
+qlog = {path = "./qlog"}
+
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = ["wincrypt"] }
 
