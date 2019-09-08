@@ -33,6 +33,9 @@ matrix:
       # http3_test
       - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
       - cargo clippy --manifest-path tools/http3_test/Cargo.toml -- -D warnings
+      # qlog
+      - RUSTFLAGS="-D warnings" cargo test --verbose --manifest-path tools/qlog/Cargo.toml
+      - cargo clippy --manifest-path tools/qlog/Cargo.toml -- -D warnings
       # quic-trace-log
       - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
       - cargo clippy --manifest-path tools/quic-trace-log/Cargo.toml -- -D warnings
@@ -66,6 +69,9 @@ matrix:
       # http3_test
       - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
       - cargo fmt --manifest-path tools/http3_test/Cargo.toml -- --check
+      # qlog
+      - RUSTFLAGS="-D warnings" cargo test --verbose --manifest-path tools/qlog/Cargo.toml
+      - cargo fmt --manifest-path tools/qlog/Cargo.toml -- --check
       # quic-trace-log
       - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
       - cargo fmt --manifest-path tools/quic-trace-log/Cargo.toml -- --check
