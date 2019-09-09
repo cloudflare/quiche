@@ -675,6 +675,8 @@ impl SendBuf {
         }
 
         if data.is_empty() {
+            // Create a dummy range buffer, in order to propagate the `fin` flag
+            // into `RangeBuf::push()`. This will be discarded later on.
             let buf = RangeBuf::from(&[], self.off, fin);
 
             return self.push(buf).map(|_| 0);
@@ -735,6 +737,12 @@ impl SendBuf {
             self.fin_off = Some(buf.max_off());
         }
 
+        // We already recorded the final offset, so we can just discard the
+        // empty buffer now.
+        if buf.is_empty() {
+            return Ok(());
+        }
+
         self.data.push(buf);
 
         Ok(())
@@ -777,10 +785,16 @@ impl SendBuf {
             out_len -= buf.len();
             out_off = buf.max_off();
 
-            out.fin = out.fin || buf.fin();
-
             out.data.extend_from_slice(&buf.data);
         }
+
+        // Override the `fin` flag set for the output buffer by matching the
+        // buffer's maximum offset against the stream's final offset (if known).
+        //
+        // This is more efficient than tracking `fin` using the range buffers
+        // themselves, and lets us avoid queueing empty buffers just so we can
+        // propagate the final size.
+        out.fin = self.fin_off == Some(out.max_off());
 
         Ok(out)
     }
@@ -1918,5 +1932,20 @@ mod tests {
         assert_eq!(write.len(), 15);
         assert_eq!(write.fin(), true);
         assert_eq!(write.data, slice);
+    }
+
+    #[test]
+    fn send_fin_zero_length() {
+        let mut stream = Stream::new(0, 15);
+
+        assert_eq!(stream.send.push_slice(b"hello", false), Ok(5));
+        assert_eq!(stream.send.push_slice(b"", true), Ok(0));
+        assert!(stream.send.is_fin());
+
+        let write = stream.send.pop(5).unwrap();
+        assert_eq!(write.off(), 0);
+        assert_eq!(write.len(), 5);
+        assert_eq!(write.fin(), true);
+        assert_eq!(write.data, b"hello");
     }
 }
