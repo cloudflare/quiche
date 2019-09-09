@@ -2054,7 +2054,7 @@ impl Connection {
         match direction {
             // TODO: send STOP_SENDING
             Shutdown::Read => {
-                stream.recv.shutdown();
+                stream.recv.shutdown()?;
 
                 // Once shutdown, the stream is guaranteed to be non-readable.
                 self.streams.mark_readable(stream_id, false);
@@ -2062,7 +2062,7 @@ impl Connection {
 
             // TODO: send RESET_STREAM
             Shutdown::Write => {
-                stream.send.shutdown();
+                stream.send.shutdown()?;
 
                 // Once shutdown, the stream is guaranteed to be non-writable.
                 self.streams.mark_writable(stream_id, false);
@@ -4111,6 +4111,11 @@ mod tests {
 
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), None);
+
+        assert_eq!(
+            pipe.server.stream_shutdown(4, Shutdown::Read, 0),
+            Err(Error::Done)
+        );
     }
 
     #[test]
@@ -4143,6 +4148,11 @@ mod tests {
 
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), None);
+
+        assert_eq!(
+            pipe.client.stream_shutdown(4, Shutdown::Write, 0),
+            Err(Error::Done)
+        );
     }
 
     #[test]
