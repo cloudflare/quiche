@@ -760,7 +760,7 @@ impl SendBuf {
                 None => break,
             };
 
-            if buf.len() > out_len || buf.max_off() >= self.max_data {
+            if buf.len() > out_len || buf.max_off() > self.max_data {
                 let new_len =
                     cmp::min(out_len, (self.max_data - buf.off()) as usize);
                 let new_buf = buf.split_off(new_len);
@@ -1903,5 +1903,20 @@ mod tests {
         assert!(stream.send.is_fin());
 
         assert_eq!(stream.send.push(second), Err(Error::FinalSize));
+    }
+
+    #[test]
+    fn send_fin_max_data_match() {
+        let mut stream = Stream::new(0, 15);
+
+        let slice = b"hellohellohello";
+
+        assert!(stream.send.push_slice(slice, true).is_ok());
+
+        let write = stream.send.pop(15).unwrap();
+        assert_eq!(write.off(), 0);
+        assert_eq!(write.len(), 15);
+        assert_eq!(write.fin(), true);
+        assert_eq!(write.data, slice);
     }
 }
