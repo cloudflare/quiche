@@ -49,6 +49,8 @@
 struct conn_io {
     ev_timer timer;
 
+    const char *host;
+
     int sock;
 
     quiche_conn *conn;
@@ -185,8 +187,8 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 .name = (const uint8_t *) ":authority",
                 .name_len = sizeof(":authority") - 1,
 
-                .value = (const uint8_t *) "quich.tech",
-                .value_len = sizeof("quich.tech") - 1,
+                .value = (const uint8_t *) conn_io->host,
+                .value_len = strlen(conn_io->host),
             },
 
             {
@@ -374,6 +376,7 @@ int main(int argc, char *argv[]) {
 
     conn_io->sock = sock;
     conn_io->conn = conn;
+    conn_io->host = host;
 
     ev_io watcher;
 
