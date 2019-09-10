@@ -876,9 +876,10 @@ impl SendBuf {
         let mut out = RangeBuf::default();
         out.data =
             Vec::with_capacity(cmp::min(max_data as u64, self.len) as usize);
+        out.off = self.off;
 
         let mut out_len = max_data;
-        let mut out_off = self.data.peek().map_or_else(|| 0, RangeBuf::off);
+        let mut out_off = self.data.peek().map_or_else(|| out.off, RangeBuf::off);
 
         while out_len > 0 &&
             self.ready() &&
@@ -1777,7 +1778,7 @@ mod tests {
         assert_eq!(send.len, 0);
 
         let write = send.pop(10).unwrap();
-        assert_eq!(write.off(), 0);
+        assert_eq!(write.off(), 5);
         assert_eq!(write.len(), 0);
         assert_eq!(write.fin(), false);
         assert_eq!(&write[..], b"");
@@ -2001,7 +2002,7 @@ mod tests {
         assert_eq!(write.data, b"helloworldsomet");
 
         let write = stream.send.pop(25).unwrap();
-        assert_eq!(write.off(), 0);
+        assert_eq!(write.off(), 15);
         assert_eq!(write.len(), 0);
         assert_eq!(write.fin(), false);
         assert_eq!(write.data, b"");
@@ -2213,5 +2214,28 @@ mod tests {
         assert!(stream.recv.is_fin());
 
         assert!(stream.is_complete());
+    }
+
+    #[test]
+    fn send_fin_zero_length_output() {
+        let mut stream = Stream::new(0, 15, true, true);
+
+        assert_eq!(stream.send.push_slice(b"hello", false), Ok(5));
+        assert!(!stream.send.is_fin());
+
+        let write = stream.send.pop(5).unwrap();
+        assert_eq!(write.off(), 0);
+        assert_eq!(write.len(), 5);
+        assert_eq!(write.fin(), false);
+        assert_eq!(write.data, b"hello");
+
+        assert_eq!(stream.send.push_slice(b"", true), Ok(0));
+        assert!(stream.send.is_fin());
+
+        let write = stream.send.pop(5).unwrap();
+        assert_eq!(write.off(), 5);
+        assert_eq!(write.len(), 0);
+        assert_eq!(write.fin(), true);
+        assert_eq!(write.data, b"");
     }
 }
