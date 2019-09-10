@@ -49,7 +49,7 @@
 struct conn_io {
     ev_timer timer;
 
-    const char* host;
+    const char *host;
 
     int sock;
 
