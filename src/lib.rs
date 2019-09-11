@@ -511,11 +511,6 @@ impl Config {
         self.local_transport_params.idle_timeout = v;
     }
 
-    /// Sets the `stateless_reset_token` transport parameter.
-    pub fn set_stateless_reset_token(&mut self, v: &[u8; 16]) {
-        self.local_transport_params.stateless_reset_token = Some(v.to_vec());
-    }
-
     /// Sets the `max_packet_size transport` parameter.
     pub fn set_max_packet_size(&mut self, v: u64) {
         self.local_transport_params.max_packet_size = v;
