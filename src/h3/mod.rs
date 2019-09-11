@@ -2484,14 +2484,32 @@ mod tests {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
-        assert!(s.send_request(true).is_ok());
-        assert!(s.send_request(true).is_ok());
-        assert!(s.send_request(true).is_ok());
-        assert!(s.send_request(true).is_ok());
-        assert!(s.send_request(true).is_ok());
+        let req = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":authority", "quic.tech"),
+            Header::new(":path", "/test"),
+            Header::new("user-agent", "quiche-test"),
+        ];
+
+        // We need to open all streams in the same flight, so we can't use the
+        // Session::send_request() method because it also calls advance(),
+        // otherwise the server would send a MAX_STREAMS frame and the client
+        // wouldn't hit the streams limit.
+        assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
+        assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(4));
+        assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(8));
+        assert_eq!(
+            s.client.send_request(&mut s.pipe.client, &req, true),
+            Ok(12)
+        );
+        assert_eq!(
+            s.client.send_request(&mut s.pipe.client, &req, true),
+            Ok(16)
+        );
 
         assert_eq!(
-            s.send_request(true),
+            s.client.send_request(&mut s.pipe.client, &req, true),
             Err(Error::TransportError(crate::Error::StreamLimit))
         );
     }
