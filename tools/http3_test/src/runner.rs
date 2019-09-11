@@ -184,7 +184,7 @@ pub fn run(
 
             if reqs_complete != reqs_count {
                 panic!("Client timed out after {:?} and only completed {}/{} requests",
-                req_start.elapsed() , reqs_complete, reqs_count);
+                req_start.elapsed(), reqs_complete, reqs_count);
             }
 
             break;
@@ -315,7 +315,7 @@ pub fn run(
 
             if reqs_complete != reqs_count {
                 panic!("Client timed out after {:?} and only completed {}/{} requests",
-                req_start.elapsed() , reqs_complete, reqs_count);
+                req_start.elapsed(), reqs_complete, reqs_count);
             }
 
             break;
