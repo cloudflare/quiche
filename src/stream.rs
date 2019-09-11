@@ -551,6 +551,12 @@ impl RecvBuf {
             return Ok(());
         }
 
+        // No need to process an empty buffer with the fin flag, if we already
+        // know the final size.
+        if buf.fin() && buf.is_empty() && self.fin_off.is_some() {
+            return Ok(());
+        }
+
         if buf.fin() {
             self.fin_off = Some(buf.max_off());
         }
@@ -849,16 +855,16 @@ impl SendBuf {
             return Ok(());
         }
 
+        if buf.fin() {
+            self.fin_off = Some(buf.max_off());
+        }
+
         // Don't queue data that was already fully ACK'd.
         if self.ack_off() >= buf.max_off() {
             return Ok(());
         }
 
         self.len += buf.len() as u64;
-
-        if buf.fin() {
-            self.fin_off = Some(buf.max_off());
-        }
 
         // We already recorded the final offset, so we can just discard the
         // empty buffer now.
