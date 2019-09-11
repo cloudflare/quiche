@@ -131,6 +131,28 @@ impl RangeSet {
     }
 }
 
+// This implements comparison between `RangeSet` and standard `Range`. The idea
+// is that a `RangeSet` with no gaps (i.e. that only contains a single range)
+// is basically equvalent to a normal `Range` so they should be comparable.
+impl PartialEq<Range<u64>> for RangeSet {
+    fn eq(&self, other: &Range<u64>) -> bool {
+        // If there is more than one range it means that the range set is not
+        // contiguous, so can't be equal to a single range.
+        if self.inner.len() != 1 {
+            return false;
+        }
+
+        // Get the first and only range in the set.
+        let (first_start, first_end) = self.inner.iter().next().unwrap();
+
+        if (*first_start..*first_end) != *other {
+            return false;
+        }
+
+        true
+    }
+}
+
 impl std::fmt::Debug for RangeSet {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let ranges: Vec<Range<u64>> = self
@@ -476,5 +498,28 @@ mod tests {
 
         r.remove_until(20);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[]);
+    }
+
+    #[test]
+    fn eq_range() {
+        let mut r = RangeSet::default();
+        assert_ne!(r, 0..0);
+
+        let expected = 3..20;
+
+        r.insert(3..6);
+        assert_ne!(r, expected);
+
+        r.insert(16..20);
+        assert_ne!(r, expected);
+
+        r.insert(10..11);
+        assert_ne!(r, expected);
+
+        r.insert(13..14);
+        assert_ne!(r, expected);
+
+        r.insert(4..17);
+        assert_eq!(r, expected);
     }
 }
