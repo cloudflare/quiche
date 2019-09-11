@@ -59,6 +59,15 @@ mod httpbin_tests {
         };
     }
 
+    fn idle_timeout() -> u64 {
+        match std::env::var_os("IDLE_TIMEOUT") {
+            Some(val) =>
+                u64::from_str_radix(&val.into_string().unwrap(), 10).unwrap(),
+
+            None => 60000,
+        }
+    }
+
     // A rudimentary structure to hold httpbin response data
     #[derive(Debug, serde::Deserialize)]
     struct HttpBinResponseBody {
@@ -89,7 +98,7 @@ mod httpbin_tests {
         });
 
         let mut test = Http3Test::new(endpoint(None), reqs, assert, concurrent);
-        runner::run(&mut test, host(), verify_peer());
+        runner::run(&mut test, host(), verify_peer(), idle_timeout());
     }
 
     // Build a single request and expected response with status code
