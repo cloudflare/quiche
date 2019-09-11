@@ -31,6 +31,7 @@ pub fn run(
     verify_peer: bool,
 ) {
     const MAX_DATAGRAM_SIZE: usize = 1350;
+    const IDLE_TIMEOUT: u64 = 60000;
 
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
@@ -83,7 +84,7 @@ pub fn run(
         .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
         .unwrap();
 
-    config.set_idle_timeout(60000);
+    config.set_idle_timeout(IDLE_TIMEOUT);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
     config.set_initial_max_data(max_data);
     config.set_initial_max_stream_data_bidi_local(max_stream_data);
@@ -180,6 +181,12 @@ pub fn run(
 
         if conn.is_closed() {
             info!("connection closed, {:?}", conn.stats());
+
+            if reqs_complete != reqs_count {
+                panic!("Client timed out after {:?} and only completed {}/{} requests",
+                req_start.elapsed(), reqs_complete, reqs_count);
+            }
+
             break;
         }
 
@@ -305,6 +312,12 @@ pub fn run(
 
         if conn.is_closed() {
             info!("connection closed, {:?}", conn.stats());
+
+            if reqs_complete != reqs_count {
+                panic!("Client timed out after {:?} and only completed {}/{} requests",
+                req_start.elapsed(), reqs_complete, reqs_count);
+            }
+
             break;
         }
     }
