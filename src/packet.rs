@@ -663,7 +663,7 @@ impl PktNumSpace {
     }
 
     pub fn ready(&self) -> bool {
-        self.crypto_stream.flushable() || self.ack_elicited
+        self.crypto_stream.is_flushable() || self.ack_elicited
     }
 }
 

@@ -1507,13 +1507,13 @@ impl Connection {
                     // figure it out.
                     self.tx_data = self.tx_data.saturating_sub(data.len() as u64);
 
-                    let was_flushable = stream.flushable();
+                    let was_flushable = stream.is_flushable();
 
                     stream.send.push(data)?;
 
                     // If the stream is now flushable push it to the flushable
                     // queue, but only if it wasn't already queued.
-                    if stream.flushable() && !was_flushable {
+                    if stream.is_flushable() && !was_flushable {
                         self.streams.push_flushable(stream_id);
                     }
                 },
@@ -1726,7 +1726,7 @@ impl Connection {
         }
 
         // Create CRYPTO frame.
-        if self.pkt_num_spaces[epoch].crypto_stream.flushable() &&
+        if self.pkt_num_spaces[epoch].crypto_stream.is_flushable() &&
             left > frame::MAX_CRYPTO_OVERHEAD &&
             !is_closing
         {
@@ -1790,7 +1790,7 @@ impl Connection {
 
                 // If the stream is still flushable, push it to the back of the
                 // queue again.
-                if stream.flushable() {
+                if stream.is_flushable() {
                     self.streams.push_flushable(stream_id);
                 }
 
@@ -1954,7 +1954,7 @@ impl Connection {
             .get_mut(stream_id)
             .ok_or(Error::InvalidStreamState)?;
 
-        if !stream.readable() {
+        if !stream.is_readable() {
             return Err(Error::Done);
         }
 
@@ -1962,7 +1962,7 @@ impl Connection {
 
         self.max_rx_data_next = self.max_rx_data_next.saturating_add(read as u64);
 
-        let readable = stream.readable();
+        let readable = stream.is_readable();
 
         if stream.recv.almost_full() {
             self.streams.mark_almost_full(stream_id, true);
@@ -2014,15 +2014,15 @@ impl Connection {
 
         // TODO: implement backpressure based on peer's flow control
 
-        let was_flushable = stream.flushable();
+        let was_flushable = stream.is_flushable();
 
         let sent = stream.send.push_slice(buf, fin)?;
 
-        let writable = stream.writable();
+        let writable = stream.is_writable();
 
         // If the stream is now flushable push it to the flushable queue, but
         // only if it wasn't already queued.
-        if stream.flushable() && !was_flushable {
+        if stream.is_flushable() && !was_flushable {
             self.streams.push_flushable(stream_id);
         }
 
@@ -2557,7 +2557,7 @@ impl Connection {
 
                 stream.recv.push(data)?;
 
-                if stream.readable() {
+                if stream.is_readable() {
                     self.streams.mark_readable(stream_id, true);
                 }
 
@@ -2572,15 +2572,15 @@ impl Connection {
                 // Get existing stream or create a new one.
                 let stream = self.get_or_create_stream(stream_id, false)?;
 
-                let was_flushable = stream.flushable();
+                let was_flushable = stream.is_flushable();
 
                 stream.send.update_max_data(max);
 
-                let writable = stream.writable();
+                let writable = stream.is_writable();
 
                 // If the stream is now flushable push it to the flushable queue,
                 // but only if it wasn't already queued.
-                if stream.flushable() && !was_flushable {
+                if stream.is_flushable() && !was_flushable {
                     self.streams.push_flushable(stream_id);
                 }
 

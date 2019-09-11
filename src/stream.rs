@@ -170,7 +170,7 @@ impl StreamMap {
         };
 
         // Stream might already be writable due to initial flow control limits.
-        if stream.writable() {
+        if stream.is_writable() {
             self.writable.insert(id);
         }
 
@@ -307,13 +307,13 @@ impl Stream {
     }
 
     /// Returns true if the stream has data to read.
-    pub fn readable(&self) -> bool {
+    pub fn is_readable(&self) -> bool {
         self.recv.ready()
     }
 
     /// Returns true if the stream has enough flow control capacity to be
     /// written to, and is not finished.
-    pub fn writable(&self) -> bool {
+    pub fn is_writable(&self) -> bool {
         !self.send.shutdown &&
             !self.send.is_fin() &&
             self.send.off < self.send.max_data
@@ -321,7 +321,7 @@ impl Stream {
 
     /// Returns true if the stream has data to send and is allowed to send at
     /// least some of it.
-    pub fn flushable(&self) -> bool {
+    pub fn is_flushable(&self) -> bool {
         self.send.ready() && self.send.off() < self.send.max_data
     }
 }
