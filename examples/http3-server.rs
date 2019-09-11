@@ -47,6 +47,7 @@ Options:
   --name <str>             Name of the server [default: quic.tech]
   --max-data BYTES         Connection-wide flow control limit [default: 10000000].
   --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
+  --max-streams STREAMS    Number of allowed concurrent streams [default: 100].
   --no-retry               Disable stateless retry.
   --no-grease              Don't send GREASE.
   -h --help                Show this screen.
@@ -86,6 +87,9 @@ fn main() {
     let max_stream_data = args.get_str("--max-stream-data");
     let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
 
+    let max_streams = args.get_str("--max-streams");
+    let max_streams = u64::from_str_radix(max_streams, 10).unwrap();
+
     // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
@@ -122,8 +126,8 @@ fn main() {
     config.set_initial_max_stream_data_bidi_local(max_stream_data);
     config.set_initial_max_stream_data_bidi_remote(max_stream_data);
     config.set_initial_max_stream_data_uni(max_stream_data);
-    config.set_initial_max_streams_bidi(100);
-    config.set_initial_max_streams_uni(5);
+    config.set_initial_max_streams_bidi(max_streams);
+    config.set_initial_max_streams_uni(max_streams);
     config.set_disable_active_migration(true);
 
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
