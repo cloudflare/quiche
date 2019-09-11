@@ -40,14 +40,16 @@ const USAGE: &str = "Usage:
   http3-server -h | --help
 
 Options:
-  --listen <addr>   Listen on the given IP:port [default: 127.0.0.1:4433]
-  --cert <file>     TLS certificate path [default: examples/cert.crt]
-  --key <file>      TLS certificate key path [default: examples/cert.key]
-  --root <dir>      Root directory [default: examples/root/]
-  --name <str>      Name of the server [default: quic.tech]
-  --no-retry        Disable stateless retry.
-  --no-grease       Don't send GREASE.
-  -h --help         Show this screen.
+  --listen <addr>          Listen on the given IP:port [default: 127.0.0.1:4433]
+  --cert <file>            TLS certificate path [default: examples/cert.crt]
+  --key <file>             TLS certificate key path [default: examples/cert.key]
+  --root <dir>             Root directory [default: examples/root/]
+  --name <str>             Name of the server [default: quic.tech]
+  --max-data BYTES         Connection-wide flow control limit [default: 10000000].
+  --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
+  --no-retry               Disable stateless retry.
+  --no-grease              Don't send GREASE.
+  -h --help                Show this screen.
 ";
 
 struct PartialResponse {
@@ -77,6 +79,12 @@ fn main() {
     let args = docopt::Docopt::new(USAGE)
         .and_then(|dopt| dopt.parse())
         .unwrap_or_else(|e| e.exit());
+
+    let max_data = args.get_str("--max-data");
+    let max_data = u64::from_str_radix(max_data, 10).unwrap();
+
+    let max_stream_data = args.get_str("--max-stream-data");
+    let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
 
     // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
@@ -110,10 +118,10 @@ fn main() {
 
     config.set_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
-    config.set_initial_max_data(10_000_000);
-    config.set_initial_max_stream_data_bidi_local(1_000_000);
-    config.set_initial_max_stream_data_bidi_remote(1_000_000);
-    config.set_initial_max_stream_data_uni(1_000_000);
+    config.set_initial_max_data(max_data);
+    config.set_initial_max_stream_data_bidi_local(max_stream_data);
+    config.set_initial_max_stream_data_bidi_remote(max_stream_data);
+    config.set_initial_max_stream_data_uni(max_stream_data);
     config.set_initial_max_streams_bidi(100);
     config.set_initial_max_streams_uni(5);
     config.set_disable_migration(true);
