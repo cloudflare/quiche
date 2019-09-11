@@ -745,9 +745,9 @@ pub fn connect(
 ) -> Result<Box<Connection>> {
     let conn = Connection::new(scid, None, config, false)?;
 
-    if server_name.is_some() {
+    if let Some(server_name) = server_name {
         conn.handshake
-            .set_host_name(server_name.unwrap())
+            .set_host_name(server_name)
             .map_err(|_| Error::TlsFail)?;
     }
 
@@ -1325,14 +1325,15 @@ impl Connection {
         // Process ACK'd frames.
         for acked in self.recovery.acked[epoch].drain(..) {
             match acked {
-                // Stop acknowledging packets less than or equal to the
-                // largest acknowledged in the sent ACK frame that, in
-                // turn, got ACK'd.
                 frame::Frame::ACK { ranges, .. } => {
-                    let largest_acked = ranges.largest().unwrap();
-                    self.pkt_num_spaces[epoch]
-                        .recv_pkt_need_ack
-                        .remove_until(largest_acked);
+                    // Stop acknowledging packets less than or equal to the
+                    // largest acknowledged in the sent ACK frame that, in
+                    // turn, got ACK'd.
+                    if let Some(largest_acked) = ranges.largest() {
+                        self.pkt_num_spaces[epoch]
+                            .recv_pkt_need_ack
+                            .remove_until(largest_acked);
+                    }
                 },
 
                 frame::Frame::Crypto { data } => {
@@ -1754,7 +1755,11 @@ impl Connection {
             !is_closing
         {
             while let Some(stream_id) = self.streams.pop_flushable() {
-                let stream = self.streams.get_mut(stream_id).unwrap();
+                let stream = match self.streams.get_mut(stream_id) {
+                    Some(v) => v,
+
+                    None => continue,
+                };
 
                 // Make sure we can fit the data in the packet.
                 let stream_len = cmp::min(
@@ -2216,21 +2221,22 @@ impl Connection {
             return;
         }
 
-        if self.idle_timer.is_some() && self.idle_timer.unwrap() <= now {
-            trace!("{} idle timeout expired", self.trace_id);
+        if let Some(timer) = self.idle_timer {
+            if timer <= now {
+                trace!("{} idle timeout expired", self.trace_id);
 
-            self.closed = true;
-            return;
+                self.closed = true;
+                return;
+            }
         }
 
-        if self.recovery.loss_detection_timer().is_some() &&
-            self.recovery.loss_detection_timer().unwrap() <= now
-        {
-            trace!("{} loss detection timeout expired", self.trace_id);
+        if let Some(timer) = self.recovery.loss_detection_timer() {
+            if timer <= now {
+                trace!("{} loss detection timeout expired", self.trace_id);
 
-            self.recovery.on_loss_detection_timeout(now, &self.trace_id);
-
-            return;
+                self.recovery.on_loss_detection_timeout(now, &self.trace_id);
+                return;
+            }
         }
     }
 
