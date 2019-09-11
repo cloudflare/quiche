@@ -56,7 +56,7 @@ impl RangeSet {
         // Check if following existing ranges overlap with the new one.
         while let Some(r) = self.next_to(start) {
             // Existing range is fully contained in the new range, remove it.
-            if range_contains(&item, r.start) && range_contains(&item, r.end) {
+            if item.contains(&r.start) && item.contains(&r.end) {
                 self.inner.remove(&r.start);
                 continue;
             }
@@ -133,16 +133,15 @@ impl RangeSet {
 
 impl std::fmt::Debug for RangeSet {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "{:?}",
-            self.iter()
-                .map(|mut r| {
-                    r.end -= 1;
-                    r
-                })
-                .collect::<Vec<Range<u64>>>()
-        )
+        let ranges: Vec<Range<u64>> = self
+            .iter()
+            .map(|mut r| {
+                r.end -= 1;
+                r
+            })
+            .collect();
+
+        write!(f, "{:?}", ranges)
     }
 }
 
@@ -209,10 +208,6 @@ impl<'a> DoubleEndedIterator for Flatten<'a> {
 
         Some(self.end)
     }
-}
-
-fn range_contains(r: &Range<u64>, item: u64) -> bool {
-    r.start <= item && item <= r.end
 }
 
 fn range_overlaps(r: &Range<u64>, other: &Range<u64>) -> bool {
