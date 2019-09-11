@@ -1346,6 +1346,11 @@ impl Connection {
                     };
 
                     stream.send.ack(data.off(), data.len());
+
+                    if stream.is_complete() {
+                        let local = stream.local;
+                        self.streams.collect(stream_id, local);
+                    }
                 },
 
                 _ => (),
@@ -1959,12 +1964,20 @@ impl Connection {
 
         let readable = stream.is_readable();
 
+        let complete = stream.is_complete();
+
+        let local = stream.local;
+
         if stream.recv.almost_full() {
             self.streams.mark_almost_full(stream_id, true);
         }
 
         if !readable {
             self.streams.mark_readable(stream_id, false);
+        }
+
+        if complete {
+            self.streams.collect(stream_id, local);
         }
 
         Ok((read, fin))
