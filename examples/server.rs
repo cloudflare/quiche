@@ -43,17 +43,18 @@ const USAGE: &str = "Usage:
   server -h | --help
 
 Options:
-  --listen <addr>          Listen on the given IP:port [default: 127.0.0.1:4433]
-  --cert <file>            TLS certificate path [default: examples/cert.crt]
-  --key <file>             TLS certificate key path [default: examples/cert.key]
-  --root <dir>             Root directory [default: examples/root/]
-  --name <str>             Name of the server [default: quic.tech]
-  --max-data BYTES         Connection-wide flow control limit [default: 10000000].
-  --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
-  --max-streams STREAMS    Number of allowed concurrent streams [default: 100].
-  --dump-packets PATH      Dump the incoming packets as files in the given directory.
-  --no-retry               Disable stateless retry.
-  -h --help                Show this screen.
+  --listen <addr>             Listen on the given IP:port [default: 127.0.0.1:4433]
+  --cert <file>               TLS certificate path [default: examples/cert.crt]
+  --key <file>                TLS certificate key path [default: examples/cert.key]
+  --root <dir>                Root directory [default: examples/root/]
+  --name <str>                Name of the server [default: quic.tech]
+  --max-data BYTES            Connection-wide flow control limit [default: 10000000].
+  --max-stream-data BYTES     Per-stream flow control limit [default: 1000000].
+  --max-streams-bidi STREAMS  Number of allowed concurrent streams [default: 100].
+  --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 100].
+  --dump-packets PATH         Dump the incoming packets as files in the given directory.
+  --no-retry                  Disable stateless retry.
+  -h --help                   Show this screen.
 ";
 
 struct PartialResponse {
@@ -88,8 +89,11 @@ fn main() {
     let max_stream_data = args.get_str("--max-stream-data");
     let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
 
-    let max_streams = args.get_str("--max-streams");
-    let max_streams = u64::from_str_radix(max_streams, 10).unwrap();
+    let max_streams_bidi = args.get_str("--max-streams-bidi");
+    let max_streams_bidi = u64::from_str_radix(max_streams_bidi, 10).unwrap();
+
+    let max_streams_uni = args.get_str("--max-streams-uni");
+    let max_streams_uni = u64::from_str_radix(max_streams_uni, 10).unwrap();
 
     let dump_path = if args.get_str("--dump-packets") != "" {
         Some(args.get_str("--dump-packets"))
@@ -133,8 +137,8 @@ fn main() {
     config.set_initial_max_stream_data_bidi_local(max_stream_data);
     config.set_initial_max_stream_data_bidi_remote(max_stream_data);
     config.set_initial_max_stream_data_uni(max_stream_data);
-    config.set_initial_max_streams_bidi(max_streams);
-    config.set_initial_max_streams_uni(max_streams);
+    config.set_initial_max_streams_bidi(max_streams_bidi);
+    config.set_initial_max_streams_uni(max_streams_uni);
     config.set_disable_active_migration(true);
 
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
