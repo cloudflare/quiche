@@ -2012,8 +2012,6 @@ impl Connection {
         // Get existing stream or create a new one.
         let stream = self.get_or_create_stream(stream_id, true)?;
 
-        // TODO: implement backpressure based on peer's flow control
-
         let was_flushable = stream.is_flushable();
 
         let sent = stream.send.push_slice(buf, fin)?;
