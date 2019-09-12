@@ -468,6 +468,15 @@ impl RecvBuf {
         while let Some(mut buf) = tmp_buf {
             tmp_buf = None;
 
+            // Discard incoming data below current stream offset. Bytes up to
+            // `self.off` have already been received so we should not buffer
+            // them again. This is also important to make sure `ready()` doesn't
+            // get stuck when a buffer with lower offset than the stream's is
+            // buffered.
+            if self.off > buf.off() {
+                buf = buf.split_off((self.off - buf.off()) as usize);
+            }
+
             for b in &self.data {
                 // New buffer is fully contained in existing buffer.
                 if buf.off() >= b.off() && buf.max_off() <= b.max_off() {
@@ -1947,5 +1956,27 @@ mod tests {
         assert_eq!(write.len(), 5);
         assert_eq!(write.fin(), true);
         assert_eq!(write.data, b"hello");
+    }
+
+    #[test]
+    fn recv_data_below_off() {
+        let mut stream = Stream::new(15, 0);
+
+        let first = RangeBuf::from(b"hello", 0, false);
+
+        assert_eq!(stream.recv.push(first), Ok(()));
+
+        let mut buf = [0; 10];
+
+        let (len, fin) = stream.recv.pop(&mut buf).unwrap();
+        assert_eq!(&buf[..len], b"hello");
+        assert_eq!(fin, false);
+
+        let first = RangeBuf::from(b"elloworld", 1, true);
+        assert_eq!(stream.recv.push(first), Ok(()));
+
+        let (len, fin) = stream.recv.pop(&mut buf).unwrap();
+        assert_eq!(&buf[..len], b"world");
+        assert_eq!(fin, true);
     }
 }
