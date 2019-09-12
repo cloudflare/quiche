@@ -1587,32 +1587,27 @@ impl Connection {
             }
         }
 
-        // Create MAX_DATA frame, when the new limit is at least double the
-        // amount of data that can be received before blocking.
-        if pkt_type == packet::Type::Short &&
-            (self.max_rx_data_next != self.max_rx_data &&
-                self.max_rx_data_next / 2 > self.max_rx_data - self.rx_data) &&
-            !is_closing
-        {
-            let frame = frame::Frame::MaxData {
-                max: self.max_rx_data_next,
-            };
-
-            if frame.wire_len() <= left {
-                self.max_rx_data = self.max_rx_data_next;
-
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
-
-                frames.push(frame);
-
-                ack_eliciting = true;
-                in_flight = true;
-            }
-        }
-
-        // Create MAX_STREAM_DATA frames as needed.
         if pkt_type == packet::Type::Short && !is_closing {
+            // Create MAX_DATA frame as needed.
+            if self.should_update_max_data() {
+                let frame = frame::Frame::MaxData {
+                    max: self.max_rx_data_next,
+                };
+
+                if frame.wire_len() <= left {
+                    self.max_rx_data = self.max_rx_data_next;
+
+                    payload_len += frame.wire_len();
+                    left -= frame.wire_len();
+
+                    frames.push(frame);
+
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
+            }
+
+            // Create MAX_STREAM_DATA frames as needed.
             for stream_id in self.streams.almost_full() {
                 let stream = match self.streams.get_mut(stream_id) {
                     Some(v) => v,
@@ -2417,7 +2412,9 @@ impl Connection {
 
         // If there are flushable streams, use Application.
         if self.handshake_completed &&
-            (self.streams.has_flushable() || self.streams.has_almost_full())
+            (self.should_update_max_data() ||
+                self.streams.has_flushable() ||
+                self.streams.has_almost_full())
         {
             return Ok(packet::EPOCH_APPLICATION);
         }
@@ -2644,6 +2641,15 @@ impl Connection {
         self.recovery.drop_unacked_data(epoch);
 
         trace!("{} dropped epoch {} state", self.trace_id, epoch);
+    }
+
+    /// Returns true if the connection-level flow control needs to be updated.
+    ///
+    /// This happens when the new max data limit is at least double the amount
+    /// of data that can be received before blocking.
+    fn should_update_max_data(&self) -> bool {
+        self.max_rx_data_next != self.max_rx_data &&
+            self.max_rx_data_next / 2 > self.max_rx_data - self.rx_data
     }
 }
 
