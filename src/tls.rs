@@ -474,7 +474,7 @@ extern fn set_encryption_secrets(
         crypto::Level::ZeroRTT => unimplemented!("0-RTT"),
         crypto::Level::Handshake =>
             &mut conn.pkt_num_spaces[packet::EPOCH_HANDSHAKE],
-        crypto::Level::Application =>
+        crypto::Level::OneRTT =>
             &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
     };
 
@@ -562,7 +562,7 @@ extern fn add_handshake_data(
         crypto::Level::ZeroRTT => unreachable!(),
         crypto::Level::Handshake =>
             &mut conn.pkt_num_spaces[packet::EPOCH_HANDSHAKE],
-        crypto::Level::Application =>
+        crypto::Level::OneRTT =>
             &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
     };
 

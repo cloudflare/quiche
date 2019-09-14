@@ -2388,7 +2388,7 @@ impl Connection {
                 crypto::Level::Initial => packet::EPOCH_INITIAL,
                 crypto::Level::ZeroRTT => unreachable!(),
                 crypto::Level::Handshake => packet::EPOCH_HANDSHAKE,
-                crypto::Level::Application => packet::EPOCH_APPLICATION,
+                crypto::Level::OneRTT => packet::EPOCH_APPLICATION,
             };
 
             return Ok(epoch);

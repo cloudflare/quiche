@@ -36,13 +36,13 @@ use crate::packet;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Level {
-    Initial     = 0,
+    Initial   = 0,
     // Silence "variant is never constructed" warning because the value can
     // be received from BoringSSL as part of the FFI callbacks.
     #[allow(dead_code)]
-    ZeroRTT     = 1,
-    Handshake   = 2,
-    Application = 3,
+    ZeroRTT   = 1,
+    Handshake = 2,
+    OneRTT    = 3,
 }
 
 impl Level {
@@ -52,7 +52,7 @@ impl Level {
 
             packet::EPOCH_HANDSHAKE => Level::Handshake,
 
-            packet::EPOCH_APPLICATION => Level::Application,
+            packet::EPOCH_APPLICATION => Level::OneRTT,
 
             _ => unreachable!(),
         }
