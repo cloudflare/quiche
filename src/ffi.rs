@@ -227,7 +227,7 @@ pub extern fn quiche_header_info(
             Type::Retry => 2,
             Type::Handshake => 3,
             Type::ZeroRTT => 4,
-            Type::Application => 5,
+            Type::Short => 5,
             Type::VersionNegotiation => 6,
         };
 

@@ -78,8 +78,8 @@ pub enum Type {
     /// Version negotiation packet.
     VersionNegotiation,
 
-    /// Short header packet.
-    Application,
+    /// 1-RTT short header packet.
+    Short,
 }
 
 impl Type {
@@ -89,7 +89,7 @@ impl Type {
 
             EPOCH_HANDSHAKE => Type::Handshake,
 
-            EPOCH_APPLICATION => Type::Application,
+            EPOCH_APPLICATION => Type::Short,
 
             _ => unreachable!(),
         }
@@ -103,7 +103,7 @@ impl Type {
 
             Type::Handshake => Ok(EPOCH_HANDSHAKE),
 
-            Type::Application => Ok(EPOCH_APPLICATION),
+            Type::Short => Ok(EPOCH_APPLICATION),
 
             _ => Err(Error::InvalidPacket),
         }
@@ -183,7 +183,7 @@ impl Header {
             let dcid = b.get_bytes(dcid_len)?;
 
             return Ok(Header {
-                ty: Type::Application,
+                ty: Type::Short,
                 version: 0,
                 dcid: dcid.to_vec(),
                 scid: Vec::new(),
@@ -280,7 +280,7 @@ impl Header {
         first |= self.pkt_num_len.saturating_sub(1) as u8;
 
         // Encode short header.
-        if self.ty == Type::Application {
+        if self.ty == Type::Short {
             // Unset form bit for short header.
             first &= !FORM_BIT;
 
@@ -362,7 +362,7 @@ impl std::fmt::Debug for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", self.ty)?;
 
-        if self.ty != Type::Application {
+        if self.ty != Type::Short {
             write!(f, " version={:x}", self.version)?;
         }
 
@@ -371,7 +371,7 @@ impl std::fmt::Debug for Header {
             write!(f, "{:02x}", b)?;
         }
 
-        if self.ty != Type::Application {
+        if self.ty != Type::Short {
             write!(f, " scid=")?;
             for b in &self.scid {
                 write!(f, "{:02x}", b)?;
@@ -396,7 +396,7 @@ impl std::fmt::Debug for Header {
             write!(f, " versions={:x?}", versions)?;
         }
 
-        if self.ty == Type::Application {
+        if self.ty == Type::Short {
             write!(f, " key_phase={}", self.key_phase)?;
         }
 
@@ -469,7 +469,7 @@ pub fn decrypt_hdr(
     hdr.pkt_num = pn;
     hdr.pkt_num_len = pn_len;
 
-    if hdr.ty == Type::Application {
+    if hdr.ty == Type::Short {
         hdr.key_phase = (first & KEY_PHASE_BIT) != 0;
     }
 
@@ -877,7 +877,7 @@ mod tests {
     #[test]
     fn application() {
         let hdr = Header {
-            ty: Type::Application,
+            ty: Type::Short,
             version: 0,
             dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba],
             scid: vec![],

@@ -1162,13 +1162,13 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        if hdr.ty != packet::Type::Application && hdr.version != self.version {
+        if hdr.ty != packet::Type::Short && hdr.version != self.version {
             return Err(Error::UnknownVersion);
         }
 
         // Long header packets have an explicit payload length, but short
         // packets don't so just use the remaining capacity in the buffer.
-        let payload_len = if hdr.ty == packet::Type::Application {
+        let payload_len = if hdr.ty == packet::Type::Short {
             b.cap()
         } else {
             b.get_varint()? as usize
@@ -1272,7 +1272,7 @@ impl Connection {
         // Keep track of the number of Application packets received before the
         // handshake is completed, and drop any that exceed the initial
         // congestion window packet count.
-        if hdr.ty == packet::Type::Application && !self.is_established() {
+        if hdr.ty == packet::Type::Short && !self.is_established() {
             self.early_app_pkts += 1;
 
             if self.early_app_pkts > recovery::INITIAL_WINDOW_PACKETS {
@@ -1309,7 +1309,7 @@ impl Connection {
 
             // If the packet this frame belongs to is an early Application one,
             // buffer the frame for later processing.
-            if hdr.ty == packet::Type::Application && !self.is_established() {
+            if hdr.ty == packet::Type::Short && !self.is_established() {
                 self.early_app_frames.push(frame);
                 continue;
             }
@@ -1592,7 +1592,7 @@ impl Connection {
 
         // Create MAX_DATA frame, when the new limit is at least double the
         // amount of data that can be received before blocking.
-        if pkt_type == packet::Type::Application &&
+        if pkt_type == packet::Type::Short &&
             (self.max_rx_data_next != self.max_rx_data &&
                 self.max_rx_data_next / 2 > self.max_rx_data - self.rx_data) &&
             !is_closing
@@ -1615,7 +1615,7 @@ impl Connection {
         }
 
         // Create MAX_STREAM_DATA frames as needed.
-        if pkt_type == packet::Type::Application && !is_closing {
+        if pkt_type == packet::Type::Short && !is_closing {
             for stream_id in self.streams.almost_full() {
                 let stream = match self.streams.get_mut(stream_id) {
                     Some(v) => v,
@@ -1685,7 +1685,7 @@ impl Connection {
 
         // Create APPLICATION_CLOSE frame.
         if let Some(err) = self.app_error {
-            if pkt_type == packet::Type::Application {
+            if pkt_type == packet::Type::Short {
                 let frame = frame::Frame::ApplicationClose {
                     error_code: err,
                     reason: self.app_reason.clone(),
@@ -1744,7 +1744,7 @@ impl Connection {
         }
 
         // Create a single STREAM frame for the first stream that is flushable.
-        if pkt_type == packet::Type::Application &&
+        if pkt_type == packet::Type::Short &&
             self.max_tx_data > self.tx_data &&
             left > frame::MAX_STREAM_OVERHEAD &&
             !is_closing
@@ -1828,7 +1828,7 @@ impl Connection {
         payload_len += overhead;
 
         // Only long header packets have an explicit length field.
-        if pkt_type != packet::Type::Application {
+        if pkt_type != packet::Type::Short {
             let len = pn_len + payload_len;
             b.put_varint(len as u64)?;
         }
@@ -3224,7 +3224,7 @@ pub mod testing {
         let payload_len =
             frames.iter().fold(0, |acc, x| acc + x.wire_len()) + space.overhead();
 
-        if pkt_type != packet::Type::Application {
+        if pkt_type != packet::Type::Short {
             let len = pn_len + payload_len;
             b.put_varint(len as u64)?;
         }
@@ -3508,7 +3508,7 @@ mod tests {
             data: stream::RangeBuf::from(b"aaaaa", 0, false),
         }];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
 
         let mut readable = pipe.server.readable();
@@ -3521,7 +3521,7 @@ mod tests {
             data: stream::RangeBuf::from(b"", 5, true),
         }];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
 
         let mut readable = pipe.server.readable();
@@ -3534,7 +3534,7 @@ mod tests {
             data: stream::RangeBuf::from(b"", 15, true),
         }];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FinalSize)
@@ -3564,7 +3564,7 @@ mod tests {
             },
         ];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FlowControl),
@@ -3590,7 +3590,7 @@ mod tests {
             },
         ];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
 
         assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
@@ -3631,7 +3631,7 @@ mod tests {
             data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaaa", 0, true),
         }];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FlowControl),
@@ -3651,7 +3651,7 @@ mod tests {
             data: stream::RangeBuf::from(b"aaaaaaaaaaa", 0, true),
         }];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FlowControl),
@@ -3671,7 +3671,7 @@ mod tests {
             data: stream::RangeBuf::from(b"aaaaaaa", 0, false),
         }];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
 
         assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
@@ -3743,7 +3743,7 @@ mod tests {
             },
         ];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::StreamLimit),
@@ -3760,14 +3760,14 @@ mod tests {
 
         let frames = [frame::Frame::MaxStreamsBidi { max: 2u64.pow(60) }];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
         let frames = [frame::Frame::MaxStreamsBidi {
             max: 2u64.pow(60) + 1,
         }];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::StreamLimit),
@@ -3813,7 +3813,7 @@ mod tests {
             },
         ];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::StreamLimit),
@@ -3830,14 +3830,14 @@ mod tests {
 
         let frames = [frame::Frame::MaxStreamsUni { max: 2u64.pow(60) }];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
         let frames = [frame::Frame::MaxStreamsUni {
             max: 2u64.pow(60) + 1,
         }];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::StreamLimit),
@@ -3867,7 +3867,7 @@ mod tests {
             },
         ];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
         let mut b = [0; 15];
@@ -3898,7 +3898,7 @@ mod tests {
             },
         ];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
         let mut b = [0; 15];
@@ -3934,7 +3934,7 @@ mod tests {
             },
         ];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FlowControl),
@@ -3953,7 +3953,7 @@ mod tests {
             data: vec![0xba; 8],
         }];
 
-        let pkt_type = packet::Type::Application;
+        let pkt_type = packet::Type::Short;
 
         let len = pipe
             .send_pkt_to_server(pkt_type, &frames, &mut buf)

@@ -271,7 +271,7 @@ impl Frame {
             (_, Frame::ConnectionClose { .. }) => true,
 
             // All frames are allowed on Application packets.
-            (packet::Type::Application, _) => true,
+            (packet::Type::Short, _) => true,
 
             // All other cases are forbidden.
             (..) => false,
@@ -891,10 +891,7 @@ mod tests {
         assert_eq!(wire_len, 128);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_ok());
@@ -921,10 +918,7 @@ mod tests {
         assert_eq!(&d[..wire_len], [0x01 as u8]);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -959,10 +953,7 @@ mod tests {
         assert_eq!(wire_len, 17);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_ok());
@@ -992,10 +983,7 @@ mod tests {
         assert_eq!(wire_len, 11);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1024,10 +1012,7 @@ mod tests {
         assert_eq!(wire_len, 7);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1057,10 +1042,7 @@ mod tests {
         assert_eq!(wire_len, 18);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_ok());
@@ -1088,10 +1070,7 @@ mod tests {
         assert_eq!(wire_len, 17);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1122,10 +1101,7 @@ mod tests {
         assert_eq!(wire_len, 19);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1157,7 +1133,7 @@ mod tests {
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
+            Frame::from_bytes(&mut b, packet::Type::Short),
             Err(Error::InvalidFrame)
         );
     }
@@ -1176,10 +1152,7 @@ mod tests {
         assert_eq!(wire_len, 5);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1208,10 +1181,7 @@ mod tests {
         assert_eq!(wire_len, 7);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1237,10 +1207,7 @@ mod tests {
         assert_eq!(wire_len, 5);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1266,10 +1233,7 @@ mod tests {
         assert_eq!(wire_len, 5);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1295,10 +1259,7 @@ mod tests {
         assert_eq!(wire_len, 5);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1327,10 +1288,7 @@ mod tests {
         assert_eq!(wire_len, 7);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1356,10 +1314,7 @@ mod tests {
         assert_eq!(wire_len, 5);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1385,10 +1340,7 @@ mod tests {
         assert_eq!(wire_len, 5);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1419,10 +1371,7 @@ mod tests {
         assert_eq!(wire_len, 41);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1448,10 +1397,7 @@ mod tests {
         assert_eq!(wire_len, 5);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1479,10 +1425,7 @@ mod tests {
         assert_eq!(wire_len, 9);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1510,10 +1453,7 @@ mod tests {
         assert_eq!(wire_len, 9);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1543,10 +1483,7 @@ mod tests {
         assert_eq!(wire_len, 22);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_ok());
@@ -1575,10 +1512,7 @@ mod tests {
         assert_eq!(wire_len, 18);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Application),
-            Ok(frame)
-        );
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
