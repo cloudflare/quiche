@@ -252,7 +252,7 @@ use std::collections::VecDeque;
 use crate::octets;
 
 /// The current HTTP/3 ALPN token.
-pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-22";
+pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-23";
 
 /// A specialized [`Result`] type for quiche HTTP/3 operations.
 ///

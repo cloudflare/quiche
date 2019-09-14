@@ -242,7 +242,7 @@ use std::cmp;
 use std::time;
 
 /// The current QUIC wire version.
-pub const PROTOCOL_VERSION: u32 = 0xff00_0016;
+pub const PROTOCOL_VERSION: u32 = 0xff00_0017;
 
 /// The maximum length of a connection ID.
 pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
