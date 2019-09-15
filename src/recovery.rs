@@ -42,6 +42,8 @@ use crate::ranges;
 // Loss Recovery
 const PACKET_THRESHOLD: u64 = 3;
 
+const TIME_THRESHOLD: f64 = 9.0 / 8.0;
+
 const GRANULARITY: Duration = Duration::from_millis(1);
 
 const INITIAL_RTT: Duration = Duration::from_millis(500);
@@ -369,9 +371,12 @@ impl Recovery {
                     latest_rtt
                 };
 
-                self.rttvar = (self.rttvar * 3 + sub_abs(srtt, adjusted_rtt)) / 4;
+                self.rttvar = self.rttvar.mul_f64(3.0 / 4.0) +
+                    sub_abs(srtt, adjusted_rtt).mul_f64(1.0 / 4.0);
 
-                self.smoothed_rtt = Some((srtt * 7 + adjusted_rtt) / 8);
+                self.smoothed_rtt = Some(
+                    srtt.mul_f64(7.0 / 8.0) + adjusted_rtt.mul_f64(1.0 / 8.0),
+                );
             },
         }
     }
@@ -432,7 +437,8 @@ impl Recovery {
 
         let largest_acked = self.largest_acked_pkt[epoch];
 
-        let loss_delay = (cmp::max(self.latest_rtt, self.rtt()) * 9) / 8;
+        let loss_delay =
+            cmp::max(self.latest_rtt, self.rtt()).mul_f64(TIME_THRESHOLD);
         let loss_delay = cmp::max(loss_delay, GRANULARITY);
 
         let lost_send_time = now - loss_delay;
