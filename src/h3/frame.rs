@@ -30,7 +30,6 @@ use crate::octets;
 
 pub const DATA_FRAME_TYPE_ID: u64 = 0x0;
 pub const HEADERS_FRAME_TYPE_ID: u64 = 0x1;
-pub const PRIORITY_FRAME_TYPE_ID: u64 = 0x2;
 pub const CANCEL_PUSH_FRAME_TYPE_ID: u64 = 0x3;
 pub const SETTINGS_FRAME_TYPE_ID: u64 = 0x4;
 pub const PUSH_PROMISE_FRAME_TYPE_ID: u64 = 0x5;

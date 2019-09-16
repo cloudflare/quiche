@@ -225,25 +225,29 @@ impl Stream {
                     (frame::SETTINGS_FRAME_TYPE_ID, false) =>
                         self.initialized = true,
 
-                    // Additional SETTINGS frame.
-                    (frame::SETTINGS_FRAME_TYPE_ID, true) =>
-                        return Err(Error::UnexpectedFrame),
-
-                    // Frames that can never be received on control streams.
-                    (frame::DATA_FRAME_TYPE_ID, _) =>
-                        return Err(Error::WrongStream),
-
-                    (frame::HEADERS_FRAME_TYPE_ID, _) =>
-                        return Err(Error::WrongStream),
-
-                    (frame::PUSH_PROMISE_FRAME_TYPE_ID, _) =>
-                        return Err(Error::WrongStream),
-
-                    (frame::DUPLICATE_PUSH_FRAME_TYPE_ID, _) =>
-                        return Err(Error::WrongStream),
-
+                    // Non-SETTINGS frames not allowed on control stream
+                    // before initialization.
                     (_, false) => return Err(Error::MissingSettings),
 
+                    // Additional SETTINGS frame.
+                    (frame::SETTINGS_FRAME_TYPE_ID, true) =>
+                        return Err(Error::FrameUnexpected),
+
+                    // Frames that can't be received on control stream
+                    // after initialization.
+                    (frame::DATA_FRAME_TYPE_ID, true) =>
+                        return Err(Error::FrameUnexpected),
+
+                    (frame::HEADERS_FRAME_TYPE_ID, true) =>
+                        return Err(Error::FrameUnexpected),
+
+                    (frame::PUSH_PROMISE_FRAME_TYPE_ID, true) =>
+                        return Err(Error::FrameUnexpected),
+
+                    (frame::DUPLICATE_PUSH_FRAME_TYPE_ID, true) =>
+                        return Err(Error::FrameUnexpected),
+
+                    // All other frames are ignored after initialization.
                     (_, true) => (),
                 }
             },
@@ -256,21 +260,17 @@ impl Stream {
                         (frame::HEADERS_FRAME_TYPE_ID, false) =>
                             self.initialized = true,
 
-                        // Frames that can never be received on request streams.
-                        (frame::PRIORITY_FRAME_TYPE_ID, _) =>
-                            return Err(Error::WrongStream),
-
                         (frame::CANCEL_PUSH_FRAME_TYPE_ID, _) =>
-                            return Err(Error::WrongStream),
+                            return Err(Error::FrameUnexpected),
 
                         (frame::SETTINGS_FRAME_TYPE_ID, _) =>
-                            return Err(Error::WrongStream),
+                            return Err(Error::FrameUnexpected),
 
                         (frame::GOAWAY_FRAME_TYPE_ID, _) =>
-                            return Err(Error::WrongStream),
+                            return Err(Error::FrameUnexpected),
 
                         (frame::MAX_PUSH_FRAME_TYPE_ID, _) =>
-                            return Err(Error::WrongStream),
+                            return Err(Error::FrameUnexpected),
 
                         // All other frames can be ignored regardless of stream
                         // state.
@@ -284,32 +284,29 @@ impl Stream {
             Some(Type::Push) => {
                 match ty {
                     // Frames that can never be received on request streams.
-                    frame::PRIORITY_FRAME_TYPE_ID =>
-                        return Err(Error::WrongStream),
-
                     frame::CANCEL_PUSH_FRAME_TYPE_ID =>
-                        return Err(Error::WrongStream),
+                        return Err(Error::FrameUnexpected),
 
                     frame::SETTINGS_FRAME_TYPE_ID =>
-                        return Err(Error::WrongStream),
+                        return Err(Error::FrameUnexpected),
 
                     frame::PUSH_PROMISE_FRAME_TYPE_ID =>
-                        return Err(Error::WrongStream),
+                        return Err(Error::FrameUnexpected),
 
                     frame::GOAWAY_FRAME_TYPE_ID =>
-                        return Err(Error::WrongStream),
+                        return Err(Error::FrameUnexpected),
 
                     frame::MAX_PUSH_FRAME_TYPE_ID =>
-                        return Err(Error::WrongStream),
+                        return Err(Error::FrameUnexpected),
 
                     frame::DUPLICATE_PUSH_FRAME_TYPE_ID =>
-                        return Err(Error::WrongStream),
+                        return Err(Error::FrameUnexpected),
 
                     _ => (),
                 }
             },
 
-            _ => return Err(Error::UnexpectedFrame),
+            _ => return Err(Error::FrameUnexpected),
         }
 
         self.frame_type = Some(ty);
@@ -613,7 +610,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(stream.set_frame_type(frame_ty), Err(Error::UnexpectedFrame));
+        assert_eq!(stream.set_frame_type(frame_ty), Err(Error::FrameUnexpected));
     }
 
     #[test]
@@ -711,7 +708,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(stream.set_frame_type(frame_ty), Err(Error::WrongStream));
+        assert_eq!(stream.set_frame_type(frame_ty), Err(Error::FrameUnexpected));
     }
 
     #[test]
@@ -794,133 +791,6 @@ mod tests {
         assert_eq!(payload, recv_buf);
 
         assert_eq!(stream.state, State::FrameType);
-    }
-
-    #[test]
-    fn priority_request_bad() {
-        let mut stream = Stream::new(0, false);
-
-        let mut d = vec![42; 1280];
-        let mut b = octets::Octets::with_slice(&mut d);
-
-        let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-        let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-        let hdrs = frame::Frame::Headers { header_block };
-        let data = frame::Frame::Data {
-            payload: payload.clone(),
-        };
-
-        // Create an approximate PRIORITY frame in the buffer.
-        b.put_varint(frame::PRIORITY_FRAME_TYPE_ID).unwrap();
-        b.put_varint(2).unwrap(); // 2 u8s = Bitfield + Weight
-        b.put_u8(0).unwrap(); // bitfield
-        b.put_u8(16).unwrap(); // weight
-
-        hdrs.to_bytes(&mut b).unwrap();
-        data.to_bytes(&mut b).unwrap();
-
-        let mut cursor = std::io::Cursor::new(d);
-
-        // Parse the PRIORITY frame type.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        let frame_ty = stream.try_consume_varint().unwrap();
-
-        // PRIORITY frame not allowed on request stream, so ensure
-        // error is returned.
-        assert_eq!(frame_ty, frame::PRIORITY_FRAME_TYPE_ID);
-
-        assert_eq!(stream.set_frame_type(frame_ty), Err(Error::WrongStream));
-        assert_eq!(stream.state, State::FrameType);
-    }
-
-    #[test]
-    fn priority_control_good() {
-        let mut stream = Stream::new(2, false);
-
-        let mut d = vec![42; 1280];
-        let mut b = octets::Octets::with_slice(&mut d);
-
-        let settings = frame::Frame::Settings {
-            num_placeholders: Some(0),
-            max_header_list_size: Some(0),
-            qpack_max_table_capacity: Some(0),
-            qpack_blocked_streams: Some(0),
-            grease: None,
-        };
-
-        b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
-        settings.to_bytes(&mut b).unwrap();
-
-        // Create an approximate PRIORITY frame in the buffer.
-        b.put_varint(frame::PRIORITY_FRAME_TYPE_ID).unwrap();
-        b.put_varint(1 + octets::varint_parse_len(1) as u64 + 1)
-            .unwrap(); // 2 u8s = Bitfield + varint + Weight
-        b.put_u8(128).unwrap(); // bitfield
-        b.put_varint(1).unwrap();
-        b.put_u8(16).unwrap(); // weight
-
-        let mut cursor = std::io::Cursor::new(d);
-
-        // Parse stream type.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        let stream_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(stream_ty, HTTP3_CONTROL_STREAM_TYPE_ID);
-        stream
-            .set_ty(Type::deserialize(stream_ty).unwrap())
-            .unwrap();
-        assert_eq!(stream.state, State::FrameType);
-
-        // Parse the SETTINGS frame type.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::SETTINGS_FRAME_TYPE_ID);
-
-        stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(stream.state, State::FramePayloadLen);
-
-        // Parse the SETTINGS frame payload length.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        let frame_payload_len = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_payload_len, 8);
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(stream.state, State::FramePayload);
-
-        // Parse the SETTINGS frame payload.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        assert!(stream.try_consume_frame().is_ok());
-        assert_eq!(stream.state, State::FrameType);
-
-        // Parse the PRIORITY frame type.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::PRIORITY_FRAME_TYPE_ID);
-
-        stream.set_frame_type(frame_ty).unwrap();
-        assert_eq!(stream.state, State::FramePayloadLen);
-
-        // Parse the PRIORITY frame payload length.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        let frame_payload_len = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_payload_len, 3);
-
-        stream.set_frame_payload_len(frame_payload_len).unwrap();
-        assert_eq!(stream.state, State::FramePayload);
-
-        // Parse the PRIORITY frame.
-        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
-
-        assert!(stream.try_consume_frame().is_ok());
-        assert_eq!(stream.state, State::FrameType);
-
-        // TODO: if/when PRIRORITY frame is fully implemented, test it
-        // e.g. `assert_eq!(stream.get_frame(), Some(priority));`
     }
 
     #[test]

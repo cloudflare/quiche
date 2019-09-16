@@ -284,7 +284,7 @@ pub enum Error {
     RequestCancelled     = -7,
 
     /// The request stream terminated before completing the request.
-    IncompleteRequest    = -8,
+    RequestIncomplete    = -8,
 
     /// Forward connection failure for CONNECT target.
     ConnectError         = -9,
@@ -295,9 +295,6 @@ pub enum Error {
 
     /// Operation cannot be served over HTTP/3. Retry over HTTP/1.1.
     VersionFallback      = -11,
-
-    /// Frame received on stream where it is not permitted.
-    WrongStream          = -12,
 
     /// Stream ID, Push ID or Placeholder Id greater that current maximum was
     /// used incorrectly, such as exceeding a limit, reducing a limit,
@@ -319,7 +316,7 @@ pub enum Error {
     MissingSettings      = -20,
 
     /// A frame was received which is not permitted in the current state.
-    UnexpectedFrame      = -21,
+    FrameUnexpected      = -21,
 
     /// Server rejected request without performing any application processing.
     RequestRejected      = -22,
@@ -329,8 +326,8 @@ pub enum Error {
     /// server, or a server-only setting by a client.
     SettingsError        = -23,
 
-    /// TODO: malformed frame where last on-wire byte is the frame type.
-    MalformedFrame       = -24,
+    /// Frame violated layout or size rules.
+    FrameError           = -24,
 
     /// QPACK Header block decompression failure.
     QpackDecompressionFailed = -25,
@@ -348,29 +345,23 @@ pub enum Error {
 impl Error {
     fn to_wire(self) -> u64 {
         match self {
-            Error::Done => 0x0,
-            Error::GeneralProtocolError => 0x1,
-            // reserved in draft 22 => 0x2,
-            Error::InternalError => 0x3,
-            // reserved in draft 22 => 0x4,
-            Error::RequestCancelled => 0x5,
-            Error::IncompleteRequest => 0x6,
-            Error::ConnectError => 0x07,
-            Error::ExcessiveLoad => 0x08,
-            Error::VersionFallback => 0x09,
-            Error::WrongStream => 0xA,
-            Error::IdError => 0xB,
-            // reserved in draft 22 => 0xC,
-            Error::StreamCreationError => 0xD,
-            // reserved in draft 22 => 0xE,
-            Error::ClosedCriticalStream => 0xF,
-            // reserved in draft 22 => 0x10,
-            Error::EarlyResponse => 0x11,
-            Error::MissingSettings => 0x12,
-            Error::UnexpectedFrame => 0x13,
-            Error::RequestRejected => 0x14,
-            Error::SettingsError => 0xFF,
-            Error::MalformedFrame => 0x10,
+            Error::Done => 0x100,
+            Error::GeneralProtocolError => 0x101,
+            Error::InternalError => 0x102,
+            Error::StreamCreationError => 0x103,
+            Error::ClosedCriticalStream => 0x104,
+            Error::FrameUnexpected => 0x105,
+            Error::FrameError => 0x106,
+            Error::ExcessiveLoad => 0x107,
+            Error::IdError => 0x108,
+            Error::SettingsError => 0x109,
+            Error::MissingSettings => 0x10A,
+            Error::RequestRejected => 0x10B,
+            Error::RequestCancelled => 0x10C,
+            Error::RequestIncomplete => 0x10D,
+            Error::EarlyResponse => 0x10E,
+            Error::ConnectError => 0x10F,
+            Error::VersionFallback => 0x110,
 
             Error::QpackDecompressionFailed => 0x200,
             Error::QpackEncoderStreamError => 0x201,
@@ -696,7 +687,7 @@ impl Connection {
 
         // Validate that it is sane to send data on the stream.
         if !self.streams.contains_key(&stream_id) || stream_id % 4 != 0 {
-            return Err(Error::WrongStream);
+            return Err(Error::FrameUnexpected);
         }
 
         let overhead = octets::varint_len(frame::DATA_FRAME_TYPE_ID) +
@@ -1124,16 +1115,16 @@ impl Connection {
                     };
 
                     match stream.set_frame_type(varint) {
-                        Err(Error::UnexpectedFrame) => {
+                        Err(Error::FrameUnexpected) => {
                             let msg = format!("Unexpected frame type {}", varint);
 
                             conn.close(
                                 true,
-                                Error::UnexpectedFrame.to_wire(),
+                                Error::FrameUnexpected.to_wire(),
                                 msg.as_bytes(),
                             )?;
 
-                            return Err(Error::UnexpectedFrame);
+                            return Err(Error::FrameUnexpected);
                         },
 
                         Err(e) => {
@@ -1259,11 +1250,11 @@ impl Connection {
                 if Some(stream_id) == self.peer_control_stream_id {
                     conn.close(
                         true,
-                        Error::UnexpectedFrame.to_wire(),
+                        Error::FrameUnexpected.to_wire(),
                         b"HEADERS received on control stream",
                     )?;
 
-                    return Err(Error::UnexpectedFrame);
+                    return Err(Error::FrameUnexpected);
                 }
 
                 let headers = self
@@ -1277,11 +1268,11 @@ impl Connection {
                 if Some(stream_id) == self.peer_control_stream_id {
                     conn.close(
                         true,
-                        Error::UnexpectedFrame.to_wire(),
+                        Error::FrameUnexpected.to_wire(),
                         b"DATA received on control stream",
                     )?;
 
-                    return Err(Error::UnexpectedFrame);
+                    return Err(Error::FrameUnexpected);
                 }
 
                 // Do nothing. The Data event is returned separately.
@@ -1293,31 +1284,31 @@ impl Connection {
                 if self.is_server {
                     conn.close(
                         true,
-                        Error::UnexpectedFrame.to_wire(),
+                        Error::FrameUnexpected.to_wire(),
                         b"GOWAY received on server",
                     )?;
 
-                    return Err(Error::UnexpectedFrame);
+                    return Err(Error::FrameUnexpected);
                 }
 
                 if Some(stream_id) != self.peer_control_stream_id {
                     conn.close(
                         true,
-                        Error::UnexpectedFrame.to_wire(),
+                        Error::FrameUnexpected.to_wire(),
                         b"GOAWAY received on non-control stream",
                     )?;
 
-                    return Err(Error::UnexpectedFrame);
+                    return Err(Error::FrameUnexpected);
                 }
 
                 if goaway_stream_id % 4 != 0 {
                     conn.close(
                         true,
-                        Error::WrongStream.to_wire(),
+                        Error::FrameUnexpected.to_wire(),
                         b"GOAWAY received with ID of non-request stream",
                     )?;
 
-                    return Err(Error::WrongStream);
+                    return Err(Error::FrameUnexpected);
                 }
 
                 // TODO: implement GOAWAY
@@ -1327,36 +1318,31 @@ impl Connection {
                 if Some(stream_id) != self.peer_control_stream_id {
                     conn.close(
                         true,
-                        Error::WrongStream.to_wire(),
+                        Error::FrameUnexpected.to_wire(),
                         b"MAX_PUSH_ID received on non-control stream",
                     )?;
 
-                    return Err(Error::WrongStream);
+                    return Err(Error::FrameUnexpected);
                 }
 
                 if !self.is_server {
                     conn.close(
                         true,
-                        Error::UnexpectedFrame.to_wire(),
+                        Error::FrameUnexpected.to_wire(),
                         b"MAX_PUSH_ID received by client",
                     )?;
 
-                    return Err(Error::UnexpectedFrame);
+                    return Err(Error::FrameUnexpected);
                 }
 
-                // The spec says this lower limit elicits an
-                // HTTP_MALFORMED_FRAME error. It's a non-sensical
-                // error because at this point we already parsed the
-                // frame just fine. Therefore, just send a
-                // HTTP_GENERAL_PROTOCOL_ERROR.
                 if push_id < self.max_push_id {
                     conn.close(
                         true,
-                        Error::GeneralProtocolError.to_wire(),
+                        Error::IdError.to_wire(),
                         b"MAX_PUSH_ID reduced limit",
                     )?;
 
-                    return Err(Error::GeneralProtocolError);
+                    return Err(Error::IdError);
                 }
 
                 self.max_push_id = push_id;
@@ -1366,21 +1352,21 @@ impl Connection {
                 if self.is_server {
                     conn.close(
                         true,
-                        Error::UnexpectedFrame.to_wire(),
+                        Error::FrameUnexpected.to_wire(),
                         b"PUSH_PROMISE received by server",
                     )?;
 
-                    return Err(Error::UnexpectedFrame);
+                    return Err(Error::FrameUnexpected);
                 }
 
                 if stream_id % 4 != 0 {
                     conn.close(
                         true,
-                        Error::UnexpectedFrame.to_wire(),
+                        Error::FrameUnexpected.to_wire(),
                         b"PUSH_PROMISE received on non-request stream",
                     )?;
 
-                    return Err(Error::UnexpectedFrame);
+                    return Err(Error::FrameUnexpected);
                 }
 
                 // TODO: implement more checks and PUSH_PROMISE event
@@ -1390,21 +1376,21 @@ impl Connection {
                 if self.is_server {
                     conn.close(
                         true,
-                        Error::UnexpectedFrame.to_wire(),
+                        Error::FrameUnexpected.to_wire(),
                         b"DUPLICATE_PUSH received by server",
                     )?;
 
-                    return Err(Error::UnexpectedFrame);
+                    return Err(Error::FrameUnexpected);
                 }
 
                 if stream_id % 4 != 0 {
                     conn.close(
                         true,
-                        Error::UnexpectedFrame.to_wire(),
+                        Error::FrameUnexpected.to_wire(),
                         b"DUPLICATE_PUSH received on non-request stream",
                     )?;
 
-                    return Err(Error::UnexpectedFrame);
+                    return Err(Error::FrameUnexpected);
                 }
 
                 // TODO: implement DUPLICATE_PUSH
@@ -1414,11 +1400,11 @@ impl Connection {
                 if Some(stream_id) != self.peer_control_stream_id {
                     conn.close(
                         true,
-                        Error::WrongStream.to_wire(),
+                        Error::FrameUnexpected.to_wire(),
                         b"CANCEL_PUSH received on non-control stream",
                     )?;
 
-                    return Err(Error::WrongStream);
+                    return Err(Error::FrameUnexpected);
                 }
 
                 // TODO: implement CANCEL_PUSH frame
@@ -1915,11 +1901,11 @@ mod tests {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
-        assert_eq!(s.send_body_server(0, true), Err(Error::WrongStream));
+        assert_eq!(s.send_body_server(0, true), Err(Error::FrameUnexpected));
 
         assert_eq!(
             s.send_body_server(s.server.control_stream_id.unwrap(), true),
-            Err(Error::WrongStream)
+            Err(Error::FrameUnexpected)
         );
 
         assert_eq!(
@@ -1927,7 +1913,7 @@ mod tests {
                 s.server.local_qpack_streams.encoder_stream_id.unwrap(),
                 true
             ),
-            Err(Error::WrongStream)
+            Err(Error::FrameUnexpected)
         );
 
         assert_eq!(
@@ -1935,12 +1921,12 @@ mod tests {
                 s.server.local_qpack_streams.decoder_stream_id.unwrap(),
                 true
             ),
-            Err(Error::WrongStream)
+            Err(Error::FrameUnexpected)
         );
 
         assert_eq!(
             s.send_body_server(s.server.peer_control_stream_id.unwrap(), true),
-            Err(Error::WrongStream)
+            Err(Error::FrameUnexpected)
         );
 
         assert_eq!(
@@ -1948,7 +1934,7 @@ mod tests {
                 s.server.peer_qpack_streams.encoder_stream_id.unwrap(),
                 true
             ),
-            Err(Error::WrongStream)
+            Err(Error::FrameUnexpected)
         );
 
         assert_eq!(
@@ -1956,7 +1942,7 @@ mod tests {
                 s.server.peer_qpack_streams.decoder_stream_id.unwrap(),
                 true
             ),
-            Err(Error::WrongStream)
+            Err(Error::FrameUnexpected)
         );
     }
 
@@ -1992,7 +1978,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(s.poll_server(), Ok((stream, Event::Headers(req))));
-        assert_eq!(s.poll_server(), Err(Error::WrongStream));
+        assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
     }
 
     #[test]
@@ -2016,7 +2002,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(s.poll_server(), Err(Error::GeneralProtocolError));
+        assert_eq!(s.poll_server(), Err(Error::IdError));
     }
 
     #[test]
@@ -2032,7 +2018,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(s.poll_client(), Err(Error::UnexpectedFrame));
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
     }
 
     #[test]
@@ -2056,7 +2042,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(s.poll_server(), Ok((stream, Event::Headers(req))));
-        assert_eq!(s.poll_server(), Err(Error::UnexpectedFrame));
+        assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
     }
 
     #[test]
@@ -2091,7 +2077,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(s.poll_server(), Ok((stream, Event::Headers(req))));
-        assert_eq!(s.poll_server(), Err(Error::WrongStream));
+        assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
     }
 
     #[test]
@@ -2126,7 +2112,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(s.poll_server(), Ok((stream, Event::Headers(req))));
-        assert_eq!(s.poll_server(), Err(Error::UnexpectedFrame));
+        assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
     }
 
     #[test]
@@ -2144,7 +2130,7 @@ mod tests {
 
         s.advance().ok();
 
-        assert_eq!(s.poll_server(), Err(Error::UnexpectedFrame));
+        assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
     }
 
     #[test]
@@ -2177,35 +2163,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(s.poll_client(), Err(Error::WrongStream));
-    }
-
-    #[test]
-    /// Send a PRIORITY frame from the client, ensure server accepts it.
-    fn priority_control_stream() {
-        let mut s = Session::default().unwrap();
-        s.handshake().unwrap();
-
-        let mut d = [42; 128];
-        let mut b = octets::Octets::with_slice(&mut d);
-
-        // Create an approximate PRIORITY frame in the buffer.
-        b.put_varint(frame::PRIORITY_FRAME_TYPE_ID).unwrap();
-        b.put_varint(1 + octets::varint_parse_len(1) as u64 + 1)
-            .unwrap(); // 2 u8s = Bitfield + varint + Weight
-        b.put_u8(176).unwrap(); // bitfield
-        b.put_varint(1).unwrap();
-        b.put_u8(16).unwrap(); // weight
-        let off = b.off();
-
-        s.pipe
-            .client
-            .stream_send(s.client.control_stream_id.unwrap(), &d[..off], false)
-            .unwrap();
-
-        s.advance().ok();
-
-        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
     }
 
     #[test]
