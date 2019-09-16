@@ -225,7 +225,7 @@ impl Stream {
                     (frame::SETTINGS_FRAME_TYPE_ID, false) =>
                         self.initialized = true,
 
-                    // Non-SETTINGS frames no allowed on control stream
+                    // Non-SETTINGS frames not allowed on control stream
                     // before initialization.
                     (_, false) => return Err(Error::MissingSettings),
 
