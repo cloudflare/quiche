@@ -693,9 +693,6 @@ pub struct SendBuf {
     /// The maximum offset we are allowed to send to the peer.
     max_data: u64,
 
-    /// The highest contiguous ACK'd offset.
-    ack_off: u64,
-
     /// The final stream offset written to the stream, if any.
     fin_off: Option<u64>,
 
@@ -784,7 +781,7 @@ impl SendBuf {
         }
 
         // Don't queue data that was already fully ACK'd.
-        if self.ack_off >= buf.max_off() {
+        if self.ack_off() >= buf.max_off() {
             return Ok(());
         }
 
@@ -863,13 +860,6 @@ impl SendBuf {
 
     /// Increments the ACK'd data offset.
     pub fn ack(&mut self, off: u64, len: usize) {
-        // Keep track of the highest contiguously ACK'd offset. This can be
-        // used to avoid spurious retransmissions of data that has already
-        // been ACK'd.
-        if self.ack_off == off {
-            self.ack_off += len as u64;
-        }
-
         self.acked.insert(off..off + len as u64);
     }
 
@@ -923,6 +913,17 @@ impl SendBuf {
             Some(v) => v.off(),
 
             None => self.off,
+        }
+    }
+
+    /// Returns the highest contiguously ACKed offset.
+    fn ack_off(&self) -> u64 {
+        match self.acked.iter().next() {
+            // Only consider the initial range if it contiguously covers the
+            // start of the stream (i.e. from offset 0).
+            Some(std::ops::Range { start: 0, end }) => end,
+
+            Some(_) | None => 0,
         }
     }
 
@@ -2020,6 +2021,66 @@ mod tests {
         assert_eq!(write.len(), 5);
         assert_eq!(write.fin(), true);
         assert_eq!(write.data, b"hello");
+    }
+
+    #[test]
+    fn send_ack() {
+        let mut stream = Stream::new(0, 15, true, true);
+
+        assert_eq!(stream.send.push_slice(b"hello", false), Ok(5));
+        assert_eq!(stream.send.push_slice(b"world", false), Ok(5));
+        assert_eq!(stream.send.push_slice(b"", true), Ok(0));
+        assert!(stream.send.is_fin());
+
+        let write = stream.send.pop(5).unwrap();
+        assert_eq!(write.off(), 0);
+        assert_eq!(write.len(), 5);
+        assert_eq!(write.fin(), false);
+        assert_eq!(write.data, b"hello");
+
+        stream.send.ack(write.off(), write.len());
+
+        assert_eq!(stream.send.push(write), Ok(()));
+
+        let write = stream.send.pop(5).unwrap();
+        assert_eq!(write.off(), 5);
+        assert_eq!(write.len(), 5);
+        assert_eq!(write.fin(), true);
+        assert_eq!(write.data, b"world");
+    }
+
+    #[test]
+    fn send_ack_reordering() {
+        let mut stream = Stream::new(0, 15, true, true);
+
+        assert_eq!(stream.send.push_slice(b"hello", false), Ok(5));
+        assert_eq!(stream.send.push_slice(b"world", false), Ok(5));
+        assert_eq!(stream.send.push_slice(b"", true), Ok(0));
+        assert!(stream.send.is_fin());
+
+        let write1 = stream.send.pop(5).unwrap();
+        assert_eq!(write1.off(), 0);
+        assert_eq!(write1.len(), 5);
+        assert_eq!(write1.fin(), false);
+        assert_eq!(write1.data, b"hello");
+
+        let write2 = stream.send.pop(1).unwrap();
+        assert_eq!(write2.off(), 5);
+        assert_eq!(write2.len(), 1);
+        assert_eq!(write2.fin(), false);
+        assert_eq!(write2.data, b"w");
+
+        stream.send.ack(write2.off(), write2.len());
+        stream.send.ack(write1.off(), write1.len());
+
+        assert_eq!(stream.send.push(write1), Ok(()));
+        assert_eq!(stream.send.push(write2), Ok(()));
+
+        let write = stream.send.pop(5).unwrap();
+        assert_eq!(write.off(), 6);
+        assert_eq!(write.len(), 4);
+        assert_eq!(write.fin(), true);
+        assert_eq!(write.data, b"orld");
     }
 
     #[test]
