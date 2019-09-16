@@ -296,7 +296,7 @@ void quiche_conn_free(quiche_conn *conn);
 //
 
 /// The current HTTP/3 ALPN token.
-#define QUICHE_H3_APPLICATION_PROTOCOL "\x05h3-22"
+#define QUICHE_H3_APPLICATION_PROTOCOL "\x05h3-23"
 
 // Stores configuration shared between multiple connections.
 typedef struct Http3Config quiche_h3_config;
