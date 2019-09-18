@@ -91,7 +91,7 @@ pub fn run(
     config.set_initial_max_stream_data_uni(max_stream_data);
     config.set_initial_max_streams_bidi(100);
     config.set_initial_max_streams_uni(100);
-    config.set_disable_migration(true);
+    config.set_disable_active_migration(true);
 
     let mut http3_conn = None;
 

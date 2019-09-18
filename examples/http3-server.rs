@@ -124,7 +124,7 @@ fn main() {
     config.set_initial_max_stream_data_uni(max_stream_data);
     config.set_initial_max_streams_bidi(100);
     config.set_initial_max_streams_uni(5);
-    config.set_disable_migration(true);
+    config.set_disable_active_migration(true);
 
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
         config.log_keys();

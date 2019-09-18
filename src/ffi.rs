@@ -197,8 +197,10 @@ pub extern fn quiche_config_set_max_ack_delay(config: &mut Config, v: u64) {
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_disable_migration(config: &mut Config, v: bool) {
-    config.set_disable_migration(v);
+pub extern fn quiche_config_set_disable_active_migration(
+    config: &mut Config, v: bool,
+) {
+    config.set_disable_active_migration(v);
 }
 
 #[no_mangle]
