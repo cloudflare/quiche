@@ -1797,8 +1797,8 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        // Pad the client's initial packet.
-        if !self.is_server && pkt_type == packet::Type::Initial {
+        // Pad all initial packets.
+        if pkt_type == packet::Type::Initial {
             let pkt_len = pn_len + payload_len + overhead;
 
             let frame = frame::Frame::Padding {
