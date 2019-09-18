@@ -558,9 +558,9 @@ impl Config {
         self.local_transport_params.max_ack_delay = v;
     }
 
-    /// Sets the `disable_migration` transport parameter.
-    pub fn set_disable_migration(&mut self, v: bool) {
-        self.local_transport_params.disable_migration = v;
+    /// Sets the `disable_active_migration` transport parameter.
+    pub fn set_disable_active_migration(&mut self, v: bool) {
+        self.local_transport_params.disable_active_migration = v;
     }
 }
 
@@ -2677,7 +2677,7 @@ struct TransportParams {
     pub initial_max_streams_uni: u64,
     pub ack_delay_exponent: u64,
     pub max_ack_delay: u64,
-    pub disable_migration: bool,
+    pub disable_active_migration: bool,
     // pub preferred_address: ...,
     pub active_conn_id_limit: u64,
 }
@@ -2697,7 +2697,7 @@ impl Default for TransportParams {
             initial_max_streams_uni: 0,
             ack_delay_exponent: 3,
             max_ack_delay: 25,
-            disable_migration: false,
+            disable_active_migration: false,
             active_conn_id_limit: 0,
         }
     }
@@ -2800,7 +2800,7 @@ impl TransportParams {
                 },
 
                 0x000c => {
-                    tp.disable_migration = true;
+                    tp.disable_active_migration = true;
                 },
 
                 0x000d => {
@@ -2913,7 +2913,7 @@ impl TransportParams {
                 b.put_varint(tp.max_ack_delay)?;
             }
 
-            if tp.disable_migration {
+            if tp.disable_active_migration {
                 b.put_u16(0x000c)?;
                 b.put_u16(0)?;
             }
@@ -2974,7 +2974,11 @@ impl std::fmt::Debug for TransportParams {
         )?;
         write!(f, "ack_delay_exponent={} ", self.ack_delay_exponent)?;
         write!(f, "max_ack_delay={} ", self.max_ack_delay)?;
-        write!(f, "disable_migration={}", self.disable_migration)?;
+        write!(
+            f,
+            "disable_active_migration={}",
+            self.disable_active_migration
+        )?;
 
         Ok(())
     }
@@ -3296,7 +3300,7 @@ mod tests {
             initial_max_streams_uni: 18_473,
             ack_delay_exponent: 20,
             max_ack_delay: 2_u64.pow(14) - 1,
-            disable_migration: true,
+            disable_active_migration: true,
             active_conn_id_limit: 8,
         };
 

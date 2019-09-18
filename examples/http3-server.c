@@ -508,7 +508,7 @@ int main(int argc, char *argv[]) {
     quiche_config_set_initial_max_stream_data_uni(config, 1000000);
     quiche_config_set_initial_max_streams_bidi(config, 100);
     quiche_config_set_initial_max_streams_uni(config, 100);
-    quiche_config_set_disable_migration(config, true);
+    quiche_config_set_disable_active_migration(config, true);
 
     http3_config = quiche_h3_config_new(0, 1024, 0, 0);
     if (config == NULL) {

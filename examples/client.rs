@@ -117,7 +117,7 @@ fn main() {
     config.set_initial_max_stream_data_bidi_remote(max_stream_data);
     config.set_initial_max_streams_bidi(100);
     config.set_initial_max_streams_uni(100);
-    config.set_disable_migration(true);
+    config.set_disable_active_migration(true);
 
     if args.get_bool("--no-verify") {
         config.verify_peer(false);
