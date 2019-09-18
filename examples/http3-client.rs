@@ -220,6 +220,12 @@ fn main() {
 
         if conn.is_closed() {
             info!("connection closed, {:?}", conn.stats());
+
+            if reqs_complete != reqs_count {
+                error!("connection timed out after {:?} and only completed {}/{} requests",
+                       req_start.elapsed(), reqs_complete, reqs_count);
+            }
+
             break;
         }
 
@@ -396,6 +402,12 @@ fn main() {
 
         if conn.is_closed() {
             info!("connection closed, {:?}", conn.stats());
+
+            if reqs_complete != reqs_count {
+                error!("connection timed out after {:?} and only completed {}/{} requests",
+                       req_start.elapsed(), reqs_complete, reqs_count);
+            }
+
             break;
         }
     }
