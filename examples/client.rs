@@ -77,7 +77,6 @@ fn main() {
 
     // Resolve server address.
     let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
-    info!("connecting to {:}", peer_addr);
 
     // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
     // server address. This is needed on macOS and BSD variants that don't
@@ -133,6 +132,13 @@ fn main() {
 
     // Create a QUIC connection and initiate handshake.
     let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
+
+    info!(
+        "connecting to {:} from {:} with scid {}",
+        peer_addr,
+        socket.local_addr().unwrap(),
+        hex_dump(&scid)
+    );
 
     let write = conn.send(&mut out).expect("initial send failed");
 
@@ -285,4 +291,10 @@ fn main() {
             break;
         }
     }
+}
+
+fn hex_dump(buf: &[u8]) -> String {
+    let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
+
+    vec.join("")
 }
