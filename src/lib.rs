@@ -1211,6 +1211,10 @@ impl Connection {
         let aead = match self.pkt_num_spaces[epoch].crypto_open {
             Some(ref v) => v,
 
+            // Ignore packets that can't be decrypted because we don't yet have
+            // the necessary decryption keys, to avoid packet reordering (e.g.
+            // between Initial and Handshake) to causet he connection to be
+            // closed.
             None => {
                 trace!(
                     "{} dropped undecryptable packet type={:?} len={}",
@@ -1241,28 +1245,8 @@ impl Connection {
             pn
         );
 
-        let mut payload = match packet::decrypt_pkt(
-            &mut b,
-            pn,
-            hdr.pkt_num_len,
-            payload_len,
-            &aead,
-        ) {
-            Ok(v) => v,
-
-            Err(Error::CryptoFail) => {
-                trace!(
-                    "{} dropped undecryptable packet type={:?} len={}",
-                    self.trace_id,
-                    hdr.ty,
-                    payload_len,
-                );
-
-                return Ok(header_len + payload_len);
-            },
-
-            Err(e) => return Err(e),
-        };
+        let mut payload =
+            packet::decrypt_pkt(&mut b, pn, hdr.pkt_num_len, payload_len, &aead)?;
 
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
@@ -4384,6 +4368,36 @@ mod tests {
         assert!(r.next().is_some());
         assert!(r.next().is_some());
         assert!(r.next().is_none());
+    }
+
+    #[test]
+    /// Tests that invalid packets received before any other valid ones cause
+    /// the server to close the connection immediately.
+    fn invalid_initial() {
+        let mut buf = [0; 65535];
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        let frames = [frame::Frame::Padding { len: 10 }];
+
+        let written = testing::encode_pkt(
+            &mut pipe.client,
+            packet::Type::Initial,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+
+        // Corrupt the packets's last byte to make decryption fail (the last
+        // byte is part of the AEAD tag, so changing it means that the packet
+        // cannot be authenticated during decryption).
+        buf[written - 1] = 0;
+
+        assert_eq!(pipe.server.timeout(), None);
+
+        assert_eq!(
+            pipe.server.recv(&mut buf[..written]),
+            Err(Error::CryptoFail)
+        );
     }
 }
 
