@@ -503,7 +503,11 @@ pub fn decrypt_pkt<'a>(
 
     let (header, mut payload) = b.split_at(payload_offset)?;
 
-    let mut ciphertext = payload.peek_bytes(payload_len - pn_len)?;
+    let payload_len = payload_len
+        .checked_sub(pn_len)
+        .ok_or(Error::InvalidPacket)?;
+
+    let mut ciphertext = payload.peek_bytes(payload_len)?;
 
     let payload_len =
         aead.open_with_u64_counter(pn, header.as_ref(), ciphertext.as_mut())?;
@@ -1519,5 +1523,37 @@ mod tests {
         ];
 
         test_encrypt_pkt(&mut header, &dcid, &frames, 1, 2, true, &pkt);
+    }
+
+    #[test]
+    fn decrypto_pkt_underflow() {
+        let mut buf = [0; 65535];
+        let mut b = octets::Octets::with_slice(&mut buf);
+
+        let hdr = Header {
+            ty: Type::Initial,
+            version: crate::PROTOCOL_VERSION,
+            dcid: Vec::new(),
+            scid: Vec::new(),
+            odcid: None,
+            pkt_num: 0,
+            pkt_num_len: 0,
+            token: None,
+            versions: None,
+            key_phase: false,
+        };
+
+        hdr.to_bytes(&mut b).unwrap();
+
+        b.put_bytes(&[0; 50]).unwrap();
+
+        let payload_len = b.get_varint().unwrap() as usize;
+
+        let (aead, _) = crypto::derive_initial_key_material(b"", true).unwrap();
+
+        assert_eq!(
+            decrypt_pkt(&mut b, 0, 1, payload_len, &aead),
+            Err(Error::InvalidPacket)
+        );
     }
 }
