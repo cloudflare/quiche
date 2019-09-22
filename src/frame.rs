@@ -824,7 +824,7 @@ fn parse_ack_frame(_ty: u64, b: &mut octets::Octets) -> Result<Frame> {
     for _i in 0..block_count {
         let gap = b.get_varint()?;
 
-        if smallest_ack - gap < 2 {
+        if smallest_ack < 2 + gap {
             return Err(Error::InvalidFrame);
         }
 
