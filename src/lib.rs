@@ -2449,10 +2449,11 @@ impl Connection {
             frame::Frame::Ping => (),
 
             frame::Frame::ACK { ranges, ack_delay } => {
-                let ack_delay = ack_delay *
-                    2_u64.pow(
+                let ack_delay = ack_delay
+                    .checked_mul(2_u64.pow(
                         self.peer_transport_params.ack_delay_exponent as u32,
-                    );
+                    ))
+                    .ok_or(Error::InvalidFrame)?;
 
                 self.recovery.on_ack_received(
                     &ranges,
