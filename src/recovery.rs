@@ -32,6 +32,9 @@ use std::time::Instant;
 
 use std::collections::BTreeMap;
 
+use crate::Error;
+use crate::Result;
+
 use crate::frame;
 use crate::packet;
 use crate::ranges;
@@ -83,6 +86,8 @@ pub struct Recovery {
 
     largest_acked_pkt: [u64; packet::EPOCH_COUNT],
 
+    largest_sent_pkt: [u64; packet::EPOCH_COUNT],
+
     latest_rtt: Duration,
 
     smoothed_rtt: Option<Duration>,
@@ -133,6 +138,8 @@ impl Default for Recovery {
 
             largest_acked_pkt: [std::u64::MAX; packet::EPOCH_COUNT],
 
+            largest_sent_pkt: [0; packet::EPOCH_COUNT],
+
             latest_rtt: Duration::new(0, 0),
 
             smoothed_rtt: None,
@@ -178,6 +185,9 @@ impl Recovery {
         let is_crypto = pkt.is_crypto;
         let sent_bytes = pkt.size;
 
+        self.largest_sent_pkt[epoch] =
+            cmp::max(self.largest_sent_pkt[epoch], pkt.pkt_num);
+
         self.sent[epoch].insert(pkt_num, pkt);
 
         if in_flight {
@@ -203,8 +213,15 @@ impl Recovery {
     pub fn on_ack_received(
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
         epoch: packet::Epoch, now: Instant, trace_id: &str,
-    ) {
+    ) -> Result<()> {
         let largest_acked = ranges.largest().unwrap();
+
+        // If the largest packet number ACKed exceeds any packet number we have
+        // sent, then the ACK is obviously invalid, so there's no need to
+        // continue further.
+        if largest_acked > self.largest_sent_pkt[epoch] {
+            return Err(Error::InvalidPacket);
+        }
 
         if self.largest_acked_pkt[epoch] == std::u64::MAX {
             self.largest_acked_pkt[epoch] = largest_acked;
@@ -241,7 +258,7 @@ impl Recovery {
         }
 
         if !has_newly_acked {
-            return;
+            return Ok(());
         }
 
         self.detect_lost_packets(epoch, now, trace_id);
@@ -252,6 +269,8 @@ impl Recovery {
         self.set_loss_detection_timer();
 
         trace!("{} {:?}", trace_id, self);
+
+        Ok(())
     }
 
     pub fn on_loss_detection_timeout(&mut self, now: Instant, trace_id: &str) {

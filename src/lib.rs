@@ -2445,7 +2445,7 @@ impl Connection {
                     epoch,
                     now,
                     &self.trace_id,
-                );
+                )?;
 
                 // When we receive an ACK for a 1-RTT packet after handshake
                 // completion, it means the handshake has been confirmed.
