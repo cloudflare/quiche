@@ -35,7 +35,7 @@ default-features = false
 cmake = "0.1"
 
 [dependencies]
-log = "0.4"
+log = { version = "0.4", features = ["std"] }
 libc = "0.2"
 ring = "0.16"
 lazy_static = "1"
