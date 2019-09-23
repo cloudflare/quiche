@@ -321,7 +321,11 @@ fn decode_int(b: &mut octets::Octets, prefix: usize) -> Result<u64> {
     while b.cap() > 0 {
         let byte = b.get_u8()?;
 
-        val += u64::from(byte & 0x7f) << shift;
+        let inc = u64::from(byte & 0x7f)
+            .checked_shl(shift)
+            .ok_or(Error::BufferTooShort)?;
+
+        val = val.checked_add(inc).ok_or(Error::BufferTooShort)?;
 
         shift += 7;
 
