@@ -101,6 +101,10 @@ impl Algorithm {
     }
 
     pub fn tag_len(self) -> usize {
+        if cfg!(fuzzing) {
+            return 0;
+        }
+
         self.get_ring_aead().tag_len()
     }
 
@@ -144,6 +148,10 @@ impl Open {
     pub fn open_with_u64_counter(
         &self, counter: u64, ad: &[u8], buf: &mut [u8],
     ) -> Result<usize> {
+        if cfg!(fuzzing) {
+            return Ok(buf.len());
+        }
+
         let nonce = make_nonce(&self.nonce, counter);
 
         let ad = aead::Aad::from(ad);
@@ -205,6 +213,10 @@ impl Seal {
     pub fn seal_with_u64_counter(
         &self, counter: u64, ad: &[u8], buf: &mut [u8],
     ) -> Result<()> {
+        if cfg!(fuzzing) {
+            return Ok(());
+        }
+
         let nonce = make_nonce(&self.nonce, counter);
 
         let ad = aead::Aad::from(ad);
