@@ -24,3 +24,7 @@ path = "src/packet_recv_client.rs"
 [[bin]]
 name = "packet_recv_server"
 path = "src/packet_recv_server.rs"
+
+[[bin]]
+name = "qpack_decode"
+path = "src/qpack_decode.rs"

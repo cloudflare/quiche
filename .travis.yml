@@ -50,6 +50,7 @@ matrix:
       # fuzzers
       - RUSTFLAGS="-D warnings" cargo fuzz run packet_recv_client -- -runs=1
       - RUSTFLAGS="-D warnings" cargo fuzz run packet_recv_server -- -runs=1
+      - RUSTFLAGS="-D warnings" cargo fuzz run qpack_decode -- -runs=1
       - cargo fmt --manifest-path fuzz/Cargo.toml -- --check
       # http3_test
       - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml

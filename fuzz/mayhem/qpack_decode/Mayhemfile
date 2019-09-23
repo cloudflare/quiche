@@ -1,0 +1,15 @@
+version: '1.0'
+
+project: quiche
+
+target: qpack-decode-libfuzzer
+
+baseimage: kestrel.forallsecure.com:5000/ghedo/quiche-libfuzzer:2
+
+advanced_triage: false
+
+cmds:
+  - cmd: /home/mayhem/qpack_decode
+    libfuzzer: true
+    asan: true
+    timeout: 5
