@@ -5,8 +5,10 @@ dist: xenial
 addons:
   apt:
     packages:
+     - binutils-dev
      - golang-go
      - libev-dev
+     - libunwind-dev
      - uthash-dev
 
 matrix:
@@ -14,32 +16,47 @@ matrix:
    - rust: stable
      install:
       - rustup component add clippy
+      - cargo install honggfuzz
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
       - cargo clippy --examples -- -D warnings
       - cargo doc --no-deps
       - make -C examples
+      # http3_test
       - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
       - cargo clippy --manifest-path tools/http3_test/Cargo.toml -- -D warnings
+      # fuzzers
+      - RUSTFLAGS="-D warnings" cargo hfuzz build --verbose --manifest-path tools/fuzzers/Cargo.toml
+      - cargo clippy --manifest-path tools/fuzzers/Cargo.toml -- -D warnings
    - rust: beta
+     install:
+      - cargo install honggfuzz
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
       - cargo doc --no-deps
       - make -C examples
+      # http3_test
       - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
+      # fuzzers
+      - RUSTFLAGS="-D warnings" cargo hfuzz build --verbose --manifest-path tools/fuzzers/Cargo.toml
    - rust: nightly
      install:
       - rustup component add rustfmt
+      - cargo install honggfuzz
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
       - cargo fmt -- --check
       - cargo doc --no-deps
       - make -C examples
+      # http3_test
       - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
       - cargo fmt --manifest-path tools/http3_test/Cargo.toml -- --check
+      # fuzzers
+      - RUSTFLAGS="-D warnings" cargo hfuzz build --verbose --manifest-path tools/fuzzers/Cargo.toml
+      - cargo fmt --manifest-path tools/fuzzers/Cargo.toml -- --check
 
 deploy:
   provider: pages

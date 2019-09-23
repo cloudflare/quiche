@@ -1,0 +1,18 @@
+[package]
+name = "fuzzers"
+version = "0.1.0"
+authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
+edition = "2018"
+publish = false
+
+[dependencies]
+honggfuzz = "0.5"
+quiche = { path = "../.." }
+
+[[bin]]
+name = "packet_recv_client"
+path = "src/packet_recv_client.rs"
+
+[[bin]]
+name = "packet_recv_server"
+path = "src/packet_recv_server.rs"
