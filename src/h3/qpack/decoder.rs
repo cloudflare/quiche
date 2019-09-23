@@ -112,7 +112,8 @@ impl Decoder {
                     trace!("Indexed index={} static={}", index, s);
 
                     if !s {
-                        unimplemented!("dynamic table");
+                        // TODO: implement dynamic table
+                        return Err(Error::InvalidHeaderValue);
                     }
 
                     let (name, value) = lookup_static(index)?;
@@ -124,7 +125,8 @@ impl Decoder {
 
                     trace!("Indexed With Post Base index={}", index);
 
-                    unimplemented!("dynamic table");
+                    // TODO: implement dynamic table
+                    return Err(Error::InvalidHeaderValue);
                 },
 
                 Representation::Literal => {
@@ -166,7 +168,8 @@ impl Decoder {
                     );
 
                     if !s {
-                        unimplemented!("dynamic table");
+                        // TODO: implement dynamic table
+                        return Err(Error::InvalidHeaderValue);
                     }
 
                     let (name, _) = lookup_static(name_idx)?;
@@ -176,7 +179,8 @@ impl Decoder {
                 Representation::LiteralWithPostBase => {
                     trace!("Literal With Post Base");
 
-                    unimplemented!("dynamic table");
+                    // TODO: implement dynamic table
+                    return Err(Error::InvalidHeaderValue);
                 },
             }
         }
