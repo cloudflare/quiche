@@ -1239,10 +1239,22 @@ impl Connection {
                     return Err(Error::FrameUnexpected);
                 }
 
+                // Use "infinite" as default value for max_header_list_size if
+                // it is not configured by the application.
+                let max_size = self
+                    .local_settings
+                    .max_header_list_size
+                    .unwrap_or(std::u64::MAX);
+
                 let headers = self
                     .qpack_decoder
-                    .decode(&mut header_block[..])
-                    .map_err(|_| Error::QpackDecompressionFailed)?;
+                    .decode(&mut header_block[..], max_size)
+                    .map_err(|e| match e {
+                        qpack::Error::HeaderListTooLarge => Error::ExcessiveLoad,
+
+                        _ => Error::QpackDecompressionFailed,
+                    })?;
+
                 return Ok((stream_id, Event::Headers(headers)));
             },
 
@@ -2391,6 +2403,52 @@ mod tests {
         // Fin flag from last send_body() call was not sent as the buffer was
         // only partially written.
         assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Tests that the max header list size setting is enforced.
+    fn request_max_header_size_limit() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_initial_max_data(1500);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(5);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let mut h3_config = Config::new().unwrap();
+        h3_config.set_max_header_list_size(65);
+
+        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        let req = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":authority", "quic.tech"),
+            Header::new(":path", "/test"),
+            Header::new("aaaaaaa", "aaaaaaaa"),
+        ];
+
+        let stream = s
+            .client
+            .send_request(&mut s.pipe.client, &req, true)
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(stream, 0);
+
+        assert_eq!(s.poll_server(), Err(Error::ExcessiveLoad));
     }
 }
 

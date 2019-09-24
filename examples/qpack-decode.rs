@@ -79,7 +79,7 @@ fn main() {
             continue;
         }
 
-        for hdr in dec.decode(&mut data[..len]).unwrap() {
+        for hdr in dec.decode(&mut data[..len], std::u64::MAX).unwrap() {
             println!("{}\t{}", hdr.name(), hdr.value());
         }
 
