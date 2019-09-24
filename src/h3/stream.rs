@@ -504,7 +504,6 @@ mod tests {
         let mut b = octets::Octets::with_slice(&mut d);
 
         let frame = frame::Frame::Settings {
-            num_placeholders: Some(0),
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
@@ -539,7 +538,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_payload_len = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_payload_len, 8);
+        assert_eq!(frame_payload_len, 6);
         stream.set_frame_payload_len(frame_payload_len).unwrap();
         assert_eq!(stream.state, State::FramePayload);
 
@@ -560,7 +559,6 @@ mod tests {
         let mut b = octets::Octets::with_slice(&mut d);
 
         let frame = frame::Frame::Settings {
-            num_placeholders: Some(0),
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
@@ -596,7 +594,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_payload_len = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_payload_len, 8);
+        assert_eq!(frame_payload_len, 6);
         stream.set_frame_payload_len(frame_payload_len).unwrap();
         assert_eq!(stream.state, State::FramePayload);
 
@@ -625,7 +623,6 @@ mod tests {
         let goaway = frame::Frame::GoAway { stream_id: 0 };
 
         let settings = frame::Frame::Settings {
-            num_placeholders: Some(0),
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
@@ -668,7 +665,6 @@ mod tests {
         let hdrs = frame::Frame::Headers { header_block };
 
         let settings = frame::Frame::Settings {
-            num_placeholders: Some(0),
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),

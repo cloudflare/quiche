@@ -49,7 +49,7 @@
 //! connection is creating its configuration object:
 //!
 //! ```
-//! let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! let h3_config = quiche::h3::Config::new(1024, 0, 0)?;
 //! # Ok::<(), quiche::h3::Error>(())
 //! ```
 //!
@@ -61,7 +61,7 @@
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
-//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! # let h3_config = quiche::h3::Config::new(1024, 0, 0)?;
 //! let h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! # Ok::<(), quiche::h3::Error>(())
 //! ```
@@ -76,7 +76,7 @@
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
-//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! # let h3_config = quiche::h3::Config::new(1024, 0, 0)?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! let req = vec![
 //!     quiche::h3::Header::new(":method", "GET"),
@@ -97,7 +97,7 @@
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
-//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! # let h3_config = quiche::h3::Config::new(1024, 0, 0)?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! let req = vec![
 //!     quiche::h3::Header::new(":method", "GET"),
@@ -125,7 +125,7 @@
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
-//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! # let h3_config = quiche::h3::Config::new(1024, 0, 0)?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! loop {
 //!     match h3_conn.poll(&mut conn) {
@@ -178,7 +178,7 @@
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
-//! # let h3_config = quiche::h3::Config::new(0, 1024, 0, 0)?;
+//! # let h3_config = quiche::h3::Config::new(1024, 0, 0)?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! loop {
 //!     match h3_conn.poll(&mut conn) {
@@ -296,7 +296,7 @@ pub enum Error {
     /// Operation cannot be served over HTTP/3. Retry over HTTP/1.1.
     VersionFallback      = -11,
 
-    /// Stream ID, Push ID or Placeholder Id greater that current maximum was
+    /// Stream ID or Push ID greater that current maximum was
     /// used incorrectly, such as exceeding a limit, reducing a limit,
     /// or being reused.
     IdError              = -13,
@@ -407,7 +407,6 @@ impl std::convert::From<octets::BufferTooShortError> for Error {
 
 /// An HTTP/3 configuration.
 pub struct Config {
-    num_placeholders: u64,
     max_header_list_size: u64,
     qpack_max_table_capacity: u64,
     qpack_blocked_streams: u64,
@@ -416,11 +415,10 @@ pub struct Config {
 impl Config {
     /// Creates a new configuration object with the specified parameters.
     pub fn new(
-        num_placeholders: u64, max_header_list_size: u64,
-        qpack_max_table_capacity: u64, qpack_blocked_streams: u64,
+        max_header_list_size: u64, qpack_max_table_capacity: u64,
+        qpack_blocked_streams: u64,
     ) -> Result<Config> {
         Ok(Config {
-            num_placeholders,
             max_header_list_size,
             qpack_max_table_capacity,
             qpack_blocked_streams,
@@ -474,7 +472,6 @@ pub enum Event {
 }
 
 struct ConnectionSettings {
-    pub num_placeholders: Option<u64>,
     pub max_header_list_size: Option<u64>,
     pub qpack_max_table_capacity: Option<u64>,
     pub qpack_blocked_streams: Option<u64>,
@@ -526,14 +523,12 @@ impl Connection {
             streams: HashMap::new(),
 
             local_settings: ConnectionSettings {
-                num_placeholders: Some(config.num_placeholders),
                 max_header_list_size: Some(config.max_header_list_size),
                 qpack_max_table_capacity: Some(config.qpack_max_table_capacity),
                 qpack_blocked_streams: Some(config.qpack_blocked_streams),
             },
 
             peer_settings: ConnectionSettings {
-                num_placeholders: None,
                 max_header_list_size: None,
                 qpack_max_table_capacity: None,
                 qpack_blocked_streams: None,
@@ -917,13 +912,6 @@ impl Connection {
             self.open_uni_stream(conn, stream::HTTP3_CONTROL_STREAM_TYPE_ID)?,
         );
 
-        // Client cannot send placeholders, so validate here
-        let num_placeholders = if self.is_server {
-            self.local_settings.num_placeholders
-        } else {
-            None
-        };
-
         let grease = if conn.grease {
             Some((grease_value(), grease_value()))
         } else {
@@ -931,7 +919,6 @@ impl Connection {
         };
 
         let frame = frame::Frame::Settings {
-            num_placeholders,
             max_header_list_size: self.local_settings.max_header_list_size,
             qpack_max_table_capacity: self
                 .local_settings
@@ -1217,24 +1204,12 @@ impl Connection {
 
         match frame {
             frame::Frame::Settings {
-                num_placeholders,
                 max_header_list_size,
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
                 ..
             } => {
-                if self.is_server && num_placeholders.is_some() {
-                    conn.close(
-                        true,
-                        Error::SettingsError.to_wire(),
-                        b"Num placeholder setting received by server.",
-                    )?;
-
-                    return Err(Error::SettingsError);
-                }
-
                 self.peer_settings = ConnectionSettings {
-                    num_placeholders,
                     max_header_list_size,
                     qpack_max_table_capacity,
                     qpack_blocked_streams,
@@ -1460,7 +1435,7 @@ pub mod testing {
             config.set_initial_max_streams_uni(5);
             config.verify_peer(false);
 
-            let mut h3_config = Config::new(0, 1024, 0, 0)?;
+            let mut h3_config = Config::new(1024, 0, 0)?;
             Session::with_configs(&mut config, &mut h3_config)
         }
 
@@ -2164,7 +2139,7 @@ mod tests {
     #[test]
     /// Ensure quiche allocates streams for client and server roles as expected.
     fn uni_stream_local_counting() {
-        let config = Config::new(0, 1024, 0, 0).unwrap();
+        let config = Config::new(1024, 0, 0).unwrap();
 
         let mut h3_cln = Connection::new(&config, false).unwrap();
 

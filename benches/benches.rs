@@ -93,7 +93,7 @@ fn http3(c: &mut Criterion) {
 
     let mut config = make_bench_config();
 
-    let mut h3_config = quiche::h3::Config::new(0, 1024, 0, 0).unwrap();
+    let mut h3_config = quiche::h3::Config::new(1024, 0, 0).unwrap();
 
     let mut s =
         quiche::h3::testing::Session::with_configs(&mut config, &mut h3_config)
