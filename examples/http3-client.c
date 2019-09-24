@@ -152,7 +152,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         fprintf(stderr, "connection established: %.*s\n",
                 (int) app_proto_len, app_proto);
 
-        quiche_h3_config *config = quiche_h3_config_new(0, 1024, 0, 0);
+        quiche_h3_config *config = quiche_h3_config_new(1024, 0, 0);
         if (config == NULL) {
             fprintf(stderr, "failed to create HTTP/3 config\n");
             return;

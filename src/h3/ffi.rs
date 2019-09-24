@@ -37,11 +37,10 @@ use crate::*;
 
 #[no_mangle]
 pub extern fn quiche_h3_config_new(
-    num_placeholders: u64, max_header_list_size: u64,
-    qpack_max_table_capacity: u64, qpack_blocked_streams: u64,
+    max_header_list_size: u64, qpack_max_table_capacity: u64,
+    qpack_blocked_streams: u64,
 ) -> *mut h3::Config {
     match h3::Config::new(
-        num_placeholders,
         max_header_list_size,
         qpack_max_table_capacity,
         qpack_blocked_streams,

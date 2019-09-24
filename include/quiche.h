@@ -302,10 +302,9 @@ void quiche_conn_free(quiche_conn *conn);
 typedef struct Http3Config quiche_h3_config;
 
 // Creates a HTTP/3 config object with the given version.
-quiche_h3_config *quiche_h3_config_new(uint64_t num_placeholders,
-                                       uint64_t max_header_list_size,
+quiche_h3_config *quiche_h3_config_new(uint64_t max_header_list_size,
                                        uint64_t qpack_max_table_capacity,
-                                       uint64_t qpack_blaocked_streams);
+                                       uint64_t qpack_blocked_streams);
 
 // Frees the HTTP/3 config object.
 void quiche_h3_config_free(quiche_h3_config *config);

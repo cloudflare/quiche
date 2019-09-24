@@ -40,7 +40,6 @@ pub const DUPLICATE_PUSH_FRAME_TYPE_ID: u64 = 0xE;
 const SETTINGS_QPACK_MAX_TABLE_CAPACITY: u64 = 0x1;
 const SETTINGS_MAX_HEADER_LIST_SIZE: u64 = 0x6;
 const SETTINGS_QPACK_BLOCKED_STREAMS: u64 = 0x7;
-const SETTINGS_NUM_PLACEHOLDERS: u64 = 0x9;
 
 #[derive(Clone, PartialEq)]
 pub enum Frame {
@@ -57,7 +56,6 @@ pub enum Frame {
     },
 
     Settings {
-        num_placeholders: Option<u64>,
         max_header_list_size: Option<u64>,
         qpack_max_table_capacity: Option<u64>,
         qpack_blocked_streams: Option<u64>,
@@ -154,18 +152,12 @@ impl Frame {
             },
 
             Frame::Settings {
-                num_placeholders,
                 max_header_list_size,
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
                 grease,
             } => {
                 let mut len = 0;
-
-                if let Some(val) = num_placeholders {
-                    len += octets::varint_len(SETTINGS_NUM_PLACEHOLDERS);
-                    len += octets::varint_len(*val);
-                }
 
                 if let Some(val) = max_header_list_size {
                     len += octets::varint_len(SETTINGS_MAX_HEADER_LIST_SIZE);
@@ -189,11 +181,6 @@ impl Frame {
 
                 b.put_varint(SETTINGS_FRAME_TYPE_ID)?;
                 b.put_varint(len as u64)?;
-
-                if let Some(val) = num_placeholders {
-                    b.put_varint(SETTINGS_NUM_PLACEHOLDERS)?;
-                    b.put_varint(*val as u64)?;
-                }
 
                 if let Some(val) = max_header_list_size {
                     b.put_varint(SETTINGS_MAX_HEADER_LIST_SIZE)?;
@@ -272,13 +259,12 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::Settings {
-                num_placeholders,
                 max_header_list_size,
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
                 ..
             } => {
-                write!(f, "SETTINGS placeholders={:?}, max_headers={:?}, qpack_max_table={:?}, qpack_blocked={:?} ", num_placeholders, max_header_list_size, qpack_max_table_capacity, qpack_blocked_streams)?;
+                write!(f, "SETTINGS max_headers={:?}, qpack_max_table={:?}, qpack_blocked={:?} ", max_header_list_size, qpack_max_table_capacity, qpack_blocked_streams)?;
             },
 
             Frame::PushPromise {
@@ -317,7 +303,6 @@ impl std::fmt::Debug for Frame {
 fn parse_settings_frame(
     b: &mut octets::Octets, settings_length: usize,
 ) -> Result<Frame> {
-    let mut num_placeholders = None;
     let mut max_header_list_size = None;
     let mut qpack_max_table_capacity = None;
     let mut qpack_blocked_streams = None;
@@ -339,17 +324,12 @@ fn parse_settings_frame(
                 qpack_blocked_streams = Some(settings_val);
             },
 
-            SETTINGS_NUM_PLACEHOLDERS => {
-                num_placeholders = Some(settings_val);
-            },
-
             // Unknown Settings parameters must be ignored.
             _ => (),
         }
     }
 
     Ok(Frame::Settings {
-        num_placeholders,
         max_header_list_size,
         qpack_max_table_capacity,
         qpack_blocked_streams,
@@ -462,14 +442,13 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::Settings {
-            num_placeholders: Some(0),
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             grease: None,
         };
 
-        let frame_payload_len = 8;
+        let frame_payload_len = 6;
         let frame_header_len = 2;
 
         let wire_len = {
@@ -495,7 +474,6 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::Settings {
-            num_placeholders: Some(0),
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
@@ -504,14 +482,13 @@ mod tests {
 
         // Frame parsing will always ignore GREASE values.
         let frame_parsed = Frame::Settings {
-            num_placeholders: Some(0),
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             grease: None,
         };
 
-        let frame_payload_len = 10;
+        let frame_payload_len = 8;
         let frame_header_len = 2;
 
         let wire_len = {
@@ -537,14 +514,13 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::Settings {
-            num_placeholders: Some(16),
             max_header_list_size: Some(1024),
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             grease: None,
         };
 
-        let frame_payload_len = 5;
+        let frame_payload_len = 3;
         let frame_header_len = 2;
 
         let wire_len = {
@@ -570,7 +546,6 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::Settings {
-            num_placeholders: None,
             max_header_list_size: None,
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),

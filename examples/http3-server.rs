@@ -134,7 +134,7 @@ fn main() {
         config.grease(false);
     }
 
-    let h3_config = quiche::h3::Config::new(16, 1024, 0, 0).unwrap();
+    let h3_config = quiche::h3::Config::new(1024, 0, 0).unwrap();
 
     let mut clients = ClientMap::new();
 
