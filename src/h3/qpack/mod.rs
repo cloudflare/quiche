@@ -53,6 +53,9 @@ pub enum Error {
 
     /// The decoded QPACK header name or value is not valid.
     InvalidHeaderValue,
+
+    /// The decoded header list exceeded the size limit.
+    HeaderListTooLarge,
 }
 
 impl std::fmt::Display for Error {
@@ -99,7 +102,7 @@ mod tests {
         assert!(enc.encode(&headers, &mut encoded).is_ok());
 
         let mut dec = Decoder::new();
-        assert_eq!(dec.decode(&mut encoded), Ok(headers));
+        assert_eq!(dec.decode(&mut encoded, std::u64::MAX), Ok(headers));
     }
 }
 

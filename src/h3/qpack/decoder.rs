@@ -89,10 +89,14 @@ impl Decoder {
     }
 
     /// Decodes a QPACK header block into a list of headers.
-    pub fn decode(&mut self, buf: &mut [u8]) -> Result<Vec<Header>> {
+    pub fn decode(
+        &mut self, buf: &mut [u8], max_size: u64,
+    ) -> Result<Vec<Header>> {
         let mut b = octets::Octets::with_slice(buf);
 
         let mut out = Vec::new();
+
+        let mut left = max_size;
 
         let req_insert_count = decode_int(&mut b, 8)?;
         let base = decode_int(&mut b, 7)?;
@@ -117,6 +121,11 @@ impl Decoder {
                     }
 
                     let (name, value) = lookup_static(index)?;
+
+                    left = left
+                        .checked_sub((name.len() + value.len()) as u64)
+                        .ok_or(Error::HeaderListTooLarge)?;
+
                     out.push(Header::new(&name, &value));
                 },
 
@@ -150,6 +159,10 @@ impl Decoder {
                         value
                     );
 
+                    left = left
+                        .checked_sub((name.len() + value.len()) as u64)
+                        .ok_or(Error::HeaderListTooLarge)?;
+
                     out.push(Header::new(&name, &value));
                 },
 
@@ -173,6 +186,11 @@ impl Decoder {
                     }
 
                     let (name, _) = lookup_static(name_idx)?;
+
+                    left = left
+                        .checked_sub((name.len() + value.len()) as u64)
+                        .ok_or(Error::HeaderListTooLarge)?;
+
                     out.push(Header::new(name, &value));
                 },
 
