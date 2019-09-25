@@ -232,7 +232,7 @@ fn main() {
         // Create a new HTTP/3 connection and end an HTTP request as soon as
         // the QUIC connection is established.
         if conn.is_established() && http3_conn.is_none() {
-            let h3_config = quiche::h3::Config::new(1024, 0, 0).unwrap();
+            let h3_config = quiche::h3::Config::new().unwrap();
 
             let mut h3_conn =
                 quiche::h3::Connection::with_transport(&mut conn, &h3_config)
