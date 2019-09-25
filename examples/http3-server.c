@@ -510,12 +510,11 @@ int main(int argc, char *argv[]) {
     quiche_config_set_initial_max_streams_uni(config, 100);
     quiche_config_set_disable_active_migration(config, true);
 
-    http3_config = quiche_h3_config_new(1024, 0, 0);
-    if (config == NULL) {
+    http3_config = quiche_h3_config_new();
+    if (http3_config == NULL) {
         fprintf(stderr, "failed to create HTTP/3 config\n");
         return -1;
     }
-
 
     struct connections c;
     c.sock = sock;

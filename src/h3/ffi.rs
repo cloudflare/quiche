@@ -36,19 +36,33 @@ use libc::ssize_t;
 use crate::*;
 
 #[no_mangle]
-pub extern fn quiche_h3_config_new(
-    max_header_list_size: u64, qpack_max_table_capacity: u64,
-    qpack_blocked_streams: u64,
-) -> *mut h3::Config {
-    match h3::Config::new(
-        max_header_list_size,
-        qpack_max_table_capacity,
-        qpack_blocked_streams,
-    ) {
+pub extern fn quiche_h3_config_new() -> *mut h3::Config {
+    match h3::Config::new() {
         Ok(c) => Box::into_raw(Box::new(c)),
 
         Err(_) => ptr::null_mut(),
     }
+}
+
+#[no_mangle]
+pub extern fn quiche_h3_config_set_max_header_list_size(
+    config: &mut h3::Config, v: u64,
+) {
+    config.set_max_header_list_size(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_h3_config_set_qpack_max_table_capacity(
+    config: &mut h3::Config, v: u64,
+) {
+    config.set_qpack_max_table_capacity(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_h3_config_set_qpack_blocked_streams(
+    config: &mut h3::Config, v: u64,
+) {
+    config.set_qpack_blocked_streams(v);
 }
 
 #[no_mangle]
