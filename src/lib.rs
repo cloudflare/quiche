@@ -205,9 +205,7 @@
 //! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! if conn.is_established() {
 //!     // Iterate over readable streams.
-//!     let streams: Vec<u64> = conn.readable().collect();
-//!
-//!     for stream_id in streams {
+//!     for stream_id in conn.readable() {
 //!         // Stream is readable, read until there's no more data.
 //!         while let Ok((read, fin)) = conn.stream_recv(stream_id, &mut buf) {
 //!             println!("Got {} bytes on stream {}", read, stream_id);
