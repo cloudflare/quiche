@@ -1,0 +1,16 @@
+version: '1.0'
+
+project: quiche
+
+target: packet-recv-server-libfuzzer
+
+baseimage: kestrel.forallsecure.com:5000/ghedo/quiche-libfuzzer:1
+
+advanced_triage: false
+
+cmds:
+  - cmd: /home/mayhem/packet_recv_server
+    libfuzzer: true
+    asan: true
+    timeout: 5
+    env: { "QUICHE_FUZZ_CRT": "/home/mayhem/cert.crt", "QUICHE_FUZZ_KEY": "/home/mayhem/cert.key" }

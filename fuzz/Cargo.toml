@@ -1,0 +1,26 @@
+[package]
+name = "quiche-fuzz"
+version = "0.1.0"
+authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
+edition = "2018"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+quiche = { path = ".." }
+lazy_static = "1"
+libfuzzer-sys = { git = "https://github.com/rust-fuzz/libfuzzer-sys.git" }
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "packet_recv_client"
+path = "src/packet_recv_client.rs"
+
+[[bin]]
+name = "packet_recv_server"
+path = "src/packet_recv_server.rs"
