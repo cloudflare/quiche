@@ -264,6 +264,8 @@ impl Context {
     }
 }
 
+unsafe impl std::marker::Send for Context {}
+
 impl Drop for Context {
     fn drop(&mut self) {
         unsafe { SSL_CTX_free(self.as_ptr()) }
