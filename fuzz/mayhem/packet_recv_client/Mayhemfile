@@ -1,0 +1,15 @@
+version: '1.0'
+
+project: quiche
+
+target: packet-recv-client-libfuzzer
+
+baseimage: kestrel.forallsecure.com:5000/ghedo/quiche-libfuzzer:1
+
+advanced_triage: false
+
+cmds:
+  - cmd: /home/mayhem/packet_recv_client
+    libfuzzer: true
+    asan: true
+    timeout: 5

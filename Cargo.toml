@@ -17,6 +17,8 @@ exclude = [
     "deps/boringssl/fuzz/*",
     "deps/boringssl/ssl/test/runner/*",
     "deps/boringssl/third_party/wycheproof_testvectors/*",
+    "fuzz/*",
+    "tools/*",
 ]
 
 [features]

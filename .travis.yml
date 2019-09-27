@@ -20,6 +20,7 @@ matrix:
       - cargo clippy --examples -- -D warnings
       - cargo doc --no-deps
       - make -C examples
+      # http3_test
       - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
       - cargo clippy --manifest-path tools/http3_test/Cargo.toml -- -D warnings
    - rust: beta
@@ -28,18 +29,25 @@ matrix:
       - RUSTFLAGS="-D warnings" cargo test --verbose
       - cargo doc --no-deps
       - make -C examples
+      # http3_test
       - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
    - rust: nightly
      install:
       - rustup component add rustfmt
+      - cargo install cargo-fuzz
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
       - cargo fmt -- --check
       - cargo doc --no-deps
       - make -C examples
+      # http3_test
       - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
       - cargo fmt --manifest-path tools/http3_test/Cargo.toml -- --check
+      # fuzzers
+      - RUSTFLAGS="-D warnings" cargo fuzz run packet_recv_client -- -runs=1
+      - RUSTFLAGS="-D warnings" cargo fuzz run packet_recv_server -- -runs=1
+      - cargo fmt --manifest-path fuzz/Cargo.toml -- --check
 
 deploy:
   provider: pages
