@@ -55,18 +55,19 @@ impl std::error::Error for BufferTooShortError {
 
 macro_rules! peek_u {
     ($b:expr, $ty:ty, $len:expr) => {{
+        let len = $len;
         let src = &$b.buf[$b.off..];
 
-        if src.len() < $len {
+        if src.len() < len {
             return Err(BufferTooShortError);
         }
 
         let mut out: $ty = 0;
         unsafe {
             let dst = &mut out as *mut $ty as *mut u8;
-            let off = (mem::size_of::<$ty>() - $len) as isize;
+            let off = (mem::size_of::<$ty>() - len) as isize;
 
-            ptr::copy_nonoverlapping(src.as_ptr(), dst.offset(off), $len);
+            ptr::copy_nonoverlapping(src.as_ptr(), dst.offset(off), len);
         };
 
         Ok(<$ty>::from_be(out))
@@ -85,18 +86,22 @@ macro_rules! get_u {
 
 macro_rules! put_u {
     ($b:expr, $ty:ty, $v:expr, $len:expr) => {{
-        if $b.buf.len() < $b.off + $len {
+        let len = $len;
+
+        if $b.buf.len() < $b.off + len {
             return Err(BufferTooShortError);
         }
 
+        let v = $v;
+
         #[allow(clippy::range_plus_one)]
-        let dst = &mut $b.buf[$b.off..($b.off + $len)];
+        let dst = &mut $b.buf[$b.off..($b.off + len)];
 
         unsafe {
-            let src = &<$ty>::to_be($v) as *const $ty as *const u8;
-            let off = (mem::size_of::<$ty>() - $len) as isize;
+            let src = &<$ty>::to_be(v) as *const $ty as *const u8;
+            let off = (mem::size_of::<$ty>() - len) as isize;
 
-            ptr::copy_nonoverlapping(src.offset(off), dst.as_mut_ptr(), $len);
+            ptr::copy_nonoverlapping(src.offset(off), dst.as_mut_ptr(), len);
         }
 
         $b.off += $len;
