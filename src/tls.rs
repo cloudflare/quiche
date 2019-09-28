@@ -40,23 +40,15 @@ use libc::size_t;
 
 use lazy_static;
 
+use crate::Error;
+use crate::Result;
+
 use crate::Connection;
 use crate::TransportParams;
 
 use crate::crypto;
 use crate::octets;
 use crate::packet;
-
-pub type Result<T> = std::result::Result<T, Error>;
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Error {
-    TlsFail,
-    WantRead,
-    WantWrite,
-    SyscallFail,
-    PendingOperation,
-}
 
 const TLS1_3_VERSION: u16 = 0x0304;
 const TLS_ALERT_ERROR: u64 = 0x100;
@@ -302,8 +294,7 @@ impl Handshake {
             &conn.local_transport_params,
             conn.is_server,
             &mut raw_params,
-        )
-        .map_err(|_| Error::TlsFail)?;
+        )?;
 
         self.set_quic_transport_params(raw_params)?;
 
@@ -699,25 +690,25 @@ fn map_result_ssl(ssl: &Handshake, bssl_result: c_int) -> Result<()> {
                 },
 
                 // SSL_ERROR_WANT_READ
-                2 => Err(Error::WantRead),
+                2 => Err(Error::Done),
 
                 // SSL_ERROR_WANT_WRITE
-                3 => Err(Error::WantWrite),
+                3 => Err(Error::Done),
 
                 // SSL_ERROR_WANT_X509_LOOKUP
-                4 => Err(Error::PendingOperation),
+                4 => Err(Error::Done),
 
                 // SSL_ERROR_SYSCALL
-                5 => Err(Error::SyscallFail),
+                5 => Err(Error::TlsFail),
 
                 // SSL_ERROR_PENDING_CERTIFICATE
-                12 => Err(Error::PendingOperation),
+                12 => Err(Error::Done),
 
                 // SSL_ERROR_WANT_PRIVATE_KEY_OPERATION
-                13 => Err(Error::PendingOperation),
+                13 => Err(Error::Done),
 
                 // SSL_ERROR_PENDING_TICKET
-                14 => Err(Error::PendingOperation),
+                14 => Err(Error::Done),
 
                 _ => Err(Error::TlsFail),
             }
