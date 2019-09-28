@@ -335,24 +335,6 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {
-    fn description(&self) -> &str {
-        match self {
-            Error::Done => "nothing else to do",
-            Error::BufferTooShort => "buffer is too short",
-            Error::UnknownVersion => "version is unknown",
-            Error::InvalidFrame => "frame is invalid",
-            Error::InvalidPacket => "packet is invalid",
-            Error::InvalidState => "connection state is invalid",
-            Error::InvalidStreamState => "stream state is invalid",
-            Error::InvalidTransportParam => "transport parameter is invalid",
-            Error::CryptoFail => "crypto operation failed",
-            Error::TlsFail => "TLS failed",
-            Error::FlowControl => "flow control limit was violated",
-            Error::StreamLimit => "stream limit was violated",
-            Error::FinalSize => "data exceeded stream's final size",
-        }
-    }
-
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
     }

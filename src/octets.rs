@@ -48,10 +48,6 @@ impl std::fmt::Display for BufferTooShortError {
 }
 
 impl std::error::Error for BufferTooShortError {
-    fn description(&self) -> &str {
-        "buffer is too short"
-    }
-
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
     }

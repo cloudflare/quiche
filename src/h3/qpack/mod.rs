@@ -62,15 +62,6 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {
-    fn description(&self) -> &str {
-        match self {
-            Error::BufferTooShort => "buffer is too short",
-            Error::InvalidHuffmanEncoding => "invalid huffman encoding",
-            Error::InvalidStaticTableIndex => "invalid QPACK static table index",
-            Error::InvalidHeaderValue => "invalid QPACK header name or value",
-        }
-    }
-
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
     }
