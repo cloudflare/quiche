@@ -383,7 +383,7 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn new(version: u32) -> Result<Config> {
-        let tls_ctx = tls::Context::new().map_err(|_| Error::TlsFail)?;
+        let tls_ctx = tls::Context::new()?;
 
         Ok(Config {
             local_transport_params: TransportParams::default(),
@@ -407,9 +407,7 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn load_cert_chain_from_pem_file(&mut self, file: &str) -> Result<()> {
-        self.tls_ctx
-            .use_certificate_chain_file(file)
-            .map_err(|_| Error::TlsFail)
+        self.tls_ctx.use_certificate_chain_file(file)
     }
 
     /// Configures the given private key.
@@ -424,9 +422,7 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn load_priv_key_from_pem_file(&mut self, file: &str) -> Result<()> {
-        self.tls_ctx
-            .use_privkey_file(file)
-            .map_err(|_| Error::TlsFail)
+        self.tls_ctx.use_privkey_file(file)
     }
 
     /// Configures whether to verify the peer's certificate.
@@ -481,9 +477,7 @@ impl Config {
 
         self.application_protos = protos_list;
 
-        self.tls_ctx
-            .set_alpn(&self.application_protos)
-            .map_err(|_| Error::TlsFail)
+        self.tls_ctx.set_alpn(&self.application_protos)
     }
 
     /// Sets the `idle_timeout` transport parameter.
@@ -721,9 +715,7 @@ pub fn connect(
     let conn = Connection::new(scid, None, config, false)?;
 
     if let Some(server_name) = server_name {
-        conn.handshake
-            .set_host_name(server_name)
-            .map_err(|_| Error::TlsFail)?;
+        conn.handshake.set_host_name(server_name)?;
     }
 
     Ok(conn)
@@ -826,7 +818,7 @@ impl Connection {
     fn new(
         scid: &[u8], odcid: Option<&[u8]>, config: &mut Config, is_server: bool,
     ) -> Result<Box<Connection>> {
-        let tls = config.tls_ctx.new_handshake().map_err(|_| Error::TlsFail)?;
+        let tls = config.tls_ctx.new_handshake()?;
         Connection::with_tls(scid, odcid, config, tls, is_server)
     }
 
@@ -925,7 +917,7 @@ impl Connection {
                 Some(odcid.to_vec());
         }
 
-        conn.handshake.init(&conn).map_err(|_| Error::TlsFail)?;
+        conn.handshake.init(&conn)?;
 
         conn.streams.update_local_max_streams_bidi(
             config.local_transport_params.initial_max_streams_bidi,
@@ -1093,7 +1085,7 @@ impl Connection {
             self.got_peer_conn_id = false;
             self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
-            self.handshake.clear().map_err(|_| Error::TlsFail)?;
+            self.handshake.clear()?;
 
             return Err(Error::Done);
         }
@@ -1137,7 +1129,7 @@ impl Connection {
             self.got_peer_conn_id = false;
             self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
-            self.handshake.clear().map_err(|_| Error::TlsFail)?;
+            self.handshake.clear()?;
 
             return Err(Error::Done);
         }
@@ -2333,11 +2325,9 @@ impl Connection {
                     }
                 },
 
-                Err(tls::Error::TlsFail) => return Err(Error::TlsFail),
+                Err(Error::Done) => (),
 
-                Err(tls::Error::SyscallFail) => return Err(Error::TlsFail),
-
-                Err(_) => (),
+                Err(e) => return Err(e),
             }
         }
 
@@ -2484,9 +2474,7 @@ impl Connection {
 
                 while let Ok((read, _)) = stream.recv.pop(&mut crypto_buf) {
                     let recv_buf = &crypto_buf[..read];
-                    self.handshake
-                        .provide_data(level, &recv_buf)
-                        .map_err(|_| Error::TlsFail)?;
+                    self.handshake.provide_data(level, &recv_buf)?;
                 }
 
                 self.do_handshake(now)?;
