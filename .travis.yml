@@ -10,6 +10,8 @@ addons:
      - protobuf-compiler
      - uthash-dev
 
+cache: cargo
+
 matrix:
   include:
    - language: rust
