@@ -94,8 +94,8 @@ fn main() {
 
         if let Some(caps) = pkt_re.captures(&l) {
             // Flush previous event.
-            if event.is_some() {
-                events.push(event.unwrap());
+            if let Some(event) = event {
+                events.push(event);
             }
 
             let mut ev = quic_trace::Event::new();
