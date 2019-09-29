@@ -338,7 +338,7 @@ pub enum Error {
     QpackDecoderStreamError,
 
     /// Error originated from the transport layer.
-    TransportError,
+    TransportError(crate::Error),
 }
 
 impl Error {
@@ -367,7 +367,7 @@ impl Error {
             Error::QpackDecoderStreamError => 0x202,
             Error::BufferTooShort => 0x999,
 
-            Error::TransportError => 0xFF,
+            Error::TransportError { .. } => 0xFF,
         }
     }
 
@@ -394,7 +394,7 @@ impl Error {
             Error::QpackDecompressionFailed => -25,
             Error::QpackEncoderStreamError => -26,
             Error::QpackDecoderStreamError => -27,
-            Error::TransportError => -28,
+            Error::TransportError { .. } => -28,
         }
     }
 }
@@ -416,7 +416,7 @@ impl std::convert::From<super::Error> for Error {
         match err {
             super::Error::Done => Error::Done,
 
-            _ => Error::TransportError,
+            _ => Error::TransportError(err),
         }
     }
 }
@@ -1574,10 +1574,8 @@ pub mod testing {
                 Header::new("user-agent", "quiche-test"),
             ];
 
-            let stream = self
-                .client
-                .send_request(&mut self.pipe.client, &req, fin)
-                .unwrap();
+            let stream =
+                self.client.send_request(&mut self.pipe.client, &req, fin)?;
 
             self.advance().ok();
 
@@ -1594,6 +1592,7 @@ pub mod testing {
                 Header::new(":status", "200"),
                 Header::new("server", "quiche-test"),
             ];
+
             self.server.send_response(
                 &mut self.pipe.server,
                 stream,
@@ -2471,6 +2470,24 @@ mod tests {
         assert_eq!(stream, 0);
 
         assert_eq!(s.poll_server(), Err(Error::ExcessiveLoad));
+    }
+
+    #[test]
+    /// Tests that Error::TransportError contains a transport error.
+    fn transport_error() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        assert!(s.send_request(true).is_ok());
+        assert!(s.send_request(true).is_ok());
+        assert!(s.send_request(true).is_ok());
+        assert!(s.send_request(true).is_ok());
+        assert!(s.send_request(true).is_ok());
+
+        assert_eq!(
+            s.send_request(true),
+            Err(Error::TransportError(crate::Error::StreamLimit))
+        );
     }
 }
 
