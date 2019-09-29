@@ -7,6 +7,7 @@ addons:
     packages:
      - golang-go
      - libev-dev
+     - protobuf-compiler
      - uthash-dev
 
 matrix:
@@ -23,6 +24,9 @@ matrix:
       # http3_test
       - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
       - cargo clippy --manifest-path tools/http3_test/Cargo.toml -- -D warnings
+      # quic-trace-log
+      - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
+      - cargo clippy --manifest-path tools/quic-trace-log/Cargo.toml -- -D warnings
    - rust: beta
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
@@ -31,6 +35,8 @@ matrix:
       - make -C examples
       # http3_test
       - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
+      # quic-trace-log
+      - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
    - rust: nightly
      install:
       - rustup component add rustfmt
@@ -41,13 +47,16 @@ matrix:
       - cargo fmt -- --check
       - cargo doc --no-deps
       - make -C examples
-      # http3_test
-      - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
-      - cargo fmt --manifest-path tools/http3_test/Cargo.toml -- --check
       # fuzzers
       - RUSTFLAGS="-D warnings" cargo fuzz run packet_recv_client -- -runs=1
       - RUSTFLAGS="-D warnings" cargo fuzz run packet_recv_server -- -runs=1
       - cargo fmt --manifest-path fuzz/Cargo.toml -- --check
+      # http3_test
+      - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
+      - cargo fmt --manifest-path tools/http3_test/Cargo.toml -- --check
+      # quic-trace-log
+      - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
+      - cargo fmt --manifest-path tools/quic-trace-log/Cargo.toml -- --check
 
 deploy:
   provider: pages
