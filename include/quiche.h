@@ -302,7 +302,7 @@ void quiche_conn_free(quiche_conn *conn);
 typedef struct Http3Config quiche_h3_config;
 
 // Creates an HTTP/3 config object with default settings values.
-quiche_h3_config *quiche_h3_config_new();
+quiche_h3_config *quiche_h3_config_new(void);
 
 // Sets the `SETTINGS_MAX_HEADER_LIST_SIZE` setting.
 void quiche_h3_config_set_max_header_list_size(quiche_h3_config *config, uint64_t v);
