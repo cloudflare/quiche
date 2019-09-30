@@ -426,11 +426,16 @@ impl Config {
     }
 
     /// Configures whether to verify the peer's certificate.
+    ///
+    /// The default value is `true` for client connections, and `false` for
+    /// server ones.
     pub fn verify_peer(&mut self, verify: bool) {
         self.tls_ctx.set_verify(verify);
     }
 
     /// Configures whether to send GREASE values.
+    ///
+    /// The default value is `true`.
     pub fn grease(&mut self, grease: bool) {
         self.grease = grease;
     }
@@ -457,6 +462,8 @@ impl Config {
     /// On the server this configures the list of supported protocols to match
     /// against the client-supplied list.
     ///
+    /// Applications must set a value, but no default is provided.
+    ///
     /// ## Examples:
     ///
     /// ```
@@ -481,58 +488,80 @@ impl Config {
     }
 
     /// Sets the `idle_timeout` transport parameter.
+    ///
+    /// By default no timeout is used.
     pub fn set_idle_timeout(&mut self, v: u64) {
         self.local_transport_params.idle_timeout = v;
     }
 
     /// Sets the `max_packet_size transport` parameter.
+    ///
+    /// The default value is `65527`.
     pub fn set_max_packet_size(&mut self, v: u64) {
         self.local_transport_params.max_packet_size = v;
     }
 
     /// Sets the `initial_max_data` transport parameter.
+    ///
+    /// The default value is `0`.
     pub fn set_initial_max_data(&mut self, v: u64) {
         self.local_transport_params.initial_max_data = v;
     }
 
     /// Sets the `initial_max_stream_data_bidi_local` transport parameter.
+    ///
+    /// The default value is `0`.
     pub fn set_initial_max_stream_data_bidi_local(&mut self, v: u64) {
         self.local_transport_params
             .initial_max_stream_data_bidi_local = v;
     }
 
     /// Sets the `initial_max_stream_data_bidi_remote` transport parameter.
+    ///
+    /// The default value is `0`.
     pub fn set_initial_max_stream_data_bidi_remote(&mut self, v: u64) {
         self.local_transport_params
             .initial_max_stream_data_bidi_remote = v;
     }
 
     /// Sets the `initial_max_stream_data_uni` transport parameter.
+    ///
+    /// The default value is `0`.
     pub fn set_initial_max_stream_data_uni(&mut self, v: u64) {
         self.local_transport_params.initial_max_stream_data_uni = v;
     }
 
     /// Sets the `initial_max_streams_bidi` transport parameter.
+    ///
+    /// The default value is `0`.
     pub fn set_initial_max_streams_bidi(&mut self, v: u64) {
         self.local_transport_params.initial_max_streams_bidi = v;
     }
 
     /// Sets the `initial_max_streams_uni` transport parameter.
+    ///
+    /// The default value is `0`.
     pub fn set_initial_max_streams_uni(&mut self, v: u64) {
         self.local_transport_params.initial_max_streams_uni = v;
     }
 
     /// Sets the `ack_delay_exponent` transport parameter.
+    ///
+    /// The default value is `3`.
     pub fn set_ack_delay_exponent(&mut self, v: u64) {
         self.local_transport_params.ack_delay_exponent = v;
     }
 
     /// Sets the `max_ack_delay` transport parameter.
+    ///
+    /// The default value is `25`.
     pub fn set_max_ack_delay(&mut self, v: u64) {
         self.local_transport_params.max_ack_delay = v;
     }
 
     /// Sets the `disable_active_migration` transport parameter.
+    ///
+    /// The default value is `false`.
     pub fn set_disable_active_migration(&mut self, v: bool) {
         self.local_transport_params.disable_active_migration = v;
     }
