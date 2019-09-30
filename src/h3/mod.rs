@@ -445,16 +445,22 @@ impl Config {
     }
 
     /// Sets the `SETTINGS_MAX_HEADER_LIST_SIZE` setting.
+    ///
+    /// By default no limit is enforced.
     pub fn set_max_header_list_size(&mut self, v: u64) {
         self.max_header_list_size = Some(v);
     }
 
     /// Sets the `SETTINGS_QPACK_MAX_TABLE_CAPACITY` setting.
+    ///
+    /// The default value is `0`.
     pub fn set_qpack_max_table_capacity(&mut self, v: u64) {
         self.qpack_max_table_capacity = Some(v);
     }
 
     /// Sets the `SETTINGS_QPACK_BLOCKED_STREAMS` setting.
+    ///
+    /// The default value is `0`.
     pub fn set_qpack_blocked_streams(&mut self, v: u64) {
         self.qpack_blocked_streams = Some(v);
     }
