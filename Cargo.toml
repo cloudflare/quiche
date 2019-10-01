@@ -15,6 +15,7 @@ exclude = [
     "deps/boringssl/crypto/**/*_tests.txt",
     "deps/boringssl/**/nist_cavp/*.txt",
     "deps/boringssl/fuzz/*",
+    "deps/boringssl/go.mod",
     "deps/boringssl/ssl/test/runner/*",
     "deps/boringssl/third_party/wycheproof_testvectors/*",
     "fuzz/*",
