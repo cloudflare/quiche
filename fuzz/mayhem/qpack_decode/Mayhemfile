@@ -4,7 +4,7 @@ project: quiche
 
 target: qpack-decode-libfuzzer
 
-baseimage: kestrel.forallsecure.com:5000/ghedo/quiche-libfuzzer:2
+baseimage: kestrel.forallsecure.com:5000/ghedo/quiche-libfuzzer:latest
 
 advanced_triage: false
 
