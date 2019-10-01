@@ -165,6 +165,10 @@ impl Open {
     }
 
     pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
+        if cfg!(fuzzing) {
+            return Ok(<[u8; 5]>::default());
+        }
+
         let mask = self
             .hp_key
             .new_mask(sample)
@@ -240,6 +244,10 @@ impl Seal {
     }
 
     pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
+        if cfg!(fuzzing) {
+            return Ok(<[u8; 5]>::default());
+        }
+
         let mask = self
             .hp_key
             .new_mask(sample)
