@@ -30,6 +30,8 @@ extern crate log;
 
 use std::net;
 
+use std::io::prelude::*;
+
 use std::collections::HashMap;
 
 use ring::rand::*;
@@ -48,6 +50,7 @@ Options:
   --name <str>             Name of the server [default: quic.tech]
   --max-data BYTES         Connection-wide flow control limit [default: 10000000].
   --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
+  --dump-packets PATH      Dump the incoming packets as files in the given directory.
   --no-retry               Disable stateless retry.
   -h --help                Show this screen.
 ";
@@ -83,6 +86,12 @@ fn main() {
 
     let max_stream_data = args.get_str("--max-stream-data");
     let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
+
+    let dump_path = if args.get_str("--dump-packets") != "" {
+        Some(args.get_str("--dump-packets"))
+    } else {
+        None
+    };
 
     // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
@@ -130,6 +139,8 @@ fn main() {
 
     let mut clients = ClientMap::new();
 
+    let mut pkt_count = 0;
+
     loop {
         // Find the shorter timeout from all the active connections.
         //
@@ -171,6 +182,17 @@ fn main() {
             debug!("got {} bytes", len);
 
             let pkt_buf = &mut buf[..len];
+
+            if let Some(target_path) = dump_path {
+                let path = format!("{}/{}.pkt", target_path, pkt_count);
+
+                if let Ok(f) = std::fs::File::create(&path) {
+                    let mut f = std::io::BufWriter::new(f);
+                    f.write_all(pkt_buf).ok();
+                }
+            }
+
+            pkt_count += 1;
 
             // Parse the QUIC packet's header.
             let hdr = match quiche::Header::from_slice(
