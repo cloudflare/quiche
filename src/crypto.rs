@@ -101,7 +101,7 @@ impl Algorithm {
     }
 
     pub fn tag_len(self) -> usize {
-        if cfg!(fuzzing) {
+        if cfg!(feature = "fuzzing") {
             return 0;
         }
 
@@ -148,7 +148,7 @@ impl Open {
     pub fn open_with_u64_counter(
         &self, counter: u64, ad: &[u8], buf: &mut [u8],
     ) -> Result<usize> {
-        if cfg!(fuzzing) {
+        if cfg!(feature = "fuzzing") {
             return Ok(buf.len());
         }
 
@@ -165,7 +165,7 @@ impl Open {
     }
 
     pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
-        if cfg!(fuzzing) {
+        if cfg!(feature = "fuzzing") {
             return Ok(<[u8; 5]>::default());
         }
 
@@ -217,7 +217,7 @@ impl Seal {
     pub fn seal_with_u64_counter(
         &self, counter: u64, ad: &[u8], buf: &mut [u8],
     ) -> Result<()> {
-        if cfg!(fuzzing) {
+        if cfg!(feature = "fuzzing") {
             return Ok(());
         }
 
@@ -244,7 +244,7 @@ impl Seal {
     }
 
     pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
-        if cfg!(fuzzing) {
+        if cfg!(feature = "fuzzing") {
             return Ok(<[u8; 5]>::default());
         }
 

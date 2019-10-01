@@ -31,6 +31,9 @@ boringssl-vendored = []
 # Generate pkg-config metadata file for libquiche.
 pkg-config-meta = []
 
+# Equivalent to "--cfg fuzzing", but can also be checked in build.rs.
+fuzzing = []
+
 [package.metadata.docs.rs]
 default-features = false
 

@@ -155,11 +155,14 @@ Cflags: -I${{includedir}}
 fn main() {
     if cfg!(feature = "boringssl-vendored") {
         let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
-            get_boringssl_cmake_config()
-                .build_target("bssl")
-                .build()
-                .display()
-                .to_string()
+            let mut cfg = get_boringssl_cmake_config();
+
+            if cfg!(feature = "fuzzing") {
+                cfg.cxxflag("-DBORINGSSL_UNSAFE_DETERMINISTIC_MODE")
+                    .cxxflag("-DBORINGSSL_UNSAFE_FUZZER_MODE");
+            }
+
+            cfg.build_target("bssl").build().display().to_string()
         });
 
         let crypto_path = get_boringssl_platform_output_path("crypto");
