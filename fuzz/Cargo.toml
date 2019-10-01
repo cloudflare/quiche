@@ -9,7 +9,7 @@ publish = false
 cargo-fuzz = true
 
 [dependencies]
-quiche = { path = ".." }
+quiche = { path = "..", features = ["fuzzing"] }
 lazy_static = "1"
 libfuzzer-sys = { git = "https://github.com/rust-fuzz/libfuzzer-sys.git" }
 
