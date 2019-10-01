@@ -30,6 +30,8 @@ extern crate log;
 
 use std::net::ToSocketAddrs;
 
+use std::io::prelude::*;
+
 use ring::rand::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
@@ -44,6 +46,7 @@ Options:
   --max-data BYTES         Connection-wide flow control limit [default: 10000000].
   --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
   --wire-version VERSION   The version number to send to the server [default: babababa].
+  --dump-packets PATH      Dump the incoming packets as files in the given directory.
   --no-verify              Don't verify server's certificate.
   -h --help                Show this screen.
 ";
@@ -68,6 +71,12 @@ fn main() {
 
     let version = args.get_str("--wire-version");
     let version = u32::from_str_radix(version, 16).unwrap();
+
+    let dump_path = if args.get_str("--dump-packets") != "" {
+        Some(args.get_str("--dump-packets"))
+    } else {
+        None
+    };
 
     let url = url::Url::parse(args.get_str("URL")).unwrap();
 
@@ -157,6 +166,8 @@ fn main() {
 
     let mut req_sent = false;
 
+    let mut pkt_count = 0;
+
     loop {
         poll.poll(&mut events, conn.timeout()).unwrap();
 
@@ -189,6 +200,17 @@ fn main() {
             };
 
             debug!("got {} bytes", len);
+
+            if let Some(target_path) = dump_path {
+                let path = format!("{}/{}.pkt", target_path, pkt_count);
+
+                if let Ok(f) = std::fs::File::create(&path) {
+                    let mut f = std::io::BufWriter::new(f);
+                    f.write_all(&buf[..len]).ok();
+                }
+            }
+
+            pkt_count += 1;
 
             // Process potentially coalesced packets.
             let read = match conn.recv(&mut buf[..len]) {

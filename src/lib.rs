@@ -248,7 +248,14 @@ pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
 /// The minimum length of Initial packets sent by a client.
 pub const MIN_CLIENT_INITIAL_LEN: usize = 1200;
 
+#[cfg(not(feature = "fuzzing"))]
 const PAYLOAD_MIN_LEN: usize = 4;
+
+#[cfg(feature = "fuzzing")]
+// Due to the fact that in fuzzing mode we use a zero-length AEAD tag (which
+// would normally be 16 bytes), we need to adjust the minimum payload size to
+// account for that.
+const PAYLOAD_MIN_LEN: usize = 20;
 
 const MAX_AMPLIFICATION_FACTOR: usize = 3;
 
