@@ -12,7 +12,7 @@ lazy_static! {
     static ref CONFIG: Mutex<quiche::Config> = {
         let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(b"\x05hq-23\x08http/0.9")
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -26,7 +26,7 @@ lazy_static! {
     };
 }
 
-static SCID: [u8; 16] = [0; 16];
+static SCID: [u8; quiche::MAX_CONN_ID_LEN] = [0; quiche::MAX_CONN_ID_LEN];
 
 fuzz_target!(|data: &[u8]| {
     let mut buf = data.to_vec();
