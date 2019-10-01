@@ -222,6 +222,10 @@ impl Recovery {
         // sent, then the ACK is obviously invalid, so there's no need to
         // continue further.
         if largest_acked > self.largest_sent_pkt[epoch] {
+            if cfg!(feature = "fuzzing") {
+                return Ok(());
+            }
+
             return Err(Error::InvalidPacket);
         }
 
