@@ -95,7 +95,7 @@ enum quiche_error {
 const char *quiche_version(void);
 
 // Enables logging. |cb| will be called with log messages
-void quiche_enable_debug_logging(void (*cb)(const char *line, void *argp),
+int quiche_enable_debug_logging(void (*cb)(const char *line, void *argp),
                                  void *argp);
 
 // Stores configuration shared between multiple connections.
