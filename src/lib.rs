@@ -4519,7 +4519,15 @@ mod tests {
         assert_eq!(pipe.client.stream_send(12, b"a", false), Ok(1));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
-        assert_eq!(pipe.server.readable().len(), 2);
+        assert_eq!(pipe.client.stream_send(16, b"a", false), Ok(1));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(
+            pipe.client.stream_send(20, b"a", false),
+            Err(Error::StreamLimit)
+        );
+
+        assert_eq!(pipe.server.readable().len(), 3);
     }
 
     #[test]
@@ -4576,7 +4584,15 @@ mod tests {
         assert_eq!(pipe.client.stream_send(14, b"a", false), Ok(1));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
-        assert_eq!(pipe.server.readable().len(), 2);
+        assert_eq!(pipe.client.stream_send(18, b"a", false), Ok(1));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(
+            pipe.client.stream_send(22, b"a", false),
+            Err(Error::StreamLimit)
+        );
+
+        assert_eq!(pipe.server.readable().len(), 3);
     }
 }
 
