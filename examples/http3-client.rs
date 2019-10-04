@@ -170,6 +170,49 @@ fn main() {
 
     debug!("written {}", write);
 
+    let h3_config = quiche::h3::Config::new().unwrap();
+
+    // Prepare request.
+    let mut path = String::from(url.path());
+
+    if let Some(query) = url.query() {
+        path.push('?');
+        path.push_str(query);
+    }
+
+    let mut req = vec![
+        quiche::h3::Header::new(":method", args.get_str("--method")),
+        quiche::h3::Header::new(":scheme", url.scheme()),
+        quiche::h3::Header::new(":authority", url.host_str().unwrap()),
+        quiche::h3::Header::new(":path", &path),
+        quiche::h3::Header::new("user-agent", "quiche"),
+    ];
+
+    // Add custom headers to the request.
+    for header in &req_headers {
+        let header_split: Vec<&str> = header.splitn(2, ": ").collect();
+        if header_split.len() != 2 {
+            panic!("malformed header provided - \"{}\"", header);
+        }
+
+        req.push(quiche::h3::Header::new(header_split[0], header_split[1]));
+    }
+
+    let body = if args.get_bool("--body") {
+        std::fs::read(args.get_str("--body")).ok()
+    } else {
+        None
+    };
+
+    if body.is_some() {
+        req.push(quiche::h3::Header::new(
+            "content-length",
+            &body.as_ref().unwrap().len().to_string(),
+        ));
+    }
+
+    let mut reqs_sent = 0;
+
     let req_start = std::time::Instant::now();
 
     loop {
@@ -235,62 +278,32 @@ fn main() {
             break;
         }
 
-        // Create a new HTTP/3 connection and end an HTTP request as soon as
-        // the QUIC connection is established.
+        // Create a new HTTP/3 connection once the QUIC connection is established.
         if conn.is_established() && http3_conn.is_none() {
-            let h3_config = quiche::h3::Config::new().unwrap();
-
-            let mut h3_conn =
+            http3_conn = Some(
                 quiche::h3::Connection::with_transport(&mut conn, &h3_config)
-                    .unwrap();
+                    .unwrap(),
+            );
+        }
 
-            let mut path = String::from(url.path());
+        // Send HTTP requests once the QUIC connection is established, and until
+        // all requests have been sent.
+        if let Some(h3_conn) = &mut http3_conn {
+            let mut reqs_done = 0;
 
-            if let Some(query) = url.query() {
-                path.push('?');
-                path.push_str(query);
-            }
-
-            let mut req = vec![
-                quiche::h3::Header::new(":method", args.get_str("--method")),
-                quiche::h3::Header::new(":scheme", url.scheme()),
-                quiche::h3::Header::new(":authority", url.host_str().unwrap()),
-                quiche::h3::Header::new(":path", &path),
-                quiche::h3::Header::new("user-agent", "quiche"),
-            ];
-
-            // Add custom headers to the request.
-            for header in &req_headers {
-                let header_split: Vec<&str> = header.splitn(2, ": ").collect();
-                if header_split.len() != 2 {
-                    panic!("malformed header provided - \"{}\"", header);
-                }
-
-                req.push(quiche::h3::Header::new(
-                    header_split[0],
-                    header_split[1],
-                ));
-            }
-
-            let body = if args.get_bool("--body") {
-                std::fs::read(args.get_str("--body")).ok()
-            } else {
-                None
-            };
-
-            if body.is_some() {
-                req.push(quiche::h3::Header::new(
-                    "content-length",
-                    &body.as_ref().unwrap().len().to_string(),
-                ));
-            }
-
-            for _ in 0..reqs_count {
+            for _ in reqs_sent..reqs_count {
                 info!("sending HTTP request {:?}", req);
 
                 let s =
                     match h3_conn.send_request(&mut conn, &req, body.is_none()) {
                         Ok(v) => v,
+
+                        Err(quiche::h3::Error::TransportError(
+                            quiche::Error::StreamLimit,
+                        )) => {
+                            debug!("not enough stream credits, retry later...");
+                            break;
+                        },
 
                         Err(e) => {
                             error!("failed to send request {:?}", e);
@@ -304,9 +317,11 @@ fn main() {
                         break;
                     }
                 }
+
+                reqs_done += 1;
             }
 
-            http3_conn = Some(h3_conn);
+            reqs_sent += reqs_done;
         }
 
         if let Some(http3_conn) = &mut http3_conn {
