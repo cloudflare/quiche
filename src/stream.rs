@@ -66,6 +66,12 @@ pub struct StreamMap {
     local_max_streams_uni: u64,
     local_max_streams_uni_next: u64,
 
+    /// The total number of bidirectional streams opened by the local endpoint.
+    local_opened_streams_bidi: u64,
+
+    /// The total number of unidirectional streams opened by the local endpoint.
+    local_opened_streams_uni: u64,
+
     /// Queue of stream IDs corresponding to streams that have buffered data
     /// ready to be sent to the peer. This also implies that the stream has
     /// enough flow control credits to send at least some of that data.
@@ -159,36 +165,44 @@ impl StreamMap {
 
                 // Enforce stream count limits.
                 match (is_local(id, is_server), is_bidi(id)) {
-                    (true, true) =>
-                        self.peer_max_streams_bidi = self
-                            .peer_max_streams_bidi
-                            .checked_sub(1)
-                            .ok_or(Error::StreamLimit)?,
+                    (true, true) => {
+                        if self.local_opened_streams_bidi >=
+                            self.peer_max_streams_bidi
+                        {
+                            return Err(Error::StreamLimit);
+                        }
 
-                    (true, false) =>
-                        self.peer_max_streams_uni = self
-                            .peer_max_streams_uni
-                            .checked_sub(1)
-                            .ok_or(Error::StreamLimit)?,
+                        self.local_opened_streams_bidi += 1;
+                    },
+
+                    (true, false) => {
+                        if self.local_opened_streams_uni >=
+                            self.peer_max_streams_uni
+                        {
+                            return Err(Error::StreamLimit);
+                        }
+
+                        self.local_opened_streams_uni += 1;
+                    },
 
                     (false, true) => {
-                        self.peer_opened_streams_bidi += 1;
-
-                        if self.peer_opened_streams_bidi >
+                        if self.peer_opened_streams_bidi >=
                             self.local_max_streams_bidi
                         {
                             return Err(Error::StreamLimit);
                         }
+
+                        self.peer_opened_streams_bidi += 1;
                     },
 
                     (false, false) => {
-                        self.peer_opened_streams_uni += 1;
-
-                        if self.peer_opened_streams_uni >
+                        if self.peer_opened_streams_uni >=
                             self.local_max_streams_uni
                         {
                             return Err(Error::StreamLimit);
                         }
+
+                        self.peer_opened_streams_uni += 1;
                     },
                 };
 
