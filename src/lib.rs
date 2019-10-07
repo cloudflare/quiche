@@ -2199,13 +2199,18 @@ impl Connection {
         }
 
         let timeout = if self.draining_timer.is_some() {
+            // Draining timer takes precedence over all other timers. If it is
+            // set it means the connection is closing so there's no point in
+            // processing the other timers.
             self.draining_timer
-        } else if self.recovery.loss_detection_timer().is_some() {
-            self.recovery.loss_detection_timer()
-        } else if self.idle_timer.is_some() {
-            self.idle_timer
         } else {
-            None
+            // Use the lowest timer value (i.e. "sooner") among idle and loss
+            // detection timers. If they are both unset (i.e. `None`) then the
+            // result is `None`, but if at least one of them is set then a
+            // `Some(...)` value is returned.
+            let timers = [self.idle_timer, self.recovery.loss_detection_timer()];
+
+            timers.iter().filter_map(|&x| x).min()
         };
 
         if let Some(timeout) = timeout {
@@ -2234,6 +2239,9 @@ impl Connection {
                 self.closed = true;
             }
 
+            // Draining timer takes precedence over all other timers. If it is
+            // set it means the connection is closing so there's no point in
+            // processing the other timers.
             return;
         }
 
