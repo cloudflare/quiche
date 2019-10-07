@@ -2193,7 +2193,7 @@ impl Connection {
     /// be called. A timeout of `None` means that the timer should be disarmed.
     ///
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
-    pub fn timeout(&self) -> Option<std::time::Duration> {
+    pub fn timeout(&self) -> Option<time::Duration> {
         if self.closed {
             return None;
         }
@@ -2212,7 +2212,7 @@ impl Connection {
             let now = time::Instant::now();
 
             if timeout <= now {
-                return Some(std::time::Duration::new(0, 0));
+                return Some(time::Duration::new(0, 0));
             }
 
             return Some(timeout.duration_since(now));
@@ -2463,8 +2463,7 @@ impl Connection {
 
     /// Processes an incoming frame.
     fn process_frame(
-        &mut self, frame: frame::Frame, epoch: packet::Epoch,
-        now: std::time::Instant,
+        &mut self, frame: frame::Frame, epoch: packet::Epoch, now: time::Instant,
     ) -> Result<()> {
         trace!("{} rx frm {:?}", self.trace_id, frame);
 
