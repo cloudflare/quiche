@@ -1,0 +1,4128 @@
+From 8046468326c3e6d852bd5c284198045c8fe29818 Mon Sep 17 00:00:00 2001
+From: Alessandro Ghedini <alessandro@cloudflare.com>
+Date: Thu, 10 Oct 2019 17:06:08 +0100
+Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
+
+---
+ auto/lib/conf                           |    4 +
+ auto/lib/make                           |    4 +
+ auto/lib/openssl/make                   |   12 +-
+ auto/lib/quiche/conf                    |   19 +
+ auto/lib/quiche/make                    |   22 +
+ auto/make                               |    3 +-
+ auto/modules                            |   44 +
+ auto/options                            |    9 +
+ src/core/ngx_connection.h               |    7 +
+ src/core/ngx_core.h                     |    3 +
+ src/event/ngx_event_quic.c              |  570 +++++++
+ src/event/ngx_event_quic.h              |   49 +
+ src/event/ngx_event_udp.c               |    8 +
+ src/http/modules/ngx_http_ssl_module.c  |   13 +-
+ src/http/ngx_http.c                     |   33 +-
+ src/http/ngx_http.h                     |    4 +
+ src/http/ngx_http_core_module.c         |    7 +
+ src/http/ngx_http_core_module.h         |    3 +
+ src/http/ngx_http_request.c             |  139 +-
+ src/http/ngx_http_request.h             |    3 +
+ src/http/ngx_http_request_body.c        |   29 +
+ src/http/ngx_http_upstream.c            |   13 +
+ src/http/v3/ngx_http_v3.c               | 2090 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.h               |   76 +
+ src/http/v3/ngx_http_v3_filter_module.c |   68 +
+ src/http/v3/ngx_http_v3_module.c        |  286 ++++
+ src/http/v3/ngx_http_v3_module.h        |   34 +
+ 27 files changed, 3541 insertions(+), 11 deletions(-)
+ create mode 100644 auto/lib/quiche/conf
+ create mode 100644 auto/lib/quiche/make
+ create mode 100644 src/event/ngx_event_quic.c
+ create mode 100644 src/event/ngx_event_quic.h
+ create mode 100644 src/http/v3/ngx_http_v3.c
+ create mode 100644 src/http/v3/ngx_http_v3.h
+ create mode 100644 src/http/v3/ngx_http_v3_filter_module.c
+ create mode 100644 src/http/v3/ngx_http_v3_module.c
+ create mode 100644 src/http/v3/ngx_http_v3_module.h
+
+diff --git a/auto/lib/conf b/auto/lib/conf
+index 2c7af1040..abf920bae 100644
+--- a/auto/lib/conf
++++ b/auto/lib/conf
+@@ -25,6 +25,10 @@ if [ $USE_OPENSSL = YES ]; then
+     . auto/lib/openssl/conf
+ fi
+
++if [ $USE_QUICHE = YES ]; then
++    . auto/lib/quiche/conf
++fi
++
+ if [ $USE_ZLIB = YES ]; then
+     . auto/lib/zlib/conf
+ fi
+diff --git a/auto/lib/make b/auto/lib/make
+index b64e32908..c8f34ae2e 100644
+--- a/auto/lib/make
++++ b/auto/lib/make
+@@ -11,6 +11,10 @@ if [ $OPENSSL != NONE -a $OPENSSL != NO -a $OPENSSL != YES ]; then
+     . auto/lib/openssl/make
+ fi
+
++if [ $QUICHE != NONE -a $QUICHE != NO -a $QUICHE != YES ]; then
++    . auto/lib/quiche/make
++fi
++
+ if [ $ZLIB != NONE -a $ZLIB != NO -a $ZLIB != YES ]; then
+     . auto/lib/zlib/make
+ fi
+diff --git a/auto/lib/openssl/make b/auto/lib/openssl/make
+index 126a23875..3af2ae557 100644
+--- a/auto/lib/openssl/make
++++ b/auto/lib/openssl/make
+@@ -49,11 +49,13 @@ END
+         cat << END                                            >> $NGX_MAKEFILE
+
+ $OPENSSL/.openssl/include/openssl/ssl.h:	$NGX_MAKEFILE
+-	cd $OPENSSL \\
+-	&& if [ -f Makefile ]; then \$(MAKE) clean; fi \\
+-	&& ./config --prefix=$ngx_prefix no-shared no-threads $OPENSSL_OPT \\
+-	&& \$(MAKE) \\
+-	&& \$(MAKE) install_sw LIBDIR=lib
++	mkdir -p $OPENSSL/build $OPENSSL/.openssl/lib $OPENSSL/.openssl/include/openssl \\
++	&& cd $OPENSSL/build \\
++	&& cmake -DCMAKE_C_FLAGS="$OPENSSL_OPT" -DCMAKE_CXX_FLAGS="$OPENSSL_OPT" .. \\
++	&& \$(MAKE) VERBOSE=1 \\
++	&& cd .. \\
++	&& cp -r include/openssl/*.h .openssl/include/openssl \\
++	&& cp build/ssl/libssl.a build/crypto/libcrypto.a .openssl/lib
+
+ END
+
+diff --git a/auto/lib/quiche/conf b/auto/lib/quiche/conf
+new file mode 100644
+index 000000000..2c8995dd7
+--- /dev/null
++++ b/auto/lib/quiche/conf
+@@ -0,0 +1,19 @@
++
++# Copyright (C) Cloudflare, Inc.
++
++
++if [ $QUICHE != NONE ]; then
++
++    have=NGX_QUIC . auto/have
++
++    QUICHE_BUILD_TARGET="release"
++
++    if [ $NGX_DEBUG = YES ]; then
++        QUICHE_BUILD_TARGET="debug"
++    fi
++
++    CORE_INCS="$CORE_INCS $QUICHE/include"
++    CORE_DEPS="$CORE_DEPS $QUICHE/target/$QUICHE_BUILD_TARGET/libquiche.a"
++    CORE_LIBS="$CORE_LIBS $QUICHE/target/$QUICHE_BUILD_TARGET/libquiche.a $NGX_LIBPTHREAD"
++
++fi
+diff --git a/auto/lib/quiche/make b/auto/lib/quiche/make
+new file mode 100644
+index 000000000..bd1bec8b7
+--- /dev/null
++++ b/auto/lib/quiche/make
+@@ -0,0 +1,22 @@
++
++# Copyright (C) Cloudflare, Inc.
++
++
++# Default is release build
++QUICHE_BUILD_FLAGS="--release --no-default-features"
++QUICHE_BUILD_TARGET="release"
++
++if [ $NGX_DEBUG = YES ]; then
++    QUICHE_BUILD_FLAGS="--no-default-features"
++    QUICHE_BUILD_TARGET="debug"
++fi
++
++
++cat << END                                                    >> $NGX_MAKEFILE
++
++$QUICHE/target/$QUICHE_BUILD_TARGET/libquiche.a: \\
++		$OPENSSL/.openssl/include/openssl/ssl.h \\
++		$NGX_MAKEFILE
++	cd $QUICHE && cargo build $QUICHE_BUILD_FLAGS
++
++END
+diff --git a/auto/make b/auto/make
+index 34c40cdd5..136c0a64e 100644
+--- a/auto/make
++++ b/auto/make
+@@ -7,7 +7,8 @@ echo "creating $NGX_MAKEFILE"
+
+ mkdir -p $NGX_OBJS/src/core $NGX_OBJS/src/event $NGX_OBJS/src/event/modules \
+          $NGX_OBJS/src/os/unix $NGX_OBJS/src/os/win32 \
+-         $NGX_OBJS/src/http $NGX_OBJS/src/http/v2 $NGX_OBJS/src/http/modules \
++         $NGX_OBJS/src/http $NGX_OBJS/src/http/v2 $NGX_OBJS/src/http/v3 \
++         $NGX_OBJS/src/http/modules \
+          $NGX_OBJS/src/http/modules/perl \
+          $NGX_OBJS/src/mail \
+          $NGX_OBJS/src/stream \
+diff --git a/auto/modules b/auto/modules
+index 09bfcb08d..2b2e6a889 100644
+--- a/auto/modules
++++ b/auto/modules
+@@ -134,6 +134,7 @@ if [ $HTTP = YES ]; then
+     #     ngx_http_header_filter
+     #     ngx_http_chunked_filter
+     #     ngx_http_v2_filter
++    #     ngx_http_v3_filter
+     #     ngx_http_range_header_filter
+     #     ngx_http_gzip_filter
+     #     ngx_http_postpone_filter
+@@ -166,6 +167,7 @@ if [ $HTTP = YES ]; then
+                       ngx_http_header_filter_module \
+                       ngx_http_chunked_filter_module \
+                       ngx_http_v2_filter_module \
++                      ngx_http_v3_filter_module \
+                       ngx_http_range_header_filter_module \
+                       ngx_http_gzip_filter_module \
+                       ngx_http_postpone_filter_module \
+@@ -227,6 +229,17 @@ if [ $HTTP = YES ]; then
+         . auto/module
+     fi
+
++    if [ $HTTP_V3 = YES ]; then
++        ngx_module_name=ngx_http_v3_filter_module
++        ngx_module_incs=
++        ngx_module_deps=
++        ngx_module_srcs=src/http/v3/ngx_http_v3_filter_module.c
++        ngx_module_libs=
++        ngx_module_link=$HTTP_V3
++
++        . auto/module
++    fi
++
+     if :; then
+         ngx_module_name=ngx_http_range_header_filter_module
+         ngx_module_incs=
+@@ -438,6 +451,24 @@ if [ $HTTP = YES ]; then
+         . auto/module
+     fi
+
++    if [ $HTTP_V3 = YES ]; then
++        USE_QUICHE=YES
++        USE_OPENSSL=YES
++        have=NGX_HTTP_V3 . auto/have
++        have=NGX_HTTP_HEADERS . auto/have
++
++        ngx_module_name=ngx_http_v3_module
++        ngx_module_incs=src/http/v3
++        ngx_module_deps="src/http/v3/ngx_http_v3.h \
++                         src/http/v3/ngx_http_v3_module.h"
++        ngx_module_srcs="src/http/v3/ngx_http_v3.c \
++                         src/http/v3/ngx_http_v3_module.c"
++        ngx_module_libs=
++        ngx_module_link=$HTTP_V3
++
++        . auto/module
++    fi
++
+     if :; then
+         ngx_module_name=ngx_http_static_module
+         ngx_module_incs=
+@@ -1268,6 +1299,19 @@ if [ $USE_OPENSSL = YES ]; then
+ fi
+
+
++if [ $USE_QUICHE = YES ]; then
++    ngx_module_type=CORE
++    ngx_module_name=ngx_quic_module
++    ngx_module_incs=
++    ngx_module_deps=src/event/ngx_event_quic.h
++    ngx_module_srcs=src/event/ngx_event_quic.c
++    ngx_module_libs=
++    ngx_module_link=YES
++
++    . auto/module
++fi
++
++
+ if [ $USE_PCRE = YES ]; then
+     ngx_module_type=CORE
+     ngx_module_name=ngx_regex_module
+diff --git a/auto/options b/auto/options
+index d8b421b0f..6b443f048 100644
+--- a/auto/options
++++ b/auto/options
+@@ -59,6 +59,7 @@ HTTP_CHARSET=YES
+ HTTP_GZIP=YES
+ HTTP_SSL=NO
+ HTTP_V2=NO
++HTTP_V3=NO
+ HTTP_SSI=YES
+ HTTP_POSTPONE=NO
+ HTTP_REALIP=NO
+@@ -148,6 +149,9 @@ PCRE_JIT=NO
+ USE_OPENSSL=NO
+ OPENSSL=NONE
+
++USE_QUICHE=NO
++QUICHE=NONE
++
+ USE_ZLIB=NO
+ ZLIB=NONE
+ ZLIB_OPT=
+@@ -225,6 +229,7 @@ $0: warning: the \"--with-ipv6\" option is deprecated"
+
+         --with-http_ssl_module)          HTTP_SSL=YES               ;;
+         --with-http_v2_module)           HTTP_V2=YES                ;;
++        --with-http_v3_module)           HTTP_V3=YES                ;;
+         --with-http_realip_module)       HTTP_REALIP=YES            ;;
+         --with-http_addition_module)     HTTP_ADDITION=YES          ;;
+         --with-http_xslt_module)         HTTP_XSLT=YES              ;;
+@@ -358,6 +363,9 @@ use the \"--with-mail_ssl_module\" option instead"
+         --with-openssl=*)                OPENSSL="$value"           ;;
+         --with-openssl-opt=*)            OPENSSL_OPT="$value"       ;;
+
++        --with-quiche=*)                 QUICHE="$value"           ;;
++        --with-quiche-opt=*)             QUICHE_OPT="$value"       ;;
++
+         --with-md5=*)
+             NGX_POST_CONF_MSG="$NGX_POST_CONF_MSG
+ $0: warning: the \"--with-md5\" option is deprecated"
+@@ -440,6 +448,7 @@ cat << END
+
+   --with-http_ssl_module             enable ngx_http_ssl_module
+   --with-http_v2_module              enable ngx_http_v2_module
++  --with-http_v3_module              enable ngx_http_v3_module
+   --with-http_realip_module          enable ngx_http_realip_module
+   --with-http_addition_module        enable ngx_http_addition_module
+   --with-http_xslt_module            enable ngx_http_xslt_module
+diff --git a/src/core/ngx_connection.h b/src/core/ngx_connection.h
+index 54059629e..7df8d4136 100644
+--- a/src/core/ngx_connection.h
++++ b/src/core/ngx_connection.h
+@@ -79,6 +79,9 @@ struct ngx_listening_s {
+     unsigned            deferred_accept:1;
+     unsigned            delete_deferred:1;
+     unsigned            add_deferred:1;
++#if (NGX_QUIC)
++    unsigned            quic:1;
++#endif
+ #if (NGX_HAVE_DEFERRED_ACCEPT && defined SO_ACCEPTFILTER)
+     char               *accept_filter;
+ #endif
+@@ -156,6 +159,10 @@ struct ngx_connection_s {
+
+     ngx_udp_connection_t  *udp;
+
++#if (NGX_QUIC)
++    ngx_quic_connection_t *quic;
++#endif
++
+     struct sockaddr    *local_sockaddr;
+     socklen_t           local_socklen;
+
+diff --git a/src/core/ngx_core.h b/src/core/ngx_core.h
+index 93ca9174d..d0441f034 100644
+--- a/src/core/ngx_core.h
++++ b/src/core/ngx_core.h
+@@ -82,6 +82,9 @@ typedef void (*ngx_connection_handler_pt)(ngx_connection_t *c);
+ #if (NGX_OPENSSL)
+ #include <ngx_event_openssl.h>
+ #endif
++#if (NGX_QUIC)
++#include <ngx_event_quic.h>
++#endif
+ #include <ngx_process_cycle.h>
+ #include <ngx_conf_file.h>
+ #include <ngx_module.h>
+diff --git a/src/event/ngx_event_quic.c b/src/event/ngx_event_quic.c
+new file mode 100644
+index 000000000..579b59783
+--- /dev/null
++++ b/src/event/ngx_event_quic.c
+@@ -0,0 +1,570 @@
++
++/*
++ * Copyright (C) Cloudflare, Inc.
++ */
++
++#include <ngx_config.h>
++#include <ngx_core.h>
++#include <ngx_event.h>
++
++
++/* Limit outgoing packets to 1200 bytes. This is the minimum value allowed. */
++#define MAX_DATAGRAM_SIZE 1200
++
++/* errors */
++#define NGX_QUIC_NO_ERROR  0x0
++#define NGX_QUIC_INTERNAL_ERROR  0x1
++
++
++static void ngx_quic_read_handler(ngx_event_t *ev);
++static void ngx_quic_write_handler(ngx_event_t *ev);
++
++static void ngx_quic_handshake_completed(ngx_connection_t *c);
++
++static void ngx_quic_shutdown_handler(ngx_event_t *ev);
++
++static void ngx_quic_finalize_connection(ngx_connection_t *c, ngx_uint_t status);
++static void ngx_quic_close_connection(ngx_connection_t *c);
++
++static ngx_int_t ngx_quic_send_udp_packet(ngx_connection_t *c, uint8_t *buf,
++    size_t len);
++
++
++static ngx_command_t  ngx_quic_commands[] = {
++
++    ngx_null_command
++};
++
++
++static ngx_core_module_t  ngx_quic_module_ctx = {
++    ngx_string("quic"),
++    NULL,
++    NULL
++};
++
++
++ngx_module_t  ngx_quic_module = {
++    NGX_MODULE_V1,
++    &ngx_quic_module_ctx,                  /* module context */
++    ngx_quic_commands,                     /* module directives */
++    NGX_CORE_MODULE,                       /* module type */
++    NULL,                                  /* init master */
++    NULL,                                  /* init module */
++    NULL,                                  /* init process */
++    NULL,                                  /* init thread */
++    NULL,                                  /* exit thread */
++    NULL,                                  /* exit process */
++    NULL,                                  /* exit master */
++    NGX_MODULE_V1_PADDING
++};
++
++
++ngx_int_t
++ngx_quic_create_conf(ngx_quic_t *quic)
++{
++    quic->config = quiche_config_new(QUICHE_PROTOCOL_VERSION);
++    if (quic->config == NULL) {
++        ngx_log_error(NGX_LOG_EMERG, quic->log, 0, "failed to create quic config");
++        return NGX_ERROR;
++    }
++
++    return NGX_OK;
++}
++
++
++ngx_int_t
++ngx_quic_validate_initial(ngx_event_t *ev, u_char *buf, ssize_t buf_len)
++{
++    /* Check incoming packet type, if it's not Initial we shouldn't be here. */
++    if (((buf[0] & 0x30) >> 4) != 0) {
++        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, ev->log, 0,
++                       "packet is not quic client initial");
++        return NGX_ERROR;
++    }
++
++    /* Client Initial packets must be at least 1200 bytes. */
++    if (buf_len < QUICHE_MIN_CLIENT_INITIAL_LEN) {
++        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, ev->log, 0,
++                       "quic initial packet is too short");
++        return NGX_ERROR;
++    }
++
++    return NGX_OK;
++}
++
++
++ngx_int_t
++ngx_quic_create_connection(ngx_quic_t *quic, ngx_connection_t *c)
++{
++    int                     rc;
++    u_char                 *buf;
++    size_t                  buf_len;
++    quiche_conn            *conn;
++    static uint8_t          out[MAX_DATAGRAM_SIZE];
++
++    uint8_t                 pkt_type;
++    uint32_t                pkt_version;
++
++    uint8_t                 scid[QUICHE_MAX_CONN_ID_LEN];
++    size_t                  scid_len = sizeof(scid);
++
++    uint8_t                 dcid[QUICHE_MAX_CONN_ID_LEN];
++    size_t                  dcid_len = sizeof(dcid);
++
++    uint8_t                 token[1];
++    size_t                  token_len = sizeof(token);
++
++    ngx_quic_connection_t  *qc;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "quic init connection");
++
++    /* Extract some fields from the client's Initial packet, which was saved
++     * into c->buffer by ngx_event_recvmsg(). */
++    buf = c->buffer->pos;
++    buf_len = ngx_buf_size(c->buffer);
++
++    rc = quiche_header_info(buf, buf_len, QUICHE_MAX_CONN_ID_LEN,
++                            &pkt_version, &pkt_type,
++                            scid, &scid_len, dcid, &dcid_len,
++                            token, &token_len);
++    if (rc < 0) {
++        ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                       "failed to parse quic header: %d", rc);
++        return NGX_ERROR;
++    }
++
++    /* Version mismatch, do version negotiation. */
++    if (pkt_version != QUICHE_PROTOCOL_VERSION) {
++        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                       "quic version negotiation");
++
++        ssize_t written = quiche_negotiate_version(scid, scid_len,
++                                                   dcid, dcid_len,
++                                                   out, sizeof(out));
++
++        if (written < 0) {
++            ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                          "failed to create quic vneg packet: %d", written);
++            return NGX_ERROR;
++        }
++
++        if (ngx_quic_send_udp_packet(c, out, written) == NGX_ERROR) {
++            return NGX_ERROR;
++        }
++
++        return NGX_DONE;
++    }
++
++    /* Initialize source connection ID with some random bytes. */
++    RAND_bytes(scid, sizeof(scid));
++
++#if (NGX_DEBUG)
++    {
++    uint8_t dcid_hex[QUICHE_MAX_CONN_ID_LEN * 2],
++            scid_hex[QUICHE_MAX_CONN_ID_LEN * 2];
++
++    ngx_log_debug4(NGX_LOG_DEBUG_EVENT, c->log, 0,
++        "new quic connection dcid:%*.s new_scid:%*.s",
++        ngx_hex_dump(dcid_hex, dcid, sizeof(dcid)) - dcid_hex, dcid_hex,
++        ngx_hex_dump(scid_hex, scid, sizeof(scid)) - scid_hex, scid_hex);
++    }
++#endif
++
++    conn = quiche_conn_new_with_tls(scid, sizeof(scid), NULL, 0, quic->config,
++                                    c->ssl->connection, true);
++    if (conn == NULL) {
++        ngx_log_error(NGX_LOG_ERR, c->log, 0, "failed to create quic connection");
++        return NGX_ERROR;
++    }
++
++    qc = ngx_pcalloc(c->pool, sizeof(ngx_quic_connection_t));
++    if (qc == NULL) {
++        return NGX_ERROR;
++    }
++
++    qc->handler = NULL;
++
++    qc->conn = conn;
++
++    c->quic = qc;
++
++    return NGX_OK;
++}
++
++
++ngx_int_t
++ngx_quic_handshake(ngx_connection_t *c)
++{
++    u_char   *buf;
++    size_t    buf_len;
++    ssize_t   done;
++
++    c->log->action = "processing QUIC connection";
++
++    /* Process the client's Initial packet, which was saved into c->buffer by
++     * ngx_event_recvmsg(). */
++    buf = c->buffer->pos;
++    buf_len = ngx_buf_size(c->buffer);
++
++    done = quiche_conn_recv(c->quic->conn, buf, buf_len);
++
++    if ((done < 0) && (done != QUICHE_ERR_DONE)) {
++        ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                      "failed to process quic packet: %d", done);
++        return NGX_ERROR;
++    }
++
++    if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
++        return NGX_ERROR;
++    }
++
++    c->read->handler = ngx_quic_read_handler;
++    c->write->handler = ngx_quic_write_handler;
++
++    ngx_post_event(c->write, &ngx_posted_events);
++
++    return NGX_AGAIN;
++}
++
++
++static void
++ngx_quic_read_handler(ngx_event_t *rev)
++{
++    int                n;
++    static uint8_t     buf[65535];
++    ngx_connection_t  *c;
++
++    c = rev->data;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "quic read handler");
++
++    if (rev->timedout) {
++        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                       "quic connection timed out");
++
++        ngx_quic_finalize_connection(c, NGX_QUIC_INTERNAL_ERROR);
++        return;
++    }
++
++    for (;;) {
++        n = c->recv(c, buf, sizeof(buf));
++        if (n == NGX_AGAIN) {
++            break;
++        }
++
++        if (n == NGX_ERROR) {
++            ngx_quic_finalize_connection(c, NGX_QUIC_INTERNAL_ERROR);
++            return;
++        }
++
++        ssize_t done = quiche_conn_recv(c->quic->conn, buf, n);
++
++        if (done == QUICHE_ERR_DONE) {
++            break;
++        }
++
++        if (done < 0) {
++            ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                           "failed to process quic packet: %d", done);
++
++            ngx_quic_finalize_connection(c, NGX_QUIC_INTERNAL_ERROR);
++            return;
++        }
++    }
++
++    if (quiche_conn_is_established(c->quic->conn)) {
++        if (!c->ssl->handshaked) {
++            ngx_quic_handshake_completed(c);
++        }
++
++        if ((c->quic == NULL) || (c->quic->handler == NULL)) {
++            return;
++        }
++
++        /* Notify application layer that there might be stream data to read. */
++        c->quic->handler(c);
++    }
++
++    ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "quic done reading");
++
++    if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
++        ngx_quic_finalize_connection(c, NGX_QUIC_INTERNAL_ERROR);
++        return;
++    }
++
++    ngx_post_event(c->write, &ngx_posted_events);
++}
++
++
++static void
++ngx_quic_write_handler(ngx_event_t *wev)
++{
++    ngx_connection_t   *c;
++    ngx_msec_t          expiry;
++    static uint8_t      out[MAX_DATAGRAM_SIZE];
++
++    c = wev->data;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "quic write handler");
++
++    if (wev->timedout) {
++        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "quic alarm fired");
++
++        quiche_conn_on_timeout(c->quic->conn);
++    }
++
++    if (quiche_conn_is_closed(c->quic->conn)) {
++        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                       "quic connection is closed");
++
++        ngx_quic_finalize_connection(c, NGX_QUIC_NO_ERROR);
++        return;
++    }
++
++    for (;;) {
++        ssize_t written = quiche_conn_send(c->quic->conn, out, sizeof(out));
++
++        if (written == QUICHE_ERR_DONE) {
++            ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "quic done writing");
++            break;
++        }
++
++        if (written < 0) {
++            ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                           "failed to create quic packet: %d", written);
++
++            ngx_quic_finalize_connection(c, NGX_QUIC_INTERNAL_ERROR);
++            return;
++        }
++
++        if (ngx_quic_send_udp_packet(c, out, written) == NGX_ERROR) {
++            ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                           "failed to send quic packet");
++
++            ngx_quic_finalize_connection(c, NGX_QUIC_INTERNAL_ERROR);
++            return;
++        }
++    }
++
++    if (ngx_handle_write_event(c->write, 0) != NGX_OK) {
++        ngx_quic_finalize_connection(c, NGX_QUIC_INTERNAL_ERROR);
++        return;
++    }
++
++    expiry = quiche_conn_timeout_as_millis(c->quic->conn);
++    expiry = ngx_max(expiry, 1);
++
++    if (wev->timer_set) {
++        ngx_del_timer(wev);
++    }
++
++    /* quiche_conn_timeout_as_millis() will return UINT64_MAX when the timer
++     * should be unset (this would be equvalent to returning Option::None in
++     * Rust). To avoid overflow we need to explicitly check for this value. */
++    if (expiry != UINT64_MAX) {
++        ngx_add_timer(wev, expiry);
++    }
++}
++
++
++static void
++ngx_quic_handshake_completed(ngx_connection_t *c)
++{
++#if (NGX_DEBUG)
++    {
++    char         buf[129], *s, *d;
++#if OPENSSL_VERSION_NUMBER >= 0x10000000L
++    const
++#endif
++    SSL_CIPHER  *cipher;
++
++    cipher = SSL_get_current_cipher(c->ssl->connection);
++
++    if (cipher) {
++        SSL_CIPHER_description(cipher, &buf[1], 128);
++
++        for (s = &buf[1], d = buf; *s; s++) {
++            if (*s == ' ' && *d == ' ') {
++                continue;
++            }
++
++            if (*s == LF || *s == CR) {
++                continue;
++            }
++
++            *++d = *s;
++        }
++
++        if (*d != ' ') {
++            d++;
++        }
++
++        *d = '\0';
++
++        ngx_log_debug2(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                       "QUIC: %s, cipher: \"%s\"",
++                       SSL_get_version(c->ssl->connection), &buf[1]);
++
++        if (SSL_session_reused(c->ssl->connection)) {
++            ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                           "quic reused session");
++        }
++
++    } else {
++        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                       "quic no shared ciphers");
++    }
++    }
++#endif
++
++    ngx_del_timer(c->read);
++
++    c->ssl->handshaked = 1;
++
++    /* Notify application layer that the handshake is complete. */
++    c->ssl->handler(c);
++}
++
++
++ngx_int_t
++ngx_quic_shutdown(ngx_connection_t *c)
++{
++    if (!quiche_conn_is_closed(c->quic->conn)) {
++        /* We shouldn't free the connection state yet, as we need to wait for
++         * the draining timeout to expire. Setup event handlers such that we
++         * will try again when that happens (or when another event is
++         * triggered). */
++        c->read->handler = ngx_quic_shutdown_handler;
++        c->write->handler = ngx_quic_shutdown_handler;
++
++        /* We need to flush any remaining frames to the client (including
++         * CONNECTION_CLOSE), so invoke the write handler. This also takes
++         * care of setting up the draining timer. */
++        ngx_quic_write_handler(c->write);
++
++        return NGX_AGAIN;
++    }
++
++    ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "free quic connection");
++
++    quiche_conn_free(c->quic->conn);
++
++    c->quic = NULL;
++    c->ssl = NULL;
++
++    return NGX_OK;
++}
++
++
++static void
++ngx_quic_shutdown_handler(ngx_event_t *ev)
++{
++    ngx_connection_t           *c;
++    ngx_connection_handler_pt   handler;
++
++    c = ev->data;
++    handler = c->quic->handler;
++
++    if (ev->timedout) {
++        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "quic alarm fired");
++
++        quiche_conn_on_timeout(c->quic->conn);
++    }
++
++    ngx_log_debug0(NGX_LOG_DEBUG_EVENT, ev->log, 0, "quic shutdown handler");
++
++    if (ngx_quic_shutdown(c) == NGX_AGAIN) {
++        return;
++    }
++
++    handler(c);
++}
++
++
++static void
++ngx_quic_finalize_connection(ngx_connection_t *c, ngx_uint_t status)
++{
++    ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                   "finalize quic connection: %d", c->fd);
++
++    c->error = 1;
++
++    quiche_conn_close(c->quic->conn, false, status, NULL, 0);
++
++    /* Notify the application layer that the connection is in an error
++     * state and will be closed. */
++    if (c->quic->handler != NULL) {
++        c->quic->handler(c);
++        return;
++    }
++
++    ngx_quic_close_connection(c);
++}
++
++
++static void
++ngx_quic_close_connection(ngx_connection_t *c)
++{
++    ngx_pool_t  *pool;
++
++    ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                   "close quic connection: %d", c->fd);
++
++    if (c->quic) {
++        if (ngx_quic_shutdown(c) == NGX_AGAIN) {
++            c->quic->handler = ngx_quic_close_connection;
++            return;
++        }
++    }
++
++#if (NGX_STAT_STUB)
++    (void) ngx_atomic_fetch_add(ngx_stat_active, -1);
++#endif
++
++    c->destroyed = 1;
++
++    pool = c->pool;
++
++    ngx_close_connection(c);
++
++    ngx_destroy_pool(pool);
++}
++
++
++void
++ngx_quic_cleanup_ctx(void *data)
++{
++    ngx_quic_t  *quic = data;
++
++    quiche_config_free(quic->config);
++}
++
++
++static ngx_int_t
++ngx_quic_send_udp_packet(ngx_connection_t *c, uint8_t *buf, size_t len)
++{
++    ngx_buf_t    out_buf = {0};
++    ngx_chain_t  out_chain = {0};
++
++    /* The send_chain() API takes an ngx_chain_t parameter instead of a simple
++     * buffer, so we need to initialize the chain such that it contains only a
++     * single buffer.
++     *
++     * The c->send_chain() call is required (instead of just c->send()) because
++     * it uses the sendmsg(2) syscall (instead of sendto(2)), which allows us to
++     * specify the correct source IP address for the connection. */
++
++    out_buf.start = out_buf.pos = buf;
++    out_buf.end = out_buf.last = buf + len;
++    out_buf.memory = 1;
++    out_buf.flush = 1;
++
++    out_chain.buf = &out_buf;
++    out_chain.next = NULL;
++
++    if (c->send_chain(c, &out_chain, 0) == NGX_CHAIN_ERROR) {
++        return NGX_ERROR;
++    }
++
++    return NGX_OK;
++}
+diff --git a/src/event/ngx_event_quic.h b/src/event/ngx_event_quic.h
+new file mode 100644
+index 000000000..b44a96320
+--- /dev/null
++++ b/src/event/ngx_event_quic.h
+@@ -0,0 +1,49 @@
++
++/*
++ * Copyright (C) Cloudflare, Inc.
++ */
++
++
++#ifndef _NGX_EVENT_QUIC_H_INCLUDED_
++#define _NGX_EVENT_QUIC_H_INCLUDED_
++
++
++#include <stdbool.h>
++
++#include <ngx_config.h>
++#include <ngx_core.h>
++
++#include <quiche.h>
++
++typedef struct ngx_quic_s              ngx_quic_t;
++typedef struct ngx_quic_connection_s   ngx_quic_connection_t;
++
++struct ngx_quic_s {
++    quiche_config              *config;
++    ngx_log_t                  *log;
++};
++
++struct ngx_quic_connection_s {
++    quiche_conn                *conn;
++
++    ngx_connection_handler_pt   handler;
++};
++
++
++ngx_int_t ngx_quic_create_conf(ngx_quic_t *quic);
++
++ngx_int_t ngx_quic_validate_initial(ngx_event_t *ev, u_char *buf,
++    ssize_t buf_len);
++
++ngx_int_t ngx_quic_create_connection(ngx_quic_t *quic, ngx_connection_t *c);
++
++ngx_int_t ngx_quic_create_ssl_connection(ngx_ssl_t *ssl, ngx_connection_t *c,
++    ngx_uint_t flags);
++
++ngx_int_t ngx_quic_handshake(ngx_connection_t *c);
++
++ngx_int_t ngx_quic_shutdown(ngx_connection_t *c);
++
++void ngx_quic_cleanup_ctx(void *data);
++
++#endif /* _NGX_EVENT_QUIC_H_INCLUDED_ */
+diff --git a/src/event/ngx_event_udp.c b/src/event/ngx_event_udp.c
+index 557283050..146275121 100644
+--- a/src/event/ngx_event_udp.c
++++ b/src/event/ngx_event_udp.c
+@@ -276,6 +276,14 @@ ngx_event_recvmsg(ngx_event_t *ev)
+         (void) ngx_atomic_fetch_add(ngx_stat_accepted, 1);
+ #endif
+
++#if (NGX_QUIC)
++        if (ls->quic) {
++            if (ngx_quic_validate_initial(ev, buffer, n) != NGX_OK) {
++                goto next;
++            }
++        }
++#endif
++
+         ngx_accept_disabled = ngx_cycle->connection_n / 8
+                               - ngx_cycle->free_connection_n;
+
+diff --git a/src/http/modules/ngx_http_ssl_module.c b/src/http/modules/ngx_http_ssl_module.c
+index b3f8f4795..00dd9c61a 100644
+--- a/src/http/modules/ngx_http_ssl_module.c
++++ b/src/http/modules/ngx_http_ssl_module.c
+@@ -371,7 +371,7 @@ ngx_http_ssl_alpn_select(ngx_ssl_conn_t *ssl_conn, const unsigned char **out,
+ #if (NGX_DEBUG)
+     unsigned int            i;
+ #endif
+-#if (NGX_HTTP_V2)
++#if (NGX_HTTP_V2 || NGX_HTTP_V3)
+     ngx_http_connection_t  *hc;
+ #endif
+ #if (NGX_HTTP_V2 || NGX_DEBUG)
+@@ -388,9 +388,11 @@ ngx_http_ssl_alpn_select(ngx_ssl_conn_t *ssl_conn, const unsigned char **out,
+     }
+ #endif
+
+-#if (NGX_HTTP_V2)
++#if (NGX_HTTP_V2 || NGX_HTTP_V3)
+     hc = c->data;
++#endif
+
++#if (NGX_HTTP_V2)
+     if (hc->addr_conf->http2) {
+         srv =
+            (unsigned char *) NGX_HTTP_V2_ALPN_ADVERTISE NGX_HTTP_NPN_ADVERTISE;
+@@ -398,6 +400,13 @@ ngx_http_ssl_alpn_select(ngx_ssl_conn_t *ssl_conn, const unsigned char **out,
+
+     } else
+ #endif
++#if (NGX_HTTP_V3)
++    if (hc->addr_conf->quic) {
++        srv = (unsigned char *) QUICHE_H3_APPLICATION_PROTOCOL;
++        srvlen = sizeof(QUICHE_H3_APPLICATION_PROTOCOL) - 1;
++
++    } else
++#endif
+     {
+         srv = (unsigned char *) NGX_HTTP_NPN_ADVERTISE;
+         srvlen = sizeof(NGX_HTTP_NPN_ADVERTISE) - 1;
+diff --git a/src/http/ngx_http.c b/src/http/ngx_http.c
+index 79ef9c644..a29bff836 100644
+--- a/src/http/ngx_http.c
++++ b/src/http/ngx_http.c
+@@ -1141,6 +1141,7 @@ ngx_int_t
+ ngx_http_add_listen(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
+     ngx_http_listen_opt_t *lsopt)
+ {
++    int                         t;
+     in_port_t                   p;
+     ngx_uint_t                  i;
+     struct sockaddr            *sa;
+@@ -1159,11 +1160,13 @@ ngx_http_add_listen(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
+
+     sa = lsopt->sockaddr;
+     p = ngx_inet_get_port(sa);
++    t = lsopt->quic ? SOCK_DGRAM : SOCK_STREAM;
+
+     port = cmcf->ports->elts;
+     for (i = 0; i < cmcf->ports->nelts; i++) {
+
+-        if (p != port[i].port || sa->sa_family != port[i].family) {
++        if (p != port[i].port || sa->sa_family != port[i].family
++             || t != port[i].type) {
+             continue;
+         }
+
+@@ -1182,6 +1185,7 @@ ngx_http_add_listen(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
+     port->family = sa->sa_family;
+     port->port = p;
+     port->addrs.elts = NULL;
++    port->type = t;
+
+     return ngx_http_add_address(cf, cscf, port, lsopt);
+ }
+@@ -1199,6 +1203,9 @@ ngx_http_add_addresses(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
+ #if (NGX_HTTP_V2)
+     ngx_uint_t             http2;
+ #endif
++#if (NGX_HTTP_V3)
++    ngx_uint_t             quic;
++#endif
+
+     /*
+      * we cannot compare whole sockaddr struct's as kernel
+@@ -1234,6 +1241,9 @@ ngx_http_add_addresses(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
+ #if (NGX_HTTP_V2)
+         http2 = lsopt->http2 || addr[i].opt.http2;
+ #endif
++#if (NGX_HTTP_V3)
++        quic = lsopt->quic || addr[i].opt.quic;
++#endif
+
+         if (lsopt->set) {
+
+@@ -1270,6 +1280,9 @@ ngx_http_add_addresses(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
+ #if (NGX_HTTP_V2)
+         addr[i].opt.http2 = http2;
+ #endif
++#if (NGX_HTTP_V3)
++        addr[i].opt.quic = quic;
++#endif
+
+         return NGX_OK;
+     }
+@@ -1688,6 +1701,12 @@ ngx_http_init_listening(ngx_conf_t *cf, ngx_http_conf_port_t *port)
+             break;
+         }
+
++#if (NGX_HTTP_V3)
++        if (addr[i].opt.quic) {
++            ls->type = SOCK_DGRAM;
++        }
++#endif
++
+         addr++;
+         last--;
+     }
+@@ -1770,6 +1789,12 @@ ngx_http_add_listening(ngx_conf_t *cf, ngx_http_conf_addr_t *addr)
+     ls->reuseport = addr->opt.reuseport;
+ #endif
+
++#if (NGX_HTTP_V3)
++    ls->quic = addr->opt.quic;
++
++    ls->wildcard = addr->opt.wildcard;
++#endif
++
+     return ls;
+ }
+
+@@ -1803,6 +1828,9 @@ ngx_http_add_addrs(ngx_conf_t *cf, ngx_http_port_t *hport,
+         addrs[i].conf.http2 = addr[i].opt.http2;
+ #endif
+         addrs[i].conf.proxy_protocol = addr[i].opt.proxy_protocol;
++#if (NGX_HTTP_V3)
++        addrs[i].conf.quic = addr[i].opt.quic;
++#endif
+
+         if (addr[i].hash.buckets == NULL
+             && (addr[i].wc_head == NULL
+@@ -1868,6 +1896,9 @@ ngx_http_add_addrs6(ngx_conf_t *cf, ngx_http_port_t *hport,
+         addrs6[i].conf.http2 = addr[i].opt.http2;
+ #endif
+         addrs6[i].conf.proxy_protocol = addr[i].opt.proxy_protocol;
++#if (NGX_HTTP_V3)
++        addrs6[i].conf.quic = addr[i].opt.quic;
++#endif
+
+         if (addr[i].hash.buckets == NULL
+             && (addr[i].wc_head == NULL
+diff --git a/src/http/ngx_http.h b/src/http/ngx_http.h
+index 8b43857ee..444f93536 100644
+--- a/src/http/ngx_http.h
++++ b/src/http/ngx_http.h
+@@ -20,6 +20,7 @@ typedef struct ngx_http_file_cache_s  ngx_http_file_cache_t;
+ typedef struct ngx_http_log_ctx_s     ngx_http_log_ctx_t;
+ typedef struct ngx_http_chunked_s     ngx_http_chunked_t;
+ typedef struct ngx_http_v2_stream_s   ngx_http_v2_stream_t;
++typedef struct ngx_http_v3_stream_s   ngx_http_v3_stream_t;
+
+ typedef ngx_int_t (*ngx_http_header_handler_pt)(ngx_http_request_t *r,
+     ngx_table_elt_t *h, ngx_uint_t offset);
+@@ -38,6 +39,9 @@ typedef u_char *(*ngx_http_log_handler_pt)(ngx_http_request_t *r,
+ #if (NGX_HTTP_V2)
+ #include <ngx_http_v2.h>
+ #endif
++#if (NGX_HTTP_V3)
++#include <ngx_http_v3.h>
++#endif
+ #if (NGX_HTTP_CACHE)
+ #include <ngx_http_cache.h>
+ #endif
+diff --git a/src/http/ngx_http_core_module.c b/src/http/ngx_http_core_module.c
+index cb49ef74a..1e991c0b3 100644
+--- a/src/http/ngx_http_core_module.c
++++ b/src/http/ngx_http_core_module.c
+@@ -4099,6 +4099,13 @@ ngx_http_core_listen(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+             continue;
+         }
+
++#if (NGX_HTTP_V3)
++        if (ngx_strcmp(value[n].data, "quic") == 0) {
++            lsopt.quic = 1;
++            continue;
++        }
++#endif
++
+         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                            "invalid parameter \"%V\"", &value[n]);
+         return NGX_CONF_ERROR;
+diff --git a/src/http/ngx_http_core_module.h b/src/http/ngx_http_core_module.h
+index 85f6d66dc..fa08e3631 100644
+--- a/src/http/ngx_http_core_module.h
++++ b/src/http/ngx_http_core_module.h
+@@ -82,6 +82,7 @@ typedef struct {
+     unsigned                   reuseport:1;
+     unsigned                   so_keepalive:2;
+     unsigned                   proxy_protocol:1;
++    unsigned                   quic:1;
+
+     int                        backlog;
+     int                        rcvbuf;
+@@ -238,6 +239,7 @@ struct ngx_http_addr_conf_s {
+     unsigned                   ssl:1;
+     unsigned                   http2:1;
+     unsigned                   proxy_protocol:1;
++    unsigned                   quic:1;
+ };
+
+
+@@ -268,6 +270,7 @@ typedef struct {
+     ngx_int_t                  family;
+     in_port_t                  port;
+     ngx_array_t                addrs;     /* array of ngx_http_conf_addr_t */
++    ngx_int_t                  type;
+ } ngx_http_conf_port_t;
+
+
+diff --git a/src/http/ngx_http_request.c b/src/http/ngx_http_request.c
+index 80c19656f..1df32a397 100644
+--- a/src/http/ngx_http_request.c
++++ b/src/http/ngx_http_request.c
+@@ -64,6 +64,10 @@ static void ngx_http_ssl_handshake(ngx_event_t *rev);
+ static void ngx_http_ssl_handshake_handler(ngx_connection_t *c);
+ #endif
+
++#if (NGX_HTTP_V3)
++static void ngx_http_quic_handshake(ngx_event_t *rev);
++#endif
++
+
+ static char *ngx_http_client_errors[] = {
+
+@@ -349,6 +353,18 @@ ngx_http_init_connection(ngx_connection_t *c)
+         c->log->action = "reading PROXY protocol";
+     }
+
++#if (NGX_HTTP_V3)
++    if (hc->addr_conf->quic) {
++        hc->quic = 1;
++
++        /* We already have a UDP packet in the connection buffer, so we don't
++         * need to wait for another read event to kick-off the handshake. */
++        ngx_add_timer(rev, c->listening->post_accept_timeout);
++        ngx_http_quic_handshake(rev);
++        return;
++    }
++#endif
++
+     if (rev->ready) {
+         /* the deferred accept(), iocp */
+
+@@ -797,7 +813,7 @@ ngx_http_ssl_handshake_handler(ngx_connection_t *c)
+
+         c->ssl->no_wait_shutdown = 1;
+
+-#if (NGX_HTTP_V2                                                              \
++#if ((NGX_HTTP_V2 || NGX_HTTP_V3)                                             \
+      && (defined TLSEXT_TYPE_application_layer_protocol_negotiation           \
+          || defined TLSEXT_TYPE_next_proto_neg))
+         {
+@@ -807,7 +823,7 @@ ngx_http_ssl_handshake_handler(ngx_connection_t *c)
+
+         hc = c->data;
+
+-        if (hc->addr_conf->http2) {
++        if (hc->addr_conf->http2 || hc->addr_conf->quic) {
+
+ #ifdef TLSEXT_TYPE_application_layer_protocol_negotiation
+             SSL_get0_alpn_selected(c->ssl->connection, &data, &len);
+@@ -822,11 +838,29 @@ ngx_http_ssl_handshake_handler(ngx_connection_t *c)
+             SSL_get0_next_proto_negotiated(c->ssl->connection, &data, &len);
+ #endif
+
++        }
++
++#if (NGX_HTTP_V2)
++        if (hc->addr_conf->http2) {
+             if (len == 2 && data[0] == 'h' && data[1] == '2') {
+                 ngx_http_v2_init(c->read);
+                 return;
+             }
+         }
++#endif
++
++#if (NGX_HTTP_V3)
++        if (hc->addr_conf->quic) {
++            if (len >= 2 && data[0] == 'h' && data[1] == '3') {
++                ngx_http_v3_init(c->read);
++                return;
++            }
++
++            ngx_http_close_connection(c);
++            return;
++        }
++#endif
++
+         }
+ #endif
+
+@@ -1033,6 +1067,68 @@ failed:
+
+ #endif
+
++#if (NGX_HTTP_V3)
++
++static void
++ngx_http_quic_handshake(ngx_event_t *rev)
++{
++    ngx_int_t                  rc;
++    ngx_connection_t          *c;
++    ngx_http_connection_t     *hc;
++    ngx_http_v3_srv_conf_t    *qscf;
++    ngx_http_ssl_srv_conf_t   *sscf;
++
++    c = rev->data;
++    hc = c->data;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
++                   "http check quic handshake");
++
++    if (rev->timedout) {
++        ngx_log_error(NGX_LOG_INFO, c->log, NGX_ETIMEDOUT, "client timed out");
++        ngx_http_close_connection(c);
++        return;
++    }
++
++    if (c->close) {
++        ngx_http_close_connection(c);
++        return;
++    }
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0, "https quic handshake");
++
++    sscf = ngx_http_get_module_srv_conf(hc->conf_ctx,
++                                        ngx_http_ssl_module);
++
++    if (ngx_ssl_create_connection(&sscf->ssl, c, 0) != NGX_OK) {
++        ngx_http_close_connection(c);
++        return;
++    }
++
++    qscf = ngx_http_get_module_srv_conf(hc->conf_ctx, ngx_http_v3_module);
++
++    if (ngx_quic_create_connection(&qscf->quic, c) != NGX_OK) {
++        ngx_http_close_connection(c);
++        return;
++    }
++
++    rc = ngx_quic_handshake(c);
++
++    if (rc == NGX_AGAIN) {
++
++        if (!rev->timer_set) {
++            ngx_add_timer(rev, c->listening->post_accept_timeout);
++        }
++
++        c->ssl->handler = ngx_http_ssl_handshake_handler;
++        return;
++    }
++
++    ngx_http_ssl_handshake_handler(c);
++}
++
++#endif
++
+
+ static void
+ ngx_http_process_request_line(ngx_event_t *rev)
+@@ -2687,6 +2783,13 @@ ngx_http_finalize_connection(ngx_http_request_t *r)
+     }
+ #endif
+
++#if (NGX_HTTP_V3)
++    if (r->qstream) {
++        ngx_http_close_request(r, 0);
++        return;
++    }
++#endif
++
+     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+
+     if (r->main->count != 1) {
+@@ -2896,6 +2999,19 @@ ngx_http_test_reading(ngx_http_request_t *r)
+
+ #endif
+
++#if (NGX_HTTP_V3)
++
++    if (r->qstream) {
++        if (c->error) {
++            err = 0;
++            goto closed;
++        }
++
++        return;
++    }
++
++#endif
++
+ #if (NGX_HAVE_KQUEUE)
+
+     if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
+@@ -3563,7 +3679,15 @@ ngx_http_close_request(ngx_http_request_t *r, ngx_int_t rc)
+     }
+ #endif
+
++#if (NGX_HTTP_V3)
++    if (r->qstream) {
++        ngx_http_v3_close_stream(r->qstream, rc);
++        return;
++    }
++#endif
++
+     ngx_http_free_request(r, rc);
++
+     ngx_http_close_connection(c);
+ }
+
+@@ -3684,6 +3808,17 @@ ngx_http_close_connection(ngx_connection_t *c)
+     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
+                    "close http connection: %d", c->fd);
+
++#if (NGX_HTTP_V3)
++
++    if (c->quic) {
++        if (ngx_quic_shutdown(c) == NGX_AGAIN) {
++            c->quic->handler = ngx_http_close_connection;
++            return;
++        }
++    }
++
++#endif
++
+ #if (NGX_HTTP_SSL)
+
+     if (c->ssl) {
+diff --git a/src/http/ngx_http_request.h b/src/http/ngx_http_request.h
+index fce70efe6..8ac19658c 100644
+--- a/src/http/ngx_http_request.h
++++ b/src/http/ngx_http_request.h
+@@ -24,6 +24,7 @@
+ #define NGX_HTTP_VERSION_10                1000
+ #define NGX_HTTP_VERSION_11                1001
+ #define NGX_HTTP_VERSION_20                2000
++#define NGX_HTTP_VERSION_3                 3000
+
+ #define NGX_HTTP_UNKNOWN                   0x0001
+ #define NGX_HTTP_GET                       0x0002
+@@ -323,6 +324,7 @@ typedef struct {
+     ngx_chain_t                      *free;
+
+     unsigned                          ssl:1;
++    unsigned                          quic:1;
+     unsigned                          proxy_protocol:1;
+ } ngx_http_connection_t;
+
+@@ -445,6 +447,7 @@ struct ngx_http_request_s {
+
+     ngx_http_connection_t            *http_connection;
+     ngx_http_v2_stream_t             *stream;
++    ngx_http_v3_stream_t             *qstream;
+
+     ngx_http_log_handler_pt           log_handler;
+
+diff --git a/src/http/ngx_http_request_body.c b/src/http/ngx_http_request_body.c
+index c4f092e59..2f8514418 100644
+--- a/src/http/ngx_http_request_body.c
++++ b/src/http/ngx_http_request_body.c
+@@ -85,6 +85,13 @@ ngx_http_read_client_request_body(ngx_http_request_t *r,
+     }
+ #endif
+
++#if (NGX_HTTP_V3)
++    if (r->qstream) {
++        rc = ngx_http_v3_read_request_body(r);
++        goto done;
++    }
++#endif
++
+     preread = r->header_in->last - r->header_in->pos;
+
+     if (preread) {
+@@ -226,6 +233,18 @@ ngx_http_read_unbuffered_request_body(ngx_http_request_t *r)
+     }
+ #endif
+
++#if (NGX_HTTP_V3)
++    if (r->qstream) {
++        rc = ngx_http_v3_read_unbuffered_request_body(r);
++
++        if (rc == NGX_OK) {
++            r->reading_body = 0;
++        }
++
++        return rc;
++    }
++#endif
++
+     if (r->connection->read->timedout) {
+         r->connection->timedout = 1;
+         return NGX_HTTP_REQUEST_TIME_OUT;
+@@ -525,6 +544,13 @@ ngx_http_discard_request_body(ngx_http_request_t *r)
+     }
+ #endif
+
++#if (NGX_HTTP_V3)
++    if (r->qstream) {
++        r->qstream->skip_data = 1;
++        return NGX_OK;
++    }
++#endif
++
+     if (ngx_http_test_expect(r) != NGX_OK) {
+         return NGX_HTTP_INTERNAL_SERVER_ERROR;
+     }
+@@ -808,6 +834,9 @@ ngx_http_test_expect(ngx_http_request_t *r)
+         || r->http_version < NGX_HTTP_VERSION_11
+ #if (NGX_HTTP_V2)
+         || r->stream != NULL
++#endif
++#if (NGX_HTTP_V3)
++        || r->qstream != NULL
+ #endif
+        )
+     {
+diff --git a/src/http/ngx_http_upstream.c b/src/http/ngx_http_upstream.c
+index a7391d09a..398af2797 100644
+--- a/src/http/ngx_http_upstream.c
++++ b/src/http/ngx_http_upstream.c
+@@ -526,6 +526,13 @@ ngx_http_upstream_init(ngx_http_request_t *r)
+     }
+ #endif
+
++#if (NGX_HTTP_V3)
++    if (r->qstream) {
++        ngx_http_upstream_init_request(r);
++        return;
++    }
++#endif
++
+     if (c->read->timer_set) {
+         ngx_del_timer(c->read);
+     }
+@@ -1351,6 +1358,12 @@ ngx_http_upstream_check_broken_connection(ngx_http_request_t *r,
+     }
+ #endif
+
++#if (NGX_HTTP_V3)
++    if (r->qstream) {
++        return;
++    }
++#endif
++
+ #if (NGX_HAVE_KQUEUE)
+
+     if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
+diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
+new file mode 100644
+index 000000000..11b791115
+--- /dev/null
++++ b/src/http/v3/ngx_http_v3.c
+@@ -0,0 +1,2090 @@
++
++/*
++ * Copyright (C) Cloudflare, Inc.
++ */
++
++
++#include <ngx_config.h>
++#include <ngx_core.h>
++#include <ngx_http.h>
++#include <ngx_http_v3_module.h>
++
++
++typedef struct {
++    ngx_str_t           name;
++    ngx_uint_t          offset;
++    ngx_uint_t          hash;
++    ngx_http_header_t  *hh;
++} ngx_http_v3_parse_header_t;
++
++
++/* errors */
++#define NGX_HTTP_V3_NO_ERROR                     0x0
++#define NGX_HTTP_V3_INTERNAL_ERROR               0x3
++
++
++static void ngx_http_v3_handler(ngx_connection_t *c);
++
++static ngx_http_v3_stream_t *ngx_http_v3_stream_lookup(
++    ngx_http_v3_connection_t *h3c, ngx_uint_t stream_id);
++static ngx_http_v3_stream_t *ngx_http_v3_create_stream(
++    ngx_http_v3_connection_t *h3c);
++static void ngx_http_v3_close_stream_handler(ngx_event_t *ev);
++
++static ngx_int_t ngx_http_v3_validate_header(ngx_http_request_t *r,
++    ngx_http_v3_header_t *header);
++static ngx_int_t ngx_http_v3_pseudo_header(ngx_http_request_t *r,
++    ngx_http_v3_header_t *header);
++static ngx_int_t ngx_http_v3_parse_path(ngx_http_request_t *r,
++    ngx_str_t *value);
++static ngx_int_t ngx_http_v3_parse_method(ngx_http_request_t *r,
++    ngx_str_t *value);
++static ngx_int_t ngx_http_v3_parse_scheme(ngx_http_request_t *r,
++    ngx_str_t *value);
++static ngx_int_t ngx_http_v3_parse_authority(ngx_http_request_t *r,
++    ngx_str_t *value);
++static ngx_int_t ngx_http_v3_parse_header(ngx_http_request_t *r,
++    ngx_http_v3_parse_header_t *header, ngx_str_t *value);
++static ngx_int_t ngx_http_v3_cookie(ngx_http_request_t *r,
++    ngx_http_v3_header_t *header);
++static ngx_int_t ngx_http_v3_construct_cookie_header(ngx_http_request_t *r);
++static ngx_int_t ngx_http_v3_construct_request_line(ngx_http_request_t *r);
++
++static void ngx_http_v3_run_request(ngx_http_request_t *r);
++static ngx_int_t ngx_http_v3_process_request_body(ngx_http_request_t *r,
++    ngx_uint_t do_read, ngx_uint_t last);
++static ngx_int_t ngx_http_v3_filter_request_body(ngx_http_request_t *r);
++static void ngx_http_v3_read_client_request_body_handler(ngx_http_request_t *r);
++
++static ngx_chain_t *ngx_http_v3_send_chain(ngx_connection_t *fc,
++    ngx_chain_t *in, off_t limit);
++
++static void ngx_http_v3_finalize_connection(ngx_http_v3_connection_t *h3c,
++    ngx_uint_t status);
++
++static void ngx_http_v3_pool_cleanup(void *data);
++
++
++static ngx_http_v3_parse_header_t  ngx_http_v3_parse_headers[] = {
++    { ngx_string("host"),
++      offsetof(ngx_http_headers_in_t, host), 0, NULL },
++
++    { ngx_string("accept-encoding"),
++      offsetof(ngx_http_headers_in_t, accept_encoding), 0, NULL },
++
++    { ngx_string("accept-language"),
++      offsetof(ngx_http_headers_in_t, accept_language), 0, NULL },
++
++    { ngx_string("user-agent"),
++      offsetof(ngx_http_headers_in_t, user_agent), 0, NULL },
++
++    { ngx_null_string, 0, 0, NULL }
++};
++
++
++void
++ngx_http_v3_init(ngx_event_t *rev)
++{
++    ngx_connection_t          *c;
++    ngx_pool_cleanup_t        *cln;
++    ngx_http_connection_t     *hc;
++    ngx_http_v3_srv_conf_t    *h3scf;
++    ngx_http_v3_connection_t  *h3c;
++
++    c = rev->data;
++    hc = c->data;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0, "init http3 connection");
++
++    c->log->action = "processing HTTP/3 connection";
++
++    h3c = ngx_pcalloc(c->pool, sizeof(ngx_http_v3_connection_t));
++    if (h3c == NULL) {
++        ngx_http_close_connection(c);
++        return;
++    }
++
++    h3scf = ngx_http_get_module_srv_conf(hc->conf_ctx, ngx_http_v3_module);
++
++    h3c->h3 = quiche_h3_conn_new_with_transport(c->quic->conn, h3scf->http3);
++    if (h3c->h3 == NULL) {
++        ngx_http_close_connection(c);
++        return;
++    }
++
++    h3c->http_connection = hc;
++
++    h3c->connection = c;
++
++    h3c->pool = c->pool;
++
++    c->data = h3c;
++
++    c->quic->handler = ngx_http_v3_handler;
++
++    cln = ngx_pool_cleanup_add(c->pool, 0);
++    if (cln == NULL) {
++        ngx_http_close_connection(c);
++        return;
++    }
++
++    cln->handler = ngx_http_v3_pool_cleanup;
++    cln->data = h3c;
++
++    ngx_rbtree_init(&h3c->streams, &h3c->streams_sentinel,
++                    ngx_rbtree_insert_value);
++}
++
++
++static int
++ngx_http_v3_for_each_header(uint8_t *name, size_t name_len,
++    uint8_t *value, size_t value_len, void *argp)
++{
++    ngx_int_t                   rc;
++    ngx_table_elt_t            *h;
++    ngx_http_header_t          *hh;
++    ngx_http_request_t         *r;
++    ngx_http_v3_header_t        header;
++    ngx_http_core_srv_conf_t   *cscf;
++    ngx_http_core_main_conf_t  *cmcf;
++
++    static ngx_str_t cookie = ngx_string("cookie");
++
++    r = argp;
++
++    /* Duplicate the header name because we don't own it. */
++    header.name.data = ngx_pnalloc(r->pool, name_len);
++    if (header.name.data == NULL) {
++        return NGX_ERROR;
++    }
++    header.name.len = name_len;
++
++    ngx_memcpy(header.name.data, name, name_len);
++
++    /* Duplicate the header value because we don't own it. Some of the
++     * functions that process headers require a NULL-terminated string,
++     * so allocate enough memory for that. */
++    header.value.data = ngx_pcalloc(r->pool, value_len + 1);
++    if (header.value.data == NULL) {
++        return NGX_ERROR;
++    }
++    header.value.len = value_len;
++
++    ngx_memcpy(header.value.data, value, value_len);
++
++    if (ngx_http_v3_validate_header(r, &header) != NGX_OK) {
++        return NGX_ERROR;
++    }
++
++    /* Check for pseudo-header. */
++    if (header.name.data[0] == ':') {
++        rc = ngx_http_v3_pseudo_header(r, &header);
++
++        if (rc == NGX_OK) {
++            ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
++                           "http3 header: \":%V: %V\"",
++                           &header.name, &header.value);
++
++            return NGX_OK;
++        }
++
++        return NGX_ERROR;
++    }
++
++    if (r->invalid_header) {
++        cscf = ngx_http_get_module_srv_conf(r, ngx_http_core_module);
++
++        if (cscf->ignore_invalid_headers) {
++            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                          "client sent invalid header: \"%V\"", &header.name);
++
++            return NGX_ERROR;
++        }
++    }
++
++    /* Handle Cookie header separately. Not sure why, but the HTTP/2 code does
++     * the same. */
++    if (header.name.len == cookie.len
++        && ngx_memcmp(header.name.data, cookie.data, cookie.len) == 0)
++    {
++        if (ngx_http_v3_cookie(r, &header) != NGX_OK) {
++            return NGX_ERROR;
++        }
++
++    } else {
++        h = ngx_list_push(&r->headers_in.headers);
++        if (h == NULL) {
++            return NGX_ERROR;
++        }
++
++        h->key.len = header.name.len;
++        h->key.data = header.name.data;
++
++        /*
++         * TODO Optimization: precalculate hash
++         * and handler for indexed headers.
++         */
++        h->hash = ngx_hash_key(h->key.data, h->key.len);
++
++        h->value.len = header.value.len;
++        h->value.data = header.value.data;
++
++        h->lowcase_key = h->key.data;
++
++        cmcf = ngx_http_get_module_main_conf(r, ngx_http_core_module);
++
++        hh = ngx_hash_find(&cmcf->headers_in_hash, h->hash,
++                           h->lowcase_key, h->key.len);
++
++        if (hh && hh->handler(r, h, hh->offset) != NGX_OK) {
++            return NGX_ERROR;
++        }
++    }
++
++    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
++                   "http3 header: \"%V: %V\"",
++                   &header.name, &header.value);
++
++    return NGX_OK;
++}
++
++
++static void
++ngx_http_v3_process_headers(ngx_connection_t *c, quiche_h3_event *ev,
++    int64_t stream_id)
++{
++    int                        rc;
++    ngx_http_v3_stream_t      *stream;
++    ngx_http_v3_srv_conf_t    *h3scf;
++    ngx_http_v3_connection_t  *h3c;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0, "http3 process headers");
++
++    h3c = c->data;
++
++    h3scf = ngx_http_get_module_srv_conf(h3c->http_connection->conf_ctx,
++                                         ngx_http_v3_module);
++
++    if (h3c->connection->requests >= h3scf->max_requests) {
++        ngx_http_v3_finalize_connection(h3c, NGX_HTTP_V3_NO_ERROR);
++        return;
++    }
++
++    /* Create a new stream to handle the incoming request. */
++    stream = ngx_http_v3_create_stream(h3c);
++    if (stream == NULL) {
++        ngx_log_error(NGX_LOG_ERR, c->log, 0, "failed to create HTTP/3 stream");
++
++        ngx_http_v3_finalize_connection(h3c, NGX_HTTP_V3_INTERNAL_ERROR);
++        return;
++    }
++
++    stream->id = stream_id;
++
++    stream->node.key = stream_id;
++
++    ngx_rbtree_insert(&h3c->streams, &stream->node);
++
++    /* Populate ngx_http_request_t from raw HTTP/3 headers. */
++    rc = quiche_h3_event_for_each_header(ev,
++        ngx_http_v3_for_each_header, stream->request);
++
++    if (rc != NGX_OK) {
++        ngx_log_error(NGX_LOG_ERR, c->log, 0,
++                      "received invalid HTTP/3 headers");
++
++        ngx_http_v3_finalize_connection(h3c, NGX_HTTP_V3_INTERNAL_ERROR);
++        return;
++    }
++
++    ngx_http_v3_run_request(stream->request);
++}
++
++
++static ngx_int_t
++ngx_http_v3_process_data(ngx_connection_t *c, int64_t stream_id)
++{
++    int                        rc;
++    ngx_http_request_t        *r;
++    ngx_http_v3_stream_t      *stream;
++    ngx_http_v3_connection_t  *h3c;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0, "http3 process data");
++
++    h3c = c->data;
++
++    stream = ngx_http_v3_stream_lookup(h3c, stream_id);
++
++    if (stream == NULL) {
++
++        return NGX_OK;
++    }
++
++    if (stream->skip_data) {
++        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0,
++                       "skipping http3 DATA frame");
++
++        return NGX_OK;
++    }
++
++    r = stream->request;
++
++    if (!r->request_body) {
++        return NGX_AGAIN;
++    }
++
++    rc = ngx_http_v3_process_request_body(r, 1, stream->in_closed);
++
++    if (rc == NGX_AGAIN) {
++        return NGX_AGAIN;
++    }
++
++    if (rc != NGX_OK) {
++        stream->skip_data = 1;
++        ngx_http_finalize_request(r, rc);
++    }
++
++    return NGX_OK;
++}
++
++
++static void
++ngx_http_v3_process_blocked_streams(ngx_http_v3_connection_t *h3c)
++{
++    ngx_event_t               *wev;
++    quiche_stream_iter        *writable;
++    ngx_http_v3_stream_t      *stream;
++    uint64_t                   stream_id;
++
++    writable = quiche_conn_writable(h3c->connection->quic->conn);
++
++    while (quiche_stream_iter_next(writable, &stream_id)) {
++        stream = ngx_http_v3_stream_lookup(h3c, stream_id);
++
++        if (stream == NULL) {
++            continue;
++        }
++
++        if (!stream->blocked) {
++            continue;
++        }
++
++        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, h3c->connection->log, 0,
++                       "http3 stream unblocked %ui", stream->id);
++
++        stream->blocked = 0;
++
++        wev = stream->request->connection->write;
++
++        wev->active = 0;
++        wev->ready = 1;
++
++        if (!wev->delayed) {
++            wev->handler(wev);
++        }
++    }
++
++    quiche_stream_iter_free(writable);
++}
++
++
++static void
++ngx_http_v3_handler(ngx_connection_t *c)
++{
++    ngx_http_v3_connection_t  *h3c;
++    ngx_http_v3_stream_t      *stream;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0, "http3 handler");
++
++    h3c = c->data;
++
++    if (c->error) {
++        ngx_http_v3_finalize_connection(h3c, 0);
++        return;
++    }
++
++    ngx_http_v3_process_blocked_streams(h3c);
++
++    while (!c->error) {
++        quiche_h3_event  *ev;
++
++        int64_t stream_id = quiche_h3_conn_poll(h3c->h3, c->quic->conn, &ev);
++        if (stream_id < 0) {
++            break;
++        }
++
++        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, h3c->connection->log, 0,
++                       "http3 event stream:%ui ev:%ui", stream_id,
++                       quiche_h3_event_type(ev));
++
++        switch (quiche_h3_event_type(ev)) {
++            case QUICHE_H3_EVENT_HEADERS: {
++                ngx_http_v3_process_headers(c, ev, stream_id);
++                break;
++            }
++
++            case QUICHE_H3_EVENT_DATA: {
++                if (ngx_http_v3_process_data(c, stream_id) == NGX_AGAIN) {
++                    quiche_h3_event_free(ev);
++                    return;
++                }
++
++                break;
++            }
++
++            case QUICHE_H3_EVENT_FINISHED: {
++                /* Lookup stream. If there isn't one, it means it has already
++                 * been closed, so ignore the event. */
++                stream = ngx_http_v3_stream_lookup(h3c, stream_id);
++
++                if (stream != NULL) {
++                    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0,
++                                   "http3 finished");
++
++                    stream->in_closed = 1;
++
++                    /* Flush request body that was buffered. */
++                    if (stream->request->request_body) {
++                        ngx_http_v3_process_request_body(stream->request, 0, 1);
++                    }
++                }
++
++                break;
++            }
++        }
++
++        quiche_h3_event_free(ev);
++    }
++}
++
++
++static ngx_http_v3_stream_t *
++ngx_http_v3_create_stream(ngx_http_v3_connection_t *h3c)
++{
++    ngx_log_t                 *log;
++    ngx_event_t               *rev, *wev;
++    ngx_connection_t          *fc;
++    ngx_http_log_ctx_t        *ctx;
++    ngx_http_request_t        *r;
++    ngx_http_v3_stream_t      *stream;
++    ngx_http_core_srv_conf_t  *cscf;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, h3c->connection->log, 0,
++                   "http3 create stream");
++
++    fc = h3c->free_fake_connections;
++
++    if (fc) {
++        h3c->free_fake_connections = fc->data;
++
++        rev = fc->read;
++        wev = fc->write;
++        log = fc->log;
++        ctx = log->data;
++
++    } else {
++        fc = ngx_palloc(h3c->pool, sizeof(ngx_connection_t));
++        if (fc == NULL) {
++            return NULL;
++        }
++
++        rev = ngx_palloc(h3c->pool, sizeof(ngx_event_t));
++        if (rev == NULL) {
++            return NULL;
++        }
++
++        wev = ngx_palloc(h3c->pool, sizeof(ngx_event_t));
++        if (wev == NULL) {
++            return NULL;
++        }
++
++        log = ngx_palloc(h3c->pool, sizeof(ngx_log_t));
++        if (log == NULL) {
++            return NULL;
++        }
++
++        ctx = ngx_palloc(h3c->pool, sizeof(ngx_http_log_ctx_t));
++        if (ctx == NULL) {
++            return NULL;
++        }
++
++        ctx->connection = fc;
++        ctx->request = NULL;
++        ctx->current_request = NULL;
++    }
++
++    ngx_memcpy(log, h3c->connection->log, sizeof(ngx_log_t));
++
++    log->data = ctx;
++
++    ngx_memzero(rev, sizeof(ngx_event_t));
++
++    rev->data = fc;
++    rev->ready = 1;
++    rev->handler = ngx_http_v3_close_stream_handler;
++    rev->log = log;
++
++    ngx_memcpy(wev, rev, sizeof(ngx_event_t));
++
++    wev->write = 1;
++
++    ngx_memcpy(fc, h3c->connection, sizeof(ngx_connection_t));
++
++    fc->data = h3c->http_connection;
++    fc->quic = h3c->connection->quic;
++    fc->read = rev;
++    fc->write = wev;
++    fc->sent = 0;
++    fc->buffer = NULL;
++    fc->log = log;
++    fc->buffered = 0;
++    fc->sndlowat = 1;
++    fc->tcp_nodelay = NGX_TCP_NODELAY_DISABLED;
++
++    fc->send_chain = ngx_http_v3_send_chain;
++    fc->need_last_buf = 1;
++
++    r = ngx_http_create_request(fc);
++    if (r == NULL) {
++        return NULL;
++    }
++
++    ngx_str_set(&r->http_protocol, "HTTP/3");
++
++    r->http_version = NGX_HTTP_VERSION_3;
++    r->valid_location = 1;
++
++    fc->data = r;
++    h3c->connection->requests++;
++
++    cscf = ngx_http_get_module_srv_conf(r, ngx_http_core_module);
++
++    r->header_in = ngx_create_temp_buf(r->pool,
++                                       cscf->client_header_buffer_size);
++    if (r->header_in == NULL) {
++        ngx_http_free_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
++        return NULL;
++    }
++
++    if (ngx_list_init(&r->headers_in.headers, r->pool, 20,
++                      sizeof(ngx_table_elt_t))
++        != NGX_OK)
++    {
++        ngx_http_free_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
++        return NULL;
++    }
++
++    r->headers_in.connection_type = NGX_HTTP_CONNECTION_CLOSE;
++
++    stream = ngx_pcalloc(h3c->pool, sizeof(ngx_http_v3_stream_t));
++    if (stream == NULL) {
++        ngx_http_free_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
++        return NULL;
++    }
++
++    r->qstream = stream;
++
++    stream->request = r;
++    stream->connection = h3c;
++
++    h3c->processing++;
++
++    return stream;
++}
++
++
++static ngx_http_v3_stream_t *
++ngx_http_v3_stream_lookup(ngx_http_v3_connection_t *h3c, ngx_uint_t stream_id)
++{
++    ngx_rbtree_node_t  *node, *sentinel;
++
++    node = h3c->streams.root;
++    sentinel = h3c->streams.sentinel;
++
++    while (node != sentinel) {
++
++        if (stream_id < node->key) {
++            node = node->left;
++            continue;
++        }
++
++        if (stream_id > node->key) {
++            node = node->right;
++            continue;
++        }
++
++        /* stream_id == node->key */
++
++        return (ngx_http_v3_stream_t *) node;
++    }
++
++    /* not found */
++
++    return NULL;
++}
++
++
++/* The following functions are copied from the HTTP/2 module, and adapted to
++ * work independently. In theory we could refactor the HTTP/2 module to expose
++ * these functions, but that would be fairly invasive and likely cause more
++ * merge conflicts in the future. */
++
++
++static ngx_int_t
++ngx_http_v3_validate_header(ngx_http_request_t *r, ngx_http_v3_header_t *header)
++{
++    u_char                     ch;
++    ngx_uint_t                 i;
++    ngx_http_core_srv_conf_t  *cscf;
++
++    if (header->name.len == 0) {
++        return NGX_ERROR;
++    }
++
++    r->invalid_header = 0;
++
++    cscf = ngx_http_get_module_srv_conf(r, ngx_http_core_module);
++
++    for (i = (header->name.data[0] == ':'); i != header->name.len; i++) {
++        ch = header->name.data[i];
++
++        if ((ch >= 'a' && ch <= 'z')
++            || (ch == '-')
++            || (ch >= '0' && ch <= '9')
++            || (ch == '_' && cscf->underscores_in_headers))
++        {
++            continue;
++        }
++
++        if (ch == '\0' || ch == LF || ch == CR || ch == ':'
++            || (ch >= 'A' && ch <= 'Z'))
++        {
++            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                          "client sent invalid header name: \"%V\"",
++                          &header->name);
++
++            return NGX_ERROR;
++        }
++
++        r->invalid_header = 1;
++    }
++
++    for (i = 0; i != header->value.len; i++) {
++        ch = header->value.data[i];
++
++        if (ch == '\0' || ch == LF || ch == CR) {
++            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                          "client sent header \"%V\" with "
++                          "invalid value: \"%V\"",
++                          &header->name, &header->value);
++
++            return NGX_ERROR;
++        }
++    }
++
++    return NGX_OK;
++}
++
++
++static ngx_int_t
++ngx_http_v3_pseudo_header(ngx_http_request_t *r, ngx_http_v3_header_t *header)
++{
++    header->name.len--;
++    header->name.data++;
++
++    switch (header->name.len) {
++    case 4:
++        if (ngx_memcmp(header->name.data, "path", sizeof("path") - 1)
++            == 0)
++        {
++            return ngx_http_v3_parse_path(r, &header->value);
++        }
++
++        break;
++
++    case 6:
++        if (ngx_memcmp(header->name.data, "method", sizeof("method") - 1)
++            == 0)
++        {
++            return ngx_http_v3_parse_method(r, &header->value);
++        }
++
++        if (ngx_memcmp(header->name.data, "scheme", sizeof("scheme") - 1)
++            == 0)
++        {
++            return ngx_http_v3_parse_scheme(r, &header->value);
++        }
++
++        break;
++
++    case 9:
++        if (ngx_memcmp(header->name.data, "authority", sizeof("authority") - 1)
++            == 0)
++        {
++            return ngx_http_v3_parse_authority(r, &header->value);
++        }
++
++        break;
++    }
++
++    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                  "client sent unknown pseudo-header \":%V\"",
++                  &header->name);
++
++    return NGX_DECLINED;
++}
++
++
++static ngx_int_t
++ngx_http_v3_parse_path(ngx_http_request_t *r, ngx_str_t *value)
++{
++    if (r->unparsed_uri.len) {
++        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                      "client sent duplicate :path header");
++
++        return NGX_DECLINED;
++    }
++
++    if (value->len == 0) {
++        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                      "client sent empty :path header");
++
++        return NGX_DECLINED;
++    }
++
++    r->uri_start = value->data;
++    r->uri_end = value->data + value->len;
++
++    if (ngx_http_parse_uri(r) != NGX_OK) {
++        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                      "client sent invalid :path header: \"%V\"", value);
++
++        return NGX_DECLINED;
++    }
++
++    if (ngx_http_process_request_uri(r) != NGX_OK) {
++        /*
++         * request has been finalized already
++         * in ngx_http_process_request_uri()
++         */
++        return NGX_ABORT;
++    }
++
++    return NGX_OK;
++}
++
++
++static ngx_int_t
++ngx_http_v3_parse_method(ngx_http_request_t *r, ngx_str_t *value)
++{
++    size_t         k, len;
++    ngx_uint_t     n;
++    const u_char  *p, *m;
++
++    /*
++     * This array takes less than 256 sequential bytes,
++     * and if typical CPU cache line size is 64 bytes,
++     * it is prefetched for 4 load operations.
++     */
++    static const struct {
++        u_char            len;
++        const u_char      method[11];
++        uint32_t          value;
++    } tests[] = {
++        { 3, "GET",       NGX_HTTP_GET },
++        { 4, "POST",      NGX_HTTP_POST },
++        { 4, "HEAD",      NGX_HTTP_HEAD },
++        { 7, "OPTIONS",   NGX_HTTP_OPTIONS },
++        { 8, "PROPFIND",  NGX_HTTP_PROPFIND },
++        { 3, "PUT",       NGX_HTTP_PUT },
++        { 5, "MKCOL",     NGX_HTTP_MKCOL },
++        { 6, "DELETE",    NGX_HTTP_DELETE },
++        { 4, "COPY",      NGX_HTTP_COPY },
++        { 4, "MOVE",      NGX_HTTP_MOVE },
++        { 9, "PROPPATCH", NGX_HTTP_PROPPATCH },
++        { 4, "LOCK",      NGX_HTTP_LOCK },
++        { 6, "UNLOCK",    NGX_HTTP_UNLOCK },
++        { 5, "PATCH",     NGX_HTTP_PATCH },
++        { 5, "TRACE",     NGX_HTTP_TRACE }
++    }, *test;
++
++    if (r->method_name.len) {
++        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                      "client sent duplicate :method header");
++
++        return NGX_DECLINED;
++    }
++
++    if (value->len == 0) {
++        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                      "client sent empty :method header");
++
++        return NGX_DECLINED;
++    }
++
++    r->method_name.len = value->len;
++    r->method_name.data = value->data;
++
++    len = r->method_name.len;
++    n = sizeof(tests) / sizeof(tests[0]);
++    test = tests;
++
++    do {
++        if (len == test->len) {
++            p = r->method_name.data;
++            m = test->method;
++            k = len;
++
++            do {
++                if (*p++ != *m++) {
++                    goto next;
++                }
++            } while (--k);
++
++            r->method = test->value;
++            return NGX_OK;
++        }
++
++    next:
++        test++;
++
++    } while (--n);
++
++    p = r->method_name.data;
++
++    do {
++        if ((*p < 'A' || *p > 'Z') && *p != '_' && *p != '-') {
++            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                          "client sent invalid method: \"%V\"",
++                          &r->method_name);
++
++            return NGX_DECLINED;
++        }
++
++        p++;
++
++    } while (--len);
++
++    return NGX_OK;
++}
++
++
++static ngx_int_t
++ngx_http_v3_parse_scheme(ngx_http_request_t *r, ngx_str_t *value)
++{
++    if (r->schema_start) {
++        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                      "client sent duplicate :scheme header");
++
++        return NGX_DECLINED;
++    }
++
++    if (value->len == 0) {
++        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                      "client sent empty :scheme header");
++
++        return NGX_DECLINED;
++    }
++
++    r->schema_start = value->data;
++    r->schema_end = value->data + value->len;
++
++    return NGX_OK;
++}
++
++
++static ngx_int_t
++ngx_http_v3_parse_authority(ngx_http_request_t *r, ngx_str_t *value)
++{
++    return ngx_http_v3_parse_header(r, &ngx_http_v3_parse_headers[0], value);
++}
++
++
++static ngx_int_t
++ngx_http_v3_parse_header(ngx_http_request_t *r,
++    ngx_http_v3_parse_header_t *header, ngx_str_t *value)
++{
++    ngx_table_elt_t            *h;
++    ngx_http_core_main_conf_t  *cmcf;
++
++    h = ngx_list_push(&r->headers_in.headers);
++    if (h == NULL) {
++        return NGX_ERROR;
++    }
++
++    h->key.len = header->name.len;
++    h->key.data = header->name.data;
++    h->lowcase_key = header->name.data;
++
++    if (header->hh == NULL) {
++        header->hash = ngx_hash_key(header->name.data, header->name.len);
++
++        cmcf = ngx_http_get_module_main_conf(r, ngx_http_core_module);
++
++        header->hh = ngx_hash_find(&cmcf->headers_in_hash, header->hash,
++                                   h->lowcase_key, h->key.len);
++        if (header->hh == NULL) {
++            return NGX_ERROR;
++        }
++    }
++
++    h->hash = header->hash;
++
++    h->value.len = value->len;
++    h->value.data = value->data;
++
++    if (header->hh->handler(r, h, header->hh->offset) != NGX_OK) {
++        /* header handler has already finalized request */
++        return NGX_ABORT;
++    }
++
++    return NGX_OK;
++}
++
++
++static ngx_int_t
++ngx_http_v3_construct_request_line(ngx_http_request_t *r)
++{
++    u_char  *p;
++
++    static const u_char ending[] = " HTTP/3";
++
++    if (r->method_name.len == 0
++        || r->schema_start == NULL
++        || r->unparsed_uri.len == 0)
++    {
++        if (r->method_name.len == 0) {
++            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                          "client sent no :method header");
++
++        } else if (r->schema_start == NULL) {
++            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                          "client sent no :scheme header");
++
++        } else {
++            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                          "client sent no :path header");
++        }
++
++        ngx_http_finalize_request(r, NGX_HTTP_BAD_REQUEST);
++        return NGX_ERROR;
++    }
++
++    r->request_line.len = r->method_name.len + 1
++                          + r->unparsed_uri.len
++                          + sizeof(ending) - 1;
++
++    p = ngx_pnalloc(r->pool, r->request_line.len + 1);
++    if (p == NULL) {
++        ngx_http_v3_close_stream(r->qstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
++        return NGX_ERROR;
++    }
++
++    r->request_line.data = p;
++
++    p = ngx_cpymem(p, r->method_name.data, r->method_name.len);
++
++    *p++ = ' ';
++
++    p = ngx_cpymem(p, r->unparsed_uri.data, r->unparsed_uri.len);
++
++    ngx_memcpy(p, ending, sizeof(ending));
++
++    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
++                   "http3 request line: \"%V\"", &r->request_line);
++
++    return NGX_OK;
++}
++
++
++static ngx_int_t
++ngx_http_v3_cookie(ngx_http_request_t *r, ngx_http_v3_header_t *header)
++{
++    ngx_str_t    *val;
++    ngx_array_t  *cookies;
++
++    cookies = r->qstream->cookies;
++
++    if (cookies == NULL) {
++        cookies = ngx_array_create(r->pool, 2, sizeof(ngx_str_t));
++        if (cookies == NULL) {
++            return NGX_ERROR;
++        }
++
++        r->qstream->cookies = cookies;
++    }
++
++    val = ngx_array_push(cookies);
++    if (val == NULL) {
++        return NGX_ERROR;
++    }
++
++    val->len = header->value.len;
++    val->data = header->value.data;
++
++    return NGX_OK;
++}
++
++
++static ngx_int_t
++ngx_http_v3_construct_cookie_header(ngx_http_request_t *r)
++{
++    u_char                     *buf, *p, *end;
++    size_t                      len;
++    ngx_str_t                  *vals;
++    ngx_uint_t                  i;
++    ngx_array_t                *cookies;
++    ngx_table_elt_t            *h;
++    ngx_http_header_t          *hh;
++    ngx_http_core_main_conf_t  *cmcf;
++
++    static ngx_str_t cookie = ngx_string("cookie");
++
++    cookies = r->qstream->cookies;
++
++    if (cookies == NULL) {
++        return NGX_OK;
++    }
++
++    vals = cookies->elts;
++
++    i = 0;
++    len = 0;
++
++    do {
++        len += vals[i].len + 2;
++    } while (++i != cookies->nelts);
++
++    len -= 2;
++
++    buf = ngx_pnalloc(r->pool, len + 1);
++    if (buf == NULL) {
++        ngx_http_v3_close_stream(r->qstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
++        return NGX_ERROR;
++    }
++
++    p = buf;
++    end = buf + len;
++
++    for (i = 0; /* void */ ; i++) {
++
++        p = ngx_cpymem(p, vals[i].data, vals[i].len);
++
++        if (p == end) {
++            *p = '\0';
++            break;
++        }
++
++        *p++ = ';'; *p++ = ' ';
++    }
++
++    h = ngx_list_push(&r->headers_in.headers);
++    if (h == NULL) {
++        ngx_http_v3_close_stream(r->qstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
++        return NGX_ERROR;
++    }
++
++    h->hash = ngx_hash(ngx_hash(ngx_hash(ngx_hash(
++                                    ngx_hash('c', 'o'), 'o'), 'k'), 'i'), 'e');
++
++    h->key.len = cookie.len;
++    h->key.data = cookie.data;
++
++    h->value.len = len;
++    h->value.data = buf;
++
++    h->lowcase_key = cookie.data;
++
++    cmcf = ngx_http_get_module_main_conf(r, ngx_http_core_module);
++
++    hh = ngx_hash_find(&cmcf->headers_in_hash, h->hash,
++                       h->lowcase_key, h->key.len);
++
++    if (hh == NULL) {
++        ngx_http_v3_close_stream(r->qstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
++        return NGX_ERROR;
++    }
++
++    if (hh->handler(r, h, hh->offset) != NGX_OK) {
++        /*
++         * request has been finalized already
++         * in ngx_http_process_multi_header_lines()
++         */
++        return NGX_ERROR;
++    }
++
++    return NGX_OK;
++}
++
++
++static void
++ngx_http_v3_run_request(ngx_http_request_t *r)
++{
++    if (ngx_http_v3_construct_request_line(r) != NGX_OK) {
++        return;
++    }
++
++    if (ngx_http_v3_construct_cookie_header(r) != NGX_OK) {
++        return;
++    }
++
++    r->http_state = NGX_HTTP_PROCESS_REQUEST_STATE;
++
++    if (ngx_http_process_request_header(r) != NGX_OK) {
++        return;
++    }
++
++    if (r->headers_in.content_length_n > 0 && r->qstream->in_closed) {
++        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                      "client prematurely closed stream");
++
++        r->qstream->skip_data = 1;
++
++        ngx_http_finalize_request(r, NGX_HTTP_BAD_REQUEST);
++        return;
++    }
++
++    if (r->headers_in.content_length_n == -1 && !r->qstream->in_closed) {
++        r->headers_in.chunked = 1;
++    }
++
++    ngx_http_process_request(r);
++}
++
++
++ngx_int_t
++ngx_http_v3_read_request_body(ngx_http_request_t *r)
++{
++    off_t                      len;
++    ngx_http_v3_stream_t      *stream;
++    ngx_http_request_body_t   *rb;
++    ngx_http_core_loc_conf_t  *clcf;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
++                   "http3 read request body");
++
++    stream = r->qstream;
++    rb = r->request_body;
++
++    if (stream->skip_data) {
++        r->request_body_no_buffering = 0;
++        rb->post_handler(r);
++        return NGX_OK;
++    }
++
++    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
++
++    len = r->headers_in.content_length_n;
++
++    if (r->request_body_no_buffering && !stream->in_closed) {
++
++        if (len < 0 || len > (off_t) clcf->client_body_buffer_size) {
++            len = clcf->client_body_buffer_size;
++        }
++
++        rb->buf = ngx_create_temp_buf(r->pool, (size_t) len);
++
++    } else if (len >= 0 && len <= (off_t) clcf->client_body_buffer_size
++               && !r->request_body_in_file_only)
++    {
++        rb->buf = ngx_create_temp_buf(r->pool, (size_t) len);
++
++    } else {
++        rb->buf = ngx_calloc_buf(r->pool);
++
++        if (rb->buf != NULL) {
++            rb->buf->sync = 1;
++        }
++    }
++
++    if (rb->buf == NULL) {
++        stream->skip_data = 1;
++        return NGX_HTTP_INTERNAL_SERVER_ERROR;
++    }
++
++    rb->rest = 1;
++
++    if (stream->in_closed) {
++        r->request_body_no_buffering = 0;
++
++        return ngx_http_v3_process_request_body(r, 0, 1);
++    }
++
++    /* TODO: set timer */
++    ngx_add_timer(r->connection->read, clcf->client_body_timeout);
++
++    r->read_event_handler = ngx_http_v3_read_client_request_body_handler;
++    r->write_event_handler = ngx_http_request_empty_handler;
++
++    return NGX_AGAIN;
++}
++
++
++static ngx_int_t
++ngx_http_v3_process_request_body(ngx_http_request_t *r, ngx_uint_t do_read,
++    ngx_uint_t last)
++{
++    ssize_t                    len = 0;
++    ngx_buf_t                 *buf;
++    ngx_int_t                  rc;
++    ngx_connection_t          *c, *fc;
++    ngx_http_v3_connection_t  *h3c;
++    ngx_http_request_body_t   *rb;
++    ngx_http_core_loc_conf_t  *clcf;
++
++    fc = r->connection;
++    h3c = r->qstream->connection;
++    c = h3c->connection;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0, "http3 process request body");
++
++    rb = r->request_body;
++    buf = rb->buf;
++
++    if (buf->sync) {
++        buf->pos = buf->start;
++        buf->last = buf->start;
++
++        r->request_body_in_file_only = 1;
++    }
++
++    if (do_read) {
++        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
++                       "http3 reading %z bytes of request body",
++                       buf->end - buf->last);
++
++        if (buf->last == buf->end) {
++            return NGX_AGAIN;
++        }
++
++        len = quiche_h3_recv_body(h3c->h3, c->quic->conn, r->qstream->id,
++                                  buf->last, buf->end - buf->last);
++
++        if (len == QUICHE_ERR_DONE) {
++            return NGX_AGAIN;
++        }
++
++        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
++                       "http3 read %z bytes of request body", len);
++
++        buf->last += len;
++    }
++
++    if (last) {
++        rb->rest = 0;
++
++        if (fc->read->timer_set) {
++            ngx_del_timer(fc->read);
++        }
++
++        if (r->request_body_no_buffering) {
++            ngx_post_event(fc->read, &ngx_posted_events);
++            return NGX_OK;
++        }
++
++        rc = ngx_http_v3_filter_request_body(r);
++
++        if (rc != NGX_OK) {
++            return rc;
++        }
++
++        if (buf->sync) {
++            /* prevent reusing this buffer in the upstream module */
++            rb->buf = NULL;
++        }
++
++        if (r->headers_in.chunked) {
++            r->headers_in.content_length_n = rb->received;
++        }
++
++        r->read_event_handler = ngx_http_block_reading;
++        rb->post_handler(r);
++
++        return NGX_OK;
++    }
++
++    if (len == 0) {
++        return NGX_OK;
++    }
++
++    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
++    ngx_add_timer(fc->read, clcf->client_body_timeout);
++
++    if (r->request_body_no_buffering) {
++        ngx_post_event(fc->read, &ngx_posted_events);
++        return NGX_AGAIN;
++    }
++
++    if (buf->sync) {
++        return ngx_http_v3_filter_request_body(r);
++    }
++
++    return NGX_OK;
++}
++
++
++static ngx_int_t
++ngx_http_v3_filter_request_body(ngx_http_request_t *r)
++{
++    ngx_buf_t                 *b, *buf;
++    ngx_int_t                  rc;
++    ngx_chain_t               *cl;
++    ngx_http_request_body_t   *rb;
++    ngx_http_core_loc_conf_t  *clcf;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
++                   "http3 filter request body");
++
++    rb = r->request_body;
++    buf = rb->buf;
++
++    if (buf->pos == buf->last && rb->rest) {
++        cl = NULL;
++        goto update;
++    }
++
++    cl = ngx_chain_get_free_buf(r->pool, &rb->free);
++    if (cl == NULL) {
++        return NGX_HTTP_INTERNAL_SERVER_ERROR;
++    }
++
++    b = cl->buf;
++
++    ngx_memzero(b, sizeof(ngx_buf_t));
++
++    if (buf->pos != buf->last) {
++        r->request_length += buf->last - buf->pos;
++        rb->received += buf->last - buf->pos;
++
++        if (r->headers_in.content_length_n != -1) {
++            if (rb->received > r->headers_in.content_length_n) {
++                ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                              "client intended to send body data "
++                              "larger than declared");
++
++                return NGX_HTTP_BAD_REQUEST;
++            }
++
++        } else {
++            clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
++
++            if (clcf->client_max_body_size
++                && rb->received > clcf->client_max_body_size)
++            {
++                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
++                              "client intended to send too large chunked body: "
++                              "%O bytes", rb->received);
++
++                return NGX_HTTP_REQUEST_ENTITY_TOO_LARGE;
++            }
++        }
++
++        b->temporary = 1;
++        b->pos = buf->pos;
++        b->last = buf->last;
++        b->start = b->pos;
++        b->end = b->last;
++
++        buf->pos = buf->last;
++    }
++
++    if (!rb->rest) {
++        if (r->headers_in.content_length_n != -1
++            && r->headers_in.content_length_n != rb->received)
++        {
++            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                          "client prematurely closed stream: "
++                          "only %O out of %O bytes of request body received",
++                          rb->received, r->headers_in.content_length_n);
++
++            return NGX_HTTP_BAD_REQUEST;
++        }
++
++        b->last_buf = 1;
++    }
++
++    b->tag = (ngx_buf_tag_t) &ngx_http_v3_filter_request_body;
++    b->flush = r->request_body_no_buffering;
++
++update:
++
++    rc = ngx_http_top_request_body_filter(r, cl);
++
++    ngx_chain_update_chains(r->pool, &rb->free, &rb->busy, &cl,
++                            (ngx_buf_tag_t) &ngx_http_v3_filter_request_body);
++
++    return rc;
++}
++
++
++static void
++ngx_http_v3_read_client_request_body_handler(ngx_http_request_t *r)
++{
++    ngx_connection_t  *fc;
++
++    fc = r->connection;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, fc->log, 0,
++                   "http3 read client request body handler");
++
++    if (fc->read->timedout) {
++        ngx_log_error(NGX_LOG_INFO, fc->log, NGX_ETIMEDOUT, "client timed out");
++
++        fc->timedout = 1;
++        r->qstream->skip_data = 1;
++
++        ngx_http_finalize_request(r, NGX_HTTP_REQUEST_TIME_OUT);
++        return;
++    }
++
++    if (fc->error) {
++        ngx_log_error(NGX_LOG_INFO, fc->log, 0,
++                      "client prematurely closed stream");
++
++        r->qstream->skip_data = 1;
++
++        ngx_http_finalize_request(r, NGX_HTTP_CLIENT_CLOSED_REQUEST);
++        return;
++    }
++}
++
++
++ngx_int_t
++ngx_http_v3_read_unbuffered_request_body(ngx_http_request_t *r)
++{
++    ngx_buf_t                 *buf;
++    ngx_int_t                  rc;
++    ngx_connection_t          *fc;
++    ngx_http_v3_stream_t      *stream;
++
++    stream = r->qstream;
++    fc = r->connection;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, fc->log, 0,
++                   "http3 read unbuffered request body");
++
++    if (fc->read->timedout) {
++        stream->skip_data = 1;
++        fc->timedout = 1;
++
++        return NGX_HTTP_REQUEST_TIME_OUT;
++    }
++
++    if (fc->error) {
++        stream->skip_data = 1;
++        return NGX_HTTP_BAD_REQUEST;
++    }
++
++    rc = ngx_http_v3_filter_request_body(r);
++
++    if (rc != NGX_OK) {
++        stream->skip_data = 1;
++        return rc;
++    }
++
++    if (!r->request_body->rest) {
++        return NGX_OK;
++    }
++
++    if (r->request_body->busy != NULL) {
++        return NGX_AGAIN;
++    }
++
++    buf = r->request_body->buf;
++
++    buf->pos = buf->start;
++    buf->last = buf->start;
++
++    ngx_post_event(stream->connection->connection->read, &ngx_posted_events);
++
++    return NGX_AGAIN;
++}
++
++
++/* End of functions copied from HTTP/2 module. */
++
++
++ngx_int_t
++ngx_http_v3_send_response(ngx_http_request_t *r)
++{
++    u_char                    *tmp;
++    u_char                     status[3], content_len[NGX_OFF_T_LEN],
++                               last_modified[sizeof("Wed, 31 Dec 1986 18:00:00 GMT") - 1],
++                               addr[NGX_SOCKADDR_STRLEN];
++    size_t                     len;
++    ngx_array_t               *headers;
++    ngx_str_t                  host, location;
++    ngx_uint_t                 i, port, fin;
++    ngx_list_part_t           *part;
++    ngx_table_elt_t           *header;
++    ngx_connection_t          *c, *fc;
++    quiche_h3_header          *h;
++    ngx_http_v3_connection_t  *h3c;
++    ngx_http_core_loc_conf_t  *clcf;
++    ngx_http_core_srv_conf_t  *cscf;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
++                   "http3 send response");
++
++    fc = r->connection;
++
++    h3c = r->qstream->connection;
++    c = h3c->connection;
++
++    headers = ngx_array_create(r->pool, 1, sizeof(quiche_h3_header));
++    if (headers == NULL) {
++        return NGX_ERROR;
++    }
++
++    /* Generate :status pseudo-header. */
++    {
++        h = ngx_array_push(headers);
++        if (h == NULL) {
++            return NGX_ERROR;
++        }
++
++        h->name = (u_char *) ":status";
++        h->name_len = sizeof(":status") - 1;
++
++        h->value = status;
++        h->value_len =
++            ngx_sprintf(status, "%03ui", r->headers_out.status) - status;
++    }
++
++    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
++
++    /* Generate Server header.*/
++    if (r->headers_out.server == NULL) {
++        h = ngx_array_push(headers);
++        if (h == NULL) {
++            return NGX_ERROR;
++        }
++
++        h->name = (u_char *) "server";
++        h->name_len = sizeof("server") - 1;
++
++        if (clcf->server_tokens == NGX_HTTP_SERVER_TOKENS_ON) {
++            h->value = (u_char *) NGINX_VER;
++            h->value_len = sizeof(NGINX_VER) - 1;
++
++        } else if (clcf->server_tokens == NGX_HTTP_SERVER_TOKENS_BUILD) {
++            h->value = (u_char *) NGINX_VER_BUILD;
++            h->value_len = sizeof(NGINX_VER_BUILD) - 1;
++
++        } else {
++            h->value = (u_char *) "nginx";
++            h->value_len = sizeof("nginx") - 1;
++        }
++    }
++
++    /* Generate Date header. */
++    if (r->headers_out.date == NULL) {
++        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, fc->log, 0,
++                       "http3 output header: \"date: %V\"",
++                       &ngx_cached_http_time);
++
++        h = ngx_array_push(headers);
++        if (h == NULL) {
++            return NGX_ERROR;
++        }
++
++        h->name = (u_char *) "date";
++        h->name_len = sizeof("date") - 1;
++
++        h->value = ngx_cached_http_time.data;
++        h->value_len = ngx_cached_http_time.len;
++    }
++
++    /* Generate Content-Type header. */
++    if (r->headers_out.content_type.len) {
++        h = ngx_array_push(headers);
++        if (h == NULL) {
++            return NGX_ERROR;
++        }
++
++        if (r->headers_out.content_type_len == r->headers_out.content_type.len
++            && r->headers_out.charset.len)
++        {
++            len = r->headers_out.content_type.len + sizeof("; charset=") - 1
++                  + r->headers_out.charset.len;
++
++            tmp = ngx_pnalloc(r->pool, len);
++            if (tmp == NULL) {
++                return NGX_ERROR;
++            }
++
++            tmp = ngx_cpymem(tmp, r->headers_out.content_type.data,
++                             r->headers_out.content_type.len);
++
++            tmp = ngx_cpymem(tmp, "; charset=", sizeof("; charset=") - 1);
++
++            tmp = ngx_cpymem(tmp, r->headers_out.charset.data,
++                             r->headers_out.charset.len);
++
++            /* updated r->headers_out.content_type is also needed for logging */
++
++            r->headers_out.content_type.len = len;
++            r->headers_out.content_type.data = tmp - len;
++        }
++
++        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, fc->log, 0,
++                       "http3 output header: \"content-type: %V\"",
++                       &r->headers_out.content_type);
++
++        h->name = (u_char *) "content-type";
++        h->name_len = sizeof("content-type") - 1;
++
++        h->value = r->headers_out.content_type.data;
++        h->value_len = r->headers_out.content_type.len;
++    }
++
++    /* Generate Content-Length header. */
++    if (r->headers_out.content_length == NULL
++        && r->headers_out.content_length_n >= 0)
++    {
++        h = ngx_array_push(headers);
++        if (h == NULL) {
++            return NGX_ERROR;
++        }
++
++        h->name = (u_char *) "content-length";
++        h->name_len = sizeof("content-length") - 1;
++
++        h->value = content_len;
++        h->value_len =
++            ngx_sprintf(content_len, "%O", r->headers_out.content_length_n) -
++            content_len;
++    }
++
++    /* Generate Last-Modified header. */
++    if (r->headers_out.last_modified == NULL
++        && r->headers_out.last_modified_time != -1)
++    {
++        h = ngx_array_push(headers);
++        if (h == NULL) {
++            return NGX_ERROR;
++        }
++
++        ngx_http_time(last_modified, r->headers_out.last_modified_time);
++
++        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, fc->log, 0,
++                       "http3 output header: \"last-modified: %*.s\"",
++                       sizeof(last_modified), last_modified);
++
++        h->name = (u_char *) "last-modified";
++        h->name_len = sizeof("last-modified") - 1;
++
++        h->value = last_modified;
++        h->value_len = sizeof(last_modified);
++    }
++
++    /* Generate Location header. */
++    if (r->headers_out.location && r->headers_out.location->value.len) {
++
++        if (r->headers_out.location->value.data[0] == '/'
++            && clcf->absolute_redirect)
++        {
++            if (clcf->server_name_in_redirect) {
++                cscf = ngx_http_get_module_srv_conf(r, ngx_http_core_module);
++                host = cscf->server_name;
++
++            } else if (r->headers_in.server.len) {
++                host = r->headers_in.server;
++
++            } else {
++                host.len = NGX_SOCKADDR_STRLEN;
++                host.data = addr;
++
++                if (ngx_connection_local_sockaddr(fc, &host, 0) != NGX_OK) {
++                    return NGX_ERROR;
++                }
++            }
++
++            port = ngx_inet_get_port(fc->local_sockaddr);
++
++            location.len = sizeof("https://") - 1 + host.len
++                           + r->headers_out.location->value.len;
++
++            if (clcf->port_in_redirect) {
++
++#if (NGX_HTTP_SSL)
++                if (fc->ssl)
++                    port = (port == 443) ? 0 : port;
++                else
++#endif
++                    port = (port == 80) ? 0 : port;
++
++            } else {
++                port = 0;
++            }
++
++            if (port) {
++                location.len += sizeof(":65535") - 1;
++            }
++
++            location.data = ngx_pnalloc(r->pool, location.len);
++            if (location.data == NULL) {
++                return NGX_ERROR;
++            }
++
++            tmp = ngx_cpymem(location.data, "http", sizeof("http") - 1);
++
++#if (NGX_HTTP_SSL)
++            if (fc->ssl) {
++                *tmp++ = 's';
++            }
++#endif
++
++            *tmp++ = ':'; *tmp++ = '/'; *tmp++ = '/';
++            tmp = ngx_cpymem(tmp, host.data, host.len);
++
++            if (port) {
++                tmp = ngx_sprintf(tmp, ":%ui", port);
++            }
++
++            tmp = ngx_cpymem(tmp, r->headers_out.location->value.data,
++                                  r->headers_out.location->value.len);
++
++            /* update r->headers_out.location->value for possible logging */
++
++            r->headers_out.location->value.len = tmp - location.data;
++            r->headers_out.location->value.data = location.data;
++            ngx_str_set(&r->headers_out.location->key, "Location");
++        }
++
++        r->headers_out.location->hash = 0;
++
++        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, fc->log, 0,
++                       "http3 output header: \"location: %V\"",
++                       &r->headers_out.location->value);
++
++        h = ngx_array_push(headers);
++        if (h == NULL) {
++            return NGX_ERROR;
++        }
++
++        h->name = (u_char *) "location";
++        h->name_len = sizeof("location") - 1;
++
++        h->value = r->headers_out.location->value.data;
++        h->value_len = r->headers_out.location->value.len;
++    }
++
++#if (NGX_HTTP_GZIP)
++    /* Generate Vary header. */
++    if (r->gzip_vary) {
++        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, fc->log, 0,
++                       "http3 output header: \"vary: Accept-Encoding\"");
++
++        h->name = (u_char *) "vary";
++        h->name_len = sizeof("vary") - 1;
++
++        h->value = (u_char *) "Accept-Encoding";
++        h->value_len = sizeof("Accept-Encoding") - 1;
++    }
++#endif
++
++    part = &r->headers_out.headers.part;
++    header = part->elts;
++
++    /* Generate all other headers. */
++    for (i = 0; /* void */; i++) {
++
++        if (i >= part->nelts) {
++            if (part->next == NULL) {
++                break;
++            }
++
++            part = part->next;
++            header = part->elts;
++            i = 0;
++        }
++
++        if (header[i].hash == 0) {
++            continue;
++        }
++
++        h = ngx_array_push(headers);
++        if (h == NULL) {
++            return NGX_ERROR;
++        }
++
++#if (NGX_DEBUG)
++        if (fc->log->log_level & NGX_LOG_DEBUG_HTTP) {
++            ngx_log_debug2(NGX_LOG_DEBUG_HTTP, fc->log, 0,
++                           "http3 output header: \"%V: %V\"",
++                           &header[i].key, &header[i].value);
++        }
++#endif
++
++        h->name = header[i].key.data;
++        h->name_len = header[i].key.len;
++
++        h->value = header[i].value.data;
++        h->value_len = header[i].value.len;
++    }
++
++    fin = r->header_only
++          || (r->headers_out.content_length_n == 0 && !r->expect_trailers);
++
++    if (quiche_h3_send_response(h3c->h3, c->quic->conn, r->qstream->id,
++                                headers->elts, headers->nelts, fin)) {
++        ngx_array_destroy(headers);
++        return NGX_ERROR;
++    }
++
++    ngx_post_event(c->write, &ngx_posted_events);
++
++    ngx_array_destroy(headers);
++
++    return NGX_OK;
++}
++
++
++static ssize_t
++ngx_http_v3_stream_do_send(ngx_connection_t *fc, ngx_buf_t *b, ngx_int_t fin)
++{
++    ssize_t                    n;
++    ngx_connection_t          *c;
++    ngx_http_request_t        *r;
++    ngx_http_v3_connection_t  *h3c;
++    ngx_http_v3_stream_t      *stream;
++
++    uint8_t *buf = b ? b->pos : NULL;
++    size_t buf_len = b ? ngx_buf_size(b) : 0;
++
++    r = fc->data;
++    stream = r->qstream;
++    h3c = stream->connection;
++    c = h3c->connection;
++
++    ngx_log_debug3(NGX_LOG_DEBUG_EVENT, fc->log, 0,
++                   "http3 stream %uz to write %uz bytes, fin=%d",
++                   stream->id, buf_len, fin);
++
++    n = quiche_h3_send_body(h3c->h3, c->quic->conn, r->qstream->id,
++                            buf, buf_len, fin);
++
++    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, stream->connection->connection->log, 0,
++                   "http3 stream written %z bytes", n);
++
++    if (n == QUICHE_ERR_DONE) {
++        return NGX_AGAIN;
++    }
++
++    if (n < 0) {
++        ngx_log_error(NGX_LOG_ERR, fc->log, 0, "stream write failed: %d", n);
++        return NGX_ERROR;
++    }
++
++    return n;
++}
++
++
++static ngx_chain_t *
++ngx_http_v3_send_chain(ngx_connection_t *fc, ngx_chain_t *in, off_t limit)
++{
++    ssize_t                n, sent;
++    off_t                  send, prev_send;
++    ngx_uint_t             blocked, fin;
++
++    ngx_http_request_t    *r;
++    ngx_http_v3_stream_t  *stream;
++
++    r = fc->data;
++    stream = r->qstream;
++
++    send = 0;
++
++    blocked = 0;
++
++    while (in) {
++        prev_send = send;
++
++        fin = in->buf->last_buf;
++
++        send += ngx_buf_size(in->buf);
++
++        n = ngx_http_v3_stream_do_send(fc, in->buf, fin);
++
++        if (n == NGX_ERROR) {
++            return NGX_CHAIN_ERROR;
++        }
++
++        sent = (n == NGX_AGAIN) ? 0 : n;
++
++        fc->sent += sent;
++
++        in->buf->pos += sent;
++
++        if (in->buf->pos == in->buf->last) {
++            in = in->next;
++        }
++
++        if (send - prev_send != sent) {
++            blocked = 1;
++            break;
++        }
++
++        if (fin) {
++            stream->out_closed = 1;
++        }
++    }
++
++    if (blocked) {
++        if (!stream->blocked) {
++            ngx_log_debug1(NGX_LOG_DEBUG_HTTP, stream->connection->connection->log, 0,
++                           "http3 stream blocked %ui", stream->id);
++
++            stream->blocked = 1;
++
++            fc->write->active = 1;
++            fc->write->ready = 0;
++        }
++    }
++
++    ngx_post_event(stream->connection->connection->write, &ngx_posted_events);
++
++    return in;
++}
++
++
++void
++ngx_http_v3_close_stream(ngx_http_v3_stream_t *stream, ngx_int_t rc)
++{
++    ngx_event_t               *ev;
++    ngx_connection_t          *fc;
++    ngx_http_v3_connection_t  *h3c;
++
++    h3c = stream->connection;
++
++    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, h3c->connection->log, 0,
++                   "http3 close stream %ui", stream->id);
++
++    quiche_conn_stream_shutdown(h3c->connection->quic->conn, stream->id,
++                                QUICHE_SHUTDOWN_READ, 0);
++
++    ngx_rbtree_delete(&h3c->streams, &stream->node);
++
++    fc = stream->request->connection;
++
++    ngx_http_free_request(stream->request, rc);
++
++    ev = fc->read;
++
++    if (ev->timer_set) {
++        ngx_del_timer(ev);
++    }
++
++    if (ev->posted) {
++        ngx_delete_posted_event(ev);
++    }
++
++    ev = fc->write;
++
++    if (ev->timer_set) {
++        ngx_del_timer(ev);
++    }
++
++    if (ev->posted) {
++        ngx_delete_posted_event(ev);
++    }
++
++    fc->data = h3c->free_fake_connections;
++    h3c->free_fake_connections = fc;
++
++    h3c->processing--;
++}
++
++
++static void
++ngx_http_v3_close_stream_handler(ngx_event_t *ev)
++{
++    ngx_connection_t    *fc;
++    ngx_http_request_t  *r;
++
++    fc = ev->data;
++    r = fc->data;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, fc->log, 0,
++                   "http3 close stream handler");
++
++    if (ev->timedout) {
++        ngx_log_error(NGX_LOG_INFO, fc->log, NGX_ETIMEDOUT, "client timed out");
++
++        fc->timedout = 1;
++
++        ngx_http_v3_close_stream(r->qstream, NGX_HTTP_REQUEST_TIME_OUT);
++        return;
++    }
++
++    ngx_http_v3_close_stream(r->qstream, 0);
++}
++
++
++static void
++ngx_http_v3_finalize_connection(ngx_http_v3_connection_t *h3c,
++    ngx_uint_t status)
++{
++    ngx_event_t             *ev;
++    ngx_connection_t        *c, *fc;
++    ngx_rbtree_node_t       *node, *root, *sentinel;
++    ngx_http_request_t      *r;
++    ngx_http_v3_stream_t    *stream;
++
++    c = h3c->connection;
++
++    quiche_conn_close(c->quic->conn, true, status, NULL, 0);
++
++    c->error = 1;
++
++    if (!h3c->processing) {
++        ngx_http_close_connection(c);
++        return;
++    }
++
++    c->read->handler = ngx_http_empty_handler;
++    c->write->handler = ngx_http_empty_handler;
++
++    sentinel = h3c->streams.sentinel;
++
++    /* Close all pending streams / requests. */
++    for ( ;; ) {
++        root = h3c->streams.root;
++
++        if (root == sentinel) {
++            break;
++        }
++
++        node = ngx_rbtree_min(root, sentinel);
++
++        stream = (ngx_http_v3_stream_t *) node;
++
++        r = stream->request;
++        fc = r->connection;
++
++        fc->error = 1;
++
++        ev = fc->read;
++
++        ev->eof = 1;
++        ev->handler(ev);
++    }
++
++    if (h3c->processing) {
++        return;
++    }
++
++    ngx_http_close_connection(c);
++}
++
++
++static void
++ngx_http_v3_pool_cleanup(void *data)
++{
++    ngx_http_v3_connection_t  *h3c = data;
++
++    if (h3c->h3) {
++        quiche_h3_conn_free(h3c->h3);
++    }
++}
+diff --git a/src/http/v3/ngx_http_v3.h b/src/http/v3/ngx_http_v3.h
+new file mode 100644
+index 000000000..25a41a77b
+--- /dev/null
++++ b/src/http/v3/ngx_http_v3.h
+@@ -0,0 +1,76 @@
++
++/*
++ * Copyright (C) Cloudflare, Inc.
++ */
++
++
++#ifndef _NGX_HTTP_V3_H_INCLUDED_
++#define _NGX_HTTP_V3_H_INCLUDED_
++
++
++#include <ngx_config.h>
++#include <ngx_core.h>
++#include <ngx_http.h>
++#include <ngx_http_v3_module.h>
++
++
++#define NGX_HTTP_V3_ALPN_ADVERTISE       "\x05h3-18"
++
++
++typedef struct ngx_http_v3_connection_s   ngx_http_v3_connection_t;
++
++
++struct ngx_http_v3_connection_s {
++    quiche_h3_conn             *h3;
++
++    ngx_connection_t           *connection;
++    ngx_http_connection_t      *http_connection;
++
++    ngx_pool_t                 *pool;
++
++    ngx_uint_t                  processing;
++
++    ngx_rbtree_t                streams;
++    ngx_rbtree_node_t           streams_sentinel;
++
++    ngx_connection_t           *free_fake_connections;
++};
++
++
++struct ngx_http_v3_stream_s {
++    ngx_rbtree_node_t          node;
++
++    uint64_t                   id;
++
++    ngx_http_request_t        *request;
++
++    ngx_http_v3_connection_t  *connection;
++
++    ngx_array_t               *cookies;
++
++    ngx_http_v3_stream_t      *next;
++
++    ngx_uint_t                 in_closed:1;
++    ngx_uint_t                 out_closed:1;
++    ngx_uint_t                 skip_data:1;
++    ngx_uint_t                 blocked:1;
++};
++
++
++typedef struct {
++    ngx_str_t                        name;
++    ngx_str_t                        value;
++} ngx_http_v3_header_t;
++
++
++void ngx_http_v3_init(ngx_event_t *rev);
++
++ngx_int_t ngx_http_v3_read_request_body(ngx_http_request_t *r);
++ngx_int_t ngx_http_v3_read_unbuffered_request_body(ngx_http_request_t *r);
++
++ngx_int_t ngx_http_v3_send_response(ngx_http_request_t *r);
++
++void ngx_http_v3_close_stream(ngx_http_v3_stream_t *stream, ngx_int_t rc);
++
++
++#endif /* _NGX_HTTP_V3_H_INCLUDED_ */
+diff --git a/src/http/v3/ngx_http_v3_filter_module.c b/src/http/v3/ngx_http_v3_filter_module.c
+new file mode 100644
+index 000000000..5bbff8602
+--- /dev/null
++++ b/src/http/v3/ngx_http_v3_filter_module.c
+@@ -0,0 +1,68 @@
++
++/*
++ * Copyright (C) Cloudflare, Inc.
++ */
++
++
++#include <ngx_config.h>
++#include <ngx_core.h>
++#include <ngx_http.h>
++#include <ngx_http_v3_module.h>
++
++
++static ngx_int_t ngx_http_v3_filter_init(ngx_conf_t *cf);
++
++
++static ngx_http_module_t  ngx_http_v3_filter_module_ctx = {
++    NULL,                                  /* preconfiguration */
++    ngx_http_v3_filter_init,               /* postconfiguration */
++
++    NULL,                                  /* create main configuration */
++    NULL,                                  /* init main configuration */
++
++    NULL,                                  /* create server configuration */
++    NULL,                                  /* merge server configuration */
++
++    NULL,                                  /* create location configuration */
++    NULL                                   /* merge location configuration */
++};
++
++
++ngx_module_t  ngx_http_v3_filter_module = {
++    NGX_MODULE_V1,
++    &ngx_http_v3_filter_module_ctx,        /* module context */
++    NULL,                                  /* module directives */
++    NGX_HTTP_MODULE,                       /* module type */
++    NULL,                                  /* init master */
++    NULL,                                  /* init module */
++    NULL,                                  /* init process */
++    NULL,                                  /* init thread */
++    NULL,                                  /* exit thread */
++    NULL,                                  /* exit process */
++    NULL,                                  /* exit master */
++    NGX_MODULE_V1_PADDING
++};
++
++
++static ngx_http_output_header_filter_pt  ngx_http_next_header_filter;
++
++
++static ngx_int_t
++ngx_http_v3_header_filter(ngx_http_request_t *r)
++{
++    if (!r->qstream) {
++        return ngx_http_next_header_filter(r);
++    }
++
++    return ngx_http_v3_send_response(r);
++}
++
++
++static ngx_int_t
++ngx_http_v3_filter_init(ngx_conf_t *cf)
++{
++    ngx_http_next_header_filter = ngx_http_top_header_filter;
++    ngx_http_top_header_filter = ngx_http_v3_header_filter;
++
++    return NGX_OK;
++}
+diff --git a/src/http/v3/ngx_http_v3_module.c b/src/http/v3/ngx_http_v3_module.c
+new file mode 100644
+index 000000000..ba6274253
+--- /dev/null
++++ b/src/http/v3/ngx_http_v3_module.c
+@@ -0,0 +1,286 @@
++
++/*
++ * Copyright (C) Cloudflare, Inc.
++ */
++
++
++#include <ngx_config.h>
++#include <ngx_core.h>
++#include <ngx_http.h>
++#include <ngx_http_v3_module.h>
++
++#include <quiche.h>
++
++
++static ngx_int_t ngx_http_v3_add_variables(ngx_conf_t *cf);
++
++static void *ngx_http_v3_create_srv_conf(ngx_conf_t *cf);
++static char *ngx_http_v3_merge_srv_conf(ngx_conf_t *cf,
++    void *parent, void *child);
++
++static ngx_int_t ngx_http_v3_variable(ngx_http_request_t *r,
++    ngx_http_variable_value_t *v, uintptr_t data);
++
++static void ngx_http_v3_cleanup_ctx(void *data);
++
++
++static ngx_command_t  ngx_http_v3_commands[] = {
++
++    { ngx_string("http3_max_concurrent_streams"),
++      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_TAKE1,
++      ngx_conf_set_num_slot,
++      NGX_HTTP_SRV_CONF_OFFSET,
++      offsetof(ngx_http_v3_srv_conf_t, concurrent_streams),
++      NULL },
++
++    { ngx_string("http3_max_requests"),
++      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_TAKE1,
++      ngx_conf_set_num_slot,
++      NGX_HTTP_SRV_CONF_OFFSET,
++      offsetof(ngx_http_v3_srv_conf_t, max_requests),
++      NULL },
++
++    { ngx_string("http3_max_header_size"),
++      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_TAKE1,
++      ngx_conf_set_size_slot,
++      NGX_HTTP_SRV_CONF_OFFSET,
++      offsetof(ngx_http_v3_srv_conf_t, max_header_size),
++      NULL },
++
++    { ngx_string("http3_initial_max_data"),
++      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_TAKE1,
++      ngx_conf_set_size_slot,
++      NGX_HTTP_SRV_CONF_OFFSET,
++      offsetof(ngx_http_v3_srv_conf_t, max_data),
++      NULL },
++
++    { ngx_string("http3_initial_max_stream_data"),
++      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_TAKE1,
++      ngx_conf_set_size_slot,
++      NGX_HTTP_SRV_CONF_OFFSET,
++      offsetof(ngx_http_v3_srv_conf_t, max_stream_data),
++      NULL },
++
++    { ngx_string("http3_idle_timeout"),
++      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_TAKE1,
++      ngx_conf_set_msec_slot,
++      NGX_HTTP_SRV_CONF_OFFSET,
++      offsetof(ngx_http_v3_srv_conf_t, idle_timeout),
++      NULL },
++
++      ngx_null_command
++};
++
++
++static ngx_http_module_t  ngx_http_v3_module_ctx = {
++    ngx_http_v3_add_variables,             /* preconfiguration */
++    NULL,                                  /* postconfiguration */
++
++    NULL,                                  /* create main configuration */
++    NULL,                                  /* init main configuration */
++
++    ngx_http_v3_create_srv_conf,           /* create server configuration */
++    ngx_http_v3_merge_srv_conf,            /* merge server configuration */
++
++    NULL,                                  /* create location configuration */
++    NULL                                   /* merge location configuration */
++};
++
++
++ngx_module_t  ngx_http_v3_module = {
++    NGX_MODULE_V1,
++    &ngx_http_v3_module_ctx,             /* module context */
++    ngx_http_v3_commands,                /* module directives */
++    NGX_HTTP_MODULE,                       /* module type */
++    NULL,                                  /* init master */
++    NULL,                                  /* init module */
++    NULL,                                  /* init process */
++    NULL,                                  /* init thread */
++    NULL,                                  /* exit thread */
++    NULL,                                  /* exit process */
++    NULL,                                  /* exit master */
++    NGX_MODULE_V1_PADDING
++};
++
++
++static ngx_http_variable_t ngx_http_v3_variables[] = {
++
++    { ngx_string("http3"), NULL,
++      ngx_http_v3_variable, 0,
++      NGX_HTTP_VAR_CHANGEABLE, 0 },
++
++      ngx_http_null_variable
++};
++
++
++static ngx_int_t
++ngx_http_v3_add_variables(ngx_conf_t *cf)
++{
++    ngx_http_variable_t *var, *v;
++
++    for (v = ngx_http_v3_variables; v->name.len; v++) {
++        var = ngx_http_add_variable(cf, &v->name, v->flags);
++        if (var == NULL) {
++            return NGX_ERROR;
++        }
++
++        var->get_handler = v->get_handler;
++        var->data = v->data;
++    }
++
++    return NGX_OK;
++}
++
++
++static void *
++ngx_http_v3_create_srv_conf(ngx_conf_t *cf)
++{
++    ngx_http_v3_srv_conf_t  *h3scf;
++
++    h3scf = ngx_pcalloc(cf->pool, sizeof(ngx_http_v3_srv_conf_t));
++    if (h3scf == NULL) {
++        return NULL;
++    }
++
++    h3scf->idle_timeout = NGX_CONF_UNSET_MSEC;
++    h3scf->max_data = NGX_CONF_UNSET_SIZE;
++    h3scf->max_stream_data = NGX_CONF_UNSET_SIZE;
++    h3scf->max_requests = NGX_CONF_UNSET_UINT;
++    h3scf->max_header_size = NGX_CONF_UNSET_SIZE;
++    h3scf->concurrent_streams = NGX_CONF_UNSET_UINT;
++
++    return h3scf;
++}
++
++
++#if (NGX_DEBUG)
++static void
++quiche_log(const char *line, void *argp)
++{
++    ngx_log_t *log = ngx_cycle->log;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0, line);
++}
++#endif
++
++
++static char *
++ngx_http_v3_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
++{
++    ngx_http_v3_srv_conf_t *prev = parent;
++    ngx_http_v3_srv_conf_t *conf = child;
++
++    ngx_pool_cleanup_t  *cln;
++
++    ngx_conf_merge_msec_value(conf->idle_timeout,
++                              prev->idle_timeout, 180000);
++
++    ngx_conf_merge_size_value(conf->max_data,
++                              prev->max_data, 10485760);
++
++    ngx_conf_merge_size_value(conf->max_stream_data,
++                              prev->max_stream_data, 1048576);
++
++    ngx_conf_merge_uint_value(conf->max_requests,
++                              prev->max_requests, 1000);
++
++    ngx_conf_merge_size_value(conf->max_header_size,
++                              prev->max_header_size, 16384);
++
++    ngx_conf_merge_uint_value(conf->concurrent_streams,
++                              prev->concurrent_streams, 128);
++
++    conf->quic.log = cf->log;
++
++#if (NGX_DEBUG)
++    /* Enable quiche debug logging. quiche commit ceade4 or later is required */
++    quiche_enable_debug_logging(quiche_log, NULL);
++#endif
++
++    if (ngx_quic_create_conf(&conf->quic) != NGX_OK) {
++        return NGX_CONF_ERROR;
++    }
++
++    quiche_config_set_idle_timeout(conf->quic.config, conf->idle_timeout);
++
++    quiche_config_set_initial_max_data(conf->quic.config, conf->max_data);
++
++    quiche_config_set_initial_max_stream_data_bidi_remote(conf->quic.config,
++                                                          conf->max_stream_data);
++
++    quiche_config_set_initial_max_stream_data_uni(conf->quic.config,
++                                                  conf->max_stream_data);
++
++    quiche_config_set_initial_max_streams_bidi(conf->quic.config,
++                                               conf->concurrent_streams);
++
++    /* For HTTP/3 we only need 3 unidirectional streams. */
++    quiche_config_set_initial_max_streams_uni(conf->quic.config, 3);
++
++    conf->http3 = quiche_h3_config_new();
++    if (conf->http3 == NULL) {
++        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
++                           "failed to create HTTP/3 config");
++        return NGX_CONF_ERROR;
++    }
++
++    quiche_h3_config_set_max_header_list_size(conf->http3,
++                                              conf->max_header_size);
++
++    cln = ngx_pool_cleanup_add(cf->pool, 0);
++    if (cln == NULL) {
++        return NGX_CONF_ERROR;
++    }
++
++    cln->handler = ngx_quic_cleanup_ctx;
++    cln->data = &conf->quic;
++
++    cln = ngx_pool_cleanup_add(cf->pool, 0);
++    if (cln == NULL) {
++        return NGX_CONF_ERROR;
++    }
++
++    cln->handler = ngx_http_v3_cleanup_ctx;
++    cln->data = conf->http3;
++
++    return NGX_CONF_OK;
++}
++
++
++static ngx_int_t
++ngx_http_v3_variable(ngx_http_request_t *r, ngx_http_variable_value_t *v,
++    uintptr_t data)
++{
++    ngx_connection_t   *c;
++
++    v->valid = 1;
++    v->no_cacheable = 1;
++    v->not_found = 0;
++
++    c = r->connection;
++    if (c == NULL) {
++        return NGX_ERROR;
++    }
++
++    if (c->quic != NULL) {
++        v->len = sizeof("h3") - 1;
++        v->valid = 1;
++        v->no_cacheable = 0;
++        v->not_found = 0;
++        v->data = (u_char *) "h3";
++
++        return NGX_OK;
++    }
++
++    *v = ngx_http_variable_null_value;
++    return NGX_OK;
++}
++
++
++static void
++ngx_http_v3_cleanup_ctx(void *data)
++{
++    quiche_h3_config  *config = data;
++
++    quiche_h3_config_free(config);
++}
+diff --git a/src/http/v3/ngx_http_v3_module.h b/src/http/v3/ngx_http_v3_module.h
+new file mode 100644
+index 000000000..72e189def
+--- /dev/null
++++ b/src/http/v3/ngx_http_v3_module.h
+@@ -0,0 +1,34 @@
++
++/*
++ * Copyright (C) Cloudflare, Inc.
++ */
++
++
++#ifndef _NGX_HTTP_V3_MODULE_H_INCLUDED_
++#define _NGX_HTTP_V3_MODULE_H_INCLUDED_
++
++
++#include <ngx_config.h>
++#include <ngx_core.h>
++
++#include <quiche.h>
++
++
++typedef struct {
++    ngx_quic_t                      quic;
++
++    quiche_h3_config                *http3;
++
++    ngx_msec_t                      idle_timeout;
++    size_t                          max_data;
++    size_t                          max_stream_data;
++    ngx_uint_t                      max_requests;
++    ngx_uint_t                      max_header_size;
++    ngx_uint_t                      concurrent_streams;
++} ngx_http_v3_srv_conf_t;
++
++
++extern ngx_module_t  ngx_http_v3_module;
++
++
++#endif /* _NGX_HTTP_V3_MODULE_H_INCLUDED_ */
+--
+2.23.0
