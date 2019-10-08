@@ -1046,6 +1046,13 @@ impl Connection {
             left -= read;
         }
 
+        // Update idle timer
+        if self.local_transport_params.idle_timeout > 0 {
+            self.idle_timer = Some(now + self.idle_timeout());
+        }
+
+        self.ack_eliciting_sent = false;
+
         Ok(done)
     }
 
@@ -1271,7 +1278,7 @@ impl Connection {
                     self.trace_id, payload_len, pn,
                 );
 
-                return Ok(header_len + payload_len);
+                return Err(Error::Done);
             }
         }
 
@@ -1362,10 +1369,6 @@ impl Connection {
         self.pkt_num_spaces[epoch].largest_rx_pkt_num =
             cmp::max(self.pkt_num_spaces[epoch].largest_rx_pkt_num, pn);
 
-        if self.local_transport_params.idle_timeout > 0 {
-            self.idle_timer = Some(now + self.idle_timeout());
-        }
-
         self.recv_count += 1;
 
         let read = b.off() + aead_tag_len;
@@ -1378,8 +1381,6 @@ impl Connection {
 
             self.verified_peer_address = true;
         }
-
-        self.ack_eliciting_sent = false;
 
         Ok(read)
     }
