@@ -1360,11 +1360,7 @@ impl Connection {
             cmp::max(self.pkt_num_spaces[epoch].largest_rx_pkt_num, pn);
 
         if self.local_transport_params.idle_timeout > 0 {
-            self.idle_timer = Some(
-                now + time::Duration::from_millis(
-                    self.local_transport_params.idle_timeout,
-                ),
-            );
+            self.idle_timer = Some(now + self.idle_timeout());
         }
 
         self.recv_count += 1;
@@ -1911,11 +1907,7 @@ impl Connection {
             !self.ack_eliciting_sent &&
             self.local_transport_params.idle_timeout > 0
         {
-            self.idle_timer = Some(
-                now + time::Duration::from_millis(
-                    self.local_transport_params.idle_timeout,
-                ),
-            );
+            self.idle_timer = Some(now + self.idle_timeout());
         }
 
         if ack_eliciting {
@@ -2682,6 +2674,14 @@ impl Connection {
     fn should_update_max_data(&self) -> bool {
         self.max_rx_data_next != self.max_rx_data &&
             self.max_rx_data_next / 2 > self.max_rx_data - self.rx_data
+    }
+
+    /// Returns the idle timeout value.
+    fn idle_timeout(&mut self) -> time::Duration {
+        cmp::max(
+            time::Duration::from_millis(self.local_transport_params.idle_timeout),
+            3 * self.recovery.pto(),
+        )
     }
 }
 
