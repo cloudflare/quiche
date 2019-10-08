@@ -1214,9 +1214,12 @@ impl Connection {
         let aead = match self.pkt_num_spaces[epoch].crypto_open {
             Some(ref v) => v,
 
-            // Ignore packets that can't be decrypted because we don't yet have
-            // the necessary decryption keys, to avoid packet reordering (e.g.
-            // between Initial and Handshake) to causet he connection to be
+            // Ignore packets that can't be decrypted because we don't have the
+            // necessary decryption key (either because we don't yet have it or
+            // because we already dropped it).
+            //
+            // For example, this is necessary to prevent packet reordering (e.g.
+            // between Initial and Handshake) from causing the connection to be
             // closed.
             None => {
                 trace!(
