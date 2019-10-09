@@ -13,6 +13,11 @@ addons:
 matrix:
   include:
    - rust: stable
+     before_install:
+      # Install and use the current stable release of Go
+      - gimme --list
+      - eval "$(gimme stable)"
+      - gimme --list
      install:
       - rustup component add clippy
      script:
@@ -28,6 +33,11 @@ matrix:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
       - cargo clippy --manifest-path tools/quic-trace-log/Cargo.toml -- -D warnings
    - rust: beta
+     before_install:
+      # Install and use the current stable release of Go
+      - gimme --list
+      - eval "$(gimme stable)"
+      - gimme --list
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
@@ -38,6 +48,11 @@ matrix:
       # quic-trace-log
       - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
    - rust: nightly
+     before_install:
+      # Install and use the current stable release of Go
+      - gimme --list
+      - eval "$(gimme stable)"
+      - gimme --list
      install:
       - rustup component add rustfmt
       - cargo install cargo-fuzz
