@@ -2306,7 +2306,7 @@ impl Connection {
     ///
     /// If no protocol has been negotiated, the returned value is empty.
     pub fn application_proto(&self) -> &[u8] {
-        self.handshake.get_alpn_protocol()
+        self.handshake.alpn_protocol()
     }
 
     /// Returns true if the connection handshake is complete.
@@ -2355,7 +2355,7 @@ impl Connection {
                     self.handshake_completed = true;
 
                     let mut raw_params =
-                        self.handshake.get_quic_transport_params().to_vec();
+                        self.handshake.quic_transport_params().to_vec();
 
                     let peer_params =
                         TransportParams::decode(&mut raw_params, self.is_server)?;
@@ -2378,10 +2378,12 @@ impl Connection {
 
                     self.peer_transport_params = peer_params;
 
-                    trace!("{} connection established: cipher={:?} proto={:?} resumed={} {:?}",
+                    trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
                            &self.trace_id,
-                           self.handshake.cipher(),
                            std::str::from_utf8(self.application_proto()),
+                           self.handshake.cipher(),
+                           self.handshake.curve(),
+                           self.handshake.sigalg(),
                            self.is_resumed(),
                            self.peer_transport_params);
 
@@ -2408,7 +2410,7 @@ impl Connection {
     fn write_epoch(&self) -> Result<packet::Epoch> {
         // On error or probe, send packet in the latest space available.
         if self.error.is_some() || self.recovery.probes > 0 {
-            let epoch = match self.handshake.get_write_level() {
+            let epoch = match self.handshake.write_level() {
                 crypto::Level::Initial => packet::EPOCH_INITIAL,
                 crypto::Level::ZeroRTT => unreachable!(),
                 crypto::Level::Handshake => packet::EPOCH_HANDSHAKE,
