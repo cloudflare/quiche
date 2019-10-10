@@ -773,6 +773,7 @@ extern {
     );
 
     // SSL
+    #[cfg(not(feature = "openssl"))]
     fn SSL_get_ex_new_index(
         argl: c_long, argp: *const c_void, unused: *const c_void,
         dup_unused: *const c_void, free_func: *const c_void,
@@ -792,11 +793,14 @@ extern {
 
     fn SSL_get_current_cipher(ssl: *mut SSL) -> *const SSL_CIPHER;
 
+    #[cfg(not(feature = "openssl"))]
     fn SSL_set_min_proto_version(ssl: *mut SSL, version: u16);
+    #[cfg(not(feature = "openssl"))]
     fn SSL_set_max_proto_version(ssl: *mut SSL, version: u16);
 
     fn SSL_set_quiet_shutdown(ssl: *mut SSL, mode: c_int);
 
+    #[cfg(not(feature = "openssl"))]
     fn SSL_set_tlsext_host_name(ssl: *mut SSL, name: *const c_char) -> c_int;
 
     fn SSL_set_quic_transport_params(
@@ -827,6 +831,11 @@ extern {
 
     fn SSL_clear(ssl: *mut SSL) -> c_int;
 
+    #[cfg(feature = "openssl")]
+    fn SSL_ctrl(
+        ssl: *mut SSL, cmd: c_int, larg: c_long, parg: *mut c_void,
+    ) -> c_int;
+
     fn SSL_free(ssl: *mut SSL);
 
     // SSL_CIPHER
@@ -851,4 +860,70 @@ extern {
     fn ERR_peek_error() -> c_uint;
 
     fn ERR_error_string_n(err: c_uint, buf: *const u8, len: usize);
+
+    // CRYPTO
+    #[cfg(feature = "openssl")]
+    fn CRYPTO_get_ex_new_index(
+        class_index: c_int, argl: c_long, argp: *const c_void,
+        new_func: *const c_void, dup_func: *const c_void,
+        free_func: *const c_void,
+    ) -> c_int;
+}
+
+// OpenSSL compatibility functions.
+//
+// These don't 100% follow the OpenSSL API (e.g. some arguments have slightly
+// different types) in order to make them compatible with the BoringSSL API.
+
+#[cfg(feature = "openssl")]
+#[allow(non_snake_case)]
+unsafe fn SSL_set_min_proto_version(s: *mut SSL, version: u16) {
+    const SSL_CTRL_SET_MIN_PROTO_VERSION: c_int = 123;
+
+    SSL_ctrl(
+        s,
+        SSL_CTRL_SET_MIN_PROTO_VERSION,
+        version as c_long,
+        ptr::null_mut(),
+    );
+}
+
+#[cfg(feature = "openssl")]
+#[allow(non_snake_case)]
+unsafe fn SSL_set_max_proto_version(s: *mut SSL, version: u16) {
+    const SSL_CTRL_SET_MAX_PROTO_VERSION: c_int = 124;
+
+    SSL_ctrl(
+        s,
+        SSL_CTRL_SET_MAX_PROTO_VERSION,
+        version as c_long,
+        ptr::null_mut(),
+    );
+}
+
+#[cfg(feature = "openssl")]
+#[allow(non_snake_case)]
+unsafe fn SSL_set_tlsext_host_name(s: *mut SSL, name: *const c_char) -> c_int {
+    const SSL_CTRL_SET_TLSEXT_HOSTNAME: c_int = 55;
+
+    #[allow(non_upper_case_globals)]
+    const TLSEXT_NAMETYPE_host_name: c_long = 0;
+
+    SSL_ctrl(
+        s,
+        SSL_CTRL_SET_TLSEXT_HOSTNAME,
+        TLSEXT_NAMETYPE_host_name,
+        name as *mut c_void,
+    )
+}
+
+#[cfg(feature = "openssl")]
+#[allow(non_snake_case)]
+unsafe fn SSL_get_ex_new_index(
+    argl: c_long, argp: *const c_void, newf: *const c_void, dupf: *const c_void,
+    freef: *const c_void,
+) -> c_int {
+    const CRYPTO_EX_INDEX_SSL: c_int = 0;
+
+    CRYPTO_get_ex_new_index(CRYPTO_EX_INDEX_SSL, argl, argp, newf, dupf, freef)
 }
