@@ -496,7 +496,7 @@ impl Config {
 
     /// Sets the `idle_timeout` transport parameter.
     ///
-    /// By default no timeout is used.
+    /// The default value is infinite, that is, no timeout is used.
     pub fn set_idle_timeout(&mut self, v: u64) {
         self.local_transport_params.idle_timeout = v;
     }
@@ -510,12 +510,23 @@ impl Config {
 
     /// Sets the `initial_max_data` transport parameter.
     ///
+    /// When set to a non-zero value quiche will only allow at most `v` bytes
+    /// of incoming stream data to be buffered for the whole connection (that
+    /// is, data that is not yet read by the application) and will allow more
+    /// data to be received as the buffer is consumed by the application.
+    ///
     /// The default value is `0`.
     pub fn set_initial_max_data(&mut self, v: u64) {
         self.local_transport_params.initial_max_data = v;
     }
 
     /// Sets the `initial_max_stream_data_bidi_local` transport parameter.
+    ///
+    /// When set to a non-zero value quiche will only allow at most `v` bytes
+    /// of incoming stream data to be buffered for each locally-initiated
+    /// bidirectional stream (that is, data that is not yet read by the
+    /// application) and will allow more data to be received as the buffer is
+    /// consumed by the application.
     ///
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_bidi_local(&mut self, v: u64) {
@@ -525,6 +536,12 @@ impl Config {
 
     /// Sets the `initial_max_stream_data_bidi_remote` transport parameter.
     ///
+    /// When set to a non-zero value quiche will only allow at most `v` bytes
+    /// of incoming stream data to be buffered for each remotely-initiated
+    /// bidirectional stream (that is, data that is not yet read by the
+    /// application) and will allow more data to be received as the buffer is
+    /// consumed by the application.
+    ///
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_bidi_remote(&mut self, v: u64) {
         self.local_transport_params
@@ -533,6 +550,11 @@ impl Config {
 
     /// Sets the `initial_max_stream_data_uni` transport parameter.
     ///
+    /// When set to a non-zero value quiche will only allow at most `v` bytes
+    /// of incoming stream data to be buffered for each unidirectional stream
+    /// (that is, data that is not yet read by the application) and will allow
+    /// more data to be received as the buffer is consumed by the application.
+    ///
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_uni(&mut self, v: u64) {
         self.local_transport_params.initial_max_stream_data_uni = v;
@@ -540,12 +562,32 @@ impl Config {
 
     /// Sets the `initial_max_streams_bidi` transport parameter.
     ///
+    /// When set to a non-zero value quiche will only allow `v` number of
+    /// concurrent remotely-initiated bidirectional streams to be open at any
+    /// given time and will increase the limit automatically as streams are
+    /// completed.
+    ///
+    /// A bidirectional stream is considered completed when all incoming data
+    /// has been read by the application (up to the `fin` offset) or the
+    /// stream's read direction has been shutdown, and all outgoing data has
+    /// been ACKed by the peer (up to the `fin` offset) or the stream's write
+    /// direction has been shutdown.
+    ///
     /// The default value is `0`.
     pub fn set_initial_max_streams_bidi(&mut self, v: u64) {
         self.local_transport_params.initial_max_streams_bidi = v;
     }
 
     /// Sets the `initial_max_streams_uni` transport parameter.
+    ///
+    /// When set to a non-zero value quiche will only allow `v` number of
+    /// concurrent remotely-initiated unidirectional streams to be open at any
+    /// given time and will increase the limit automatically as streams are
+    /// completed.
+    ///
+    /// A unidirectional stream is considered completed when all incoming data
+    /// has been read by the application (up to the `fin` offset) or the
+    /// stream's read direction has been shutdown.
     ///
     /// The default value is `0`.
     pub fn set_initial_max_streams_uni(&mut self, v: u64) {
