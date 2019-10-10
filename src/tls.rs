@@ -355,7 +355,7 @@ impl Handshake {
         })
     }
 
-    pub fn get_quic_transport_params(&self) -> &[u8] {
+    pub fn quic_transport_params(&self) -> &[u8] {
         let mut ptr: *const u8 = ptr::null();
         let mut len: usize = 0;
 
@@ -370,7 +370,7 @@ impl Handshake {
         unsafe { slice::from_raw_parts(ptr, len) }
     }
 
-    pub fn get_alpn_protocol(&self) -> &[u8] {
+    pub fn alpn_protocol(&self) -> &[u8] {
         let mut ptr: *const u8 = ptr::null();
         let mut len: u32 = 0;
 
@@ -395,12 +395,48 @@ impl Handshake {
         map_result_ssl(self, unsafe { SSL_do_handshake(self.as_ptr()) })
     }
 
-    pub fn get_write_level(&self) -> crypto::Level {
+    pub fn write_level(&self) -> crypto::Level {
         unsafe { SSL_quic_write_level(self.as_ptr()) }
     }
 
-    pub fn cipher(&self) -> Result<crypto::Algorithm> {
-        get_cipher_from_ptr(self.as_ptr())
+    pub fn cipher(&self) -> Option<crypto::Algorithm> {
+        get_cipher_from_ptr(self.as_ptr()).ok()
+    }
+
+    pub fn curve(&self) -> Option<String> {
+        let curve = unsafe {
+            let curve_id = SSL_get_curve_id(self.as_ptr());
+            if curve_id == 0 {
+                return None;
+            }
+
+            let curve_name = SSL_get_curve_name(curve_id);
+            match std::ffi::CStr::from_ptr(curve_name).to_str() {
+                Ok(v) => v,
+
+                Err(_) => return None,
+            }
+        };
+
+        Some(curve.to_string())
+    }
+
+    pub fn sigalg(&self) -> Option<String> {
+        let sigalg = unsafe {
+            let sigalg_id = SSL_get_peer_signature_algorithm(self.as_ptr());
+            if sigalg_id == 0 {
+                return None;
+            }
+
+            let sigalg_name = SSL_get_signature_algorithm_name(sigalg_id, 1);
+            match std::ffi::CStr::from_ptr(sigalg_name).to_str() {
+                Ok(v) => v,
+
+                Err(_) => return None,
+            }
+        };
+
+        Some(sigalg.to_string())
     }
 
     pub fn is_resumed(&self) -> bool {
@@ -791,6 +827,14 @@ extern {
     fn SSL_get_ex_data(ssl: *mut SSL, idx: c_int) -> *mut c_void;
 
     fn SSL_get_current_cipher(ssl: *mut SSL) -> *const SSL_CIPHER;
+
+    fn SSL_get_curve_id(ssl: *mut SSL) -> u16;
+    fn SSL_get_curve_name(curve: u16) -> *const c_char;
+
+    fn SSL_get_peer_signature_algorithm(ssl: *mut SSL) -> u16;
+    fn SSL_get_signature_algorithm_name(
+        sigalg: u16, include_curve: i32,
+    ) -> *const c_char;
 
     fn SSL_set_min_proto_version(ssl: *mut SSL, version: u16);
     fn SSL_set_max_proto_version(ssl: *mut SSL, version: u16);
