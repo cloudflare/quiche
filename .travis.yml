@@ -1,11 +1,8 @@
 language: rust
 
-dist: xenial
-
 addons:
   apt:
     packages:
-     - golang-go
      - libev-dev
      - protobuf-compiler
      - uthash-dev
@@ -32,21 +29,6 @@ matrix:
       # quic-trace-log
       - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
       - cargo clippy --manifest-path tools/quic-trace-log/Cargo.toml -- -D warnings
-   - rust: beta
-     before_install:
-      # Install and use the current stable release of Go
-      - gimme --list
-      - eval "$(gimme stable)"
-      - gimme --list
-     script:
-      - RUSTFLAGS="-D warnings" cargo build --release --verbose
-      - RUSTFLAGS="-D warnings" cargo test --verbose
-      - cargo doc --no-deps
-      - make -C examples
-      # http3_test
-      - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
-      # quic-trace-log
-      - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
    - rust: nightly
      before_install:
       # Install and use the current stable release of Go
@@ -73,6 +55,20 @@ matrix:
       # quic-trace-log
       - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
       - cargo fmt --manifest-path tools/quic-trace-log/Cargo.toml -- --check
+   - rust: stable
+     os: osx
+     script:
+      - RUSTFLAGS="-D warnings" cargo build --release --verbose
+      - RUSTFLAGS="-D warnings" cargo test --verbose
+   - rust: stable
+     os: windows
+     before_install:
+      - choco install golang nasm
+      # Update $PATH
+      - export PATH="$(powershell -Command '("Process", "Machine" | % { [Environment]::GetEnvironmentVariable("PATH", $_) -Split ";" -Replace "\\$", "" } | Select -Unique | % { cygpath $_ }) -Join ":"')"
+     script:
+      - RUSTFLAGS="-D warnings" cargo build --release --verbose
+      - RUSTFLAGS="-D warnings" cargo test --verbose
 
 deploy:
   provider: pages
@@ -82,4 +78,4 @@ deploy:
   github-token: $GITHUB_TOKEN
   on:
     branch: master
-    condition: $TRAVIS_RUST_VERSION = stable
+    condition: $TRAVIS_RUST_VERSION = stable && $TRAVIS_OS_NAME = linux
