@@ -10,16 +10,25 @@ readme = "README.md"
 keywords = ["quic", "http3"]
 categories = ["network-programming"]
 license = "BSD-2-Clause"
-exclude = [
-    "deps/boringssl/crypto/**/*_test.txt",
-    "deps/boringssl/crypto/**/*_tests.txt",
-    "deps/boringssl/**/nist_cavp/*.txt",
-    "deps/boringssl/fuzz/*",
-    "deps/boringssl/go.mod",
-    "deps/boringssl/ssl/test/runner/*",
-    "deps/boringssl/third_party/wycheproof_testvectors/*",
-    "fuzz/*",
-    "tools/*",
+include = [
+     "/*.md",
+     "/*.toml",
+     "/CODEOWNERS",
+     "/COPYING",
+     "/benches",
+     "/deps/boringssl/**/*.[chS]",
+     "/deps/boringssl/**/*.cc",
+     "/deps/boringssl/**/*.errordata",
+     "/deps/boringssl/**/*.go",
+     "/deps/boringssl/**/*.pl",
+     "/deps/boringssl/**/CMakeLists.txt",
+     "/deps/boringssl/*.md",
+     "/deps/boringssl/LICENSE",
+     "/deps/boringssl/sources.cmake",
+     "/examples",
+     "/include",
+     "/quiche.svg",
+     "/src",
 ]
 
 [features]
