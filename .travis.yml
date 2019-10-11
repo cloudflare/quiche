@@ -1,5 +1,3 @@
-language: rust
-
 addons:
   apt:
     packages:
@@ -9,7 +7,8 @@ addons:
 
 matrix:
   include:
-   - rust: stable
+   - language: rust
+     rust: stable
      before_install:
       # Install and use the current stable release of Go
       - gimme --list
@@ -30,7 +29,8 @@ matrix:
       # quic-trace-log
       - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
       - cargo clippy --manifest-path tools/quic-trace-log/Cargo.toml -- -D warnings
-   - rust: nightly
+   - language: rust
+     rust: nightly
      before_install:
       # Install and use the current stable release of Go
       - gimme --list
@@ -57,12 +57,14 @@ matrix:
       # quic-trace-log
       - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
       - cargo fmt --manifest-path tools/quic-trace-log/Cargo.toml -- --check
-   - rust: stable
+   - language: rust
+     rust: stable
      os: osx
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
-   - rust: stable
+   - language: rust
+     rust: stable
      os: osx
      osx_image: xcode11.2
      install:
@@ -70,7 +72,8 @@ matrix:
       - cargo install cargo-lipo
      script:
       - RUSTFLAGS="-D warnings" cargo lipo --release --verbose
-   - rust: stable
+   - language: rust
+     rust: stable
      os: windows
      before_install:
       - choco install golang nasm
@@ -79,7 +82,8 @@ matrix:
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
-   - rust: stable
+   - language: rust
+     rust: stable
      env:
       NGINX_VER=1.16.1
      before_install:
@@ -95,6 +99,36 @@ matrix:
         patch -p01 < ../extras/nginx/nginx-1.16.patch &&
         ./configure --with-http_ssl_module --with-http_v2_module --with-http_v3_module --with-openssl="../deps/boringssl" --with-quiche=".." &&
         make -j`nproc`
+   - language: android
+     dist: trusty
+     env:
+      NDK_VER=r13b
+      CMAKE_VER=3.6.4111459
+     android:
+       components:
+        - build-tools-26.0.1
+        # Minimum API level supported
+        - android-21
+     install:
+      # Install rust manually
+      - curl https://build.travis-ci.org/files/rustup-init.sh -sSf | sh -s -- -y --default-toolchain stable
+      - export PATH=$HOME/.cargo/bin:$PATH
+      - rustup default stable
+      - rustup target add aarch64-linux-android arm-linux-androideabi armv7-linux-androideabi i686-linux-android
+      # Additional Android components
+      - echo y | sdkmanager "cmake;$CMAKE_VER"
+      - export PATH=$ANDROID_HOME/cmake/$CMAKE_VER/bin/:$PATH
+      # NDK download and install
+      - NDK_URL=https://dl.google.com/android/repository/android-ndk-%s-linux-x86_64.zip
+      - curl -ondk.zip -q $(printf $NDK_URL $NDK_VER)
+      - unzip -q ndk.zip -d $HOME
+      - export ANDROID_NDK_HOME=$HOME/android-ndk-$NDK_VER
+      # Setup android toolchain
+      - export TOOLCHAIN_DIR=$(pwd)/toolchain
+      - mkdir -p $TOOLCHAIN_DIR
+      - tools/setup_android.sh
+     script:
+      - tools/build_android.sh --release --verbose
 
 deploy:
   provider: pages

@@ -7,6 +7,7 @@ const CMAKE_PARAMS_ANDROID: &[(&str, &[(&str, &str)])] = &[
             "CMAKE_TOOLCHAIN_FILE",
             "${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
         ),
+        ("ANDROID_STL", "c++_shared"),
     ]),
     ("arm", &[
         ("ANDROID_TOOLCHAIN_NAME", "arm-linux-androideabi-4.9"),
@@ -15,6 +16,7 @@ const CMAKE_PARAMS_ANDROID: &[(&str, &[(&str, &str)])] = &[
             "CMAKE_TOOLCHAIN_FILE",
             "${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
         ),
+        ("ANDROID_STL", "c++_shared"),
     ]),
     ("x86", &[
         ("ANDROID_TOOLCHAIN_NAME", "x86-linux-android-4.9"),
@@ -23,6 +25,7 @@ const CMAKE_PARAMS_ANDROID: &[(&str, &[(&str, &str)])] = &[
             "CMAKE_TOOLCHAIN_FILE",
             "${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
         ),
+        ("ANDROID_STL", "c++_shared"),
     ]),
     ("x86_64", &[
         ("ANDROID_TOOLCHAIN_NAME", "x86_64-linux-android-4.9"),
@@ -31,6 +34,7 @@ const CMAKE_PARAMS_ANDROID: &[(&str, &[(&str, &str)])] = &[
             "CMAKE_TOOLCHAIN_FILE",
             "${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
         ),
+        ("ANDROID_STL", "c++_shared"),
     ]),
 ];
 
