@@ -20,6 +20,7 @@ matrix:
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
+      - RUSTFLAGS="-D warnings" cargo package --verbose --allow-dirty
       - cargo clippy --examples -- -D warnings
       - cargo doc --no-deps
       - make -C examples
@@ -41,6 +42,7 @@ matrix:
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
+      - RUSTFLAGS="-D warnings" cargo package --verbose --allow-dirty
       - cargo fmt -- --check
       - cargo doc --no-deps
       - make -C examples
