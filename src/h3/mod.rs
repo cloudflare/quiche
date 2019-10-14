@@ -2318,8 +2318,9 @@ mod tests {
         let d = [0; 20];
 
         s.pipe.client.stream_send(e_stream_id, &d, false).unwrap();
-        s.pipe.client.stream_send(d_stream_id, &d, false).unwrap();
+        s.advance().ok();
 
+        s.pipe.client.stream_send(d_stream_id, &d, false).unwrap();
         s.advance().ok();
 
         loop {
