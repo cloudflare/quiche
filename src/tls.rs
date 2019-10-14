@@ -251,6 +251,14 @@ impl Context {
         })
     }
 
+    pub fn set_early_data_enabled(&mut self, enabled: bool) {
+        let enabled = if enabled { 1 } else { 0 };
+
+        unsafe {
+            SSL_CTX_set_early_data_enabled(self.as_ptr(), enabled);
+        }
+    }
+
     fn as_ptr(&self) -> *mut SSL_CTX {
         self.0
     }
@@ -443,6 +451,10 @@ impl Handshake {
         unsafe { SSL_session_reused(self.as_ptr()) == 1 }
     }
 
+    pub fn is_in_early_data(&self) -> bool {
+        unsafe { SSL_in_early_data(self.as_ptr()) == 1 }
+    }
+
     pub fn clear(&mut self) -> Result<()> {
         map_result_ssl(self, unsafe { SSL_clear(self.as_ptr()) })
     }
@@ -499,8 +511,8 @@ extern fn set_encryption_secrets(
 
     let space = match level {
         crypto::Level::Initial => &mut conn.pkt_num_spaces[packet::EPOCH_INITIAL],
-        // TODO: implement 0-RTT
-        crypto::Level::ZeroRTT => unimplemented!("0-RTT"),
+        crypto::Level::ZeroRTT =>
+            &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
         crypto::Level::Handshake =>
             &mut conn.pkt_num_spaces[packet::EPOCH_HANDSHAKE],
         crypto::Level::OneRTT =>
@@ -520,49 +532,60 @@ extern fn set_encryption_secrets(
     let mut iv = vec![0; nonce_len];
     let mut pn_key = vec![0; key_len];
 
-    let secret = unsafe { slice::from_raw_parts(read_secret, secret_len) };
+    // 0-RTT read secrets are present only on the server.
+    if level != crypto::Level::ZeroRTT || conn.is_server {
+        let secret = unsafe { slice::from_raw_parts(read_secret, secret_len) };
 
-    if crypto::derive_pkt_key(aead, &secret, &mut key).is_err() {
-        return 0;
+        if crypto::derive_pkt_key(aead, &secret, &mut key).is_err() {
+            return 0;
+        }
+
+        if crypto::derive_pkt_iv(aead, &secret, &mut iv).is_err() {
+            return 0;
+        }
+
+        if crypto::derive_hdr_key(aead, &secret, &mut pn_key).is_err() {
+            return 0;
+        }
+
+        let open = match crypto::Open::new(aead, &key, &iv, &pn_key) {
+            Ok(v) => v,
+
+            Err(_) => return 0,
+        };
+
+        if level == crypto::Level::ZeroRTT {
+            space.crypto_0rtt_open = Some(open);
+            return 1;
+        }
+
+        space.crypto_open = Some(open);
     }
 
-    if crypto::derive_pkt_iv(aead, &secret, &mut iv).is_err() {
-        return 0;
+    // 0-RTT write secrets are present only on the client.
+    if level != crypto::Level::ZeroRTT || !conn.is_server {
+        let secret = unsafe { slice::from_raw_parts(write_secret, secret_len) };
+
+        if crypto::derive_pkt_key(aead, &secret, &mut key).is_err() {
+            return 0;
+        }
+
+        if crypto::derive_pkt_iv(aead, &secret, &mut iv).is_err() {
+            return 0;
+        }
+
+        if crypto::derive_hdr_key(aead, &secret, &mut pn_key).is_err() {
+            return 0;
+        }
+
+        let seal = match crypto::Seal::new(aead, &key, &iv, &pn_key) {
+            Ok(v) => v,
+
+            Err(_) => return 0,
+        };
+
+        space.crypto_seal = Some(seal);
     }
-
-    if crypto::derive_hdr_key(aead, &secret, &mut pn_key).is_err() {
-        return 0;
-    }
-
-    let open = match crypto::Open::new(aead, &key, &iv, &pn_key) {
-        Ok(v) => v,
-
-        Err(_) => return 0,
-    };
-
-    space.crypto_open = Some(open);
-
-    let secret = unsafe { slice::from_raw_parts(write_secret, secret_len) };
-
-    if crypto::derive_pkt_key(aead, &secret, &mut key).is_err() {
-        return 0;
-    }
-
-    if crypto::derive_pkt_iv(aead, &secret, &mut iv).is_err() {
-        return 0;
-    }
-
-    if crypto::derive_hdr_key(aead, &secret, &mut pn_key).is_err() {
-        return 0;
-    }
-
-    let seal = match crypto::Seal::new(aead, &key, &iv, &pn_key) {
-        Ok(v) => v,
-
-        Err(_) => return 0,
-    };
-
-    space.crypto_seal = Some(seal);
 
     1
 }
@@ -808,6 +831,8 @@ extern {
         arg: *mut c_void,
     );
 
+    fn SSL_CTX_set_early_data_enabled(ctx: *mut SSL_CTX, enabled: i32);
+
     // SSL
     fn SSL_get_ex_new_index(
         argl: c_long, argp: *const c_void, unused: *const c_void,
@@ -868,6 +893,8 @@ extern {
     fn SSL_quic_write_level(ssl: *mut SSL) -> crypto::Level;
 
     fn SSL_session_reused(ssl: *mut SSL) -> c_int;
+
+    fn SSL_in_early_data(ssl: *mut SSL) -> c_int;
 
     fn SSL_clear(ssl: *mut SSL) -> c_int;
 

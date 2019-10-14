@@ -121,6 +121,9 @@ void quiche_config_grease(quiche_config *config, bool v);
 // Enables logging of secrets.
 void quiche_config_log_keys(quiche_config *config);
 
+// Enables sending or receiving early data.
+void quiche_config_enable_early_data(quiche_config *config);
+
 // Configures the list of supported application protocols.
 int quiche_config_set_application_protos(quiche_config *config,
                                          const uint8_t *protos,
@@ -257,6 +260,10 @@ void quiche_conn_application_proto(quiche_conn *conn, const uint8_t **out,
 
 // Returns true if the connection handshake is complete.
 bool quiche_conn_is_established(quiche_conn *conn);
+
+// Returns true if the connection has a pending handshake that has progressed
+// enough to send or receive early data.
+bool quiche_conn_is_in_early_data(quiche_conn *conn);
 
 // Returns true if the connection is closed.
 bool quiche_conn_is_closed(quiche_conn *conn);

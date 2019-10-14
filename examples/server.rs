@@ -53,6 +53,7 @@ Options:
   --max-streams-bidi STREAMS  Number of allowed concurrent streams [default: 100].
   --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 100].
   --dump-packets PATH         Dump the incoming packets as files in the given directory.
+  --early-data                Enables receiving early data.
   --no-retry                  Disable stateless retry.
   -h --help                   Show this screen.
 ";
@@ -140,6 +141,10 @@ fn main() {
     config.set_initial_max_streams_bidi(max_streams_bidi);
     config.set_initial_max_streams_uni(max_streams_uni);
     config.set_disable_active_migration(true);
+
+    if args.get_bool("--early-data") {
+        config.enable_early_data();
+    }
 
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
         config.log_keys();
@@ -340,7 +345,7 @@ fn main() {
 
             debug!("{} processed {} bytes", client.conn.trace_id(), read);
 
-            if client.conn.is_established() {
+            if client.conn.is_in_early_data() || client.conn.is_established() {
                 // Handle writable streams.
                 for stream_id in client.conn.writable() {
                     handle_writable(client, stream_id);
