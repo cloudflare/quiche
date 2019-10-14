@@ -458,6 +458,11 @@ impl Config {
         self.tls_ctx.enable_keylog();
     }
 
+    /// Enables sending or receiving early data.
+    pub fn enable_early_data(&mut self) {
+        self.tls_ctx.set_early_data_enabled(true);
+    }
+
     /// Configures the list of supported application protocols.
     ///
     /// The list of protocols `protos` must be in wire-format (i.e. a series
@@ -1253,26 +1258,36 @@ impl Connection {
         // Select packet number space epoch based on the received packet's type.
         let epoch = hdr.ty.to_epoch()?;
 
-        let aead = match self.pkt_num_spaces[epoch].crypto_open {
-            Some(ref v) => v,
+        let aead = if hdr.ty == packet::Type::ZeroRTT &&
+            self.pkt_num_spaces[epoch].crypto_0rtt_open.is_some()
+        {
+            self.pkt_num_spaces[epoch]
+                .crypto_0rtt_open
+                .as_ref()
+                .unwrap()
+        } else {
+            match self.pkt_num_spaces[epoch].crypto_open {
+                Some(ref v) => v,
 
-            // Ignore packets that can't be decrypted because we don't have the
-            // necessary decryption key (either because we don't yet have it or
-            // because we already dropped it).
-            //
-            // For example, this is necessary to prevent packet reordering (e.g.
-            // between Initial and Handshake) from causing the connection to be
-            // closed.
-            None => {
-                trace!(
-                    "{} dropped undecryptable packet type={:?} len={}",
-                    self.trace_id,
-                    hdr.ty,
-                    payload_len
-                );
+                // Ignore packets that can't be decrypted because we don't have
+                // the necessary decryption key (either because we
+                // don't yet have it or because we already dropped
+                // it).
+                //
+                // For example, this is necessary to prevent packet reordering
+                // (e.g. between Initial and Handshake) from
+                // causing the connection to be closed.
+                None => {
+                    trace!(
+                        "{} dropped undecryptable packet type={:?} len={}",
+                        self.trace_id,
+                        hdr.ty,
+                        payload_len
+                    );
 
-                return Ok(header_len + payload_len);
-            },
+                    return Ok(header_len + payload_len);
+                },
+            }
         };
 
         let aead_tag_len = aead.alg().tag_len();
@@ -2384,6 +2399,12 @@ impl Connection {
     /// Returns true if the connection is resumed.
     pub fn is_resumed(&self) -> bool {
         self.handshake.is_resumed()
+    }
+
+    /// Returns true if the connection has a pending handshake that has
+    /// progressed enough to send or receive early data.
+    pub fn is_in_early_data(&self) -> bool {
+        self.handshake.is_in_early_data()
     }
 
     /// Returns true if the connection is closed.

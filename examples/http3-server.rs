@@ -49,6 +49,7 @@ Options:
   --max-stream-data BYTES     Per-stream flow control limit [default: 1000000].
   --max-streams-bidi STREAMS  Number of allowed concurrent streams [default: 100].
   --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 100].
+  --early-data                Enables receiving early data.
   --no-retry                  Disable stateless retry.
   --no-grease                 Don't send GREASE.
   -h --help                   Show this screen.
@@ -134,12 +135,16 @@ fn main() {
     config.set_initial_max_streams_uni(max_streams_uni);
     config.set_disable_active_migration(true);
 
-    if std::env::var_os("SSLKEYLOGFILE").is_some() {
-        config.log_keys();
+    if args.get_bool("--early-data") {
+        config.enable_early_data();
     }
 
     if args.get_bool("--no-grease") {
         config.grease(false);
+    }
+
+    if std::env::var_os("SSLKEYLOGFILE").is_some() {
+        config.log_keys();
     }
 
     let h3_config = quiche::h3::Config::new().unwrap();
@@ -328,7 +333,9 @@ fn main() {
 
             // Create a new HTTP/3 connection as soon as the QUIC connection
             // is established.
-            if client.conn.is_established() && client.http3_conn.is_none() {
+            if (client.conn.is_in_early_data() || client.conn.is_established()) &&
+                client.http3_conn.is_none()
+            {
                 debug!(
                     "{} QUIC handshake completed, now trying HTTP/3",
                     client.conn.trace_id()

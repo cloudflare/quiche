@@ -129,6 +129,11 @@ pub extern fn quiche_config_log_keys(config: &mut Config) {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_enable_early_data(config: &mut Config) {
+    config.enable_early_data();
+}
+
+#[no_mangle]
 pub extern fn quiche_config_set_application_protos(
     config: &mut Config, protos: *const u8, protos_len: size_t,
 ) -> c_int {
@@ -538,6 +543,11 @@ pub extern fn quiche_conn_application_proto(
 #[no_mangle]
 pub extern fn quiche_conn_is_established(conn: &mut Connection) -> bool {
     conn.is_established()
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_is_in_early_data(conn: &mut Connection) -> bool {
+    conn.is_in_early_data()
 }
 
 #[no_mangle]
