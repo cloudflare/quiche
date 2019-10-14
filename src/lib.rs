@@ -1285,6 +1285,8 @@ impl Connection {
             hdr.pkt_num_len,
         );
 
+        let pn_len = hdr.pkt_num_len;
+
         trace!(
             "{} rx pkt {:?} len={} pn={}",
             self.trace_id,
@@ -1294,7 +1296,30 @@ impl Connection {
         );
 
         let mut payload =
-            packet::decrypt_pkt(&mut b, pn, hdr.pkt_num_len, payload_len, &aead)?;
+            match packet::decrypt_pkt(&mut b, pn, pn_len, payload_len, &aead) {
+                Ok(v) => v,
+
+                Err(e) => {
+                    // Ignore packets that fail decryption, but only if we have
+                    // successfully processed at least another packet for the
+                    // connection. This way we can avoid closing the connection
+                    // when junk is injected, but we don't keep a connection
+                    // alive in case we only received junk.
+
+                    if self.recv_count == 0 {
+                        return Err(e);
+                    }
+
+                    trace!(
+                        "{} dropped undecryptable packet type={:?} len={}",
+                        self.trace_id,
+                        hdr.ty,
+                        payload_len
+                    );
+
+                    return Err(Error::Done);
+                },
+            };
 
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
