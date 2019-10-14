@@ -61,6 +61,14 @@ matrix:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
    - rust: stable
+     os: osx
+     osx_image: xcode11.2
+     install:
+      - rustup target add aarch64-apple-ios x86_64-apple-ios
+      - cargo install cargo-lipo
+     script:
+      - RUSTFLAGS="-D warnings" cargo lipo --release --verbose
+   - rust: stable
      os: windows
      before_install:
       - choco install golang nasm
