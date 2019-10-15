@@ -79,6 +79,22 @@ matrix:
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
+   - rust: stable
+     env:
+      NGINX_VER=1.16.1
+     before_install:
+      # Install and use the current stable release of Go
+      - gimme --list
+      - eval "$(gimme stable)"
+      - gimme --list
+     script:
+      - curl -O https://nginx.org/download/nginx-$NGINX_VER.tar.gz
+      - tar xzf nginx-$NGINX_VER.tar.gz
+      - |
+        cd nginx-$NGINX_VER &&
+        patch -p01 < ../extras/nginx/nginx-1.16.patch &&
+        ./configure --with-http_ssl_module --with-http_v2_module --with-http_v3_module --with-openssl="../deps/boringssl" --with-quiche=".." &&
+        make -j`nproc`
 
 deploy:
   provider: pages
