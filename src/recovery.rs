@@ -112,7 +112,7 @@ pub struct Recovery {
 
     bytes_in_flight: usize,
 
-    crypto_bytes_in_flight: usize,
+    pub crypto_bytes_in_flight: usize,
 
     cwnd: usize,
 

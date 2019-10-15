@@ -2534,15 +2534,22 @@ impl Connection {
                     &self.trace_id,
                 )?;
 
-                // When we receive an ACK for a 1-RTT packet after handshake
-                // completion, it means the handshake has been confirmed.
-                if epoch == packet::EPOCH_APPLICATION && self.handshake_completed
-                {
-                    self.handshake_confirmed = true;
+                if self.handshake_completed {
+                    // When we receive an ACK for a 1-RTT packet after handshake
+                    // completion, it means the handshake has been confirmed.
+                    // Another condition to confirm the handshake is when
+                    // all crypto data is acked by this Handshake ack after
+                    // the handshake completed.
+                    if epoch == packet::EPOCH_APPLICATION ||
+                        (epoch == packet::EPOCH_HANDSHAKE &&
+                            self.recovery.crypto_bytes_in_flight == 0)
+                    {
+                        self.handshake_confirmed = true;
 
-                    // Once the handshake is confirmed, we can drop Handshake
-                    // keys.
-                    self.drop_epoch_state(packet::EPOCH_HANDSHAKE);
+                        // Once the handshake is confirmed, we can drop Handshake
+                        // keys.
+                        self.drop_epoch_state(packet::EPOCH_HANDSHAKE);
+                    }
                 }
             },
 
