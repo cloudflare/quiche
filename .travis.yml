@@ -89,7 +89,7 @@ matrix:
       - gimme --list
      script:
       - curl -O https://nginx.org/download/nginx-$NGINX_VER.tar.gz
-      - tar xvf nginx-$NGINX_VER.tar.gz
+      - tar xzf nginx-$NGINX_VER.tar.gz
       - |
         cd nginx-$NGINX_VER &&
         patch -p01 < ../extras/nginx/nginx-1.16.patch &&
