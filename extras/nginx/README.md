@@ -44,6 +44,7 @@ And finally build NGINX with HTTP/3 support enabled:
        --with-http_v3_module                   \
        --with-openssl=../quiche/deps/boringssl \
        --with-quiche=../quiche
+ % make
 ```
 
 The above command instructs the NGINX build system to enable the HTTP/3 support
