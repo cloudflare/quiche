@@ -47,6 +47,19 @@ pub fn rand_u64() -> u64 {
     u64::from_ne_bytes(buf)
 }
 
+pub fn rand_u64_uniform(max: u64) -> u64 {
+    let chunk_size = u64::max_value() / max;
+    let end_of_last_chunk = chunk_size * max;
+
+    let mut r = rand_u64();
+
+    while r >= end_of_last_chunk {
+        r = rand_u64();
+    }
+
+    r / chunk_size
+}
+
 extern {
     fn RAND_bytes(buf: *mut u8, len: libc::size_t) -> libc::c_int;
 }
