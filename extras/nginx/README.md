@@ -37,7 +37,7 @@ Next you’ll need to apply the patch to NGINX:
 
 And finally build NGINX with HTTP/3 support enabled:
 ```
- % auto/configure                              \
+ % ./configure                                 \
        --prefix=$PWD                           \
        --with-http_ssl_module                  \
        --with-http_v2_module                   \
