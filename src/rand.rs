@@ -54,7 +54,7 @@ pub fn rand_u64_uniform(max: u64) -> u64 {
     let mut r = rand_u64();
 
     while r >= end_of_last_chunk {
-        r = super::rand::rand_u64();
+        r = rand_u64();
     }
 
     r / chunk_size
