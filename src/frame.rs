@@ -35,6 +35,7 @@ use crate::stream;
 pub const MAX_CRYPTO_OVERHEAD: usize = 8;
 pub const MAX_STREAM_OVERHEAD: usize = 12;
 pub const MAX_STREAM_SIZE: u64 = 1 << 62;
+pub const MAX_DGRAM_OVERHEAD: usize = 8;
 
 #[derive(Clone, PartialEq)]
 pub enum Frame {
@@ -138,6 +139,10 @@ pub enum Frame {
     },
 
     HandshakeDone,
+
+    Datagram {
+        data: stream::RangeBuf,
+    },
 }
 
 impl Frame {
@@ -255,6 +260,8 @@ impl Frame {
             },
 
             0x1e => Frame::HandshakeDone,
+
+            0x30 | 0x31 => parse_datagram_frame(frame_type, b)?,
 
             _ => return Err(Error::InvalidFrame),
         };
@@ -503,6 +510,18 @@ impl Frame {
             Frame::HandshakeDone => {
                 b.put_varint(0x1e)?;
             },
+
+            Frame::Datagram { data } => {
+                let mut ty: u8 = 0x30;
+
+                // Always encode length
+                ty |= 0x01;
+
+                b.put_varint(u64::from(ty))?;
+
+                b.put_varint(data.len() as u64)?;
+                b.put_bytes(data.as_ref())?;
+            },
         }
 
         Ok(before - b.cap())
@@ -676,6 +695,12 @@ impl Frame {
             Frame::HandshakeDone => {
                 1 // frame type
             },
+
+            Frame::Datagram { data } => {
+                1 + // frame type
+                octets::varint_len(data.len() as u64) + // length
+                data.len() // data
+            },
         }
     }
 
@@ -835,6 +860,8 @@ impl Frame {
                 ),
 
             Frame::HandshakeDone => qlog::QuicFrame::handshake_done(),
+
+            Frame::Datagram { .. } => qlog::QuicFrame::unknown(0x30),
         }
     }
 }
@@ -971,6 +998,10 @@ impl std::fmt::Debug for Frame {
             Frame::HandshakeDone => {
                 write!(f, "HANDSHAKE_DONE")?;
             },
+
+            Frame::Datagram { data } => {
+                write!(f, "DATAGRAM len={}", data.len(),)?;
+            },
         }
 
         Ok(())
@@ -1044,6 +1075,21 @@ fn parse_stream_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
     let data = stream::RangeBuf::from(data.as_ref(), offset, fin);
 
     Ok(Frame::Stream { stream_id, data })
+}
+
+fn parse_datagram_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
+    let first = ty as u8;
+
+    let len = if first & 0x01 != 0 {
+        b.get_varint()? as usize
+    } else {
+        b.cap()
+    };
+
+    let data = b.get_bytes(len)?;
+    let data = stream::RangeBuf::from(data.as_ref(), 0, true);
+
+    Ok(Frame::Datagram { data })
 }
 
 #[cfg(test)]
@@ -1720,6 +1766,36 @@ mod tests {
         assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
 
         let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn datagram() {
+        let mut d = [42; 128];
+
+        let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+        let frame = Frame::Datagram {
+            data: stream::RangeBuf::from(&data, 0, true),
+        };
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 14);
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_ok());
+
+        let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
     }
 }

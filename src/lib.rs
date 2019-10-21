@@ -721,6 +721,13 @@ impl Config {
         self.cc_algorithm = algo;
     }
 
+    /// Sets the `max_datagram_frame_size` transport parameter.
+    ///
+    /// The default is `0`.
+    pub fn set_max_datagram_frame_size(&mut self, v: u64) {
+        self.local_transport_params.max_datagram_frame_size = v;
+    }
+
     /// Configures whether to enable HyStart++.
     ///
     /// The default value is `true`.
@@ -864,6 +871,9 @@ pub struct Connection {
     /// Whether peer transport parameters were qlogged.
     #[cfg(feature = "qlog")]
     qlogged_peer_params: bool,
+
+    /// Datagram queue.
+    dgram_queue: dgram::DatagramQueue,
 }
 
 /// Creates a new server-side connection.
@@ -1160,6 +1170,8 @@ impl Connection {
 
             #[cfg(feature = "qlog")]
             qlogged_peer_params: false,
+
+            dgram_queue: dgram::DatagramQueue::new(),
         });
 
         if let Some(odcid) = odcid {
@@ -2143,6 +2155,35 @@ impl Connection {
             }
         }
 
+        // Create DATAGRAM frame.
+        if pkt_type == packet::Type::Short &&
+            left > frame::MAX_DGRAM_OVERHEAD &&
+            !is_closing
+        {
+            while let Some(len) = self.dgram_queue.peek_writable() {
+                // Make sure we can fit the data in the packet.
+                if left > frame::MAX_DGRAM_OVERHEAD + len {
+                    let data = match self.dgram_queue.pop_writable() {
+                        Some(v) => v,
+
+                        None => continue,
+                    };
+
+                    let frame = frame::Frame::Datagram { data };
+
+                    payload_len += frame.wire_len();
+                    left -= frame.wire_len();
+
+                    frames.push(frame);
+
+                    ack_eliciting = true;
+                    in_flight = true;
+
+                    break;
+                }
+            }
+        }
+
         // Create a single STREAM frame for the first stream that is flushable.
         if pkt_type == packet::Type::Short &&
             left > frame::MAX_STREAM_OVERHEAD &&
@@ -2765,6 +2806,74 @@ impl Connection {
         self.streams.writable()
     }
 
+    /// Attempts to read a stored Datagram.
+    ///
+    /// On success the Datagram's data is returned, or [`Done`] if there is no
+    /// data to read.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
+    /// while let Ok((data)) = conn.dgram_recv() {
+    ///     println!("Got {} bytes of Datagram", data.len());
+    /// }
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn dgram_recv(&mut self) -> Result<Vec<u8>> {
+        let data = self.dgram_queue.pop_readable()?.to_vec();
+
+        if data.len() >
+            self.local_transport_params.max_datagram_frame_size as usize
+        {
+            trace!("received a DATAGRAM larger than max_datagram_frame_size");
+            return Err(Error::BufferTooShort);
+        }
+
+        Ok(data)
+    }
+
+    /// Send data in a Datagram frame.
+    ///
+    /// [`Done`] is returned if no data was written.
+    ///
+    /// Note that there is no flow control of Datagram frames, so in order to
+    /// avoid buffering an infinite amount of frames we apply an internal
+    /// limit.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
+    /// conn.dgram_send(b"hello")?;
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn dgram_send(&mut self, buf: &[u8]) -> Result<()> {
+        if buf.len() > self.peer_transport_params.max_datagram_frame_size as usize
+        {
+            trace!("attempt to send DATAGRAM larger than peer's max_datagram_frame_size");
+            return Err(Error::BufferTooShort);
+        }
+
+        let data = stream::RangeBuf::from(buf, 0, true);
+
+        self.dgram_queue.push_writable(data)?;
+
+        Ok(())
+    }
+
     /// Returns the amount of time until the next timeout event.
     ///
     /// Once the given duration has elapsed, the [`on_timeout()`] method should
@@ -3341,6 +3450,14 @@ impl Connection {
                 // Once the handshake is confirmed, we can drop Handshake keys.
                 self.drop_epoch_state(packet::EPOCH_HANDSHAKE);
             },
+
+            frame::Frame::Datagram { data } => {
+                self.dgram_queue.push_readable(stream::RangeBuf::from(
+                    data.as_ref(),
+                    0,
+                    true,
+                ))?;
+            },
         }
 
         Ok(())
@@ -3499,6 +3616,7 @@ struct TransportParams {
     pub disable_active_migration: bool,
     // pub preferred_address: ...,
     pub active_conn_id_limit: u64,
+    pub max_datagram_frame_size: u64,
 }
 
 impl Default for TransportParams {
@@ -3518,6 +3636,7 @@ impl Default for TransportParams {
             max_ack_delay: 25,
             disable_active_migration: false,
             active_conn_id_limit: 0,
+            max_datagram_frame_size: 0,
         }
     }
 }
@@ -3634,6 +3753,10 @@ impl TransportParams {
 
                 0x000e => {
                     tp.active_conn_id_limit = val.get_varint()?;
+                },
+
+                0x0020 => {
+                    tp.max_datagram_frame_size = val.get_varint()?;
                 },
 
                 // Ignore unknown parameters.
@@ -3760,6 +3883,15 @@ impl TransportParams {
                 octets::varint_len(tp.max_ack_delay),
             )?;
             b.put_varint(tp.max_ack_delay)?;
+        }
+
+        if tp.max_datagram_frame_size != 0 {
+            TransportParams::encode_param(
+                &mut b,
+                0x0020,
+                octets::varint_len(tp.max_datagram_frame_size),
+            )?;
+            b.put_varint(tp.max_datagram_frame_size)?;
         }
 
         if tp.disable_active_migration {
@@ -4137,12 +4269,13 @@ mod tests {
             max_ack_delay: 2_u64.pow(14) - 1,
             disable_active_migration: true,
             active_conn_id_limit: 8,
+            max_datagram_frame_size: 32,
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 73);
+        assert_eq!(raw_params.len(), 76);
 
         let new_tp = TransportParams::decode(&raw_params, false).unwrap();
 
@@ -4164,12 +4297,13 @@ mod tests {
             max_ack_delay: 2_u64.pow(14) - 1,
             disable_active_migration: true,
             active_conn_id_limit: 8,
+            max_datagram_frame_size: 32,
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, false, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 55);
+        assert_eq!(raw_params.len(), 58);
 
         let new_tp = TransportParams::decode(&raw_params, true).unwrap();
 
@@ -5837,6 +5971,7 @@ pub use crate::recovery::CongestionControlAlgorithm;
 pub use crate::stream::StreamIter;
 
 mod crypto;
+mod dgram;
 mod ffi;
 mod frame;
 pub mod h3;
