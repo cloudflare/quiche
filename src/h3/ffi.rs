@@ -115,6 +115,14 @@ pub extern fn quiche_h3_event_type(ev: &h3::Event) -> u32 {
 }
 
 #[no_mangle]
+#[cfg(feature = "h3-dgram")]
+pub extern fn quiche_h3_datagram_event_type(ev: &h3::DatagramEvent) -> u32 {
+    match ev {
+        h3::DatagramEvent::Received { .. } => 0,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_h3_event_for_each_header(
     ev: &h3::Event,
     cb: extern fn(

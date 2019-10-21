@@ -237,8 +237,32 @@ pub extern fn quiche_config_set_cc_algorithm(
 }
 
 #[no_mangle]
+#[cfg(feature = "quic-dgram")]
+pub extern fn quiche_config_set_dgram_recv_max_queue_len(
+    config: &mut Config, v: size_t,
+) {
+    config.set_dgram_recv_max_queue_len(v);
+}
+
+#[no_mangle]
+#[cfg(feature = "quic-dgram")]
+pub extern fn quiche_config_set_dgram_send_max_queue_len(
+    config: &mut Config, v: size_t,
+) {
+    config.set_dgram_send_max_queue_len(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
     config.enable_hystart(v);
+}
+
+#[no_mangle]
+#[cfg(feature = "quic-dgram")]
+pub extern fn quiche_config_set_dgram_frames_supported(
+    config: &mut Config, v: bool,
+) {
+    config.set_dgram_frames_supported(v);
 }
 
 #[no_mangle]
@@ -731,6 +755,67 @@ pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.rtt = stats.rtt.as_nanos() as u64;
     out.cwnd = stats.cwnd;
     out.delivery_rate = stats.delivery_rate;
+}
+
+#[no_mangle]
+#[cfg(feature = "quic-dgram")]
+pub extern fn quiche_conn_dgram_max_writable_len(conn: &Connection) -> ssize_t {
+    match conn.dgram_max_writable_len() {
+        None => Error::Done.to_c(),
+
+        Some(v) => v as ssize_t,
+    }
+}
+
+#[no_mangle]
+#[cfg(feature = "quic-dgram")]
+pub extern fn quiche_conn_dgram_send(
+    conn: &mut Connection, buf: *const u8, buf_len: size_t,
+) -> ssize_t {
+    if buf_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
+    let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
+
+    match conn.dgram_send(buf) {
+        Ok(_) => buf_len as ssize_t,
+
+        Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
+#[cfg(feature = "quic-dgram")]
+pub extern fn quiche_conn_dgram_recv(
+    conn: &mut Connection, out: *mut u8, out_len: size_t,
+) -> ssize_t {
+    if out_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
+    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+
+    let out_len = match conn.dgram_recv(out) {
+        Ok(v) => v,
+
+        Err(e) => return e.to_c(),
+    };
+
+    out_len as ssize_t
+}
+
+#[no_mangle]
+#[cfg(feature = "quic-dgram")]
+pub extern fn quiche_conn_dgram_purge_outgoing(
+    conn: &mut Connection, f: fn(*const u8, size_t) -> bool,
+) {
+    conn.dgram_purge_outgoing(|d: &[u8]| -> bool {
+        let ptr: *const u8 = d.as_ptr();
+        let len: size_t = d.len();
+
+        f(ptr, len)
+    });
 }
 
 #[no_mangle]

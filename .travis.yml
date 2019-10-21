@@ -40,6 +40,9 @@ matrix:
       # quiche-apps
       - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/apps/Cargo.toml
       - cargo clippy --manifest-path tools/apps/Cargo.toml -- -D warnings
+      # dgram-apps
+      - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/dgram/Cargo.toml
+      - cargo clippy --manifest-path tools/apps/Cargo.toml -- -D warnings
       # x86 cross build
       - RUSTFLAGS="-D warnings" cargo build --target=$TARGET_32
       # docker
@@ -73,6 +76,9 @@ matrix:
       - cargo fmt --manifest-path tools/qlog/Cargo.toml -- --check
       # quiche-apps
       - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/apps/Cargo.toml
+      - cargo fmt --manifest-path tools/apps/Cargo.toml -- --check
+      # dgram-apps
+      - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/dgram/Cargo.toml
       - cargo fmt --manifest-path tools/apps/Cargo.toml -- --check
    - name: "stable macOS + iOS"
      language: rust

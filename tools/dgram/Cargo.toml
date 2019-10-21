@@ -1,0 +1,32 @@
+[package]
+name = "dgram"
+version = "0.1.0"
+authors = ["Lucas Pardue <lucaspardue.24.7@gmail.com>"]
+edition = "2018"
+publish = false
+
+[features]
+# Enable quiche's fuzzing mode.
+fuzzing = ["quiche/fuzzing"]
+
+# Enable qlog support.
+qlog = ["quiche/qlog"]
+
+# Enable quiche's datagram support.
+quic-dgram = ["quiche/quic-dgram"]
+h3-dgram = ["quiche/h3-dgram"]
+
+default = ["qlog", "quic-dgram", "h3-dgram"]
+
+[dependencies]
+docopt = "1"
+env_logger = "0.6"
+mio = "0.6"
+url = "1"
+log = "0.4"
+ring = "0.16"
+quiche = { path = "../../" }
+quiche_apps = { path = "../apps" }
+
+[profile.release]
+debug = true

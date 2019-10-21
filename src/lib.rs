@@ -306,6 +306,15 @@ const MAX_ACK_RANGES: usize = 68;
 // The highest possible stream ID allowed.
 const MAX_STREAM_ID: u64 = 1 << 60;
 
+#[cfg(feature = "quic-dgram")]
+// The default length of DATAGRAM queues if not specified by the user in config.
+const DEFAULT_DGRAM_MAX_QUEUE_LEN: usize = 1000;
+
+#[cfg(feature = "quic-dgram")]
+// The DATAGRAM standard recommends either none or 65536 as maximum DATAGRAM
+// frames size. We enforce the recommendation for forward compatibility.
+const MAX_DGRAM_FRAME_SIZE: u64 = 65536;
+
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -430,6 +439,11 @@ pub struct Config {
     cc_algorithm: CongestionControlAlgorithm,
 
     hystart: bool,
+
+    #[cfg(feature = "quic-dgram")]
+    dgram_recv_max_queue_len: usize,
+    #[cfg(feature = "quic-dgram")]
+    dgram_send_max_queue_len: usize,
 }
 
 impl Config {
@@ -452,6 +466,11 @@ impl Config {
             grease: true,
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
             hystart: true,
+
+            #[cfg(feature = "quic-dgram")]
+            dgram_recv_max_queue_len: DEFAULT_DGRAM_MAX_QUEUE_LEN,
+            #[cfg(feature = "quic-dgram")]
+            dgram_send_max_queue_len: DEFAULT_DGRAM_MAX_QUEUE_LEN,
         })
     }
 
@@ -732,11 +751,41 @@ impl Config {
         self.cc_algorithm = algo;
     }
 
+    /// Enables support for receiving DATAGRAM frames. When enabled, the
+    /// `max_datagram_frame_size` transport parameter is set to 65536 as
+    /// recommended by the current draft of the standard.
+    ///
+    /// The default is `false`.
+    #[cfg(feature = "quic-dgram")]
+    pub fn set_dgram_frames_supported(&mut self, supported: bool) {
+        self.local_transport_params.max_datagram_frame_size = if supported {
+            Some(MAX_DGRAM_FRAME_SIZE)
+        } else {
+            None
+        };
+    }
+
     /// Configures whether to enable HyStart++.
     ///
     /// The default value is `true`.
     pub fn enable_hystart(&mut self, v: bool) {
         self.hystart = v;
+    }
+
+    /// Sets the maximum length of the DATAGRAM send queue.
+    ///
+    /// The default is `1000`.
+    #[cfg(feature = "quic-dgram")]
+    pub fn set_dgram_send_max_queue_len(&mut self, v: usize) {
+        self.dgram_send_max_queue_len = v;
+    }
+
+    /// Sets the maximum length of the DATAGRAM receive queue.
+    ///
+    /// The default is `1000`.
+    #[cfg(feature = "quic-dgram")]
+    pub fn set_dgram_recv_max_queue_len(&mut self, v: usize) {
+        self.dgram_recv_max_queue_len = v;
     }
 }
 
@@ -887,6 +936,12 @@ pub struct Connection {
     /// Whether peer transport parameters were qlogged.
     #[cfg(feature = "qlog")]
     qlogged_peer_params: bool,
+
+    /// DATAGRAM queues.
+    #[cfg(feature = "quic-dgram")]
+    dgram_recv_queue: dgram::DatagramQueue,
+    #[cfg(feature = "quic-dgram")]
+    dgram_send_queue: dgram::DatagramQueue,
 }
 
 /// Creates a new server-side connection.
@@ -1193,6 +1248,16 @@ impl Connection {
 
             #[cfg(feature = "qlog")]
             qlogged_peer_params: false,
+
+            #[cfg(feature = "quic-dgram")]
+            dgram_recv_queue: dgram::DatagramQueue::new(
+                config.dgram_recv_max_queue_len,
+            ),
+
+            #[cfg(feature = "quic-dgram")]
+            dgram_send_queue: dgram::DatagramQueue::new(
+                config.dgram_send_max_queue_len,
+            ),
         });
 
         if let Some(odcid) = odcid {
@@ -1382,7 +1447,7 @@ impl Connection {
     ///
     /// On success the number of bytes processed from the input buffer is
     /// returned. When the [`Done`] error is returned, processing of the
-    /// remainder of the incoming UDP datagram should be interrupted.
+    /// remainder of the incoming UDP DATAGRAM should be interrupted.
     ///
     /// On error, an error other than [`Done`] is returned.
     ///
@@ -1979,22 +2044,8 @@ impl Connection {
 
         let mut left = b.cap();
 
-        // Use max_udp_payload_size as sent by the peer, except during the
-        // handshake when we haven't parsed transport parameters yet, so
-        // use a default value then.
-        let max_pkt_len = if self.is_established() {
-            // We cap the maximum packet size to 16KB or so, so that it can be
-            // always encoded with a 2-byte varint.
-            cmp::min(16383, self.peer_transport_params.max_udp_payload_size)
-                as usize
-        } else {
-            // Allow for 1200 bytes (minimum QUIC packet size) during the
-            // handshake.
-            1200
-        };
-
-        // Limit output packet size to respect peer's max_udp_payload_size limit.
-        left = cmp::min(left, max_pkt_len);
+        // Limit output packet size to respect peer's max_packet_size limit.
+        left = cmp::min(left, self.max_send_udp_payload_len());
 
         // Limit output packet size by congestion window size.
         left = cmp::min(left, self.recovery.cwnd_available());
@@ -2287,6 +2338,42 @@ impl Connection {
             }
         }
 
+        // Create DATAGRAM frame.
+        #[cfg(feature = "quic-dgram")]
+        if pkt_type == packet::Type::Short &&
+            left > frame::MAX_DGRAM_OVERHEAD &&
+            !is_closing
+        {
+            if let Some(max_dgram_payload) = self.dgram_max_writable_len() {
+                while let Some(len) = self.dgram_send_queue.peek() {
+                    if (len + frame::MAX_DGRAM_OVERHEAD) <= left {
+                        // Front of the queue fits this packet, send it
+                        let mut buf = vec![0; len];
+                        match self.dgram_send_queue.pop(&mut buf) {
+                            Ok(v) => v,
+
+                            Err(_) => continue,
+                        };
+
+                        let frame = frame::Frame::Datagram { data: buf };
+
+                        payload_len += frame.wire_len();
+                        left -= frame.wire_len();
+
+                        frames.push(frame);
+
+                        ack_eliciting = true;
+                        in_flight = true;
+                    } else if len > max_dgram_payload {
+                        // this dgram frame will never fit. Let's purge it.
+                        self.dgram_send_queue.discard_front().ok();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
         // Create a single STREAM frame for the first stream that is flushable.
         if pkt_type == packet::Type::Short &&
             left > frame::MAX_STREAM_OVERHEAD &&
@@ -2474,6 +2561,12 @@ impl Connection {
             aead,
         )?;
 
+        // Once frames have been serialized they are passed to the Recovery
+        // module which manages retransmission. However, some frames are not
+        // retransmittable and storing them is a waste of resources.
+        // So drop them here.
+        frames.retain(|f| f.retransmittable());
+
         let sent_pkt = recovery::Sent {
             pkt_num: pn,
             frames,
@@ -2507,6 +2600,12 @@ impl Connection {
 
         self.sent_count += 1;
 
+        #[cfg(feature = "quic-dgram")]
+        if self.dgram_send_queue.pending_bytes() > self.recovery.cwnd_available()
+        {
+            self.recovery.update_app_limited(false);
+        }
+
         // On the client, drop initial state after sending an Handshake packet.
         if !self.is_server && hdr.ty == packet::Type::Handshake {
             self.drop_epoch_state(packet::EPOCH_INITIAL, now);
@@ -2527,6 +2626,22 @@ impl Connection {
         }
 
         Ok(written)
+    }
+
+    // Returns the maximum len of a packet to be sent. This is max_packet_size
+    // as sent by the peer, except during the handshake when we haven't parsed
+    // transport parameters yet, so use a default value then.
+    fn max_send_udp_payload_len(&self) -> usize {
+        if self.is_established() {
+            // We cap the maximum packet size to 16KB or so, so that it can be
+            // always encoded with a 2-byte varint.
+            cmp::min(16383, self.peer_transport_params.max_udp_payload_size)
+                as usize
+        } else {
+            // Allow for 1200 bytes (minimum QUIC packet size) during the
+            // handshake.
+            MIN_CLIENT_INITIAL_LEN
+        }
     }
 
     /// Reads contiguous data from a stream into the provided slice.
@@ -2958,6 +3073,152 @@ impl Connection {
         self.streams.writable()
     }
 
+    /// Attempts to read a stored DATAGRAM.
+    ///
+    /// On success the DATAGRAM's data is returned, or [`Done`] if there is no
+    /// data to read.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
+    /// let mut dgram_buf = [0; 512];
+    /// while let Ok((len)) = conn.dgram_recv(&mut dgram_buf) {
+    ///     println!("Got {} bytes of DATAGRAM", len);
+    /// }
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    #[cfg(feature = "quic-dgram")]
+    pub fn dgram_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
+        self.dgram_recv_queue.pop(buf)
+    }
+
+    /// Send data in a DATAGRAM frame.
+    ///
+    /// [`Done`] is returned if no data was written.
+    /// [`InvalidState`] is returned if the peer does not support DATAGRAM.
+    /// [`BufferTooShort`] is returned if the DATAGRAM frame length is larger
+    /// than peer's supported DATAGRAM frame length. Use
+    /// `peer_datagram_frame_size` to get the largest supported DATAGRAM
+    /// frame length.
+    ///
+    /// Note that there is no flow control of DATAGRAM frames, so in order to
+    /// avoid buffering an infinite amount of frames we apply an internal
+    /// limit.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// [`BufferTooShort`]: enum.Error.html#variant.BufferTooShort
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
+    /// conn.dgram_send(b"hello")?;
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    #[cfg(feature = "quic-dgram")]
+    pub fn dgram_send(&mut self, buf: &[u8]) -> Result<()> {
+        let max_payload_len = match self.dgram_max_writable_len() {
+            Some(v) => v as usize,
+            None => {
+                trace!(
+                    "attempt to send DATAGRAM to a peer without \
+                        max_datagram_frame_size"
+                );
+                return Err(Error::InvalidState);
+            },
+        };
+
+        if buf.len() > max_payload_len {
+            trace!("attempt to send DATAGRAM larger than dgram_max_writable_len");
+            return Err(Error::BufferTooShort);
+        }
+
+        self.dgram_send_queue.push(buf)?;
+
+        if self.dgram_send_queue.pending_bytes() > self.recovery.cwnd_available()
+        {
+            self.recovery.update_app_limited(false);
+        }
+
+        Ok(())
+    }
+
+    /// Iterates over the outgoing queue and purges DATAGRAMs
+    /// matching the predicate.
+    ///
+    /// In other words, remove all elements `e` such that `f(&e)` returns true.
+    ///
+    /// ## Examples:
+    /// ```no_run
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
+    /// conn.dgram_send(b"hello")?;
+    /// conn.dgram_purge_outgoing(&|d: &[u8]| -> bool { d[0] == 0 });
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    #[cfg(feature = "quic-dgram")]
+    pub fn dgram_purge_outgoing<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
+        self.dgram_send_queue.purge(f);
+    }
+
+    /// Gets the size of the largest Datagram frame payload that can be sent,
+    /// given the maximum size supported by the peer, the current maximum
+    /// packet length and the space required by the transport overhead.
+    ///
+    /// [`None`] is returned if the peer hasn't advertised a maximum DATAGRAM
+    /// frame size.
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = [0xba; 16];
+    /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
+    /// if let Some(payload_size) = conn.dgram_max_writable_len() {
+    ///     if payload_size > 5 {
+    ///         conn.dgram_send(b"hello")?;
+    ///     }
+    /// }
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    #[cfg(feature = "quic-dgram")]
+    pub fn dgram_max_writable_len(&self) -> Option<usize> {
+        match self.peer_transport_params.max_datagram_frame_size {
+            None => None,
+            Some(peer_frame_len) => {
+                // start from the maximum packet size
+                let mut max_len = self.max_send_udp_payload_len();
+                // subtract the Short packet header overhead
+                // (1 byte of pkt_len + len of dcid)
+                max_len = max_len.saturating_sub(1 + self.dcid.len());
+                // subtract the packet number (max len)
+                max_len = max_len.saturating_sub(packet::MAX_PKT_NUM_LEN);
+                // subtract the crypto overhead
+                max_len = max_len.saturating_sub(frame::MAX_CRYPTO_OVERHEAD);
+                // clamp to what peer can support
+                max_len = cmp::min(peer_frame_len as usize, max_len);
+                // subtract frame overhead, checked for underflow
+                max_len.checked_sub(frame::MAX_DGRAM_OVERHEAD)
+            },
+        }
+    }
+
     /// Returns the amount of time until the next timeout event.
     ///
     /// Once the given duration has elapsed, the [`on_timeout()`] method should
@@ -3241,11 +3502,18 @@ impl Connection {
             }
         }
 
+        #[allow(unused_variables)]
+        let dgram_pending = false;
+
+        #[cfg(feature = "quic-dgram")]
+        let dgram_pending = self.dgram_send_queue.has_pending();
+
         // If there are flushable, almost full or blocked streams, use the
         // Application epoch.
         if (self.is_established() || self.is_in_early_data()) &&
             (self.almost_full ||
                 self.blocked_limit.is_some() ||
+                dgram_pending ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
@@ -3617,6 +3885,32 @@ impl Connection {
                 // Once the handshake is confirmed, we can drop Handshake keys.
                 self.drop_epoch_state(packet::EPOCH_HANDSHAKE, now);
             },
+
+            #[cfg(feature = "quic-dgram")]
+            frame::Frame::Datagram { data } => {
+                // Close the connection if DATAGRAMs are not enabled.
+                // quiche always advertises support for 64K sized DATAGRAM
+                // frames, as recommended by the standard, so we don't need a
+                // size check.
+                if self
+                    .local_transport_params
+                    .max_datagram_frame_size
+                    .is_none()
+                {
+                    trace!(
+                        "received a DATAGRAM without \
+                            max_datagram_frame_size; closing."
+                    );
+                    return Err(Error::InvalidState);
+                }
+
+                // If recv queue is full, discard oldest
+                if self.dgram_recv_queue.is_full() {
+                    self.dgram_recv_queue.discard_front()?;
+                }
+
+                self.dgram_recv_queue.push(&data)?;
+            },
         }
 
         Ok(())
@@ -3796,6 +4090,7 @@ struct TransportParams {
     pub active_conn_id_limit: u64,
     pub initial_source_connection_id: Option<Vec<u8>>,
     pub retry_source_connection_id: Option<Vec<u8>>,
+    pub max_datagram_frame_size: Option<u64>,
 }
 
 impl Default for TransportParams {
@@ -3817,6 +4112,7 @@ impl Default for TransportParams {
             active_conn_id_limit: 2,
             initial_source_connection_id: None,
             retry_source_connection_id: None,
+            max_datagram_frame_size: None,
         }
     }
 }
@@ -3953,6 +4249,10 @@ impl TransportParams {
                     tp.retry_source_connection_id = Some(val.to_vec());
                 },
 
+                0x0020 => {
+                    tp.max_datagram_frame_size = Some(val.get_varint()?);
+                },
+
                 // Ignore unknown parameters.
                 _ => (),
             }
@@ -4077,6 +4377,15 @@ impl TransportParams {
                 octets::varint_len(tp.max_ack_delay),
             )?;
             b.put_varint(tp.max_ack_delay)?;
+        }
+
+        if let Some(max_datagram_frame_size) = tp.max_datagram_frame_size {
+            TransportParams::encode_param(
+                &mut b,
+                0x0020,
+                octets::varint_len(max_datagram_frame_size),
+            )?;
+            b.put_varint(max_datagram_frame_size)?;
         }
 
         if tp.disable_active_migration {
@@ -4470,12 +4779,13 @@ mod tests {
             active_conn_id_limit: 8,
             initial_source_connection_id: Some(b"woot woot".to_vec()),
             retry_source_connection_id: Some(b"retry".to_vec()),
+            max_datagram_frame_size: Some(32),
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 91);
+        assert_eq!(raw_params.len(), 94);
 
         let new_tp = TransportParams::decode(&raw_params, false).unwrap();
 
@@ -4499,12 +4809,13 @@ mod tests {
             active_conn_id_limit: 8,
             initial_source_connection_id: Some(b"woot woot".to_vec()),
             retry_source_connection_id: None,
+            max_datagram_frame_size: Some(32),
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, false, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 66);
+        assert_eq!(raw_params.len(), 69);
 
         let new_tp = TransportParams::decode(&raw_params, true).unwrap();
 
@@ -7035,8 +7346,7 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config
-            .set_application_protos(b"\x06proto1\06proto2")
+        config.set_application_protos(b"\x06proto1\06proto2")
             .unwrap();
 
         let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
@@ -7112,6 +7422,269 @@ mod tests {
         // Server receives corrupted packet without returning an error.
         assert_eq!(pipe.server.recv(&mut buf[..len]), Ok(len));
     }
+
+    #[test]
+    #[cfg(feature = "quic-dgram")]
+    fn dgram_send_fails_invalidstate() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(
+            pipe.client.dgram_send(b"hello, world"),
+            Err(Error::InvalidState)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "quic-dgram")]
+    fn dgram_send_app_limited() {
+        let mut buf = [0; 65535];
+        let send_buf = [0xcf; 1000];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_dgram_frames_supported(true);
+        config.set_max_udp_payload_size(1200);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        for _ in 0..1000 {
+            assert_eq!(pipe.client.dgram_send(&send_buf), Ok(()));
+        }
+
+        assert!(!pipe.client.recovery.app_limited());
+        assert_eq!(pipe.client.dgram_send_queue.pending_bytes(), 1_000_000);
+
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        assert_ne!(pipe.client.dgram_send_queue.pending_bytes(), 0);
+        assert_ne!(pipe.client.dgram_send_queue.pending_bytes(), 1_000_000);
+        assert!(!pipe.client.recovery.app_limited());
+
+        testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+        testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert_ne!(pipe.client.dgram_send_queue.pending_bytes(), 0);
+        assert_ne!(pipe.client.dgram_send_queue.pending_bytes(), 1_000_000);
+
+        assert!(!pipe.client.recovery.app_limited());
+    }
+
+    #[test]
+    #[cfg(feature = "quic-dgram")]
+    fn dgram_single_datagram() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_dgram_frames_supported(true);
+        config.set_dgram_recv_max_queue_len(10);
+        config.set_dgram_send_max_queue_len(10);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let result1 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result1, Ok(12));
+
+        let result2 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result2, Err(Error::Done));
+    }
+
+    #[test]
+    #[cfg(feature = "quic-dgram")]
+    fn dgram_multiple_datagrams() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_dgram_frames_supported(true);
+        config.set_dgram_recv_max_queue_len(10);
+        config.set_dgram_send_max_queue_len(10);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
+        assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
+        assert_eq!(pipe.client.dgram_send(b"hola, mundo"), Ok(()));
+
+        pipe.client
+            .dgram_purge_outgoing(|d: &[u8]| -> bool { d[0] == b'c' });
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let result1 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result1, Ok(12));
+        assert_eq!(buf[0], b'h');
+        assert_eq!(buf[1], b'e');
+
+        let result2 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result2, Ok(11));
+        assert_eq!(buf[0], b'h');
+        assert_eq!(buf[1], b'o');
+
+        let result3 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result3, Err(Error::Done));
+    }
+
+    #[test]
+    #[cfg(feature = "quic-dgram")]
+    fn dgram_send_queue_overflow() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_dgram_frames_supported(true);
+        config.set_dgram_recv_max_queue_len(10);
+        config.set_dgram_send_max_queue_len(2);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
+        assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
+        assert_eq!(pipe.client.dgram_send(b"hola, mundo"), Err(Error::Done));
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let result1 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result1, Ok(12));
+        assert_eq!(buf[0], b'h');
+        assert_eq!(buf[1], b'e');
+
+        let result2 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result2, Ok(11));
+        assert_eq!(buf[0], b'c');
+        assert_eq!(buf[1], b'i');
+
+        let result3 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result3, Err(Error::Done));
+    }
+
+    #[test]
+    #[cfg(feature = "quic-dgram")]
+    fn dgram_recv_queue_overflow() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_dgram_frames_supported(true);
+        config.set_dgram_recv_max_queue_len(2);
+        config.set_dgram_send_max_queue_len(10);
+        config.set_max_udp_payload_size(1200);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
+        assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
+        assert_eq!(pipe.client.dgram_send(b"hola, mundo"), Ok(()));
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let result1 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result1, Ok(11));
+        assert_eq!(buf[0], b'c');
+        assert_eq!(buf[1], b'i');
+
+        let result2 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result2, Ok(11));
+        assert_eq!(buf[0], b'h');
+        assert_eq!(buf[1], b'o');
+
+        let result3 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result3, Err(Error::Done));
+    }
 }
 
 pub use crate::packet::Header;
@@ -7120,6 +7693,7 @@ pub use crate::recovery::CongestionControlAlgorithm;
 pub use crate::stream::StreamIter;
 
 mod crypto;
+mod dgram;
 mod ffi;
 mod frame;
 pub mod h3;
