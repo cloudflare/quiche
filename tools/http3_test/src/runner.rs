@@ -209,13 +209,13 @@ pub fn run(
             // Process HTTP/3 events.
             loop {
                 match http3_conn.poll(&mut conn) {
-                    Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
+                    Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
                         info!(
                             "got response headers {:?} on stream id {}",
-                            headers, stream_id
+                            &list, stream_id
                         );
 
-                        test.add_response_headers(stream_id, &headers);
+                        test.add_response_headers(stream_id, &list);
                     },
 
                     Ok((stream_id, quiche::h3::Event::Data)) => {

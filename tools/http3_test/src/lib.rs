@@ -157,8 +157,8 @@
 //! # let h3_config = quiche::h3::Config::new()?;
 //! # let mut http3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! match http3_conn.poll(&mut conn) {
-//!     Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
-//!         test.add_response_headers(stream_id, &headers);
+//!     Ok((stream_id, quiche::h3::Event::Headers{list, has_body})) => {
+//!         test.add_response_headers(stream_id, &list);
 //!     },
 //!
 //!     Ok((stream_id, quiche::h3::Event::Data)) => {
