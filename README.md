@@ -325,9 +325,7 @@ or
 Copyright
 ---------
 
-Copyright (C) 2018, Cloudflare, Inc.
-
-Copyright (C) 2018, Alessandro Ghedini
+Copyright (C) 2018-2019, Cloudflare, Inc.
 
 See [COPYING] for the license.
 
