@@ -2804,8 +2804,8 @@ impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "recv={} sent={} lost={} rtt={:?}",
-            self.recv, self.sent, self.lost, self.rtt
+            "recv={} sent={} lost={} rtt={:?} cwnd={}",
+            self.recv, self.sent, self.lost, self.rtt, self.cwnd
         )
     }
 }

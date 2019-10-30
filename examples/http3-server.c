@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -422,9 +423,16 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         flush_egress(loop, conn_io);
 
         if (quiche_conn_is_closed(conn_io->conn)) {
+            quiche_stats stats;
+
+            quiche_conn_stats(conn_io->conn, &stats);
+            fprintf(stderr, "connection closed, recv=%zu sent=%zu lost=%zu rtt=%" PRIu64 "ns cwnd=%zu\n",
+					stats.recv, stats.sent, stats.lost, stats.rtt, stats.cwnd);
+
             HASH_DELETE(hh, conns->h, conn_io);
 
             ev_timer_stop(loop, &conn_io->timer);
+
             quiche_conn_free(conn_io->conn);
             free(conn_io);
         }
@@ -440,7 +448,11 @@ static void timeout_cb(EV_P_ ev_timer *w, int revents) {
     flush_egress(loop, conn_io);
 
     if (quiche_conn_is_closed(conn_io->conn)) {
-        fprintf(stderr, "connection closed\n");
+        quiche_stats stats;
+
+        quiche_conn_stats(conn_io->conn, &stats);
+        fprintf(stderr, "connection closed, recv=%zu sent=%zu lost=%zu rtt=%" PRIu64 "ns cwnd=%zu\n",
+				stats.recv, stats.sent, stats.lost, stats.rtt, stats.cwnd);
 
         HASH_DELETE(hh, conns->h, conn_io);
 
