@@ -2495,7 +2495,8 @@ impl Connection {
 
     /// Selects the packet number space for outgoing packets.
     fn write_epoch(&self) -> Result<packet::Epoch> {
-        // On error or probe, send packet in the latest space available.
+        // On error or PTO send packets in the latest epoch available, but only
+        // send 1-RTT ones when the handshake is completed.
         if self.error.is_some() || self.recovery.probes > 0 {
             let epoch = match self.handshake.write_level() {
                 crypto::Level::Initial => packet::EPOCH_INITIAL,
@@ -2503,6 +2504,17 @@ impl Connection {
                 crypto::Level::Handshake => packet::EPOCH_HANDSHAKE,
                 crypto::Level::OneRTT => packet::EPOCH_APPLICATION,
             };
+
+            if epoch == packet::EPOCH_APPLICATION && !self.handshake_completed {
+                // For errors, downgrade the epoch to handshake. We can't
+                // currently do the same for probes because PING frames are not
+                // allowed in Handshake packets.
+                if self.error.is_some() {
+                    return Ok(packet::EPOCH_HANDSHAKE);
+                }
+
+                return Err(Error::Done);
+            }
 
             return Ok(epoch);
         }
