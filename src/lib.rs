@@ -1611,7 +1611,8 @@ impl Connection {
         let pn_len = packet::pkt_num_len(pn)?;
 
         // The AEAD overhead at the current encryption level.
-        let overhead = self.pkt_num_spaces[epoch].overhead();
+        let overhead =
+            self.pkt_num_spaces[epoch].overhead().ok_or(Error::Done)?;
 
         let hdr = Header {
             ty: pkt_type,
@@ -3378,8 +3379,8 @@ pub mod testing {
 
         hdr.to_bytes(&mut b)?;
 
-        let payload_len =
-            frames.iter().fold(0, |acc, x| acc + x.wire_len()) + space.overhead();
+        let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len()) +
+            space.overhead().unwrap();
 
         if pkt_type != packet::Type::Short {
             let len = pn_len + payload_len;

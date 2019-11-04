@@ -673,8 +673,8 @@ impl PktNumSpace {
         self.ack_elicited = false;
     }
 
-    pub fn overhead(&self) -> usize {
-        self.crypto_seal.as_ref().unwrap().alg().tag_len()
+    pub fn overhead(&self) -> Option<usize> {
+        Some(self.crypto_seal.as_ref()?.alg().tag_len())
     }
 
     pub fn ready(&self) -> bool {
