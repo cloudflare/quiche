@@ -10,8 +10,9 @@ specified by the [IETF]. It provides a low level API for processing QUIC packets
 and handling connection state. The application is responsible for providing I/O
 (e.g. sockets handling) as well as an event loop with support for timers.
 
-A live QUIC server based on quiche is available at ``https://quic.tech:4433/``
-to be used for experimentation.
+A live QUIC server based on quiche is available at ``https://quic.tech:4433/``,
+and an HTTP/3 one at ``https://quic.tech:8443/``, that can be used for
+experimentation.
 
 For more information on how quiche came about and some insights into its design
 you can read a [post] on Cloudflare's (where this library is used in production)
