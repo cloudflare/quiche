@@ -1527,6 +1527,12 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        // If the Initial secrets have not been derived yet, there's no point
+        // in trying to send a packet, so return early.
+        if !self.derived_initial_secrets {
+            return Err(Error::Done);
+        }
+
         let is_closing = self.error.is_some() || self.app_error.is_some();
 
         if !is_closing {
