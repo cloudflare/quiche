@@ -1546,7 +1546,7 @@ new file mode 100644
 index 000000000..972ecd223
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2093 @@
+@@ -0,0 +1,2092 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -1832,9 +1832,6 @@ index 000000000..972ecd223
 +
 +    stream->node.key = stream_id;
 +
-+    /* TODO: remove this when FLPROTO-548 is done. */
-+    stream->in_closed = quiche_conn_stream_finished(c->quic->conn, stream_id);
-+
 +    ngx_rbtree_insert(&h3c->streams, &stream->node);
 +
 +    /* Populate ngx_http_request_t from raw HTTP/3 headers. */
@@ -1848,6 +1845,8 @@ index 000000000..972ecd223
 +        ngx_http_v3_finalize_connection(h3c, NGX_HTTP_V3_INTERNAL_ERROR);
 +        return;
 +    }
++
++    stream->in_closed = !quiche_h3_event_headers_has_body(ev);
 +
 +    ngx_http_v3_run_request(stream->request);
 +}

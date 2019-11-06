@@ -368,11 +368,14 @@ fn main() {
                     let http3_conn = client.http3_conn.as_mut().unwrap();
 
                     match http3_conn.poll(client.conn.as_mut()) {
-                        Ok((stream_id, quiche::h3::Event::Headers(headers))) => {
+                        Ok((
+                            stream_id,
+                            quiche::h3::Event::Headers { list, .. },
+                        )) => {
                             handle_request(
                                 client,
                                 stream_id,
-                                &headers,
+                                &list,
                                 args.get_str("--root"),
                             );
                         },

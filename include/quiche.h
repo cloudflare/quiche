@@ -359,6 +359,9 @@ int quiche_h3_event_for_each_header(quiche_h3_event *ev,
                                               void *argp),
                                     void *argp);
 
+// Check whether data will follow the headers on the stream.
+bool quiche_h3_event_headers_has_body(quiche_h3_event *ev);
+
 // Frees the HTTP/3 event object.
 void quiche_h3_event_free(quiche_h3_event *ev);
 

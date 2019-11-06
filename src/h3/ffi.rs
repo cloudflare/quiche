@@ -125,8 +125,8 @@ pub extern fn quiche_h3_event_for_each_header(
     argp: *mut c_void,
 ) -> c_int {
     match ev {
-        h3::Event::Headers(headers) =>
-            for h in headers {
+        h3::Event::Headers { list, .. } =>
+            for h in list {
                 let rc = cb(
                     h.name().as_ptr(),
                     h.name().len(),
@@ -144,6 +144,15 @@ pub extern fn quiche_h3_event_for_each_header(
     }
 
     0
+}
+
+#[no_mangle]
+pub extern fn quiche_h3_event_headers_has_body(ev: &h3::Event) -> bool {
+    match ev {
+        h3::Event::Headers { has_body, .. } => *has_body,
+
+        _ => unreachable!(),
+    }
 }
 
 #[no_mangle]
