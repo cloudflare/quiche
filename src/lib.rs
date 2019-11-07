@@ -230,6 +230,7 @@
 //! [`stream_recv()`]: struct.Connection.html#method.stream_recv
 //! [HTTP/3 module]: h3/index.html
 
+#![allow(improper_ctypes)]
 #![warn(missing_docs)]
 
 #[macro_use]
