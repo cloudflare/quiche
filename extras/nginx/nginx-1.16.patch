@@ -26,12 +26,12 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   29 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2093 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2092 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   76 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 ++++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3545 insertions(+), 11 deletions(-)
+ 27 files changed, 3544 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -334,7 +334,7 @@ index 93ca9174d..d0441f034 100644
  #include <ngx_module.h>
 diff --git a/src/event/ngx_event_quic.c b/src/event/ngx_event_quic.c
 new file mode 100644
-index 000000000..d814a5a7f
+index 000000000..bcaf446fa
 --- /dev/null
 +++ b/src/event/ngx_event_quic.c
 @@ -0,0 +1,571 @@
@@ -505,8 +505,8 @@ index 000000000..d814a5a7f
 +
 +    ngx_log_debug4(NGX_LOG_DEBUG_EVENT, c->log, 0,
 +        "new quic connection dcid:%*.s new_scid:%*.s",
-+        ngx_hex_dump(dcid_hex, dcid, sizeof(dcid)) - dcid_hex, dcid_hex,
-+        ngx_hex_dump(scid_hex, scid, sizeof(scid)) - scid_hex, scid_hex);
++        ngx_hex_dump(dcid_hex, dcid, dcid_len) - dcid_hex, dcid_hex,
++        ngx_hex_dump(scid_hex, scid, scid_len) - scid_hex, scid_hex);
 +    }
 +#endif
 +
@@ -1543,7 +1543,7 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..972ecd223
+index 000000000..b70a479dc
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
 @@ -0,0 +1,2092 @@
