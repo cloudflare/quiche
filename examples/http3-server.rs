@@ -62,7 +62,7 @@ struct PartialResponse {
 }
 
 struct Client {
-    conn: Box<quiche::Connection>,
+    conn: std::pin::Pin<Box<quiche::Connection>>,
 
     http3_conn: Option<quiche::h3::Connection>,
 
@@ -367,7 +367,7 @@ fn main() {
                 loop {
                     let http3_conn = client.http3_conn.as_mut().unwrap();
 
-                    match http3_conn.poll(client.conn.as_mut()) {
+                    match http3_conn.poll(&mut client.conn) {
                         Ok((
                             stream_id,
                             quiche::h3::Event::Headers { list, .. },

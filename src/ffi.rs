@@ -296,7 +296,7 @@ pub extern fn quiche_accept(
     };
 
     match accept(scid, odcid, config) {
-        Ok(c) => Box::into_raw(c),
+        Ok(c) => Box::into_raw(Pin::into_inner(c)),
 
         Err(_) => ptr::null_mut(),
     }
@@ -316,7 +316,7 @@ pub extern fn quiche_connect(
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
 
     match connect(server_name, scid, config) {
-        Ok(c) => Box::into_raw(c),
+        Ok(c) => Box::into_raw(Pin::into_inner(c)),
 
         Err(_) => ptr::null_mut(),
     }
@@ -373,7 +373,7 @@ pub extern fn quiche_conn_new_with_tls(
     let tls = unsafe { tls::Handshake::from_ptr(ssl) };
 
     match Connection::with_tls(scid, odcid, config, tls, is_server) {
-        Ok(c) => Box::into_raw(c),
+        Ok(c) => Box::into_raw(Pin::into_inner(c)),
 
         Err(_) => ptr::null_mut(),
     }
