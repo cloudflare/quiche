@@ -239,6 +239,8 @@ extern crate log;
 use std::cmp;
 use std::time;
 
+use std::pin::Pin;
+
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = 0xff00_0017;
 
@@ -771,7 +773,7 @@ pub struct Connection {
 /// ```
 pub fn accept(
     scid: &[u8], odcid: Option<&[u8]>, config: &mut Config,
-) -> Result<Box<Connection>> {
+) -> Result<Pin<Box<Connection>>> {
     let conn = Connection::new(scid, odcid, config, true)?;
 
     Ok(conn)
@@ -794,7 +796,7 @@ pub fn accept(
 /// ```
 pub fn connect(
     server_name: Option<&str>, scid: &[u8], config: &mut Config,
-) -> Result<Box<Connection>> {
+) -> Result<Pin<Box<Connection>>> {
     let conn = Connection::new(scid, None, config, false)?;
 
     if let Some(server_name) = server_name {
@@ -900,7 +902,7 @@ pub fn retry(
 impl Connection {
     fn new(
         scid: &[u8], odcid: Option<&[u8]>, config: &mut Config, is_server: bool,
-    ) -> Result<Box<Connection>> {
+    ) -> Result<Pin<Box<Connection>>> {
         let tls = config.tls_ctx.new_handshake()?;
         Connection::with_tls(scid, odcid, config, tls, is_server)
     }
@@ -908,13 +910,13 @@ impl Connection {
     fn with_tls(
         scid: &[u8], odcid: Option<&[u8]>, config: &mut Config,
         tls: tls::Handshake, is_server: bool,
-    ) -> Result<Box<Connection>> {
+    ) -> Result<Pin<Box<Connection>>> {
         let max_rx_data = config.local_transport_params.initial_max_data;
 
         let scid_as_hex: Vec<String> =
             scid.iter().map(|b| format!("{:02x}", b)).collect();
 
-        let mut conn = Box::new(Connection {
+        let mut conn = Box::pin(Connection {
             version: config.version,
 
             dcid: Vec::new(),
@@ -3167,8 +3169,8 @@ pub mod testing {
     use super::*;
 
     pub struct Pipe {
-        pub client: Box<Connection>,
-        pub server: Box<Connection>,
+        pub client: Pin<Box<Connection>>,
+        pub server: Pin<Box<Connection>>,
     }
 
     impl Pipe {
