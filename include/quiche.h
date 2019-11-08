@@ -350,9 +350,10 @@ enum quiche_h3_event_type quiche_h3_event_type(quiche_h3_event *ev);
 
 // Iterates over the headers in the event.
 //
-// The `cb` callback will be called for each header in `ev`. If `cb` returns
-// any value other than `0`, processing will be interrupted and the value is
-// returned to the caller.
+// The `cb` callback will be called for each header in `ev`. `cb` should check
+// the validity of pseudo-headers and headers. If `cb` returns any value other
+// than `0`, processing will be interrupted and the value is returned to the
+// caller.
 int quiche_h3_event_for_each_header(quiche_h3_event *ev,
                                     int (*cb)(uint8_t *name, size_t name_len,
                                               uint8_t *value, size_t value_len,

@@ -495,7 +495,8 @@ impl Header {
 pub enum Event {
     /// Request/response headers were received.
     Headers {
-        /// The list of received header fields.
+        /// The list of received header fields. The application should validate
+        /// pseudo-headers and headers.
         list: Vec<Header>,
 
         /// Whether data will follow the headers on the stream.
