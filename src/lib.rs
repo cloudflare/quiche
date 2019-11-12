@@ -1093,6 +1093,17 @@ impl Connection {
             left -= read;
         }
 
+        // Keep track of how many bytes we received from the client, so we
+        // can limit bytes sent back before address validation, to a multiple
+        // of this. The limit needs to be increased early on, so that if there
+        // is an error there is enough credit to send a CONNECTION_CLOSE.
+        //
+        // It doesn't matter if the packets received were valid or not, we only
+        // need to track the total amount of bytes received.
+        if !self.verified_peer_address {
+            self.max_send_bytes += buf.len() * MAX_AMPLIFICATION_FACTOR;
+        }
+
         Ok(done)
     }
 
@@ -1355,15 +1366,6 @@ impl Connection {
 
                 return Ok(header_len + payload_len);
             }
-        }
-
-        // Keep track of how many bytes we received from the client, so we
-        // can limit bytes sent back before address validation, to a multiple
-        // of this. The limit needs to be increased early on, so that if there
-        // is an error there is enough credit to send a CONNECTION_CLOSE.
-        if !self.verified_peer_address {
-            self.max_send_bytes +=
-                (header_len + payload_len) * MAX_AMPLIFICATION_FACTOR;
         }
 
         // To avoid sending an ACK in response to an ACK-only packet, we need
