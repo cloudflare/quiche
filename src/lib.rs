@@ -1651,7 +1651,7 @@ impl Connection {
         let mut payload_len = 0;
 
         // Create ACK frame.
-        if self.pkt_num_spaces[epoch].ack_elicited {
+        if self.pkt_num_spaces[epoch].ack_elicited && !is_closing {
             let ack_delay =
                 self.pkt_num_spaces[epoch].largest_rx_pkt_time.elapsed();
 
@@ -1757,7 +1757,7 @@ impl Connection {
         }
 
         // Create PING for PTO probe.
-        if self.recovery.probes > 0 && left >= 1 {
+        if self.recovery.probes > 0 && left >= 1 && !is_closing {
             let frame = frame::Frame::Ping;
 
             payload_len += frame.wire_len();
