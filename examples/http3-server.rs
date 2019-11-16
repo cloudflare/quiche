@@ -221,7 +221,7 @@ fn main() {
                     continue;
                 }
 
-                if hdr.version != quiche::PROTOCOL_VERSION {
+                if !quiche::version_is_supported(hdr.version) {
                     warn!("Doing version negotiation");
 
                     let len =

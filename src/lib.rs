@@ -242,7 +242,8 @@ use std::time;
 use std::pin::Pin;
 
 /// The current QUIC wire version.
-pub const PROTOCOL_VERSION: u32 = 0xff00_0017;
+pub const PROTOCOL_VERSION: u32 = 0xff00_0018;
+const PROTOCOL_VERSION_OLD: u32 = 0xff00_0017;
 
 /// The maximum length of a connection ID.
 pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
@@ -899,6 +900,11 @@ pub fn retry(
     packet::retry(scid, dcid, new_scid, token, out)
 }
 
+/// Returns true if the given protocol version is supported.
+pub fn version_is_supported(version: u32) -> bool {
+    version == PROTOCOL_VERSION || version == PROTOCOL_VERSION_OLD
+}
+
 impl Connection {
     fn new(
         scid: &[u8], odcid: Option<&[u8]>, config: &mut Config, is_server: bool,
@@ -1159,8 +1165,9 @@ impl Connection {
 
             let mut new_version = 0;
             for v in versions.iter() {
-                if *v == PROTOCOL_VERSION {
+                if version_is_supported(*v) {
                     new_version = *v;
+                    break;
                 }
             }
 
@@ -1223,6 +1230,15 @@ impl Connection {
             self.handshake.clear()?;
 
             return Err(Error::Done);
+        }
+
+        if self.is_server && !self.did_version_negotiation {
+            if !version_is_supported(hdr.version) {
+                return Err(Error::UnknownVersion);
+            }
+
+            self.version = hdr.version;
+            self.did_version_negotiation = true;
         }
 
         if hdr.ty != packet::Type::Short && hdr.version != self.version {

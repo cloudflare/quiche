@@ -211,13 +211,13 @@ impl Header {
         };
 
         let dcid_len = b.get_u8()?;
-        if version == crate::PROTOCOL_VERSION && dcid_len > MAX_CID_LEN {
+        if crate::version_is_supported(version) && dcid_len > MAX_CID_LEN {
             return Err(Error::InvalidPacket);
         }
         let dcid = b.get_bytes(dcid_len as usize)?.to_vec();
 
         let scid_len = b.get_u8()?;
-        if version == crate::PROTOCOL_VERSION && scid_len > MAX_CID_LEN {
+        if crate::version_is_supported(version) && scid_len > MAX_CID_LEN {
             return Err(Error::InvalidPacket);
         }
         let scid = b.get_bytes(scid_len as usize)?.to_vec();
@@ -587,6 +587,7 @@ pub fn negotiate_version(
     b.put_u8(dcid.len() as u8)?;
     b.put_bytes(&dcid)?;
     b.put_u32(crate::PROTOCOL_VERSION)?;
+    b.put_u32(crate::PROTOCOL_VERSION_OLD)?;
 
     Ok(b.off())
 }

@@ -38,7 +38,7 @@ extern "C" {
 //
 
 // The current QUIC wire version.
-#define QUICHE_PROTOCOL_VERSION 0xff000017
+#define QUICHE_PROTOCOL_VERSION 0xff000018
 
 // The maximum length of a connection ID.
 #define QUICHE_MAX_CONN_ID_LEN 20
@@ -196,6 +196,9 @@ ssize_t quiche_retry(const uint8_t *scid, size_t scid_len,
                      const uint8_t *token, size_t token_len,
                      uint8_t *out, size_t out_len);
 
+// Returns true if the given protocol version is supported.
+bool quiche_version_is_supported(uint32_t version);
+
 quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
                                       const uint8_t *odcid, size_t odcid_len,
                                       quiche_config *config, void *ssl,
@@ -301,8 +304,8 @@ void quiche_conn_free(quiche_conn *conn);
 // HTTP/3 API
 //
 
-/// The current HTTP/3 ALPN token.
-#define QUICHE_H3_APPLICATION_PROTOCOL "\x05h3-23"
+// List of ALPN tokens of supported HTTP/3 versions.
+#define QUICHE_H3_APPLICATION_PROTOCOL "\x05h3-24\x05h3-23"
 
 // Stores configuration shared between multiple connections.
 typedef struct Http3Config quiche_h3_config;
