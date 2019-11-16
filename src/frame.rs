@@ -256,8 +256,8 @@ impl Frame {
         };
 
         let allowed = match (pkt, &frame) {
-            // PADDING is allowed on all packet types.
-            (_, Frame::Padding { .. }) => true,
+            // PADDING and PING are allowed on all packet types.
+            (_, Frame::Padding { .. }) | (_, Frame::Ping { .. }) => true,
 
             // ACK, CRYPTO and CONNECTION_CLOSE frames are allowed on all
             // packet types except 0-RTT.
@@ -927,10 +927,10 @@ mod tests {
         assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_ok());
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_ok());
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_ok());
     }
 
     #[test]
