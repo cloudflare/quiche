@@ -339,6 +339,11 @@ pub extern fn quiche_negotiate_version(
 }
 
 #[no_mangle]
+pub extern fn quiche_version_is_supported(version: u32) -> bool {
+    version_is_supported(version)
+}
+
+#[no_mangle]
 pub extern fn quiche_retry(
     scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
     new_scid: *const u8, new_scid_len: size_t, token: *const u8,

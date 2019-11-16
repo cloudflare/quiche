@@ -251,8 +251,14 @@ use std::collections::VecDeque;
 
 use crate::octets;
 
-/// The current HTTP/3 ALPN token.
-pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-23";
+/// List of ALPN tokens of supported HTTP/3 versions.
+///
+/// This can be passed directly to the [`Config::set_application_protos()`]
+/// method when implementing HTTP/3 applications.
+///
+/// [`Config::set_application_protos()`]:
+/// ../struct.Config.html#method.set_application_protos
+pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-24\x05h3-23";
 
 /// A specialized [`Result`] type for quiche HTTP/3 operations.
 ///

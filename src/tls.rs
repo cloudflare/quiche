@@ -690,6 +690,12 @@ extern fn select_alpn(
 
     while let Ok(proto) = protos.get_bytes_with_u8_length() {
         let found = conn.application_protos.iter().any(|expected| {
+            trace!(
+                "checking peer ALPN {:?} against {:?}",
+                std::str::from_utf8(proto.as_ref()),
+                std::str::from_utf8(expected.as_slice())
+            );
+
             if expected.len() == proto.len() &&
                 expected.as_slice() == proto.as_ref()
             {

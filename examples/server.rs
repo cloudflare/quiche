@@ -128,7 +128,7 @@ fn main() {
         .unwrap();
 
     config
-        .set_application_protos(b"\x05hq-23\x08http/0.9")
+        .set_application_protos(b"\x05hq-24\x08http/0.9")
         .unwrap();
 
     config.set_idle_timeout(5000);
@@ -234,7 +234,7 @@ fn main() {
                     continue;
                 }
 
-                if hdr.version != quiche::PROTOCOL_VERSION {
+                if !quiche::version_is_supported(hdr.version) {
                     warn!("Doing version negotiation");
 
                     let len =
