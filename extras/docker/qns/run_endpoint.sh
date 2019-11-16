@@ -15,6 +15,7 @@ QUICHE_CLIENT=client
 QUICHE_SERVER=server
 QUICHE_CLIENT_OPT="--no-verify"
 QUICHE_SERVER_OPT="--no-retry"
+LOG=/logs/log.txt
 
 check_testcase () {
     TESTNAME=$1
@@ -44,16 +45,14 @@ run_quiche_client_tests () {
     do
         # get path only from the url
         file=$(echo $req | perl -F'/' -an -e 'print $F[-1]')
-        RUST_LOG=${RUST_LOG:-info} $QUICHE_DIR/$QUICHE_CLIENT \
-            $QUICHE_CLIENT_OPT \
-            $CLIENT_PARAMS $req > $DOWNLOAD_DIR/$file || exit 127
+        $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
+            $CLIENT_PARAMS $req > $DOWNLOAD_DIR/$file 2> $LOG || exit 127
     done
 }
 
 run_quiche_server_tests() {
-    RUST_LOG=${RUST_LOG:-info} $QUICHE_DIR/$QUICHE_SERVER \
-        --listen 0.0.0.0:443 --root $WWW_DIR \
-        $SERVER_PARAMS $QUICHE_SERVER_OPT || exit 127
+    $QUICHE_DIR/$QUICHE_SERVER --listen 0.0.0.0:443 --root $WWW_DIR \
+        $SERVER_PARAMS $QUICHE_SERVER_OPT 2> $LOG || exit 127
 }
 
 # Update config based on test case
