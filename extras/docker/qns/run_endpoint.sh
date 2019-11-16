@@ -13,7 +13,7 @@ WWW_DIR=/www
 DOWNLOAD_DIR=/downloads
 QUICHE_CLIENT=client
 QUICHE_SERVER=server
-QUICHE_CLIENT_OPT="--no-verify --wire-version=ff000017"
+QUICHE_CLIENT_OPT="--no-verify"
 QUICHE_SERVER_OPT="--no-retry"
 
 check_testcase () {
