@@ -41,6 +41,7 @@ COPY --from=build /build/quiche/target/release/examples/client .
 COPY --from=build /build/quiche/target/release/examples/server .
 COPY --from=build /build/quiche/target/release/examples/http3-client .
 COPY --from=build /build/quiche/target/release/examples/http3-server .
+ENV RUST_LOG=trace
 
 # copy interop test script
 COPY qns/run_endpoint.sh .
