@@ -38,7 +38,7 @@ matrix:
      env:
       DOCKER_BUILD=YES
      script:
-      - make -C extras/docker all test
+      - make -C extras/docker
    - language: rust
      rust: nightly
      before_install:
