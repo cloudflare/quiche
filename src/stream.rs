@@ -358,12 +358,6 @@ impl StreamMap {
             self.local_max_streams_uni_next / 2 >
                 self.local_max_streams_uni - self.peer_opened_streams_uni
     }
-
-    /// Creates an iterator over all streams.
-    #[cfg(test)]
-    pub fn iter_mut(&mut self) -> hash_map::IterMut<u64, Stream> {
-        self.streams.iter_mut()
-    }
 }
 
 /// A QUIC stream.
