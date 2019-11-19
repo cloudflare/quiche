@@ -229,6 +229,36 @@
 //! [`readable()`]: struct.Connection.html#method.readable
 //! [`stream_recv()`]: struct.Connection.html#method.stream_recv
 //! [HTTP/3 module]: h3/index.html
+//!
+//! ## Congestion Control
+//!
+//! The quiche provides a high level API for configuring which
+//! congestion control algorithm to use throughout the QUIC connection.
+//!
+//! When you create a QUIC connection, you can optionally choose which CC
+//! algorithm to use. See [CongestionControlAlgorithm] for currently
+//! available congestion control algorithms.
+//!
+//! For example:
+//!
+//! ```
+//! let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! config.set_cc_algorithm(quiche::CongestionControlAlgorithm::Reno);
+//! ```
+//!
+//! Alternatively, you can configure a congestion control algorithm to use
+//! by its name.
+//!
+//! ```
+//! let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+//! config.set_cc_algorithm_name("reno").unwrap();
+//! ```
+//!
+//! Note that those API should be called before you call [`connect()`]
+//! or [`accept()`]. Otherwise the connection will use a default CC algorithm.
+//! By default `Reno` will be used as a default congestion control.
+//!
+//! [CongestionControlAlgorithm]: cc/enum.Algorithm.html
 
 #![allow(improper_ctypes)]
 #![warn(missing_docs)]
@@ -240,6 +270,9 @@ use std::cmp;
 use std::time;
 
 use std::pin::Pin;
+use std::str::FromStr;
+
+pub use crate::cc::Algorithm as CongestionControlAlgorithm;
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = 0xff00_0018;
@@ -315,6 +348,9 @@ pub enum Error {
 
     /// The received data exceeds the stream's final size.
     FinalSize          = -13,
+
+    /// Error in congestion control.
+    CongestionControl  = -14,
 }
 
 impl Error {
@@ -381,6 +417,9 @@ pub struct Config {
     application_protos: Vec<Vec<u8>>,
 
     grease: bool,
+
+    // Congestion control algorithm to use
+    cc_algorithm: cc::Algorithm,
 }
 
 impl Config {
@@ -401,6 +440,7 @@ impl Config {
             tls_ctx,
             application_protos: Vec::new(),
             grease: true,
+            cc_algorithm: cc::Algorithm::Reno, // default cc algorithm
         })
     }
 
@@ -621,6 +661,35 @@ impl Config {
     /// The default value is `false`.
     pub fn set_disable_active_migration(&mut self, v: bool) {
         self.local_transport_params.disable_active_migration = v;
+    }
+
+    /// Sets the congestion control algorithm used by string.
+    ///
+    /// The default value is `reno`. If failed, `Error::CongestionControl`
+    /// will be returned.
+    ///
+    /// ## Examples:
+    ///
+    /// ```
+    /// # let mut config = quiche::Config::new(0xbabababa)?;
+    /// config.set_cc_algorithm_name("reno");
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn set_cc_algorithm_name(&mut self, name: &str) -> Result<()> {
+        match CongestionControlAlgorithm::from_str(name) {
+            Ok(cc) => {
+                self.cc_algorithm = cc;
+                Ok(())
+            },
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Sets the congestion control algorithm used.
+    ///
+    /// The default value is `quiche::CongestionControlAlgorithm::Reno`.
+    pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
+        self.cc_algorithm = algo;
     }
 }
 
@@ -934,7 +1003,7 @@ impl Connection {
 
             handshake: tls,
 
-            recovery: recovery::Recovery::default(),
+            recovery: recovery::Recovery::new(&config),
 
             application_protos: config.application_protos.clone(),
 
@@ -1600,7 +1669,7 @@ impl Connection {
         }
 
         // Calculate available space in the packet based on congestion window.
-        let mut left = cmp::min(self.recovery.cwnd(), b.cap());
+        let mut left = cmp::min(self.recovery.cwnd_available(), b.cap());
 
         // Limit data sent by the server based on the amount of data received
         // from the client before its address is validated.
@@ -2515,7 +2584,7 @@ impl Connection {
             recv: self.recv_count,
             sent: self.sent_count,
             lost: self.recovery.lost_count,
-            cwnd: self.recovery.cwnd(),
+            cwnd: self.recovery.cc.cwnd(),
             rtt: self.recovery.rtt(),
         }
     }
@@ -4872,6 +4941,7 @@ pub use crate::packet::Header;
 pub use crate::packet::Type;
 pub use crate::stream::StreamIter;
 
+mod cc;
 mod crypto;
 mod ffi;
 mod frame;

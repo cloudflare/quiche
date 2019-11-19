@@ -88,6 +88,9 @@ enum quiche_error {
 
     // The received data exceeds the stream's final size.
     QUICHE_ERR_FINAL_SIZE = -13,
+
+    // Error in congestion control.
+    QUICHE_ERR_CONGESTION_CONTROL = -14,
 };
 
 // Returns a human readable string with the quiche version number.
@@ -160,6 +163,16 @@ void quiche_config_set_max_ack_delay(quiche_config *config, uint64_t v);
 
 // Sets the `disable_active_migration` transport parameter.
 void quiche_config_set_disable_active_migration(quiche_config *config, bool v);
+
+enum quiche_cc_algorithm {
+    QUICHE_CC_RENO = 0,
+};
+
+// Sets the congestion control algorithm used (string).
+void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algorithm algo);
+
+// Sets the initial congestion control window size (bytes).
+void quiche_config_set_cc_initcwnd(quiche_config *config, size_t v);
 
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
