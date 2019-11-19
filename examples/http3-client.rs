@@ -45,6 +45,7 @@ Options:
   --wire-version VERSION   The version number to send to the server [default: babababa].
   --no-verify              Don't verify server's certificate.
   --no-grease              Don't send GREASE.
+  --cc-algorithm NAME      Set client congestion control algorithm [default: reno].
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
   -h --help                Show this screen.
@@ -142,6 +143,10 @@ fn main() {
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
         config.log_keys();
     }
+
+    config
+        .set_cc_algorithm_name(args.get_str("--cc-algorithm"))
+        .unwrap();
 
     // Generate a random source connection ID for the connection.
     let mut scid = [0; quiche::MAX_CONN_ID_LEN];

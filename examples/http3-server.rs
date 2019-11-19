@@ -52,6 +52,7 @@ Options:
   --early-data                Enables receiving early data.
   --no-retry                  Disable stateless retry.
   --no-grease                 Don't send GREASE.
+  --cc-algorithm NAME         Set server congestion control algorithm [default: reno].
   -h --help                   Show this screen.
 ";
 
@@ -146,6 +147,10 @@ fn main() {
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
         config.log_keys();
     }
+
+    config
+        .set_cc_algorithm_name(args.get_str("--cc-algorithm"))
+        .unwrap();
 
     let h3_config = quiche::h3::Config::new().unwrap();
 

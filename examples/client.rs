@@ -47,6 +47,7 @@ Options:
   --wire-version VERSION   The version number to send to the server [default: babababa].
   --dump-packets PATH      Dump the incoming packets as files in the given directory.
   --no-verify              Don't verify server's certificate.
+  --cc-algorithm NAME      Set client congestion control algorithm [default: reno].
   -h --help                Show this screen.
 ";
 
@@ -133,6 +134,10 @@ fn main() {
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
         config.log_keys();
     }
+
+    config
+        .set_cc_algorithm_name(args.get_str("--cc-algorithm"))
+        .unwrap();
 
     // Generate a random source connection ID for the connection.
     let mut scid = [0; quiche::MAX_CONN_ID_LEN];

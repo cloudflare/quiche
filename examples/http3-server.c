@@ -520,6 +520,7 @@ int main(int argc, char *argv[]) {
     quiche_config_set_initial_max_streams_bidi(config, 100);
     quiche_config_set_initial_max_streams_uni(config, 100);
     quiche_config_set_disable_active_migration(config, true);
+    quiche_config_set_cc_algorithm(config, QUICHE_CC_RENO);
 
     http3_config = quiche_h3_config_new();
     if (http3_config == NULL) {

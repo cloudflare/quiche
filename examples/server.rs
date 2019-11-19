@@ -54,6 +54,7 @@ Options:
   --dump-packets PATH         Dump the incoming packets as files in the given directory.
   --early-data                Enables receiving early data.
   --no-retry                  Disable stateless retry.
+  --cc-algorithm NAME         Set server congestion control algorithm [default: reno].
   -h --help                   Show this screen.
 ";
 
@@ -148,6 +149,10 @@ fn main() {
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
         config.log_keys();
     }
+
+    config
+        .set_cc_algorithm_name(args.get_str("--cc-algorithm"))
+        .unwrap();
 
     let mut clients = ClientMap::new();
 

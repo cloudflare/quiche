@@ -213,6 +213,25 @@ pub extern fn quiche_config_set_disable_active_migration(
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_cc_algorithm_name(
+    config: &mut Config, name: *const c_char,
+) -> c_int {
+    let name = unsafe { ffi::CStr::from_ptr(name).to_str().unwrap() };
+    match config.set_cc_algorithm_name(name) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_cc_algorithm(
+    config: &mut Config, algo: cc::Algorithm,
+) {
+    config.set_cc_algorithm(algo);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_free(config: *mut Config) {
     unsafe { Box::from_raw(config) };
 }
