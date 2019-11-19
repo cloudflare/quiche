@@ -1810,15 +1810,17 @@ impl Connection {
                 data: challenge.clone(),
             };
 
-            payload_len += frame.wire_len();
-            left -= frame.wire_len();
+            if left > frame.wire_len() {
+                payload_len += frame.wire_len();
+                left -= frame.wire_len();
 
-            frames.push(frame);
+                frames.push(frame);
 
-            self.challenge = None;
+                self.challenge = None;
 
-            ack_eliciting = true;
-            in_flight = true;
+                ack_eliciting = true;
+                in_flight = true;
+            }
         }
 
         // Create CRYPTO frame.
