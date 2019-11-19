@@ -31,9 +31,11 @@ use std::time::Instant;
 
 use std::collections::BTreeMap;
 
+use crate::Config;
 use crate::Error;
 use crate::Result;
 
+use crate::cc;
 use crate::frame;
 use crate::packet;
 use crate::ranges;
@@ -46,14 +48,6 @@ const TIME_THRESHOLD: f64 = 9.0 / 8.0;
 const GRANULARITY: Duration = Duration::from_millis(1);
 
 const INITIAL_RTT: Duration = Duration::from_millis(500);
-
-// Congestion Control
-pub const INITIAL_WINDOW_PACKETS: usize = 10;
-
-const MAX_DATAGRAM_SIZE: usize = 1452;
-
-const INITIAL_WINDOW: usize = INITIAL_WINDOW_PACKETS * MAX_DATAGRAM_SIZE;
-const MINIMUM_WINDOW: usize = 2 * MAX_DATAGRAM_SIZE;
 
 const PERSISTENT_CONGESTION_THRESHOLD: u32 = 3;
 
@@ -103,19 +97,13 @@ pub struct Recovery {
 
     pub lost_count: usize,
 
-    bytes_in_flight: usize,
-
-    cwnd: usize,
-
-    recovery_start_time: Option<Instant>,
-
-    ssthresh: usize,
-
     pub loss_probes: [usize; packet::EPOCH_COUNT],
+
+    pub cc: Box<dyn cc::CongestionControl>,
 }
 
-impl Default for Recovery {
-    fn default() -> Recovery {
+impl Recovery {
+    pub fn new(config: &Config) -> Self {
         Recovery {
             loss_detection_timer: None,
 
@@ -147,20 +135,12 @@ impl Default for Recovery {
 
             lost_count: 0,
 
-            bytes_in_flight: 0,
-
-            cwnd: INITIAL_WINDOW,
-
-            recovery_start_time: None,
-
-            ssthresh: std::usize::MAX,
-
             loss_probes: [0; packet::EPOCH_COUNT],
+
+            cc: cc::new_congestion_control(config.cc_algorithm),
         }
     }
-}
 
-impl Recovery {
     pub fn on_packet_sent(
         &mut self, pkt: Sent, epoch: packet::Epoch, handshake_completed: bool,
         now: Instant, trace_id: &str,
@@ -180,7 +160,7 @@ impl Recovery {
             }
 
             // OnPacketSentCC
-            self.bytes_in_flight += sent_bytes;
+            self.cc.on_packet_sent_cc(sent_bytes, trace_id);
 
             self.set_loss_detection_timer(handshake_completed);
         }
@@ -232,7 +212,7 @@ impl Recovery {
         // Processing acked packets in reverse order (from largest to smallest)
         // appears to be faster, possibly due to the BTreeMap implementation.
         for pn in ranges.flatten().rev() {
-            let newly_acked = self.on_packet_acked(pn, epoch);
+            let newly_acked = self.on_packet_acked(pn, epoch, trace_id);
             has_newly_acked = cmp::max(has_newly_acked, newly_acked);
 
             if newly_acked {
@@ -292,7 +272,7 @@ impl Recovery {
             unacked_bytes += p.size;
         }
 
-        self.bytes_in_flight -= unacked_bytes;
+        self.cc.decrease_bytes_in_flight(unacked_bytes);
 
         self.loss_time[epoch] = None;
         self.loss_probes[epoch] = 0;
@@ -307,13 +287,13 @@ impl Recovery {
         self.loss_detection_timer
     }
 
-    pub fn cwnd(&self) -> usize {
+    pub fn cwnd_available(&self) -> usize {
         // Ignore cwnd when sending probe packets.
         if self.loss_probes.iter().any(|&x| x > 0) {
             return std::usize::MAX;
         }
 
-        self.cwnd.saturating_sub(self.bytes_in_flight)
+        self.cc.cwnd().saturating_sub(self.cc.bytes_in_flight())
     }
 
     pub fn rtt(&self) -> Duration {
@@ -394,7 +374,7 @@ impl Recovery {
             return;
         }
 
-        if self.bytes_in_flight == 0 {
+        if self.cc.bytes_in_flight() == 0 {
             // TODO: check if peer is awaiting address validation.
             self.loss_detection_timer = None;
             return;
@@ -465,19 +445,13 @@ impl Recovery {
         }
 
         if !lost_pkt.is_empty() {
-            self.on_packets_lost(lost_pkt, epoch, now);
+            self.on_packets_lost(lost_pkt, epoch, now, trace_id);
         }
     }
 
-    fn in_recovery(&self, sent_time: Instant) -> bool {
-        match self.recovery_start_time {
-            Some(recovery_start_time) => sent_time <= recovery_start_time,
-
-            None => false,
-        }
-    }
-
-    fn on_packet_acked(&mut self, pkt_num: u64, epoch: packet::Epoch) -> bool {
+    fn on_packet_acked(
+        &mut self, pkt_num: u64, epoch: packet::Epoch, trace_id: &str,
+    ) -> bool {
         // If the acked packet number is lower than the lowest unacked packet
         // number it means that the packet is not newly acked, so return early.
         if let Some(lowest) = self.sent[epoch].values().nth(0) {
@@ -491,20 +465,13 @@ impl Recovery {
             self.acked[epoch].append(&mut p.frames);
 
             if p.in_flight {
-                // OnPacketAckedCC
-                self.bytes_in_flight -= p.size;
-
-                if self.in_recovery(p.time) {
-                    return true;
-                }
-
-                if self.cwnd < self.ssthresh {
-                    // Slow start.
-                    self.cwnd += p.size;
-                } else {
-                    // Congestion avoidance.
-                    self.cwnd += (MAX_DATAGRAM_SIZE * p.size) / self.cwnd;
-                }
+                // OnPacketAckedCC(acked_packet)
+                self.cc.on_packet_acked_cc(
+                    &p,
+                    self.rtt(),
+                    self.min_rtt,
+                    trace_id,
+                );
             }
 
             return true;
@@ -514,6 +481,7 @@ impl Recovery {
         false
     }
 
+    // TODO: move to Congestion Control and implement draft 24
     fn in_persistent_congestion(&mut self, _largest_lost_pkt: &Sent) -> bool {
         let _congestion_period = self.pto() * PERSISTENT_CONGESTION_THRESHOLD;
 
@@ -521,8 +489,10 @@ impl Recovery {
         false
     }
 
+    // TODO: move to Congestion Control
     fn on_packets_lost(
         &mut self, lost_pkt: Vec<u64>, epoch: packet::Epoch, now: Instant,
+        trace_id: &str,
     ) {
         // Differently from OnPacketsLost(), we need to handle both
         // in-flight and non-in-flight packets, so need to keep track
@@ -539,7 +509,7 @@ impl Recovery {
                 continue;
             }
 
-            self.bytes_in_flight -= p.size;
+            self.cc.decrease_bytes_in_flight(p.size);
 
             self.lost[epoch].append(&mut p.frames);
 
@@ -548,16 +518,11 @@ impl Recovery {
 
         if let Some(largest_lost_pkt) = largest_lost_pkt {
             // CongestionEvent
-            if !self.in_recovery(largest_lost_pkt.time) {
-                self.recovery_start_time = Some(now);
-
-                self.cwnd /= 2;
-                self.cwnd = cmp::max(self.cwnd, MINIMUM_WINDOW);
-                self.ssthresh = self.cwnd;
-            }
+            self.cc
+                .congestion_event(largest_lost_pkt.time, now, trace_id);
 
             if self.in_persistent_congestion(&largest_lost_pkt) {
-                self.cwnd = MINIMUM_WINDOW;
+                self.cc.collapse_cwnd();
             }
         }
     }
@@ -582,14 +547,13 @@ impl std::fmt::Debug for Recovery {
             },
         };
 
-        write!(f, "inflight={} ", self.bytes_in_flight)?;
-        write!(f, "cwnd={} ", self.cwnd)?;
         write!(f, "latest_rtt={:?} ", self.latest_rtt)?;
         write!(f, "srtt={:?} ", self.smoothed_rtt)?;
         write!(f, "min_rtt={:?} ", self.min_rtt)?;
         write!(f, "rttvar={:?} ", self.rttvar)?;
         write!(f, "loss_time={:?} ", self.loss_time)?;
         write!(f, "loss_probes={:?} ", self.loss_probes)?;
+        write!(f, "{:?} ", self.cc)?;
 
         Ok(())
     }
