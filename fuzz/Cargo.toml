@@ -8,6 +8,9 @@ publish = false
 [package.metadata]
 cargo-fuzz = true
 
+[profile.dev]
+opt-level = 3
+
 [dependencies]
 quiche = { path = "..", features = ["fuzzing"] }
 lazy_static = "1"
