@@ -16,10 +16,11 @@ FROM debian:latest as quiche-base
 RUN apt-get update && apt-get install -y ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 RUN update-ca-certificates
-COPY --from=build /build/quiche/target/release/examples/http3-client /usr/local/bin/
-COPY --from=build /build/quiche/target/release/examples/http3-server /usr/local/bin/
-COPY --from=build /build/quiche/target/release/examples/client /usr/local/bin/
-COPY --from=build /build/quiche/target/release/examples/server /usr/local/bin/
+COPY --from=build /build/quiche/target/release/examples/http3-client \
+     /build/quiche/target/release/examples/http3-server \
+     /build/quiche/target/release/examples/client \
+     /build/quiche/target/release/examples/server \
+     /usr/local/bin/
 ENV PATH="/usr/local/bin/:${PATH}"
 ENV RUST_LOG=info
 
@@ -35,12 +36,14 @@ FROM martenseemann/quic-network-simulator-endpoint:latest as quiche-qns
 WORKDIR /quiche
 
 # copy binaries and sample certificate for server
-COPY --from=build /build/quiche/examples/cert.crt examples/
-COPY --from=build /build/quiche/examples/cert.key examples/
-COPY --from=build /build/quiche/target/release/examples/client .
-COPY --from=build /build/quiche/target/release/examples/server .
-COPY --from=build /build/quiche/target/release/examples/http3-client .
-COPY --from=build /build/quiche/target/release/examples/http3-server .
+COPY --from=build /build/quiche/examples/cert.crt \
+     /build/quiche/examples/cert.key \
+     examples/
+COPY --from=build /build/quiche/target/release/examples/client \
+     /build/quiche/target/release/examples/server \
+     /build/quiche/target/release/examples/http3-client \
+     /build/quiche/target/release/examples/http3-server \
+     ./
 ENV RUST_LOG=trace
 
 # copy interop test script
