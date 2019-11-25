@@ -2904,6 +2904,10 @@ impl TransportParams {
 
                 0x0003 => {
                     tp.max_packet_size = val.get_varint()?;
+
+                    if tp.max_packet_size < 1200 {
+                        return Err(Error::InvalidTransportParam);
+                    }
                 },
 
                 0x0004 => {
