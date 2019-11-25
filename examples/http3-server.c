@@ -255,7 +255,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         HASH_FIND(hh, conns->h, dcid, dcid_len, conn_io);
 
         if (conn_io == NULL) {
-            if (version != QUICHE_PROTOCOL_VERSION) {
+            if (!quiche_version_is_supported(version)) {
                 fprintf(stderr, "version negotiation\n");
 
                 ssize_t written = quiche_negotiate_version(scid, scid_len,
