@@ -29,7 +29,7 @@ optionally populate variable `quiche_commit` with current quiche commit hash:
 ```
  % git clone --recursive https://github.com/cloudflare/quiche
  % cd quiche
- % quiche_commit=(git log --pretty=format:'%h' -n 1)
+ % quiche_commit=$(git log --pretty=format:'%h' -n 1)
 ```
 
 Next you’ll need to apply the patch to NGINX:
