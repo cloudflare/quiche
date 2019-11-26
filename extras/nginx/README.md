@@ -24,9 +24,12 @@ only works with the 1.16.x release branch (the latest stable release being
  % tar xzvf nginx-1.16.1.tar.gz
 ```
 
-As well as quiche, the underlying implementation of HTTP/3 and QUIC:
+As well as quiche, the underlying implementation of HTTP/3 and QUIC and 
+optionally populate variable `quiche_commit` with current quiche commit hash:
 ```
  % git clone --recursive https://github.com/cloudflare/quiche
+ % cd quiche
+ % quiche_commit=(git log --pretty=format:'%h' -n 1)
 ```
 
 Next you’ll need to apply the patch to NGINX:
@@ -35,16 +38,29 @@ Next you’ll need to apply the patch to NGINX:
  % patch -p01 < ../quiche/extras/nginx/nginx-1.16.patch
 ```
 
-And finally build NGINX with HTTP/3 support enabled:
+And finally build NGINX with HTTP/3 support enabled and optionally label with
+`quiche_commit` populated variable the NGINX version to identify what was 
+quiche's last commit when NGINX was built:
 ```
  % ./configure                                 \
        --prefix=$PWD                           \
+       --build="quiche-${quiche_commit}"       \
        --with-http_ssl_module                  \
        --with-http_v2_module                   \
        --with-http_v3_module                   \
        --with-openssl=../quiche/deps/boringssl \
        --with-quiche=../quiche
  % make
+```
+
+When you run `nginx -V`, you get the build label like `quiche-a0e69ed` where
+quiche commit `a0e69ed` was the last commit for this NGINX build. Provide this
+`nginx -V` output when submiiting bug/issue requests.
+
+```
+nginx -V
+nginx version: nginx/1.16.1 (quiche-a0e69ed)
+built with OpenSSL 1.1.0 (compatible; BoringSSL) (running with BoringSSL)
 ```
 
 The above command instructs the NGINX build system to enable the HTTP/3 support
