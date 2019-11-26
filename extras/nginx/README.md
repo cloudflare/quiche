@@ -39,12 +39,24 @@ And finally build NGINX with HTTP/3 support enabled:
 ```
  % ./configure                                 \
        --prefix=$PWD                           \
+       --build="quiche-$(git --git-dir=../quiche/.git rev-parse --short HEAD)" \
        --with-http_ssl_module                  \
        --with-http_v2_module                   \
        --with-http_v3_module                   \
        --with-openssl=../quiche/deps/boringssl \
        --with-quiche=../quiche
  % make
+```
+
+The (optional) `--build` argument will embed the latest commit hash from the
+quiche repository in the NGINX binary, so that it can be retrieved when running
+`nginx -V`. The `nginx -V` output can also be provided when submiiting bug/issue
+requests to help with triage.
+
+```
+nginx -V
+nginx version: nginx/1.16.1 (quiche-a0e69ed)
+built with OpenSSL 1.1.0 (compatible; BoringSSL) (running with BoringSSL)
 ```
 
 The above command instructs the NGINX build system to enable the HTTP/3 support
