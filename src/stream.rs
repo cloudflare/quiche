@@ -45,6 +45,13 @@ pub struct StreamMap {
     /// Map of streams indexed by stream ID.
     streams: HashMap<u64, Stream>,
 
+    /// Set of streams that were completed and garbage collected.
+    ///
+    /// Instead of keeping the full stream state forever, we collect completed
+    /// streams to save memory, but we still need to keep track of previously
+    /// created streams, to prevent peers from re-creating them.
+    collected: HashSet<u64>,
+
     /// Peer's maximum bidirectional stream count limit.
     peer_max_streams_bidi: u64,
 
@@ -138,6 +145,11 @@ impl StreamMap {
         let stream = match self.streams.entry(id) {
             hash_map::Entry::Vacant(v) => {
                 if local != is_local(id, is_server) {
+                    return Err(Error::InvalidStreamState);
+                }
+
+                // Stream has already been closed and garbage collected.
+                if self.collected.contains(&id) {
                     return Err(Error::InvalidStreamState);
                 }
 
@@ -315,6 +327,9 @@ impl StreamMap {
                     self.local_max_streams_uni_next.saturating_add(1);
             }
         }
+
+        self.streams.remove(&stream_id);
+        self.collected.insert(stream_id);
     }
 
     /// Creates an iterator over streams that have outstanding data to read.
@@ -357,6 +372,12 @@ impl StreamMap {
         self.local_max_streams_uni_next != self.local_max_streams_uni &&
             self.local_max_streams_uni_next / 2 >
                 self.local_max_streams_uni - self.peer_opened_streams_uni
+    }
+
+    /// Returns the number of active streams in the map.
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.streams.len()
     }
 }
 

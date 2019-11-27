@@ -715,6 +715,10 @@ impl Connection {
         )?;
         conn.stream_send(stream_id, &header_block, fin)?;
 
+        if fin && conn.stream_finished(stream_id) {
+            self.streams.remove(&stream_id);
+        }
+
         Ok(())
     }
 
@@ -770,6 +774,10 @@ impl Connection {
 
         // Return how many bytes were written, excluding the frame header.
         let written = conn.stream_send(stream_id, &body[..body_len], fin)?;
+
+        if fin && written == body.len() && conn.stream_finished(stream_id) {
+            self.streams.remove(&stream_id);
+        }
 
         Ok(written)
     }
@@ -851,6 +859,8 @@ impl Connection {
             if conn.stream_finished(s) {
                 self.finished_streams.push_back(s);
             }
+
+            // TODO: check if stream is completed so it can be freed
 
             if let Some(ev) = ev {
                 return Ok(ev);
@@ -997,6 +1007,16 @@ impl Connection {
     fn process_control_stream(
         &mut self, conn: &mut super::Connection, stream_id: u64,
     ) -> Result<()> {
+        if conn.stream_finished(stream_id) {
+            conn.close(
+                true,
+                Error::ClosedCriticalStream.to_wire(),
+                b"Critical stream closed.",
+            )?;
+
+            return Err(Error::ClosedCriticalStream);
+        }
+
         match self.process_readable_stream(conn, stream_id) {
             Ok(_) => (),
 
