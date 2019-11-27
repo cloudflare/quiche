@@ -454,6 +454,14 @@ impl Recovery {
     }
 
     fn on_packet_acked(&mut self, pkt_num: u64, epoch: packet::Epoch) -> bool {
+        // If the acked packet number is lower than the lowest unacked packet
+        // number it means that the packet is not newly acked, so return early.
+        if let Some(lowest) = self.sent[epoch].values().nth(0) {
+            if pkt_num < lowest.pkt_num {
+                return false;
+            }
+        }
+
         // Check if packet is newly acked.
         if let Some(mut p) = self.sent[epoch].remove(&pkt_num) {
             self.acked[epoch].append(&mut p.frames);
