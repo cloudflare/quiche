@@ -4733,6 +4733,56 @@ mod tests {
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), None);
     }
+
+    #[test]
+    /// Tests that completed streams are garbage collected.
+    fn collect_streams() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.streams.len(), 0);
+        assert_eq!(pipe.server.streams.len(), 0);
+
+        assert_eq!(pipe.client.stream_send(0, b"aaaaa", true), Ok(5));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert!(!pipe.client.stream_finished(0));
+        assert!(!pipe.server.stream_finished(0));
+
+        assert_eq!(pipe.client.streams.len(), 1);
+        assert_eq!(pipe.server.streams.len(), 1);
+
+        let mut b = [0; 5];
+        pipe.server.stream_recv(0, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.server.stream_send(0, b"aaaaa", true), Ok(5));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert!(!pipe.client.stream_finished(0));
+        assert!(pipe.server.stream_finished(0));
+
+        assert_eq!(pipe.client.streams.len(), 1);
+        assert_eq!(pipe.server.streams.len(), 0);
+
+        let mut b = [0; 5];
+        pipe.client.stream_recv(0, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.streams.len(), 0);
+        assert_eq!(pipe.server.streams.len(), 0);
+
+        assert!(pipe.client.stream_finished(0));
+        assert!(pipe.server.stream_finished(0));
+
+        assert_eq!(
+            pipe.client.stream_send(0, b"", true),
+            Err(Error::InvalidStreamState)
+        );
+    }
 }
 
 pub use crate::packet::Header;
