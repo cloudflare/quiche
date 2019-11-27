@@ -412,7 +412,7 @@ impl Stream {
     ///
     /// For bidirectional streams this happens when both the receive and send
     /// sides are complete. That is when all incoming data has been read by the
-    /// application, and when all outgoing data has been ACKed by the peer.
+    /// application, and when all outgoing data has been acked by the peer.
     ///
     /// For unidirectional streams this happens when either the receive or send
     /// side is complete, depending on whether the stream was created locally
@@ -768,7 +768,7 @@ pub struct SendBuf {
     /// Whether the stream's send-side has been shut down.
     shutdown: bool,
 
-    /// Ranges of data offsets that have been ACKed.
+    /// Ranges of data offsets that have been acked.
     acked: ranges::RangeSet,
 }
 
@@ -853,7 +853,7 @@ impl SendBuf {
             self.fin_off = Some(buf.max_off());
         }
 
-        // Don't queue data that was already fully ACK'd.
+        // Don't queue data that was already fully acked.
         if self.ack_off() >= buf.max_off() {
             return Ok(());
         }
@@ -928,7 +928,7 @@ impl SendBuf {
         self.max_data = cmp::max(self.max_data, max_data);
     }
 
-    /// Increments the ACK'd data offset.
+    /// Increments the acked data offset.
     pub fn ack(&mut self, off: u64, len: usize) {
         self.acked.insert(off..off + len as u64);
     }
@@ -961,7 +961,7 @@ impl SendBuf {
     /// Returns true if the send-side of the stream is complete.
     ///
     /// This happens when the stream's send final size is known, and the peer
-    /// has already ACKed all stream data up to that point.
+    /// has already acked all stream data up to that point.
     pub fn is_complete(&self) -> bool {
         if let Some(fin_off) = self.fin_off {
             if self.acked == (0..fin_off) {
@@ -986,7 +986,7 @@ impl SendBuf {
         }
     }
 
-    /// Returns the highest contiguously ACKed offset.
+    /// Returns the highest contiguously acked offset.
     fn ack_off(&self) -> u64 {
         match self.acked.iter().next() {
             // Only consider the initial range if it contiguously covers the

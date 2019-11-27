@@ -578,7 +578,7 @@ impl Config {
     /// A bidirectional stream is considered completed when all incoming data
     /// has been read by the application (up to the `fin` offset) or the
     /// stream's read direction has been shutdown, and all outgoing data has
-    /// been ACKed by the peer (up to the `fin` offset) or the stream's write
+    /// been acked by the peer (up to the `fin` offset) or the stream's write
     /// direction has been shutdown.
     ///
     /// The default value is `0`.
@@ -736,7 +736,7 @@ pub struct Connection {
     /// Whether the connection handshake has been confirmed.
     handshake_confirmed: bool,
 
-    /// Whether an ACK-eliciting packet has been sent since last receiving a
+    /// Whether an ack-eliciting packet has been sent since last receiving a
     /// packet.
     ack_eliciting_sent: bool,
 
@@ -1383,13 +1383,13 @@ impl Connection {
             self.process_frame(frame, epoch, now)?;
         }
 
-        // Process ACK'd frames.
+        // Process acked frames.
         for acked in self.recovery.acked[epoch].drain(..) {
             match acked {
                 frame::Frame::ACK { ranges, .. } => {
                     // Stop acknowledging packets less than or equal to the
                     // largest acknowledged in the sent ACK frame that, in
-                    // turn, got ACK'd.
+                    // turn, got acked.
                     if let Some(largest_acked) = ranges.largest() {
                         self.pkt_num_spaces[epoch]
                             .recv_pkt_need_ack
@@ -1424,7 +1424,7 @@ impl Connection {
         }
 
         // We only record the time of arrival of the largest packet number
-        // that still needs to be ACK'd, to be used for ACK delay calculation.
+        // that still needs to be acked, to be used for ACK delay calculation.
         if self.pkt_num_spaces[epoch].recv_pkt_need_ack.largest() < Some(pn) {
             self.pkt_num_spaces[epoch].largest_rx_pkt_time = now;
         }
@@ -1991,7 +1991,7 @@ impl Connection {
 
         self.max_send_bytes = self.max_send_bytes.saturating_sub(written);
 
-        // (Re)start the idle timer if we are sending the first ACK-eliciting
+        // (Re)start the idle timer if we are sending the first ack-eliciting
         // packet since last receiving a packet.
         if ack_eliciting &&
             !self.ack_eliciting_sent &&
@@ -2143,7 +2143,7 @@ impl Connection {
     /// When the `direction` argument is set to [`Shutdown::Read`], outstanding
     /// data in the stream's receive buffer is dropped, and no additional data
     /// is added to it. Data received after calling this method is still
-    /// validated and ACKed but not stored, and [`stream_recv()`] will not
+    /// validated and acked but not stored, and [`stream_recv()`] will not
     /// return it to the application.
     ///
     /// When the `direction` argument is set to [`Shutdown::Write`], outstanding
@@ -3565,7 +3565,7 @@ mod tests {
         assert!(pipe.server.handshake_completed);
         assert!(!pipe.server.handshake_confirmed);
 
-        // Client ACKs 1-RTT packet.
+        // Client acks 1-RTT packet.
         len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
 
         assert!(pipe.client.handshake_completed);
@@ -3583,12 +3583,12 @@ mod tests {
         assert!(pipe.server.handshake_completed);
         assert!(pipe.server.handshake_confirmed);
 
-        // Client sends 1-RTT ACK-eliciting packet.
+        // Client sends 1-RTT ack-eliciting packet.
         assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
 
         len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
 
-        // Server ACKs 1-RTT packet.
+        // Server acks 1-RTT packet.
         len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
         assert!(pipe.client.handshake_completed);

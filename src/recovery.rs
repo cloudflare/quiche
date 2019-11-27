@@ -195,7 +195,7 @@ impl Recovery {
     ) -> Result<()> {
         let largest_acked = ranges.largest().unwrap();
 
-        // If the largest packet number ACKed exceeds any packet number we have
+        // If the largest packet number acked exceeds any packet number we have
         // sent, then the ACK is obviously invalid, so there's no need to
         // continue further.
         if largest_acked > self.largest_sent_pkt[epoch] {
@@ -229,7 +229,7 @@ impl Recovery {
 
         let mut has_newly_acked = false;
 
-        // Processing ACKed packets in reverse order (from largest to smallest)
+        // Processing acked packets in reverse order (from largest to smallest)
         // appears to be faster, possibly due to the BTreeMap implementation.
         for pn in ranges.flatten().rev() {
             let newly_acked = self.on_packet_acked(pn, epoch);
