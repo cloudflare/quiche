@@ -1631,11 +1631,16 @@ impl Connection {
         hdr.to_bytes(&mut b)?;
 
         // Make sure we have enough space left for the header, the payload
-        // length, the packet number and the AEAD overhead. We assume that
-        // the payload length can always be encoded with a 2-byte varint.
+        // length, the packet number and the AEAD overhead.
         left = left
-            .checked_sub(b.off() + 2 + pn_len + overhead)
+            .checked_sub(b.off() + pn_len + overhead)
             .ok_or(Error::Done)?;
+
+        // We assume that the payload length, which is only present in long
+        // header packets, can always be encoded with a 2-byte varint.
+        if pkt_type != packet::Type::Short {
+            left = left.checked_sub(2).ok_or(Error::Done)?;
+        }
 
         let mut frames: Vec<frame::Frame> = Vec::new();
 
