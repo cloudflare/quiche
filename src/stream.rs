@@ -967,6 +967,15 @@ impl SendBuf {
         Ok(())
     }
 
+    /// Returns the lowest offset of data buffered.
+    pub fn off(&self) -> u64 {
+        match self.data.peek() {
+            Some(v) => v.off(),
+
+            None => self.off,
+        }
+    }
+
     /// Returns true if all data in the stream has been sent.
     ///
     /// This happens when the stream's send final size is knwon, and the
@@ -996,15 +1005,6 @@ impl SendBuf {
     /// Returns true if there is data to be written.
     fn ready(&self) -> bool {
         !self.data.is_empty()
-    }
-
-    /// Returns the lowest offset of data buffered.
-    fn off(&self) -> u64 {
-        match self.data.peek() {
-            Some(v) => v.off(),
-
-            None => self.off,
-        }
     }
 
     /// Returns the highest contiguously acked offset.
