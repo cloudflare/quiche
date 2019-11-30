@@ -1864,12 +1864,26 @@ impl Connection {
                 };
 
                 // Make sure we can fit the data in the packet.
-                let stream_len = cmp::min(
-                    left - frame::MAX_STREAM_OVERHEAD,
-                    (self.max_tx_data - self.tx_data) as usize,
-                );
+                let max_len =
+                    cmp::min(left, (self.max_tx_data - self.tx_data) as usize);
 
-                let stream_buf = stream.send.pop(stream_len)?;
+                let off = stream.send.off();
+
+                // Try to accurately account for the STREAM frame's overhead,
+                // such that we can fill as much of the packet buffer as
+                // possible.
+                let overhead = 1 +
+                    octets::varint_len(stream_id) +
+                    octets::varint_len(off) +
+                    octets::varint_len(max_len as u64);
+
+                let max_len = match max_len.checked_sub(overhead) {
+                    Some(v) => v,
+
+                    None => continue,
+                };
+
+                let stream_buf = stream.send.pop(max_len)?;
 
                 if stream_buf.is_empty() && !stream_buf.fin() {
                     continue;
