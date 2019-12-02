@@ -37,6 +37,11 @@ A set of environment variables allow tuning of test beheviour:
 * IDLE_TIMEOUT     - client's idle timeout in integer milliseconds.
                      Default value is 60000 (60 seconds).
 
+* EXTRA_HEADERS    - additional request headers in JSON format.
+                     Currently used by `headers` test only.
+
+* EXPECT_REQ_HEADERS - expected request header/value pairs in JSON format.
+                       Currently used by `headers` test only.
 
 For example, to test a non-default server, use the HTTPBIN_ENDPOINT environment
 variable

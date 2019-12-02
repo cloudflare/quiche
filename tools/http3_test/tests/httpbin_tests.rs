@@ -94,6 +94,29 @@ mod httpbin_tests {
         }
     }
 
+    fn extra_headers() -> Option<serde_json::Map<String, serde_json::Value>> {
+        if let Some(val) = std::env::var_os("EXTRA_HEADERS") {
+            let json_string = val.into_string().unwrap();
+            let parsed: serde_json::Value =
+                serde_json::from_str(&json_string).unwrap();
+            return Some(parsed.as_object().unwrap().clone());
+        }
+
+        return None;
+    }
+
+    fn expect_req_headers() -> Option<serde_json::Map<String, serde_json::Value>>
+    {
+        if let Some(val) = std::env::var_os("EXPECT_REQ_HEADERS") {
+            let json_string = val.into_string().unwrap();
+            let parsed: serde_json::Value =
+                serde_json::from_str(&json_string).unwrap();
+            return Some(parsed.as_object().unwrap().clone());
+        }
+
+        return None;
+    }
+
     // A rudimentary structure to hold httpbin response data
     #[derive(Debug, serde::Deserialize)]
     struct HttpBinResponseBody {
@@ -230,14 +253,44 @@ mod httpbin_tests {
 
     #[test]
     fn headers() {
-        let reqs = request_check_status("headers", 200);
+        let mut reqs = Vec::new();
+        let expect_hdrs = Some(vec![Header::new(":status", "200")]);
+
+        let mut url = endpoint(Some("headers"));
+        url.set_query(Some("show_env=1")); // reveal X-Forwarded-* headers
+        reqs.push(Http3Req::new("GET", &url, None, expect_hdrs.clone()));
+
+        if let Some(headers) = &extra_headers() {
+            for (name, val) in headers {
+                reqs[0].hdrs.push(Header::new(&name, val.as_str().unwrap()));
+            }
+        };
 
         let assert = |reqs: &[Http3Req]| {
             assert_headers!(reqs[0]);
 
             let json = jsonify(&reqs[0].resp_body);
-            if let Some(args) = json.args {
-                assert_eq!(args["Host"], reqs[0].url.host_str().unwrap());
+            assert_ne!(json.headers, None);
+            if let Some(headers) = json.headers {
+                if let Some(expected_headers) = &expect_req_headers() {
+                    for (name, val) in expected_headers {
+                        if let Some(expected_value) = val.as_str() {
+                            assert_eq!(
+                                headers.get(name),
+                                Some(&String::from(expected_value)),
+                                "Header '{}' doesn't match",
+                                name
+                            );
+                        } else {
+                            assert_eq!(
+                                headers.get(name),
+                                None,
+                                "Header '{}' exists",
+                                name
+                            );
+                        }
+                    }
+                }
             }
         };
 
