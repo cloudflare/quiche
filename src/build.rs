@@ -80,6 +80,7 @@ fn get_boringssl_platform_output_path(lib: &str) -> String {
 fn get_boringssl_cmake_config() -> cmake::Config {
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
+    let pwd = std::env::current_dir().unwrap();
 
     let mut boringssl_cmake = cmake::Config::new("deps/boringssl");
 
@@ -120,7 +121,18 @@ fn get_boringssl_cmake_config() -> cmake::Config {
             boringssl_cmake
         },
 
-        _ => boringssl_cmake,
+        _ => {
+            // Configure BoringSSL for building on 32-bit platforms.
+            if arch == "x86" {
+                boringssl_cmake.define(
+                    "CMAKE_TOOLCHAIN_FILE",
+                    pwd.join("deps/boringssl/util/32-bit-toolchain.cmake")
+                        .as_os_str(),
+                );
+            }
+
+            boringssl_cmake
+        },
     };
 }
 

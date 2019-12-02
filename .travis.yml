@@ -141,6 +141,25 @@ matrix:
       - tools/setup_android.sh
      script:
       - tools/build_android.sh --release --verbose
+   - name: "x86 cross-build"
+     language: rust
+     rust: stable
+     env:
+       TARGET=i686-unknown-linux-gnu
+     before_install:
+      # Install and use the current stable release of Go
+      - gimme --list
+      - eval "$(gimme stable)"
+      - gimme --list
+      # Install x86 Rust target for cross-building
+      - rustup target add $TARGET || true
+     addons:
+       apt:
+         packages:
+         - gcc-multilib
+         - g++-multilib
+     script:
+      - RUSTFLAGS="-D warnings" cargo build --target=$TARGET
 
 deploy:
   - provider: pages
