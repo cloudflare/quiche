@@ -152,7 +152,7 @@ matrix:
       - eval "$(gimme stable)"
       - gimme --list
       # Install x86 Rust target for cross-building
-      - rustup target add $TARGET || true
+      - rustup target add $TARGET
      addons:
        apt:
          packages:
@@ -169,7 +169,8 @@ deploy:
     github-token: $GITHUB_TOKEN
     on:
       branch: master
-      condition: $TRAVIS_RUST_VERSION = stable && $TRAVIS_OS_NAME = linux && $NGINX_VER = ""
+      condition: $TRAVIS_RUST_VERSION = stable && $TRAVIS_OS_NAME = linux && \
+                 $NGINX_VER = "" && $TARGET = ""
   # publish docker images on master
   - provider: script
     skip-cleanup: true
