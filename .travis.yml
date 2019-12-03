@@ -169,7 +169,7 @@ deploy:
     github-token: $GITHUB_TOKEN
     on:
       branch: master
-      condition: $TRAVIS_RUST_VERSION = stable && $TRAVIS_OS_NAME = linux && $NGINX_VER = ""
+      condition: $TRAVIS_RUST_VERSION = stable && $TRAVIS_OS_NAME = linux && $NGINX_VER = "" && TARGET = ""
   # publish docker images on master
   - provider: script
     skip-cleanup: true
