@@ -1,4 +1,4 @@
-From b98484cf2f61f0168b93bd1eb9e506b3294c0d13 Mon Sep 17 00:00:00 2001
+From 631a3c8493e4d6b5831c457e767f6f7ce5961a67 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 10 Oct 2019 17:06:08 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -14,7 +14,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  auto/options                            |    9 +
  src/core/ngx_connection.h               |    7 +
  src/core/ngx_core.h                     |    3 +
- src/event/ngx_event_quic.c              |  571 +++++++
+ src/event/ngx_event_quic.c              |  581 +++++++
  src/event/ngx_event_quic.h              |   49 +
  src/event/ngx_event_udp.c               |    8 +
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
@@ -31,7 +31,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 ++++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3544 insertions(+), 11 deletions(-)
+ 27 files changed, 3554 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -334,10 +334,10 @@ index 93ca9174d..d0441f034 100644
  #include <ngx_module.h>
 diff --git a/src/event/ngx_event_quic.c b/src/event/ngx_event_quic.c
 new file mode 100644
-index 000000000..bcaf446fa
+index 000000000..71d571a44
 --- /dev/null
 +++ b/src/event/ngx_event_quic.c
-@@ -0,0 +1,571 @@
+@@ -0,0 +1,581 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -474,7 +474,7 @@ index 000000000..bcaf446fa
 +    }
 +
 +    /* Version mismatch, do version negotiation. */
-+    if (pkt_version != QUICHE_PROTOCOL_VERSION) {
++    if (!quiche_version_is_supported(pkt_version)) {
 +        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0,
 +                       "quic version negotiation");
 +
@@ -783,6 +783,12 @@ index 000000000..bcaf446fa
 +         * care of setting up the draining timer. */
 +        ngx_quic_write_handler(c->write);
 +
++        /* The QUIC connection might have already been freed inside the write
++         * handler, in which case we are done. */
++        if (c->destroyed) {
++            return NGX_OK;
++        }
++
 +        return NGX_AGAIN;
 +    }
 +
@@ -854,6 +860,10 @@ index 000000000..bcaf446fa
 +    if (c->quic) {
 +        if (ngx_quic_shutdown(c) == NGX_AGAIN) {
 +            c->quic->handler = ngx_quic_close_connection;
++            return;
++        }
++
++        if (c->destroyed) {
 +            return;
 +        }
 +    }
@@ -4128,4 +4138,4 @@ index 000000000..72e189def
 +
 +#endif /* _NGX_HTTP_V3_MODULE_H_INCLUDED_ */
 --
-2.23.0
+2.24.0
