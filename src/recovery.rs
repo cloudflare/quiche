@@ -272,6 +272,10 @@ impl Recovery {
 
         self.pto_count += 1;
 
+        // Detect lost packets in all epoch.
+        for e in packet::EPOCH_INITIAL..packet::EPOCH_COUNT {
+            self.detect_lost_packets(e, now, trace_id);
+        }
         self.set_loss_detection_timer();
 
         trace!("{} {:?}", trace_id, self);

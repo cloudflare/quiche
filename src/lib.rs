@@ -2565,6 +2565,14 @@ impl Connection {
 
     /// Selects the packet number space for outgoing packets.
     fn write_epoch(&self) -> Result<packet::Epoch> {
+        // If there is lost packet in any epoch, handle it first.
+        for epoch in packet::EPOCH_INITIAL..packet::EPOCH_COUNT {
+            // There are lost frames in this packet number space.
+            if !self.recovery.lost[epoch].is_empty() {
+                return Ok(epoch);
+            }
+        }
+
         // On error or PTO send packets in the latest epoch available, but only
         // send 1-RTT ones when the handshake is completed.
         if self.error.is_some() || self.recovery.probes > 0 {
@@ -2598,11 +2606,6 @@ impl Connection {
 
             // We are ready to send data for this packet number space.
             if self.pkt_num_spaces[epoch].ready() {
-                return Ok(epoch);
-            }
-
-            // There are lost frames in this packet number space.
-            if !self.recovery.lost[epoch].is_empty() {
                 return Ok(epoch);
             }
         }
