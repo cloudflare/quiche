@@ -77,7 +77,7 @@ pub struct Recovery {
 
     pto_count: u32,
 
-    time_of_last_sent_ack_eliciting_pkt: Instant,
+    time_of_last_sent_ack_eliciting_pkt: [Option<Instant>; packet::EPOCH_COUNT],
 
     largest_acked_pkt: [u64; packet::EPOCH_COUNT],
 
@@ -111,19 +111,17 @@ pub struct Recovery {
 
     ssthresh: usize,
 
-    pub probes: usize,
+    pub loss_probes: [usize; packet::EPOCH_COUNT],
 }
 
 impl Default for Recovery {
     fn default() -> Recovery {
-        let now = Instant::now();
-
         Recovery {
             loss_detection_timer: None,
 
             pto_count: 0,
 
-            time_of_last_sent_ack_eliciting_pkt: now,
+            time_of_last_sent_ack_eliciting_pkt: [None; packet::EPOCH_COUNT],
 
             largest_acked_pkt: [std::u64::MAX; packet::EPOCH_COUNT],
 
@@ -157,14 +155,15 @@ impl Default for Recovery {
 
             ssthresh: std::usize::MAX,
 
-            probes: 0,
+            loss_probes: [0; packet::EPOCH_COUNT],
         }
     }
 }
 
 impl Recovery {
     pub fn on_packet_sent(
-        &mut self, pkt: Sent, epoch: packet::Epoch, now: Instant, trace_id: &str,
+        &mut self, pkt: Sent, epoch: packet::Epoch, handshake_completed: bool,
+        now: Instant, trace_id: &str,
     ) {
         let ack_eliciting = pkt.ack_eliciting;
         let in_flight = pkt.in_flight;
@@ -177,13 +176,13 @@ impl Recovery {
 
         if in_flight {
             if ack_eliciting {
-                self.time_of_last_sent_ack_eliciting_pkt = now;
+                self.time_of_last_sent_ack_eliciting_pkt[epoch] = Some(now);
             }
 
             // OnPacketSentCC
             self.bytes_in_flight += sent_bytes;
 
-            self.set_loss_detection_timer();
+            self.set_loss_detection_timer(handshake_completed);
         }
 
         trace!("{} {:?}", trace_id, self);
@@ -191,7 +190,8 @@ impl Recovery {
 
     pub fn on_ack_received(
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
-        epoch: packet::Epoch, now: Instant, trace_id: &str,
+        epoch: packet::Epoch, handshake_completed: bool, now: Instant,
+        trace_id: &str,
     ) -> Result<()> {
         let largest_acked = ranges.largest().unwrap();
 
@@ -248,19 +248,22 @@ impl Recovery {
 
         self.pto_count = 0;
 
-        self.set_loss_detection_timer();
+        self.set_loss_detection_timer(handshake_completed);
 
         trace!("{} {:?}", trace_id, self);
 
         Ok(())
     }
 
-    pub fn on_loss_detection_timeout(&mut self, now: Instant, trace_id: &str) {
-        let (loss_time, epoch) = self.earliest_loss_time();
+    pub fn on_loss_detection_timeout(
+        &mut self, handshake_completed: bool, now: Instant, trace_id: &str,
+    ) {
+        let (earliest_loss_time, epoch) =
+            self.earliest_loss_time(self.loss_time, handshake_completed);
 
-        if loss_time.is_some() {
+        if earliest_loss_time.is_some() {
             self.detect_lost_packets(epoch, now, trace_id);
-            self.set_loss_detection_timer();
+            self.set_loss_detection_timer(handshake_completed);
 
             trace!("{} {:?}", trace_id, self);
             return;
@@ -268,11 +271,16 @@ impl Recovery {
 
         // TODO: handle client without 1-RTT keys case.
 
-        self.probes = 2;
+        let (_, epoch) = self.earliest_loss_time(
+            self.time_of_last_sent_ack_eliciting_pkt,
+            handshake_completed,
+        );
+
+        self.loss_probes[epoch] = 2;
 
         self.pto_count += 1;
 
-        self.set_loss_detection_timer();
+        self.set_loss_detection_timer(handshake_completed);
 
         trace!("{} {:?}", trace_id, self);
     }
@@ -286,6 +294,10 @@ impl Recovery {
 
         self.bytes_in_flight -= unacked_bytes;
 
+        self.loss_time[epoch] = None;
+        self.loss_probes[epoch] = 0;
+        self.time_of_last_sent_ack_eliciting_pkt[epoch] = None;
+
         self.sent[epoch].clear();
         self.lost[epoch].clear();
         self.acked[epoch].clear();
@@ -297,15 +309,11 @@ impl Recovery {
 
     pub fn cwnd(&self) -> usize {
         // Ignore cwnd when sending probe packets.
-        if self.probes > 0 {
+        if self.loss_probes.iter().any(|&x| x > 0) {
             return std::usize::MAX;
         }
 
-        if self.bytes_in_flight > self.cwnd {
-            return 0;
-        }
-
-        self.cwnd - self.bytes_in_flight
+        self.cwnd.saturating_sub(self.bytes_in_flight)
     }
 
     pub fn rtt(&self) -> Duration {
@@ -351,12 +359,21 @@ impl Recovery {
         }
     }
 
-    fn earliest_loss_time(&mut self) -> (Option<Instant>, packet::Epoch) {
+    fn earliest_loss_time(
+        &mut self, times: [Option<Instant>; packet::EPOCH_COUNT],
+        handshake_completed: bool,
+    ) -> (Option<Instant>, packet::Epoch) {
         let mut epoch = packet::EPOCH_INITIAL;
-        let mut time = self.loss_time[epoch];
+        let mut time = times[epoch];
 
+        // Iterate over all packet number spaces starting from Handshake.
+        #[allow(clippy::needless_range_loop)]
         for e in packet::EPOCH_HANDSHAKE..packet::EPOCH_COUNT {
-            let new_time = self.loss_time[e];
+            let new_time = times[e];
+
+            if e == packet::EPOCH_APPLICATION && !handshake_completed {
+                continue;
+            }
 
             if new_time.is_some() && (time.is_none() || new_time < time) {
                 time = new_time;
@@ -367,12 +384,13 @@ impl Recovery {
         (time, epoch)
     }
 
-    fn set_loss_detection_timer(&mut self) {
-        let (loss_time, _) = self.earliest_loss_time();
+    fn set_loss_detection_timer(&mut self, handshake_completed: bool) {
+        let (earliest_loss_time, _) =
+            self.earliest_loss_time(self.loss_time, handshake_completed);
 
-        if loss_time.is_some() {
+        if earliest_loss_time.is_some() {
             // Time threshold loss detection.
-            self.loss_detection_timer = loss_time;
+            self.loss_detection_timer = earliest_loss_time;
             return;
         }
 
@@ -389,8 +407,14 @@ impl Recovery {
             Some(_) => self.pto() * 2_u32.pow(self.pto_count),
         };
 
-        self.loss_detection_timer =
-            Some(self.time_of_last_sent_ack_eliciting_pkt + timeout);
+        let (sent_time, _) = self.earliest_loss_time(
+            self.time_of_last_sent_ack_eliciting_pkt,
+            handshake_completed,
+        );
+
+        if let Some(sent_time) = sent_time {
+            self.loss_detection_timer = Some(sent_time + timeout);
+        }
     }
 
     fn detect_lost_packets(
@@ -564,7 +588,8 @@ impl std::fmt::Debug for Recovery {
         write!(f, "srtt={:?} ", self.smoothed_rtt)?;
         write!(f, "min_rtt={:?} ", self.min_rtt)?;
         write!(f, "rttvar={:?} ", self.rttvar)?;
-        write!(f, "probes={} ", self.probes)?;
+        write!(f, "loss_time={:?} ", self.loss_time)?;
+        write!(f, "loss_probes={:?} ", self.loss_probes)?;
 
         Ok(())
     }

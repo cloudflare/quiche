@@ -1756,7 +1756,7 @@ impl Connection {
         }
 
         // Create PING for PTO probe.
-        if self.recovery.probes > 0 && left >= 1 && !is_closing {
+        if self.recovery.loss_probes[epoch] > 0 && left >= 1 && !is_closing {
             let frame = frame::Frame::Ping;
 
             payload_len += frame.wire_len();
@@ -1764,7 +1764,7 @@ impl Connection {
 
             frames.push(frame);
 
-            self.recovery.probes -= 1;
+            self.recovery.loss_probes[epoch] -= 1;
 
             ack_eliciting = true;
             in_flight = true;
@@ -1996,8 +1996,13 @@ impl Connection {
             in_flight,
         };
 
-        self.recovery
-            .on_packet_sent(sent_pkt, epoch, now, &self.trace_id);
+        self.recovery.on_packet_sent(
+            sent_pkt,
+            epoch,
+            self.handshake_completed,
+            now,
+            &self.trace_id,
+        );
 
         self.pkt_num_spaces[epoch].next_pkt_num += 1;
 
@@ -2413,7 +2418,12 @@ impl Connection {
             if timer <= now {
                 trace!("{} loss detection timeout expired", self.trace_id);
 
-                self.recovery.on_loss_detection_timeout(now, &self.trace_id);
+                self.recovery.on_loss_detection_timeout(
+                    self.handshake_completed,
+                    now,
+                    &self.trace_id,
+                );
+
                 return;
             }
         }
@@ -2565,9 +2575,9 @@ impl Connection {
 
     /// Selects the packet number space for outgoing packets.
     fn write_epoch(&self) -> Result<packet::Epoch> {
-        // On error or PTO send packets in the latest epoch available, but only
-        // send 1-RTT ones when the handshake is completed.
-        if self.error.is_some() || self.recovery.probes > 0 {
+        // On error send packet in the latest epoch available, but only send
+        // 1-RTT ones when the handshake is completed.
+        if self.error.is_some() {
             let epoch = match self.handshake.write_level() {
                 crypto::Level::Initial => packet::EPOCH_INITIAL,
                 crypto::Level::ZeroRTT => unreachable!(),
@@ -2576,22 +2586,16 @@ impl Connection {
             };
 
             if epoch == packet::EPOCH_APPLICATION && !self.handshake_completed {
-                // For errors, downgrade the epoch to handshake. We can't
-                // currently do the same for probes because PING frames are not
-                // allowed in Handshake packets.
-                if self.error.is_some() {
-                    return Ok(packet::EPOCH_HANDSHAKE);
-                }
-
-                return Err(Error::Done);
+                // Downgrade the epoch to handshake as the handshake is not
+                // completed yet.
+                return Ok(packet::EPOCH_HANDSHAKE);
             }
 
             return Ok(epoch);
         }
 
         for epoch in packet::EPOCH_INITIAL..packet::EPOCH_COUNT {
-            // Only use application packet number space when handshake is
-            // complete.
+            // Only send 1-RTT packets when handshake is complete.
             if epoch == packet::EPOCH_APPLICATION && !self.handshake_completed {
                 continue;
             }
@@ -2603,6 +2607,11 @@ impl Connection {
 
             // There are lost frames in this packet number space.
             if !self.recovery.lost[epoch].is_empty() {
+                return Ok(epoch);
+            }
+
+            // We need to send PTO probe packets.
+            if self.recovery.loss_probes[epoch] > 0 {
                 return Ok(epoch);
             }
         }
@@ -2657,6 +2666,7 @@ impl Connection {
                     &ranges,
                     ack_delay,
                     epoch,
+                    self.handshake_completed,
                     now,
                     &self.trace_id,
                 )?;
