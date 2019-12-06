@@ -1755,21 +1755,6 @@ impl Connection {
             }
         }
 
-        // Create PING for PTO probe.
-        if self.recovery.loss_probes[epoch] > 0 && left >= 1 && !is_closing {
-            let frame = frame::Frame::Ping;
-
-            payload_len += frame.wire_len();
-            left -= frame.wire_len();
-
-            frames.push(frame);
-
-            self.recovery.loss_probes[epoch] -= 1;
-
-            ack_eliciting = true;
-            in_flight = true;
-        }
-
         // Create CONNECTION_CLOSE frame.
         if let Some(err) = self.error {
             let frame = frame::Frame::ConnectionClose {
@@ -1912,6 +1897,28 @@ impl Connection {
 
                 break;
             }
+        }
+
+        // Create PING for PTO probe.
+        if self.recovery.loss_probes[epoch] > 0 &&
+            !ack_eliciting &&
+            left >= 1 &&
+            !is_closing
+        {
+            let frame = frame::Frame::Ping;
+
+            payload_len += frame.wire_len();
+            left -= frame.wire_len();
+
+            frames.push(frame);
+
+            ack_eliciting = true;
+            in_flight = true;
+        }
+
+        if ack_eliciting {
+            self.recovery.loss_probes[epoch] =
+                self.recovery.loss_probes[epoch].saturating_sub(1);
         }
 
         if frames.is_empty() {
