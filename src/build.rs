@@ -122,8 +122,8 @@ fn get_boringssl_cmake_config() -> cmake::Config {
         },
 
         _ => {
-            // Configure BoringSSL for building on 32-bit platforms.
-            if arch == "x86" {
+            // Configure BoringSSL for building on 32-bit non-windows platforms.
+            if arch == "x86" && os != "windows" {
                 boringssl_cmake.define(
                     "CMAKE_TOOLCHAIN_FILE",
                     pwd.join("deps/boringssl/util/32-bit-toolchain.cmake")
