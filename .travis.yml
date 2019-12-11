@@ -3,19 +3,27 @@ env:
   - secure: "Aa+7RLfRyfdH2ENH0fyjI7Waq7/9XSk1LP6sDwG0zG1uhmus/z0QaiaCd027mFY3V25Kzfd6TVzL92dp3U63+3Qn3hHle3oNdu1jqaSBHB1L7R+IS6tLW0Bny5Zd7mMRNbVO642qvmuZo8A5nuu/WHp3w91WI4rp1rhULm/uhQ/+7Sx7mDSR1vRJyIeB7mETzRpckz0cUiZU656AB1hRsMVzkm+no9urHcnEP6AcPukVlWGgsdcBloMoczwp8M/cnvrGg8SuroEnu82i3eY5TwmXBhtmFa06WUaiIafT8PcB+JVADwunS1nJ7tTGCjInVQY5qNogPJxdr97E9vuHJGMDpdCkDuvTFaF2FdnXuvli3nUr2w7mP3t991ocWQW9PMRUTJe+/pFJ935puy8zD797UKUR3d2GwZRHIpwbzmcP+QQ1wG3odoFk4i/tEUAHtKirh6VglQyp9BFIaIX7TuuqIyRqxcqHVsVfDVVouHBIYuy7uRDd7YjmoF3IqqIKsHEFBnMT9GSQeifjJAPYEOoPXfzoa1Ya8PbmSdYtVR9nyjIHHLv/xDYxG3ulBgmz1ieGe9pGNgqLmi6GSiyJ/Vj+5L+1bJGrVMDELHQR/bVdZMmoAp6y8f397hace2qHKDBVN4AVfDWeCiTs1NUtgrJVIpj3Xt788RrnIfvuhF4="
   - secure: "CE2MWJZ+EtmaOheaGBd5XNgV7A/AGLpQ1Lct2R4v8BG3pXFFAM9uJEvpyTXBFx40gzD8HTBHbNRw1Ae+hP/Hz3M8o96jrdVsPlojKaShaOqoalYCghnfxDSd6WsstJdTYUk1iKhU3bSin/PHhDHe5i/dpwTay4DqSCX4MWaJPpItRIwiPpd8ekVGrHb/DkuTpEWY35Dg+9oao9KnB5c/D1oHLvInRMCivtpPpKRxNWkznOGprQALGIPmnHupBQ0zu6H7+K7TE/DT/HmocQd1h6HEba6DGkKqXU79NgS3uz2EFfgdhnIvTlxWTZFtkET9lym5mqjyuvwkIDsEDfGmk7dGjT0MFe2/9RRMxeNjINA1dlat4riUZ+a5dWqj/7uSvcOgTv0lqT5qitHbtqI0Id/TMaZlVE9r1x+vSTy/7ISzwhVPOwFa6SZJFwrHVBqnPZKP8gajpCcDJMKdFjfuLNZMF/NlDhj78S9Hyr0CUUoCKcPYiCxyCPfV7LzNMtlaynKJG2A+z0vLqZ8YSlTrqBfjuVzrq8EDJyJWMRuik3rkNe/GOFzUgQ+nBxgOzPT0Y5CPlEQNYW991pRz2r5gXhR+MSpjF3ytSrMCYYfIwymwqxb9oX4EvPCHCrWCqT4lebQyfPO8Pp8tDeV3XeRBM5a6KjOD0WfZ5pRlZ/REWrM="
 
+cache: cargo
+
 addons:
   apt:
-    packages:
-     - libev-dev
-     - protobuf-compiler
-     - uthash-dev
-
-cache: cargo
+    packages: &linux_deps
+      - libev-dev
+      - uthash-dev
+      - protobuf-compiler
 
 matrix:
   include:
-   - language: rust
+   - name: "rust/stable Linux x86_64/nginx/x86"
+     language: rust
      rust: stable
+     env:
+       NGINX_VER=1.16.1
+       TARGET_32=i686-unknown-linux-gnu
+     addons:
+       apt:
+         packages:
+         - [*linux_deps, gcc-multilib, g++-multilib]
      before_install:
       # Install and use the current stable release of Go
       - gimme --list
@@ -23,8 +31,9 @@ matrix:
       - gimme --list
      install:
       - rustup component add clippy
+      - rustup target add $TARGET_32
      script:
-      - RUSTFLAGS="-D warnings" cargo build --release --verbose
+      - RUSTFLAGS="-D warnings" cargo build --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
       - RUSTFLAGS="-D warnings" cargo package --verbose --allow-dirty
       - cargo clippy --examples -- -D warnings
@@ -37,15 +46,32 @@ matrix:
       - RUSTFLAGS="-D warnings" cargo test --verbose --manifest-path tools/qlog/Cargo.toml
       - cargo clippy --manifest-path tools/qlog/Cargo.toml -- -D warnings
       # quic-trace-log
-      - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
+      - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/quic-trace-log/Cargo.toml
       - cargo clippy --manifest-path tools/quic-trace-log/Cargo.toml -- -D warnings
-   - name: "Docker images"
+      # nginx
+      - curl -O https://nginx.org/download/nginx-$NGINX_VER.tar.gz
+      - tar xzf nginx-$NGINX_VER.tar.gz
+      - |
+        cd nginx-$NGINX_VER &&
+        patch -p01 < ../extras/nginx/nginx-1.16.patch &&
+        ./configure --with-http_ssl_module --with-http_v2_module --with-http_v3_module --with-openssl="../deps/boringssl" --with-quiche=".." --with-debug &&
+        make -j`nproc`
+      - objs/nginx -V
+      - cd ..
+      # x86 cross build
+      - RUSTFLAGS="-D warnings" cargo build --target=$TARGET_32
+   - name: "rust/stable Linux x86_64 Docker images"
      env:
-      DOCKER_BUILD=YES
+       DOCKER_BUILD=YES
      script:
       - make -C extras/docker
-   - language: rust
+   - name: "rust/nightly Linux x86_64"
+     language: rust
      rust: nightly
+     addons:
+       apt:
+         packages:
+         - [*linux_deps]
      before_install:
       # Install and use the current stable release of Go
       - gimme --list
@@ -55,7 +81,7 @@ matrix:
       - rustup component add rustfmt
       - cargo install cargo-fuzz
      script:
-      - RUSTFLAGS="-D warnings" cargo build --release --verbose
+      - RUSTFLAGS="-D warnings" cargo build --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
       - RUSTFLAGS="-D warnings" cargo package --verbose --allow-dirty
       - cargo fmt -- --check
@@ -73,71 +99,44 @@ matrix:
       - RUSTFLAGS="-D warnings" cargo test --verbose --manifest-path tools/qlog/Cargo.toml
       - cargo fmt --manifest-path tools/qlog/Cargo.toml -- --check
       # quic-trace-log
-      - RUSTFLAGS="-D warnings" cargo build --release --verbose --manifest-path tools/quic-trace-log/Cargo.toml
+      - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/quic-trace-log/Cargo.toml
       - cargo fmt --manifest-path tools/quic-trace-log/Cargo.toml -- --check
-   - language: rust
-     rust: stable
-     os: osx
-     script:
-      - RUSTFLAGS="-D warnings" cargo build --release --verbose
-      - RUSTFLAGS="-D warnings" cargo test --verbose
-   - language: rust
+   - name: "rust/stable MacOS X/iOS"
+     language: rust
      rust: stable
      os: osx
      osx_image: xcode11.2
-     install:
+     script:
+      # MacOS X
+      - RUSTFLAGS="-D warnings" cargo build --verbose
+      - RUSTFLAGS="-D warnings" cargo test --verbose
+      # iOS
       - rustup target add aarch64-apple-ios x86_64-apple-ios
       - cargo install --force cargo-lipo
-     script:
-      - RUSTFLAGS="-D warnings" cargo lipo --release --verbose
-   - language: rust
+      - RUSTFLAGS="-D warnings" cargo lipo --verbose
+   - name: "rust/stable Windows x86_64/x86"
+     language: rust
      rust: stable
      os: windows
      env:
-       TARGET=x86_64-pc-windows-msvc
+       TARGET_64=x86_64-pc-windows-msvc
+       TARGET_32=i686-pc-windows-msvc
      before_install:
       - choco install golang nasm
       # Update $PATH
       - export PATH="$(powershell -Command '("Process", "Machine" | % { [Environment]::GetEnvironmentVariable("PATH", $_) -Split ";" -Replace "\\$", "" } | Select -Unique | % { cygpath $_ }) -Join ":"')"
-      - rustup target add $TARGET
      script:
-      - RUSTFLAGS="-D warnings" cargo build --release --verbose --target=$TARGET
-      - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET
-   - language: rust
-     rust: stable
-     os: windows
-     env:
-       TARGET=i686-pc-windows-msvc
-     before_install:
-      - choco install golang nasm
-      # Update $PATH
-      - export PATH="$(powershell -Command '("Process", "Machine" | % { [Environment]::GetEnvironmentVariable("PATH", $_) -Split ";" -Replace "\\$", "" } | Select -Unique | % { cygpath $_ }) -Join ":"')"
-      - rustup target add $TARGET
-     script:
-      - RUSTFLAGS="-D warnings" cargo build --release --verbose --target=$TARGET
-      - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET
-   - language: rust
-     rust: stable
-     env:
-      NGINX_VER=1.16.1
-     before_install:
-      # Install and use the current stable release of Go
-      - gimme --list
-      - eval "$(gimme stable)"
-      - gimme --list
-     script:
-      - curl -O https://nginx.org/download/nginx-$NGINX_VER.tar.gz
-      - tar xzf nginx-$NGINX_VER.tar.gz
-      - |
-        cd nginx-$NGINX_VER &&
-        patch -p01 < ../extras/nginx/nginx-1.16.patch &&
-        ./configure --with-http_ssl_module --with-http_v2_module --with-http_v3_module --with-openssl="../deps/boringssl" --with-quiche=".." &&
-        make -j`nproc`
-   - language: android
+      - RUSTFLAGS="-D warnings" cargo build --verbose --target=$TARGET_64
+      - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET_64
+      - rustup target add $TARGET_32
+      - RUSTFLAGS="-D warnings" cargo build --verbose --target=$TARGET_32
+      - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET_32
+   - name: "rust/stable Android"
+     language: android
      dist: trusty
      env:
-      NDK_VER=r13b
-      CMAKE_VER=3.6.4111459
+       NDK_VER=r13b
+       CMAKE_VER=3.6.4111459
      android:
        components:
         - build-tools-26.0.1
@@ -162,26 +161,7 @@ matrix:
       - mkdir -p $TOOLCHAIN_DIR
       - tools/setup_android.sh
      script:
-      - tools/build_android.sh --release --verbose
-   - name: "x86 cross-build"
-     language: rust
-     rust: stable
-     env:
-       TARGET=i686-unknown-linux-gnu
-     before_install:
-      # Install and use the current stable release of Go
-      - gimme --list
-      - eval "$(gimme stable)"
-      - gimme --list
-      # Install x86 Rust target for cross-building
-      - rustup target add $TARGET
-     addons:
-       apt:
-         packages:
-         - gcc-multilib
-         - g++-multilib
-     script:
-      - RUSTFLAGS="-D warnings" cargo build --target=$TARGET
+      - tools/build_android.sh --verbose
 
 deploy:
   - provider: pages
@@ -191,7 +171,7 @@ deploy:
     github-token: $GITHUB_TOKEN
     on:
       branch: master
-      condition: $TRAVIS_RUST_VERSION = stable && $TRAVIS_OS_NAME = linux && $NGINX_VER = "" && TARGET = ""
+      condition: $TRAVIS_RUST_VERSION = stable && $TRAVIS_OS_NAME = linux
   # publish docker images on master
   - provider: script
     skip-cleanup: true
