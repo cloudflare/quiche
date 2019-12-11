@@ -87,13 +87,28 @@ matrix:
    - language: rust
      rust: stable
      os: windows
+     env:
+       TARGET=x86_64-pc-windows-msvc
      before_install:
       - choco install golang nasm
       # Update $PATH
       - export PATH="$(powershell -Command '("Process", "Machine" | % { [Environment]::GetEnvironmentVariable("PATH", $_) -Split ";" -Replace "\\$", "" } | Select -Unique | % { cygpath $_ }) -Join ":"')"
      script:
-      - RUSTFLAGS="-D warnings" cargo build --release --verbose
-      - RUSTFLAGS="-D warnings" cargo test --verbose
+      - RUSTFLAGS="-D warnings" cargo build --release --verbose --target=$TARGET
+      - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET
+   - language: rust
+     rust: stable
+     os: windows
+     env:
+       TARGET=i686-pc-windows-msvc
+     before_install:
+      - choco install golang nasm
+      # Update $PATH
+      - export PATH="$(powershell -Command '("Process", "Machine" | % { [Environment]::GetEnvironmentVariable("PATH", $_) -Split ";" -Replace "\\$", "" } | Select -Unique | % { cygpath $_ }) -Join ":"')"
+      - rustup target add $TARGET
+     script:
+      - RUSTFLAGS="-D warnings" cargo build --release --verbose --target=$TARGET
+      - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET
    - language: rust
      rust: stable
      env:
@@ -152,7 +167,7 @@ matrix:
       - eval "$(gimme stable)"
       - gimme --list
       # Install x86 Rust target for cross-building
-      - rustup target add $TARGET || true
+      - rustup target add $TARGET
      addons:
        apt:
          packages:
