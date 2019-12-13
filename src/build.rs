@@ -1,7 +1,7 @@
 // Additional parameters for Android build of BoringSSL.
 const CMAKE_PARAMS_ANDROID: &[(&str, &[(&str, &str)])] = &[
     ("aarch64", &[
-        ("ANDROID_TOOLCHAIN_NAME", "aarch64-linux-android-4.9"),
+        ("ANDROID_TOOLCHAIN_NAME", "aarch64-linux-android-clang(4.9)"),
         ("ANDROID_NATIVE_API_LEVEL", "21"),
         (
             "CMAKE_TOOLCHAIN_FILE",
@@ -10,7 +10,7 @@ const CMAKE_PARAMS_ANDROID: &[(&str, &[(&str, &str)])] = &[
         ("ANDROID_STL", "c++_shared"),
     ]),
     ("arm", &[
-        ("ANDROID_TOOLCHAIN_NAME", "arm-linux-androideabi-4.9"),
+        ("ANDROID_TOOLCHAIN_NAME", "arm-linux-androideabi-clang(4.9)"),
         ("ANDROID_NATIVE_API_LEVEL", "21"),
         (
             "CMAKE_TOOLCHAIN_FILE",
@@ -19,7 +19,7 @@ const CMAKE_PARAMS_ANDROID: &[(&str, &[(&str, &str)])] = &[
         ("ANDROID_STL", "c++_shared"),
     ]),
     ("x86", &[
-        ("ANDROID_TOOLCHAIN_NAME", "x86-linux-android-4.9"),
+        ("ANDROID_TOOLCHAIN_NAME", "x86-linux-android-clang(4.9)"),
         ("ANDROID_NATIVE_API_LEVEL", "21"),
         (
             "CMAKE_TOOLCHAIN_FILE",
@@ -28,7 +28,7 @@ const CMAKE_PARAMS_ANDROID: &[(&str, &[(&str, &str)])] = &[
         ("ANDROID_STL", "c++_shared"),
     ]),
     ("x86_64", &[
-        ("ANDROID_TOOLCHAIN_NAME", "x86_64-linux-android-4.9"),
+        ("ANDROID_TOOLCHAIN_NAME", "x86_64-linux-android-clang(4.9)"),
         ("ANDROID_NATIVE_API_LEVEL", "21"),
         (
             "CMAKE_TOOLCHAIN_FILE",
