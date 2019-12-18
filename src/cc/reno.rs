@@ -86,7 +86,7 @@ impl cc::CongestionControl for Reno {
     fn on_packet_sent_cc(&mut self, bytes_sent: usize, trace_id: &str) {
         self.bytes_in_flight += bytes_sent;
 
-        trace!("{} OnPacketSentCC() {:?}", trace_id, &self);
+        cclog!("{} OnPacketSentCC() {:?}", trace_id, &self);
     }
 
     fn on_packet_acked_cc(
@@ -107,13 +107,13 @@ impl cc::CongestionControl for Reno {
             // Slow start.
             self.congestion_window += packet.size;
 
-            trace!("{} OnPacketAckedCC() SLOW_START {:?}", trace_id, &self);
+            cclog!("{} OnPacketAckedCC() SLOW_START {:?}", trace_id, &self);
         } else {
             // Congestion avoidance.
             self.congestion_window +=
                 (cc::MAX_DATAGRAM_SIZE * packet.size) / self.congestion_window;
 
-            trace!("{} OnPacketAckedCC() CONG_AVOIDANCE {:?}", trace_id, &self);
+            cclog!("{} OnPacketAckedCC() CONG_AVOIDANCE {:?}", trace_id, &self);
         }
     }
 
@@ -132,7 +132,7 @@ impl cc::CongestionControl for Reno {
                 std::cmp::max(self.congestion_window, cc::MINIMUM_WINDOW);
             self.ssthresh = self.congestion_window;
 
-            trace!("{} CongestionEvent() {:?}", trace_id, &self);
+            cclog!("{} CongestionEvent() {:?}", trace_id, &self);
         }
     }
 }

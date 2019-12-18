@@ -43,6 +43,9 @@ pub const MAX_DATAGRAM_SIZE: usize = 1452;
 
 pub const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 
+#[macro_use]
+mod log;
+
 /// Available congestion control algorithms.
 ///
 /// This enum provides currently available list of congestion control
@@ -124,7 +127,7 @@ where
 
 // Returns a congestion control module. `algo` is one of cc::Algorithm enum.
 pub fn new_congestion_control(algo: Algorithm) -> Box<dyn CongestionControl> {
-    trace!("Congestion Control initialized: {:?}", algo);
+    cclog!("Congestion Control initialized: {:?}", algo);
     match algo {
         Algorithm::Reno => Box::new(cc::reno::Reno::new()),
     }
