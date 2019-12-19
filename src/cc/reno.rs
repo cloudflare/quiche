@@ -39,6 +39,8 @@ pub struct Reno {
     congestion_recovery_start_time: Option<Instant>,
 
     ssthresh: usize,
+
+    app_limited: bool,
     /* TODO: ECN is not implemented.
      * ecn_ce_counters: [usize; packet::EPOCH_COUNT] */
 }
@@ -56,8 +58,8 @@ impl cc::CongestionControl for Reno {
             congestion_recovery_start_time: None,
 
             ssthresh: std::usize::MAX,
-            /* TODO: ECN is not implemented.
-             * ecn_ce_counters: [0; packet::EPOCH_COUNT], */
+
+            app_limited: false,
         }
     }
 
@@ -84,6 +86,8 @@ impl cc::CongestionControl for Reno {
 
     fn on_packet_sent_cc(&mut self, bytes_sent: usize, _trace_id: &str) {
         self.bytes_in_flight += bytes_sent;
+
+        self.app_limited = self.bytes_in_flight < self.congestion_window;
     }
 
     fn on_packet_acked_cc(
@@ -96,7 +100,7 @@ impl cc::CongestionControl for Reno {
             return;
         }
 
-        if self.is_app_limited() {
+        if self.app_limited {
             return;
         }
 
