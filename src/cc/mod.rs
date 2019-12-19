@@ -83,10 +83,6 @@ where
 
     fn congestion_recovery_start_time(&self) -> Option<Instant>;
 
-    fn is_app_limited(&self) -> bool {
-        false
-    }
-
     /// Resets the congestion window to the minimum size.
     fn collapse_cwnd(&mut self);
 
@@ -106,7 +102,7 @@ where
     /// OnPacketAckedCC(packet)
     fn on_packet_acked_cc(
         &mut self, packet: &Sent, srtt: Duration, min_rtt: Duration,
-        trace_id: &str,
+        app_limited: bool, trace_id: &str,
     );
 
     /// CongestionEvent(time_sent)

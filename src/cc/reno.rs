@@ -88,7 +88,7 @@ impl cc::CongestionControl for Reno {
 
     fn on_packet_acked_cc(
         &mut self, packet: &Sent, _srtt: Duration, _min_rtt: Duration,
-        _trace_id: &str,
+        app_limited: bool, _trace_id: &str,
     ) {
         self.bytes_in_flight -= packet.size;
 
@@ -96,7 +96,7 @@ impl cc::CongestionControl for Reno {
             return;
         }
 
-        if self.is_app_limited() {
+        if app_limited {
             return;
         }
 
@@ -195,6 +195,7 @@ mod tests {
             &p,
             Duration::new(0, 1),
             Duration::new(0, 1),
+            false,
             TRACE_ID,
         );
 
@@ -254,6 +255,7 @@ mod tests {
             &p,
             Duration::new(0, 1),
             Duration::new(0, 1),
+            false,
             TRACE_ID,
         );
 
