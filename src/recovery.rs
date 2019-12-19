@@ -100,6 +100,8 @@ pub struct Recovery {
     pub loss_probes: [usize; packet::EPOCH_COUNT],
 
     pub cc: Box<dyn cc::CongestionControl>,
+
+    app_limited: bool,
 }
 
 impl Recovery {
@@ -138,6 +140,8 @@ impl Recovery {
             loss_probes: [0; packet::EPOCH_COUNT],
 
             cc: cc::new_congestion_control(config.cc_algorithm),
+
+            app_limited: false,
         }
     }
 
@@ -158,6 +162,9 @@ impl Recovery {
             if ack_eliciting {
                 self.time_of_last_sent_ack_eliciting_pkt[epoch] = Some(now);
             }
+
+            self.app_limited =
+                (self.cc.bytes_in_flight() + sent_bytes) < self.cc.cwnd();
 
             // OnPacketSentCC
             self.cc.on_packet_sent_cc(sent_bytes, trace_id);
@@ -470,6 +477,7 @@ impl Recovery {
                     &p,
                     self.rtt(),
                     self.min_rtt,
+                    self.app_limited,
                     trace_id,
                 );
             }
