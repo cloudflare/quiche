@@ -274,7 +274,7 @@ impl Http3Req {
             url: url.clone(),
             hdrs,
             body,
-            expect_resp_hdrs: expect_resp_hdrs.clone(),
+            expect_resp_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
         }
