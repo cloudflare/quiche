@@ -826,6 +826,13 @@ impl Connection {
     /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`close()`]: ../struct.Connection.html#method.close
     pub fn poll(&mut self, conn: &mut super::Connection) -> Result<(u64, Event)> {
+        // When connection close is initiated by the local application (e.g. due
+        // to a protocol error), the connection itself might be in a broken
+        // state, so return early.
+        if conn.error.is_some() || conn.app_error.is_some() {
+            return Err(Error::Done);
+        }
+
         // Process control streams first.
         if let Some(stream_id) = self.peer_control_stream_id {
             self.process_control_stream(conn, stream_id)?;
@@ -2635,6 +2642,51 @@ mod tests {
             s.client.send_request(&mut s.pipe.client, &req, true),
             Err(Error::TransportError(crate::Error::StreamLimit))
         );
+    }
+
+    #[test]
+    /// Tests that calling poll() after an error occured does nothing.
+    fn poll_after_error() {
+        // DATA frames don't consume the state buffer, so can be of any size.
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        let mut d = [42; 128];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        let frame_type = b.put_varint(frame::DATA_FRAME_TYPE_ID).unwrap();
+        s.pipe.client.stream_send(0, frame_type, false).unwrap();
+
+        let frame_len = b.put_varint(1 << 24).unwrap();
+        s.pipe.client.stream_send(0, frame_len, false).unwrap();
+
+        s.pipe.client.stream_send(0, &d, false).unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.server.poll(&mut s.pipe.server), Ok((0, Event::Data)));
+
+        // GREASE frames consume the state buffer, so need to be limited.
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        let mut d = [42; 128];
+        let mut b = octets::Octets::with_slice(&mut d);
+
+        let frame_type = b.put_varint(148_764_065_110_560_899).unwrap();
+        s.pipe.client.stream_send(0, frame_type, false).unwrap();
+
+        let frame_len = b.put_varint(1 << 24).unwrap();
+        s.pipe.client.stream_send(0, frame_len, false).unwrap();
+
+        s.pipe.client.stream_send(0, &d, false).unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::InternalError));
+
+        // Try to call poll() again after an error occurred.
+        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::Done));
     }
 }
 
