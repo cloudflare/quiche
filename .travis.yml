@@ -99,6 +99,7 @@ matrix:
       - choco install golang nasm
       # Update $PATH
       - export PATH="$(powershell -Command '("Process", "Machine" | % { [Environment]::GetEnvironmentVariable("PATH", $_) -Split ";" -Replace "\\$", "" } | Select -Unique | % { cygpath $_ }) -Join ":"')"
+      - rustup target add $TARGET
      script:
       - RUSTFLAGS="-D warnings" cargo build --release --verbose --target=$TARGET
       - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET
