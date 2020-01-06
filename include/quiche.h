@@ -267,6 +267,9 @@ bool quiche_conn_is_established(quiche_conn *conn);
 // enough to send or receive early data.
 bool quiche_conn_is_in_early_data(quiche_conn *conn);
 
+// Returns true if the connection is in the process of being closed..
+bool quiche_conn_is_closing(quiche_conn *conn);
+
 // Returns true if the connection is closed.
 bool quiche_conn_is_closed(quiche_conn *conn);
 

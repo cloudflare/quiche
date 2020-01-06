@@ -1115,9 +1115,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let is_closing = self.error.is_some() || self.app_error.is_some();
-
-        if is_closing {
+        if self.is_closing() {
             return Err(Error::Done);
         }
 
@@ -1528,9 +1526,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let is_closing = self.error.is_some() || self.app_error.is_some();
-
-        if !is_closing {
+        if !self.is_closing() {
             self.do_handshake()?;
         }
 
@@ -1650,7 +1646,7 @@ impl Connection {
         let mut payload_len = 0;
 
         // Create ACK frame.
-        if self.pkt_num_spaces[epoch].ack_elicited && !is_closing {
+        if self.pkt_num_spaces[epoch].ack_elicited && !self.is_closing() {
             let ack_delay =
                 self.pkt_num_spaces[epoch].largest_rx_pkt_time.elapsed();
 
@@ -1673,7 +1669,7 @@ impl Connection {
             }
         }
 
-        if pkt_type == packet::Type::Short && !is_closing {
+        if pkt_type == packet::Type::Short && !self.is_closing() {
             // Create MAX_STREAMS_BIDI frame.
             if self.streams.should_update_max_streams_bidi() {
                 let max = self.streams.update_max_streams_bidi();
@@ -1816,7 +1812,7 @@ impl Connection {
         // Create CRYPTO frame.
         if self.pkt_num_spaces[epoch].crypto_stream.is_flushable() &&
             left > frame::MAX_CRYPTO_OVERHEAD &&
-            !is_closing
+            !self.is_closing()
         {
             let crypto_len = left - frame::MAX_CRYPTO_OVERHEAD;
             let crypto_buf = self.pkt_num_spaces[epoch]
@@ -1839,7 +1835,7 @@ impl Connection {
         if pkt_type == packet::Type::Short &&
             self.max_tx_data > self.tx_data &&
             left > frame::MAX_STREAM_OVERHEAD &&
-            !is_closing
+            !self.is_closing()
         {
             while let Some(stream_id) = self.streams.pop_flushable() {
                 let stream = match self.streams.get_mut(stream_id) {
@@ -1903,7 +1899,7 @@ impl Connection {
         if self.recovery.loss_probes[epoch] > 0 &&
             !ack_eliciting &&
             left >= 1 &&
-            !is_closing
+            !self.is_closing()
         {
             let frame = frame::Frame::Ping;
 
@@ -2500,6 +2496,24 @@ impl Connection {
     /// progressed enough to send or receive early data.
     pub fn is_in_early_data(&self) -> bool {
         self.handshake.is_in_early_data()
+    }
+
+    /// Returns true if the connection is in the process of being closed.
+    ///
+    /// This happens when the [`close()`] method is called, either by the
+    /// application, or by the library itself due to an error.
+    ///
+    /// The application must keep calling the [`recv()`] and [`send()`] methods,
+    /// as well as [`timeout()`] and [`on_timeout()`], until [`is_closed()`]
+    /// returns `true`, to make sure the connection is properly shut down.
+    ///
+    /// [`recv()`]: struct.Connection.html#method.recv
+    /// [`send()`]: struct.Connection.html#method.send
+    /// [`timeout()`]: struct.Connection.html#method.timeout
+    /// [`on_timeout()`]: struct.Connection.html#method.timeout
+    /// [`is_closed()`]: struct.Connection.html#method.is_closed
+    pub fn is_closing(&self) -> bool {
+        self.error.is_some() || self.app_error.is_some()
     }
 
     /// Returns true if the connection is closed.
