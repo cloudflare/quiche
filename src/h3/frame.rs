@@ -42,6 +42,7 @@ const SETTINGS_MAX_HEADER_LIST_SIZE: u64 = 0x6;
 const SETTINGS_QPACK_BLOCKED_STREAMS: u64 = 0x7;
 
 #[derive(Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Frame {
     Data {
         payload: Vec<u8>,

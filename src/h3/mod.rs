@@ -156,7 +156,11 @@
 //!
 //!         Ok((stream_id, quiche::h3::Event::Finished)) => {
 //!             // Peer terminated stream, handle it.
-//!         }
+//!         },
+//!
+//!         Ok((stream_id, _)) => {
+//!             // Catch-all match for other events.
+//!         },
 //!
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
@@ -202,6 +206,10 @@
 //!         Ok((stream_id, quiche::h3::Event::Finished)) => {
 //!             // Peer terminated stream, handle it.
 //!         }
+//!
+//!         Ok((stream_id, _)) => {
+//!             // Catch-all match for other events.
+//!         },
 //!
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
@@ -270,6 +278,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// An HTTP/3 error.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Error {
     /// There is no error or no work to do
     Done,
@@ -498,6 +507,7 @@ impl Header {
 
 /// An HTTP/3 connection event.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Event {
     /// Request/response headers were received.
     Headers {

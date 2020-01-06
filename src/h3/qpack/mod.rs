@@ -41,6 +41,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// A QPACK error.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Error {
     /// The provided buffer is too short.
     BufferTooShort,

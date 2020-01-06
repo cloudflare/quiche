@@ -390,6 +390,10 @@ fn main() {
 
                         Ok((_stream_id, quiche::h3::Event::Finished)) => (),
 
+                        Ok((stream_id, _)) => {
+                            warn!("unsupported event on stream {}", stream_id);
+                        },
+
                         Err(quiche::h3::Error::Done) => {
                             break;
                         },

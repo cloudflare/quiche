@@ -272,6 +272,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// A QUIC error.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 #[repr(C)]
 pub enum Error {
     /// There is no more work to do.

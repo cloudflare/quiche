@@ -266,6 +266,10 @@ pub fn run(
                         }
                     },
 
+                    Ok((stream_id, _)) => {
+                        warn!("unsupported event on stream {}", stream_id);
+                    },
+
                     Err(quiche::h3::Error::Done) => {
                         break;
                     },

@@ -37,6 +37,7 @@ pub const MAX_STREAM_OVERHEAD: usize = 12;
 pub const MAX_STREAM_SIZE: u64 = 1 << 62;
 
 #[derive(Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Frame {
     Padding {
         len: usize,

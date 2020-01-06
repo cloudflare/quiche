@@ -56,6 +56,7 @@ impl Level {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Algorithm {
     #[allow(non_camel_case_types)]
     AES128_GCM,
