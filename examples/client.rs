@@ -35,10 +35,8 @@ use ring::rand::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
-const HTTP_REQ_STREAM_ID: u64 = 4;
-
 const USAGE: &str = "Usage:
-  client [options] URL
+  client [options] URL...
   client -h | --help
 
 Options:
@@ -77,14 +75,21 @@ fn main() {
         None
     };
 
-    let url = url::Url::parse(args.get_str("URL")).unwrap();
+    let urls: Vec<url::Url> = args
+        .get_vec("URL")
+        .into_iter()
+        .map(|x| url::Url::parse(x).unwrap())
+        .collect();
 
     // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
+    // We'll only connect to the first server provided in URL list
+    let connect_url = &urls[0];
+
     // Resolve server address.
-    let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
+    let peer_addr = connect_url.to_socket_addrs().unwrap().next().unwrap();
 
     // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
     // server address. This is needed on macOS and BSD variants that don't
@@ -139,7 +144,8 @@ fn main() {
     SystemRandom::new().fill(&mut scid[..]).unwrap();
 
     // Create a QUIC connection and initiate handshake.
-    let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
+    let mut conn =
+        quiche::connect(connect_url.domain(), &scid, &mut config).unwrap();
 
     info!(
         "connecting to {:} from {:} with scid {}",
@@ -161,9 +167,25 @@ fn main() {
 
     debug!("written {}", write);
 
+    // Create a single list of all the requests to be issued.
+    let mut reqs = std::collections::HashMap::new();
+    let mut stream_id = 0;
+
+    for url in &urls {
+        let req = format!("GET {}\r\n", url.path());
+
+        reqs.insert(stream_id, req);
+
+        stream_id += 4;
+    }
+
     let req_start = std::time::Instant::now();
 
-    let mut req_sent = false;
+    let reqs_count = reqs.len();
+
+    let mut reqs_sent = 0;
+
+    let mut reqs_complete = 0;
 
     let mut pkt_count = 0;
 
@@ -234,15 +256,33 @@ fn main() {
             break;
         }
 
-        // Send an HTTP request as soon as the connection is established.
-        if conn.is_established() && !req_sent {
-            info!("sending HTTP request for {}", url.path());
+        // Send HTTP requests once the QUIC connection is established, and until
+        // all requests have been sent.
+        if conn.is_established() {
+            let mut reqs_done = 0;
 
-            let req = format!("GET {}\r\n", url.path());
-            conn.stream_send(HTTP_REQ_STREAM_ID, req.as_bytes(), true)
-                .unwrap();
+            for i in reqs_sent..reqs_count {
+                let (stream_id, req) = &reqs.iter().nth(i as usize).unwrap();
+                info!("sending HTTP request {:?}", req);
 
-            req_sent = true;
+                match conn.stream_send(**stream_id, req.as_bytes(), true) {
+                    Ok(v) => v,
+
+                    Err(quiche::Error::StreamLimit) => {
+                        debug!("not enough stream credits, retry later...");
+                        break;
+                    },
+
+                    Err(e) => {
+                        error!("failed to send request {:?}", e);
+                        break;
+                    },
+                };
+
+                reqs_done += 1;
+            }
+
+            reqs_sent += reqs_done;
         }
 
         // Process all readable streams.
@@ -265,13 +305,28 @@ fn main() {
 
                 // The server reported that it has no more data to send, which
                 // we got the full response. Close the connection.
-                if s == HTTP_REQ_STREAM_ID && fin {
-                    info!(
-                        "response received in {:?}, closing...",
-                        req_start.elapsed()
-                    );
+                if reqs.contains_key(&s) && fin {
+                    reqs_complete += 1;
 
-                    conn.close(true, 0x00, b"kthxbye").unwrap();
+                    debug!("{}/{} responses received", reqs_complete, reqs_count);
+
+                    if reqs_complete == reqs_count {
+                        info!(
+                            "{}/{} response(s) received in {:?}, closing...",
+                            reqs_complete,
+                            reqs_count,
+                            req_start.elapsed()
+                        );
+
+                        match conn.close(true, 0x00, b"kthxbye") {
+                            // Already closed.
+                            Ok(_) | Err(quiche::Error::Done) => (),
+
+                            Err(e) => panic!("error closing conn: {:?}", e),
+                        }
+
+                        break;
+                    }
                 }
             }
         }

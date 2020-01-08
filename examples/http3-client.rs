@@ -34,7 +34,7 @@ use ring::rand::*;
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
 const USAGE: &str = "Usage:
-  http3-client [options] URL
+  http3-client [options] URL...
   http3-client -h | --help
 
 Options:
@@ -71,7 +71,11 @@ fn main() {
     let version = args.get_str("--wire-version");
     let version = u32::from_str_radix(version, 16).unwrap();
 
-    let url = url::Url::parse(args.get_str("URL")).unwrap();
+    let urls: Vec<url::Url> = args
+        .get_vec("URL")
+        .into_iter()
+        .map(|x| url::Url::parse(x).unwrap())
+        .collect();
 
     // Request headers (can be multiple).
     let req_headers = args.get_vec("--header");
@@ -85,8 +89,11 @@ fn main() {
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
+    // We'll only connect to the first server provided in URL list
+    let connect_url = &urls[0];
+
     // Resolve server address.
-    let peer_addr = url.to_socket_addrs().unwrap().next().unwrap();
+    let peer_addr = connect_url.to_socket_addrs().unwrap().next().unwrap();
 
     // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
     // server address. This is needed on macOS and BSD variants that don't
@@ -148,7 +155,8 @@ fn main() {
     SystemRandom::new().fill(&mut scid[..]).unwrap();
 
     // Create a QUIC connection and initiate handshake.
-    let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
+    let mut conn =
+        quiche::connect(connect_url.domain(), &scid, &mut config).unwrap();
 
     info!(
         "connecting to {:} from {:} with scid {}",
@@ -172,44 +180,53 @@ fn main() {
 
     let h3_config = quiche::h3::Config::new().unwrap();
 
-    // Prepare request.
-    let mut path = String::from(url.path());
-
-    if let Some(query) = url.query() {
-        path.push('?');
-        path.push_str(query);
-    }
-
-    let mut req = vec![
-        quiche::h3::Header::new(":method", args.get_str("--method")),
-        quiche::h3::Header::new(":scheme", url.scheme()),
-        quiche::h3::Header::new(":authority", url.host_str().unwrap()),
-        quiche::h3::Header::new(":path", &path),
-        quiche::h3::Header::new("user-agent", "quiche"),
-    ];
-
-    // Add custom headers to the request.
-    for header in &req_headers {
-        let header_split: Vec<&str> = header.splitn(2, ": ").collect();
-        if header_split.len() != 2 {
-            panic!("malformed header provided - \"{}\"", header);
-        }
-
-        req.push(quiche::h3::Header::new(header_split[0], header_split[1]));
-    }
-
     let body = if args.get_bool("--body") {
         std::fs::read(args.get_str("--body")).ok()
     } else {
         None
     };
 
-    if body.is_some() {
-        req.push(quiche::h3::Header::new(
-            "content-length",
-            &body.as_ref().unwrap().len().to_string(),
-        ));
+    // Create a single list of all the requests to be issued.
+    let mut reqs = Vec::new();
+
+    for url in &urls {
+        for _ in 0..reqs_count {
+            let mut req = vec![
+                quiche::h3::Header::new(":method", args.get_str("--method")),
+                quiche::h3::Header::new(":scheme", url.scheme()),
+                quiche::h3::Header::new(":authority", url.host_str().unwrap()),
+                quiche::h3::Header::new(
+                    ":path",
+                    &url[url::Position::BeforePath..],
+                ),
+                quiche::h3::Header::new("user-agent", "quiche"),
+            ];
+
+            // Add custom headers to the request.
+            for header in &req_headers {
+                let header_split: Vec<&str> = header.splitn(2, ": ").collect();
+                if header_split.len() != 2 {
+                    panic!("malformed header provided - \"{}\"", header);
+                }
+
+                req.push(quiche::h3::Header::new(
+                    header_split[0],
+                    header_split[1],
+                ));
+            }
+
+            if body.is_some() {
+                req.push(quiche::h3::Header::new(
+                    "content-length",
+                    &body.as_ref().unwrap().len().to_string(),
+                ));
+            }
+
+            reqs.push(req);
+        }
     }
+
+    let reqs_count = reqs.len();
 
     let mut reqs_sent = 0;
 
@@ -291,7 +308,8 @@ fn main() {
         if let Some(h3_conn) = &mut http3_conn {
             let mut reqs_done = 0;
 
-            for _ in reqs_sent..reqs_count {
+            for i in reqs_sent..reqs_count {
+                let req = &reqs[i as usize];
                 info!("sending HTTP request {:?}", req);
 
                 let s =
