@@ -14,7 +14,7 @@ addons:
 
 matrix:
   include:
-   - name: "rust/stable Linux x86_64/nginx/x86"
+   - name: "stable Linux x86_64/x86 + NGINX"
      language: rust
      rust: stable
      env:
@@ -60,7 +60,7 @@ matrix:
       - cd ..
       # x86 cross build
       - RUSTFLAGS="-D warnings" cargo build --target=$TARGET_32
-   - name: "rust/nightly Linux x86_64"
+   - name: "nightly Linux x86_64"
      language: rust
      rust: nightly
      addons:
@@ -96,7 +96,7 @@ matrix:
       # quic-trace-log
       - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/quic-trace-log/Cargo.toml
       - cargo fmt --manifest-path tools/quic-trace-log/Cargo.toml -- --check
-   - name: "rust/stable MacOS X/iOS"
+   - name: "stable macOS + iOS"
      language: rust
      rust: stable
      os: osx
@@ -104,13 +104,13 @@ matrix:
      install:
       - rustup target add aarch64-apple-ios x86_64-apple-ios
      script:
-      # MacOS X
+      # macOS
       - RUSTFLAGS="-D warnings" cargo build --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
       # iOS
       - cargo install --force cargo-lipo
       - RUSTFLAGS="-D warnings" cargo lipo --verbose
-   - name: "rust/stable Windows x86_64/x86"
+   - name: "stable Windows x86_64/x86"
      language: rust
      rust: stable
      os: windows
@@ -128,7 +128,7 @@ matrix:
       - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET_64
       - RUSTFLAGS="-D warnings" cargo build --verbose --target=$TARGET_32
       - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET_32
-   - name: "rust/stable Android"
+   - name: "stable Android"
      language: android
      dist: trusty
      env:
