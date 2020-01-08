@@ -89,7 +89,7 @@ fn main() {
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
-    // We'll only connect to the first server provided in URL list
+    // We'll only connect to the first server provided in URL list.
     let connect_url = &urls[0];
 
     // Resolve server address.
