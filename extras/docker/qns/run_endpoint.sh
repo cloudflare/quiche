@@ -21,8 +21,12 @@ check_testcase () {
     TESTNAME=$1
 
     case $1 in
-    handshake | transfer | resumption )
+    handshake | resumption )
         echo "supported"
+        ;;
+    transfer )
+        echo "supported"
+        RUST_LOG="info"
         ;;
     retry )
         echo "supported"
