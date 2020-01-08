@@ -101,12 +101,13 @@ matrix:
      rust: stable
      os: osx
      osx_image: xcode11.2
+     install:
+      - rustup target add aarch64-apple-ios x86_64-apple-ios
      script:
       # MacOS X
       - RUSTFLAGS="-D warnings" cargo build --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
       # iOS
-      - rustup target add aarch64-apple-ios x86_64-apple-ios
       - cargo install --force cargo-lipo
       - RUSTFLAGS="-D warnings" cargo lipo --verbose
    - name: "rust/stable Windows x86_64/x86"
@@ -120,10 +121,11 @@ matrix:
       - choco install golang nasm
       # Update $PATH
       - export PATH="$(powershell -Command '("Process", "Machine" | % { [Environment]::GetEnvironmentVariable("PATH", $_) -Split ";" -Replace "\\$", "" } | Select -Unique | % { cygpath $_ }) -Join ":"')"
+     install:
+      - rustup target add $TARGET_32 $TARGET_64
      script:
       - RUSTFLAGS="-D warnings" cargo build --verbose --target=$TARGET_64
       - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET_64
-      - rustup target add $TARGET_32
       - RUSTFLAGS="-D warnings" cargo build --verbose --target=$TARGET_32
       - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET_32
    - name: "rust/stable Android"
