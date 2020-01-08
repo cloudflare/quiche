@@ -60,11 +60,6 @@ matrix:
       - cd ..
       # x86 cross build
       - RUSTFLAGS="-D warnings" cargo build --target=$TARGET_32
-   - name: "rust/stable Linux x86_64 Docker images"
-     env:
-       DOCKER_BUILD=YES
-     script:
-      - make -C extras/docker
    - name: "rust/nightly Linux x86_64"
      language: rust
      rust: nightly
@@ -164,6 +159,7 @@ matrix:
       - tools/build_android.sh --verbose
 
 deploy:
+  # publish docs
   - provider: pages
     fqdn: docs.quic.tech
     local-dir: target/doc
@@ -172,12 +168,13 @@ deploy:
     on:
       branch: master
       condition: $TRAVIS_RUST_VERSION = stable && $TRAVIS_OS_NAME = linux
-  # publish docker images on master
+  # publish Docker images
   - provider: script
     skip-cleanup: true
     script: >-
       echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin &&
+      make -C extras/docker &&
       make -C extras/docker publish
     on:
       branch: master
-      condition: $DOCKER_BUILD = "YES"
+      condition: $TRAVIS_RUST_VERSION = stable && $TRAVIS_OS_NAME = linux
