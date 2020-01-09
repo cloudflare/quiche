@@ -95,7 +95,7 @@ const char *quiche_version(void);
 
 // Enables logging. |cb| will be called with log messages
 int quiche_enable_debug_logging(void (*cb)(const char *line, void *argp),
-                                 void *argp);
+                                void *argp);
 
 // Stores configuration shared between multiple connections.
 typedef struct Config quiche_config;
@@ -343,7 +343,7 @@ typedef struct Http3Connection quiche_h3_conn;
 
 // Creates a new server-side connection.
 quiche_h3_conn *quiche_h3_accept(quiche_conn *quiche_conn,
-                              quiche_h3_config *config);
+                                 quiche_h3_config *config);
 
 // Creates a new HTTP/3 connection using the provided QUIC connection.
 quiche_h3_conn *quiche_h3_conn_new_with_transport(quiche_conn *quiche_conn,
