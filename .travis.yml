@@ -175,8 +175,7 @@ deploy:
     skip-cleanup: true
     script: >-
       echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin &&
-      make -C extras/docker &&
-      make -C extras/docker publish
+      make -C extras/docker all publish
     on:
       branch: master
       condition: $TRAVIS_RUST_VERSION = stable && $TRAVIS_OS_NAME = linux
