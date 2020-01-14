@@ -12,11 +12,11 @@ addons:
 
 matrix:
   include:
-   - name: "stable Linux x86_64/x86 + NGINX"
+   - name: "stable Linux x86_64/x86"
      language: rust
      rust: stable
      env:
-       NGINX_VER=1.16.1
+       DEPLOY_BUILD=yes
        TARGET_32=i686-unknown-linux-gnu
      addons:
        apt:
@@ -45,16 +45,6 @@ matrix:
       # quic-trace-log
       - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/quic-trace-log/Cargo.toml
       - cargo clippy --manifest-path tools/quic-trace-log/Cargo.toml -- -D warnings
-      # nginx
-      - curl -O https://nginx.org/download/nginx-$NGINX_VER.tar.gz
-      - tar xzf nginx-$NGINX_VER.tar.gz
-      - |
-        cd nginx-$NGINX_VER &&
-        patch -p01 < ../extras/nginx/nginx-1.16.patch &&
-        ./configure --with-http_ssl_module --with-http_v2_module --with-http_v3_module --with-openssl="../deps/boringssl" --with-quiche=".." --with-debug &&
-        make -j`nproc`
-      - objs/nginx -V
-      - cd ..
       # x86 cross build
       - RUSTFLAGS="-D warnings" cargo build --target=$TARGET_32
    - name: "nightly Linux x86_64"
@@ -156,6 +146,29 @@ matrix:
       - tools/setup_android.sh
      script:
       - tools/build_android.sh --verbose
+   - name: "NGINX"
+     language: rust
+     rust: stable
+     env:
+       NGINX_VER=1.16.1
+     addons:
+       apt:
+         packages:
+         - [*linux_deps]
+     before_install:
+      # Install and use the current stable release of Go
+      - gimme --list
+      - eval "$(gimme stable)"
+      - gimme --list
+     script:
+      - curl -O https://nginx.org/download/nginx-$NGINX_VER.tar.gz
+      - tar xzf nginx-$NGINX_VER.tar.gz
+      - |
+        cd nginx-$NGINX_VER &&
+        patch -p01 < ../extras/nginx/nginx-1.16.patch &&
+        ./configure --with-http_ssl_module --with-http_v2_module --with-http_v3_module --with-openssl="../deps/boringssl" --with-quiche=".." --with-debug &&
+        make -j`nproc`
+      - objs/nginx -V
 
 deploy:
   # publish docs
@@ -166,7 +179,7 @@ deploy:
     github-token: $GITHUB_TOKEN
     on:
       branch: master
-      condition: $TRAVIS_RUST_VERSION = stable && $TRAVIS_OS_NAME = linux
+      condition: $DEPLOY_BUILD = yes
   # publish Docker images
   - provider: script
     skip-cleanup: true
@@ -175,4 +188,4 @@ deploy:
       make -C extras/docker all publish
     on:
       branch: master
-      condition: $TRAVIS_RUST_VERSION = stable && $TRAVIS_OS_NAME = linux
+      condition: $DEPLOY_BUILD = yes
