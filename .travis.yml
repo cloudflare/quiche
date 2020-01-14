@@ -3,8 +3,6 @@ env:
   - secure: "Aa+7RLfRyfdH2ENH0fyjI7Waq7/9XSk1LP6sDwG0zG1uhmus/z0QaiaCd027mFY3V25Kzfd6TVzL92dp3U63+3Qn3hHle3oNdu1jqaSBHB1L7R+IS6tLW0Bny5Zd7mMRNbVO642qvmuZo8A5nuu/WHp3w91WI4rp1rhULm/uhQ/+7Sx7mDSR1vRJyIeB7mETzRpckz0cUiZU656AB1hRsMVzkm+no9urHcnEP6AcPukVlWGgsdcBloMoczwp8M/cnvrGg8SuroEnu82i3eY5TwmXBhtmFa06WUaiIafT8PcB+JVADwunS1nJ7tTGCjInVQY5qNogPJxdr97E9vuHJGMDpdCkDuvTFaF2FdnXuvli3nUr2w7mP3t991ocWQW9PMRUTJe+/pFJ935puy8zD797UKUR3d2GwZRHIpwbzmcP+QQ1wG3odoFk4i/tEUAHtKirh6VglQyp9BFIaIX7TuuqIyRqxcqHVsVfDVVouHBIYuy7uRDd7YjmoF3IqqIKsHEFBnMT9GSQeifjJAPYEOoPXfzoa1Ya8PbmSdYtVR9nyjIHHLv/xDYxG3ulBgmz1ieGe9pGNgqLmi6GSiyJ/Vj+5L+1bJGrVMDELHQR/bVdZMmoAp6y8f397hace2qHKDBVN4AVfDWeCiTs1NUtgrJVIpj3Xt788RrnIfvuhF4="
   - secure: "CE2MWJZ+EtmaOheaGBd5XNgV7A/AGLpQ1Lct2R4v8BG3pXFFAM9uJEvpyTXBFx40gzD8HTBHbNRw1Ae+hP/Hz3M8o96jrdVsPlojKaShaOqoalYCghnfxDSd6WsstJdTYUk1iKhU3bSin/PHhDHe5i/dpwTay4DqSCX4MWaJPpItRIwiPpd8ekVGrHb/DkuTpEWY35Dg+9oao9KnB5c/D1oHLvInRMCivtpPpKRxNWkznOGprQALGIPmnHupBQ0zu6H7+K7TE/DT/HmocQd1h6HEba6DGkKqXU79NgS3uz2EFfgdhnIvTlxWTZFtkET9lym5mqjyuvwkIDsEDfGmk7dGjT0MFe2/9RRMxeNjINA1dlat4riUZ+a5dWqj/7uSvcOgTv0lqT5qitHbtqI0Id/TMaZlVE9r1x+vSTy/7ISzwhVPOwFa6SZJFwrHVBqnPZKP8gajpCcDJMKdFjfuLNZMF/NlDhj78S9Hyr0CUUoCKcPYiCxyCPfV7LzNMtlaynKJG2A+z0vLqZ8YSlTrqBfjuVzrq8EDJyJWMRuik3rkNe/GOFzUgQ+nBxgOzPT0Y5CPlEQNYW991pRz2r5gXhR+MSpjF3ytSrMCYYfIwymwqxb9oX4EvPCHCrWCqT4lebQyfPO8Pp8tDeV3XeRBM5a6KjOD0WfZ5pRlZ/REWrM="
 
-cache: cargo
-
 addons:
   apt:
     packages: &linux_deps
@@ -33,7 +31,6 @@ matrix:
       - rustup component add clippy
       - rustup target add $TARGET_32
      script:
-      - RUSTFLAGS="-D warnings" cargo build --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
       - RUSTFLAGS="-D warnings" cargo package --verbose --allow-dirty
       - cargo clippy --examples -- -D warnings
