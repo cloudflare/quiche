@@ -63,7 +63,6 @@ matrix:
       - rustup component add rustfmt
       - cargo install cargo-fuzz
      script:
-      - RUSTFLAGS="-D warnings" cargo build --verbose
       - RUSTFLAGS="-D warnings" cargo test --verbose
       - RUSTFLAGS="-D warnings" cargo package --verbose --allow-dirty
       - cargo fmt -- --check
