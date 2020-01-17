@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 # Set up the routing needed for the simulation
 /setup.sh
@@ -15,13 +16,14 @@ QUICHE_CLIENT=client
 QUICHE_SERVER=server
 QUICHE_CLIENT_OPT="--no-verify"
 QUICHE_SERVER_OPT="--no-retry"
-LOG=/logs/log.txt
+LOG_DIR=/logs
+LOG=$LOG_DIR/log.txt
 
 check_testcase () {
     TESTNAME=$1
 
     case $1 in
-    handshake | resumption )
+    handshake | resumption | multiconnect )
         echo "supported"
         ;;
     transfer )
@@ -61,6 +63,9 @@ run_quiche_server_tests() {
 
 # Update config based on test case
 check_testcase $TESTCASE
+
+# Create quiche log directory
+mkdir -p $LOG_DIR
 
 if [ "$ROLE" == "client" ]; then
     # Wait for the simulator to start up.
