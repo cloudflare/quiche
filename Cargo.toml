@@ -43,6 +43,9 @@ pkg-config-meta = []
 # Equivalent to "--cfg fuzzing", but can also be checked in build.rs.
 fuzzing = []
 
+# when building with Android NDK < 18 with gcc
+ndk-old-gcc = []
+
 [package.metadata.docs.rs]
 default-features = false
 

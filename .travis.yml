@@ -120,7 +120,8 @@ matrix:
      language: android
      dist: trusty
      env:
-       NDK_VER=r13b
+       NDK_VER_OLD=r13b
+       NDK_VER=r21
        CMAKE_VER=3.6.4111459
      android:
        components:
@@ -136,17 +137,29 @@ matrix:
       # Additional Android components
       - echo y | sdkmanager "cmake;$CMAKE_VER"
       - export PATH=$ANDROID_HOME/cmake/$CMAKE_VER/bin/:$PATH
-      # NDK download and install
+     script:
+      #
+      # Old NDK. Here we use 13b
+      #
       - NDK_URL=https://dl.google.com/android/repository/android-ndk-%s-linux-x86_64.zip
-      - curl -ondk.zip -q $(printf $NDK_URL $NDK_VER)
+      - curl -ondk.zip -q $(printf $NDK_URL $NDK_VER_OLD)
       - unzip -q ndk.zip -d $HOME
-      - export ANDROID_NDK_HOME=$HOME/android-ndk-$NDK_VER
+      - export ANDROID_NDK_HOME=$HOME/android-ndk-$NDK_VER_OLD
       # Setup android toolchain
       - export TOOLCHAIN_DIR=$(pwd)/toolchain
       - mkdir -p $TOOLCHAIN_DIR
       - tools/setup_android.sh
-     script:
-      - tools/build_android.sh --verbose
+      - tools/build_android.sh --verbose --features ndk-old-gcc
+      - rm -fr $TOOLCHAIN_DIR && rm -f .cargo/config
+      #
+      # NDK 19 or higher. Here we use 21 (long term support)
+      #
+      - curl -ondk.zip -q $(printf $NDK_URL $NDK_VER)
+      - unzip -q ndk.zip -d $HOME
+      - export ANDROID_NDK_HOME=$HOME/android-ndk-$NDK_VER
+      - cargo install cargo-ndk
+      - cargo clean
+      - tools/build_android_ndk19.sh --verbose
    - name: "NGINX"
      language: rust
      rust: stable

@@ -250,20 +250,53 @@ the BoringSSL directory with the ``QUICHE_BSSL_PATH`` environment variable:
 
 To build quiche for Android, you need the following:
 
-- Install Android NDK (13b or higher), using Android Studio or directly.
-- Set `ANDROID_NDK_HOME` environment variable to NDK path, e.g. using bash:
+- Install [Android NDK] (13b or higher), using Android Studio or directly.
+- Set `ANDROID_NDK_HOME` environment variable to NDK path, e.g.
 
 ```bash
  $ export ANDROID_NDK_HOME=/usr/local/share/android-ndk
 ```
 
-- Install the Rust toolchain for Android architectures:
+- Install the Rust toolchain for Android architectures needed:
 
 ```bash
- $ rustup target add aarch64-linux-android arm-linux-androideabi armv7-linux-androideabi i686-linux-android
+ $ rustup target add aarch64-linux-android arm-linux-androideabi armv7-linux-androideabi i686-linux-android x86_64-linux-android
 ```
 
-Then, to prepare the cross-compiling toolchain, run the following command:
+Note that the minimum API level is 21 for all target architectures.
+
+Depending on NDK version, you can take one of the following way.
+
+[Android NDK]: https://developer.android.com/ndk
+
+#### NDK version >= 19
+
+For NDK version 19 or higher (21 recommended), you can build in a simpler
+way using [cargo-ndk]. You need to install [cargo-ndk] first.
+
+```bash
+ $ cargo install cargo-ndk
+```
+
+You can build quiche library using the following way. Note that
+`--target` and `--android-platform` are mandatory.
+
+```bash
+ $ cargo ndk --target aarch64-linux-android --android-platform 21 -- build
+```
+
+See [build_android_ndk19.sh] for more example.
+
+Note that building with NDK version 18 seems broken.
+
+[cargo-ndk]: https://docs.rs/crate/cargo-ndk
+[build_android_ndk19.sh]: https://github.com/cloudflare/quiche/blob/master/tools/build_android_ndk19.sh
+
+#### NDK version < 18
+
+If you need to use NDK version < 18 (gcc), you can build quiche in the following way.
+
+To prepare the cross-compiling toolchain, run the following command:
 
 ```bash
  $ tools/setup_android.sh
@@ -271,13 +304,12 @@ Then, to prepare the cross-compiling toolchain, run the following command:
 
 It will create a standalone toolchain for arm64/arm/x86 architectures under the
 `$TOOLCHAIN_DIR/arch` directory. If you didn't set `TOOLCHAIN_DIR` environment
-variable, the current directory will be used. Note that the minimum API level is
-21 for all target architectures.
+variable, the current directory will be used.
 
 After it run successfully, run the following script to build libquiche:
 
 ```bash
- $ tools/build_android.sh
+ $ tools/build_android.sh --features ndk-old-gcc
 ```
 
 It will build binaries for aarch64, armv7 and i686. You can pass parameters to
@@ -285,7 +317,7 @@ this script for cargo build. For example if you want to build a release binary
 with verbose logs, do the following:
 
 ```bash
- $ tools/build_android.sh --release -vv
+ $ tools/build_android.sh --features ndk-old-gcc --release -vv
 ```
 
 ### Building for iOS
