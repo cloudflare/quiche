@@ -4929,6 +4929,19 @@ mod tests {
             Err(Error::InvalidStreamState)
         );
     }
+
+    #[test]
+    fn config_set_cc_algorithm_name() {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+
+        assert_eq!(config.set_cc_algorithm_name("reno"), Ok(()));
+
+        // Unknown name
+        assert_eq!(
+            config.set_cc_algorithm_name("???"),
+            Err(Error::CongestionControl)
+        );
+    }
 }
 
 pub use crate::packet::Header;
