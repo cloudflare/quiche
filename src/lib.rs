@@ -2549,6 +2549,11 @@ impl Connection {
         self.handshake.alpn_protocol()
     }
 
+    /// Returns the peer's leaf certificate (if any) as a DER-encoded buffer.
+    pub fn peer_cert(&self) -> Option<Vec<u8>> {
+        self.handshake.peer_cert()
+    }
+
     /// Returns true if the connection handshake is complete.
     pub fn is_established(&self) -> bool {
         self.handshake_completed
@@ -4941,6 +4946,21 @@ mod tests {
             config.set_cc_algorithm_name("???"),
             Err(Error::CongestionControl)
         );
+    }
+
+    #[test]
+    fn peer_cert() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        match pipe.client.peer_cert() {
+            Some(c) => assert_eq!(c.len(), 919),
+
+            None => panic!("missing server certificate"),
+        }
     }
 }
 
