@@ -79,7 +79,6 @@ struct X509_STORE(c_void);
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-#[cfg(windows)]
 struct X509(c_void);
 
 #[repr(C)]
@@ -444,6 +443,31 @@ impl Handshake {
         };
 
         Some(sigalg.to_string())
+    }
+
+    pub fn peer_cert(&self) -> Option<Vec<u8>> {
+        let peer_cert = unsafe {
+            let mut out: *mut libc::c_uchar = ptr::null_mut();
+
+            let x509 = SSL_get_peer_certificate(self.as_ptr());
+            if x509.is_null() {
+                return None;
+            }
+
+            let out_len = i2d_X509(x509, &mut out);
+            if out_len <= 0 {
+                return None;
+            }
+
+            let der = slice::from_raw_parts(out, out_len as usize);
+            let der = der.to_vec();
+
+            OPENSSL_free(out as *mut c_void);
+
+            der
+        };
+
+        Some(peer_cert)
     }
 
     pub fn is_resumed(&self) -> bool {
@@ -866,6 +890,8 @@ extern {
         sigalg: u16, include_curve: i32,
     ) -> *const c_char;
 
+    fn SSL_get_peer_certificate(ssl: *mut SSL) -> *const X509;
+
     fn SSL_set_min_proto_version(ssl: *mut SSL, version: u16);
     fn SSL_set_max_proto_version(ssl: *mut SSL, version: u16);
 
@@ -923,8 +949,13 @@ extern {
     #[cfg(windows)]
     fn d2i_X509(px: *mut X509, input: *const *const u8, len: c_int) -> *mut X509;
 
+    fn i2d_X509(px: *const X509, out: *mut *mut u8) -> c_int;
+
     // ERR
     fn ERR_peek_error() -> c_uint;
 
     fn ERR_error_string_n(err: c_uint, buf: *const u8, len: usize);
+
+    // OPENSSL
+    fn OPENSSL_free(ptr: *mut c_void);
 }
