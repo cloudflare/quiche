@@ -7,6 +7,10 @@
 #
 set -eu
 
+# Change this value if you need a different API level
+# 21 is the minimum API tested
+API_LEVEL=21
+
 if [ ! -d "${ANDROID_NDK_HOME-}" ]; then
     ANDROID_NDK_HOME=/usr/local/share/android-ndk
 fi
@@ -31,9 +35,9 @@ echo "> Android NDK: ${ANDROID_NDK_HOME}"
 echo "> Toolchain Directory: ${TOOLCHAIN_DIR}"
 
 mkdir -p ${TOOLCHAIN_DIR}/arch
-make_standalone_toolchain arm64 21
-make_standalone_toolchain arm 21
-make_standalone_toolchain x86 21
+make_standalone_toolchain arm64 $API_LEVEL
+make_standalone_toolchain arm $API_LEVEL
+make_standalone_toolchain x86 $API_LEVEL
 
 CARGO_CONFIG=cargo-config.toml
 sed 's@$TOOLCHAIN_DIR@'"${TOOLCHAIN_DIR}"'@g' > $CARGO_CONFIG <<CARGO_CONFIG_EOF
