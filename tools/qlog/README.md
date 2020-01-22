@@ -86,7 +86,7 @@ Simply:
 
 ```rust
 serde_json::to_string_pretty(&trace).unwrap();
-``
+```
 
 which would generate the following:
 
