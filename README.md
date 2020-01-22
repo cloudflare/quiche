@@ -250,7 +250,7 @@ the BoringSSL directory with the ``QUICHE_BSSL_PATH`` environment variable:
 
 To build quiche for Android, you need the following:
 
-- Install [Android NDK] (13b or higher), using Android Studio or directly.
+- Install the [Android NDK] (13b or higher), using Android Studio or directly.
 - Set `ANDROID_NDK_HOME` environment variable to NDK path, e.g.
 
 ```bash
@@ -265,7 +265,7 @@ To build quiche for Android, you need the following:
 
 Note that the minimum API level is 21 for all target architectures.
 
-Depending on NDK version, you can take one of the following way.
+Depending on the NDK version used, you can take one of the following procedures:
 
 [Android NDK]: https://developer.android.com/ndk
 
@@ -278,16 +278,16 @@ way using [cargo-ndk]. You need to install [cargo-ndk] first.
  $ cargo install cargo-ndk
 ```
 
-You can build quiche library using the following way. Note that
+You can build the quiche library using the following procedure. Note that
 `--target` and `--android-platform` are mandatory.
 
 ```bash
  $ cargo ndk --target aarch64-linux-android --android-platform 21 -- build
 ```
 
-See [build_android_ndk19.sh] for more example.
+See [build_android_ndk19.sh] for more information.
 
-Note that building with NDK version 18 seems broken.
+Note that building with NDK version 18 appears to be broken.
 
 [cargo-ndk]: https://docs.rs/crate/cargo-ndk
 [build_android_ndk19.sh]: https://github.com/cloudflare/quiche/blob/master/tools/build_android_ndk19.sh

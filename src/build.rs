@@ -1,6 +1,6 @@
 // Additional parameters for Android build of BoringSSL.
 //
-// Android NDK < 18 with gcc
+// Android NDK < 18 with GCC.
 const CMAKE_PARAMS_ANDROID_NDK_OLD_GCC: &[(&str, &[(&str, &str)])] = &[
     ("aarch64", &[(
         "ANDROID_TOOLCHAIN_NAME",
@@ -20,7 +20,7 @@ const CMAKE_PARAMS_ANDROID_NDK_OLD_GCC: &[(&str, &[(&str, &str)])] = &[
     )]),
 ];
 
-// Android NDK >= 19
+// Android NDK >= 19.
 const CMAKE_PARAMS_ANDROID_NDK: &[(&str, &[(&str, &str)])] = &[
     ("aarch64", &[("ANDROID_ABI", "arm64-v8a")]),
     ("arm", &[("ANDROID_ABI", "armeabi-v7a")]),
