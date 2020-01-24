@@ -24,6 +24,210 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+//! The qlog crate is an implementation of the [qlog main schema] and [qlog QUIC
+//! and HTTP/3 events] that attempts to closely follow the format of the qlog
+//! [TypeScript schema]. This is just a data model and no support is provided
+//! for logging IO, applications can decide themselves the most appropriate
+//! method.
+//!
+//! The crate uses Serde for conversion between Rust and JSON.
+//!
+//! [qlog main schema]: https://tools.ietf.org/html/draft-marx-qlog-main-schema
+//! [qlog QUIC and HTTP/3 events]:
+//! https://quiclog.github.io/internet-drafts/draft-marx-qlog-event-definitions-quic-h3
+//! [TypeScript schema]:
+//! https://github.com/quiclog/qlog/blob/master/TypeScript/draft-01/QLog.ts
+//!
+//! Getting Started
+//! ---------------
+//! qlog is a hierarchical logging format, with a rough structure of:
+//!
+//! * Log
+//!   * Trace(s)
+//!     * Event(s)
+//!
+//! In practice, a single QUIC connection maps to a single Trace file with one
+//! or more Events. Applications can decide whether to combine Traces from
+//! different connections into the same Log.
+//!
+//! ## Traces
+//!
+//! A [`Trace`] contains metadata such as the [`VantagePoint`] of capture and
+//! the [`Configuration`] of the `Trace`.
+//!
+//! A very important part of the `Trace` is the definition of `event_fields`. A
+//! qlog Event is a vector of [`EventField`]; this provides great flexibility to
+//! log events with any number of `EventFields` in any order. The `event_fields`
+//! property describes the format of event logging and it is important that
+//! events comply with that format. Failing to do so it going to cause problems
+//! for qlog analysis tools. For information is available at
+//! https://tools.ietf.org/html/draft-marx-qlog-main-schema-01#section-3.3.4
+//!
+//! In order to make using qlog a bit easier, this crate expects a qlog Event to
+//! consist of the following EventFields in the following order:
+//! [`EventField::RelativeTime`], [`EventField::Category`],
+//! [`EventField::Event`] and [`EventField::Data`]. A set of methods are
+//! provided to assist in creating a Trace and appending events to it in this
+//! format.
+//!
+//! ### Creating a Trace
+//!
+//! A typical application needs a single qlog [`Trace`] that it appends QUIC
+//! and/or HTTP/3 events to:
+//!
+//! ```
+//! let mut trace = qlog::Trace::new(
+//!     qlog::VantagePoint {
+//!         name: Some("Example client".to_string()),
+//!         ty: qlog::VantagePointType::Client,
+//!         flow: None,
+//!     },
+//!     Some("Example qlog trace".to_string()),
+//!     Some("Example qlog trace description".to_string()),
+//!     Some(qlog::Configuration {
+//!         time_offset: Some("0".to_string()),
+//!         time_units: Some(qlog::TimeUnits::Ms),
+//!         original_uris: None,
+//!     }),
+//!     None,
+//! );
+//! ```
+//!
+//! ## Adding events
+//!
+//! Qlog Events are added to [`qlog::Trace.events`].
+//!
+//! It is recommended to use the provided utility methods to append semantically
+//! valid events to a trace. However, there is nothing preventing you from
+//! creating the events manually.
+//!
+//! The following example demonstrates how to log a QUIC packet
+//! containing a single Crypto frame. It uses the [`QuicFrame::crypto()`],
+//! [`packet_sent_min()`] and [`push_event()`] methods to create and log a
+//! PacketSent event and its EventData.
+//!
+//! ```
+//! # let mut trace = qlog::Trace::new (
+//! #     qlog::VantagePoint {
+//! #         name: Some("Example client".to_string()),
+//! #         ty: qlog::VantagePointType::Client,
+//! #         flow: None,
+//! #     },
+//! #     Some("Example qlog trace".to_string()),
+//! #     Some("Example qlog trace description".to_string()),
+//! #     Some(qlog::Configuration {
+//! #         time_offset: Some("0".to_string()),
+//! #         time_units: Some(qlog::TimeUnits::Ms),
+//! #         original_uris: None,
+//! #     }),
+//! #     None
+//! # );
+//!
+//! let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
+//! let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
+//! let pkt_hdr = qlog::PacketHeader::new(
+//!     0,
+//!     Some(1251),
+//!     Some(1224),
+//!     Some(0xff000018),
+//!     Some(&scid),
+//!     Some(&dcid),
+//! );
+//! let frames =
+//!     vec![qlog::QuicFrame::crypto("0".to_string(), "1000".to_string())];
+//! let event = qlog::event::Event::packet_sent_min(
+//!     qlog::PacketType::Initial,
+//!     pkt_hdr,
+//!     Some(frames),
+//! );
+//!
+//! trace.push_event(std::time::Duration::new(0, 0), event);
+//! ```
+//!
+//! ### Serializing
+//!
+//! Simply:
+//!
+//! ```
+//! # let mut trace = qlog::Trace::new (
+//! #     qlog::VantagePoint {
+//! #         name: Some("Example client".to_string()),
+//! #         ty: qlog::VantagePointType::Client,
+//! #         flow: None,
+//! #     },
+//! #     Some("Example qlog trace".to_string()),
+//! #     Some("Example qlog trace description".to_string()),
+//! #     Some(qlog::Configuration {
+//! #         time_offset: Some("0".to_string()),
+//! #         time_units: Some(qlog::TimeUnits::Ms),
+//! #         original_uris: None,
+//! #     }),
+//! #     None
+//! # );
+//! serde_json::to_string_pretty(&trace).unwrap();
+//! ```
+//!
+//! which would generate the following:
+//!
+//! ```ignore
+//! {
+//!   "vantage_point": {
+//!     "name": "Example client",
+//!     "type": "client"
+//!   },
+//!   "title": "Example qlog trace",
+//!   "description": "Example qlog trace description",
+//!   "configuration": {
+//!     "time_units": "ms",
+//!     "time_offset": "0"
+//!   },
+//!   "event_fields": [
+//!     "relative_time",
+//!     "category",
+//!     "event",
+//!     "data"
+//!   ],
+//!   "events": [
+//!     [
+//!       "0",
+//!       "transport",
+//!       "packet_sent",
+//!       {
+//!         "packet_type": "initial",
+//!         "header": {
+//!           "packet_number": "0",
+//!           "packet_size": 1251,
+//!           "payload_length": 1224,
+//!           "version": "ff000018",
+//!           "scil": "8",
+//!           "dcil": "8",
+//!           "scid": "7e37e4dcc6682da8",
+//!           "dcid": "36ce104eee50101c"
+//!         },
+//!         "frames": [
+//!           {
+//!             "frame_type": "crypto",
+//!             "offset": "0",
+//!             "length": "100",
+//!           }
+//!         ]
+//!       }
+//!     ]
+//!   ]
+//! }
+//! ```
+//! [`Trace`]: struct.Trace.html
+//! [`VantagePoint`]: struct.VantagePoint.html
+//! [`Configuration`]: struct.Configuration.html
+//! [`EventField`]: enum.EventField.html
+//! [`EventField::RelativeTime`]: enum.EventField.html#variant.RelativeTime
+//! [`EventField::Category`]: enum.EventField.html#variant.Category
+//! [`EventField::Type`]: enum.EventField.html#variant.Type
+//! [`EventField::Data`]: enum.EventField.html#variant.Data
+//! [`qlog::Trace.events`]: struct.Trace.html#structfield.events
+//! [`push_event()`]: struct.Trace.html#method.push_event
+//! [`packet_sent_min()`]: event/struct.Event.html#method.packet_sent_min
+//! [`QuicFrame::crypto()`]: enum.QuicFrame.html#variant.Crypto
 use serde::{
     Deserialize,
     Serialize,
@@ -40,6 +244,18 @@ pub struct Qlog {
     pub summary: Option<String>,
 
     pub traces: Vec<Trace>,
+}
+
+impl Default for Qlog {
+    fn default() -> Self {
+        Qlog {
+            qlog_version: QLOG_VERSION.to_string(),
+            title: Some("Default qlog title".to_string()),
+            description: Some("Default qlog description".to_string()),
+            summary: Some("Default qlog title".to_string()),
+            traces: Vec::new(),
+        }
+    }
 }
 
 #[serde_with::skip_serializing_none]
@@ -59,68 +275,50 @@ pub struct Trace {
 
 /// Helper functions for using a qlog trace.
 impl Trace {
-    fn push_event(
-        &mut self, relative_time: String, category: EventCategory,
-        event: EventType, data: EventData,
+    /// Creates a new qlog trace with the hard-coded event_fields
+    /// ["relative_time", "category", "event", "data"]
+    pub fn new(
+        vantage_point: VantagePoint, title: Option<String>,
+        description: Option<String>, configuration: Option<Configuration>,
+        common_fields: Option<CommonFields>,
+    ) -> Self {
+        Trace {
+            vantage_point,
+            title,
+            description,
+            configuration,
+            common_fields,
+            event_fields: vec![
+                "relative_time".to_string(),
+                "category".to_string(),
+                "event".to_string(),
+                "data".to_string(),
+            ],
+            events: Vec::new(),
+        }
+    }
+
+    pub fn push_event(
+        &mut self, relative_time: std::time::Duration, event: crate::event::Event,
     ) {
+        let rel = match &self.configuration {
+            Some(conf) => match conf.time_units {
+                Some(TimeUnits::Ms) => relative_time.as_millis().to_string(),
+
+                Some(TimeUnits::Us) => relative_time.as_micros().to_string(),
+
+                None => String::from(""),
+            },
+
+            None => String::from(""),
+        };
+
         self.events.push(vec![
-            EventField::RelativeTime(relative_time),
-            EventField::Category(category),
-            EventField::Event(event),
-            EventField::Data(data),
+            EventField::RelativeTime(rel),
+            EventField::Category(event.category),
+            EventField::Event(event.ty),
+            EventField::Data(event.data),
         ]);
-    }
-
-    /// Appends an `ConnectivityEventType` to the back of a qlog trace.
-    pub fn push_connectivity_event(
-        &mut self, relative_time: String, event: ConnectivityEventType,
-        data: EventData,
-    ) {
-        self.push_event(
-            relative_time,
-            EventCategory::Connectivity,
-            EventType::ConnectivityEventType(event),
-            data,
-        );
-    }
-
-    /// Appends a `TransportEventType` to the back of a qlog trace.
-    pub fn push_transport_event(
-        &mut self, relative_time: String, event: TransportEventType,
-        data: EventData,
-    ) {
-        self.push_event(
-            relative_time,
-            EventCategory::Transport,
-            EventType::TransportEventType(event),
-            data,
-        );
-    }
-
-    /// Appends a `TransportEventType` to the back of a qlog trace.
-    pub fn push_security_event(
-        &mut self, relative_time: String, event: SecurityEventType,
-        data: EventData,
-    ) {
-        self.push_event(
-            relative_time,
-            EventCategory::Security,
-            EventType::SecurityEventType(event),
-            data,
-        );
-    }
-
-    /// Appends a `TransportEventType` to the back of a qlog trace.
-    pub fn push_recovery_event(
-        &mut self, relative_time: String, event: RecoveryEventType,
-        data: EventData,
-    ) {
-        self.push_event(
-            relative_time,
-            EventCategory::Recovery,
-            EventType::RecoveryEventType(event),
-            data,
-        );
     }
 }
 
@@ -162,8 +360,18 @@ pub struct Configuration {
      * additionalUserSpecifiedProperty */
 }
 
+impl Default for Configuration {
+    fn default() -> Self {
+        Configuration {
+            time_units: Some(TimeUnits::Ms),
+            time_offset: Some("0".to_string()),
+            original_uris: None,
+        }
+    }
+}
+
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 pub struct CommonFields {
     pub group_id: Option<String>,
     pub protocol_type: Option<String>,
@@ -185,6 +393,10 @@ pub enum EventType {
     RecoveryEventType(RecoveryEventType),
 
     Http3EventType(Http3EventType),
+
+    QpackEventType(QpackEventType),
+
+    GenericEventType(GenericEventType),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -331,14 +543,14 @@ pub enum TransportOwner {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PreferredAddress {
-    ip_v4: String,
-    ip_v6: String,
+    pub ip_v4: String,
+    pub ip_v6: String,
 
-    port_v4: u64,
-    port_v6: u64,
+    pub port_v4: u64,
+    pub port_v6: u64,
 
-    connection_id: String,
-    stateless_reset_token: String,
+    pub connection_id: String,
+    pub stateless_reset_token: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -440,16 +652,16 @@ pub enum QpackUpdateType {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct QpackDynamicTableEntry {
-    index: u64,
-    name: Option<String>,
-    value: Option<String>,
+    pub index: u64,
+    pub name: Option<String>,
+    pub value: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct QpackHeaderBlockPrefix {
-    required_insert_count: u64,
-    sign_bit: bool,
-    delta_base: u64,
+    pub required_insert_count: u64,
+    pub sign_bit: bool,
+    pub delta_base: u64,
 }
 
 #[serde_with::skip_serializing_none]
@@ -596,7 +808,7 @@ pub enum EventData {
         packet_number: String,
     },
 
-    SteamStateUpdated {
+    StreamStateUpdated {
         stream_id: String,
         stream_type: Option<StreamType>,
 
@@ -835,19 +1047,19 @@ pub enum PacketType {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum Http3EventType {
-    StreamStateUpdate,
-    StreamTypeUpdate,
+    ParametersSet,
+    StreamTypeSet,
     FrameCreated,
     FrameParsed,
     DataMoved,
-    DatagramReceived,
+    PushResolved,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackEventType {
     StateUpdated,
-    StreamStateUpdate,
+    StreamStateUpdated,
     DynamicTableUpdated,
     HeadersEncoded,
     HeadersDecoded,
@@ -893,6 +1105,49 @@ pub struct PacketHeader {
     pub dcil: Option<String>,
     pub scid: Option<String>,
     pub dcid: Option<String>,
+}
+
+impl PacketHeader {
+    pub fn new(
+        packet_number: u64, packet_size: Option<u64>,
+        payload_length: Option<u64>, version: Option<u32>, scid: Option<&[u8]>,
+        dcid: Option<&[u8]>,
+    ) -> Self {
+        let (scil, scid) = match scid {
+            Some(cid) => (
+                Some(cid.len().to_string()),
+                Some(format!("{}", HexSlice::new(&cid))),
+            ),
+
+            None => (None, None),
+        };
+
+        let (dcil, dcid) = match dcid {
+            Some(cid) => (
+                Some(cid.len().to_string()),
+                Some(format!("{}", HexSlice::new(&cid))),
+            ),
+
+            None => (None, None),
+        };
+
+        let version = match version {
+            Some(v) => Some(format!("{:x?}", v)),
+
+            None => None,
+        };
+
+        PacketHeader {
+            packet_number: packet_number.to_string(),
+            packet_size,
+            payload_length,
+            version,
+            scil,
+            dcil,
+            scid,
+            dcid,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1316,14 +1571,14 @@ pub enum Http3FrameTypeName {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct HttpHeader {
-    name: String,
-    value: String,
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Setting {
-    name: String,
-    value: String,
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1578,14 +1833,6 @@ pub enum QpackHeaderBlockRepresentation {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-pub struct QPackHeaderBlockPrefix {
-    required_insert_count: u64,
-    sign_bit: bool,
-    delta_base: u64,
-}
-
 pub struct HexSlice<'a>(&'a [u8]);
 
 impl<'a> HexSlice<'a> {
@@ -1615,22 +1862,22 @@ mod tests {
 
     #[test]
     fn packet_header() {
-        let pkt_hdr = PacketHeader {
-            packet_number: "0".to_string(),
-            packet_size: Some(1251),
-            payload_length: Some(1224),
-            version: Some("0xff000018".to_string()),
-            scil: Some("8".to_string()),
-            dcil: Some("8".to_string()),
-            scid: Some("7e37e4dcc6682da8".to_string()),
-            dcid: Some("36ce104eee50101c".to_string()),
-        };
+        let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
+        let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
+        let pkt_hdr = PacketHeader::new(
+            0,
+            Some(1251),
+            Some(1224),
+            Some(0xff000018),
+            Some(&scid),
+            Some(&dcid),
+        );
 
         let log_string = r#"{
   "packet_number": "0",
   "packet_size": 1251,
   "payload_length": 1224,
-  "version": "0xff000018",
+  "version": "ff000018",
   "scil": "8",
   "dcil": "8",
   "scid": "7e37e4dcc6682da8",
@@ -1648,7 +1895,7 @@ mod tests {
     "packet_number": "0",
     "packet_size": 1251,
     "payload_length": 1224,
-    "version": "0xff000018",
+    "version": "ff000018",
     "scil": "8",
     "dcil": "8",
     "scid": "7e37e4dcc6682da8",
@@ -1656,16 +1903,16 @@ mod tests {
   }
 }"#;
 
-        let pkt_hdr = PacketHeader {
-            packet_number: "0".to_string(),
-            packet_size: Some(1251),
-            payload_length: Some(1224),
-            version: Some("0xff000018".to_string()),
-            scil: Some("8".to_string()),
-            dcil: Some("8".to_string()),
-            scid: Some("7e37e4dcc6682da8".to_string()),
-            dcid: Some("36ce104eee50101c".to_string()),
-        };
+        let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
+        let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
+        let pkt_hdr = PacketHeader::new(
+            0,
+            Some(1251),
+            Some(1224),
+            Some(0xff000018),
+            Some(&scid),
+            Some(&dcid),
+        );
 
         let pkt_sent_evt = EventData::PacketSent {
             raw_encrypted: None,
@@ -1690,7 +1937,7 @@ mod tests {
     "packet_number": "0",
     "packet_size": 1251,
     "payload_length": 1224,
-    "version": "0xff000018",
+    "version": "ff000018",
     "scil": "8",
     "dcil": "8",
     "scid": "7e37e4dcc6682da8",
@@ -1713,16 +1960,16 @@ mod tests {
   ]
 }"#;
 
-        let pkt_hdr = PacketHeader {
-            packet_number: "0".to_string(),
-            packet_size: Some(1251),
-            payload_length: Some(1224),
-            version: Some("0xff000018".to_string()),
-            scil: Some("8".to_string()),
-            dcil: Some("8".to_string()),
-            scid: Some("7e37e4dcc6682da8".to_string()),
-            dcid: Some("36ce104eee50101c".to_string()),
-        };
+        let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
+        let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
+        let pkt_hdr = PacketHeader::new(
+            0,
+            Some(1251),
+            Some(1224),
+            Some(0xff000018),
+            Some(&scid),
+            Some(&dcid),
+        );
 
         let mut frames = Vec::new();
         frames.push(QuicFrame::padding());
@@ -1773,28 +2020,21 @@ mod tests {
   "events": []
 }"#;
 
-        let trace = Trace {
-            vantage_point: VantagePoint {
+        let trace = Trace::new(
+            VantagePoint {
                 name: None,
                 ty: VantagePointType::Server,
                 flow: None,
             },
-            title: Some("Quiche qlog trace".to_string()),
-            description: Some("Quiche qlog trace description".to_string()),
-            configuration: Some(Configuration {
+            Some("Quiche qlog trace".to_string()),
+            Some("Quiche qlog trace description".to_string()),
+            Some(Configuration {
                 time_offset: Some("0".to_string()),
                 time_units: Some(TimeUnits::Ms),
                 original_uris: None,
             }),
-            common_fields: None,
-            event_fields: vec![
-                "relative_time".to_string(),
-                "category".to_string(),
-                "event".to_string(),
-                "data".to_string(),
-            ], // TODO: hack
-            events: Vec::new(), // vec![vec![rt, cat, ev, data]],
-        };
+            None,
+        );
 
         assert_eq!(serde_json::to_string_pretty(&trace).unwrap(), log_string);
     }
@@ -1829,7 +2069,7 @@ fn trace_single_transport_event() {
           "packet_number": "0",
           "packet_size": 1251,
           "payload_length": 1224,
-          "version": "0xff000018",
+          "version": "ff000018",
           "scil": "8",
           "dcil": "8",
           "scid": "7e37e4dcc6682da8",
@@ -1849,56 +2089,109 @@ fn trace_single_transport_event() {
   ]
 }"#;
 
-    let mut trace = Trace {
-        vantage_point: VantagePoint {
+    let mut trace = Trace::new(
+        VantagePoint {
             name: None,
             ty: VantagePointType::Server,
             flow: None,
         },
-        title: Some("Quiche qlog trace".to_string()),
-        description: Some("Quiche qlog trace description".to_string()),
-        configuration: Some(Configuration {
+        Some("Quiche qlog trace".to_string()),
+        Some("Quiche qlog trace description".to_string()),
+        Some(Configuration {
             time_offset: Some("0".to_string()),
             time_units: Some(TimeUnits::Ms),
             original_uris: None,
         }),
-        common_fields: None,
-        event_fields: vec![
-            "relative_time".to_string(),
-            "category".to_string(),
-            "event".to_string(),
-            "data".to_string(),
-        ], // TODO: hack
-        events: Vec::new(), // vec![vec![rt, cat, ev, data]],
-    };
-
-    trace.push_transport_event(
-        "0".to_string(),
-        TransportEventType::PacketSent,
-        EventData::PacketSent {
-            raw_encrypted: None,
-            raw_decrypted: None,
-            packet_type: PacketType::Initial,
-            header: PacketHeader {
-                packet_number: "0".to_string(),
-                packet_size: Some(1251),
-                payload_length: Some(1224),
-                version: Some("0xff000018".to_string()),
-                scil: Some("8".to_string()),
-                dcil: Some("8".to_string()),
-                scid: Some("7e37e4dcc6682da8".to_string()),
-                dcid: Some("36ce104eee50101c".to_string()),
-            },
-            frames: Some(vec![QuicFrame::stream(
-                "0".to_string(),
-                "0".to_string(),
-                "100".to_string(),
-                true,
-                None,
-            )]),
-            is_coalesced: None,
-        },
+        None,
     );
+
+    let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
+    let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
+    let pkt_hdr = PacketHeader::new(
+        0,
+        Some(1251),
+        Some(1224),
+        Some(0xff000018),
+        Some(&scid),
+        Some(&dcid),
+    );
+    let frames = vec![QuicFrame::stream(
+        "0".to_string(),
+        "0".to_string(),
+        "100".to_string(),
+        true,
+        None,
+    )];
+    let event =
+        event::Event::packet_sent_min(PacketType::Initial, pkt_hdr, Some(frames));
+
+    trace.push_event(std::time::Duration::new(0, 0), event);
 
     assert_eq!(serde_json::to_string_pretty(&trace).unwrap(), log_string);
 }
+
+#[test]
+fn test_event_validity() {
+    // Test a single event in each category
+
+    let ev = event::Event::server_listening_min(443, 443);
+    assert!(ev.is_valid());
+
+    let ev = event::Event::transport_parameters_set_min();
+    assert!(ev.is_valid());
+
+    let ev = event::Event::recovery_parameters_set_min();
+    assert!(ev.is_valid());
+
+    let ev = event::Event::h3_parameters_set_min();
+    assert!(ev.is_valid());
+
+    let ev = event::Event::qpack_state_updated_min();
+    assert!(ev.is_valid());
+
+    let ev = event::Event {
+        category: EventCategory::Error,
+        ty: EventType::GenericEventType(GenericEventType::ConnectionError),
+        data: EventData::ConnectionError {
+            code: None,
+            description: None,
+        },
+    };
+
+    assert!(ev.is_valid());
+}
+
+#[test]
+fn test_bogus_event_validity() {
+    // Test a single event in each category
+
+    let mut ev = event::Event::server_listening_min(443, 443);
+    ev.category = EventCategory::Simulation;
+    assert!(!ev.is_valid());
+
+    let mut ev = event::Event::transport_parameters_set_min();
+    ev.category = EventCategory::Simulation;
+    assert!(!ev.is_valid());
+
+    let mut ev = event::Event::recovery_parameters_set_min();
+    ev.category = EventCategory::Simulation;
+    assert!(!ev.is_valid());
+
+    let mut ev = event::Event::h3_parameters_set_min();
+    ev.category = EventCategory::Simulation;
+    assert!(!ev.is_valid());
+
+    let mut ev = event::Event::qpack_state_updated_min();
+    ev.category = EventCategory::Simulation;
+    assert!(!ev.is_valid());
+
+    let ev = event::Event {
+        category: EventCategory::Error,
+        ty: EventType::GenericEventType(GenericEventType::ConnectionError),
+        data: EventData::FramesProcessed { frames: Vec::new() },
+    };
+
+    assert!(!ev.is_valid());
+}
+
+pub mod event;
