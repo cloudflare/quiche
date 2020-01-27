@@ -39,8 +39,17 @@ pub fn run(
 
     let max_stream_data = 1_000_000;
 
-    let version = "babababa";
-    let version = u32::from_str_radix(version, 16).unwrap();
+    let version = if let Some(v) = std::env::var_os("QUIC_VERSION") {
+        match v.to_str() {
+            Some("current") => quiche::PROTOCOL_VERSION,
+
+            Some(v) => u32::from_str_radix(v, 16).unwrap(),
+
+            _ => 0xbaba_baba,
+        }
+    } else {
+        0xbaba_baba
+    };
 
     let mut reqs_count = 0;
 

@@ -37,6 +37,11 @@ A set of environment variables allow tuning of test beheviour:
 * IDLE_TIMEOUT     - client's idle timeout in integer milliseconds.
                      Default value is 60000 (60 seconds).
 
+* QUIC_VERSION     - wire protocol version used by the client as a hex value
+                     (e.g. "0xbabababa"). By default an invalid version is used
+                     to trigger version negotiation. If set to "current", the
+                     current supported version is used.
+
 * EXTRA_HEADERS    - additional request headers in JSON format.
                      Currently used by `headers` test only.
 
