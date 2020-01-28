@@ -31,6 +31,8 @@ use crate::cc;
 use crate::recovery::Sent;
 
 /// Reno congestion control implementation.
+const SIMPLE_LOST_THRESHOLD: u32 = 2;
+
 pub struct Reno {
     congestion_window: usize,
 
@@ -39,6 +41,10 @@ pub struct Reno {
     congestion_recovery_start_time: Option<Instant>,
 
     ssthresh: usize,
+
+    prev_cwnd: usize,
+
+    prev_ssthresh: usize,
     /* TODO: ECN is not implemented.
      * ecn_ce_counters: [usize; packet::EPOCH_COUNT] */
 }
@@ -56,8 +62,10 @@ impl cc::CongestionControl for Reno {
             congestion_recovery_start_time: None,
 
             ssthresh: std::usize::MAX,
-            /* TODO: ECN is not implemented.
-             * ecn_ce_counters: [0; packet::EPOCH_COUNT], */
+
+            prev_cwnd: 0,
+
+            prev_ssthresh: 0,
         }
     }
 
@@ -87,10 +95,33 @@ impl cc::CongestionControl for Reno {
     }
 
     fn on_packet_acked_cc(
-        &mut self, packet: &Sent, _srtt: Duration, _min_rtt: Duration,
+        &mut self, packet: &Sent, _srtt: Duration, min_rtt: Duration,
         app_limited: bool, _trace_id: &str,
     ) {
         self.bytes_in_flight -= packet.size;
+
+        if let Some(congestion_recovery_start_time) =
+            self.congestion_recovery_start_time
+        {
+            // Simple lost detection: when the recovery episode ends
+            // and the duration of current recovery episode is
+            // short than a given threshold, currently defined by
+            // 2 x min_rtt. This means there was a small loss
+            // recovered very quickly, indicating this has a
+            // low probability of congestion and a simple packet lost.
+            // In this case we restore previous cwnd/ssthresh
+            // to resume faster after recovery.
+            if packet.time > congestion_recovery_start_time &&
+                congestion_recovery_start_time.elapsed() <
+                    SIMPLE_LOST_THRESHOLD * min_rtt
+            {
+                // End of current recovery episode.
+                self.congestion_recovery_start_time = None;
+
+                self.congestion_window = self.prev_cwnd;
+                self.ssthresh = self.prev_ssthresh;
+            }
+        }
 
         if self.in_congestion_recovery(packet.time) {
             return;
@@ -117,6 +148,10 @@ impl cc::CongestionControl for Reno {
         // start of the previous congestion recovery period.
         if !self.in_congestion_recovery(time_sent) {
             self.congestion_recovery_start_time = Some(now);
+
+            // Back up current cwnd/ssthresh
+            self.prev_cwnd = self.congestion_window;
+            self.prev_ssthresh = self.ssthresh;
 
             self.congestion_window = (self.congestion_window as f64 *
                 cc::LOSS_REDUCTION_FACTOR)
@@ -262,6 +297,48 @@ mod tests {
         // Check if cwnd increase is smaller than a packet size (congestion
         // avoidance).
         assert!(cc.cwnd() < prev_cwnd + 1111);
+    }
+
+    #[test]
+    fn reno_detect_simple_loss() {
+        init();
+
+        let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
+        let prev_cwnd = cc.cwnd();
+
+        // Send 20K bytes
+        cc.on_packet_sent_cc(20000, TRACE_ID);
+
+        cc.congestion_event(
+            std::time::Instant::now(),
+            std::time::Instant::now(),
+            TRACE_ID,
+        );
+
+        // In Reno, after congestion event, cwnd will be cut by half
+        assert_eq!(prev_cwnd / 2, cc.cwnd());
+
+        let p = Sent {
+            pkt_num: 0,
+            frames: vec![],
+            time: std::time::Instant::now(),
+            size: 5000,
+            ack_eliciting: true,
+            in_flight: true,
+        };
+
+        // Ack 5000 bytes
+        // We give min_rtt = 1sec to trigger undoing cwnd
+        cc.on_packet_acked_cc(
+            &p,
+            Duration::new(1, 1),
+            Duration::new(1, 0),
+            false,
+            TRACE_ID,
+        );
+
+        // Check if we are still in slow start after undoing cwnd
+        assert_eq!(cc.cwnd(), prev_cwnd + 5000);
     }
 
     #[test]
