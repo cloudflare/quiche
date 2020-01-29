@@ -115,7 +115,7 @@ fn main() {
     config.verify_peer(true);
 
     config
-        .set_application_protos(b"\x05hq-24\x05hq-23\x08http/0.9")
+        .set_application_protos(b"\x05hq-25\x05hq-24\x05hq-23\x08http/0.9")
         .unwrap();
 
     config.set_idle_timeout(5000);

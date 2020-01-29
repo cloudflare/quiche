@@ -274,8 +274,14 @@ use std::str::FromStr;
 pub use crate::cc::Algorithm as CongestionControlAlgorithm;
 
 /// The current QUIC wire version.
-pub const PROTOCOL_VERSION: u32 = 0xff00_0018;
-const PROTOCOL_VERSION_OLD: u32 = 0xff00_0017;
+pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_DRAFT25;
+
+/// Supported QUIC versions.
+///
+/// Note that the older ones might not be fully supported.
+const PROTOCOL_VERSION_DRAFT25: u32 = 0xff00_0019;
+const PROTOCOL_VERSION_DRAFT24: u32 = 0xff00_0018;
+const PROTOCOL_VERSION_DRAFT23: u32 = 0xff00_0017;
 
 /// The maximum length of a connection ID.
 pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
@@ -957,7 +963,13 @@ pub fn retry(
 
 /// Returns true if the given protocol version is supported.
 pub fn version_is_supported(version: u32) -> bool {
-    version == PROTOCOL_VERSION || version == PROTOCOL_VERSION_OLD
+    match version {
+        PROTOCOL_VERSION |
+        PROTOCOL_VERSION_DRAFT24 |
+        PROTOCOL_VERSION_DRAFT23 => true,
+
+        _ => false,
+    }
 }
 
 impl Connection {
