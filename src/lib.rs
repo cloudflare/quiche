@@ -802,6 +802,9 @@ pub struct Connection {
     /// Whether the connection handshake has completed.
     handshake_completed: bool,
 
+    /// Whether the HANDSHAKE_DONE has been sent.
+    handshake_done_sent: bool,
+
     /// Whether the connection handshake has been confirmed.
     handshake_confirmed: bool,
 
@@ -1059,6 +1062,8 @@ impl Connection {
             verified_peer_address: odcid.is_some(),
 
             handshake_completed: false,
+
+            handshake_done_sent: false,
 
             handshake_confirmed: false,
 
@@ -1670,6 +1675,10 @@ impl Connection {
                     self.pkt_num_spaces[epoch].ack_elicited = true;
                 },
 
+                frame::Frame::HandshakeDone => {
+                    self.handshake_done_sent = false;
+                },
+
                 _ => (),
             }
         }
@@ -1749,6 +1758,22 @@ impl Connection {
         }
 
         if pkt_type == packet::Type::Short && !is_closing {
+            // Create HANDSHAKE_DONE frame.
+            if self.handshake_completed &&
+                !self.handshake_done_sent &&
+                self.is_server &&
+                self.version >= PROTOCOL_VERSION_DRAFT25
+            {
+                let frame = frame::Frame::HandshakeDone;
+
+                payload_len += frame.wire_len();
+                left -= frame.wire_len();
+
+                frames.push(frame);
+
+                self.handshake_done_sent = true;
+            }
+
             // Create MAX_STREAMS_BIDI frame.
             if self.streams.should_update_max_streams_bidi() {
                 let max = self.streams.update_max_streams_bidi();
@@ -2919,6 +2944,21 @@ impl Connection {
             frame::Frame::ApplicationClose { .. } => {
                 self.draining_timer = Some(now + (self.recovery.pto() * 3));
             },
+
+            frame::Frame::HandshakeDone => {
+                if self.version < PROTOCOL_VERSION_DRAFT25 {
+                    return Err(Error::InvalidFrame);
+                }
+
+                if self.is_server {
+                    return Err(Error::InvalidPacket);
+                }
+
+                self.handshake_confirmed = true;
+
+                // Once the handshake is confirmed, we can drop Handshake keys.
+                self.drop_epoch_state(packet::EPOCH_HANDSHAKE);
+            },
         }
 
         Ok(())
@@ -3719,7 +3759,7 @@ mod tests {
         assert!(!pipe.server.handshake_completed);
         assert!(!pipe.server.handshake_confirmed);
 
-        // Server completes handshake.
+        // Server completes handshake and sends HANDSHAKE_DONE.
         len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
         assert!(pipe.client.handshake_completed);
@@ -3728,40 +3768,17 @@ mod tests {
         assert!(pipe.server.handshake_completed);
         assert!(!pipe.server.handshake_confirmed);
 
-        // Client acks 1-RTT packet.
+        // Client acks 1-RTT packet, and confirms handshake.
         len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
 
         assert!(pipe.client.handshake_completed);
-        assert!(!pipe.client.handshake_confirmed);
+        assert!(pipe.client.handshake_confirmed);
 
         assert!(pipe.server.handshake_completed);
         assert!(!pipe.server.handshake_confirmed);
 
         // Server handshake is confirmed.
-        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
-
-        assert!(pipe.client.handshake_completed);
-        assert!(!pipe.client.handshake_confirmed);
-
-        assert!(pipe.server.handshake_completed);
-        assert!(pipe.server.handshake_confirmed);
-
-        // Client sends 1-RTT ack-eliciting packet.
-        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
-
-        len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
-
-        // Server acks 1-RTT packet.
-        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
-
-        assert!(pipe.client.handshake_completed);
-        assert!(!pipe.client.handshake_confirmed);
-
-        assert!(pipe.server.handshake_completed);
-        assert!(pipe.server.handshake_confirmed);
-
-        // Client handshake is confirmed.
-        testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+        testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
         assert!(pipe.client.handshake_completed);
         assert!(pipe.client.handshake_confirmed);

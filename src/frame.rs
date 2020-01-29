@@ -136,6 +136,8 @@ pub enum Frame {
         error_code: u64,
         reason: Vec<u8>,
     },
+
+    HandshakeDone,
 }
 
 impl Frame {
@@ -252,6 +254,8 @@ impl Frame {
                 reason: b.get_bytes_with_varint_length()?.to_vec(),
             },
 
+            0x1e => Frame::HandshakeDone,
+
             _ => return Err(Error::InvalidFrame),
         };
 
@@ -259,12 +263,18 @@ impl Frame {
             // PADDING and PING are allowed on all packet types.
             (_, Frame::Padding { .. }) | (_, Frame::Ping { .. }) => true,
 
-            // ACK, CRYPTO and CONNECTION_CLOSE frames are allowed on all
-            // packet types except 0-RTT.
+            // ACK, CRYPTO, HANDSHAKE_DONE, NEW_TOKEN, PATH_RESPONSE, and
+            // RETIRE_CONNECTION_ID can't be sent on 0-RTT packets.
             (packet::Type::ZeroRTT, Frame::ACK { .. }) => false,
             (packet::Type::ZeroRTT, Frame::Crypto { .. }) => false,
+            (packet::Type::ZeroRTT, Frame::HandshakeDone) => false,
+            (packet::Type::ZeroRTT, Frame::NewToken { .. }) => false,
+            (packet::Type::ZeroRTT, Frame::PathResponse { .. }) => false,
+            (packet::Type::ZeroRTT, Frame::RetireConnectionId { .. }) => false,
             (packet::Type::ZeroRTT, Frame::ConnectionClose { .. }) => false,
 
+            // ACK, CRYPTO and CONNECTION_CLOSE can be sent on all other packet
+            // types.
             (_, Frame::ACK { .. }) => true,
             (_, Frame::Crypto { .. }) => true,
             (_, Frame::ConnectionClose { .. }) => true,
@@ -489,6 +499,10 @@ impl Frame {
                 b.put_varint(reason.len() as u64)?;
                 b.put_bytes(reason.as_ref())?;
             },
+
+            Frame::HandshakeDone => {
+                b.put_varint(0x1e)?;
+            },
         }
 
         Ok(before - b.cap())
@@ -658,6 +672,10 @@ impl Frame {
                 octets::varint_len(reason.len() as u64) + // reason_len
                 reason.len() // reason
             },
+
+            Frame::HandshakeDone => {
+                1 // frame type
+            },
         }
     }
 
@@ -800,6 +818,10 @@ impl std::fmt::Debug for Frame {
                     "APPLICATION_CLOSE err={:x} reason={:x?}",
                     error_code, reason
                 )?;
+            },
+
+            Frame::HandshakeDone => {
+                write!(f, "HANDSHAKE_DONE")?;
             },
         }
 
@@ -1076,10 +1098,10 @@ mod tests {
         assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_ok());
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
@@ -1403,10 +1425,10 @@ mod tests {
         assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_ok());
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
@@ -1459,10 +1481,10 @@ mod tests {
         assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_ok());
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
@@ -1522,6 +1544,32 @@ mod tests {
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn handshake_done() {
+        let mut d = [42; 128];
+
+        let frame = Frame::HandshakeDone;
+
+        let wire_len = {
+            let mut b = octets::Octets::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 1);
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
