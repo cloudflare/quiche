@@ -395,6 +395,11 @@ impl<'a> Octets<'a> {
         self.off
     }
 
+    /// Returns a reference to the internal buffer.
+    pub fn buf(&self) -> &[u8] {
+        self.buf
+    }
+
     /// Copies the buffer from the current offset into a new `Vec<u8>`.
     pub fn to_vec(&self) -> Vec<u8> {
         self.as_ref().to_vec()
