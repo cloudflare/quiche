@@ -468,11 +468,12 @@ pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize) -> u64 
     let pn_mask = pn_win - 1;
     let candidate_pn = (expected_pn & !pn_mask) | truncated_pn;
 
-    if candidate_pn + pn_hwin <= expected_pn {
+    if candidate_pn + pn_hwin <= expected_pn && candidate_pn < (1 << 62) - pn_win
+    {
         return candidate_pn + pn_win;
     }
 
-    if candidate_pn > expected_pn + pn_hwin && candidate_pn > pn_win {
+    if candidate_pn > expected_pn + pn_hwin && candidate_pn >= pn_win {
         return candidate_pn - pn_win;
     }
 
