@@ -26,6 +26,8 @@
 
 use std::time;
 
+use ring::aead;
+
 use crate::Error;
 use crate::Result;
 
@@ -124,10 +126,6 @@ pub struct Header {
     /// The source connection ID of the packet.
     pub scid: Vec<u8>,
 
-    /// The original destination connection ID. Only present in `Retry`
-    /// packets.
-    pub odcid: Option<Vec<u8>>,
-
     /// The packet number. It's only meaningful after the header protection is
     /// removed.
     pub(crate) pkt_num: u64,
@@ -186,7 +184,6 @@ impl Header {
                 version: 0,
                 dcid: dcid.to_vec(),
                 scid: Vec::new(),
-                odcid: None,
                 pkt_num: 0,
                 pkt_num_len: 0,
                 token: None,
@@ -224,7 +221,6 @@ impl Header {
 
         // End of invariants.
 
-        let mut odcid: Option<Vec<u8>> = None;
         let mut token: Option<Vec<u8>> = None;
         let mut versions: Option<Vec<u32>> = None;
 
@@ -234,14 +230,13 @@ impl Header {
             },
 
             Type::Retry => {
-                let odcid_len = b.get_u8()?;
-
-                if odcid_len > MAX_CID_LEN {
+                // Exclude the integrity tag from the token.
+                if b.cap() < aead::AES_128_GCM.tag_len() {
                     return Err(Error::InvalidPacket);
                 }
 
-                odcid = Some(b.get_bytes(odcid_len as usize)?.to_vec());
-                token = Some(b.to_vec());
+                let token_len = b.cap() - aead::AES_128_GCM.tag_len();
+                token = Some(b.get_bytes(token_len)?.to_vec());
             },
 
             Type::VersionNegotiation => {
@@ -263,7 +258,6 @@ impl Header {
             version,
             dcid,
             scid,
-            odcid,
             pkt_num: 0,
             pkt_num_len: 0,
             token,
@@ -320,30 +314,28 @@ impl Header {
         out.put_u8(self.scid.len() as u8)?;
         out.put_bytes(&self.scid)?;
 
-        if self.ty == Type::Retry {
-            let odcid = self.odcid.as_ref().unwrap();
-            out.put_u8(odcid.len() as u8)?;
-            out.put_bytes(odcid)?;
-        }
-
         // Only Initial and Retry packets have a token.
-        if self.ty == Type::Initial {
-            match self.token {
-                Some(ref v) => {
-                    out.put_varint(v.len() as u64)?;
-                    out.put_bytes(v)?;
-                },
+        match self.ty {
+            Type::Initial => {
+                match self.token {
+                    Some(ref v) => {
+                        out.put_varint(v.len() as u64)?;
+                        out.put_bytes(v)?;
+                    },
 
-                // No token, so length = 0.
-                None => {
-                    out.put_varint(0)?;
-                },
-            }
-        }
+                    // No token, so length = 0.
+                    None => {
+                        out.put_varint(0)?;
+                    },
+                }
+            },
 
-        // Retry packets don't have a token length.
-        if self.ty == Type::Retry {
-            out.put_bytes(self.token.as_ref().unwrap())?;
+            Type::Retry => {
+                // Retry packets don't have a token length.
+                out.put_bytes(self.token.as_ref().unwrap())?;
+            },
+
+            _ => (),
         }
 
         Ok(())
@@ -373,13 +365,6 @@ impl std::fmt::Debug for Header {
         if self.ty != Type::Short {
             write!(f, " scid=")?;
             for b in &self.scid {
-                write!(f, "{:02x}", b)?;
-            }
-        }
-
-        if let Some(ref odcid) = self.odcid {
-            write!(f, " odcid=")?;
-            for b in odcid {
                 write!(f, "{:02x}", b)?;
             }
         }
@@ -605,7 +590,6 @@ pub fn retry(
         scid: new_scid.to_vec(),
         pkt_num: 0,
         pkt_num_len: 0,
-        odcid: Some(dcid.to_vec()),
         token: Some(token.to_vec()),
         versions: None,
         key_phase: false,
@@ -613,7 +597,58 @@ pub fn retry(
 
     hdr.to_bytes(&mut b)?;
 
+    let tag = compute_retry_integrity_tag(&b, dcid)?;
+
+    b.put_bytes(tag.as_ref())?;
+
     Ok(b.off())
+}
+
+pub fn verify_retry_integrity(b: &octets::Octets, odcid: &[u8]) -> Result<()> {
+    let tag = compute_retry_integrity_tag(b, odcid)?;
+
+    ring::constant_time::verify_slices_are_equal(
+        &b.as_ref()[..aead::AES_128_GCM.tag_len()],
+        tag.as_ref(),
+    )
+    .map_err(|_| Error::CryptoFail)?;
+
+    Ok(())
+}
+
+fn compute_retry_integrity_tag(
+    b: &octets::Octets, odcid: &[u8],
+) -> Result<aead::Tag> {
+    const RETRY_INTEGRITY_KEY: [u8; 16] = [
+        0x4d, 0x32, 0xec, 0xdb, 0x2a, 0x21, 0x33, 0xc8, 0x41, 0xe4, 0x04, 0x3d,
+        0xf2, 0x7d, 0x44, 0x30,
+    ];
+
+    const RETRY_INTEGRITY_NONCE: [u8; aead::NONCE_LEN] = [
+        0x4d, 0x16, 0x11, 0xd0, 0x55, 0x13, 0xa5, 0x52, 0xc5, 0x87, 0xd5, 0x75,
+    ];
+
+    let hdr_len = b.off();
+
+    let mut pseudo = vec![0; 1 + odcid.len() + hdr_len];
+
+    let mut pb = octets::Octets::with_slice(&mut pseudo);
+
+    pb.put_u8(odcid.len() as u8)?;
+    pb.put_bytes(odcid)?;
+    pb.put_bytes(&b.buf()[..hdr_len])?;
+
+    let key = aead::LessSafeKey::new(
+        aead::UnboundKey::new(&aead::AES_128_GCM, &RETRY_INTEGRITY_KEY)
+            .map_err(|_| Error::CryptoFail)?,
+    );
+
+    let nonce = aead::Nonce::assume_unique_for_key(RETRY_INTEGRITY_NONCE);
+
+    let aad = aead::Aad::from(&pseudo);
+
+    key.seal_in_place_separate_tag(nonce, aad, &mut [])
+        .map_err(|_| Error::CryptoFail)
 }
 
 pub struct PktNumSpace {
@@ -747,16 +782,18 @@ mod tests {
             scid: vec![0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb],
             pkt_num: 0,
             pkt_num_len: 0,
-            odcid: Some(vec![0x01, 0x02, 0x03, 0x04]),
             token: Some(vec![0xba; 24]),
             versions: None,
             key_phase: false,
         };
 
-        let mut d = [0; 52];
+        let mut d = [0; 63];
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
+
+        // Add fake retry integrity token.
+        b.put_bytes(&vec![0xba; 16]).unwrap();
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
@@ -771,7 +808,6 @@ mod tests {
             scid: vec![0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb],
             pkt_num: 0,
             pkt_num_len: 0,
-            odcid: None,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
             versions: None,
             key_phase: false,
@@ -798,7 +834,6 @@ mod tests {
             scid: vec![0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb],
             pkt_num: 0,
             pkt_num_len: 0,
-            odcid: None,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
             versions: None,
             key_phase: false,
@@ -825,7 +860,6 @@ mod tests {
             ],
             pkt_num: 0,
             pkt_num_len: 0,
-            odcid: None,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
             versions: None,
             key_phase: false,
@@ -852,7 +886,6 @@ mod tests {
             ],
             pkt_num: 0,
             pkt_num_len: 0,
-            odcid: None,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
             versions: None,
             key_phase: false,
@@ -876,7 +909,6 @@ mod tests {
             scid: vec![0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb],
             pkt_num: 0,
             pkt_num_len: 0,
-            odcid: None,
             token: None,
             versions: None,
             key_phase: false,
@@ -900,7 +932,6 @@ mod tests {
             scid: vec![],
             pkt_num: 0,
             pkt_num_len: 0,
-            odcid: None,
             token: None,
             versions: None,
             key_phase: false,
@@ -1548,7 +1579,6 @@ mod tests {
             version: crate::PROTOCOL_VERSION,
             dcid: Vec::new(),
             scid: Vec::new(),
-            odcid: None,
             pkt_num: 0,
             pkt_num_len: 0,
             token: None,

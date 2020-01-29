@@ -1267,7 +1267,8 @@ impl Connection {
                 return Err(Error::Done);
             }
 
-            if hdr.odcid.as_ref() != Some(&self.dcid) {
+            // Check if Retry packet is valid.
+            if packet::verify_retry_integrity(&b, &self.dcid).is_err() {
                 return Err(Error::Done);
             }
 
@@ -1706,7 +1707,6 @@ impl Connection {
             scid: self.scid.clone(),
             pkt_num: 0,
             pkt_num_len: pn_len,
-            odcid: None,
             token: self.token.clone(),
             versions: None,
             key_phase: false,
@@ -3572,7 +3572,6 @@ pub mod testing {
             scid: conn.scid.clone(),
             pkt_num: 0,
             pkt_num_len: pn_len,
-            odcid: None,
             token: conn.token.clone(),
             versions: None,
             key_phase: false,
@@ -4970,7 +4969,7 @@ mod tests {
 
         assert_eq!(config.set_cc_algorithm_name("reno"), Ok(()));
 
-        // Unknown name
+        // Unknown name.
         assert_eq!(
             config.set_cc_algorithm_name("???"),
             Err(Error::CongestionControl)
@@ -4990,6 +4989,35 @@ mod tests {
 
             None => panic!("missing server certificate"),
         }
+    }
+
+    #[test]
+    fn retry() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Client sends initial flight.
+        let mut len = pipe.client.send(&mut buf).unwrap();
+
+        // Server sends Retry packet.
+        let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
+
+        let mut scid = [0; MAX_CONN_ID_LEN];
+        rand::rand_bytes(&mut scid[..]);
+
+        let token = b"quiche test retry token";
+
+        len =
+            packet::retry(&hdr.scid, &hdr.dcid, &scid, token, &mut buf).unwrap();
+
+        // Client receives Retry and sends new Initial.
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Err(Error::Done));
+
+        len = pipe.client.send(&mut buf).unwrap();
+
+        let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
+        assert_eq!(&hdr.token.unwrap(), token);
     }
 }
 
