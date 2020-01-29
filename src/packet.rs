@@ -587,7 +587,8 @@ pub fn negotiate_version(
     b.put_u8(dcid.len() as u8)?;
     b.put_bytes(&dcid)?;
     b.put_u32(crate::PROTOCOL_VERSION)?;
-    b.put_u32(crate::PROTOCOL_VERSION_OLD)?;
+    b.put_u32(crate::PROTOCOL_VERSION_DRAFT24)?;
+    b.put_u32(crate::PROTOCOL_VERSION_DRAFT23)?;
 
     Ok(b.off())
 }
