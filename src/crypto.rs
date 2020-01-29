@@ -388,7 +388,7 @@ fn hkdf_expand_label(
 }
 
 fn make_nonce(iv: &[u8], counter: u64) -> aead::Nonce {
-    let mut nonce = [0; 12];
+    let mut nonce = [0; aead::NONCE_LEN];
     nonce.copy_from_slice(&iv);
 
     // XOR the last bytes of the IV with the counter. This is equivalent to
