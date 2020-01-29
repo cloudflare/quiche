@@ -146,8 +146,8 @@ pub extern fn quiche_config_set_application_protos(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_idle_timeout(config: &mut Config, v: u64) {
-    config.set_idle_timeout(v);
+pub extern fn quiche_config_set_max_idle_timeout(config: &mut Config, v: u64) {
+    config.set_max_idle_timeout(v);
 }
 
 #[no_mangle]
