@@ -120,7 +120,7 @@ fn main() {
         .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
         .unwrap();
 
-    config.set_idle_timeout(5000);
+    config.set_max_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
     config.set_initial_max_data(max_data);
     config.set_initial_max_stream_data_bidi_local(max_stream_data);

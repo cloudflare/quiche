@@ -546,11 +546,11 @@ impl Config {
         self.tls_ctx.set_alpn(&self.application_protos)
     }
 
-    /// Sets the `idle_timeout` transport parameter.
+    /// Sets the `max_idle_timeout` transport parameter.
     ///
     /// The default value is infinite, that is, no timeout is used.
-    pub fn set_idle_timeout(&mut self, v: u64) {
-        self.local_transport_params.idle_timeout = v;
+    pub fn set_max_idle_timeout(&mut self, v: u64) {
+        self.local_transport_params.max_idle_timeout = v;
     }
 
     /// Sets the `max_packet_size transport` parameter.
@@ -1519,8 +1519,8 @@ impl Connection {
         self.pkt_num_spaces[epoch].largest_rx_pkt_num =
             cmp::max(self.pkt_num_spaces[epoch].largest_rx_pkt_num, pn);
 
-        if self.local_transport_params.idle_timeout > 0 {
-            self.idle_timer = Some(now + self.idle_timeout());
+        if let Some(idle_timeout) = self.idle_timeout() {
+            self.idle_timer = Some(now + idle_timeout);
         }
 
         self.recv_count += 1;
@@ -2124,11 +2124,10 @@ impl Connection {
 
         // (Re)start the idle timer if we are sending the first ack-eliciting
         // packet since last receiving a packet.
-        if ack_eliciting &&
-            !self.ack_eliciting_sent &&
-            self.local_transport_params.idle_timeout > 0
-        {
-            self.idle_timer = Some(now + self.idle_timeout());
+        if ack_eliciting && !self.ack_eliciting_sent {
+            if let Some(idle_timeout) = self.idle_timeout() {
+                self.idle_timer = Some(now + idle_timeout);
+            }
         }
 
         if ack_eliciting {
@@ -2988,11 +2987,35 @@ impl Connection {
     }
 
     /// Returns the idle timeout value.
-    fn idle_timeout(&mut self) -> time::Duration {
-        cmp::max(
-            time::Duration::from_millis(self.local_transport_params.idle_timeout),
-            3 * self.recovery.pto(),
-        )
+    ///
+    /// `None` is returned if both end-points disabled the idle timeout.
+    fn idle_timeout(&mut self) -> Option<time::Duration> {
+        // If the transport parameter is set to 0, then the respective endpoint
+        // decided to disable the idle timeout. If both are disabled we should
+        // not set any timeout.
+        if self.local_transport_params.max_idle_timeout == 0 &&
+            self.peer_transport_params.max_idle_timeout == 0
+        {
+            return None;
+        }
+
+        // If the local endpoint or the peer disabled the idle timeout, use the
+        // other peer's value, otherwise use the minimum of the two values.
+        let idle_timeout = if self.local_transport_params.max_idle_timeout == 0 {
+            self.peer_transport_params.max_idle_timeout
+        } else if self.peer_transport_params.max_idle_timeout == 0 {
+            self.local_transport_params.max_idle_timeout
+        } else {
+            cmp::min(
+                self.local_transport_params.max_idle_timeout,
+                self.peer_transport_params.max_idle_timeout,
+            )
+        };
+
+        let idle_timeout = time::Duration::from_millis(idle_timeout);
+        let idle_timeout = cmp::max(idle_timeout, 3 * self.recovery.pto());
+
+        Some(idle_timeout)
     }
 }
 
@@ -3032,7 +3055,7 @@ impl std::fmt::Debug for Stats {
 #[derive(Clone, PartialEq)]
 struct TransportParams {
     pub original_connection_id: Option<Vec<u8>>,
-    pub idle_timeout: u64,
+    pub max_idle_timeout: u64,
     pub stateless_reset_token: Option<Vec<u8>>,
     pub max_packet_size: u64,
     pub initial_max_data: u64,
@@ -3052,7 +3075,7 @@ impl Default for TransportParams {
     fn default() -> TransportParams {
         TransportParams {
             original_connection_id: None,
-            idle_timeout: 0,
+            max_idle_timeout: 0,
             stateless_reset_token: None,
             max_packet_size: 65527,
             initial_max_data: 0,
@@ -3094,7 +3117,7 @@ impl TransportParams {
                 },
 
                 0x0001 => {
-                    tp.idle_timeout = val.get_varint()?;
+                    tp.max_idle_timeout = val.get_varint()?;
                 },
 
                 0x0002 => {
@@ -3209,10 +3232,10 @@ impl TransportParams {
                 }
             };
 
-            if tp.idle_timeout != 0 {
+            if tp.max_idle_timeout != 0 {
                 b.put_u16(0x0001)?;
-                b.put_u16(octets::varint_len(tp.idle_timeout) as u16)?;
-                b.put_varint(tp.idle_timeout)?;
+                b.put_u16(octets::varint_len(tp.max_idle_timeout) as u16)?;
+                b.put_varint(tp.max_idle_timeout)?;
             }
 
             if let Some(ref token) = tp.stateless_reset_token {
@@ -3314,7 +3337,7 @@ impl TransportParams {
 
 impl std::fmt::Debug for TransportParams {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "idle_timeout={} ", self.idle_timeout)?;
+        write!(f, "max_idle_timeout={} ", self.max_idle_timeout)?;
         write!(f, "max_packet_size={} ", self.max_packet_size)?;
         write!(f, "initial_max_data={} ", self.initial_max_data)?;
         write!(
@@ -3658,7 +3681,7 @@ mod tests {
     fn transport_params() {
         let tp = TransportParams {
             original_connection_id: None,
-            idle_timeout: 30,
+            max_idle_timeout: 30,
             stateless_reset_token: Some(vec![0xba; 16]),
             max_packet_size: 23_421,
             initial_max_data: 424_645_563,
