@@ -45,6 +45,7 @@
 
 #define LOCAL_CONN_ID_LEN 16
 
+#define MAX_UDP_SIZE 65527
 #define MAX_DATAGRAM_SIZE 1350
 
 #define MAX_TOKEN_LEN \
@@ -195,7 +196,7 @@ static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
 static void recv_cb(EV_P_ ev_io *w, int revents) {
     struct conn_io *tmp, *conn_io = NULL;
 
-    static uint8_t buf[65535];
+    static uint8_t buf[MAX_UDP_SIZE];
     static uint8_t out[MAX_DATAGRAM_SIZE];
 
     while (1) {
@@ -447,6 +448,7 @@ int main(int argc, char *argv[]) {
 
     quiche_config_set_max_idle_timeout(config, 5000);
     quiche_config_set_max_packet_size(config, MAX_DATAGRAM_SIZE);
+	quiche_config_set_max_datagram_size(config, MAX_DATAGRAM_SIZE);
     quiche_config_set_initial_max_data(config, 10000000);
     quiche_config_set_initial_max_stream_data_bidi_local(config, 1000000);
     quiche_config_set_initial_max_stream_data_bidi_remote(config, 1000000);

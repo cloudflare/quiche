@@ -32,6 +32,8 @@ use crate::recovery::Sent;
 
 /// Reno congestion control implementation.
 pub struct Reno {
+    params: cc::CongestionControlParams,
+
     congestion_window: usize,
 
     bytes_in_flight: usize,
@@ -44,12 +46,14 @@ pub struct Reno {
 }
 
 impl cc::CongestionControl for Reno {
-    fn new() -> Self
+    fn new(params: cc::CongestionControlParams) -> Self
     where
         Self: Sized,
     {
         Reno {
-            congestion_window: cc::INITIAL_WINDOW,
+            params,
+
+            congestion_window: params.initial_window,
 
             bytes_in_flight: 0,
 
@@ -66,7 +70,7 @@ impl cc::CongestionControl for Reno {
     }
 
     fn collapse_cwnd(&mut self) {
-        self.congestion_window = cc::MINIMUM_WINDOW;
+        self.congestion_window = self.params.minimum_window;
     }
 
     fn bytes_in_flight(&self) -> usize {
@@ -122,9 +126,17 @@ impl cc::CongestionControl for Reno {
                 cc::LOSS_REDUCTION_FACTOR)
                 as usize;
             self.congestion_window =
-                std::cmp::max(self.congestion_window, cc::MINIMUM_WINDOW);
+                std::cmp::max(self.congestion_window, self.params.minimum_window);
             self.ssthresh = self.congestion_window;
         }
+    }
+
+    fn set_max_datagram_size(&mut self, max_datagram_size: usize) {
+        self.params.max_datagram_size(max_datagram_size);
+    }
+
+    fn max_datagram_size(&self) -> usize {
+        self.params.max_datagram_size
     }
 }
 
@@ -140,6 +152,8 @@ impl std::fmt::Debug for Reno {
 
 #[cfg(test)]
 mod tests {
+    use crate::*;
+
     use super::*;
 
     const TRACE_ID: &str = "test_id";
@@ -150,7 +164,10 @@ mod tests {
 
     #[test]
     fn reno_init() {
-        let cc = cc::new_congestion_control(cc::Algorithm::Reno);
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+
+        let cc = cc::new_congestion_control(&config);
 
         assert!(cc.cwnd() > 0);
         assert_eq!(cc.bytes_in_flight(), 0);
@@ -160,7 +177,10 @@ mod tests {
     fn reno_send() {
         init();
 
-        let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+
+        let mut cc = cc::new_congestion_control(&config);
 
         cc.on_packet_sent_cc(1000, TRACE_ID);
 
@@ -171,7 +191,10 @@ mod tests {
     fn reno_slow_start() {
         init();
 
-        let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+
+        let mut cc = cc::new_congestion_control(&config);
 
         let p = Sent {
             pkt_num: 0,
@@ -207,7 +230,11 @@ mod tests {
     fn reno_congestion_event() {
         init();
 
-        let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+
+        let mut cc = cc::new_congestion_control(&config);
+
         let prev_cwnd = cc.cwnd();
 
         cc.congestion_event(
@@ -224,7 +251,11 @@ mod tests {
     fn reno_congestion_avoidance() {
         init();
 
-        let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+
+        let mut cc = cc::new_congestion_control(&config);
+
         let prev_cwnd = cc.cwnd();
 
         // Send 20K bytes.
@@ -268,10 +299,14 @@ mod tests {
     fn reno_collapse_cwnd() {
         init();
 
-        let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+        config.set_max_datagram_size(5000);
+
+        let mut cc = cc::new_congestion_control(&config);
 
         // cwnd will be reset
         cc.collapse_cwnd();
-        assert_eq!(cc.cwnd(), cc::MINIMUM_WINDOW);
+        assert_eq!(cc.cwnd(), cc::MINIMUM_WINDOW_PACKETS * 5000);
     }
 }

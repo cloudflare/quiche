@@ -289,6 +289,14 @@ pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
 /// The minimum length of Initial packets sent by a client.
 pub const MIN_CLIENT_INITIAL_LEN: usize = 1200;
 
+/// The minimum length of a QUIC packet.
+pub const MIN_PACKET_LEN: usize = 1200;
+
+/// The maximum length of a QUIC packet.
+/// We cap the maximum packet size to 16KB or so, so that it
+/// can be always encoded with a 2-byte varint.
+pub const MAX_PACKET_LEN: usize = 16383;
+
 #[cfg(not(feature = "fuzzing"))]
 const PAYLOAD_MIN_LEN: usize = 4;
 
@@ -424,6 +432,8 @@ pub struct Config {
     grease: bool,
 
     cc_algorithm: cc::Algorithm,
+
+    max_datagram_size: usize,
 }
 
 impl Config {
@@ -445,6 +455,7 @@ impl Config {
             application_protos: Vec::new(),
             grease: true,
             cc_algorithm: cc::Algorithm::Reno, // default cc algorithm
+            max_datagram_size: cc::MAX_DATAGRAM_SIZE,
         })
     }
 
@@ -690,6 +701,14 @@ impl Config {
     /// The default value is `quiche::CongestionControlAlgorithm::Reno`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
+    }
+
+    /// Sets the maximum datagram size can be sent.
+    ///
+    /// The default value is 1200 and should not be more than 16383.
+    pub fn set_max_datagram_size(&mut self, v: usize) {
+        self.max_datagram_size = cmp::min(v, MAX_PACKET_LEN);
+        self.max_datagram_size = cmp::max(self.max_datagram_size, MIN_PACKET_LEN);
     }
 }
 
@@ -1619,13 +1638,11 @@ impl Connection {
         // when we haven't parsed transport parameters yet, so use a default
         // value then.
         let max_pkt_len = if self.handshake_completed {
-            // We cap the maximum packet size to 16KB or so, so that it can be
-            // always encoded with a 2-byte varint.
-            cmp::min(16383, self.peer_transport_params.max_packet_size) as usize
+            self.recovery.cc.max_datagram_size()
         } else {
             // Allow for 1200 bytes (minimum QUIC packet size) during the
             // handshake.
-            1200
+            MIN_PACKET_LEN
         };
 
         // Cap output buffer to respect peer's max_packet_size limit.
@@ -2663,6 +2680,15 @@ impl Connection {
                     self.recovery.max_ack_delay =
                         time::Duration::from_millis(peer_params.max_ack_delay);
 
+                    // Make sure max_datagram_size < peer's max_packet_size
+                    if (peer_params.max_packet_size as usize) <
+                        self.recovery.cc.max_datagram_size()
+                    {
+                        self.recovery.cc.set_max_datagram_size(
+                            peer_params.max_packet_size as usize,
+                        );
+                    }
+
                     self.peer_transport_params = peer_params;
 
                     trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
@@ -3131,7 +3157,7 @@ impl TransportParams {
                 0x0003 => {
                     tp.max_packet_size = val.get_varint()?;
 
-                    if tp.max_packet_size < 1200 {
+                    if tp.max_packet_size < MIN_PACKET_LEN as u64 {
                         return Err(Error::InvalidTransportParam);
                     }
                 },

@@ -31,16 +31,16 @@ use std::time::Instant;
 
 use crate::cc;
 use crate::recovery::Sent;
+use crate::Config;
 
 pub const INITIAL_WINDOW_PACKETS: usize = 10;
 
-pub const INITIAL_WINDOW: usize = INITIAL_WINDOW_PACKETS * MAX_DATAGRAM_SIZE;
-
-pub const MINIMUM_WINDOW: usize = 2 * MAX_DATAGRAM_SIZE;
-
-pub const MAX_DATAGRAM_SIZE: usize = 1452;
+pub const MINIMUM_WINDOW_PACKETS: usize = 2;
 
 pub const LOSS_REDUCTION_FACTOR: f64 = 0.5;
+
+/// Maximum datagram size used for congestion control.
+pub const MAX_DATAGRAM_SIZE: usize = 1200;
 
 /// Available congestion control algorithms.
 ///
@@ -66,12 +66,49 @@ impl FromStr for Algorithm {
     }
 }
 
+/// Parameters for congestion control.
+#[derive(Copy, Clone)]
+pub struct CongestionControlParams {
+    initial_window_packets: usize,
+
+    initial_window: usize,
+
+    minimum_window_packets: usize,
+
+    minimum_window: usize,
+
+    max_datagram_size: usize,
+}
+
+impl Default for CongestionControlParams {
+    fn default() -> Self {
+        CongestionControlParams {
+            initial_window_packets: cc::INITIAL_WINDOW_PACKETS,
+            initial_window: cc::INITIAL_WINDOW_PACKETS * cc::MAX_DATAGRAM_SIZE,
+            minimum_window_packets: cc::MINIMUM_WINDOW_PACKETS,
+            minimum_window: cc::MINIMUM_WINDOW_PACKETS * cc::MAX_DATAGRAM_SIZE,
+            max_datagram_size: cc::MAX_DATAGRAM_SIZE,
+        }
+    }
+}
+
+impl CongestionControlParams {
+    fn max_datagram_size(&mut self, max_datagram_size: usize) {
+        self.max_datagram_size = max_datagram_size;
+
+        self.initial_window =
+            self.initial_window_packets * self.max_datagram_size;
+        self.minimum_window =
+            self.minimum_window_packets * self.max_datagram_size;
+    }
+}
+
 /// Congestion control algorithm.
 pub trait CongestionControl
 where
     Self: std::fmt::Debug,
 {
-    fn new() -> Self
+    fn new(params: CongestionControlParams) -> Self
     where
         Self: Sized;
 
@@ -109,23 +146,38 @@ where
     fn congestion_event(
         &mut self, time_sent: Instant, now: Instant, trace_id: &str,
     );
+
+    /// Update max_datagram_size.
+    fn set_max_datagram_size(&mut self, max_datagram_size: usize);
+
+    fn max_datagram_size(&self) -> usize;
 }
 
 /// Instances a congestion control implementation based on the CC algorithm ID.
-pub fn new_congestion_control(algo: Algorithm) -> Box<dyn CongestionControl> {
-    trace!("Initializing congestion control: {:?}", algo);
-    match algo {
-        Algorithm::Reno => Box::new(cc::reno::Reno::new()),
+pub fn new_congestion_control(config: &Config) -> Box<dyn CongestionControl> {
+    let mut cc_params = cc::CongestionControlParams::default();
+
+    cc_params.max_datagram_size(config.max_datagram_size);
+
+    trace!("Initializing congestion control: {:?}", config.cc_algorithm);
+
+    match config.cc_algorithm {
+        Algorithm::Reno => Box::new(cc::reno::Reno::new(cc_params)),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::*;
+
     use super::*;
 
     #[test]
     fn new_cc() {
-        let cc = new_congestion_control(Algorithm::Reno);
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(Algorithm::Reno);
+
+        let cc = cc::new_congestion_control(&config);
 
         assert!(cc.cwnd() > 0);
         assert_eq!(cc.bytes_in_flight(), 0);
@@ -140,10 +192,30 @@ mod tests {
 
     #[test]
     fn lookup_cc_algo_bad() {
-        assert_eq!(
-            Algorithm::from_str("???"),
-            Err(crate::Error::CongestionControl)
-        );
+        assert_eq!(Algorithm::from_str("???"), Err(Error::CongestionControl));
+    }
+
+    #[test]
+    fn max_datagram_size() {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(Algorithm::Reno);
+        config.set_max_datagram_size(5000);
+
+        let cc = cc::new_congestion_control(&config);
+
+        assert_eq!(cc.cwnd(), 5000 * cc::INITIAL_WINDOW_PACKETS);
+        assert_eq!(cc.bytes_in_flight(), 0);
+    }
+
+    #[test]
+    fn min_datagram_size() {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(Algorithm::Reno);
+        config.set_max_datagram_size(500);
+
+        let cc = cc::new_congestion_control(&config);
+
+        assert_eq!(cc.max_datagram_size(), 1200);
     }
 }
 

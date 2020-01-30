@@ -171,6 +171,9 @@ enum quiche_cc_algorithm {
 // Sets the congestion control algorithm used.
 void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algorithm algo);
 
+// Sets the maximum datagram size.
+void quiche_config_set_max_datagram_size(quiche_config *config, size_t v);
+
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 

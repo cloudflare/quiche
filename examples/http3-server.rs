@@ -33,6 +33,7 @@ use std::collections::HashMap;
 
 use ring::rand::*;
 
+const MAX_UDP_SIZE: usize = 65527;
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
 const USAGE: &str = "Usage:
@@ -73,7 +74,7 @@ struct Client {
 type ClientMap = HashMap<Vec<u8>, (net::SocketAddr, Client)>;
 
 fn main() {
-    let mut buf = [0; 65535];
+    let mut buf = [0; MAX_UDP_SIZE];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
     env_logger::builder()
@@ -128,6 +129,7 @@ fn main() {
 
     config.set_max_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
+    config.set_max_datagram_size(MAX_DATAGRAM_SIZE);
     config.set_initial_max_data(max_data);
     config.set_initial_max_stream_data_bidi_local(max_stream_data);
     config.set_initial_max_stream_data_bidi_remote(max_stream_data);
