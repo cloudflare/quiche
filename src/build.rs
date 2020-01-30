@@ -55,13 +55,13 @@ const CMAKE_PARAMS_IOS: &[(&str, &[(&str, &str)])] = &[
 fn get_boringssl_platform_output_path(lib: &str) -> String {
     if cfg!(windows) {
         if cfg!(debug_assertions) {
-            return format!("{}/Debug", lib);
+            format!("{}/Debug", lib)
         } else {
-            return format!("{}/RelWithDebInfo", lib);
+            format!("{}/RelWithDebInfo", lib)
         }
     } else {
-        return format!("{}", lib);
-    };
+        lib.to_string()
+    }
 }
 
 /// Returns a new cmake::Config for building BoringSSL.
@@ -75,12 +75,13 @@ fn get_boringssl_cmake_config() -> cmake::Config {
     let mut boringssl_cmake = cmake::Config::new("deps/boringssl");
 
     // Add platform-specific parameters.
-    return match os.as_ref() {
+    match os.as_ref() {
         "android" => {
-            let mut cmake_params_android = CMAKE_PARAMS_ANDROID_NDK;
-            if cfg!(feature = "ndk-old-gcc") {
-                cmake_params_android = CMAKE_PARAMS_ANDROID_NDK_OLD_GCC;
-            }
+            let cmake_params_android = if cfg!(feature = "ndk-old-gcc") {
+                CMAKE_PARAMS_ANDROID_NDK_OLD_GCC
+            } else {
+                CMAKE_PARAMS_ANDROID_NDK
+            };
 
             // We need ANDROID_NDK_HOME to be set properly.
             let android_ndk_home = std::env::var("ANDROID_NDK_HOME")
@@ -136,7 +137,7 @@ fn get_boringssl_cmake_config() -> cmake::Config {
 
             boringssl_cmake
         },
-    };
+    }
 }
 
 fn write_pkg_config() {
