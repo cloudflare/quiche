@@ -1734,7 +1734,11 @@ impl Connection {
         let mut payload_len = 0;
 
         // Create ACK frame.
-        if self.pkt_num_spaces[epoch].ack_elicited && !is_closing {
+        if (self.pkt_num_spaces[epoch].ack_elicited ||
+            (!self.pkt_num_spaces[epoch].recv_pkt_need_ack.is_empty() &&
+                pn % 4 == 0)) &&
+            !is_closing
+        {
             let ack_delay =
                 self.pkt_num_spaces[epoch].largest_rx_pkt_time.elapsed();
 
