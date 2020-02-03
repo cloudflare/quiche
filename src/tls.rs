@@ -470,6 +470,10 @@ impl Handshake {
         Some(peer_cert)
     }
 
+    pub fn is_completed(&self) -> bool {
+        unsafe { SSL_in_init(self.as_ptr()) == 0 }
+    }
+
     pub fn is_resumed(&self) -> bool {
         unsafe { SSL_session_reused(self.as_ptr()) == 1 }
     }
@@ -924,6 +928,8 @@ extern {
     fn SSL_quic_write_level(ssl: *mut SSL) -> crypto::Level;
 
     fn SSL_session_reused(ssl: *mut SSL) -> c_int;
+
+    fn SSL_in_init(ssl: *mut SSL) -> c_int;
 
     fn SSL_in_early_data(ssl: *mut SSL) -> c_int;
 
