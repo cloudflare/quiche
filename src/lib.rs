@@ -1231,21 +1231,15 @@ impl Connection {
                 None => return Err(Error::InvalidPacket),
             };
 
-            let mut new_version = 0;
-            for v in versions.iter() {
-                if version_is_supported(*v) {
-                    new_version = *v;
-                    break;
-                }
-            }
-
-            // We don't support any of the versions offered.
-            if new_version == 0 {
+            if let Some(version) =
+                versions.iter().filter(|v| version_is_supported(**v)).max()
+            {
+                self.version = *version;
+                self.did_version_negotiation = true;
+            } else {
+                // We don't support any of the versions offered.
                 return Err(Error::UnknownVersion);
             }
-
-            self.version = new_version;
-            self.did_version_negotiation = true;
 
             // Reset connection state to force sending another Initial packet.
             self.got_peer_conn_id = false;
