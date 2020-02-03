@@ -219,6 +219,20 @@ impl Recovery {
         // Processing acked packets in reverse order (from largest to smallest)
         // appears to be faster, possibly due to the BTreeMap implementation.
         for pn in ranges.flatten().rev() {
+            // If the acked packet number is lower than the lowest unacked packet
+            // number it means that the packet is not newly acked, so return
+            // early.
+            //
+            // Since we process acked packets from largest to lowest, this means
+            // that as soon as we see an already-acked packet number
+            // all following packet numbers will also be already
+            // acked.
+            if let Some(lowest) = self.sent[epoch].values().nth(0) {
+                if pn < lowest.pkt_num {
+                    break;
+                }
+            }
+
             let newly_acked = self.on_packet_acked(pn, epoch, trace_id);
             has_newly_acked = cmp::max(has_newly_acked, newly_acked);
 
@@ -459,14 +473,6 @@ impl Recovery {
     fn on_packet_acked(
         &mut self, pkt_num: u64, epoch: packet::Epoch, trace_id: &str,
     ) -> bool {
-        // If the acked packet number is lower than the lowest unacked packet
-        // number it means that the packet is not newly acked, so return early.
-        if let Some(lowest) = self.sent[epoch].values().nth(0) {
-            if pkt_num < lowest.pkt_num {
-                return false;
-            }
-        }
-
         // Check if packet is newly acked.
         if let Some(mut p) = self.sent[epoch].remove(&pkt_num) {
             self.acked[epoch].append(&mut p.frames);
