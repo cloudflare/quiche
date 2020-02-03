@@ -799,8 +799,8 @@ pub struct Connection {
     /// Whether the peer's address has been verified.
     verified_peer_address: bool,
 
-    /// Whether the connection handshake has completed.
-    handshake_completed: bool,
+    /// Whether the peer's transport parameters were parsed.
+    parsed_peer_transport_params: bool,
 
     /// Whether the HANDSHAKE_DONE has been sent.
     handshake_done_sent: bool,
@@ -1061,7 +1061,7 @@ impl Connection {
             // If we did stateless retry assume the peer's address is verified.
             verified_peer_address: odcid.is_some(),
 
-            handshake_completed: false,
+            parsed_peer_transport_params: false,
 
             handshake_done_sent: false,
 
@@ -1612,7 +1612,7 @@ impl Connection {
         // Use max_packet_size as sent by the peer, except during the handshake
         // when we haven't parsed transport parameters yet, so use a default
         // value then.
-        let max_pkt_len = if self.handshake_completed {
+        let max_pkt_len = if self.is_established() {
             // We cap the maximum packet size to 16KB or so, so that it can be
             // always encoded with a 2-byte varint.
             cmp::min(16383, self.peer_transport_params.max_packet_size) as usize
@@ -1753,7 +1753,7 @@ impl Connection {
 
         if pkt_type == packet::Type::Short && !is_closing {
             // Create HANDSHAKE_DONE frame.
-            if self.handshake_completed &&
+            if self.is_established() &&
                 !self.handshake_done_sent &&
                 self.is_server &&
                 self.version >= PROTOCOL_VERSION_DRAFT25
@@ -2100,7 +2100,7 @@ impl Connection {
         self.recovery.on_packet_sent(
             sent_pkt,
             epoch,
-            self.handshake_completed,
+            self.is_established(),
             now,
             &self.trace_id,
         );
@@ -2519,7 +2519,7 @@ impl Connection {
                 trace!("{} loss detection timeout expired", self.trace_id);
 
                 self.recovery.on_loss_detection_timeout(
-                    self.handshake_completed,
+                    self.is_established(),
                     now,
                     &self.trace_id,
                 );
@@ -2586,7 +2586,7 @@ impl Connection {
 
     /// Returns true if the connection handshake is complete.
     pub fn is_established(&self) -> bool {
-        self.handshake_completed
+        self.handshake.is_completed()
     }
 
     /// Returns true if the connection is resumed.
@@ -2622,57 +2622,59 @@ impl Connection {
     ///
     /// If the connection is already established, it does nothing.
     fn do_handshake(&mut self) -> Result<()> {
-        if !self.handshake_completed {
-            match self.handshake.do_handshake() {
-                Ok(_) => {
-                    if self.application_proto().is_empty() {
-                        // Send no_application_proto TLS alert when no protocol
-                        // can be negotiated.
-                        self.error = Some(0x178);
-                        return Err(Error::TlsFail);
-                    }
+        // Handshake is already complete, there's nothing to do.
+        if self.is_established() {
+            return Ok(());
+        }
 
-                    // Handshake is complete!
-                    self.handshake_completed = true;
+        match self.handshake.do_handshake() {
+            Ok(_) => (),
 
-                    let mut raw_params =
-                        self.handshake.quic_transport_params().to_vec();
+            Err(Error::Done) => return Ok(()),
 
-                    let peer_params =
-                        TransportParams::decode(&mut raw_params, self.is_server)?;
+            Err(e) => return Err(e),
+        };
 
-                    if peer_params.original_connection_id != self.odcid {
-                        return Err(Error::InvalidTransportParam);
-                    }
+        if self.application_proto().is_empty() {
+            // Send no_application_proto TLS alert when no protocol
+            // can be negotiated.
+            self.error = Some(0x178);
+            return Err(Error::TlsFail);
+        }
 
-                    self.max_tx_data = peer_params.initial_max_data;
+        if !self.parsed_peer_transport_params {
+            let mut raw_params = self.handshake.quic_transport_params().to_vec();
 
-                    self.streams.update_peer_max_streams_bidi(
-                        peer_params.initial_max_streams_bidi,
-                    );
-                    self.streams.update_peer_max_streams_uni(
-                        peer_params.initial_max_streams_uni,
-                    );
+            let peer_params =
+                TransportParams::decode(&mut raw_params, self.is_server)?;
 
-                    self.recovery.max_ack_delay =
-                        time::Duration::from_millis(peer_params.max_ack_delay);
-
-                    self.peer_transport_params = peer_params;
-
-                    trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
-                           &self.trace_id,
-                           std::str::from_utf8(self.application_proto()),
-                           self.handshake.cipher(),
-                           self.handshake.curve(),
-                           self.handshake.sigalg(),
-                           self.is_resumed(),
-                           self.peer_transport_params);
-                },
-
-                Err(Error::Done) => (),
-
-                Err(e) => return Err(e),
+            if peer_params.original_connection_id != self.odcid {
+                return Err(Error::InvalidTransportParam);
             }
+
+            self.max_tx_data = peer_params.initial_max_data;
+
+            self.streams.update_peer_max_streams_bidi(
+                peer_params.initial_max_streams_bidi,
+            );
+            self.streams
+                .update_peer_max_streams_uni(peer_params.initial_max_streams_uni);
+
+            self.recovery.max_ack_delay =
+                time::Duration::from_millis(peer_params.max_ack_delay);
+
+            self.peer_transport_params = peer_params;
+
+            self.parsed_peer_transport_params = true;
+
+            trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
+                   &self.trace_id,
+                   std::str::from_utf8(self.application_proto()),
+                   self.handshake.cipher(),
+                   self.handshake.curve(),
+                   self.handshake.sigalg(),
+                   self.is_resumed(),
+                   self.peer_transport_params);
         }
 
         Ok(())
@@ -2690,7 +2692,7 @@ impl Connection {
                 crypto::Level::OneRTT => packet::EPOCH_APPLICATION,
             };
 
-            if epoch == packet::EPOCH_APPLICATION && !self.handshake_completed {
+            if epoch == packet::EPOCH_APPLICATION && !self.is_established() {
                 // Downgrade the epoch to handshake as the handshake is not
                 // completed yet.
                 return Ok(packet::EPOCH_HANDSHAKE);
@@ -2701,7 +2703,7 @@ impl Connection {
 
         for epoch in packet::EPOCH_INITIAL..packet::EPOCH_COUNT {
             // Only send 1-RTT packets when handshake is complete.
-            if epoch == packet::EPOCH_APPLICATION && !self.handshake_completed {
+            if epoch == packet::EPOCH_APPLICATION && !self.is_established() {
                 continue;
             }
 
@@ -2722,7 +2724,7 @@ impl Connection {
         }
 
         // If there are flushable streams, use Application.
-        if self.handshake_completed &&
+        if self.is_established() &&
             (self.should_update_max_data() ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
@@ -2771,15 +2773,14 @@ impl Connection {
                     &ranges,
                     ack_delay,
                     epoch,
-                    self.handshake_completed,
+                    self.is_established(),
                     now,
                     &self.trace_id,
                 )?;
 
                 // When we receive an ACK for a 1-RTT packet after handshake
                 // completion, it means the handshake has been confirmed.
-                if epoch == packet::EPOCH_APPLICATION && self.handshake_completed
-                {
+                if epoch == packet::EPOCH_APPLICATION && self.is_established() {
                     self.handshake_confirmed = true;
 
                     // Once the handshake is confirmed, we can drop Handshake
@@ -3760,46 +3761,46 @@ mod tests {
         // Server sends initial flight.
         len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
-        assert!(!pipe.client.handshake_completed);
+        assert!(!pipe.client.is_established());
         assert!(!pipe.client.handshake_confirmed);
 
-        assert!(!pipe.server.handshake_completed);
+        assert!(!pipe.server.is_established());
         assert!(!pipe.server.handshake_confirmed);
 
         // Client sends Handshake packet and completes handshake.
         len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
 
-        assert!(pipe.client.handshake_completed);
+        assert!(pipe.client.is_established());
         assert!(!pipe.client.handshake_confirmed);
 
-        assert!(!pipe.server.handshake_completed);
+        assert!(!pipe.server.is_established());
         assert!(!pipe.server.handshake_confirmed);
 
         // Server completes handshake and sends HANDSHAKE_DONE.
         len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
-        assert!(pipe.client.handshake_completed);
+        assert!(pipe.client.is_established());
         assert!(!pipe.client.handshake_confirmed);
 
-        assert!(pipe.server.handshake_completed);
+        assert!(pipe.server.is_established());
         assert!(!pipe.server.handshake_confirmed);
 
         // Client acks 1-RTT packet, and confirms handshake.
         len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
 
-        assert!(pipe.client.handshake_completed);
+        assert!(pipe.client.is_established());
         assert!(pipe.client.handshake_confirmed);
 
-        assert!(pipe.server.handshake_completed);
+        assert!(pipe.server.is_established());
         assert!(!pipe.server.handshake_confirmed);
 
         // Server handshake is confirmed.
         testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
-        assert!(pipe.client.handshake_completed);
+        assert!(pipe.client.is_established());
         assert!(pipe.client.handshake_confirmed);
 
-        assert!(pipe.server.handshake_completed);
+        assert!(pipe.server.is_established());
         assert!(pipe.server.handshake_confirmed);
     }
 
