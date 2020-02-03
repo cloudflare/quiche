@@ -45,16 +45,14 @@ check_testcase () {
 }
 
 run_quiche_client_tests () {
-    for req in $REQUESTS
-    do
-        $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
-            $CLIENT_PARAMS $req 2> $LOG || exit 127
-    done
+    $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
+        $CLIENT_PARAMS $REQUESTS 2>&1 > $LOG
+
 }
 
 run_quiche_server_tests() {
     $QUICHE_DIR/$QUICHE_SERVER --listen 0.0.0.0:443 --root $WWW_DIR \
-        $SERVER_PARAMS $QUICHE_SERVER_OPT 2> $LOG || exit 127
+        $SERVER_PARAMS $QUICHE_SERVER_OPT 2>&1 > $LOG
 }
 
 # Update config based on test case
