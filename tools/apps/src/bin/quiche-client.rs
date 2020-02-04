@@ -33,12 +33,7 @@ use std::io::prelude::*;
 
 use ring::rand::*;
 
-use quiche_apps::utils::*;
-use quiche_apps::{
-    Http09Conn2,
-    Http3Conn2,
-    HttpConn2,
-};
+use quiche_apps::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
@@ -134,7 +129,7 @@ fn main() {
         config.log_keys();
     }
 
-    let mut http_conn: Option<Box<dyn HttpConn2>> = None;
+    let mut http_conn: Option<Box<dyn HttpConn>> = None;
 
     // Generate a random source connection ID for the connection.
     let mut scid = [0; quiche::MAX_CONN_ID_LEN];
@@ -243,14 +238,22 @@ fn main() {
 
         // Create a new HTTP connection once the QUIC connection is established.
         if conn.is_established() && http_conn.is_none() {
+            // At this stage the ALPN negotiation succeeded and selected a
+            // single application protocol name. We'll use this to construct
+            // the correct type of HttpConn but `application_proto()`
+            // returns a slice, so we have to convert it to a str in order
+            // to compare to our lists of protocols. We `unwrap()` because
+            // we need the value and if something fails at this stage, there
+            // is not much anyone can do to recover.
+
             let app_proto = conn.application_proto();
             let app_proto = &std::str::from_utf8(&app_proto).unwrap();
 
             if alpns::HTTP_09.contains(app_proto) {
                 http_conn =
-                    Some(Http09Conn2::with_urls(&args.urls, args.reqs_cardinal));
+                    Some(Http09Conn::with_urls(&args.urls, args.reqs_cardinal));
             } else if alpns::HTTP_3.contains(app_proto) {
-                http_conn = Some(Http3Conn2::with_urls(
+                http_conn = Some(Http3Conn::with_urls(
                     &mut conn,
                     &args.urls,
                     args.reqs_cardinal,
@@ -263,13 +266,10 @@ fn main() {
             }
         }
 
-        // If we have an HTTP connection, first issue the requests.
+        // If we have an HTTP connection, first issue the requests then
+        // process received data.
         if let Some(h_conn) = http_conn.as_mut() {
             h_conn.send_requests(&mut conn, &args.dump_response_path);
-        }
-
-        // If we have an HTTP connection, process received data
-        if let Some(h_conn) = http_conn.as_mut() {
             h_conn.handle_responses(&mut conn, &mut buf, &req_start);
         }
 

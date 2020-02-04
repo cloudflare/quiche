@@ -36,135 +36,128 @@ use std::io::prelude::*;
 
 use std::collections::HashMap;
 
-pub mod utils {
-    use std::net;
+use std::net;
 
-    use std::collections::HashMap;
+/// Returns a String containing a pretty printed version of the `buf` slice.
+pub fn hex_dump(buf: &[u8]) -> String {
+    let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
 
-    /// Returns a String containing a pretty printed version of the `buf` slice.
-    pub fn hex_dump(buf: &[u8]) -> String {
-        let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
-
-        vec.join("")
-    }
-
-    /// ALPN helpers.
-    ///
-    /// This module contains constants and functions for working with ALPN.
-    pub mod alpns {
-        pub const HTTP_09: [&str; 4] = ["hq-25", "hq-24", "hq-23", "http/0.9"];
-        pub const HTTP_3: [&str; 3] = ["h3-25", "h3-24", "h3-23"];
-
-        pub fn length_prefixed(alpns: &[&str]) -> Vec<u8> {
-            let mut out = Vec::new();
-
-            for s in alpns {
-                out.push(s.len() as u8);
-                out.extend_from_slice(s.as_bytes());
-            }
-
-            out
-        }
-    }
-
-    pub trait Args {
-        fn with_docopt(docopt: &docopt::Docopt) -> Self;
-    }
-
-    /// Contains commons arguments for creating a quiche QUIC connection.
-    pub struct CommonArgs {
-        pub alpns: Vec<u8>,
-        pub max_data: u64,
-        pub max_stream_data: u64,
-        pub max_streams_bidi: u64,
-        pub max_streams_uni: u64,
-        pub dump_packet_path: Option<String>,
-        pub no_grease: bool,
-    }
-
-    /// Creates a new `CommonArgs` structure using the provided [`Docopt`].
-    ///
-    /// The `Docopt` usage String needs to include the following:
-    ///
-    /// --http-version VERSION   HTTP version to use
-    /// --max-data BYTES         Connection-wide flow control limit.
-    /// --max-stream-data BYTES  Per-stream flow control limit.
-    /// --max-streams-bidi STREAMS  Number of allowed concurrent streams.
-    /// --max-streams-uni STREAMS   Number of allowed concurrent streams.
-    /// --dump-packets PATH         Dump the incoming packets as files in the
-    /// given directory. --no-grease                 Don't send GREASE.
-    ///
-    /// [`Docopt`]: https://docs.rs/docopt/1.1.0/docopt/
-    impl Args for CommonArgs {
-        fn with_docopt(docopt: &docopt::Docopt) -> Self {
-            let args = docopt.parse().unwrap_or_else(|e| e.exit());
-
-            let http_version = args.get_str("--http-version");
-            let alpns = match http_version {
-                "HTTP/0.9" => alpns::length_prefixed(&alpns::HTTP_09),
-
-                "HTTP/3" => alpns::length_prefixed(&alpns::HTTP_3),
-
-                "all" => [
-                    alpns::length_prefixed(&alpns::HTTP_3),
-                    alpns::length_prefixed(&alpns::HTTP_09),
-                ]
-                .concat(),
-
-                _ => panic!("Unsupported HTTP version"),
-            };
-
-            let max_data = args.get_str("--max-data");
-            let max_data = u64::from_str_radix(max_data, 10).unwrap();
-
-            let max_stream_data = args.get_str("--max-stream-data");
-            let max_stream_data =
-                u64::from_str_radix(max_stream_data, 10).unwrap();
-
-            let max_streams_bidi = args.get_str("--max-streams-bidi");
-            let max_streams_bidi =
-                u64::from_str_radix(max_streams_bidi, 10).unwrap();
-
-            let max_streams_uni = args.get_str("--max-streams-uni");
-            let max_streams_uni =
-                u64::from_str_radix(max_streams_uni, 10).unwrap();
-
-            let dump_packet_path = if args.get_str("--dump-packets") != "" {
-                Some(args.get_str("--dump-packets").to_string())
-            } else {
-                None
-            };
-
-            let no_grease = args.get_bool("--no-grease");
-
-            CommonArgs {
-                alpns,
-                max_data,
-                max_stream_data,
-                max_streams_bidi,
-                max_streams_uni,
-                dump_packet_path,
-                no_grease,
-            }
-        }
-    }
-
-    pub struct PartialResponse {
-        pub body: Vec<u8>,
-
-        pub written: usize,
-    }
-
-    pub struct Client {
-        pub conn: std::pin::Pin<Box<quiche::Connection>>,
-
-        pub http_conn: Option<Box<dyn crate::HttpConn2>>,
-
-        pub partial_responses: std::collections::HashMap<u64, PartialResponse>,
-    }
-
-    pub type ClientMap = HashMap<Vec<u8>, (net::SocketAddr, Client)>;
+    vec.join("")
 }
+
+/// ALPN helpers.
+///
+/// This module contains constants and functions for working with ALPN.
+pub mod alpns {
+    pub const HTTP_09: [&str; 4] = ["hq-25", "hq-24", "hq-23", "http/0.9"];
+    pub const HTTP_3: [&str; 3] = ["h3-25", "h3-24", "h3-23"];
+
+    pub fn length_prefixed(alpns: &[&str]) -> Vec<u8> {
+        let mut out = Vec::new();
+
+        for s in alpns {
+            out.push(s.len() as u8);
+            out.extend_from_slice(s.as_bytes());
+        }
+
+        out
+    }
+}
+
+pub trait Args {
+    fn with_docopt(docopt: &docopt::Docopt) -> Self;
+}
+
+/// Contains commons arguments for creating a quiche QUIC connection.
+pub struct CommonArgs {
+    pub alpns: Vec<u8>,
+    pub max_data: u64,
+    pub max_stream_data: u64,
+    pub max_streams_bidi: u64,
+    pub max_streams_uni: u64,
+    pub dump_packet_path: Option<String>,
+    pub no_grease: bool,
+}
+
+/// Creates a new `CommonArgs` structure using the provided [`Docopt`].
+///
+/// The `Docopt` usage String needs to include the following:
+///
+/// --http-version VERSION   HTTP version to use
+/// --max-data BYTES         Connection-wide flow control limit.
+/// --max-stream-data BYTES  Per-stream flow control limit.
+/// --max-streams-bidi STREAMS  Number of allowed concurrent streams.
+/// --max-streams-uni STREAMS   Number of allowed concurrent streams.
+/// --dump-packets PATH         Dump the incoming packets as files in the
+/// given directory. --no-grease                 Don't send GREASE.
+///
+/// [`Docopt`]: https://docs.rs/docopt/1.1.0/docopt/
+impl Args for CommonArgs {
+    fn with_docopt(docopt: &docopt::Docopt) -> Self {
+        let args = docopt.parse().unwrap_or_else(|e| e.exit());
+
+        let http_version = args.get_str("--http-version");
+        let alpns = match http_version {
+            "HTTP/0.9" => alpns::length_prefixed(&alpns::HTTP_09),
+
+            "HTTP/3" => alpns::length_prefixed(&alpns::HTTP_3),
+
+            "all" => [
+                alpns::length_prefixed(&alpns::HTTP_3),
+                alpns::length_prefixed(&alpns::HTTP_09),
+            ]
+            .concat(),
+
+            _ => panic!("Unsupported HTTP version"),
+        };
+
+        let max_data = args.get_str("--max-data");
+        let max_data = u64::from_str_radix(max_data, 10).unwrap();
+
+        let max_stream_data = args.get_str("--max-stream-data");
+        let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
+
+        let max_streams_bidi = args.get_str("--max-streams-bidi");
+        let max_streams_bidi = u64::from_str_radix(max_streams_bidi, 10).unwrap();
+
+        let max_streams_uni = args.get_str("--max-streams-uni");
+        let max_streams_uni = u64::from_str_radix(max_streams_uni, 10).unwrap();
+
+        let dump_packet_path = if args.get_str("--dump-packets") != "" {
+            Some(args.get_str("--dump-packets").to_string())
+        } else {
+            None
+        };
+
+        let no_grease = args.get_bool("--no-grease");
+
+        CommonArgs {
+            alpns,
+            max_data,
+            max_stream_data,
+            max_streams_bidi,
+            max_streams_uni,
+            dump_packet_path,
+            no_grease,
+        }
+    }
+}
+
+pub struct PartialResponse {
+    pub body: Vec<u8>,
+
+    pub written: usize,
+}
+
+pub struct Client {
+    pub conn: std::pin::Pin<Box<quiche::Connection>>,
+
+    pub http_conn: Option<Box<dyn crate::HttpConn>>,
+
+    pub partial_responses: std::collections::HashMap<u64, PartialResponse>,
+}
+
+pub type ClientMap = HashMap<Vec<u8>, (net::SocketAddr, Client)>;
 
 // Makes a buffered writer for a resource with a target URL. The
 // file will have the same name as the resource's last path segment value.
@@ -193,57 +186,7 @@ fn make_writer(
     None
 }
 
-// Builds an HTTP/3 response given a request.
-pub fn build_h3_response(
-    root: &str, request: &[quiche::h3::Header],
-) -> (Vec<quiche::h3::Header>, Vec<u8>) {
-    let mut file_path = std::path::PathBuf::from(root);
-    let mut path = std::path::Path::new("");
-    let mut method = "";
-
-    // Look for the request's path and method.
-    for hdr in request {
-        match hdr.name() {
-            ":path" => {
-                path = std::path::Path::new(hdr.value());
-            },
-
-            ":method" => {
-                method = hdr.value();
-            },
-
-            _ => (),
-        }
-    }
-
-    let (status, body) = match method {
-        "GET" => {
-            for c in path.components() {
-                if let std::path::Component::Normal(v) = c {
-                    file_path.push(v)
-                }
-            }
-
-            match std::fs::read(file_path.as_path()) {
-                Ok(data) => (200, data),
-
-                Err(_) => (404, b"Not Found!".to_vec()),
-            }
-        },
-
-        _ => (405, Vec::new()),
-    };
-
-    let headers = vec![
-        quiche::h3::Header::new(":status", &status.to_string()),
-        quiche::h3::Header::new("server", "quiche"),
-        quiche::h3::Header::new("content-length", &body.len().to_string()),
-    ];
-
-    (headers, body)
-}
-
-pub trait HttpConn2 {
+pub trait HttpConn {
     fn send_requests(
         &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
     );
@@ -257,16 +200,13 @@ pub trait HttpConn2 {
 
     fn handle_requests(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
-        partial_responses: &mut HashMap<u64, utils::PartialResponse>, root: &str,
+        partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         buf: &mut [u8],
     ) -> i8;
 
-    // fn handle_writable(&mut self, client: &mut utils::Client, stream_id: u64);
-
     fn handle_writable(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
-        partial_responses: &mut HashMap<u64, utils::PartialResponse>,
-        stream_id: u64,
+        partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     );
 }
 
@@ -288,17 +228,16 @@ struct Http3Request {
     response_writer: Option<std::io::BufWriter<std::fs::File>>,
 }
 
-pub struct Http09Conn2 {
+#[derive(Default)]
+pub struct Http09Conn {
     stream_id: u64,
     reqs_sent: usize,
     reqs_complete: usize,
     reqs: Vec<Http09Request>,
 }
 
-impl Http09Conn2 {
-    pub fn with_urls(
-        urls: &[url::Url], reqs_cardinal: u64,
-    ) -> Box<dyn HttpConn2> {
+impl Http09Conn {
+    pub fn with_urls(urls: &[url::Url], reqs_cardinal: u64) -> Box<dyn HttpConn> {
         let mut reqs = Vec::new();
         for url in urls {
             for i in 1..=reqs_cardinal {
@@ -313,7 +252,7 @@ impl Http09Conn2 {
             }
         }
 
-        let h_conn = Http09Conn2 {
+        let h_conn = Http09Conn {
             stream_id: 0,
             reqs_sent: 0,
             reqs_complete: 0,
@@ -322,20 +261,19 @@ impl Http09Conn2 {
 
         Box::new(h_conn)
     }
-
-    pub fn default() -> Box<dyn HttpConn2> {
-        let h_conn = Http09Conn2 {
-            stream_id: 0,
-            reqs_sent: 0,
-            reqs_complete: 0,
-            reqs: Vec::new(),
-        };
-
-        Box::new(h_conn)
-    }
+    // pub fn default() -> Box<dyn HttpConn> {
+    // let h_conn = Http09Conn {
+    // stream_id: 0,
+    // reqs_sent: 0,
+    // reqs_complete: 0,
+    // reqs: Vec::new(),
+    // };
+    //
+    // Box::new(h_conn)
+    // }
 }
 
-impl HttpConn2 for Http09Conn2 {
+impl HttpConn for Http09Conn {
     fn send_requests(
         &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
     ) {
@@ -459,7 +397,7 @@ impl HttpConn2 for Http09Conn2 {
 
     fn handle_requests(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
-        partial_responses: &mut HashMap<u64, utils::PartialResponse>, root: &str,
+        partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         buf: &mut [u8],
     ) -> i8 {
         // Process all readable streams.
@@ -523,7 +461,7 @@ impl HttpConn2 for Http09Conn2 {
                     };
 
                     if written < body.len() {
-                        let response = utils::PartialResponse { body, written };
+                        let response = PartialResponse { body, written };
                         partial_responses.insert(s, response);
                     }
                 }
@@ -535,8 +473,7 @@ impl HttpConn2 for Http09Conn2 {
 
     fn handle_writable(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
-        partial_responses: &mut HashMap<u64, utils::PartialResponse>,
-        stream_id: u64,
+        partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
         debug!("{} stream {} is writable", conn.trace_id(), stream_id);
 
@@ -566,7 +503,7 @@ impl HttpConn2 for Http09Conn2 {
     }
 }
 
-pub struct Http3Conn2 {
+pub struct Http3Conn {
     h3_conn: quiche::h3::Connection,
     reqs_sent: usize,
     reqs_complete: usize,
@@ -574,11 +511,11 @@ pub struct Http3Conn2 {
     body: Option<Vec<u8>>,
 }
 
-impl Http3Conn2 {
+impl Http3Conn {
     pub fn with_urls(
         conn: &mut quiche::Connection, urls: &[url::Url], reqs_cardinal: u64,
         req_headers: &[String], body: &Option<Vec<u8>>, method: &str,
-    ) -> Box<dyn HttpConn2> {
+    ) -> Box<dyn HttpConn> {
         let mut reqs = Vec::new();
         for url in urls {
             for i in 1..=reqs_cardinal {
@@ -627,7 +564,7 @@ impl Http3Conn2 {
             }
         }
 
-        let h_conn = Http3Conn2 {
+        let h_conn = Http3Conn {
             h3_conn: quiche::h3::Connection::with_transport(
                 conn,
                 &quiche::h3::Config::new().unwrap(),
@@ -642,8 +579,8 @@ impl Http3Conn2 {
         Box::new(h_conn)
     }
 
-    pub fn with_conn(conn: &mut quiche::Connection) -> Box<dyn HttpConn2> {
-        let h_conn = Http3Conn2 {
+    pub fn with_conn(conn: &mut quiche::Connection) -> Box<dyn HttpConn> {
+        let h_conn = Http3Conn {
             h3_conn: quiche::h3::Connection::with_transport(
                 conn,
                 &quiche::h3::Config::new().unwrap(),
@@ -657,9 +594,59 @@ impl Http3Conn2 {
 
         Box::new(h_conn)
     }
+
+    // Builds an HTTP/3 response given a request.
+    fn build_h3_response(
+        root: &str, request: &[quiche::h3::Header],
+    ) -> (Vec<quiche::h3::Header>, Vec<u8>) {
+        let mut file_path = std::path::PathBuf::from(root);
+        let mut path = std::path::Path::new("");
+        let mut method = "";
+
+        // Look for the request's path and method.
+        for hdr in request {
+            match hdr.name() {
+                ":path" => {
+                    path = std::path::Path::new(hdr.value());
+                },
+
+                ":method" => {
+                    method = hdr.value();
+                },
+
+                _ => (),
+            }
+        }
+
+        let (status, body) = match method {
+            "GET" => {
+                for c in path.components() {
+                    if let std::path::Component::Normal(v) = c {
+                        file_path.push(v)
+                    }
+                }
+
+                match std::fs::read(file_path.as_path()) {
+                    Ok(data) => (200, data),
+
+                    Err(_) => (404, b"Not Found!".to_vec()),
+                }
+            },
+
+            _ => (405, Vec::new()),
+        };
+
+        let headers = vec![
+            quiche::h3::Header::new(":status", &status.to_string()),
+            quiche::h3::Header::new("server", "quiche"),
+            quiche::h3::Header::new("content-length", &body.len().to_string()),
+        ];
+
+        (headers, body)
+    }
 }
 
-impl HttpConn2 for Http3Conn2 {
+impl HttpConn for Http3Conn {
     fn send_requests(
         &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
     ) {
@@ -743,10 +730,6 @@ impl HttpConn2 for Http3Conn2 {
                                 });
                             },
                         }
-
-                        if let Some(f) = &mut req.response_writer {
-                            f.write_all(&buf[..read]).ok();
-                        }
                     }
                 },
 
@@ -804,7 +787,7 @@ impl HttpConn2 for Http3Conn2 {
 
     fn handle_requests(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
-        partial_responses: &mut HashMap<u64, utils::PartialResponse>, root: &str,
+        partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         _buf: &mut [u8],
     ) -> i8 {
         // Process HTTP events.
@@ -825,7 +808,8 @@ impl HttpConn2 for Http3Conn2 {
                     conn.stream_shutdown(stream_id, quiche::Shutdown::Read, 0)
                         .unwrap();
 
-                    let (headers, body) = build_h3_response(root, &list);
+                    let (headers, body) =
+                        Http3Conn::build_h3_response(root, &list);
 
                     if let Err(e) = self
                         .h3_conn
@@ -853,7 +837,7 @@ impl HttpConn2 for Http3Conn2 {
                     };
 
                     if written < body.len() {
-                        let response = utils::PartialResponse { body, written };
+                        let response = PartialResponse { body, written };
                         partial_responses.insert(stream_id, response);
                     }
                 },
@@ -885,8 +869,7 @@ impl HttpConn2 for Http3Conn2 {
 
     fn handle_writable(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
-        partial_responses: &mut HashMap<u64, utils::PartialResponse>,
-        stream_id: u64,
+        partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
         debug!("{} stream {} is writable", conn.trace_id(), stream_id);
 

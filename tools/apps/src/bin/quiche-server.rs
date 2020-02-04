@@ -35,11 +35,7 @@ use std::collections::HashMap;
 
 use ring::rand::*;
 
-use quiche_apps::utils::*;
-use quiche_apps::{
-    Http09Conn2,
-    Http3Conn2,
-};
+use quiche_apps::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
@@ -325,21 +321,21 @@ fn main() {
                 (client.conn.is_in_early_data() ||
                     client.conn.is_established())
             {
+                // At this stage the ALPN negotiation succeeded and selected a
+                // single application protocol name. We'll use this to construct
+                // the correct type of HttpConn but `application_proto()`
+                // returns a slice, so we have to convert it to a str in order
+                // to compare to our lists of protocols. We `unwrap()` because
+                // we need the value and if something fails at this stage, there
+                // is not much anyone can do to recover.
                 let app_proto = client.conn.application_proto();
                 let app_proto = &std::str::from_utf8(&app_proto).unwrap();
 
                 if alpns::HTTP_09.contains(app_proto) {
-                    client.http_conn = Some(Http09Conn2::default());
+                    client.http_conn = Some(Box::new(Http09Conn::default()));
                 } else if alpns::HTTP_3.contains(app_proto) {
-                    debug!(
-                        "{} QUIC handshake completed, now trying HTTP/3",
-                        client.conn.trace_id()
-                    );
-
                     client.http_conn =
-                        Some(Http3Conn2::with_conn(&mut client.conn));
-                } else {
-                    panic!("Negotiated unhandled protocol {:?}", app_proto);
+                        Some(Http3Conn::with_conn(&mut client.conn));
                 }
             }
 
