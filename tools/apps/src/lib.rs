@@ -41,7 +41,7 @@ pub mod utils {
 
     use std::collections::HashMap;
 
-    /// Returns a String containing a pretty printed version of the `buf` slice
+    /// Returns a String containing a pretty printed version of the `buf` slice.
     pub fn hex_dump(buf: &[u8]) -> String {
         let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
 
