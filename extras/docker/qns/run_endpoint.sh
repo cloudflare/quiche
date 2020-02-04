@@ -15,7 +15,7 @@ DOWNLOAD_DIR=/downloads
 QUICHE_CLIENT=quiche-client
 QUICHE_SERVER=quiche-server
 QUICHE_CLIENT_OPT="--no-verify --dump-responses ${DOWNLOAD_DIR}"
-QUICHE_SERVER_OPT="--no-retry"
+QUICHE_SERVER_OPT="--max-streams-bidi 3000 --max-streams-uni 3000 --no-retry --cert examples/cert.crt --key examples/cert.key"
 LOG_DIR=/logs
 LOG=$LOG_DIR/log.txt
 

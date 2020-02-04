@@ -44,7 +44,7 @@ COPY --from=build /build/quiche/examples/cert.crt \
      /build/quiche/examples/cert.key \
      examples/
 COPY --from=build /build/quiche/tools/apps/target/release/quiche-client \
-    /build/quiche/tools/apps/target/release/quiche-client \
+    /build/quiche/tools/apps/target/release/quiche-server \
      ./
 ENV RUST_LOG=trace
 
