@@ -154,6 +154,10 @@ fn main() {
 
     let h3_config = quiche::h3::Config::new().unwrap();
 
+    let rng = SystemRandom::new();
+    let conn_id_seed =
+        ring::hmac::Key::generate(ring::hmac::HMAC_SHA256, &rng).unwrap();
+
     let mut clients = ClientMap::new();
 
     loop {
@@ -213,14 +217,14 @@ fn main() {
 
             trace!("got packet {:?}", hdr);
 
-            if hdr.ty == quiche::Type::VersionNegotiation {
-                error!("Version negotiation invalid on the server");
-                continue;
-            }
+            let conn_id = ring::hmac::sign(&conn_id_seed, &hdr.dcid);
+            let conn_id = &conn_id.as_ref()[..quiche::MAX_CONN_ID_LEN];
 
             // Lookup a connection based on the packet's connection ID. If there
             // is no connection matching, create a new one.
-            let (_, client) = if !clients.contains_key(&hdr.dcid) {
+            let (_, client) = if !clients.contains_key(&hdr.dcid) &&
+                !clients.contains_key(conn_id)
+            {
                 if hdr.ty != quiche::Type::Initial {
                     error!("Packet is not Initial");
                     continue;
@@ -246,9 +250,8 @@ fn main() {
                     continue;
                 }
 
-                // Generate a random source connection ID for the connection.
                 let mut scid = [0; quiche::MAX_CONN_ID_LEN];
-                SystemRandom::new().fill(&mut scid[..]).unwrap();
+                scid.copy_from_slice(&conn_id);
 
                 let mut odcid = None;
 
@@ -316,7 +319,11 @@ fn main() {
 
                 clients.get_mut(&scid[..]).unwrap()
             } else {
-                clients.get_mut(&hdr.dcid).unwrap()
+                match clients.get_mut(&hdr.dcid) {
+                    Some(v) => v,
+
+                    None => clients.get_mut(conn_id).unwrap(),
+                }
             };
 
             // Process potentially coalesced packets.
