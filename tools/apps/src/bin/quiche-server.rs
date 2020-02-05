@@ -298,7 +298,11 @@ fn main() {
 
                 clients.get_mut(&scid[..]).unwrap()
             } else {
-                clients.get_mut(&hdr.dcid).unwrap()
+                match clients.get_mut(&hdr.dcid) {
+                    Some(v) => v,
+
+                    None => clients.get_mut(conn_id).unwrap(),
+                }
             };
 
             // Process potentially coalesced packets.
