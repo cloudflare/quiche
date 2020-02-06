@@ -150,7 +150,7 @@ impl StreamMap {
 
                 // Stream has already been closed and garbage collected.
                 if self.collected.contains(&id) {
-                    return Err(Error::InvalidStreamState);
+                    return Err(Error::Done);
                 }
 
                 let (max_rx_data, max_tx_data) = match (local, is_bidi(id)) {
