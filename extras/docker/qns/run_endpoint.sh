@@ -45,6 +45,8 @@ check_testcase () {
 }
 
 run_quiche_client_tests () {
+    # TODO: https://github.com/marten-seemann/quic-interop-runner/issues/61
+    # remove this sleep when the issue above is resolved.
     sleep 3
     $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
         $CLIENT_PARAMS $REQUESTS >& $LOG
