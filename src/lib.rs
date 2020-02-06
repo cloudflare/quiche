@@ -2801,8 +2801,23 @@ impl Connection {
                     return Err(Error::InvalidStreamState);
                 }
 
-                // Get existing stream or create a new one.
-                let stream = self.get_or_create_stream(stream_id, false)?;
+                // Get existing stream or create a new one, but if the stream
+                // has already been closed and collected, ignore the frame.
+                //
+                // This can happen if e.g. an ACK frame is lost, and the peer
+                // retransmits another frame before it realizes that the stream
+                // is gone.
+                //
+                // Note that it makes it impossible to check if the frame is
+                // illegal, since we have no state, but since we ignore the
+                // frame, it should be fine.
+                let stream = match self.get_or_create_stream(stream_id, false) {
+                    Ok(v) => v,
+
+                    Err(Error::Done) => return Ok(()),
+
+                    Err(e) => return Err(e),
+                };
 
                 self.rx_data += stream.recv.reset(final_size)? as u64;
 
@@ -2858,8 +2873,23 @@ impl Connection {
                     return Err(Error::FlowControl);
                 }
 
-                // Get existing stream or create a new one.
-                let stream = self.get_or_create_stream(stream_id, false)?;
+                // Get existing stream or create a new one, but if the stream
+                // has already been closed and collected, ignore the frame.
+                //
+                // This can happen if e.g. an ACK frame is lost, and the peer
+                // retransmits another frame before it realizes that the stream
+                // is gone.
+                //
+                // Note that it makes it impossible to check if the frame is
+                // illegal, since we have no state, but since we ignore the
+                // frame, it should be fine.
+                let stream = match self.get_or_create_stream(stream_id, false) {
+                    Ok(v) => v,
+
+                    Err(Error::Done) => return Ok(()),
+
+                    Err(e) => return Err(e),
+                };
 
                 stream.recv.push(data)?;
 
@@ -2875,8 +2905,23 @@ impl Connection {
             },
 
             frame::Frame::MaxStreamData { stream_id, max } => {
-                // Get existing stream or create a new one.
-                let stream = self.get_or_create_stream(stream_id, false)?;
+                // Get existing stream or create a new one, but if the stream
+                // has already been closed and collected, ignore the frame.
+                //
+                // This can happen if e.g. an ACK frame is lost, and the peer
+                // retransmits another frame before it realizes that the stream
+                // is gone.
+                //
+                // Note that it makes it impossible to check if the frame is
+                // illegal, since we have no state, but since we ignore the
+                // frame, it should be fine.
+                let stream = match self.get_or_create_stream(stream_id, false) {
+                    Ok(v) => v,
+
+                    Err(Error::Done) => return Ok(()),
+
+                    Err(e) => return Err(e),
+                };
 
                 let was_flushable = stream.is_flushable();
 
@@ -4975,10 +5020,15 @@ mod tests {
         assert!(pipe.client.stream_finished(0));
         assert!(pipe.server.stream_finished(0));
 
-        assert_eq!(
-            pipe.client.stream_send(0, b"", true),
-            Err(Error::InvalidStreamState)
-        );
+        assert_eq!(pipe.client.stream_send(0, b"", true), Err(Error::Done));
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 0,
+            data: stream::RangeBuf::from(b"aa", 0, false),
+        }];
+
+        let pkt_type = packet::Type::Short;
+        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
     }
 
     #[test]
