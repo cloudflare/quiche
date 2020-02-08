@@ -202,7 +202,7 @@ pub trait HttpConn {
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         buf: &mut [u8],
-    ) -> i8;
+    ) -> quiche::h3::Result<()>;
 
     fn handle_writable(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
@@ -399,7 +399,7 @@ impl HttpConn for Http09Conn {
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         buf: &mut [u8],
-    ) -> i8 {
+    ) -> quiche::h3::Result<()> {
         // Process all readable streams.
         for s in conn.readable() {
             while let Ok((read, fin)) = conn.stream_recv(s, buf) {
@@ -456,7 +456,7 @@ impl HttpConn for Http09Conn {
                                 conn.trace_id(),
                                 e
                             );
-                            return -1;
+                            return Err(From::from(e));
                         },
                     };
 
@@ -468,7 +468,7 @@ impl HttpConn for Http09Conn {
             }
         }
 
-        0
+        Ok(())
     }
 
     fn handle_writable(
@@ -789,7 +789,7 @@ impl HttpConn for Http3Conn {
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         _buf: &mut [u8],
-    ) -> i8 {
+    ) -> quiche::h3::Result<()> {
         // Process HTTP events.
         loop {
             match self.h3_conn.poll(conn) {
@@ -859,12 +859,12 @@ impl HttpConn for Http3Conn {
                 Err(e) => {
                     error!("{} HTTP/3 error {:?}", conn.trace_id(), e);
 
-                    return -1;
+                    return Err(e);
                 },
             }
         }
 
-        0
+        Ok(())
     }
 
     fn handle_writable(
