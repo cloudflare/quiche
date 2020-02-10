@@ -29,27 +29,11 @@ extern crate log;
 
 use std::net::ToSocketAddrs;
 
-use std::io::prelude::*;
-
 use ring::rand::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
 const HTTP_REQ_STREAM_ID: u64 = 4;
-
-const USAGE: &str = "Usage:
-  client [options] URL
-  client -h | --help
-
-Options:
-  --max-data BYTES         Connection-wide flow control limit [default: 10000000].
-  --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
-  --wire-version VERSION   The version number to send to the server [default: babababa].
-  --dump-packets PATH      Dump the incoming packets as files in the given directory.
-  --no-verify              Don't verify server's certificate.
-  --cc-algorithm NAME      Set client congestion control algorithm [default: reno].
-  -h --help                Show this screen.
-";
 
 fn main() {
     let mut buf = [0; 65535];
@@ -59,26 +43,17 @@ fn main() {
         .default_format_timestamp_nanos(true)
         .init();
 
-    let args = docopt::Docopt::new(USAGE)
-        .and_then(|dopt| dopt.parse())
-        .unwrap_or_else(|e| e.exit());
+    let mut args = std::env::args();
 
-    let max_data = args.get_str("--max-data");
-    let max_data = u64::from_str_radix(max_data, 10).unwrap();
+    let cmd = &args.next().unwrap();
 
-    let max_stream_data = args.get_str("--max-stream-data");
-    let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
+    if args.len() != 1 {
+        println!("Usage: {} URL", cmd);
+        println!("\nSee tools/apps/ for more complete implementations.");
+        return;
+    }
 
-    let version = args.get_str("--wire-version");
-    let version = u32::from_str_radix(version, 16).unwrap();
-
-    let dump_path = if args.get_str("--dump-packets") != "" {
-        Some(args.get_str("--dump-packets"))
-    } else {
-        None
-    };
-
-    let url = url::Url::parse(args.get_str("URL")).unwrap();
+    let url = url::Url::parse(&args.next().unwrap()).unwrap();
 
     // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
@@ -110,9 +85,10 @@ fn main() {
     .unwrap();
 
     // Create the configuration for the QUIC connection.
-    let mut config = quiche::Config::new(version).unwrap();
+    let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 
-    config.verify_peer(true);
+    // *CAUTION*: this should not be set to `false` in production!!!
+    config.verify_peer(false);
 
     config
         .set_application_protos(b"\x05hq-25\x05hq-24\x05hq-23\x08http/0.9")
@@ -120,24 +96,12 @@ fn main() {
 
     config.set_max_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
-    config.set_initial_max_data(max_data);
-    config.set_initial_max_stream_data_bidi_local(max_stream_data);
-    config.set_initial_max_stream_data_bidi_remote(max_stream_data);
+    config.set_initial_max_data(10_000_000);
+    config.set_initial_max_stream_data_bidi_local(1_000_000);
+    config.set_initial_max_stream_data_bidi_remote(1_000_000);
     config.set_initial_max_streams_bidi(100);
     config.set_initial_max_streams_uni(100);
     config.set_disable_active_migration(true);
-
-    if args.get_bool("--no-verify") {
-        config.verify_peer(false);
-    }
-
-    if std::env::var_os("SSLKEYLOGFILE").is_some() {
-        config.log_keys();
-    }
-
-    config
-        .set_cc_algorithm_name(args.get_str("--cc-algorithm"))
-        .unwrap();
 
     // Generate a random source connection ID for the connection.
     let mut scid = [0; quiche::MAX_CONN_ID_LEN];
@@ -169,8 +133,6 @@ fn main() {
     let req_start = std::time::Instant::now();
 
     let mut req_sent = false;
-
-    let mut pkt_count = 0;
 
     loop {
         poll.poll(&mut events, conn.timeout()).unwrap();
@@ -204,17 +166,6 @@ fn main() {
             };
 
             debug!("got {} bytes", len);
-
-            if let Some(target_path) = dump_path {
-                let path = format!("{}/{}.pkt", target_path, pkt_count);
-
-                if let Ok(f) = std::fs::File::create(&path) {
-                    let mut f = std::io::BufWriter::new(f);
-                    f.write_all(&buf[..len]).ok();
-                }
-            }
-
-            pkt_count += 1;
 
             // Process potentially coalesced packets.
             let read = match conn.recv(&mut buf[..len]) {

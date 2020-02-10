@@ -33,24 +33,21 @@ use std::io::prelude::*;
 
 use quiche::h3::qpack;
 
-const USAGE: &str = "Usage:
-  qpack-decode [options] FILE
-  qpack-decode -h | --help
-
-Options:
-  -h --help  Show this screen.
-";
-
 fn main() {
     env_logger::init();
 
-    let args = docopt::Docopt::new(USAGE)
-        .and_then(|dopt| dopt.parse())
-        .unwrap_or_else(|e| e.exit());
-
     // TODO: parse params from file name.
 
-    let mut file = File::open(args.get_str("FILE")).unwrap();
+    let mut args = std::env::args();
+
+    let cmd = &args.next().unwrap();
+
+    if args.len() != 1 {
+        println!("Usage: {} FILE", cmd);
+        return;
+    }
+
+    let mut file = File::open(&args.next().unwrap()).unwrap();
 
     let mut dec = qpack::Decoder::new();
 
