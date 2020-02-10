@@ -37,10 +37,6 @@ fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
-    env_logger::builder()
-        .default_format_timestamp_nanos(true)
-        .init();
-
     let mut args = std::env::args();
 
     let cmd = &args.next().unwrap();

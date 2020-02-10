@@ -35,8 +35,6 @@ use std::io::BufReader;
 use quiche::h3;
 
 fn main() {
-    env_logger::init();
-
     let mut args = std::env::args();
 
     let cmd = &args.next().unwrap();

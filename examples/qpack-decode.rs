@@ -34,8 +34,6 @@ use std::io::prelude::*;
 use quiche::h3::qpack;
 
 fn main() {
-    env_logger::init();
-
     // TODO: parse params from file name.
 
     let mut args = std::env::args();

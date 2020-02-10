@@ -69,7 +69,6 @@ winapi = { version = "0.3", features = ["wincrypt"] }
 [dev-dependencies]
 mio = "0.6"
 url = "1"
-env_logger = "0.6"
 
 [profile.bench]
 debug = true
