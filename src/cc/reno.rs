@@ -144,10 +144,6 @@ mod tests {
 
     const TRACE_ID: &str = "test_id";
 
-    fn init() {
-        let _ = env_logger::builder().is_test(true).try_init();
-    }
-
     #[test]
     fn reno_init() {
         let cc = cc::new_congestion_control(cc::Algorithm::Reno);
@@ -158,8 +154,6 @@ mod tests {
 
     #[test]
     fn reno_send() {
-        init();
-
         let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
 
         cc.on_packet_sent_cc(1000, TRACE_ID);
@@ -169,8 +163,6 @@ mod tests {
 
     #[test]
     fn reno_slow_start() {
-        init();
-
         let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
 
         let p = Sent {
@@ -205,8 +197,6 @@ mod tests {
 
     #[test]
     fn reno_congestion_event() {
-        init();
-
         let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
         let prev_cwnd = cc.cwnd();
 
@@ -222,8 +212,6 @@ mod tests {
 
     #[test]
     fn reno_congestion_avoidance() {
-        init();
-
         let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
         let prev_cwnd = cc.cwnd();
 
@@ -266,8 +254,6 @@ mod tests {
 
     #[test]
     fn reno_collapse_cwnd() {
-        init();
-
         let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
 
         // cwnd will be reset
