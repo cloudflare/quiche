@@ -356,7 +356,9 @@ fn main() {
                     http_conn.handle_writable(conn, partials, stream_id);
                 }
 
-                if http_conn.handle_requests(conn, partials, &args.root, &mut buf).is_err()
+                if http_conn
+                    .handle_requests(conn, partials, &args.root, &mut buf)
+                    .is_err()
                 {
                     break 'read;
                 }

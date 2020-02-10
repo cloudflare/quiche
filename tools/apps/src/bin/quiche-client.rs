@@ -261,8 +261,6 @@ fn main() {
                     &args.body,
                     &args.method,
                 ));
-            } else {
-                panic!("Negotiated unhandled protocol {:?}", app_proto);
             }
         }
 
@@ -315,7 +313,8 @@ fn main() {
         }
     }
 }
-// Application-specific arguments that compliment the `CommonArgs`.
+
+/// Application-specific arguments that compliment the `CommonArgs`.
 struct ClientArgs {
     version: u32,
     dump_response_path: Option<String>,
@@ -340,7 +339,7 @@ impl Args for ClientArgs {
             None
         };
 
-        // URLs (can be multiple)
+        // URLs (can be multiple).
         let urls: Vec<url::Url> = args
             .get_vec("URL")
             .into_iter()

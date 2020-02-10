@@ -159,10 +159,12 @@ pub struct Client {
 
 pub type ClientMap = HashMap<Vec<u8>, (net::SocketAddr, Client)>;
 
-// Makes a buffered writer for a resource with a target URL. The
-// file will have the same name as the resource's last path segment value.
-// Multiple requests for the same URL are indicated by the value of `cardinal`,
-// any value "N" greater than 1, will cause ".N" to be appended to the filename.
+/// Makes a buffered writer for a resource with a target URL.
+///
+/// The file will have the same name as the resource's last path segment value.
+/// Multiple requests for the same URL are indicated by the value of `cardinal`,
+/// any value "N" greater than 1, will cause ".N" to be appended to the
+/// filename.
 fn make_writer(
     url: &url::Url, target_path: &Option<String>, cardinal: u64,
 ) -> Option<std::io::BufWriter<std::fs::File>> {
@@ -210,7 +212,7 @@ pub trait HttpConn {
     );
 }
 
-// Represents an HTTP/0.9 formatted request.
+/// Represents an HTTP/0.9 formatted request.
 pub struct Http09Request {
     url: url::Url,
     cardinal: u64,
@@ -219,7 +221,7 @@ pub struct Http09Request {
     response_writer: Option<std::io::BufWriter<std::fs::File>>,
 }
 
-// Represents an HTTP/3 formatted request.
+/// Represents an HTTP/3 formatted request.
 struct Http3Request {
     url: url::Url,
     cardinal: u64,
@@ -261,16 +263,6 @@ impl Http09Conn {
 
         Box::new(h_conn)
     }
-    // pub fn default() -> Box<dyn HttpConn> {
-    // let h_conn = Http09Conn {
-    // stream_id: 0,
-    // reqs_sent: 0,
-    // reqs_complete: 0,
-    // reqs: Vec::new(),
-    // };
-    //
-    // Box::new(h_conn)
-    // }
 }
 
 impl HttpConn for Http09Conn {
@@ -595,7 +587,7 @@ impl Http3Conn {
         Box::new(h_conn)
     }
 
-    // Builds an HTTP/3 response given a request.
+    /// Builds an HTTP/3 response given a request.
     fn build_h3_response(
         root: &str, request: &[quiche::h3::Header],
     ) -> (Vec<quiche::h3::Header>, Vec<u8>) {
