@@ -12,10 +12,10 @@ set -e
 QUICHE_DIR=/quiche
 WWW_DIR=/www
 DOWNLOAD_DIR=/downloads
-QUICHE_CLIENT=client
-QUICHE_SERVER=server
-QUICHE_CLIENT_OPT="--no-verify"
-QUICHE_SERVER_OPT="--no-retry"
+QUICHE_CLIENT=quiche-client
+QUICHE_SERVER=quiche-server
+QUICHE_CLIENT_OPT="--no-verify --dump-responses ${DOWNLOAD_DIR}"
+QUICHE_SERVER_OPT="--no-retry --cert examples/cert.crt --key examples/cert.key"
 LOG_DIR=/logs
 LOG=$LOG_DIR/log.txt
 
@@ -36,8 +36,6 @@ check_testcase () {
         ;;
     http3 )
         echo "supported"
-        QUICHE_CLIENT=http3-client
-        QUICHE_SERVER=http3-server
         ;;
     *)
         echo "unsupported"
@@ -47,18 +45,17 @@ check_testcase () {
 }
 
 run_quiche_client_tests () {
-    for req in $REQUESTS
-    do
-        # get path only from the url
-        file=$(echo $req | perl -F'/' -an -e 'print $F[-1]')
-        $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
-            $CLIENT_PARAMS $req > $DOWNLOAD_DIR/$file 2> $LOG || exit 127
-    done
+    # TODO: https://github.com/marten-seemann/quic-interop-runner/issues/61
+    # remove this sleep when the issue above is resolved.
+    sleep 3
+    $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
+        $CLIENT_PARAMS $REQUESTS >& $LOG
+
 }
 
 run_quiche_server_tests() {
     $QUICHE_DIR/$QUICHE_SERVER --listen 0.0.0.0:443 --root $WWW_DIR \
-        $SERVER_PARAMS $QUICHE_SERVER_OPT 2> $LOG || exit 127
+        $SERVER_PARAMS $QUICHE_SERVER_OPT >& $LOG
 }
 
 # Update config based on test case
@@ -76,6 +73,8 @@ if [ "$ROLE" == "client" ]; then
     echo "## Test case: $TESTCASE"
     run_quiche_client_tests
 elif [ "$ROLE" == "server" ]; then
+    # Wait for the simulator to start up.
+    /wait-for-it.sh sim:57832 -s -t 30
     echo "## Starting quiche server..."
     echo "## Server params: $SERVER_PARAMS"
     echo "## Test case: $TESTCASE"

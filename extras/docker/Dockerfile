@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y git cmake golang && \
 RUN git clone --recurse-submodules --depth 1 https://github.com/cloudflare/quiche
 RUN cd quiche && \
     cargo build --release --examples
+RUN cd quiche && \
+    cargo build --manifest-path tools/apps/Cargo.toml --release
 
 ##
 ## quiche-base: base quiche image
@@ -20,6 +22,8 @@ COPY --from=build /build/quiche/target/release/examples/http3-client \
      /build/quiche/target/release/examples/http3-server \
      /build/quiche/target/release/examples/client \
      /build/quiche/target/release/examples/server \
+     /build/quiche/tools/apps/target/release/quiche-client \
+     /build/quiche/tools/apps/target/release/quiche-server \
      /usr/local/bin/
 ENV PATH="/usr/local/bin/:${PATH}"
 ENV RUST_LOG=info
@@ -39,10 +43,8 @@ WORKDIR /quiche
 COPY --from=build /build/quiche/examples/cert.crt \
      /build/quiche/examples/cert.key \
      examples/
-COPY --from=build /build/quiche/target/release/examples/client \
-     /build/quiche/target/release/examples/server \
-     /build/quiche/target/release/examples/http3-client \
-     /build/quiche/target/release/examples/http3-server \
+COPY --from=build /build/quiche/tools/apps/target/release/quiche-client \
+    /build/quiche/tools/apps/target/release/quiche-server \
      ./
 ENV RUST_LOG=trace
 
