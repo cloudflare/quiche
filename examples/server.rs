@@ -29,34 +29,11 @@ extern crate log;
 
 use std::net;
 
-use std::io::prelude::*;
-
 use std::collections::HashMap;
 
 use ring::rand::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
-
-const USAGE: &str = "Usage:
-  server [options]
-  server -h | --help
-
-Options:
-  --listen <addr>             Listen on the given IP:port [default: 127.0.0.1:4433]
-  --cert <file>               TLS certificate path [default: examples/cert.crt]
-  --key <file>                TLS certificate key path [default: examples/cert.key]
-  --root <dir>                Root directory [default: examples/root/]
-  --name <str>                Name of the server [default: quic.tech]
-  --max-data BYTES            Connection-wide flow control limit [default: 10000000].
-  --max-stream-data BYTES     Per-stream flow control limit [default: 1000000].
-  --max-streams-bidi STREAMS  Number of allowed concurrent streams [default: 100].
-  --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 100].
-  --dump-packets PATH         Dump the incoming packets as files in the given directory.
-  --early-data                Enables receiving early data.
-  --no-retry                  Disable stateless retry.
-  --cc-algorithm NAME         Set server congestion control algorithm [default: reno].
-  -h --help                   Show this screen.
-";
 
 struct PartialResponse {
     body: Vec<u8>,
@@ -80,34 +57,22 @@ fn main() {
         .default_format_timestamp_nanos(true)
         .init();
 
-    let args = docopt::Docopt::new(USAGE)
-        .and_then(|dopt| dopt.parse())
-        .unwrap_or_else(|e| e.exit());
+    let mut args = std::env::args();
 
-    let max_data = args.get_str("--max-data");
-    let max_data = u64::from_str_radix(max_data, 10).unwrap();
+    let cmd = &args.next().unwrap();
 
-    let max_stream_data = args.get_str("--max-stream-data");
-    let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
-
-    let max_streams_bidi = args.get_str("--max-streams-bidi");
-    let max_streams_bidi = u64::from_str_radix(max_streams_bidi, 10).unwrap();
-
-    let max_streams_uni = args.get_str("--max-streams-uni");
-    let max_streams_uni = u64::from_str_radix(max_streams_uni, 10).unwrap();
-
-    let dump_path = if args.get_str("--dump-packets") != "" {
-        Some(args.get_str("--dump-packets"))
-    } else {
-        None
-    };
+    if args.len() != 0 {
+        println!("Usage: {}", cmd);
+        println!("\nSee tools/apps/ for more complete implementations.");
+        return;
+    }
 
     // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
     // Create the UDP listening socket, and register it with the event loop.
-    let socket = net::UdpSocket::bind(args.get_str("--listen")).unwrap();
+    let socket = net::UdpSocket::bind("127.0.0.1:4433").unwrap();
 
     let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
     poll.register(
@@ -122,10 +87,10 @@ fn main() {
     let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 
     config
-        .load_cert_chain_from_pem_file(args.get_str("--cert"))
+        .load_cert_chain_from_pem_file("examples/cert.crt")
         .unwrap();
     config
-        .load_priv_key_from_pem_file(args.get_str("--key"))
+        .load_priv_key_from_pem_file("examples/cert.key")
         .unwrap();
 
     config
@@ -134,33 +99,20 @@ fn main() {
 
     config.set_max_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
-    config.set_initial_max_data(max_data);
-    config.set_initial_max_stream_data_bidi_local(max_stream_data);
-    config.set_initial_max_stream_data_bidi_remote(max_stream_data);
-    config.set_initial_max_stream_data_uni(max_stream_data);
-    config.set_initial_max_streams_bidi(max_streams_bidi);
-    config.set_initial_max_streams_uni(max_streams_uni);
+    config.set_initial_max_data(10_000_000);
+    config.set_initial_max_stream_data_bidi_local(1_000_000);
+    config.set_initial_max_stream_data_bidi_remote(1_000_000);
+    config.set_initial_max_stream_data_uni(1_000_000);
+    config.set_initial_max_streams_bidi(100);
+    config.set_initial_max_streams_uni(100);
     config.set_disable_active_migration(true);
-
-    if args.get_bool("--early-data") {
-        config.enable_early_data();
-    }
-
-    if std::env::var_os("SSLKEYLOGFILE").is_some() {
-        config.log_keys();
-    }
-
-    config
-        .set_cc_algorithm_name(args.get_str("--cc-algorithm"))
-        .unwrap();
+    config.enable_early_data();
 
     let rng = SystemRandom::new();
     let conn_id_seed =
         ring::hmac::Key::generate(ring::hmac::HMAC_SHA256, &rng).unwrap();
 
     let mut clients = ClientMap::new();
-
-    let mut pkt_count = 0;
 
     loop {
         // Find the shorter timeout from all the active connections.
@@ -203,17 +155,6 @@ fn main() {
             debug!("got {} bytes", len);
 
             let pkt_buf = &mut buf[..len];
-
-            if let Some(target_path) = dump_path {
-                let path = format!("{}/{}.pkt", target_path, pkt_count);
-
-                if let Ok(f) = std::fs::File::create(&path) {
-                    let mut f = std::io::BufWriter::new(f);
-                    f.write_all(pkt_buf).ok();
-                }
-            }
-
-            pkt_count += 1;
 
             // Parse the QUIC packet's header.
             let hdr = match quiche::Header::from_slice(
@@ -266,54 +207,50 @@ fn main() {
                 let mut scid = [0; quiche::MAX_CONN_ID_LEN];
                 scid.copy_from_slice(&conn_id);
 
-                let mut odcid = None;
+                // Token is always present in Initial packets.
+                let token = hdr.token.as_ref().unwrap();
 
-                if !args.get_bool("--no-retry") {
-                    // Token is always present in Initial packets.
-                    let token = hdr.token.as_ref().unwrap();
+                // Do stateless retry if the client didn't send a token.
+                if token.is_empty() {
+                    warn!("Doing stateless retry");
 
-                    // Do stateless retry if the client didn't send a token.
-                    if token.is_empty() {
-                        warn!("Doing stateless retry");
+                    let new_token = mint_token(&hdr, &src);
 
-                        let new_token = mint_token(&hdr, &src);
+                    let len = quiche::retry(
+                        &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
+                    )
+                    .unwrap();
 
-                        let len = quiche::retry(
-                            &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
-                        )
-                        .unwrap();
+                    let out = &out[..len];
 
-                        let out = &out[..len];
-
-                        if let Err(e) = socket.send_to(out, &src) {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                debug!("send() would block");
-                                break;
-                            }
-
-                            panic!("send() failed: {:?}", e);
+                    if let Err(e) = socket.send_to(out, &src) {
+                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                            debug!("send() would block");
+                            break;
                         }
-                        continue;
+
+                        panic!("send() failed: {:?}", e);
                     }
-
-                    odcid = validate_token(&src, token);
-
-                    // The token was not valid, meaning the retry failed, so
-                    // drop the packet.
-                    if odcid == None {
-                        error!("Invalid address validation token");
-                        continue;
-                    }
-
-                    if scid.len() != hdr.dcid.len() {
-                        error!("Invalid destination connection ID");
-                        continue;
-                    }
-
-                    // Reuse the source connection ID we sent in the Retry
-                    // packet, instead of changing it again.
-                    scid.copy_from_slice(&hdr.dcid);
+                    continue;
                 }
+
+                let odcid = validate_token(&src, token);
+
+                // The token was not valid, meaning the retry failed, so
+                // drop the packet.
+                if odcid == None {
+                    error!("Invalid address validation token");
+                    continue;
+                }
+
+                if scid.len() != hdr.dcid.len() {
+                    error!("Invalid destination connection ID");
+                    continue;
+                }
+
+                // Reuse the source connection ID we sent in the Retry
+                // packet, instead of changing it again.
+                scid.copy_from_slice(&hdr.dcid);
 
                 debug!(
                     "New connection: dcid={} scid={}",
@@ -383,12 +320,7 @@ fn main() {
                             fin
                         );
 
-                        handle_stream(
-                            client,
-                            s,
-                            stream_buf,
-                            args.get_str("--root"),
-                        );
+                        handle_stream(client, s, stream_buf, "examples/root");
                     }
                 }
             }
