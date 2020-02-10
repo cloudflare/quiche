@@ -46,6 +46,10 @@ fuzzing = []
 # For building with Android NDK < 18 and GCC.
 ndk-old-gcc = []
 
+# Build benchmarks. This is intended to make benchmark-specific dependencies
+# optional, so we don't have to build them for other targets.
+bench = ["criterion"]
+
 [package.metadata.docs.rs]
 default-features = false
 
@@ -56,6 +60,7 @@ cmake = "0.1"
 log = { version = "0.4", features = ["std"] }
 libc = "0.2"
 ring = "0.16"
+criterion = { version = "0.3", optional = true }
 lazy_static = "1"
 
 [target."cfg(windows)".dependencies]
@@ -65,7 +70,6 @@ winapi = { version = "0.3", features = ["wincrypt"] }
 mio = "0.6"
 url = "1"
 docopt = "1"
-criterion = "0.3"
 env_logger = "0.6"
 
 [profile.bench]
@@ -80,3 +84,4 @@ crate-type = ["lib", "staticlib", "cdylib"]
 [[bench]]
 name = "benches"
 harness = false
+required-features = ["bench"]
