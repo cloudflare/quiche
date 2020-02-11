@@ -5,6 +5,10 @@ authors = ["Lucas Pardue <lucaspardue.24.7@gmail.com>"]
 edition = "2018"
 publish = false
 
+[features]
+# Enable quiche's fuzzing mode.
+fuzzing = ["quiche/fuzzing"]
+
 [dependencies]
 docopt = "1"
 env_logger = "0.6"
