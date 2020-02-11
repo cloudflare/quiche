@@ -46,10 +46,6 @@ fuzzing = []
 # For building with Android NDK < 18 and GCC.
 ndk-old-gcc = []
 
-# Build benchmarks. This is intended to make benchmark-specific dependencies
-# optional, so we don't have to build them for other targets.
-bench = ["criterion"]
-
 [package.metadata.docs.rs]
 default-features = false
 
@@ -60,7 +56,6 @@ cmake = "0.1"
 log = { version = "0.4", features = ["std"] }
 libc = "0.2"
 ring = "0.16"
-criterion = { version = "0.3", optional = true }
 lazy_static = "1"
 qlog = { version = "0.2", optional = true }
 
