@@ -2233,6 +2233,16 @@ impl Connection {
             return Err(Error::InvalidStreamState);
         }
 
+        // Truncate the input buffer based on the connection's send capacity if
+        // necessary.
+        let cap = self.send_capacity();
+
+        let (buf, fin) = if cap < buf.len() {
+            (&buf[..cap], false)
+        } else {
+            (buf, fin)
+        };
+
         // Get existing stream or create a new one.
         let stream = self.get_or_create_stream(stream_id, true)?;
 
@@ -2306,10 +2316,11 @@ impl Connection {
         Ok(())
     }
 
-    /// Returns the stream's outgoing flow control capacity in bytes.
+    /// Returns the stream's send capacity in bytes.
     pub fn stream_capacity(&self, stream_id: u64) -> Result<usize> {
         if let Some(stream) = self.streams.get(stream_id) {
-            return Ok(stream.send.cap());
+            let cap = cmp::min(self.send_capacity(), stream.send.cap());
+            return Ok(cap);
         };
 
         Err(Error::InvalidStreamState)
@@ -3056,6 +3067,12 @@ impl Connection {
         let idle_timeout = cmp::max(idle_timeout, 3 * self.recovery.pto());
 
         Some(idle_timeout)
+    }
+
+    /// Returns the connection's overall send capacity.
+    fn send_capacity(&self) -> usize {
+        let cap = self.max_tx_data as usize - self.tx_data as usize;
+        cmp::min(cap, self.recovery.cwnd_available())
     }
 }
 
