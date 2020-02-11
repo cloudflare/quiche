@@ -44,9 +44,6 @@ matrix:
       # qlog
       - RUSTFLAGS="-D warnings" cargo test --verbose --manifest-path tools/qlog/Cargo.toml
       - cargo clippy --manifest-path tools/qlog/Cargo.toml -- -D warnings
-      # quic-trace-log
-      - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/quic-trace-log/Cargo.toml
-      - cargo clippy --manifest-path tools/quic-trace-log/Cargo.toml -- -D warnings
       # quiche-apps
       - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/apps/Cargo.toml
       - cargo clippy --manifest-path tools/apps/Cargo.toml -- -D warnings
@@ -84,9 +81,6 @@ matrix:
       # qlog
       - RUSTFLAGS="-D warnings" cargo test --verbose --manifest-path tools/qlog/Cargo.toml
       - cargo fmt --manifest-path tools/qlog/Cargo.toml -- --check
-      # quic-trace-log
-      - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/quic-trace-log/Cargo.toml
-      - cargo fmt --manifest-path tools/quic-trace-log/Cargo.toml -- --check
       # quiche-apps
       - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/apps/Cargo.toml
       - cargo fmt --manifest-path tools/apps/Cargo.toml -- --check
