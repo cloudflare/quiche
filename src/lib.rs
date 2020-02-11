@@ -1989,6 +1989,13 @@ impl Connection {
                     self.streams.push_flushable(stream_id);
                 }
 
+                // When fuzzing, try to coalesce multiple STREAM frames in the
+                // same packet, so it's easier to generate fuzz corpora.
+                if cfg!(feature = "fuzzing") && left > frame::MAX_STREAM_OVERHEAD
+                {
+                    continue;
+                }
+
                 break;
             }
         }
