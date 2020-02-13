@@ -52,7 +52,7 @@ run_quiche_client_tests () {
         for req in $REQUESTS
         do
             $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
-                $CLIENT_PARAMS $req >& $LOG
+                $CLIENT_PARAMS $req >> $LOG 2>&1
         done
 
     else
