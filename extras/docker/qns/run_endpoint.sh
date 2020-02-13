@@ -15,7 +15,8 @@ DOWNLOAD_DIR=/downloads
 QUICHE_CLIENT=quiche-client
 QUICHE_SERVER=quiche-server
 QUICHE_CLIENT_OPT="--no-verify --dump-responses ${DOWNLOAD_DIR}"
-QUICHE_SERVER_OPT="--no-retry --cert examples/cert.crt --key examples/cert.key"
+QUICHE_SERVER_OPT_COMMON="--cert examples/cert.crt --key examples/cert.key"
+QUICHE_SERVER_OPT="$QUICHE_SERVER_OPT_COMMON --no-retry "
 LOG_DIR=/logs
 LOG=$LOG_DIR/log.txt
 
@@ -23,7 +24,7 @@ check_testcase () {
     TESTNAME=$1
 
     case $1 in
-    handshake | resumption | multiconnect )
+    handshake | resumption | multiconnect | http3 )
         echo "supported"
         ;;
     transfer )
@@ -32,10 +33,7 @@ check_testcase () {
         ;;
     retry )
         echo "supported"
-        QUICHE_SERVER_OPT=""
-        ;;
-    http3 )
-        echo "supported"
+        QUICHE_SERVER_OPT="$QUICHE_SERVER_OPT_COMMON"
         ;;
     *)
         echo "unsupported"
@@ -48,9 +46,21 @@ run_quiche_client_tests () {
     # TODO: https://github.com/marten-seemann/quic-interop-runner/issues/61
     # remove this sleep when the issue above is resolved.
     sleep 3
-    $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
-        $CLIENT_PARAMS $REQUESTS >& $LOG
 
+    if [ "$TESTCASE" == "multiconnect" ]; then
+
+        for req in $REQUESTS
+        do
+            $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
+                $CLIENT_PARAMS $req >> $LOG 2>&1
+        done
+
+    else
+
+        $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
+            $CLIENT_PARAMS $REQUESTS >& $LOG
+
+    fi
 }
 
 run_quiche_server_tests() {
