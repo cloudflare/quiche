@@ -48,6 +48,7 @@ Options:
   --cert <file>               TLS certificate path [default: src/bin/cert.crt]
   --key <file>                TLS certificate key path [default: src/bin/cert.key]
   --root <dir>                Root directory [default: src/bin/root/]
+  --index <name>              The file that will be used as index [default: index.html].
   --name <str>                Name of the server [default: quic.tech]
   --max-data BYTES            Connection-wide flow control limit [default: 10000000].
   --max-stream-data BYTES     Per-stream flow control limit [default: 1000000].
@@ -357,7 +358,13 @@ fn main() {
                 }
 
                 if http_conn
-                    .handle_requests(conn, partials, &args.root, &mut buf)
+                    .handle_requests(
+                        conn,
+                        partials,
+                        &args.root,
+                        &args.index,
+                        &mut buf,
+                    )
                     .is_err()
                 {
                     break 'read;
@@ -480,6 +487,7 @@ struct ServerArgs {
     listen: String,
     no_retry: bool,
     root: String,
+    index: String,
     cert: String,
     key: String,
     early_data: bool,
@@ -493,6 +501,7 @@ impl Args for ServerArgs {
         let no_retry = args.get_bool("--no-retry");
         let early_data = args.get_bool("--early-data");
         let root = args.get_str("--root").to_string();
+        let index = args.get_str("--index").to_string();
         let cert = args.get_str("--cert").to_string();
         let key = args.get_str("--key").to_string();
 
@@ -500,6 +509,7 @@ impl Args for ServerArgs {
             listen,
             no_retry,
             root,
+            index,
             cert,
             key,
             early_data,

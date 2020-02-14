@@ -37,6 +37,7 @@ use std::io::prelude::*;
 use std::collections::HashMap;
 
 use std::net;
+use std::path;
 
 /// Returns a String containing a pretty printed version of the `buf` slice.
 pub fn hex_dump(buf: &[u8]) -> String {
@@ -188,6 +189,17 @@ fn make_writer(
     None
 }
 
+fn autoindex(path: path::PathBuf, index: &str) -> path::PathBuf {
+    if let Some(path_str) = path.to_str() {
+        if path_str.ends_with('/') {
+            let path_str = format!("{}{}", path_str, index);
+            return path::PathBuf::from(&path_str);
+        }
+    }
+
+    path
+}
+
 pub trait HttpConn {
     fn send_requests(
         &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
@@ -203,7 +215,7 @@ pub trait HttpConn {
     fn handle_requests(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
-        buf: &mut [u8],
+        index: &str, buf: &mut [u8],
     ) -> quiche::h3::Result<()>;
 
     fn handle_writable(
@@ -390,7 +402,7 @@ impl HttpConn for Http09Conn {
     fn handle_requests(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
-        buf: &mut [u8],
+        index: &str, buf: &mut [u8],
     ) -> quiche::h3::Result<()> {
         // Process all readable streams.
         for s in conn.readable() {
@@ -411,14 +423,16 @@ impl HttpConn for Http09Conn {
                     let uri = &buf[4..stream_buf.len()];
                     let uri = String::from_utf8(uri.to_vec()).unwrap();
                     let uri = String::from(uri.lines().next().unwrap());
-                    let uri = std::path::Path::new(&uri);
-                    let mut path = std::path::PathBuf::from(root);
+                    let uri = path::Path::new(&uri);
+                    let mut path = path::PathBuf::from(root);
 
                     for c in uri.components() {
-                        if let std::path::Component::Normal(v) = c {
+                        if let path::Component::Normal(v) = c {
                             path.push(v)
                         }
                     }
+
+                    path = autoindex(path, index);
 
                     info!(
                         "{} got GET request for {:?} on stream {}",
@@ -589,17 +603,17 @@ impl Http3Conn {
 
     /// Builds an HTTP/3 response given a request.
     fn build_h3_response(
-        root: &str, request: &[quiche::h3::Header],
+        root: &str, index: &str, request: &[quiche::h3::Header],
     ) -> (Vec<quiche::h3::Header>, Vec<u8>) {
-        let mut file_path = std::path::PathBuf::from(root);
-        let mut path = std::path::Path::new("");
+        let mut file_path = path::PathBuf::from(root);
+        let mut path = path::PathBuf::from("");
         let mut method = "";
 
         // Look for the request's path and method.
         for hdr in request {
             match hdr.name() {
                 ":path" => {
-                    path = std::path::Path::new(hdr.value());
+                    path = path::PathBuf::from(hdr.value());
                 },
 
                 ":method" => {
@@ -610,10 +624,12 @@ impl Http3Conn {
             }
         }
 
+        path = autoindex(path, index);
+
         let (status, body) = match method {
             "GET" => {
                 for c in path.components() {
-                    if let std::path::Component::Normal(v) = c {
+                    if let path::Component::Normal(v) = c {
                         file_path.push(v)
                     }
                 }
@@ -780,7 +796,7 @@ impl HttpConn for Http3Conn {
     fn handle_requests(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
-        _buf: &mut [u8],
+        index: &str, _buf: &mut [u8],
     ) -> quiche::h3::Result<()> {
         // Process HTTP events.
         loop {
@@ -801,7 +817,7 @@ impl HttpConn for Http3Conn {
                         .unwrap();
 
                     let (headers, body) =
-                        Http3Conn::build_h3_response(root, &list);
+                        Http3Conn::build_h3_response(root, index, &list);
 
                     if let Err(e) = self
                         .h3_conn
