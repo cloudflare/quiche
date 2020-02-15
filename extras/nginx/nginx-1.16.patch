@@ -100,7 +100,7 @@ new file mode 100644
 index 000000000..2c8995dd7
 --- /dev/null
 +++ b/auto/lib/quiche/conf
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,23 @@
 +
 +# Copyright (C) Cloudflare, Inc.
 +
@@ -118,6 +118,10 @@ index 000000000..2c8995dd7
 +    CORE_INCS="$CORE_INCS $QUICHE/include"
 +    CORE_DEPS="$CORE_DEPS $QUICHE/target/$QUICHE_BUILD_TARGET/libquiche.a"
 +    CORE_LIBS="$CORE_LIBS $QUICHE/target/$QUICHE_BUILD_TARGET/libquiche.a $NGX_LIBPTHREAD"
++
++    if [ "$NGX_SYSTEM" = "Darwin" ]; then
++        CORE_LIBS+=" -framework Security"
++    fi
 +
 +fi
 diff --git a/auto/lib/quiche/make b/auto/lib/quiche/make
