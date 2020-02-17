@@ -145,6 +145,8 @@ impl Args for CommonArgs {
 }
 
 pub struct PartialResponse {
+    pub headers: Option<Vec<quiche::h3::Header>>,
+
     pub body: Vec<u8>,
 
     pub written: usize,
@@ -467,7 +469,11 @@ impl HttpConn for Http09Conn {
                     };
 
                     if written < body.len() {
-                        let response = PartialResponse { body, written };
+                        let response = PartialResponse {
+                            headers: None,
+                            body,
+                            written,
+                        };
                         partial_responses.insert(s, response);
                     }
                 }
@@ -819,11 +825,32 @@ impl HttpConn for Http3Conn {
                     let (headers, body) =
                         Http3Conn::build_h3_response(root, index, &list);
 
-                    if let Err(e) = self
+                    match self
                         .h3_conn
                         .send_response(conn, stream_id, &headers, false)
                     {
-                        error!("{} stream send failed {:?}", conn.trace_id(), e);
+                        Ok(v) => v,
+
+                        Err(quiche::h3::Error::StreamBlocked) => {
+                            let response = PartialResponse {
+                                headers: Some(headers),
+                                body,
+                                written: 0,
+                            };
+
+                            partial_responses.insert(stream_id, response);
+                            continue;
+                        },
+
+                        Err(e) => {
+                            error!(
+                                "{} stream send failed {:?}",
+                                conn.trace_id(),
+                                e
+                            );
+
+                            break;
+                        },
                     }
 
                     let written = match self
@@ -832,20 +859,24 @@ impl HttpConn for Http3Conn {
                     {
                         Ok(v) => v,
 
-                        Err(quiche::h3::Error::Done) => 0,
-
                         Err(e) => {
                             error!(
                                 "{} stream send failed {:?}",
                                 conn.trace_id(),
                                 e
                             );
+
                             break;
                         },
                     };
 
                     if written < body.len() {
-                        let response = PartialResponse { body, written };
+                        let response = PartialResponse {
+                            headers: None,
+                            body,
+                            written,
+                        };
+
                         partial_responses.insert(stream_id, response);
                     }
                 },
@@ -886,12 +917,28 @@ impl HttpConn for Http3Conn {
         }
 
         let resp = partial_responses.get_mut(&stream_id).unwrap();
+
+        if let Some(ref headers) = resp.headers {
+            match self.h3_conn.send_response(conn, stream_id, &headers, false) {
+                Ok(_) => (),
+
+                Err(quiche::h3::Error::StreamBlocked) => {
+                    return;
+                },
+
+                Err(e) => {
+                    error!("{} stream send failed {:?}", conn.trace_id(), e);
+                    return;
+                },
+            }
+        }
+
+        resp.headers = None;
+
         let body = &resp.body[resp.written..];
 
         let written = match self.h3_conn.send_body(conn, stream_id, body, true) {
             Ok(v) => v,
-
-            Err(quiche::h3::Error::Done) => 0,
 
             Err(e) => {
                 error!("{} stream send failed {:?}", conn.trace_id(), e);

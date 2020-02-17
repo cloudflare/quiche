@@ -2209,6 +2209,11 @@ impl Connection {
     /// up to the amount that the peer allows it to send (that is, up to the
     /// stream's outgoing flow control capacity).
     ///
+    /// This means that the number of written bytes returned can be lower than
+    /// the length of the input buffer when the stream doesn't have enough
+    /// capacity for the operation to complete. The application should retry the
+    /// operation once the stream is reported as writable again.
+    ///
     /// [`Done`]: enum.Error.html#variant.Done
     ///
     /// ## Examples:

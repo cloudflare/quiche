@@ -345,6 +345,10 @@ pub enum Error {
 
     /// Error originated from the transport layer.
     TransportError(crate::Error),
+
+    /// The underlying QUIC stream (or connection) doesn't have enough capacity
+    /// for the operation to complete. The application should retry later on.
+    StreamBlocked,
 }
 
 impl Error {
@@ -374,6 +378,8 @@ impl Error {
             Error::BufferTooShort => 0x999,
 
             Error::TransportError { .. } => 0xFF,
+
+            Error::StreamBlocked => 0xFF,
         }
     }
 
@@ -401,6 +407,7 @@ impl Error {
             Error::QpackEncoderStreamError => -26,
             Error::QpackDecoderStreamError => -27,
             Error::TransportError { .. } => -28,
+            Error::StreamBlocked => -29,
         }
     }
 }
@@ -642,6 +649,13 @@ impl Connection {
     /// a newly allocated stream.
     ///
     /// On success the newly allocated stream ID is returned.
+    ///
+    /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application should retry the operation once the stream is
+    /// reported as writable again.
+    ///
+    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_request(
         &mut self, conn: &mut super::Connection, headers: &[Header], fin: bool,
     ) -> Result<u64> {
@@ -649,12 +663,25 @@ impl Connection {
         self.streams
             .insert(stream_id, stream::Stream::new(stream_id, true));
 
+        // The underlying QUIC stream does not exist yet, so calls to e.g.
+        // stream_capacity() will fail. By writing a 0-length buffer, we force
+        // the creation of the QUIC stream state, without actually writing
+        // anything.
+        conn.stream_send(stream_id, b"", false)?;
+
         self.send_headers(conn, stream_id, headers, fin)?;
 
         Ok(stream_id)
     }
 
     /// Sends an HTTP/3 response on the specified stream.
+    ///
+    /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application should retry the operation once the stream is
+    /// reported as writable again.
+    ///
+    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_response(
         &mut self, conn: &mut super::Connection, stream_id: u64,
         headers: &[Header], fin: bool,
@@ -687,11 +714,20 @@ impl Connection {
         let mut d = [42; 10];
         let mut b = octets::Octets::with_slice(&mut d);
 
-        let header_block = self.encode_header_block(headers)?;
-
         if !self.frames_greased && conn.grease {
             self.send_grease_frames(conn, stream_id)?;
             self.frames_greased = true;
+        }
+
+        let stream_cap = conn.stream_capacity(stream_id)?;
+
+        let header_block = self.encode_header_block(headers)?;
+
+        let overhead = octets::varint_len(frame::HEADERS_FRAME_TYPE_ID) +
+            octets::varint_len(header_block.len() as u64);
+
+        if stream_cap < overhead + header_block.len() {
+            return Err(Error::StreamBlocked);
         }
 
         trace!(
@@ -713,6 +749,7 @@ impl Connection {
             b.put_varint(header_block.len() as u64)?,
             false,
         )?;
+
         conn.stream_send(stream_id, &header_block, fin)?;
 
         if fin && conn.stream_finished(stream_id) {
@@ -725,6 +762,11 @@ impl Connection {
     /// Sends an HTTP/3 body chunk on the given stream.
     ///
     /// On success the number of bytes written is returned.
+    ///
+    /// Note that the number of written bytes returned can be lower than the
+    /// length of the input buffer when the underlying QUIC stream doesn't have
+    /// enough capacity for the operation to complete. The application should
+    /// retry the operation once the stream is reported as writable again.
     pub fn send_body(
         &mut self, conn: &mut super::Connection, stream_id: u64, body: &[u8],
         fin: bool,
@@ -746,7 +788,7 @@ impl Connection {
         // least one byte of frame payload (this to avoid sending 0-length DATA
         // frames).
         if stream_cap <= overhead {
-            return Err(Error::Done);
+            return Ok(0);
         }
 
         // Cap the frame payload length to the stream's capacity.
@@ -936,20 +978,43 @@ impl Connection {
     fn send_grease_frames(
         &mut self, conn: &mut super::Connection, stream_id: u64,
     ) -> Result<()> {
-        let mut d = [42; 128];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut d = [0; 8];
+
+        let stream_cap = conn.stream_capacity(stream_id)?;
+
+        let grease_frame1 = grease_value();
+        let grease_frame2 = grease_value();
+        let grease_payload = b"GREASE is the word";
+
+        let overhead = octets::varint_len(grease_frame1) + // frame type
+            1 + // payload len
+            octets::varint_len(grease_frame2) + // frame type
+            1 + // payload len
+            grease_payload.len(); // payload
+
+        // Don't send GREASE if there is not enough capacity for it. Greasing
+        // will _not_ be attempted again later on.
+        if stream_cap < overhead {
+            return Ok(());
+        }
 
         trace!("{} tx frm GREASE stream={}", conn.trace_id(), stream_id);
 
         // Empty GREASE frame.
-        conn.stream_send(stream_id, b.put_varint(grease_value())?, false)?;
+        let mut b = octets::Octets::with_slice(&mut d);
+        conn.stream_send(stream_id, b.put_varint(grease_frame1)?, false)?;
+
+        let mut b = octets::Octets::with_slice(&mut d);
         conn.stream_send(stream_id, b.put_varint(0)?, false)?;
 
         // GREASE frame with payload.
-        conn.stream_send(stream_id, b.put_varint(grease_value())?, false)?;
+        let mut b = octets::Octets::with_slice(&mut d);
+        conn.stream_send(stream_id, b.put_varint(grease_frame2)?, false)?;
+
+        let mut b = octets::Octets::with_slice(&mut d);
         conn.stream_send(stream_id, b.put_varint(18)?, false)?;
 
-        conn.stream_send(stream_id, b"GREASE is the word", false)?;
+        conn.stream_send(stream_id, grease_payload, false)?;
 
         Ok(())
     }
@@ -2687,6 +2752,46 @@ mod tests {
 
         // Try to call poll() again after an error occurred.
         assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::Done));
+    }
+
+    #[test]
+    /// Tests that we limit sending HEADERS based on the stream capacity.
+    fn headers_blocked() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let mut h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        let req = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":authority", "quic.tech"),
+            Header::new(":path", "/test"),
+        ];
+
+        assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
+
+        assert_eq!(
+            s.client.send_request(&mut s.pipe.client, &req, true),
+            Err(Error::StreamBlocked)
+        );
     }
 }
 
