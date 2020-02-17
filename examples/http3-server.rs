@@ -36,6 +36,8 @@ use ring::rand::*;
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
 struct PartialResponse {
+    headers: Option<Vec<quiche::h3::Header>>,
+
     body: Vec<u8>,
 
     written: usize,
@@ -503,14 +505,28 @@ fn handle_request(
 
     let (headers, body) = build_response(root, headers);
 
-    if let Err(e) = http3_conn.send_response(conn, stream_id, &headers, false) {
-        error!("{} stream send failed {:?}", conn.trace_id(), e);
+    match http3_conn.send_response(conn, stream_id, &headers, false) {
+        Ok(v) => v,
+
+        Err(quiche::h3::Error::StreamBlocked) => {
+            let response = PartialResponse {
+                headers: Some(headers),
+                body,
+                written: 0,
+            };
+
+            client.partial_responses.insert(stream_id, response);
+            return;
+        },
+
+        Err(e) => {
+            error!("{} stream send failed {:?}", conn.trace_id(), e);
+            return;
+        },
     }
 
     let written = match http3_conn.send_body(conn, stream_id, &body, true) {
         Ok(v) => v,
-
-        Err(quiche::h3::Error::Done) => 0,
 
         Err(e) => {
             error!("{} stream send failed {:?}", conn.trace_id(), e);
@@ -519,7 +535,12 @@ fn handle_request(
     };
 
     if written < body.len() {
-        let response = PartialResponse { body, written };
+        let response = PartialResponse {
+            headers: None,
+            body,
+            written,
+        };
+
         client.partial_responses.insert(stream_id, response);
     }
 }
@@ -586,12 +607,28 @@ fn handle_writable(client: &mut Client, stream_id: u64) {
     }
 
     let resp = client.partial_responses.get_mut(&stream_id).unwrap();
+
+    if let Some(ref headers) = resp.headers {
+        match http3_conn.send_response(conn, stream_id, &headers, false) {
+            Ok(_) => (),
+
+            Err(quiche::h3::Error::StreamBlocked) => {
+                return;
+            },
+
+            Err(e) => {
+                error!("{} stream send failed {:?}", conn.trace_id(), e);
+                return;
+            },
+        }
+    }
+
+    resp.headers = None;
+
     let body = &resp.body[resp.written..];
 
     let written = match http3_conn.send_body(conn, stream_id, body, true) {
         Ok(v) => v,
-
-        Err(quiche::h3::Error::Done) => 0,
 
         Err(e) => {
             error!("{} stream send failed {:?}", conn.trace_id(), e);
