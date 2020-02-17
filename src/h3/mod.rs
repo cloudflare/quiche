@@ -277,29 +277,12 @@ pub enum Error {
     /// The provided buffer is too short.
     BufferTooShort,
 
-    /// Peer violated protocol requirements in a way which doesn’t match a
-    /// more specific error code, or endpoint declines to use the more
-    /// specific error code.
-    GeneralProtocolError,
-
     /// Internal error in the HTTP/3 stack.
     InternalError,
-
-    /// The client no longer needs the requested data.
-    RequestCancelled,
-
-    /// The request stream terminated before completing the request.
-    RequestIncomplete,
-
-    /// Forward connection failure for CONNECT target.
-    ConnectError,
 
     /// Endpoint detected that the peer is exhibiting behavior that causes.
     /// excessive load.
     ExcessiveLoad,
-
-    /// Operation cannot be served over HTTP/3. Retry over HTTP/1.1.
-    VersionFallback,
 
     /// Stream ID or Push ID greater that current maximum was
     /// used incorrectly, such as exceeding a limit, reducing a limit,
@@ -313,35 +296,17 @@ pub enum Error {
     /// A required critical stream was closed.
     ClosedCriticalStream,
 
-    /// Inform client that remainder of request is not needed. Used in
-    /// STOP_SENDING only.
-    EarlyResponse,
-
     /// No SETTINGS frame at beginning of control stream.
     MissingSettings,
 
     /// A frame was received which is not permitted in the current state.
     FrameUnexpected,
 
-    /// Server rejected request without performing any application processing.
-    RequestRejected,
-
-    /// An endpoint detected an error in the payload of a SETTINGS frame:
-    /// a duplicate setting was detected, a client-only setting was sent by a
-    /// server, or a server-only setting by a client.
-    SettingsError,
-
     /// Frame violated layout or size rules.
     FrameError,
 
     /// QPACK Header block decompression failure.
     QpackDecompressionFailed,
-
-    /// QPACK encoder stream error.
-    QpackEncoderStreamError,
-
-    /// QPACK decoder stream error.
-    QpackDecoderStreamError,
 
     /// Error originated from the transport layer.
     TransportError(crate::Error),
@@ -355,7 +320,6 @@ impl Error {
     fn to_wire(self) -> u64 {
         match self {
             Error::Done => 0x100,
-            Error::GeneralProtocolError => 0x101,
             Error::InternalError => 0x102,
             Error::StreamCreationError => 0x103,
             Error::ClosedCriticalStream => 0x104,
@@ -363,22 +327,10 @@ impl Error {
             Error::FrameError => 0x106,
             Error::ExcessiveLoad => 0x107,
             Error::IdError => 0x108,
-            Error::SettingsError => 0x109,
             Error::MissingSettings => 0x10A,
-            Error::RequestRejected => 0x10B,
-            Error::RequestCancelled => 0x10C,
-            Error::RequestIncomplete => 0x10D,
-            Error::EarlyResponse => 0x10E,
-            Error::ConnectError => 0x10F,
-            Error::VersionFallback => 0x110,
-
             Error::QpackDecompressionFailed => 0x200,
-            Error::QpackEncoderStreamError => 0x201,
-            Error::QpackDecoderStreamError => 0x202,
             Error::BufferTooShort => 0x999,
-
             Error::TransportError { .. } => 0xFF,
-
             Error::StreamBlocked => 0xFF,
         }
     }
@@ -387,27 +339,17 @@ impl Error {
         match self {
             Error::Done => -1,
             Error::BufferTooShort => -2,
-            Error::GeneralProtocolError => -3,
-            Error::InternalError => -5,
-            Error::RequestCancelled => -7,
-            Error::RequestIncomplete => -8,
-            Error::ConnectError => -9,
-            Error::ExcessiveLoad => -10,
-            Error::VersionFallback => -11,
-            Error::IdError => -13,
-            Error::StreamCreationError => -15,
-            Error::ClosedCriticalStream => -17,
-            Error::EarlyResponse => -19,
-            Error::MissingSettings => -20,
-            Error::FrameUnexpected => -21,
-            Error::RequestRejected => -22,
-            Error::SettingsError => -23,
-            Error::FrameError => -24,
-            Error::QpackDecompressionFailed => -25,
-            Error::QpackEncoderStreamError => -26,
-            Error::QpackDecoderStreamError => -27,
-            Error::TransportError { .. } => -28,
-            Error::StreamBlocked => -29,
+            Error::InternalError => -3,
+            Error::ExcessiveLoad => -4,
+            Error::IdError => -5,
+            Error::StreamCreationError => -6,
+            Error::ClosedCriticalStream => -7,
+            Error::MissingSettings => -8,
+            Error::FrameUnexpected => -9,
+            Error::FrameError => -10,
+            Error::QpackDecompressionFailed => -11,
+            Error::TransportError { .. } => -12,
+            Error::StreamBlocked => -13,
         }
     }
 }
