@@ -330,6 +330,52 @@ void quiche_conn_free(quiche_conn *conn);
 // List of ALPN tokens of supported HTTP/3 versions.
 #define QUICHE_H3_APPLICATION_PROTOCOL "\x05h3-25\x05h3-24\x05h3-23"
 
+enum quiche_h3_error {
+    /// There is no error or no work to do
+    QUICHE_H3_ERR_DONE = -1,
+
+    /// The provided buffer is too short.
+    QUICHE_H3_ERR_BUFFER_TOO_SHORT = -2,
+
+    /// Internal error in the HTTP/3 stack.
+    QUICHE_H3_ERR_INTERNAL_ERROR = -3,
+
+    /// Endpoint detected that the peer is exhibiting behavior that causes.
+    /// excessive load.
+    QUICHE_H3_ERR_EXCESSIVE_LOAD = -4,
+
+    /// Stream ID or Push ID greater that current maximum was
+    /// used incorrectly, such as exceeding a limit, reducing a limit,
+    /// or being reused.
+    QUICHE_H3_ERR_ID_ERROR= -5,
+
+    /// The endpoint detected that its peer created a stream that it will not
+    /// accept.
+    QUICHE_H3_ERR_STREAM_CREATION_ERROR = -6,
+
+    /// A required critical stream was closed.
+    QUICHE_H3_ERR_CLOSED_CRITICAL_STREAM = -7,
+
+    /// No SETTINGS frame at beginning of control stream.
+    QUICHE_H3_ERR_MISSING_SETTINGS = -8,
+
+    /// A frame was received which is not permitted in the current state.
+    QUICHE_H3_ERR_FRAME_UNEXPECTED = -9,
+
+    /// Frame violated layout or size rules.
+    QUICHE_H3_ERR_FRAME_ERROR = -10,
+
+    /// QPACK Header block decompression failure.
+    QUICHE_H3_ERR_QPACK_DECOMPRESSION_FAILED = -11,
+
+    /// Error originated from the transport layer.
+    QUICHE_H3_ERR_TRANSPORT_ERROR = -12,
+
+    /// The underlying QUIC stream (or connection) doesn't have enough capacity
+    /// for the operation to complete. The application should retry later on.
+    QUICHE_H3_ERR_STREAM_BLOCKED = -13,
+};
+
 // Stores configuration shared between multiple connections.
 typedef struct Http3Config quiche_h3_config;
 
