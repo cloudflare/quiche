@@ -546,8 +546,8 @@ struct QpackStreams {
 pub struct Connection {
     is_server: bool,
 
-    highest_request_stream_id: u64,
-    highest_uni_stream_id: u64,
+    next_request_stream_id: u64,
+    next_uni_stream_id: u64,
 
     streams: HashMap<u64, stream::Stream>,
 
@@ -577,8 +577,9 @@ impl Connection {
         Ok(Connection {
             is_server,
 
-            highest_request_stream_id: 0,
-            highest_uni_stream_id: initial_uni_stream_id,
+            next_request_stream_id: 0,
+
+            next_uni_stream_id: initial_uni_stream_id,
 
             streams: HashMap::new(),
 
@@ -659,7 +660,8 @@ impl Connection {
     pub fn send_request(
         &mut self, conn: &mut super::Connection, headers: &[Header], fin: bool,
     ) -> Result<u64> {
-        let stream_id = self.get_available_request_stream()?;
+        let stream_id = self.next_request_stream_id;
+
         self.streams
             .insert(stream_id, stream::Stream::new(stream_id, true));
 
@@ -670,6 +672,13 @@ impl Connection {
         conn.stream_send(stream_id, b"", false)?;
 
         self.send_headers(conn, stream_id, headers, fin)?;
+
+        // To avoid skipping stream IDs, we only calculate the next available
+        // stream ID when a request has been successfully buffered.
+        self.next_request_stream_id = self
+            .next_request_stream_id
+            .checked_add(4)
+            .ok_or(Error::IdError)?;
 
         Ok(stream_id)
     }
@@ -919,37 +928,22 @@ impl Connection {
         Err(Error::Done)
     }
 
-    /// Allocates a new request stream ID for the local endpoint to use.
-    fn get_available_request_stream(&mut self) -> Result<u64> {
-        if self.highest_request_stream_id < std::u64::MAX {
-            let ret = self.highest_request_stream_id;
-            self.highest_request_stream_id += 4;
-            return Ok(ret);
-        }
-
-        Err(Error::IdError)
-    }
-
-    /// Allocates a new unidirectional stream ID for the local endpoint to use.
-    fn get_available_uni_stream(&mut self) -> Result<u64> {
-        if self.highest_uni_stream_id < std::u64::MAX {
-            let ret = self.highest_uni_stream_id;
-            self.highest_uni_stream_id += 4;
-            return Ok(ret);
-        }
-
-        Err(Error::IdError)
-    }
-
     fn open_uni_stream(
         &mut self, conn: &mut super::Connection, ty: u64,
     ) -> Result<u64> {
-        let stream_id = self.get_available_uni_stream()?;
+        let stream_id = self.next_uni_stream_id;
 
         let mut d = [0; 8];
         let mut b = octets::Octets::with_slice(&mut d);
 
         conn.stream_send(stream_id, b.put_varint(ty)?, false)?;
+
+        // To avoid skipping stream IDs, we only calculate the next available
+        // stream ID when data has been successfully buffered.
+        self.next_uni_stream_id = self
+            .next_uni_stream_id
+            .checked_add(4)
+            .ok_or(Error::IdError)?;
 
         Ok(stream_id)
     }
@@ -2381,21 +2375,11 @@ mod tests {
     fn uni_stream_local_counting() {
         let config = Config::new().unwrap();
 
-        let mut h3_cln = Connection::new(&config, false).unwrap();
+        let h3_cln = Connection::new(&config, false).unwrap();
+        assert_eq!(h3_cln.next_uni_stream_id, 2);
 
-        assert_eq!(h3_cln.get_available_uni_stream().unwrap(), 2);
-        assert_eq!(h3_cln.get_available_uni_stream().unwrap(), 6);
-        assert_eq!(h3_cln.get_available_uni_stream().unwrap(), 10);
-        assert_eq!(h3_cln.get_available_uni_stream().unwrap(), 14);
-        assert_eq!(h3_cln.get_available_uni_stream().unwrap(), 18);
-
-        let mut h3_srv = Connection::new(&config, true).unwrap();
-
-        assert_eq!(h3_srv.get_available_uni_stream().unwrap(), 3);
-        assert_eq!(h3_srv.get_available_uni_stream().unwrap(), 7);
-        assert_eq!(h3_srv.get_available_uni_stream().unwrap(), 11);
-        assert_eq!(h3_srv.get_available_uni_stream().unwrap(), 15);
-        assert_eq!(h3_srv.get_available_uni_stream().unwrap(), 19);
+        let h3_srv = Connection::new(&config, true).unwrap();
+        assert_eq!(h3_srv.next_uni_stream_id, 3);
     }
 
     #[test]
@@ -2404,7 +2388,7 @@ mod tests {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
-        let stream_id = s.client.get_available_uni_stream().unwrap();
+        let stream_id = s.client.next_uni_stream_id;
 
         let mut d = [42; 8];
         let mut b = octets::Octets::with_slice(&mut d);
@@ -2792,6 +2776,12 @@ mod tests {
             s.client.send_request(&mut s.pipe.client, &req, true),
             Err(Error::StreamBlocked)
         );
+
+        s.advance().ok();
+
+        // Once the server gives flow control credits back, we can send the
+        // request.
+        assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(4));
     }
 }
 
