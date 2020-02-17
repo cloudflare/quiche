@@ -1931,7 +1931,6 @@ impl Connection {
 
         // Create a single STREAM frame for the first stream that is flushable.
         if pkt_type == packet::Type::Short &&
-            self.max_tx_data > self.tx_data &&
             left > frame::MAX_STREAM_OVERHEAD &&
             !is_closing
         {
@@ -1942,10 +1941,6 @@ impl Connection {
                     None => continue,
                 };
 
-                // Make sure we can fit the data in the packet.
-                let max_len =
-                    cmp::min(left, (self.max_tx_data - self.tx_data) as usize);
-
                 let off = stream.send.off();
 
                 // Try to accurately account for the STREAM frame's overhead,
@@ -1954,9 +1949,9 @@ impl Connection {
                 let overhead = 1 +
                     octets::varint_len(stream_id) +
                     octets::varint_len(off) +
-                    octets::varint_len(max_len as u64);
+                    octets::varint_len(left as u64);
 
-                let max_len = match max_len.checked_sub(overhead) {
+                let max_len = match left.checked_sub(overhead) {
                     Some(v) => v,
 
                     None => continue,
@@ -1967,8 +1962,6 @@ impl Connection {
                 if stream_buf.is_empty() && !stream_buf.fin() {
                     continue;
                 }
-
-                self.tx_data += stream_buf.len() as u64;
 
                 let frame = frame::Frame::Stream {
                     stream_id,
@@ -2275,6 +2268,8 @@ impl Connection {
         if !writable {
             self.streams.mark_writable(stream_id, false);
         }
+
+        self.tx_data += sent as u64;
 
         Ok(sent)
     }
@@ -4446,12 +4441,27 @@ mod tests {
         assert!(pipe.client.is_established());
 
         // Send 1-RTT packet #0.
-        assert_eq!(pipe.client.stream_send(0, b"hello, world", true), Ok(12));
-        assert_eq!(pipe.advance(&mut buf), Ok(()));
+        let frames = [frame::Frame::Stream {
+            stream_id: 0,
+            data: stream::RangeBuf::from(b"hello, world", 0, true),
+        }];
+
+        let pkt_type = packet::Type::Short;
+        let written =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
 
         // Send 1-RTT packet #1.
-        assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
-        assert_eq!(pipe.advance(&mut buf), Ok(()));
+        let frames = [frame::Frame::Stream {
+            stream_id: 4,
+            data: stream::RangeBuf::from(b"hello, world", 0, true),
+        }];
+
+        let written =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
 
         assert!(!pipe.server.is_established());
 
@@ -4475,8 +4485,6 @@ mod tests {
                 .largest_rx_pkt_num,
             0
         );
-
-        assert_eq!(pipe.client.stats().sent, pipe.server.stats().recv + 2);
     }
 
     #[test]
@@ -4620,6 +4628,9 @@ mod tests {
         let mut r = pipe.client.readable();
         assert_eq!(r.next(), None);
 
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         // Server received stream.
@@ -4645,7 +4656,7 @@ mod tests {
         let mut r = pipe.client.readable();
         assert_eq!(r.next(), None);
 
-        // Server suts down stream.
+        // Server shuts down stream.
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), Some(4));
         assert_eq!(r.next(), None);
@@ -4770,7 +4781,7 @@ mod tests {
             Ok(15)
         );
         assert_eq!(pipe.advance(&mut buf), Ok(()));
-        assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
+        assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(0));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         let mut r = pipe.server.readable();
