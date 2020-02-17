@@ -25,6 +25,31 @@ blog that goes into some more detail.
 Getting Started
 ---------------
 
+### Command-line apps
+
+Before diving into the quiche API, here are a few examples on how to use the
+quiche tools provided as part of the [quiche-apps](tools/apps/) crate.
+
+The client can be run as follows:
+
+```bash
+ $ cargo run --manifest-path=tools/apps/Cargo.toml --bin quiche-client -- https://quic.tech:8443/
+```
+
+while the server can be run as follows:
+
+```bash
+ $ cargo run --manifest-path=tools/apps/Cargo.toml --bin quiche-server -- \
+      --cert tools/apps/src/bin/cert.crt \
+      --key tools/apps/src/bin/cert.key
+```
+
+(note that the certificate provided is self-signed and should not be used in
+production)
+
+Use the `--help` command-line flag to get a more detailed description of each
+tool's options.
+
 ### Connection setup
 
 The first step in establishing a QUIC connection using quiche is creating a
