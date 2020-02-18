@@ -1,4 +1,4 @@
-From c4a58f3c04c5393f572bb0e060067163af9a0ecd Mon Sep 17 00:00:00 2001
+From e6e724d7ac4dd75e8583d69706ccfc3330a9b6ed Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 10 Oct 2019 17:06:08 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -7,7 +7,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  auto/lib/conf                           |    4 +
  auto/lib/make                           |    4 +
  auto/lib/openssl/make                   |   12 +-
- auto/lib/quiche/conf                    |   19 +
+ auto/lib/quiche/conf                    |   23 +
  auto/lib/quiche/make                    |   22 +
  auto/make                               |    3 +-
  auto/modules                            |   44 +
@@ -26,12 +26,12 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   29 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2094 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2099 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   76 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
- src/http/v3/ngx_http_v3_module.c        |  286 ++++
+ src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3560 insertions(+), 11 deletions(-)
+ 27 files changed, 3569 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -97,7 +97,7 @@ index 126a23875..3af2ae557 100644
  
 diff --git a/auto/lib/quiche/conf b/auto/lib/quiche/conf
 new file mode 100644
-index 000000000..2c8995dd7
+index 000000000..23219d92a
 --- /dev/null
 +++ b/auto/lib/quiche/conf
 @@ -0,0 +1,23 @@
@@ -1561,7 +1561,7 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..0877fb9a2
+index 000000000..38683d901
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
 @@ -0,0 +1,2099 @@
@@ -3822,7 +3822,7 @@ index 000000000..5bbff8602
 +}
 diff --git a/src/http/v3/ngx_http_v3_module.c b/src/http/v3/ngx_http_v3_module.c
 new file mode 100644
-index 000000000..ba6274253
+index 000000000..2e8aaa7c9
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3_module.c
 @@ -0,0 +1,286 @@
@@ -4153,4 +4153,5 @@ index 000000000..72e189def
 +
 +#endif /* _NGX_HTTP_V3_MODULE_H_INCLUDED_ */
 -- 
-2.24.1
+2.25.0
+
