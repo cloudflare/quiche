@@ -286,8 +286,6 @@ impl HttpConn for Http09Conn {
         let mut reqs_done = 0;
 
         for req in self.reqs.iter_mut().skip(self.reqs_sent) {
-            info!("sending HTTP request {:?}", req.request_line);
-
             match conn.stream_send(
                 self.stream_id,
                 req.request_line.as_bytes(),
@@ -305,6 +303,8 @@ impl HttpConn for Http09Conn {
                     break;
                 },
             };
+
+            debug!("sending HTTP request {:?}", req.request_line);
 
             req.stream_id = Some(self.stream_id);
             req.response_writer =
@@ -667,8 +667,6 @@ impl HttpConn for Http3Conn {
         let mut reqs_done = 0;
 
         for req in self.reqs.iter_mut().skip(self.reqs_sent) {
-            info!("sending HTTP request {:?}", req.hdrs);
-
             let s = match self.h3_conn.send_request(
                 conn,
                 &req.hdrs,
@@ -683,11 +681,18 @@ impl HttpConn for Http3Conn {
                     break;
                 },
 
+                Err(quiche::h3::Error::StreamBlocked) => {
+                    debug!("stream is blocked, retry later...");
+                    break;
+                },
+
                 Err(e) => {
                     error!("failed to send request {:?}", e);
                     break;
                 },
             };
+
+            debug!("sending HTTP request {:?}", req.hdrs);
 
             req.stream_id = Some(s);
             req.response_writer =
@@ -713,7 +718,7 @@ impl HttpConn for Http3Conn {
         loop {
             match self.h3_conn.poll(conn) {
                 Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
-                    info!(
+                    debug!(
                         "got response headers {:?} on stream id {}",
                         list, stream_id
                     );
