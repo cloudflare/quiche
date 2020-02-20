@@ -1842,6 +1842,17 @@ impl<'a> HexSlice<'a> {
     {
         HexSlice(data.as_ref())
     }
+
+    pub fn maybe_string<T>(data: Option<&'a T>) -> Option<String>
+    where
+        T: ?Sized + AsRef<[u8]> + 'a,
+    {
+        match data {
+            Some(d) => Some(format!("{}", HexSlice::new(d))),
+
+            None => None,
+        }
+    }
 }
 
 impl<'a> std::fmt::Display for HexSlice<'a> {
