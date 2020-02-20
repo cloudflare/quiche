@@ -1,4 +1,4 @@
-From e6e724d7ac4dd75e8583d69706ccfc3330a9b6ed Mon Sep 17 00:00:00 2001
+From f783a79efc894c3024822681dfe5bc0a72fba9d0 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 10 Oct 2019 17:06:08 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -26,12 +26,12 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   29 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2099 +++++++++++++++++++++++
- src/http/v3/ngx_http_v3.h               |   76 +
+ src/http/v3/ngx_http_v3.c               | 2123 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.h               |   77 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3569 insertions(+), 11 deletions(-)
+ 27 files changed, 3594 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -1561,10 +1561,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..38683d901
+index 000000000..0b06bbf23
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2099 @@
+@@ -0,0 +1,2123 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -1947,6 +1947,10 @@ index 000000000..38683d901
 +
 +        wev->active = 0;
 +        wev->ready = 1;
++
++        if (!stream->headers_sent) {
++            ngx_http_v3_send_response(stream->request);
++        }
 +
 +        if (!wev->delayed) {
 +            wev->handler(wev);
@@ -3076,6 +3080,7 @@ index 000000000..38683d901
 +ngx_int_t
 +ngx_http_v3_send_response(ngx_http_request_t *r)
 +{
++    int                        rc;
 +    u_char                    *tmp;
 +    u_char                     status[3], content_len[NGX_OFF_T_LEN],
 +                               last_modified[sizeof("Wed, 31 Dec 1986 18:00:00 GMT") - 1],
@@ -3092,8 +3097,8 @@ index 000000000..38683d901
 +    ngx_http_core_loc_conf_t  *clcf;
 +    ngx_http_core_srv_conf_t  *cscf;
 +
-+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-+                   "http3 send response");
++    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
++                   "http3 send response stream %ui", r->qstream->id);
 +
 +    fc = r->connection;
 +
@@ -3401,15 +3406,30 @@ index 000000000..38683d901
 +    fin = r->header_only
 +          || (r->headers_out.content_length_n == 0 && !r->expect_trailers);
 +
-+    if (quiche_h3_send_response(h3c->h3, c->quic->conn, r->qstream->id,
-+                                headers->elts, headers->nelts, fin)) {
-+        ngx_array_destroy(headers);
++    rc = quiche_h3_send_response(h3c->h3, c->quic->conn, r->qstream->id,
++                                headers->elts, headers->nelts, fin);
++
++    ngx_array_destroy(headers);
++
++    if (rc == QUICHE_H3_ERR_STREAM_BLOCKED) {
++        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
++                       "http3 stream blocked %ui", r->qstream->id);
++
++        r->qstream->blocked = 1;
++
++        fc->write->active = 1;
++        fc->write->ready = 0;
++
++        return NGX_AGAIN;
++    }
++
++    if (rc != NGX_OK) {
 +        return NGX_ERROR;
 +    }
 +
-+    ngx_post_event(c->write, &ngx_posted_events);
++    r->qstream->headers_sent = 1;
 +
-+    ngx_array_destroy(headers);
++    ngx_post_event(c->write, &ngx_posted_events);
 +
 +    return NGX_OK;
 +}
@@ -3435,6 +3455,10 @@ index 000000000..38683d901
 +    ngx_log_debug3(NGX_LOG_DEBUG_EVENT, fc->log, 0,
 +                   "http3 stream %uz to write %uz bytes, fin=%d",
 +                   stream->id, buf_len, fin);
++
++    if (!stream->headers_sent) {
++        return NGX_AGAIN;
++    }
 +
 +    n = quiche_h3_send_body(h3c->h3, c->quic->conn, r->qstream->id,
 +                            buf, buf_len, fin);
@@ -3666,10 +3690,10 @@ index 000000000..38683d901
 +}
 diff --git a/src/http/v3/ngx_http_v3.h b/src/http/v3/ngx_http_v3.h
 new file mode 100644
-index 000000000..25a41a77b
+index 000000000..45a55b898
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.h
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,77 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -3722,6 +3746,7 @@ index 000000000..25a41a77b
 +
 +    ngx_http_v3_stream_t      *next;
 +
++    ngx_uint_t                 headers_sent:1;
 +    ngx_uint_t                 in_closed:1;
 +    ngx_uint_t                 out_closed:1;
 +    ngx_uint_t                 skip_data:1;
@@ -4153,5 +4178,5 @@ index 000000000..72e189def
 +
 +#endif /* _NGX_HTTP_V3_MODULE_H_INCLUDED_ */
 -- 
-2.25.0
+2.25.1
 
