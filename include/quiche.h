@@ -171,6 +171,9 @@ enum quiche_cc_algorithm {
 // Sets the congestion control algorithm used.
 void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algorithm algo);
 
+// Extension: Sets the `min_ack_delay` transport parameter.
+void quiche_config_ext_set_min_ack_delay(quiche_config *config, uint64_t v);
+
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 

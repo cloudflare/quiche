@@ -232,6 +232,11 @@ pub extern fn quiche_config_set_cc_algorithm(
 }
 
 #[no_mangle]
+pub extern fn quiche_config_ext_set_min_ack_delay(config: &mut Config, v: u64) {
+    config.ext_set_min_ack_delay(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_free(config: *mut Config) {
     unsafe { Box::from_raw(config) };
 }
