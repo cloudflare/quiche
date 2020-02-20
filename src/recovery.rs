@@ -64,6 +64,8 @@ pub struct Sent {
     pub ack_eliciting: bool,
 
     pub in_flight: bool,
+
+    pub pmtud: bool,
 }
 
 pub struct Recovery {
@@ -93,7 +95,7 @@ pub struct Recovery {
 
     pub lost: [Vec<frame::Frame>; packet::EPOCH_COUNT],
 
-    pub acked: [Vec<frame::Frame>; packet::EPOCH_COUNT],
+    pub acked: [Vec<Sent>; packet::EPOCH_COUNT],
 
     pub lost_count: usize,
 
@@ -474,9 +476,7 @@ impl Recovery {
         &mut self, pkt_num: u64, epoch: packet::Epoch, trace_id: &str,
     ) -> bool {
         // Check if packet is newly acked.
-        if let Some(mut p) = self.sent[epoch].remove(&pkt_num) {
-            self.acked[epoch].append(&mut p.frames);
-
+        if let Some(p) = self.sent[epoch].remove(&pkt_num) {
             if p.in_flight {
                 // OnPacketAckedCC(acked_packet)
                 self.cc.on_packet_acked_cc(
@@ -487,6 +487,8 @@ impl Recovery {
                     trace_id,
                 );
             }
+
+            self.acked[epoch].push(p);
 
             return true;
         }
@@ -524,6 +526,11 @@ impl Recovery {
             }
 
             self.cc.decrease_bytes_in_flight(p.size);
+
+            // Ignore loss of PMTUD probe.
+            if p.pmtud {
+                continue;
+            }
 
             self.lost[epoch].append(&mut p.frames);
 

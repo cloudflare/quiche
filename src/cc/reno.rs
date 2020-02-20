@@ -172,6 +172,7 @@ mod tests {
             size: 5000,
             ack_eliciting: true,
             in_flight: true,
+            pmtud: false,
         };
 
         // Send 5k x 4 = 20k, higher than default cwnd(~15k)
@@ -234,6 +235,7 @@ mod tests {
             size: 5000,
             ack_eliciting: true,
             in_flight: true,
+            pmtud: false,
         };
 
         let prev_cwnd = cc.cwnd();

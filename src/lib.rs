@@ -422,9 +422,11 @@ pub struct Config {
 
     application_protos: Vec<Vec<u8>>,
 
+    cc_algorithm: cc::Algorithm,
+
     grease: bool,
 
-    cc_algorithm: cc::Algorithm,
+    pmtud: bool,
 }
 
 impl Config {
@@ -444,8 +446,9 @@ impl Config {
             version,
             tls_ctx,
             application_protos: Vec::new(),
-            grease: true,
             cc_algorithm: cc::Algorithm::Reno, // default cc algorithm
+            grease: true,
+            pmtud: false,
         })
     }
 
@@ -493,6 +496,11 @@ impl Config {
     /// The default value is `true`.
     pub fn grease(&mut self, grease: bool) {
         self.grease = grease;
+    }
+
+    /// Configures whether to do path MTU discovery.
+    pub fn discover_pmtu(&mut self, discover: bool) {
+        self.pmtud = discover;
     }
 
     /// Enables logging of secrets.
@@ -780,6 +788,12 @@ pub struct Connection {
     /// Draining timeout expiration time.
     draining_timer: Option<time::Instant>,
 
+    /// The current path MTU estimate.
+    pmtu: usize,
+
+    /// The path MTU probe size to be attempted next.
+    pmtu_next: usize,
+
     /// Whether this is a server-side connection.
     is_server: bool,
 
@@ -1050,6 +1064,10 @@ impl Connection {
 
             draining_timer: None,
 
+            pmtu: MIN_CLIENT_INITIAL_LEN,
+
+            pmtu_next: 0,
+
             is_server,
 
             derived_initial_secrets: false,
@@ -1075,6 +1093,10 @@ impl Connection {
 
             grease: config.grease,
         });
+
+        if config.pmtud {
+            conn.pmtu_next = cc::MAX_DATAGRAM_SIZE;
+        }
 
         if let Some(odcid) = odcid {
             conn.local_transport_params.original_connection_id =
@@ -1473,43 +1495,47 @@ impl Connection {
             self.process_frame(frame, epoch, now)?;
         }
 
-        // Process acked frames.
+        // Process acked packets.
         for acked in self.recovery.acked[epoch].drain(..) {
-            match acked {
-                frame::Frame::ACK { ranges, .. } => {
-                    // Stop acknowledging packets less than or equal to the
-                    // largest acknowledged in the sent ACK frame that, in
-                    // turn, got acked.
-                    if let Some(largest_acked) = ranges.largest() {
+            self.pmtu = cmp::max(self.pmtu, acked.size);
+
+            for frame in &acked.frames {
+                match frame {
+                    frame::Frame::ACK { ranges, .. } => {
+                        // Stop acknowledging packets less than or equal to the
+                        // largest acknowledged in the sent ACK frame that, in
+                        // turn, got acked.
+                        if let Some(largest_acked) = ranges.largest() {
+                            self.pkt_num_spaces[epoch]
+                                .recv_pkt_need_ack
+                                .remove_until(largest_acked);
+                        }
+                    },
+
+                    frame::Frame::Crypto { data } => {
                         self.pkt_num_spaces[epoch]
-                            .recv_pkt_need_ack
-                            .remove_until(largest_acked);
-                    }
-                },
+                            .crypto_stream
+                            .send
+                            .ack(data.off(), data.len());
+                    },
 
-                frame::Frame::Crypto { data } => {
-                    self.pkt_num_spaces[epoch]
-                        .crypto_stream
-                        .send
-                        .ack(data.off(), data.len());
-                },
+                    frame::Frame::Stream { stream_id, data } => {
+                        let stream = match self.streams.get_mut(*stream_id) {
+                            Some(v) => v,
 
-                frame::Frame::Stream { stream_id, data } => {
-                    let stream = match self.streams.get_mut(stream_id) {
-                        Some(v) => v,
+                            None => continue,
+                        };
 
-                        None => continue,
-                    };
+                        stream.send.ack(data.off(), data.len());
 
-                    stream.send.ack(data.off(), data.len());
+                        if stream.is_complete() {
+                            let local = stream.local;
+                            self.streams.collect(*stream_id, local);
+                        }
+                    },
 
-                    if stream.is_complete() {
-                        let local = stream.local;
-                        self.streams.collect(stream_id, local);
-                    }
-                },
-
-                _ => (),
+                    _ => (),
+                }
             }
         }
 
@@ -1624,23 +1650,9 @@ impl Connection {
             self.do_handshake()?;
         }
 
-        // Use max_packet_size as sent by the peer, except during the handshake
-        // when we haven't parsed transport parameters yet, so use a default
-        // value then.
-        let max_pkt_len = if self.is_established() {
-            // We cap the maximum packet size to 16KB or so, so that it can be
-            // always encoded with a 2-byte varint.
-            cmp::min(16383, self.peer_transport_params.max_packet_size) as usize
-        } else {
-            // Allow for 1200 bytes (minimum QUIC packet size) during the
-            // handshake.
-            1200
-        };
+        let out_len = out.len();
 
-        // Cap output buffer to respect peer's max_packet_size limit.
-        let avail = cmp::min(max_pkt_len, out.len());
-
-        let mut b = octets::Octets::with_slice(&mut out[..avail]);
+        let mut b = octets::Octets::with_slice(out);
 
         let epoch = self.write_epoch()?;
 
@@ -1688,8 +1700,11 @@ impl Connection {
             }
         }
 
-        // Calculate available space in the packet based on congestion window.
-        let mut left = cmp::min(self.recovery.cwnd_available(), b.cap());
+        // Limit output buffer size by estimated path MTU.
+        let mut left = cmp::min(self.pmtu, b.cap());
+
+        // Limit data sent based on the congestion window size.
+        left = cmp::min(left, self.recovery.cwnd_available());
 
         // Limit data sent by the server based on the amount of data received
         // from the client before its address is validated.
@@ -1720,9 +1735,9 @@ impl Connection {
 
         // Make sure we have enough space left for the header, the payload
         // length, the packet number and the AEAD overhead.
-        left = left
-            .checked_sub(b.off() + pn_len + overhead)
-            .ok_or(Error::Done)?;
+        let pkt_overhead = b.off() + pn_len + overhead;
+
+        left = left.checked_sub(pkt_overhead).ok_or(Error::Done)?;
 
         // We assume that the payload length, which is only present in long
         // header packets, can always be encoded with a 2-byte varint.
@@ -1734,8 +1749,50 @@ impl Connection {
 
         let mut ack_eliciting = false;
         let mut in_flight = false;
+        let mut pmtud = false;
 
         let mut payload_len = 0;
+
+        // Create PMTUD probe.
+        //
+        // In order to send a PMTUD probe the current `left` value, which was
+        // already limited by the current PMTU measure, needs to be ignored, but
+        // the outgoing packet still needs to be limited by the output buffer
+        // size, as well as the congestion window.
+        //
+        // In addition, the PMTUD probe is only generated when the handshake is
+        // confirmed, to avoid interfering with the handshake (e.g. due to the
+        // anti-amplification limits).
+        if pkt_type == packet::Type::Short &&
+            (self.handshake_confirmed || self.handshake_done_sent) &&
+            self.pmtu_next > self.pmtu &&
+            self.recovery.cwnd_available() > self.pmtu_next &&
+            out_len > self.pmtu_next
+        {
+            // Add PADDING up to the PMTUD probe size (accounting for the QUIC
+            // packet header already written), minus the size of a PING frame.
+            let frame = frame::Frame::Padding {
+                len: self.pmtu_next - pkt_overhead - 1,
+            };
+            payload_len += frame.wire_len();
+            frames.push(frame);
+
+            // Add PING to make sure the PMTUD probe is ack-eliciting.
+            let frame = frame::Frame::Ping;
+            payload_len += frame.wire_len();
+            frames.push(frame);
+
+            ack_eliciting = true;
+            in_flight = true;
+
+            // Do not attempt additional probing.
+            self.pmtu_next = 0;
+
+            // Prevent other frames from being added to the packet.
+            left = 0;
+
+            pmtud = true;
+        }
 
         // Create ACK frame.
         if self.pkt_num_spaces[epoch].ack_elicited && !is_closing {
@@ -2105,6 +2162,7 @@ impl Connection {
             size: if ack_eliciting { written } else { 0 },
             ack_eliciting,
             in_flight,
+            pmtud,
         };
 
         self.recovery.on_packet_sent(
@@ -2643,6 +2701,7 @@ impl Connection {
             lost: self.recovery.lost_count,
             cwnd: self.recovery.cc.cwnd(),
             rtt: self.recovery.rtt(),
+            pmtu: self.pmtu,
         }
     }
 
@@ -2693,6 +2752,9 @@ impl Connection {
 
             self.recovery.max_ack_delay =
                 time::Duration::from_millis(peer_params.max_ack_delay);
+
+            self.pmtu_next =
+                cmp::min(self.pmtu_next, peer_params.max_packet_size as usize);
 
             self.peer_transport_params = peer_params;
 
@@ -2760,7 +2822,8 @@ impl Connection {
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
-                self.streams.has_almost_full())
+                self.streams.has_almost_full() ||
+                self.pmtu_next > self.pmtu)
         {
             return Ok(packet::EPOCH_APPLICATION);
         }
@@ -3117,14 +3180,17 @@ pub struct Stats {
 
     /// The size in bytes of the connection's congestion window.
     pub cwnd: usize,
+
+    /// The path's MTU.
+    pub pmtu: usize,
 }
 
 impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "recv={} sent={} lost={} rtt={:?} cwnd={}",
-            self.recv, self.sent, self.lost, self.rtt, self.cwnd
+            "recv={} sent={} lost={} rtt={:?} cwnd={} pmtu={}",
+            self.recv, self.sent, self.lost, self.rtt, self.cwnd, self.pmtu
         )
     }
 }
@@ -5291,6 +5357,89 @@ mod tests {
 
         let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
         assert_eq!(&hdr.token.unwrap(), token);
+    }
+
+    #[test]
+    fn pmtud() {
+        let mut buf = [0; 65535];
+
+        let mut server_scid = [0; 16];
+        rand::rand_bytes(&mut server_scid[..]);
+
+        let mut srv_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        srv_config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        srv_config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        srv_config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        srv_config.set_initial_max_data(30);
+        srv_config.set_initial_max_stream_data_bidi_local(15);
+        srv_config.set_initial_max_stream_data_bidi_remote(15);
+        srv_config.set_initial_max_stream_data_uni(10);
+        srv_config.set_initial_max_streams_bidi(1);
+        srv_config.set_initial_max_streams_uni(0);
+        srv_config.verify_peer(false);
+
+        // Enable PMTUD on the server.
+        srv_config.discover_pmtu(true);
+
+        let mut client_scid = [0; 16];
+        rand::rand_bytes(&mut client_scid[..]);
+
+        let mut cln_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cln_config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        cln_config.set_initial_max_data(30);
+        cln_config.set_initial_max_stream_data_bidi_local(15);
+        cln_config.set_initial_max_stream_data_bidi_remote(15);
+        cln_config.set_initial_max_streams_bidi(3);
+        cln_config.set_initial_max_streams_uni(3);
+
+        // Set max packet size on the client lower than MAX_DATAGRAM_SIZE.
+        cln_config.set_max_packet_size(1350);
+
+        let mut pipe = testing::Pipe {
+            client: connect(Some("quic.tech"), &client_scid, &mut cln_config)
+                .unwrap(),
+            server: accept(&server_scid, None, &mut srv_config).unwrap(),
+        };
+
+        // Client sends initial flight.
+        let mut len = pipe.client.send(&mut buf).unwrap();
+
+        // Server sends initial flight.
+        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        // Client sends Handshake packet and completes handshake.
+        len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+
+        pipe.server.recv(&mut buf[..len]).unwrap();
+
+        // Server sends Handshake packet.
+        len = pipe.server.send(&mut buf).unwrap();
+
+        len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+
+        pipe.server.recv(&mut buf[..len]).unwrap();
+
+        // Server sends HANDSHAKE_DONE packet.
+        len = pipe.server.send(&mut buf).unwrap();
+
+        len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+
+        // Server sends PMTUD probe packet.
+        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        // Client acks PMTUD probe.
+        len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+        testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert_eq!(pipe.server.stats().pmtu, 1350);
     }
 }
 
