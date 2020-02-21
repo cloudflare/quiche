@@ -274,11 +274,12 @@ use std::str::FromStr;
 pub use crate::cc::Algorithm as CongestionControlAlgorithm;
 
 /// The current QUIC wire version.
-pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_DRAFT25;
+pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_DRAFT27;
 
 /// Supported QUIC versions.
 ///
 /// Note that the older ones might not be fully supported.
+const PROTOCOL_VERSION_DRAFT27: u32 = 0xff00_001b;
 const PROTOCOL_VERSION_DRAFT25: u32 = 0xff00_0019;
 const PROTOCOL_VERSION_DRAFT24: u32 = 0xff00_0018;
 const PROTOCOL_VERSION_DRAFT23: u32 = 0xff00_0017;
@@ -967,7 +968,8 @@ pub fn retry(
 /// Returns true if the given protocol version is supported.
 pub fn version_is_supported(version: u32) -> bool {
     match version {
-        PROTOCOL_VERSION |
+        PROTOCOL_VERSION_DRAFT27 |
+        PROTOCOL_VERSION_DRAFT25 |
         PROTOCOL_VERSION_DRAFT24 |
         PROTOCOL_VERSION_DRAFT23 => true,
 
