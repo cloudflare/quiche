@@ -75,10 +75,6 @@ pub enum Frame {
         push_id: u64,
     },
 
-    DuplicatePush {
-        push_id: u64,
-    },
-
     Unknown,
 }
 
@@ -113,10 +109,6 @@ impl Frame {
             },
 
             MAX_PUSH_FRAME_TYPE_ID => Frame::MaxPushId {
-                push_id: b.get_varint()?,
-            },
-
-            DUPLICATE_PUSH_FRAME_TYPE_ID => Frame::DuplicatePush {
                 push_id: b.get_varint()?,
             },
 
@@ -229,13 +221,6 @@ impl Frame {
                 b.put_varint(*push_id)?;
             },
 
-            Frame::DuplicatePush { push_id } => {
-                b.put_varint(DUPLICATE_PUSH_FRAME_TYPE_ID)?;
-                b.put_varint(octets::varint_len(*push_id) as u64)?;
-
-                b.put_varint(*push_id)?;
-            },
-
             Frame::Unknown => unreachable!(),
         }
 
@@ -285,10 +270,6 @@ impl std::fmt::Debug for Frame {
 
             Frame::MaxPushId { push_id } => {
                 write!(f, "MAX_PUSH_ID push_id={}", push_id)?;
-            },
-
-            Frame::DuplicatePush { push_id } => {
-                write!(f, "DUPLICATE_PUSH push_id={}", push_id)?;
             },
 
             Frame::Unknown => {
@@ -650,33 +631,6 @@ mod tests {
         assert_eq!(
             Frame::from_bytes(
                 MAX_PUSH_FRAME_TYPE_ID,
-                frame_payload_len as u64,
-                &mut d[frame_header_len..]
-            )
-            .unwrap(),
-            frame
-        );
-    }
-
-    #[test]
-    fn duplicate_push() {
-        let mut d = [42; 128];
-
-        let frame = Frame::DuplicatePush { push_id: 0 };
-
-        let frame_payload_len = 1;
-        let frame_header_len = 2;
-
-        let wire_len = {
-            let mut b = octets::Octets::with_slice(&mut d);
-            frame.to_bytes(&mut b).unwrap()
-        };
-
-        assert_eq!(wire_len, frame_header_len + frame_payload_len);
-
-        assert_eq!(
-            Frame::from_bytes(
-                DUPLICATE_PUSH_FRAME_TYPE_ID,
                 frame_payload_len as u64,
                 &mut d[frame_header_len..]
             )
