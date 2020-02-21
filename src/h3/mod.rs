@@ -1440,30 +1440,6 @@ impl Connection {
                 // TODO: implement more checks and PUSH_PROMISE event
             },
 
-            frame::Frame::DuplicatePush { .. } => {
-                if self.is_server {
-                    conn.close(
-                        true,
-                        Error::FrameUnexpected.to_wire(),
-                        b"DUPLICATE_PUSH received by server",
-                    )?;
-
-                    return Err(Error::FrameUnexpected);
-                }
-
-                if stream_id % 4 != 0 {
-                    conn.close(
-                        true,
-                        Error::FrameUnexpected.to_wire(),
-                        b"DUPLICATE_PUSH received on non-request stream",
-                    )?;
-
-                    return Err(Error::FrameUnexpected);
-                }
-
-                // TODO: implement DUPLICATE_PUSH
-            },
-
             frame::Frame::CancelPush { .. } => {
                 if Some(stream_id) != self.peer_control_stream_id {
                     conn.close(
@@ -2235,30 +2211,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(s.poll_client(), Err(Error::Done));
-    }
-
-    #[test]
-    /// Send a DUPLICATE_PUSH frame from the client, which is forbidden.
-    fn duplicate_push_from_client() {
-        let mut s = Session::default().unwrap();
-        s.handshake().unwrap();
-
-        let (stream, req) = s.send_request(false).unwrap();
-
-        s.send_frame_client(
-            frame::Frame::DuplicatePush { push_id: 1 },
-            stream,
-            false,
-        )
-        .unwrap();
-
-        let ev_headers = Event::Headers {
-            list: req,
-            has_body: true,
-        };
-
-        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
-        assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
     }
 
     #[test]
