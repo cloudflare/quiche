@@ -298,6 +298,7 @@ impl Handshake {
 
         let raw_params = TransportParams::encode(
             &conn.local_transport_params,
+            conn.version,
             conn.is_server,
             &mut raw_params,
         )?;

@@ -1249,6 +1249,19 @@ impl Connection {
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
             self.handshake.clear()?;
 
+            // Encode transport parameters again, as the new version might be
+            // using a different format.
+            let mut raw_params = [0; 128];
+
+            let raw_params = TransportParams::encode(
+                &self.local_transport_params,
+                self.version,
+                self.is_server,
+                &mut raw_params,
+            )?;
+
+            self.handshake.set_quic_transport_params(raw_params)?;
+
             return Err(Error::Done);
         }
 
@@ -2665,8 +2678,11 @@ impl Connection {
         if !self.parsed_peer_transport_params {
             let mut raw_params = self.handshake.quic_transport_params().to_vec();
 
-            let peer_params =
-                TransportParams::decode(&mut raw_params, self.is_server)?;
+            let peer_params = TransportParams::decode(
+                &mut raw_params,
+                self.version,
+                self.is_server,
+            )?;
 
             if peer_params.original_connection_id != self.odcid {
                 return Err(Error::InvalidTransportParam);
@@ -3159,17 +3175,31 @@ impl Default for TransportParams {
 }
 
 impl TransportParams {
-    fn decode(buf: &mut [u8], is_server: bool) -> Result<TransportParams> {
+    fn decode(
+        buf: &mut [u8], version: u32, is_server: bool,
+    ) -> Result<TransportParams> {
         let mut b = octets::Octets::with_slice(buf);
 
         let mut tp = TransportParams::default();
 
-        let mut params = b.get_bytes_with_u16_length()?;
+        let mut params = if version < PROTOCOL_VERSION_DRAFT27 {
+            b.get_bytes_with_u16_length()?
+        } else {
+            b
+        };
 
         while params.cap() > 0 {
-            let id = params.get_u16()?;
+            let id = if version < PROTOCOL_VERSION_DRAFT27 {
+                params.get_u16()? as u64
+            } else {
+                params.get_varint()?
+            };
 
-            let mut val = params.get_bytes_with_u16_length()?;
+            let mut val = if version < PROTOCOL_VERSION_DRAFT27 {
+                params.get_bytes_with_u16_length()?
+            } else {
+                params.get_bytes_with_varint_length()?
+            };
 
             // TODO: forbid duplicated param
 
@@ -3282,8 +3312,22 @@ impl TransportParams {
         Ok(tp)
     }
 
+    fn encode_param(
+        b: &mut octets::Octets, ty: u64, len: usize, version: u32,
+    ) -> Result<()> {
+        if version < PROTOCOL_VERSION_DRAFT27 {
+            b.put_u16(ty as u16)?;
+            b.put_u16(len as u16)?;
+        } else {
+            b.put_varint(ty)?;
+            b.put_varint(len as u64)?;
+        }
+
+        Ok(())
+    }
+
     fn encode<'a>(
-        tp: &TransportParams, is_server: bool, out: &'a mut [u8],
+        tp: &TransportParams, version: u32, is_server: bool, out: &'a mut [u8],
     ) -> Result<&'a mut [u8]> {
         let mut params = [0; 128];
 
@@ -3292,96 +3336,141 @@ impl TransportParams {
 
             if is_server {
                 if let Some(ref odcid) = tp.original_connection_id {
-                    b.put_u16(0x0000)?;
-                    b.put_u16(odcid.len() as u16)?;
+                    TransportParams::encode_param(
+                        &mut b,
+                        0x0000,
+                        odcid.len(),
+                        version,
+                    )?;
                     b.put_bytes(&odcid)?;
                 }
             };
 
             if tp.max_idle_timeout != 0 {
-                b.put_u16(0x0001)?;
-                b.put_u16(octets::varint_len(tp.max_idle_timeout) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0001,
+                    octets::varint_len(tp.max_idle_timeout),
+                    version,
+                )?;
                 b.put_varint(tp.max_idle_timeout)?;
             }
 
             if let Some(ref token) = tp.stateless_reset_token {
                 if is_server {
-                    b.put_u16(0x0002)?;
-                    b.put_u16(token.len() as u16)?;
+                    TransportParams::encode_param(
+                        &mut b,
+                        0x0002,
+                        token.len(),
+                        version,
+                    )?;
                     b.put_bytes(&token)?;
                 }
             }
 
             if tp.max_packet_size != 0 {
-                b.put_u16(0x0003)?;
-                b.put_u16(octets::varint_len(tp.max_packet_size) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0003,
+                    octets::varint_len(tp.max_packet_size),
+                    version,
+                )?;
                 b.put_varint(tp.max_packet_size)?;
             }
 
             if tp.initial_max_data != 0 {
-                b.put_u16(0x0004)?;
-                b.put_u16(octets::varint_len(tp.initial_max_data) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0004,
+                    octets::varint_len(tp.initial_max_data),
+                    version,
+                )?;
                 b.put_varint(tp.initial_max_data)?;
             }
 
             if tp.initial_max_stream_data_bidi_local != 0 {
-                b.put_u16(0x0005)?;
-                b.put_u16(octets::varint_len(
-                    tp.initial_max_stream_data_bidi_local,
-                ) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0005,
+                    octets::varint_len(tp.initial_max_stream_data_bidi_local),
+                    version,
+                )?;
                 b.put_varint(tp.initial_max_stream_data_bidi_local)?;
             }
 
             if tp.initial_max_stream_data_bidi_remote != 0 {
-                b.put_u16(0x0006)?;
-                b.put_u16(octets::varint_len(
-                    tp.initial_max_stream_data_bidi_remote,
-                ) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0006,
+                    octets::varint_len(tp.initial_max_stream_data_bidi_remote),
+                    version,
+                )?;
                 b.put_varint(tp.initial_max_stream_data_bidi_remote)?;
             }
 
             if tp.initial_max_stream_data_uni != 0 {
-                b.put_u16(0x0007)?;
-                b.put_u16(
-                    octets::varint_len(tp.initial_max_stream_data_uni) as u16
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0007,
+                    octets::varint_len(tp.initial_max_stream_data_uni),
+                    version,
                 )?;
                 b.put_varint(tp.initial_max_stream_data_uni)?;
             }
 
             if tp.initial_max_streams_bidi != 0 {
-                b.put_u16(0x0008)?;
-                b.put_u16(octets::varint_len(tp.initial_max_streams_bidi) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0008,
+                    octets::varint_len(tp.initial_max_streams_bidi),
+                    version,
+                )?;
                 b.put_varint(tp.initial_max_streams_bidi)?;
             }
 
             if tp.initial_max_streams_uni != 0 {
-                b.put_u16(0x0009)?;
-                b.put_u16(octets::varint_len(tp.initial_max_streams_uni) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0009,
+                    octets::varint_len(tp.initial_max_streams_uni),
+                    version,
+                )?;
                 b.put_varint(tp.initial_max_streams_uni)?;
             }
 
             if tp.ack_delay_exponent != 0 {
-                b.put_u16(0x000a)?;
-                b.put_u16(octets::varint_len(tp.ack_delay_exponent) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x000a,
+                    octets::varint_len(tp.ack_delay_exponent),
+                    version,
+                )?;
                 b.put_varint(tp.ack_delay_exponent)?;
             }
 
             if tp.max_ack_delay != 0 {
-                b.put_u16(0x000b)?;
-                b.put_u16(octets::varint_len(tp.max_ack_delay) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x000b,
+                    octets::varint_len(tp.max_ack_delay),
+                    version,
+                )?;
                 b.put_varint(tp.max_ack_delay)?;
             }
 
             if tp.disable_active_migration {
-                b.put_u16(0x000c)?;
-                b.put_u16(0)?;
+                TransportParams::encode_param(&mut b, 0x000c, 0, version)?;
             }
 
             // TODO: encode preferred_address
 
             if tp.active_conn_id_limit != 0 {
-                b.put_u16(0x000e)?;
-                b.put_u16(octets::varint_len(tp.active_conn_id_limit) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x000e,
+                    octets::varint_len(tp.active_conn_id_limit),
+                    version,
+                )?;
                 b.put_varint(tp.active_conn_id_limit)?;
             }
 
@@ -3391,7 +3480,13 @@ impl TransportParams {
         let out_len = {
             let mut b = octets::Octets::with_slice(out);
 
-            b.put_u16(params_len as u16)?;
+            // TODO: once we drop support for drafts < 27, we should simplify
+            // the encoding to serialize the parameters into the output buffer
+            // directly.
+            if version < PROTOCOL_VERSION_DRAFT27 {
+                b.put_u16(params_len as u16)?;
+            }
+
             b.put_bytes(&params[..params_len])?;
 
             b.off()
@@ -3703,6 +3798,7 @@ mod tests {
 
     #[test]
     fn transport_params() {
+        // Server encodes, client decodes.
         let tp = TransportParams {
             original_connection_id: None,
             max_idle_timeout: 30,
@@ -3722,10 +3818,124 @@ mod tests {
 
         let mut raw_params = [42; 256];
         let mut raw_params =
-            TransportParams::encode(&tp, true, &mut raw_params).unwrap();
+            TransportParams::encode(&tp, PROTOCOL_VERSION, true, &mut raw_params)
+                .unwrap();
+        assert_eq!(raw_params.len(), 73);
+
+        let new_tp =
+            TransportParams::decode(&mut raw_params, PROTOCOL_VERSION, false)
+                .unwrap();
+
+        assert_eq!(new_tp, tp);
+
+        // Client encodes, server decodes.
+        let tp = TransportParams {
+            original_connection_id: None,
+            max_idle_timeout: 30,
+            stateless_reset_token: None,
+            max_packet_size: 23_421,
+            initial_max_data: 424_645_563,
+            initial_max_stream_data_bidi_local: 154_323_123,
+            initial_max_stream_data_bidi_remote: 6_587_456,
+            initial_max_stream_data_uni: 2_461_234,
+            initial_max_streams_bidi: 12_231,
+            initial_max_streams_uni: 18_473,
+            ack_delay_exponent: 20,
+            max_ack_delay: 2_u64.pow(14) - 1,
+            disable_active_migration: true,
+            active_conn_id_limit: 8,
+        };
+
+        let mut raw_params = [42; 256];
+        let mut raw_params = TransportParams::encode(
+            &tp,
+            PROTOCOL_VERSION,
+            false,
+            &mut raw_params,
+        )
+        .unwrap();
+        assert_eq!(raw_params.len(), 55);
+
+        let new_tp =
+            TransportParams::decode(&mut raw_params, PROTOCOL_VERSION, true)
+                .unwrap();
+
+        assert_eq!(new_tp, tp);
+    }
+
+    #[test]
+    fn transport_params_old() {
+        // Server encodes, client decodes.
+        let tp = TransportParams {
+            original_connection_id: None,
+            max_idle_timeout: 30,
+            stateless_reset_token: Some(vec![0xba; 16]),
+            max_packet_size: 23_421,
+            initial_max_data: 424_645_563,
+            initial_max_stream_data_bidi_local: 154_323_123,
+            initial_max_stream_data_bidi_remote: 6_587_456,
+            initial_max_stream_data_uni: 2_461_234,
+            initial_max_streams_bidi: 12_231,
+            initial_max_streams_uni: 18_473,
+            ack_delay_exponent: 20,
+            max_ack_delay: 2_u64.pow(14) - 1,
+            disable_active_migration: true,
+            active_conn_id_limit: 8,
+        };
+
+        let mut raw_params = [42; 256];
+        let mut raw_params = TransportParams::encode(
+            &tp,
+            PROTOCOL_VERSION_DRAFT25,
+            true,
+            &mut raw_params,
+        )
+        .unwrap();
         assert_eq!(raw_params.len(), 101);
 
-        let new_tp = TransportParams::decode(&mut raw_params, false).unwrap();
+        let new_tp = TransportParams::decode(
+            &mut raw_params,
+            PROTOCOL_VERSION_DRAFT25,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(new_tp, tp);
+
+        // Client encodes, server decodes.
+        let tp = TransportParams {
+            original_connection_id: None,
+            max_idle_timeout: 30,
+            stateless_reset_token: None,
+            max_packet_size: 23_421,
+            initial_max_data: 424_645_563,
+            initial_max_stream_data_bidi_local: 154_323_123,
+            initial_max_stream_data_bidi_remote: 6_587_456,
+            initial_max_stream_data_uni: 2_461_234,
+            initial_max_streams_bidi: 12_231,
+            initial_max_streams_uni: 18_473,
+            ack_delay_exponent: 20,
+            max_ack_delay: 2_u64.pow(14) - 1,
+            disable_active_migration: true,
+            active_conn_id_limit: 8,
+        };
+
+        let mut raw_params = [42; 256];
+        let mut raw_params = TransportParams::encode(
+            &tp,
+            PROTOCOL_VERSION_DRAFT25,
+            false,
+            &mut raw_params,
+        )
+        .unwrap();
+        assert_eq!(raw_params.len(), 81);
+
+        let new_tp = TransportParams::decode(
+            &mut raw_params,
+            PROTOCOL_VERSION_DRAFT25,
+            true,
+        )
+        .unwrap();
 
         assert_eq!(new_tp, tp);
     }
