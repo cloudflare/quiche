@@ -1660,11 +1660,6 @@ impl Connection {
                         None => continue,
                     };
 
-                    // TODO: due to a packet loss edge case the following could
-                    // go negative, though it's not clear why, so will need to
-                    // figure it out.
-                    self.tx_data = self.tx_data.saturating_sub(data.len() as u64);
-
                     let was_flushable = stream.is_flushable();
 
                     let empty_fin = data.is_empty() && data.fin();
