@@ -2105,6 +2105,10 @@ impl Connection {
             size: if ack_eliciting { written } else { 0 },
             ack_eliciting,
             in_flight,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
         };
 
         self.recovery.on_packet_sent(
@@ -2285,6 +2289,8 @@ impl Connection {
         }
 
         self.tx_data += sent as u64;
+
+        self.recovery.rate_check_app_limited();
 
         Ok(sent)
     }
