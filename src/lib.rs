@@ -3091,8 +3091,8 @@ impl Connection {
 
     /// Returns the connection's overall send capacity.
     fn send_capacity(&self) -> usize {
-        let cap = self.max_tx_data as usize - self.tx_data as usize;
-        cmp::min(cap, self.recovery.cwnd_available())
+        let cap = self.max_tx_data - self.tx_data;
+        cmp::min(cap, self.recovery.cwnd_available() as u64) as usize
     }
 }
 
@@ -4103,6 +4103,41 @@ mod tests {
         assert_eq!(&b[..12], b"hello, world");
 
         assert!(pipe.server.stream_finished(4));
+    }
+
+    #[test]
+    fn stream_send_on_32bit_arch() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(2_u64.pow(32) + 5);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(0);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // In 32bit arch, send_capacity() should be min(2^32+5, cwnd),
+        // not min(5, cwnd)
+        assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert!(!pipe.server.stream_finished(4));
     }
 
     #[test]
