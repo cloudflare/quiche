@@ -1326,6 +1326,19 @@ impl Connection {
 
             self.version = hdr.version;
             self.did_version_negotiation = true;
+
+            // Encode transport parameters again, as the new version might be
+            // using a different format.
+            let mut raw_params = [0; 128];
+
+            let raw_params = TransportParams::encode(
+                &self.local_transport_params,
+                self.version,
+                self.is_server,
+                &mut raw_params,
+            )?;
+
+            self.handshake.set_quic_transport_params(raw_params)?;
         }
 
         if hdr.ty != packet::Type::Short && hdr.version != self.version {
