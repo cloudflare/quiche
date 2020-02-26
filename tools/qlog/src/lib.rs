@@ -236,7 +236,7 @@ use serde::{
 pub const QLOG_VERSION: &str = "draft-01";
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct Qlog {
     pub qlog_version: String,
     pub title: Option<String>,
@@ -259,7 +259,7 @@ impl Default for Qlog {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct Trace {
     pub vantage_point: VantagePoint,
     pub title: Option<String>,
@@ -323,7 +323,7 @@ impl Trace {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct VantagePoint {
     pub name: Option<String>,
 
@@ -333,7 +333,7 @@ pub struct VantagePoint {
     pub flow: Option<VantagePointType>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum VantagePointType {
     Client,
@@ -342,7 +342,7 @@ pub enum VantagePointType {
     Unknown,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum TimeUnits {
     Ms,
@@ -350,7 +350,7 @@ pub enum TimeUnits {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct Configuration {
     pub time_units: Option<TimeUnits>,
     pub time_offset: Option<String>,
@@ -371,7 +371,7 @@ impl Default for Configuration {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Clone, Default)]
 pub struct CommonFields {
     pub group_id: Option<String>,
     pub protocol_type: Option<String>,
@@ -381,7 +381,7 @@ pub struct CommonFields {
      * additionalUserSpecifiedProperty */
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(untagged)]
 pub enum EventType {
     ConnectivityEventType(ConnectivityEventType),
@@ -399,7 +399,7 @@ pub enum EventType {
     GenericEventType(GenericEventType),
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant)]
 pub enum EventField {
@@ -412,7 +412,7 @@ pub enum EventField {
     Data(EventData),
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum EventCategory {
     Connectivity,
@@ -430,7 +430,7 @@ pub enum EventCategory {
     Simulation,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectivityEventType {
     ServerListening,
@@ -440,7 +440,7 @@ pub enum ConnectivityEventType {
     ConnectionStateUpdated,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportEventType {
     ParametersSet,
@@ -459,7 +459,7 @@ pub enum TransportEventType {
     StreamStateUpdated,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportEventTrigger {
     Line,
@@ -467,14 +467,14 @@ pub enum TransportEventTrigger {
     KeysUnavailable,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityEventType {
     KeyUpdated,
     KeyRetired,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityEventTrigger {
     Tls,
@@ -483,7 +483,7 @@ pub enum SecurityEventTrigger {
     LocalUpdate,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum RecoveryEventType {
     ParametersSet,
@@ -495,7 +495,7 @@ pub enum RecoveryEventType {
     MarkedForRetransmit,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum RecoveryEventTrigger {
     AckReceived,
@@ -506,7 +506,7 @@ pub enum RecoveryEventTrigger {
 
 // ================================================================== //
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyType {
     ServerInitialSecret,
@@ -522,7 +522,7 @@ pub enum KeyType {
     Client1RttSecret,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionState {
     Attempted,
@@ -534,14 +534,14 @@ pub enum ConnectionState {
     Closed,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportOwner {
     Local,
     Remote,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct PreferredAddress {
     pub ip_v4: String,
     pub ip_v6: String,
@@ -553,14 +553,14 @@ pub struct PreferredAddress {
     pub stateless_reset_token: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamSide {
     Sending,
     Receiving,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamState {
     // bidirectional stream states, draft-23 3.4.
@@ -590,21 +590,21 @@ pub enum StreamState {
     Destroyed,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum TimerType {
     Ack,
     Pto,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum H3Owner {
     Local,
     Remote,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum H3StreamType {
     Data,
@@ -615,49 +615,49 @@ pub enum H3StreamType {
     QpackDecode,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum H3DataRecipient {
     Application,
     Transport,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum H3PushDecision {
     Claimed,
     Abandoned,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackOwner {
     Local,
     Remote,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackStreamState {
     Blocked,
     Unblocked,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackUpdateType {
     Added,
     Evicted,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct QpackDynamicTableEntry {
     pub index: u64,
     pub name: Option<String>,
     pub value: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct QpackHeaderBlockPrefix {
     pub required_insert_count: u64,
     pub sign_bit: bool,
@@ -665,7 +665,7 @@ pub struct QpackHeaderBlockPrefix {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant)]
 pub enum EventData {
@@ -1027,7 +1027,7 @@ pub enum EventData {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum PacketType {
     Initial,
@@ -1044,7 +1044,7 @@ pub enum PacketType {
     Unknown,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum Http3EventType {
     ParametersSet,
@@ -1055,7 +1055,7 @@ pub enum Http3EventType {
     PushResolved,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackEventType {
     StateUpdated,
@@ -1067,7 +1067,7 @@ pub enum QpackEventType {
     InstructionReceived,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum QuicFrameTypeName {
     Padding,
@@ -1150,21 +1150,21 @@ impl PacketHeader {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamType {
     Bidirectional,
     Unidirectional,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorSpace {
     TransportError,
     ApplicationError,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum GenericEventType {
     ConnectionError,
@@ -1176,7 +1176,7 @@ pub enum GenericEventType {
     Marker,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(untagged)]
 pub enum ConnectionErrorCode {
     TransportError(TransportError),
@@ -1184,14 +1184,14 @@ pub enum ConnectionErrorCode {
     Value(u64),
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(untagged)]
 pub enum ApplicationErrorCode {
     ApplicationError(ApplicationError),
     Value(u64),
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportError {
     NoError,
@@ -1210,13 +1210,13 @@ pub enum TransportError {
 }
 
 // TODO
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum CryptoError {
     Prefix,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ApplicationError {
     HttpNoError,
@@ -1240,7 +1240,7 @@ pub enum ApplicationError {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(untagged)]
 pub enum QuicFrame {
     Padding {
@@ -1554,7 +1554,7 @@ impl QuicFrame {
 }
 
 // ================================================================== //
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum Http3FrameTypeName {
     Data,
@@ -1569,19 +1569,19 @@ pub enum Http3FrameTypeName {
     Unknown,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct HttpHeader {
     pub name: String,
     pub value: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct Setting {
     pub name: String,
     pub value: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub enum Http3Frame {
     Data {
         frame_type: Http3FrameTypeName,
@@ -1705,7 +1705,7 @@ impl Http3Frame {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackInstructionTypeName {
     SetDynamicTableCapacityInstruction,
@@ -1717,14 +1717,14 @@ pub enum QpackInstructionTypeName {
     InsertCountIncrementInstruction,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackTableType {
     Static,
     Dynamic,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub enum QPackInstruction {
     SetDynamicTableCapacityInstruction {
         instruction_type: QpackInstructionTypeName,
@@ -1781,7 +1781,7 @@ pub enum QPackInstruction {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackHeaderBlockRepresentationTypeName {
     IndexedHeaderField,
@@ -1789,7 +1789,7 @@ pub enum QpackHeaderBlockRepresentationTypeName {
     LiteralHeaderFieldWithoutName,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Clone)]
 pub enum QpackHeaderBlockRepresentation {
     IndexedHeaderField {
         header_field_type: QpackHeaderBlockRepresentationTypeName,
