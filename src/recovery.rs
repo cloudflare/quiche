@@ -167,7 +167,7 @@ impl Recovery {
                 (self.cc.bytes_in_flight() + sent_bytes) < self.cc.cwnd();
 
             // OnPacketSentCC
-            self.cc.on_packet_sent_cc(sent_bytes, trace_id);
+            self.cc.on_packet_sent_cc(sent_bytes, now, trace_id);
 
             self.set_loss_detection_timer(handshake_completed);
         }
@@ -233,7 +233,7 @@ impl Recovery {
                 }
             }
 
-            let newly_acked = self.on_packet_acked(pn, epoch, trace_id);
+            let newly_acked = self.on_packet_acked(pn, epoch, now, trace_id);
             has_newly_acked = cmp::max(has_newly_acked, newly_acked);
 
             if newly_acked {
@@ -471,7 +471,8 @@ impl Recovery {
     }
 
     fn on_packet_acked(
-        &mut self, pkt_num: u64, epoch: packet::Epoch, trace_id: &str,
+        &mut self, pkt_num: u64, epoch: packet::Epoch, now: Instant,
+        trace_id: &str,
     ) -> bool {
         // Check if packet is newly acked.
         if let Some(mut p) = self.sent[epoch].remove(&pkt_num) {
@@ -484,6 +485,7 @@ impl Recovery {
                     self.rtt(),
                     self.min_rtt,
                     self.app_limited,
+                    now,
                     trace_id,
                 );
             }
