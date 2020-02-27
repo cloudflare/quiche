@@ -201,7 +201,7 @@ impl Recovery {
         let in_flight = pkt.in_flight;
         let sent_bytes = pkt.size;
 
-        self.rate_on_packet_sent(&mut pkt, now, trace_id);
+        self.rate_on_packet_sent(&mut pkt, now);
 
         self.largest_sent_pkt[epoch] =
             cmp::max(self.largest_sent_pkt[epoch], pkt.pkt_num);
@@ -291,7 +291,7 @@ impl Recovery {
             }
         }
 
-        self.rate_estimate(trace_id);
+        self.rate_estimate();
         if !has_newly_acked {
             return Ok(());
         }
@@ -540,7 +540,7 @@ impl Recovery {
                     trace_id,
                 );
 
-                self.rate_on_ack_received(p, now, trace_id);
+                self.rate_on_ack_received(p, now);
             }
 
             return true;
@@ -596,9 +596,7 @@ impl Recovery {
         }
     }
 
-    fn rate_on_packet_sent(
-        &mut self, pkt: &mut Sent, now: Instant, trace_id: &str,
-    ) {
+    fn rate_on_packet_sent(&mut self, pkt: &mut Sent, now: Instant) {
         if self.delivered_time.is_none() {
             self.delivered_time = Some(now);
         }
@@ -614,11 +612,9 @@ impl Recovery {
             self.recent_delivered_packet_sent_time.unwrap();
 
         pkt.is_app_limited = self.app_limited_at_pkt > 0;
-
-        trace!("{} {:?}", trace_id, pkt);
     }
 
-    fn rate_on_ack_received(&mut self, pkt: Sent, now: Instant, trace_id: &str) {
+    fn rate_on_ack_received(&mut self, pkt: Sent, now: Instant) {
         self.rate_sample.prior_time = Some(pkt.delivered_time);
 
         self.delivered += pkt.size;
@@ -638,10 +634,9 @@ impl Recovery {
 
             self.recent_delivered_packet_sent_time = Some(pkt.time);
         }
-        trace!("{} {:?}", trace_id, self);
     }
 
-    fn rate_estimate(&mut self, trace_id: &str) {
+    fn rate_estimate(&mut self) {
         if (self.app_limited_at_pkt > 0) &&
             (self.delivered > self.app_limited_at_pkt)
         {
@@ -664,8 +659,6 @@ impl Recovery {
             self.rate_sample.delivery_rate = self.rate_sample.delivered as f64 /
                 self.rate_sample.interval.as_millis() as f64;
         }
-
-        trace!("{} {:?}", trace_id, self.rate_sample);
     }
 
     pub fn rate_check_app_limited(&mut self) {
@@ -769,8 +762,6 @@ fn sub_abs(lhs: Duration, rhs: Duration) -> Duration {
 mod tests {
     use super::*;
 
-    const TRACE_ID: &str = "test_id";
-
     #[test]
     fn rate_check() {
         let config = Config::new(0xbabababa).unwrap();
@@ -789,9 +780,9 @@ mod tests {
             is_app_limited: false,
         };
 
-        recovery.rate_on_packet_sent(&mut pkt_1, Instant::now(), TRACE_ID);
+        recovery.rate_on_packet_sent(&mut pkt_1, Instant::now());
         std::thread::sleep(Duration::new(0, 50000000));
-        recovery.rate_on_ack_received(pkt_1, Instant::now(), TRACE_ID);
+        recovery.rate_on_ack_received(pkt_1, Instant::now());
 
         let mut pkt_2 = Sent {
             pkt_num: 1,
@@ -806,10 +797,10 @@ mod tests {
             is_app_limited: false,
         };
 
-        recovery.rate_on_packet_sent(&mut pkt_2, Instant::now(), TRACE_ID);
+        recovery.rate_on_packet_sent(&mut pkt_2, Instant::now());
         std::thread::sleep(Duration::new(0, 50000000));
-        recovery.rate_on_ack_received(pkt_2, Instant::now(), TRACE_ID);
-        recovery.rate_estimate(TRACE_ID);
+        recovery.rate_on_ack_received(pkt_2, Instant::now());
+        recovery.rate_estimate();
 
         assert!(recovery.rate_sample.delivery_rate > 0.0);
     }
@@ -832,9 +823,9 @@ mod tests {
             is_app_limited: false,
         };
 
-        recvry.rate_on_packet_sent(&mut pkt_1, Instant::now(), TRACE_ID);
+        recvry.rate_on_packet_sent(&mut pkt_1, Instant::now());
         std::thread::sleep(Duration::new(0, 50000000));
-        recvry.rate_on_ack_received(pkt_1, Instant::now(), TRACE_ID);
+        recvry.rate_on_ack_received(pkt_1, Instant::now());
 
         let mut pkt_2 = Sent {
             pkt_num: 1,
@@ -851,10 +842,10 @@ mod tests {
 
         recvry.app_limited = true;
         recvry.rate_check_app_limited();
-        recvry.rate_on_packet_sent(&mut pkt_2, Instant::now(), TRACE_ID);
+        recvry.rate_on_packet_sent(&mut pkt_2, Instant::now());
         std::thread::sleep(Duration::new(0, 50000000));
-        recvry.rate_on_ack_received(pkt_2, Instant::now(), TRACE_ID);
-        recvry.rate_estimate(TRACE_ID);
+        recvry.rate_on_ack_received(pkt_2, Instant::now());
+        recvry.rate_estimate();
 
         assert_eq!(recvry.app_limited_at_pkt, 0);
     }
