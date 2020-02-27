@@ -3983,6 +3983,40 @@ mod tests {
     }
 
     #[test]
+    fn different_client_versions() {
+        let mut buf = [0; 65535];
+        let protos = b"\x06proto1\x06proto2";
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION_DRAFT23).unwrap();
+        config.verify_peer(false);
+        config.set_application_protos(protos).unwrap();
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION_DRAFT24).unwrap();
+        config.verify_peer(false);
+        config.set_application_protos(protos).unwrap();
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION_DRAFT25).unwrap();
+        config.verify_peer(false);
+        config.set_application_protos(protos).unwrap();
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION_DRAFT27).unwrap();
+        config.verify_peer(false);
+        config.set_application_protos(protos).unwrap();
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+    }
+
+    #[test]
     fn handshake() {
         let mut buf = [0; 65535];
 
