@@ -186,7 +186,10 @@ fn make_writer(
         match std::fs::File::create(&path) {
             Ok(f) => return Some(std::io::BufWriter::new(f)),
 
-            Err(e) => panic!("Bad times: {}", e),
+            Err(e) => panic!(
+                "Error creating file for {}, attempted path was {}: {}",
+                url, path, e
+            ),
         }
     }
 
