@@ -330,11 +330,11 @@ impl HttpConn for Http09Conn {
         // Process all readable streams.
         for s in conn.readable() {
             while let Ok((read, fin)) = conn.stream_recv(s, buf) {
-                debug!("received {} bytes", read);
+                trace!("received {} bytes", read);
 
                 let stream_buf = &buf[..read];
 
-                debug!(
+                trace!(
                     "stream {} has {} bytes (fin? {})",
                     s,
                     stream_buf.len(),
@@ -414,11 +414,11 @@ impl HttpConn for Http09Conn {
         // Process all readable streams.
         for s in conn.readable() {
             while let Ok((read, fin)) = conn.stream_recv(s, buf) {
-                debug!("{} received {} bytes", conn.trace_id(), read);
+                trace!("{} received {} bytes", conn.trace_id(), read);
 
                 let stream_buf = &buf[..read];
 
-                debug!(
+                trace!(
                     "{} stream {} has {} bytes (fin? {})",
                     conn.trace_id(),
                     s,
@@ -492,7 +492,7 @@ impl HttpConn for Http09Conn {
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
-        debug!("{} stream {} is writable", conn.trace_id(), stream_id);
+        trace!("{} stream {} is writable", conn.trace_id(), stream_id);
 
         if !partial_responses.contains_key(&stream_id) {
             return;

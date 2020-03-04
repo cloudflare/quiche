@@ -145,7 +145,7 @@ fn main() {
             // has expired, so handle it without attempting to read packets. We
             // will then proceed with the send loop.
             if events.is_empty() {
-                debug!("timed out");
+                trace!("timed out");
 
                 clients.values_mut().for_each(|(_, c)| c.conn.on_timeout());
 
@@ -159,7 +159,7 @@ fn main() {
                     // There are no more UDP packets to read, so end the read
                     // loop.
                     if e.kind() == std::io::ErrorKind::WouldBlock {
-                        debug!("recv() would block");
+                        trace!("recv() would block");
                         break 'read;
                     }
 
@@ -167,7 +167,7 @@ fn main() {
                 },
             };
 
-            debug!("got {} bytes", len);
+            trace!("got {} bytes", len);
 
             let pkt_buf = &mut buf[..len];
 
@@ -221,7 +221,7 @@ fn main() {
 
                     if let Err(e) = socket.send_to(out, &src) {
                         if e.kind() == std::io::ErrorKind::WouldBlock {
-                            debug!("send() would block");
+                            trace!("send() would block");
                             break;
                         }
 
@@ -253,7 +253,7 @@ fn main() {
 
                         if let Err(e) = socket.send_to(out, &src) {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
-                                debug!("send() would block");
+                                trace!("send() would block");
                                 break;
                             }
 
@@ -311,7 +311,7 @@ fn main() {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
-                    debug!("{} done reading", client.conn.trace_id());
+                    trace!("{} done reading", client.conn.trace_id());
                     break;
                 },
 
@@ -321,7 +321,7 @@ fn main() {
                 },
             };
 
-            debug!("{} processed {} bytes", client.conn.trace_id(), read);
+            trace!("{} processed {} bytes", client.conn.trace_id(), read);
 
             // Create a new HTTP connection as soon as the QUIC connection
             // is established.
@@ -381,7 +381,7 @@ fn main() {
                     Ok(v) => v,
 
                     Err(quiche::Error::Done) => {
-                        debug!("{} done writing", client.conn.trace_id());
+                        trace!("{} done writing", client.conn.trace_id());
                         break;
                     },
 
@@ -396,20 +396,20 @@ fn main() {
                 // TODO: coalesce packets.
                 if let Err(e) = socket.send_to(&out[..write], &peer) {
                     if e.kind() == std::io::ErrorKind::WouldBlock {
-                        debug!("send() would block");
+                        trace!("send() would block");
                         break;
                     }
 
                     panic!("send() failed: {:?}", e);
                 }
 
-                debug!("{} written {} bytes", client.conn.trace_id(), write);
+                trace!("{} written {} bytes", client.conn.trace_id(), write);
             }
         }
 
         // Garbage collect closed connections.
         clients.retain(|_, (_, ref mut c)| {
-            debug!("Collecting garbage");
+            trace!("Collecting garbage");
 
             if c.conn.is_closed() {
                 info!(

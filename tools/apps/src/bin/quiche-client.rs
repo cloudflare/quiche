@@ -150,14 +150,14 @@ fn main() {
 
     while let Err(e) = socket.send(&out[..write]) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
-            debug!("send() would block");
+            trace!("send() would block");
             continue;
         }
 
         panic!("send() failed: {:?}", e);
     }
 
-    debug!("written {}", write);
+    trace!("written {}", write);
 
     let req_start = std::time::Instant::now();
 
@@ -173,7 +173,7 @@ fn main() {
             // has expired, so handle it without attempting to read packets. We
             // will then proceed with the send loop.
             if events.is_empty() {
-                debug!("timed out");
+                trace!("timed out");
 
                 conn.on_timeout();
 
@@ -187,7 +187,7 @@ fn main() {
                     // There are no more UDP packets to read, so end the read
                     // loop.
                     if e.kind() == std::io::ErrorKind::WouldBlock {
-                        debug!("recv() would block");
+                        trace!("recv() would block");
                         break 'read;
                     }
 
@@ -195,7 +195,7 @@ fn main() {
                 },
             };
 
-            debug!("got {} bytes", len);
+            trace!("got {} bytes", len);
 
             if let Some(target_path) = conn_args.dump_packet_path.as_ref() {
                 let path = format!("{}/{}.pkt", target_path, pkt_count);
@@ -213,7 +213,7 @@ fn main() {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
-                    debug!("done reading");
+                    trace!("done reading");
                     break;
                 },
 
@@ -223,7 +223,7 @@ fn main() {
                 },
             };
 
-            debug!("processed {} bytes", read);
+            trace!("processed {} bytes", read);
         }
 
         if conn.is_closed() {
@@ -278,7 +278,7 @@ fn main() {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
-                    debug!("done writing");
+                    trace!("done writing");
                     break;
                 },
 
@@ -292,14 +292,14 @@ fn main() {
 
             if let Err(e) = socket.send(&out[..write]) {
                 if e.kind() == std::io::ErrorKind::WouldBlock {
-                    debug!("send() would block");
+                    trace!("send() would block");
                     break;
                 }
 
                 panic!("send() failed: {:?}", e);
             }
 
-            debug!("written {}", write);
+            trace!("written {}", write);
         }
 
         if conn.is_closed() {
