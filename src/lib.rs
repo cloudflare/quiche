@@ -3109,7 +3109,7 @@ impl Connection {
 /// noise, and it shouldn't keep resources occupied indefinitely.
 ///
 /// This function maps an error to `Error::Done` to ignore a packet failure
-/// without aborting the connection, except when no other pakcet was prevously
+/// without aborting the connection, except when no other packet was previously
 /// received, in which case the error itself is returned.
 ///
 /// This must only be used for errors preceding packet authentication. Failures
@@ -3122,7 +3122,7 @@ fn drop_pkt_on_err(e: Error, recv_count: usize, trace_id: &str) -> Error {
         return e;
     }
 
-    trace!("{} dropped invalid packet", trace_id,);
+    trace!("{} dropped invalid packet", trace_id);
 
     // Ignore other invalid packets that haven't been authenticated to prevent
     // man-in-the-middle and man-on-the-side attacks.
