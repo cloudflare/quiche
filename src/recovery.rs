@@ -778,7 +778,7 @@ mod tests {
         };
 
         recovery.rate_on_packet_sent(&mut pkt_1, Instant::now());
-        std::thread::sleep(Duration::new(0, 50000000));
+        std::thread::sleep(Duration::from_millis(50));
         recovery.rate_on_ack_received(pkt_1, Instant::now());
 
         let mut pkt_2 = Sent {
@@ -795,7 +795,7 @@ mod tests {
         };
 
         recovery.rate_on_packet_sent(&mut pkt_2, Instant::now());
-        std::thread::sleep(Duration::new(0, 50000000));
+        std::thread::sleep(Duration::from_millis(50));
         recovery.rate_on_ack_received(pkt_2, Instant::now());
         recovery.rate_estimate();
 
@@ -821,7 +821,7 @@ mod tests {
         };
 
         recvry.rate_on_packet_sent(&mut pkt_1, Instant::now());
-        std::thread::sleep(Duration::new(0, 50000000));
+        std::thread::sleep(Duration::from_millis(50));
         recvry.rate_on_ack_received(pkt_1, Instant::now());
 
         let mut pkt_2 = Sent {
@@ -840,7 +840,7 @@ mod tests {
         recvry.app_limited = true;
         recvry.rate_check_app_limited();
         recvry.rate_on_packet_sent(&mut pkt_2, Instant::now());
-        std::thread::sleep(Duration::new(0, 50000000));
+        std::thread::sleep(Duration::from_millis(50));
         recvry.rate_on_ack_received(pkt_2, Instant::now());
         recvry.rate_estimate();
 
