@@ -376,6 +376,10 @@ impl Recovery {
         self.rtt() + cmp::max(self.rttvar * 4, GRANULARITY) + self.max_ack_delay
     }
 
+    pub fn delivery_rate(&self) -> f64 {
+        self.rate_sample.delivery_rate
+    }
+
     fn update_rtt(&mut self, latest_rtt: Duration, ack_delay: Duration) {
         self.latest_rtt = latest_rtt;
 

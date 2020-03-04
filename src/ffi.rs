@@ -624,6 +624,7 @@ pub struct Stats {
     pub lost: usize,
     pub rtt: u64,
     pub cwnd: usize,
+    pub delivery_rate: u64,
 }
 
 #[no_mangle]
@@ -635,6 +636,7 @@ pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.lost = stats.lost;
     out.rtt = stats.rtt.as_nanos() as u64;
     out.cwnd = stats.cwnd;
+    out.delivery_rate = stats.delivery_rate as u64;
 }
 
 #[no_mangle]

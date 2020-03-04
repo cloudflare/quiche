@@ -2651,6 +2651,7 @@ impl Connection {
             lost: self.recovery.lost_count,
             cwnd: self.recovery.cc.cwnd(),
             rtt: self.recovery.rtt(),
+            delivery_rate: self.recovery.delivery_rate(),
         }
     }
 
@@ -3154,16 +3155,24 @@ pub struct Stats {
     /// The estimated round-trip time of the connection.
     pub rtt: time::Duration,
 
-    /// The size in bytes of the connection's congestion window.
+    /// The size of the connection's congestion window in bytes.
     pub cwnd: usize,
+
+    /// The estimated data delivery rate in bytes/s.
+    pub delivery_rate: f64,
 }
 
 impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "recv={} sent={} lost={} rtt={:?} cwnd={}",
-            self.recv, self.sent, self.lost, self.rtt, self.cwnd
+            "recv={} sent={} lost={} rtt={:?} cwnd={} delivery_rate={}",
+            self.recv,
+            self.sent,
+            self.lost,
+            self.rtt,
+            self.cwnd,
+            self.delivery_rate
         )
     }
 }
