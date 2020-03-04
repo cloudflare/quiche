@@ -84,11 +84,19 @@ struct X509(c_void);
 #[repr(C)]
 #[allow(non_camel_case_types)]
 struct SSL_QUIC_METHOD {
-    set_encryption_secrets: extern fn(
+    set_read_secret: extern fn(
         ssl: *mut SSL,
         level: crypto::Level,
-        read_secret: *const u8,
-        write_secret: *const u8,
+        cipher: *const SSL_CIPHER,
+        secret: *const u8,
+        secret_len: usize,
+    ) -> c_int,
+
+    set_write_secret: extern fn(
+        ssl: *mut SSL,
+        level: crypto::Level,
+        cipher: *const SSL_CIPHER,
+        secret: *const u8,
         secret_len: usize,
     ) -> c_int,
 
@@ -112,7 +120,8 @@ lazy_static::lazy_static! {
 }
 
 static QUICHE_STREAM_METHOD: SSL_QUIC_METHOD = SSL_QUIC_METHOD {
-    set_encryption_secrets,
+    set_read_secret,
+    set_write_secret,
     add_handshake_data,
     flush_flight,
     send_alert,
@@ -407,7 +416,10 @@ impl Handshake {
     }
 
     pub fn cipher(&self) -> Option<crypto::Algorithm> {
-        get_cipher_from_ptr(self.as_ptr()).ok()
+        let cipher =
+            map_result_ptr(unsafe { SSL_get_current_cipher(self.as_ptr()) });
+
+        get_cipher_from_ptr(cipher.ok()?).ok()
     }
 
     pub fn curve(&self) -> Option<String> {
@@ -505,9 +517,7 @@ fn get_ex_data_from_ptr<'a, T>(ptr: *mut SSL, idx: c_int) -> Option<&'a mut T> {
     }
 }
 
-fn get_cipher_from_ptr(ptr: *mut SSL) -> Result<crypto::Algorithm> {
-    let cipher = map_result_ptr(unsafe { SSL_get_current_cipher(ptr) })?;
-
+fn get_cipher_from_ptr(cipher: *const SSL_CIPHER) -> Result<crypto::Algorithm> {
     let cipher_id = unsafe { SSL_CIPHER_get_id(cipher) };
 
     let alg = match cipher_id {
@@ -520,9 +530,9 @@ fn get_cipher_from_ptr(ptr: *mut SSL) -> Result<crypto::Algorithm> {
     Ok(alg)
 }
 
-extern fn set_encryption_secrets(
-    ssl: *mut SSL, level: crypto::Level, read_secret: *const u8,
-    write_secret: *const u8, secret_len: usize,
+extern fn set_read_secret(
+    ssl: *mut SSL, level: crypto::Level, cipher: *const SSL_CIPHER,
+    secret: *const u8, secret_len: usize,
 ) -> c_int {
     let conn =
         match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
@@ -531,11 +541,7 @@ extern fn set_encryption_secrets(
             None => return 0,
         };
 
-    trace!(
-        "{} tls set encryption secret lvl={:?}",
-        conn.trace_id,
-        level
-    );
+    trace!("{} set read secret lvl={:?}", conn.trace_id, level);
 
     let space = match level {
         crypto::Level::Initial => &mut conn.pkt_num_spaces[packet::EPOCH_INITIAL],
@@ -547,7 +553,7 @@ extern fn set_encryption_secrets(
             &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
     };
 
-    let aead = match get_cipher_from_ptr(ssl) {
+    let aead = match get_cipher_from_ptr(cipher) {
         Ok(v) => v,
 
         Err(_) => return 0,
@@ -562,7 +568,7 @@ extern fn set_encryption_secrets(
 
     // 0-RTT read secrets are present only on the server.
     if level != crypto::Level::ZeroRTT || conn.is_server {
-        let secret = unsafe { slice::from_raw_parts(read_secret, secret_len) };
+        let secret = unsafe { slice::from_raw_parts(secret, secret_len) };
 
         if crypto::derive_pkt_key(aead, &secret, &mut key).is_err() {
             return 0;
@@ -590,9 +596,48 @@ extern fn set_encryption_secrets(
         space.crypto_open = Some(open);
     }
 
+    1
+}
+
+extern fn set_write_secret(
+    ssl: *mut SSL, level: crypto::Level, cipher: *const SSL_CIPHER,
+    secret: *const u8, secret_len: usize,
+) -> c_int {
+    let conn =
+        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
+            Some(v) => v,
+
+            None => return 0,
+        };
+
+    trace!("{} set write secret lvl={:?}", conn.trace_id, level);
+
+    let space = match level {
+        crypto::Level::Initial => &mut conn.pkt_num_spaces[packet::EPOCH_INITIAL],
+        crypto::Level::ZeroRTT =>
+            &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
+        crypto::Level::Handshake =>
+            &mut conn.pkt_num_spaces[packet::EPOCH_HANDSHAKE],
+        crypto::Level::OneRTT =>
+            &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
+    };
+
+    let aead = match get_cipher_from_ptr(cipher) {
+        Ok(v) => v,
+
+        Err(_) => return 0,
+    };
+
+    let key_len = aead.key_len();
+    let nonce_len = aead.nonce_len();
+
+    let mut key = vec![0; key_len];
+    let mut iv = vec![0; nonce_len];
+    let mut pn_key = vec![0; key_len];
+
     // 0-RTT write secrets are present only on the client.
     if level != crypto::Level::ZeroRTT || !conn.is_server {
-        let secret = unsafe { slice::from_raw_parts(write_secret, secret_len) };
+        let secret = unsafe { slice::from_raw_parts(secret, secret_len) };
 
         if crypto::derive_pkt_key(aead, &secret, &mut key).is_err() {
             return 0;
@@ -629,7 +674,7 @@ extern fn add_handshake_data(
         };
 
     trace!(
-        "{} tls write message lvl={:?} len={}",
+        "{} write message lvl={:?} len={}",
         conn.trace_id,
         level,
         len
@@ -669,7 +714,7 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int {
         };
 
     trace!(
-        "{} tls send alert lvl={:?} alert={:x}",
+        "{} send alert lvl={:?} alert={:x}",
         conn.trace_id,
         level,
         alert
