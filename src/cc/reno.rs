@@ -176,6 +176,10 @@ mod tests {
             size: 5000,
             ack_eliciting: true,
             in_flight: true,
+            delivered: 0,
+            delivered_time: std::time::Instant::now(),
+            recent_delivered_packet_sent_time: std::time::Instant::now(),
+            is_app_limited: false,
         };
 
         // Send 5k x 4 = 20k, higher than default cwnd(~15k)
@@ -233,6 +237,10 @@ mod tests {
             size: 5000,
             ack_eliciting: true,
             in_flight: true,
+            delivered: 0,
+            delivered_time: std::time::Instant::now(),
+            recent_delivered_packet_sent_time: std::time::Instant::now(),
+            is_app_limited: false,
         };
 
         let prev_cwnd = cc.cwnd();
