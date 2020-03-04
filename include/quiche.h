@@ -313,8 +313,11 @@ typedef struct {
     // The estimated round-trip time of the connection (in nanoseconds).
     uint64_t rtt;
 
-    // The size in bytes of the connection's congestion window.
+    // The size of the connection's congestion window in bytes.
     size_t cwnd;
+
+    // The estimated data delivery rate in bytes/s.
+    uint64_t delivery_rate;
 } quiche_stats;
 
 // Collects and returns statistics about the connection.
