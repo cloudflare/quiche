@@ -656,9 +656,9 @@ impl Recovery {
             None => return,
         }
 
-        if self.rate_sample.interval.as_millis() > 0 {
+        if self.rate_sample.interval.as_secs_f64() > 0.0 {
             self.rate_sample.delivery_rate = self.rate_sample.delivered as f64 /
-                self.rate_sample.interval.as_millis() as f64;
+                self.rate_sample.interval.as_secs_f64();
         }
     }
 
