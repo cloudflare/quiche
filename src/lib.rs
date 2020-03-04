@@ -1190,7 +1190,7 @@ impl Connection {
         let now = time::Instant::now();
 
         if buf.is_empty() {
-            return Err(Error::BufferTooShort);
+            return Err(Error::Done);
         }
 
         if self.draining_timer.is_some() {
@@ -1205,7 +1205,8 @@ impl Connection {
 
         let mut b = octets::Octets::with_slice(buf);
 
-        let mut hdr = Header::from_bytes(&mut b, self.scid.len())?;
+        let mut hdr = Header::from_bytes(&mut b, self.scid.len())
+            .map_err(|e| drop_pkt_on_err(e, self.recv_count, &self.trace_id))?;
 
         if hdr.ty == packet::Type::VersionNegotiation {
             // Version negotiation packets can only be sent by the server.
@@ -1228,20 +1229,24 @@ impl Connection {
 
             trace!("{} rx pkt {:?}", self.trace_id, hdr);
 
-            let versions = match hdr.versions {
-                Some(ref v) => v,
-                None => return Err(Error::InvalidPacket),
+            let versions = hdr.versions.ok_or(Error::Done)?;
+
+            match versions.iter().filter(|v| version_is_supported(**v)).max() {
+                Some(v) => self.version = *v,
+
+                None => {
+                    // We don't support any of the versions offered.
+                    //
+                    // While a man-in-the-middle attacker might be able to
+                    // inject a version negotiation packet that triggers this
+                    // failure, the window of opportunity is very small and
+                    // this error is quite useful for debugging, so don't just
+                    // ignore the packet.
+                    return Err(Error::UnknownVersion);
+                },
             };
 
-            if let Some(version) =
-                versions.iter().filter(|v| version_is_supported(**v)).max()
-            {
-                self.version = *version;
-                self.did_version_negotiation = true;
-            } else {
-                // We don't support any of the versions offered.
-                return Err(Error::UnknownVersion);
-            }
+            self.did_version_negotiation = true;
 
             // Reset connection state to force sending another Initial packet.
             self.got_peer_conn_id = false;
@@ -1342,7 +1347,9 @@ impl Connection {
         }
 
         if hdr.ty != packet::Type::Short && hdr.version != self.version {
-            return Err(Error::UnknownVersion);
+            // At this point version negotiation was already performed, so
+            // ignore packets that don't match the connection's version.
+            return Err(Error::Done);
         }
 
         // Long header packets have an explicit payload length, but short
@@ -1354,7 +1361,8 @@ impl Connection {
         };
 
         if b.cap() < payload_len {
-            return Err(Error::BufferTooShort);
+            trace!("{} payload length mismatch", self.trace_id);
+            return Err(Error::Done);
         }
 
         let header_len = b.off();
@@ -1387,6 +1395,7 @@ impl Connection {
         // Select packet number space epoch based on the received packet's type.
         let epoch = hdr.ty.to_epoch()?;
 
+        // TODO: somehow deal with re-ordered 0-RTT data.
         let aead = if hdr.ty == packet::Type::ZeroRTT &&
             self.pkt_num_spaces[epoch].crypto_0rtt_open.is_some()
         {
@@ -1421,7 +1430,8 @@ impl Connection {
 
         let aead_tag_len = aead.alg().tag_len();
 
-        packet::decrypt_hdr(&mut b, &mut hdr, &aead)?;
+        packet::decrypt_hdr(&mut b, &mut hdr, &aead)
+            .map_err(|e| drop_pkt_on_err(e, self.recv_count, &self.trace_id))?;
 
         let pn = packet::decode_pkt_num(
             self.pkt_num_spaces[epoch].largest_rx_pkt_num,
@@ -1440,30 +1450,9 @@ impl Connection {
         );
 
         let mut payload =
-            match packet::decrypt_pkt(&mut b, pn, pn_len, payload_len, &aead) {
-                Ok(v) => v,
-
-                Err(e) => {
-                    // Ignore packets that fail decryption, but only if we have
-                    // successfully processed at least another packet for the
-                    // connection. This way we can avoid closing the connection
-                    // when junk is injected, but we don't keep a connection
-                    // alive in case we only received junk.
-
-                    if self.recv_count == 0 {
-                        return Err(e);
-                    }
-
-                    trace!(
-                        "{} dropped undecryptable packet type={:?} len={}",
-                        self.trace_id,
-                        hdr.ty,
-                        payload_len
-                    );
-
-                    return Err(Error::Done);
-                },
-            };
+            packet::decrypt_pkt(&mut b, pn, pn_len, payload_len, &aead).map_err(
+                |e| drop_pkt_on_err(e, self.recv_count, &self.trace_id),
+            )?;
 
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
@@ -3113,6 +3102,37 @@ impl Connection {
         let cap = self.max_tx_data - self.tx_data;
         cmp::min(cap, self.recovery.cwnd_available() as u64) as usize
     }
+}
+
+/// Maps an `Error` to `Error::Done`, or itself.
+///
+/// When a received packet that hasn't yet been authenticated triggers a failure
+/// it should, in most cases, be ignored, instead of raising a connection error,
+/// to avoid potential man-in-the-middle and man-on-the-side attacks.
+///
+/// However, if no other packet was previously received, the connection should
+/// indeed be closed as the received packet might just be network background
+/// noise, and it shouldn't keep resources occupied indefinitely.
+///
+/// This function maps an error to `Error::Done` to ignore a packet failure
+/// without aborting the connection, except when no other packet was previously
+/// received, in which case the error itself is returned.
+///
+/// This must only be used for errors preceding packet authentication. Failures
+/// happening after a packet has been authenticated should still cause the
+/// connection to be aborted.
+fn drop_pkt_on_err(e: Error, recv_count: usize, trace_id: &str) -> Error {
+    // If no other packet has been successflully processed, abort the connection
+    // to avoid keeping the connection open when only junk is received.
+    if recv_count == 0 {
+        return e;
+    }
+
+    trace!("{} dropped invalid packet", trace_id);
+
+    // Ignore other invalid packets that haven't been authenticated to prevent
+    // man-in-the-middle and man-on-the-side attacks.
+    Error::Done
 }
 
 /// Statistics about the connection.
@@ -5076,6 +5096,37 @@ mod tests {
             pipe.server.recv(&mut buf[..written]),
             Err(Error::CryptoFail)
         );
+    }
+
+    #[test]
+    /// Tests that invalid packets don't cause the connection to be closed.
+    fn invalid_packet() {
+        let mut buf = [0; 65535];
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [frame::Frame::Padding { len: 10 }];
+
+        let written = testing::encode_pkt(
+            &mut pipe.client,
+            packet::Type::Short,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+
+        // Corrupt the packets's last byte to make decryption fail (the last
+        // byte is part of the AEAD tag, so changing it means that the packet
+        // cannot be authenticated during decryption).
+        buf[written - 1] = 0;
+
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
+
+        // Corrupt the packets's first byte to make the header fail decoding.
+        buf[0] = 255;
+
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
     }
 
     #[test]
