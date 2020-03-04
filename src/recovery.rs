@@ -647,6 +647,7 @@ impl Recovery {
             Some(_) => {
                 self.rate_sample.delivered =
                     self.delivered - self.rate_sample.prior_delivered;
+
                 self.rate_sample.interval = cmp::max(
                     self.rate_sample.send_elapsed,
                     self.rate_sample.ack_elapsed,
@@ -697,14 +698,10 @@ impl std::fmt::Debug for Recovery {
         write!(f, "{:?} ", self.cc)?;
         write!(f, "delivered={:?} ", self.delivered)?;
         if let Some(t) = self.delivered_time {
-            write!(f, "delivered_time={:?}", t.elapsed().as_millis())?;
+            write!(f, "delivered_time={:?}", t.elapsed())?;
         }
         if let Some(t) = self.recent_delivered_packet_sent_time {
-            write!(
-                f,
-                "recent_delivered_packet_sent_time={:?} ",
-                t.elapsed().as_millis()
-            )?;
+            write!(f, "recent_delivered_packet_sent_time={:?} ", t.elapsed())?;
         }
         write!(f, "app_limited_at_pkt={:?} ", self.app_limited_at_pkt)?;
 
@@ -715,13 +712,13 @@ impl std::fmt::Debug for Recovery {
 impl std::fmt::Debug for RateSample {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "delivery_rate={:?} ", self.delivery_rate)?;
-        write!(f, "interval={:?} ", self.interval.as_millis())?;
+        write!(f, "interval={:?} ", self.interval)?;
         write!(f, "delivered={:?} ", self.delivered)?;
         write!(f, "prior_delivered={:?} ", self.prior_delivered)?;
-        write!(f, "send_elapsed={:?} ", self.send_elapsed.as_millis())?;
-        write!(f, "ack_elapsed={:?} ", self.ack_elapsed.as_millis())?;
+        write!(f, "send_elapsed={:?} ", self.send_elapsed)?;
+        write!(f, "ack_elapsed={:?} ", self.ack_elapsed)?;
         if let Some(t) = self.prior_time {
-            write!(f, "prior_time={:?} ", t.elapsed().as_millis())?;
+            write!(f, "prior_time={:?} ", t.elapsed())?;
         }
 
         Ok(())
@@ -731,18 +728,14 @@ impl std::fmt::Debug for RateSample {
 impl std::fmt::Debug for Sent {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "pkt_num={:?} ", self.pkt_num)?;
-        write!(f, "pkt_sent_time={:?} ", self.time.elapsed().as_millis())?;
+        write!(f, "pkt_sent_time={:?} ", self.time.elapsed())?;
         write!(f, "pkt_size={:?} ", self.size)?;
         write!(f, "delivered={:?} ", self.delivered)?;
-        write!(
-            f,
-            "delivered_time ={:?} ",
-            self.delivered_time.elapsed().as_millis()
-        )?;
+        write!(f, "delivered_time ={:?} ", self.delivered_time.elapsed())?;
         write!(
             f,
             "recent_delivered_packet_sent_time={:?} ",
-            self.recent_delivered_packet_sent_time.elapsed().as_millis()
+            self.recent_delivered_packet_sent_time.elapsed()
         )?;
         write!(f, "is_app_limited={:?} ", self.is_app_limited)?;
 
