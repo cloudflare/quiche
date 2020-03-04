@@ -131,15 +131,15 @@ pub struct Recovery {
 
     app_limited: bool,
 
-    pub delivered: usize,
+    delivered: usize,
 
-    pub delivered_time: Option<Instant>,
+    delivered_time: Option<Instant>,
 
-    pub recent_delivered_packet_sent_time: Option<Instant>,
+    recent_delivered_packet_sent_time: Option<Instant>,
 
-    pub app_limited_at_pkt: usize,
+    app_limited_at_pkt: usize,
 
-    pub rate_sample: RateSample,
+    rate_sample: RateSample,
 }
 
 impl Recovery {
