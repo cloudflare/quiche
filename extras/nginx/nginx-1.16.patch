@@ -1,4 +1,4 @@
-From af88e1c54d0df989a8f526b761a41f918bdd8073 Mon Sep 17 00:00:00 2001
+From 8d06735158ce4108695802453cedc0129ae967d7 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 10 Oct 2019 17:06:08 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -14,7 +14,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  auto/options                            |    9 +
  src/core/ngx_connection.h               |    7 +
  src/core/ngx_core.h                     |    3 +
- src/event/ngx_event_quic.c              |  583 +++++++
+ src/event/ngx_event_quic.c              |  585 +++++++
  src/event/ngx_event_quic.h              |   49 +
  src/event/ngx_event_udp.c               |    8 +
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
@@ -31,7 +31,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3597 insertions(+), 11 deletions(-)
+ 27 files changed, 3599 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -338,10 +338,10 @@ index 93ca9174d..d0441f034 100644
  #include <ngx_module.h>
 diff --git a/src/event/ngx_event_quic.c b/src/event/ngx_event_quic.c
 new file mode 100644
-index 000000000..53ac0703c
+index 000000000..8c9f8b5be
 --- /dev/null
 +++ b/src/event/ngx_event_quic.c
-@@ -0,0 +1,583 @@
+@@ -0,0 +1,585 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -822,6 +822,8 @@ index 000000000..53ac0703c
 +        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "quic alarm fired");
 +
 +        quiche_conn_on_timeout(c->quic->conn);
++
++        ev->timedout = 0;
 +    }
 +
 +    ngx_log_debug0(NGX_LOG_DEBUG_EVENT, ev->log, 0, "quic shutdown handler");
