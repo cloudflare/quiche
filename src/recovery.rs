@@ -37,6 +37,7 @@ use crate::Result;
 
 use crate::cc;
 use crate::frame;
+use crate::minmax;
 use crate::packet;
 use crate::ranges;
 
@@ -50,6 +51,8 @@ const GRANULARITY: Duration = Duration::from_millis(1);
 const INITIAL_RTT: Duration = Duration::from_millis(500);
 
 const PERSISTENT_CONGESTION_THRESHOLD: u32 = 3;
+
+const RTT_WINDOW: Duration = Duration::from_secs(300);
 
 pub struct Sent {
     pub pkt_num: u64,
@@ -111,6 +114,8 @@ pub struct Recovery {
 
     rttvar: Duration,
 
+    minmax_filter: minmax::Minmax,
+
     min_rtt: Duration,
 
     pub max_ack_delay: Duration,
@@ -158,6 +163,8 @@ impl Recovery {
             latest_rtt: Duration::new(0, 0),
 
             smoothed_rtt: None,
+
+            minmax_filter: minmax::Minmax::new(),
 
             min_rtt: Duration::new(0, 0),
 
@@ -260,7 +267,7 @@ impl Recovery {
                     Duration::from_micros(0)
                 };
 
-                self.update_rtt(latest_rtt, ack_delay);
+                self.update_rtt(latest_rtt, ack_delay, now);
             }
         }
 
@@ -380,13 +387,15 @@ impl Recovery {
         self.rate_sample.delivery_rate
     }
 
-    fn update_rtt(&mut self, latest_rtt: Duration, ack_delay: Duration) {
+    fn update_rtt(
+        &mut self, latest_rtt: Duration, ack_delay: Duration, now: Instant,
+    ) {
         self.latest_rtt = latest_rtt;
 
         match self.smoothed_rtt {
             // First RTT sample.
             None => {
-                self.min_rtt = latest_rtt;
+                self.min_rtt = self.minmax_filter.reset(now, latest_rtt);
 
                 self.smoothed_rtt = Some(latest_rtt);
 
@@ -394,7 +403,8 @@ impl Recovery {
             },
 
             Some(srtt) => {
-                self.min_rtt = cmp::min(self.min_rtt, latest_rtt);
+                self.min_rtt =
+                    self.minmax_filter.running_min(RTT_WINDOW, now, latest_rtt);
 
                 let ack_delay = cmp::min(self.max_ack_delay, ack_delay);
 
