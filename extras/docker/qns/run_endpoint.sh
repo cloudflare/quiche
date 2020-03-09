@@ -24,12 +24,21 @@ check_testcase () {
     TESTNAME=$1
 
     case $1 in
-    handshake | resumption | multiconnect | http3 )
+    handshake | multiconnect | http3 )
         echo "supported"
         ;;
     transfer )
         echo "supported"
         RUST_LOG="info"
+        ;;
+    resumption )
+        if [ "$ROLE" == "client" ]; then
+            # We don't support session resumption on the client-side yet.
+            echo "unsupported"
+            exit 127
+        elif [ "$ROLE" == "server" ]; then
+            echo "supported"
+        fi
         ;;
     retry )
         echo "supported"
