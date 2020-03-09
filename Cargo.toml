@@ -67,7 +67,7 @@ lazy_static = "1"
 winapi = { version = "0.3", features = ["wincrypt"] }
 
 [dev-dependencies]
-mio = "0.6"
+mio = "0.7"
 url = "1"
 
 [profile.bench]
