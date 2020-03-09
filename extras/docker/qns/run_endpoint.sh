@@ -31,7 +31,7 @@ check_testcase () {
         echo "supported"
         RUST_LOG="info"
         ;;
-    resumption )
+    resumption | zerortt )
         if [ "$ROLE" == "client" ]; then
             # We don't support session resumption on the client-side yet.
             echo "unsupported"
