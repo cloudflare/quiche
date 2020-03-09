@@ -1626,23 +1626,7 @@ impl Connection {
             self.do_handshake()?;
         }
 
-        // Use max_packet_size as sent by the peer, except during the handshake
-        // when we haven't parsed transport parameters yet, so use a default
-        // value then.
-        let max_pkt_len = if self.is_established() {
-            // We cap the maximum packet size to 16KB or so, so that it can be
-            // always encoded with a 2-byte varint.
-            cmp::min(16383, self.peer_transport_params.max_packet_size) as usize
-        } else {
-            // Allow for 1200 bytes (minimum QUIC packet size) during the
-            // handshake.
-            1200
-        };
-
-        // Cap output buffer to respect peer's max_packet_size limit.
-        let avail = cmp::min(max_pkt_len, out.len());
-
-        let mut b = octets::Octets::with_slice(&mut out[..avail]);
+        let mut b = octets::Octets::with_slice(out);
 
         let epoch = self.write_epoch()?;
 
@@ -1690,8 +1674,26 @@ impl Connection {
             }
         }
 
-        // Calculate available space in the packet based on congestion window.
-        let mut left = cmp::min(self.recovery.cwnd_available(), b.cap());
+        let mut left = b.cap();
+
+        // Use max_packet_size as sent by the peer, except during the handshake
+        // when we haven't parsed transport parameters yet, so use a default
+        // value then.
+        let max_pkt_len = if self.is_established() {
+            // We cap the maximum packet size to 16KB or so, so that it can be
+            // always encoded with a 2-byte varint.
+            cmp::min(16383, self.peer_transport_params.max_packet_size) as usize
+        } else {
+            // Allow for 1200 bytes (minimum QUIC packet size) during the
+            // handshake.
+            1200
+        };
+
+        // Limit output packet size to respect peer's max_packet_size limit.
+        left = cmp::min(left, max_pkt_len);
+
+        // Limit output packet size by congestion window size.
+        left = cmp::min(left, self.recovery.cwnd_available());
 
         // Limit data sent by the server based on the amount of data received
         // from the client before its address is validated.
