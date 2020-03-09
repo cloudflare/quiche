@@ -38,6 +38,7 @@ check_testcase () {
             exit 127
         elif [ "$ROLE" == "server" ]; then
             echo "supported"
+            QUICHE_SERVER_OPT="$QUICHE_SERVER_OPT --early-data"
         fi
         ;;
     retry )
