@@ -1712,10 +1712,27 @@ impl Connection {
             ty: pkt_type,
             version: self.version,
             dcid: self.dcid.clone(),
-            scid: self.scid.clone(),
+
+            // Don't needlessly clone the source connection ID for 1-RTT packets
+            // as it is not used.
+            scid: if pkt_type != packet::Type::Short {
+                self.scid.clone()
+            } else {
+                Vec::new()
+            },
+
             pkt_num: 0,
             pkt_num_len: pn_len,
-            token: self.token.clone(),
+
+            // Only clone token for Initial packets, as other packets don't have
+            // this field (Retry doesn't count, as it's not encoded as part of
+            // this code path).
+            token: if pkt_type == packet::Type::Initial {
+                self.token.clone()
+            } else {
+                None
+            },
+
             versions: None,
             key_phase: false,
         };
