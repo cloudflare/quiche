@@ -977,6 +977,26 @@ pub fn version_is_supported(version: u32) -> bool {
     }
 }
 
+/// Pushes a frame to the output packet if there is enough space.
+///
+/// Returns `true` on success, `false` otherwise. In case of failure it means
+/// there is no room to add the frame in the packet. You may retry to add the
+/// frame later.
+macro_rules! push_frame_to_pkt {
+    ($frames:expr, $frame:expr, $payload_len: expr, $left:expr) => {{
+        if $frame.wire_len() <= $left {
+            $payload_len += $frame.wire_len();
+            $left -= $frame.wire_len();
+
+            $frames.push($frame);
+
+            true
+        } else {
+            false
+        }
+    }};
+}
+
 impl Connection {
     fn new(
         scid: &[u8], odcid: Option<&[u8]>, config: &mut Config, is_server: bool,
@@ -1772,13 +1792,8 @@ impl Connection {
                 ranges: self.pkt_num_spaces[epoch].recv_pkt_need_ack.clone(),
             };
 
-            if frame.wire_len() <= left {
+            if push_frame_to_pkt!(frames, frame, payload_len, left) {
                 self.pkt_num_spaces[epoch].ack_elicited = false;
-
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
-
-                frames.push(frame);
             }
         }
 
@@ -1791,40 +1806,37 @@ impl Connection {
             {
                 let frame = frame::Frame::HandshakeDone;
 
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
-
-                frames.push(frame);
-
-                self.handshake_done_sent = true;
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    self.handshake_done_sent = true;
+                }
             }
 
             // Create MAX_STREAMS_BIDI frame.
             if self.streams.should_update_max_streams_bidi() {
-                let max = self.streams.update_max_streams_bidi();
-                let frame = frame::Frame::MaxStreamsBidi { max };
+                let frame = frame::Frame::MaxStreamsBidi {
+                    max: self.streams.max_streams_bidi_next(),
+                };
 
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    self.streams.update_max_streams_bidi();
 
-                frames.push(frame);
-
-                ack_eliciting = true;
-                in_flight = true;
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
             }
 
             // Create MAX_STREAMS_UNI frame.
             if self.streams.should_update_max_streams_uni() {
-                let max = self.streams.update_max_streams_uni();
-                let frame = frame::Frame::MaxStreamsUni { max };
+                let frame = frame::Frame::MaxStreamsUni {
+                    max: self.streams.max_streams_uni_next(),
+                };
 
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    self.streams.update_max_streams_uni();
 
-                frames.push(frame);
-
-                ack_eliciting = true;
-                in_flight = true;
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
             }
 
             // Create MAX_DATA frame as needed.
@@ -1833,13 +1845,8 @@ impl Connection {
                     max: self.max_rx_data_next,
                 };
 
-                if frame.wire_len() <= left {
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
                     self.max_rx_data = self.max_rx_data_next;
-
-                    payload_len += frame.wire_len();
-                    left -= frame.wire_len();
-
-                    frames.push(frame);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -1861,22 +1868,17 @@ impl Connection {
 
                 let frame = frame::Frame::MaxStreamData {
                     stream_id,
-                    max: stream.recv.update_max_data() as u64,
+                    max: stream.recv.max_data_next(),
                 };
 
-                self.streams.mark_almost_full(stream_id, false);
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    stream.recv.update_max_data();
 
-                if frame.wire_len() > left {
-                    break;
+                    self.streams.mark_almost_full(stream_id, false);
+
+                    ack_eliciting = true;
+                    in_flight = true;
                 }
-
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
-
-                frames.push(frame);
-
-                ack_eliciting = true;
-                in_flight = true;
             }
         }
 
@@ -1888,15 +1890,12 @@ impl Connection {
                 reason: Vec::new(),
             };
 
-            payload_len += frame.wire_len();
-            left -= frame.wire_len();
+            if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                self.draining_timer = Some(now + (self.recovery.pto() * 3));
 
-            frames.push(frame);
-
-            self.draining_timer = Some(now + (self.recovery.pto() * 3));
-
-            ack_eliciting = true;
-            in_flight = true;
+                ack_eliciting = true;
+                in_flight = true;
+            }
         }
 
         // Create APPLICATION_CLOSE frame.
@@ -1907,15 +1906,12 @@ impl Connection {
                     reason: self.app_reason.clone(),
                 };
 
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    self.draining_timer = Some(now + (self.recovery.pto() * 3));
 
-                frames.push(frame);
-
-                self.draining_timer = Some(now + (self.recovery.pto() * 3));
-
-                ack_eliciting = true;
-                in_flight = true;
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
             }
         }
 
@@ -1925,12 +1921,7 @@ impl Connection {
                 data: challenge.clone(),
             };
 
-            if left > frame.wire_len() {
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
-
-                frames.push(frame);
-
+            if push_frame_to_pkt!(frames, frame, payload_len, left) {
                 self.challenge = None;
 
                 ack_eliciting = true;
@@ -1951,13 +1942,10 @@ impl Connection {
 
             let frame = frame::Frame::Crypto { data: crypto_buf };
 
-            payload_len += frame.wire_len();
-            left -= frame.wire_len();
-
-            frames.push(frame);
-
-            ack_eliciting = true;
-            in_flight = true;
+            if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                ack_eliciting = true;
+                in_flight = true;
+            }
         }
 
         // Create a single STREAM frame for the first stream that is flushable.
@@ -1999,13 +1987,10 @@ impl Connection {
                     data: stream_buf,
                 };
 
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
-
-                frames.push(frame);
-
-                ack_eliciting = true;
-                in_flight = true;
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
 
                 // If the stream is still flushable, push it to the back of the
                 // queue again.
@@ -2032,13 +2017,10 @@ impl Connection {
         {
             let frame = frame::Frame::Ping;
 
-            payload_len += frame.wire_len();
-            left -= frame.wire_len();
-
-            frames.push(frame);
-
-            ack_eliciting = true;
-            in_flight = true;
+            if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                ack_eliciting = true;
+                in_flight = true;
+            }
         }
 
         if ack_eliciting {

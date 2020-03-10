@@ -299,15 +299,23 @@ impl StreamMap {
         self.peer_max_streams_uni = cmp::max(self.peer_max_streams_uni, v);
     }
 
-    /// Commits the new max_streams_bidi limit and returns it.
-    pub fn update_max_streams_bidi(&mut self) -> u64 {
+    /// Commits the new max_streams_bidi limit.
+    pub fn update_max_streams_bidi(&mut self) {
         self.local_max_streams_bidi = self.local_max_streams_bidi_next;
+    }
+
+    /// Returns the new max_streams_bidi limit.
+    pub fn max_streams_bidi_next(&mut self) -> u64 {
         self.local_max_streams_bidi_next
     }
 
-    /// Commits the new max_streams_uni limit and returns it.
-    pub fn update_max_streams_uni(&mut self) -> u64 {
+    /// Commits the new max_streams_uni limit.
+    pub fn update_max_streams_uni(&mut self) {
         self.local_max_streams_uni = self.local_max_streams_uni_next;
+    }
+
+    /// Returns the new max_streams_uni limit.
+    pub fn max_streams_uni_next(&mut self) -> u64 {
         self.local_max_streams_uni_next
     }
 
@@ -711,11 +719,14 @@ impl RecvBuf {
         Ok((final_size - self.len) as usize)
     }
 
-    /// Commits the new max_data limit and returns it.
-    pub fn update_max_data(&mut self) -> u64 {
+    /// Commits the new max_data limit.
+    pub fn update_max_data(&mut self) {
         self.max_data = self.max_data_next;
+    }
 
-        self.max_data
+    /// Return the new max_data limit.
+    pub fn max_data_next(&mut self) -> u64 {
+        self.max_data_next
     }
 
     /// Shuts down receiving data.
@@ -1881,7 +1892,8 @@ mod tests {
 
         assert!(stream.recv.almost_full());
 
-        assert_eq!(stream.recv.update_max_data(), 25);
+        stream.recv.update_max_data();
+        assert_eq!(stream.recv.max_data_next(), 25);
         assert!(!stream.recv.almost_full());
 
         let third = RangeBuf::from(b"something", 10, false);
