@@ -274,11 +274,12 @@ use std::str::FromStr;
 pub use crate::cc::Algorithm as CongestionControlAlgorithm;
 
 /// The current QUIC wire version.
-pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_DRAFT25;
+pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_DRAFT27;
 
 /// Supported QUIC versions.
 ///
 /// Note that the older ones might not be fully supported.
+const PROTOCOL_VERSION_DRAFT27: u32 = 0xff00_001b;
 const PROTOCOL_VERSION_DRAFT25: u32 = 0xff00_0019;
 const PROTOCOL_VERSION_DRAFT24: u32 = 0xff00_0018;
 const PROTOCOL_VERSION_DRAFT23: u32 = 0xff00_0017;
@@ -799,8 +800,8 @@ pub struct Connection {
     /// Whether the peer's address has been verified.
     verified_peer_address: bool,
 
-    /// Whether the connection handshake has completed.
-    handshake_completed: bool,
+    /// Whether the peer's transport parameters were parsed.
+    parsed_peer_transport_params: bool,
 
     /// Whether the HANDSHAKE_DONE has been sent.
     handshake_done_sent: bool,
@@ -967,12 +968,33 @@ pub fn retry(
 /// Returns true if the given protocol version is supported.
 pub fn version_is_supported(version: u32) -> bool {
     match version {
-        PROTOCOL_VERSION |
+        PROTOCOL_VERSION_DRAFT27 |
+        PROTOCOL_VERSION_DRAFT25 |
         PROTOCOL_VERSION_DRAFT24 |
         PROTOCOL_VERSION_DRAFT23 => true,
 
         _ => false,
     }
+}
+
+/// Pushes a frame to the output packet if there is enough space.
+///
+/// Returns `true` on success, `false` otherwise. In case of failure it means
+/// there is no room to add the frame in the packet. You may retry to add the
+/// frame later.
+macro_rules! push_frame_to_pkt {
+    ($frames:expr, $frame:expr, $payload_len: expr, $left:expr) => {{
+        if $frame.wire_len() <= $left {
+            $payload_len += $frame.wire_len();
+            $left -= $frame.wire_len();
+
+            $frames.push($frame);
+
+            true
+        } else {
+            false
+        }
+    }};
 }
 
 impl Connection {
@@ -1061,7 +1083,7 @@ impl Connection {
             // If we did stateless retry assume the peer's address is verified.
             verified_peer_address: odcid.is_some(),
 
-            handshake_completed: false,
+            parsed_peer_transport_params: false,
 
             handshake_done_sent: false,
 
@@ -1188,7 +1210,7 @@ impl Connection {
         let now = time::Instant::now();
 
         if buf.is_empty() {
-            return Err(Error::BufferTooShort);
+            return Err(Error::Done);
         }
 
         if self.draining_timer.is_some() {
@@ -1203,7 +1225,8 @@ impl Connection {
 
         let mut b = octets::Octets::with_slice(buf);
 
-        let mut hdr = Header::from_bytes(&mut b, self.scid.len())?;
+        let mut hdr = Header::from_bytes(&mut b, self.scid.len())
+            .map_err(|e| drop_pkt_on_err(e, self.recv_count, &self.trace_id))?;
 
         if hdr.ty == packet::Type::VersionNegotiation {
             // Version negotiation packets can only be sent by the server.
@@ -1226,25 +1249,23 @@ impl Connection {
 
             trace!("{} rx pkt {:?}", self.trace_id, hdr);
 
-            let versions = match hdr.versions {
-                Some(ref v) => v,
-                None => return Err(Error::InvalidPacket),
+            let versions = hdr.versions.ok_or(Error::Done)?;
+
+            match versions.iter().filter(|v| version_is_supported(**v)).max() {
+                Some(v) => self.version = *v,
+
+                None => {
+                    // We don't support any of the versions offered.
+                    //
+                    // While a man-in-the-middle attacker might be able to
+                    // inject a version negotiation packet that triggers this
+                    // failure, the window of opportunity is very small and
+                    // this error is quite useful for debugging, so don't just
+                    // ignore the packet.
+                    return Err(Error::UnknownVersion);
+                },
             };
 
-            let mut new_version = 0;
-            for v in versions.iter() {
-                if version_is_supported(*v) {
-                    new_version = *v;
-                    break;
-                }
-            }
-
-            // We don't support any of the versions offered.
-            if new_version == 0 {
-                return Err(Error::UnknownVersion);
-            }
-
-            self.version = new_version;
             self.did_version_negotiation = true;
 
             // Reset connection state to force sending another Initial packet.
@@ -1252,6 +1273,19 @@ impl Connection {
             self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
             self.handshake.clear()?;
+
+            // Encode transport parameters again, as the new version might be
+            // using a different format.
+            let mut raw_params = [0; 128];
+
+            let raw_params = TransportParams::encode(
+                &self.local_transport_params,
+                self.version,
+                self.is_server,
+                &mut raw_params,
+            )?;
+
+            self.handshake.set_quic_transport_params(raw_params)?;
 
             return Err(Error::Done);
         }
@@ -1317,10 +1351,25 @@ impl Connection {
 
             self.version = hdr.version;
             self.did_version_negotiation = true;
+
+            // Encode transport parameters again, as the new version might be
+            // using a different format.
+            let mut raw_params = [0; 128];
+
+            let raw_params = TransportParams::encode(
+                &self.local_transport_params,
+                self.version,
+                self.is_server,
+                &mut raw_params,
+            )?;
+
+            self.handshake.set_quic_transport_params(raw_params)?;
         }
 
         if hdr.ty != packet::Type::Short && hdr.version != self.version {
-            return Err(Error::UnknownVersion);
+            // At this point version negotiation was already performed, so
+            // ignore packets that don't match the connection's version.
+            return Err(Error::Done);
         }
 
         // Long header packets have an explicit payload length, but short
@@ -1332,7 +1381,8 @@ impl Connection {
         };
 
         if b.cap() < payload_len {
-            return Err(Error::BufferTooShort);
+            trace!("{} payload length mismatch", self.trace_id);
+            return Err(Error::Done);
         }
 
         let header_len = b.off();
@@ -1365,6 +1415,7 @@ impl Connection {
         // Select packet number space epoch based on the received packet's type.
         let epoch = hdr.ty.to_epoch()?;
 
+        // TODO: somehow deal with re-ordered 0-RTT data.
         let aead = if hdr.ty == packet::Type::ZeroRTT &&
             self.pkt_num_spaces[epoch].crypto_0rtt_open.is_some()
         {
@@ -1399,7 +1450,8 @@ impl Connection {
 
         let aead_tag_len = aead.alg().tag_len();
 
-        packet::decrypt_hdr(&mut b, &mut hdr, &aead)?;
+        packet::decrypt_hdr(&mut b, &mut hdr, &aead)
+            .map_err(|e| drop_pkt_on_err(e, self.recv_count, &self.trace_id))?;
 
         let pn = packet::decode_pkt_num(
             self.pkt_num_spaces[epoch].largest_rx_pkt_num,
@@ -1418,30 +1470,9 @@ impl Connection {
         );
 
         let mut payload =
-            match packet::decrypt_pkt(&mut b, pn, pn_len, payload_len, &aead) {
-                Ok(v) => v,
-
-                Err(e) => {
-                    // Ignore packets that fail decryption, but only if we have
-                    // successfully processed at least another packet for the
-                    // connection. This way we can avoid closing the connection
-                    // when junk is injected, but we don't keep a connection
-                    // alive in case we only received junk.
-
-                    if self.recv_count == 0 {
-                        return Err(e);
-                    }
-
-                    trace!(
-                        "{} dropped undecryptable packet type={:?} len={}",
-                        self.trace_id,
-                        hdr.ty,
-                        payload_len
-                    );
-
-                    return Err(Error::Done);
-                },
-            };
+            packet::decrypt_pkt(&mut b, pn, pn_len, payload_len, &aead).map_err(
+                |e| drop_pkt_on_err(e, self.recv_count, &self.trace_id),
+            )?;
 
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
@@ -1615,23 +1646,7 @@ impl Connection {
             self.do_handshake()?;
         }
 
-        // Use max_packet_size as sent by the peer, except during the handshake
-        // when we haven't parsed transport parameters yet, so use a default
-        // value then.
-        let max_pkt_len = if self.handshake_completed {
-            // We cap the maximum packet size to 16KB or so, so that it can be
-            // always encoded with a 2-byte varint.
-            cmp::min(16383, self.peer_transport_params.max_packet_size) as usize
-        } else {
-            // Allow for 1200 bytes (minimum QUIC packet size) during the
-            // handshake.
-            1200
-        };
-
-        // Cap output buffer to respect peer's max_packet_size limit.
-        let avail = cmp::min(max_pkt_len, out.len());
-
-        let mut b = octets::Octets::with_slice(&mut out[..avail]);
+        let mut b = octets::Octets::with_slice(out);
 
         let epoch = self.write_epoch()?;
 
@@ -1650,11 +1665,6 @@ impl Connection {
 
                         None => continue,
                     };
-
-                    // TODO: due to a packet loss edge case the following could
-                    // go negative, though it's not clear why, so will need to
-                    // figure it out.
-                    self.tx_data = self.tx_data.saturating_sub(data.len() as u64);
 
                     let was_flushable = stream.is_flushable();
 
@@ -1684,8 +1694,26 @@ impl Connection {
             }
         }
 
-        // Calculate available space in the packet based on congestion window.
-        let mut left = cmp::min(self.recovery.cwnd_available(), b.cap());
+        let mut left = b.cap();
+
+        // Use max_packet_size as sent by the peer, except during the handshake
+        // when we haven't parsed transport parameters yet, so use a default
+        // value then.
+        let max_pkt_len = if self.is_established() {
+            // We cap the maximum packet size to 16KB or so, so that it can be
+            // always encoded with a 2-byte varint.
+            cmp::min(16383, self.peer_transport_params.max_packet_size) as usize
+        } else {
+            // Allow for 1200 bytes (minimum QUIC packet size) during the
+            // handshake.
+            1200
+        };
+
+        // Limit output packet size to respect peer's max_packet_size limit.
+        left = cmp::min(left, max_pkt_len);
+
+        // Limit output packet size by congestion window size.
+        left = cmp::min(left, self.recovery.cwnd_available());
 
         // Limit data sent by the server based on the amount of data received
         // from the client before its address is validated.
@@ -1704,10 +1732,27 @@ impl Connection {
             ty: pkt_type,
             version: self.version,
             dcid: self.dcid.clone(),
-            scid: self.scid.clone(),
+
+            // Don't needlessly clone the source connection ID for 1-RTT packets
+            // as it is not used.
+            scid: if pkt_type != packet::Type::Short {
+                self.scid.clone()
+            } else {
+                Vec::new()
+            },
+
             pkt_num: 0,
             pkt_num_len: pn_len,
-            token: self.token.clone(),
+
+            // Only clone token for Initial packets, as other packets don't have
+            // this field (Retry doesn't count, as it's not encoded as part of
+            // this code path).
+            token: if pkt_type == packet::Type::Initial {
+                self.token.clone()
+            } else {
+                None
+            },
+
             versions: None,
             key_phase: false,
         };
@@ -1747,59 +1792,54 @@ impl Connection {
                 ranges: self.pkt_num_spaces[epoch].recv_pkt_need_ack.clone(),
             };
 
-            if frame.wire_len() <= left {
+            if push_frame_to_pkt!(frames, frame, payload_len, left) {
                 self.pkt_num_spaces[epoch].ack_elicited = false;
-
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
-
-                frames.push(frame);
             }
         }
 
         if pkt_type == packet::Type::Short && !is_closing {
             // Create HANDSHAKE_DONE frame.
-            if self.handshake_completed &&
+            if self.is_established() &&
                 !self.handshake_done_sent &&
                 self.is_server &&
                 self.version >= PROTOCOL_VERSION_DRAFT25
             {
                 let frame = frame::Frame::HandshakeDone;
 
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    self.handshake_done_sent = true;
 
-                frames.push(frame);
-
-                self.handshake_done_sent = true;
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
             }
 
             // Create MAX_STREAMS_BIDI frame.
             if self.streams.should_update_max_streams_bidi() {
-                let max = self.streams.update_max_streams_bidi();
-                let frame = frame::Frame::MaxStreamsBidi { max };
+                let frame = frame::Frame::MaxStreamsBidi {
+                    max: self.streams.max_streams_bidi_next(),
+                };
 
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    self.streams.update_max_streams_bidi();
 
-                frames.push(frame);
-
-                ack_eliciting = true;
-                in_flight = true;
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
             }
 
             // Create MAX_STREAMS_UNI frame.
             if self.streams.should_update_max_streams_uni() {
-                let max = self.streams.update_max_streams_uni();
-                let frame = frame::Frame::MaxStreamsUni { max };
+                let frame = frame::Frame::MaxStreamsUni {
+                    max: self.streams.max_streams_uni_next(),
+                };
 
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    self.streams.update_max_streams_uni();
 
-                frames.push(frame);
-
-                ack_eliciting = true;
-                in_flight = true;
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
             }
 
             // Create MAX_DATA frame as needed.
@@ -1808,13 +1848,8 @@ impl Connection {
                     max: self.max_rx_data_next,
                 };
 
-                if frame.wire_len() <= left {
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
                     self.max_rx_data = self.max_rx_data_next;
-
-                    payload_len += frame.wire_len();
-                    left -= frame.wire_len();
-
-                    frames.push(frame);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -1836,22 +1871,17 @@ impl Connection {
 
                 let frame = frame::Frame::MaxStreamData {
                     stream_id,
-                    max: stream.recv.update_max_data() as u64,
+                    max: stream.recv.max_data_next(),
                 };
 
-                self.streams.mark_almost_full(stream_id, false);
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    stream.recv.update_max_data();
 
-                if frame.wire_len() > left {
-                    break;
+                    self.streams.mark_almost_full(stream_id, false);
+
+                    ack_eliciting = true;
+                    in_flight = true;
                 }
-
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
-
-                frames.push(frame);
-
-                ack_eliciting = true;
-                in_flight = true;
             }
         }
 
@@ -1863,15 +1893,12 @@ impl Connection {
                 reason: Vec::new(),
             };
 
-            payload_len += frame.wire_len();
-            left -= frame.wire_len();
+            if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                self.draining_timer = Some(now + (self.recovery.pto() * 3));
 
-            frames.push(frame);
-
-            self.draining_timer = Some(now + (self.recovery.pto() * 3));
-
-            ack_eliciting = true;
-            in_flight = true;
+                ack_eliciting = true;
+                in_flight = true;
+            }
         }
 
         // Create APPLICATION_CLOSE frame.
@@ -1882,15 +1909,12 @@ impl Connection {
                     reason: self.app_reason.clone(),
                 };
 
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    self.draining_timer = Some(now + (self.recovery.pto() * 3));
 
-                frames.push(frame);
-
-                self.draining_timer = Some(now + (self.recovery.pto() * 3));
-
-                ack_eliciting = true;
-                in_flight = true;
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
             }
         }
 
@@ -1900,12 +1924,7 @@ impl Connection {
                 data: challenge.clone(),
             };
 
-            if left > frame.wire_len() {
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
-
-                frames.push(frame);
-
+            if push_frame_to_pkt!(frames, frame, payload_len, left) {
                 self.challenge = None;
 
                 ack_eliciting = true;
@@ -1926,18 +1945,14 @@ impl Connection {
 
             let frame = frame::Frame::Crypto { data: crypto_buf };
 
-            payload_len += frame.wire_len();
-            left -= frame.wire_len();
-
-            frames.push(frame);
-
-            ack_eliciting = true;
-            in_flight = true;
+            if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                ack_eliciting = true;
+                in_flight = true;
+            }
         }
 
         // Create a single STREAM frame for the first stream that is flushable.
         if pkt_type == packet::Type::Short &&
-            self.max_tx_data > self.tx_data &&
             left > frame::MAX_STREAM_OVERHEAD &&
             !is_closing
         {
@@ -1948,10 +1963,6 @@ impl Connection {
                     None => continue,
                 };
 
-                // Make sure we can fit the data in the packet.
-                let max_len =
-                    cmp::min(left, (self.max_tx_data - self.tx_data) as usize);
-
                 let off = stream.send.off();
 
                 // Try to accurately account for the STREAM frame's overhead,
@@ -1960,9 +1971,9 @@ impl Connection {
                 let overhead = 1 +
                     octets::varint_len(stream_id) +
                     octets::varint_len(off) +
-                    octets::varint_len(max_len as u64);
+                    octets::varint_len(left as u64);
 
-                let max_len = match max_len.checked_sub(overhead) {
+                let max_len = match left.checked_sub(overhead) {
                     Some(v) => v,
 
                     None => continue,
@@ -1974,25 +1985,27 @@ impl Connection {
                     continue;
                 }
 
-                self.tx_data += stream_buf.len() as u64;
-
                 let frame = frame::Frame::Stream {
                     stream_id,
                     data: stream_buf,
                 };
 
-                payload_len += frame.wire_len();
-                left -= frame.wire_len();
-
-                frames.push(frame);
-
-                ack_eliciting = true;
-                in_flight = true;
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
 
                 // If the stream is still flushable, push it to the back of the
                 // queue again.
                 if stream.is_flushable() {
                     self.streams.push_flushable(stream_id);
+                }
+
+                // When fuzzing, try to coalesce multiple STREAM frames in the
+                // same packet, so it's easier to generate fuzz corpora.
+                if cfg!(feature = "fuzzing") && left > frame::MAX_STREAM_OVERHEAD
+                {
+                    continue;
                 }
 
                 break;
@@ -2007,13 +2020,10 @@ impl Connection {
         {
             let frame = frame::Frame::Ping;
 
-            payload_len += frame.wire_len();
-            left -= frame.wire_len();
-
-            frames.push(frame);
-
-            ack_eliciting = true;
-            in_flight = true;
+            if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                ack_eliciting = true;
+                in_flight = true;
+            }
         }
 
         if ack_eliciting {
@@ -2101,12 +2111,16 @@ impl Connection {
             size: if ack_eliciting { written } else { 0 },
             ack_eliciting,
             in_flight,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
         };
 
         self.recovery.on_packet_sent(
             sent_pkt,
             epoch,
-            self.handshake_completed,
+            self.is_established(),
             now,
             &self.trace_id,
         );
@@ -2215,6 +2229,11 @@ impl Connection {
     /// up to the amount that the peer allows it to send (that is, up to the
     /// stream's outgoing flow control capacity).
     ///
+    /// This means that the number of written bytes returned can be lower than
+    /// the length of the input buffer when the stream doesn't have enough
+    /// capacity for the operation to complete. The application should retry the
+    /// operation once the stream is reported as writable again.
+    ///
     /// [`Done`]: enum.Error.html#variant.Done
     ///
     /// ## Examples:
@@ -2238,6 +2257,16 @@ impl Connection {
         {
             return Err(Error::InvalidStreamState);
         }
+
+        // Truncate the input buffer based on the connection's send capacity if
+        // necessary.
+        let cap = self.send_capacity();
+
+        let (buf, fin) = if cap < buf.len() {
+            (&buf[..cap], false)
+        } else {
+            (buf, fin)
+        };
 
         // Get existing stream or create a new one.
         let stream = self.get_or_create_stream(stream_id, true)?;
@@ -2264,6 +2293,10 @@ impl Connection {
         if !writable {
             self.streams.mark_writable(stream_id, false);
         }
+
+        self.tx_data += sent as u64;
+
+        self.recovery.rate_check_app_limited();
 
         Ok(sent)
     }
@@ -2312,10 +2345,11 @@ impl Connection {
         Ok(())
     }
 
-    /// Returns the stream's outgoing flow control capacity in bytes.
+    /// Returns the stream's send capacity in bytes.
     pub fn stream_capacity(&self, stream_id: u64) -> Result<usize> {
         if let Some(stream) = self.streams.get(stream_id) {
-            return Ok(stream.send.cap());
+            let cap = cmp::min(self.send_capacity(), stream.send.cap());
+            return Ok(cap);
         };
 
         Err(Error::InvalidStreamState)
@@ -2525,7 +2559,7 @@ impl Connection {
                 trace!("{} loss detection timeout expired", self.trace_id);
 
                 self.recovery.on_loss_detection_timeout(
-                    self.handshake_completed,
+                    self.is_established(),
                     now,
                     &self.trace_id,
                 );
@@ -2592,7 +2626,7 @@ impl Connection {
 
     /// Returns true if the connection handshake is complete.
     pub fn is_established(&self) -> bool {
-        self.handshake_completed
+        self.handshake.is_completed()
     }
 
     /// Returns true if the connection is resumed.
@@ -2621,6 +2655,7 @@ impl Connection {
             lost: self.recovery.lost_count,
             cwnd: self.recovery.cc.cwnd(),
             rtt: self.recovery.rtt(),
+            delivery_rate: self.recovery.delivery_rate(),
         }
     }
 
@@ -2628,57 +2663,62 @@ impl Connection {
     ///
     /// If the connection is already established, it does nothing.
     fn do_handshake(&mut self) -> Result<()> {
-        if !self.handshake_completed {
-            match self.handshake.do_handshake() {
-                Ok(_) => {
-                    if self.application_proto().is_empty() {
-                        // Send no_application_proto TLS alert when no protocol
-                        // can be negotiated.
-                        self.error = Some(0x178);
-                        return Err(Error::TlsFail);
-                    }
+        // Handshake is already complete, there's nothing to do.
+        if self.is_established() {
+            return Ok(());
+        }
 
-                    // Handshake is complete!
-                    self.handshake_completed = true;
+        match self.handshake.do_handshake() {
+            Ok(_) => (),
 
-                    let mut raw_params =
-                        self.handshake.quic_transport_params().to_vec();
+            Err(Error::Done) => return Ok(()),
 
-                    let peer_params =
-                        TransportParams::decode(&mut raw_params, self.is_server)?;
+            Err(e) => return Err(e),
+        };
 
-                    if peer_params.original_connection_id != self.odcid {
-                        return Err(Error::InvalidTransportParam);
-                    }
+        if self.application_proto().is_empty() {
+            // Send no_application_proto TLS alert when no protocol
+            // can be negotiated.
+            self.error = Some(0x178);
+            return Err(Error::TlsFail);
+        }
 
-                    self.max_tx_data = peer_params.initial_max_data;
+        if !self.parsed_peer_transport_params {
+            let mut raw_params = self.handshake.quic_transport_params().to_vec();
 
-                    self.streams.update_peer_max_streams_bidi(
-                        peer_params.initial_max_streams_bidi,
-                    );
-                    self.streams.update_peer_max_streams_uni(
-                        peer_params.initial_max_streams_uni,
-                    );
+            let peer_params = TransportParams::decode(
+                &mut raw_params,
+                self.version,
+                self.is_server,
+            )?;
 
-                    self.recovery.max_ack_delay =
-                        time::Duration::from_millis(peer_params.max_ack_delay);
-
-                    self.peer_transport_params = peer_params;
-
-                    trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
-                           &self.trace_id,
-                           std::str::from_utf8(self.application_proto()),
-                           self.handshake.cipher(),
-                           self.handshake.curve(),
-                           self.handshake.sigalg(),
-                           self.is_resumed(),
-                           self.peer_transport_params);
-                },
-
-                Err(Error::Done) => (),
-
-                Err(e) => return Err(e),
+            if peer_params.original_connection_id != self.odcid {
+                return Err(Error::InvalidTransportParam);
             }
+
+            self.max_tx_data = peer_params.initial_max_data;
+
+            self.streams.update_peer_max_streams_bidi(
+                peer_params.initial_max_streams_bidi,
+            );
+            self.streams
+                .update_peer_max_streams_uni(peer_params.initial_max_streams_uni);
+
+            self.recovery.max_ack_delay =
+                time::Duration::from_millis(peer_params.max_ack_delay);
+
+            self.peer_transport_params = peer_params;
+
+            self.parsed_peer_transport_params = true;
+
+            trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
+                   &self.trace_id,
+                   std::str::from_utf8(self.application_proto()),
+                   self.handshake.cipher(),
+                   self.handshake.curve(),
+                   self.handshake.sigalg(),
+                   self.is_resumed(),
+                   self.peer_transport_params);
         }
 
         Ok(())
@@ -2696,7 +2736,7 @@ impl Connection {
                 crypto::Level::OneRTT => packet::EPOCH_APPLICATION,
             };
 
-            if epoch == packet::EPOCH_APPLICATION && !self.handshake_completed {
+            if epoch == packet::EPOCH_APPLICATION && !self.is_established() {
                 // Downgrade the epoch to handshake as the handshake is not
                 // completed yet.
                 return Ok(packet::EPOCH_HANDSHAKE);
@@ -2707,7 +2747,7 @@ impl Connection {
 
         for epoch in packet::EPOCH_INITIAL..packet::EPOCH_COUNT {
             // Only send 1-RTT packets when handshake is complete.
-            if epoch == packet::EPOCH_APPLICATION && !self.handshake_completed {
+            if epoch == packet::EPOCH_APPLICATION && !self.is_established() {
                 continue;
             }
 
@@ -2728,7 +2768,7 @@ impl Connection {
         }
 
         // If there are flushable streams, use Application.
-        if self.handshake_completed &&
+        if self.is_established() &&
             (self.should_update_max_data() ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
@@ -2777,15 +2817,14 @@ impl Connection {
                     &ranges,
                     ack_delay,
                     epoch,
-                    self.handshake_completed,
+                    self.is_established(),
                     now,
                     &self.trace_id,
                 )?;
 
                 // When we receive an ACK for a 1-RTT packet after handshake
                 // completion, it means the handshake has been confirmed.
-                if epoch == packet::EPOCH_APPLICATION && self.handshake_completed
-                {
+                if epoch == packet::EPOCH_APPLICATION && self.is_established() {
                     self.handshake_confirmed = true;
 
                     // Once the handshake is confirmed, we can drop Handshake
@@ -2806,8 +2845,23 @@ impl Connection {
                     return Err(Error::InvalidStreamState);
                 }
 
-                // Get existing stream or create a new one.
-                let stream = self.get_or_create_stream(stream_id, false)?;
+                // Get existing stream or create a new one, but if the stream
+                // has already been closed and collected, ignore the frame.
+                //
+                // This can happen if e.g. an ACK frame is lost, and the peer
+                // retransmits another frame before it realizes that the stream
+                // is gone.
+                //
+                // Note that it makes it impossible to check if the frame is
+                // illegal, since we have no state, but since we ignore the
+                // frame, it should be fine.
+                let stream = match self.get_or_create_stream(stream_id, false) {
+                    Ok(v) => v,
+
+                    Err(Error::Done) => return Ok(()),
+
+                    Err(e) => return Err(e),
+                };
 
                 self.rx_data += stream.recv.reset(final_size)? as u64;
 
@@ -2863,8 +2917,23 @@ impl Connection {
                     return Err(Error::FlowControl);
                 }
 
-                // Get existing stream or create a new one.
-                let stream = self.get_or_create_stream(stream_id, false)?;
+                // Get existing stream or create a new one, but if the stream
+                // has already been closed and collected, ignore the frame.
+                //
+                // This can happen if e.g. an ACK frame is lost, and the peer
+                // retransmits another frame before it realizes that the stream
+                // is gone.
+                //
+                // Note that it makes it impossible to check if the frame is
+                // illegal, since we have no state, but since we ignore the
+                // frame, it should be fine.
+                let stream = match self.get_or_create_stream(stream_id, false) {
+                    Ok(v) => v,
+
+                    Err(Error::Done) => return Ok(()),
+
+                    Err(e) => return Err(e),
+                };
 
                 stream.recv.push(data)?;
 
@@ -2880,8 +2949,23 @@ impl Connection {
             },
 
             frame::Frame::MaxStreamData { stream_id, max } => {
-                // Get existing stream or create a new one.
-                let stream = self.get_or_create_stream(stream_id, false)?;
+                // Get existing stream or create a new one, but if the stream
+                // has already been closed and collected, ignore the frame.
+                //
+                // This can happen if e.g. an ACK frame is lost, and the peer
+                // retransmits another frame before it realizes that the stream
+                // is gone.
+                //
+                // Note that it makes it impossible to check if the frame is
+                // illegal, since we have no state, but since we ignore the
+                // frame, it should be fine.
+                let stream = match self.get_or_create_stream(stream_id, false) {
+                    Ok(v) => v,
+
+                    Err(Error::Done) => return Ok(()),
+
+                    Err(e) => return Err(e),
+                };
 
                 let was_flushable = stream.is_flushable();
 
@@ -3017,6 +3101,43 @@ impl Connection {
 
         Some(idle_timeout)
     }
+
+    /// Returns the connection's overall send capacity.
+    fn send_capacity(&self) -> usize {
+        let cap = self.max_tx_data - self.tx_data;
+        cmp::min(cap, self.recovery.cwnd_available() as u64) as usize
+    }
+}
+
+/// Maps an `Error` to `Error::Done`, or itself.
+///
+/// When a received packet that hasn't yet been authenticated triggers a failure
+/// it should, in most cases, be ignored, instead of raising a connection error,
+/// to avoid potential man-in-the-middle and man-on-the-side attacks.
+///
+/// However, if no other packet was previously received, the connection should
+/// indeed be closed as the received packet might just be network background
+/// noise, and it shouldn't keep resources occupied indefinitely.
+///
+/// This function maps an error to `Error::Done` to ignore a packet failure
+/// without aborting the connection, except when no other packet was previously
+/// received, in which case the error itself is returned.
+///
+/// This must only be used for errors preceding packet authentication. Failures
+/// happening after a packet has been authenticated should still cause the
+/// connection to be aborted.
+fn drop_pkt_on_err(e: Error, recv_count: usize, trace_id: &str) -> Error {
+    // If no other packet has been successflully processed, abort the connection
+    // to avoid keeping the connection open when only junk is received.
+    if recv_count == 0 {
+        return e;
+    }
+
+    trace!("{} dropped invalid packet", trace_id);
+
+    // Ignore other invalid packets that haven't been authenticated to prevent
+    // man-in-the-middle and man-on-the-side attacks.
+    Error::Done
 }
 
 /// Statistics about the connection.
@@ -3038,21 +3159,29 @@ pub struct Stats {
     /// The estimated round-trip time of the connection.
     pub rtt: time::Duration,
 
-    /// The size in bytes of the connection's congestion window.
+    /// The size of the connection's congestion window in bytes.
     pub cwnd: usize,
+
+    /// The estimated data delivery rate in bytes/s.
+    pub delivery_rate: f64,
 }
 
 impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "recv={} sent={} lost={} rtt={:?} cwnd={}",
-            self.recv, self.sent, self.lost, self.rtt, self.cwnd
+            "recv={} sent={} lost={} rtt={:?} cwnd={} delivery_rate={}",
+            self.recv,
+            self.sent,
+            self.lost,
+            self.rtt,
+            self.cwnd,
+            self.delivery_rate
         )
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct TransportParams {
     pub original_connection_id: Option<Vec<u8>>,
     pub max_idle_timeout: u64,
@@ -3093,17 +3222,31 @@ impl Default for TransportParams {
 }
 
 impl TransportParams {
-    fn decode(buf: &mut [u8], is_server: bool) -> Result<TransportParams> {
+    fn decode(
+        buf: &mut [u8], version: u32, is_server: bool,
+    ) -> Result<TransportParams> {
         let mut b = octets::Octets::with_slice(buf);
 
         let mut tp = TransportParams::default();
 
-        let mut params = b.get_bytes_with_u16_length()?;
+        let mut params = if version < PROTOCOL_VERSION_DRAFT27 {
+            b.get_bytes_with_u16_length()?
+        } else {
+            b
+        };
 
         while params.cap() > 0 {
-            let id = params.get_u16()?;
+            let id = if version < PROTOCOL_VERSION_DRAFT27 {
+                params.get_u16()? as u64
+            } else {
+                params.get_varint()?
+            };
 
-            let mut val = params.get_bytes_with_u16_length()?;
+            let mut val = if version < PROTOCOL_VERSION_DRAFT27 {
+                params.get_bytes_with_u16_length()?
+            } else {
+                params.get_bytes_with_varint_length()?
+            };
 
             // TODO: forbid duplicated param
 
@@ -3216,8 +3359,22 @@ impl TransportParams {
         Ok(tp)
     }
 
+    fn encode_param(
+        b: &mut octets::Octets, ty: u64, len: usize, version: u32,
+    ) -> Result<()> {
+        if version < PROTOCOL_VERSION_DRAFT27 {
+            b.put_u16(ty as u16)?;
+            b.put_u16(len as u16)?;
+        } else {
+            b.put_varint(ty)?;
+            b.put_varint(len as u64)?;
+        }
+
+        Ok(())
+    }
+
     fn encode<'a>(
-        tp: &TransportParams, is_server: bool, out: &'a mut [u8],
+        tp: &TransportParams, version: u32, is_server: bool, out: &'a mut [u8],
     ) -> Result<&'a mut [u8]> {
         let mut params = [0; 128];
 
@@ -3226,96 +3383,141 @@ impl TransportParams {
 
             if is_server {
                 if let Some(ref odcid) = tp.original_connection_id {
-                    b.put_u16(0x0000)?;
-                    b.put_u16(odcid.len() as u16)?;
+                    TransportParams::encode_param(
+                        &mut b,
+                        0x0000,
+                        odcid.len(),
+                        version,
+                    )?;
                     b.put_bytes(&odcid)?;
                 }
             };
 
             if tp.max_idle_timeout != 0 {
-                b.put_u16(0x0001)?;
-                b.put_u16(octets::varint_len(tp.max_idle_timeout) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0001,
+                    octets::varint_len(tp.max_idle_timeout),
+                    version,
+                )?;
                 b.put_varint(tp.max_idle_timeout)?;
             }
 
             if let Some(ref token) = tp.stateless_reset_token {
                 if is_server {
-                    b.put_u16(0x0002)?;
-                    b.put_u16(token.len() as u16)?;
+                    TransportParams::encode_param(
+                        &mut b,
+                        0x0002,
+                        token.len(),
+                        version,
+                    )?;
                     b.put_bytes(&token)?;
                 }
             }
 
             if tp.max_packet_size != 0 {
-                b.put_u16(0x0003)?;
-                b.put_u16(octets::varint_len(tp.max_packet_size) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0003,
+                    octets::varint_len(tp.max_packet_size),
+                    version,
+                )?;
                 b.put_varint(tp.max_packet_size)?;
             }
 
             if tp.initial_max_data != 0 {
-                b.put_u16(0x0004)?;
-                b.put_u16(octets::varint_len(tp.initial_max_data) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0004,
+                    octets::varint_len(tp.initial_max_data),
+                    version,
+                )?;
                 b.put_varint(tp.initial_max_data)?;
             }
 
             if tp.initial_max_stream_data_bidi_local != 0 {
-                b.put_u16(0x0005)?;
-                b.put_u16(octets::varint_len(
-                    tp.initial_max_stream_data_bidi_local,
-                ) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0005,
+                    octets::varint_len(tp.initial_max_stream_data_bidi_local),
+                    version,
+                )?;
                 b.put_varint(tp.initial_max_stream_data_bidi_local)?;
             }
 
             if tp.initial_max_stream_data_bidi_remote != 0 {
-                b.put_u16(0x0006)?;
-                b.put_u16(octets::varint_len(
-                    tp.initial_max_stream_data_bidi_remote,
-                ) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0006,
+                    octets::varint_len(tp.initial_max_stream_data_bidi_remote),
+                    version,
+                )?;
                 b.put_varint(tp.initial_max_stream_data_bidi_remote)?;
             }
 
             if tp.initial_max_stream_data_uni != 0 {
-                b.put_u16(0x0007)?;
-                b.put_u16(
-                    octets::varint_len(tp.initial_max_stream_data_uni) as u16
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0007,
+                    octets::varint_len(tp.initial_max_stream_data_uni),
+                    version,
                 )?;
                 b.put_varint(tp.initial_max_stream_data_uni)?;
             }
 
             if tp.initial_max_streams_bidi != 0 {
-                b.put_u16(0x0008)?;
-                b.put_u16(octets::varint_len(tp.initial_max_streams_bidi) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0008,
+                    octets::varint_len(tp.initial_max_streams_bidi),
+                    version,
+                )?;
                 b.put_varint(tp.initial_max_streams_bidi)?;
             }
 
             if tp.initial_max_streams_uni != 0 {
-                b.put_u16(0x0009)?;
-                b.put_u16(octets::varint_len(tp.initial_max_streams_uni) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0009,
+                    octets::varint_len(tp.initial_max_streams_uni),
+                    version,
+                )?;
                 b.put_varint(tp.initial_max_streams_uni)?;
             }
 
             if tp.ack_delay_exponent != 0 {
-                b.put_u16(0x000a)?;
-                b.put_u16(octets::varint_len(tp.ack_delay_exponent) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x000a,
+                    octets::varint_len(tp.ack_delay_exponent),
+                    version,
+                )?;
                 b.put_varint(tp.ack_delay_exponent)?;
             }
 
             if tp.max_ack_delay != 0 {
-                b.put_u16(0x000b)?;
-                b.put_u16(octets::varint_len(tp.max_ack_delay) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x000b,
+                    octets::varint_len(tp.max_ack_delay),
+                    version,
+                )?;
                 b.put_varint(tp.max_ack_delay)?;
             }
 
             if tp.disable_active_migration {
-                b.put_u16(0x000c)?;
-                b.put_u16(0)?;
+                TransportParams::encode_param(&mut b, 0x000c, 0, version)?;
             }
 
             // TODO: encode preferred_address
 
             if tp.active_conn_id_limit != 0 {
-                b.put_u16(0x000e)?;
-                b.put_u16(octets::varint_len(tp.active_conn_id_limit) as u16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x000e,
+                    octets::varint_len(tp.active_conn_id_limit),
+                    version,
+                )?;
                 b.put_varint(tp.active_conn_id_limit)?;
             }
 
@@ -3325,55 +3527,19 @@ impl TransportParams {
         let out_len = {
             let mut b = octets::Octets::with_slice(out);
 
-            b.put_u16(params_len as u16)?;
+            // TODO: once we drop support for drafts < 27, we should simplify
+            // the encoding to serialize the parameters into the output buffer
+            // directly.
+            if version < PROTOCOL_VERSION_DRAFT27 {
+                b.put_u16(params_len as u16)?;
+            }
+
             b.put_bytes(&params[..params_len])?;
 
             b.off()
         };
 
         Ok(&mut out[..out_len])
-    }
-}
-
-impl std::fmt::Debug for TransportParams {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "max_idle_timeout={} ", self.max_idle_timeout)?;
-        write!(f, "max_packet_size={} ", self.max_packet_size)?;
-        write!(f, "initial_max_data={} ", self.initial_max_data)?;
-        write!(
-            f,
-            "initial_max_stream_data_bidi_local={} ",
-            self.initial_max_stream_data_bidi_local
-        )?;
-        write!(
-            f,
-            "initial_max_stream_data_bidi_remote={} ",
-            self.initial_max_stream_data_bidi_remote
-        )?;
-        write!(
-            f,
-            "initial_max_stream_data_uni={} ",
-            self.initial_max_stream_data_uni
-        )?;
-        write!(
-            f,
-            "initial_max_streams_bidi={} ",
-            self.initial_max_streams_bidi
-        )?;
-        write!(
-            f,
-            "initial_max_streams_uni={} ",
-            self.initial_max_streams_uni
-        )?;
-        write!(f, "ack_delay_exponent={} ", self.ack_delay_exponent)?;
-        write!(f, "max_ack_delay={} ", self.max_ack_delay)?;
-        write!(
-            f,
-            "disable_active_migration={}",
-            self.disable_active_migration
-        )?;
-
-        Ok(())
     }
 }
 
@@ -3679,6 +3845,7 @@ mod tests {
 
     #[test]
     fn transport_params() {
+        // Server encodes, client decodes.
         let tp = TransportParams {
             original_connection_id: None,
             max_idle_timeout: 30,
@@ -3698,10 +3865,124 @@ mod tests {
 
         let mut raw_params = [42; 256];
         let mut raw_params =
-            TransportParams::encode(&tp, true, &mut raw_params).unwrap();
+            TransportParams::encode(&tp, PROTOCOL_VERSION, true, &mut raw_params)
+                .unwrap();
+        assert_eq!(raw_params.len(), 73);
+
+        let new_tp =
+            TransportParams::decode(&mut raw_params, PROTOCOL_VERSION, false)
+                .unwrap();
+
+        assert_eq!(new_tp, tp);
+
+        // Client encodes, server decodes.
+        let tp = TransportParams {
+            original_connection_id: None,
+            max_idle_timeout: 30,
+            stateless_reset_token: None,
+            max_packet_size: 23_421,
+            initial_max_data: 424_645_563,
+            initial_max_stream_data_bidi_local: 154_323_123,
+            initial_max_stream_data_bidi_remote: 6_587_456,
+            initial_max_stream_data_uni: 2_461_234,
+            initial_max_streams_bidi: 12_231,
+            initial_max_streams_uni: 18_473,
+            ack_delay_exponent: 20,
+            max_ack_delay: 2_u64.pow(14) - 1,
+            disable_active_migration: true,
+            active_conn_id_limit: 8,
+        };
+
+        let mut raw_params = [42; 256];
+        let mut raw_params = TransportParams::encode(
+            &tp,
+            PROTOCOL_VERSION,
+            false,
+            &mut raw_params,
+        )
+        .unwrap();
+        assert_eq!(raw_params.len(), 55);
+
+        let new_tp =
+            TransportParams::decode(&mut raw_params, PROTOCOL_VERSION, true)
+                .unwrap();
+
+        assert_eq!(new_tp, tp);
+    }
+
+    #[test]
+    fn transport_params_old() {
+        // Server encodes, client decodes.
+        let tp = TransportParams {
+            original_connection_id: None,
+            max_idle_timeout: 30,
+            stateless_reset_token: Some(vec![0xba; 16]),
+            max_packet_size: 23_421,
+            initial_max_data: 424_645_563,
+            initial_max_stream_data_bidi_local: 154_323_123,
+            initial_max_stream_data_bidi_remote: 6_587_456,
+            initial_max_stream_data_uni: 2_461_234,
+            initial_max_streams_bidi: 12_231,
+            initial_max_streams_uni: 18_473,
+            ack_delay_exponent: 20,
+            max_ack_delay: 2_u64.pow(14) - 1,
+            disable_active_migration: true,
+            active_conn_id_limit: 8,
+        };
+
+        let mut raw_params = [42; 256];
+        let mut raw_params = TransportParams::encode(
+            &tp,
+            PROTOCOL_VERSION_DRAFT25,
+            true,
+            &mut raw_params,
+        )
+        .unwrap();
         assert_eq!(raw_params.len(), 101);
 
-        let new_tp = TransportParams::decode(&mut raw_params, false).unwrap();
+        let new_tp = TransportParams::decode(
+            &mut raw_params,
+            PROTOCOL_VERSION_DRAFT25,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(new_tp, tp);
+
+        // Client encodes, server decodes.
+        let tp = TransportParams {
+            original_connection_id: None,
+            max_idle_timeout: 30,
+            stateless_reset_token: None,
+            max_packet_size: 23_421,
+            initial_max_data: 424_645_563,
+            initial_max_stream_data_bidi_local: 154_323_123,
+            initial_max_stream_data_bidi_remote: 6_587_456,
+            initial_max_stream_data_uni: 2_461_234,
+            initial_max_streams_bidi: 12_231,
+            initial_max_streams_uni: 18_473,
+            ack_delay_exponent: 20,
+            max_ack_delay: 2_u64.pow(14) - 1,
+            disable_active_migration: true,
+            active_conn_id_limit: 8,
+        };
+
+        let mut raw_params = [42; 256];
+        let mut raw_params = TransportParams::encode(
+            &tp,
+            PROTOCOL_VERSION_DRAFT25,
+            false,
+            &mut raw_params,
+        )
+        .unwrap();
+        assert_eq!(raw_params.len(), 81);
+
+        let new_tp = TransportParams::decode(
+            &mut raw_params,
+            PROTOCOL_VERSION_DRAFT25,
+            true,
+        )
+        .unwrap();
 
         assert_eq!(new_tp, tp);
     }
@@ -3741,6 +4022,40 @@ mod tests {
     }
 
     #[test]
+    fn different_client_versions() {
+        let mut buf = [0; 65535];
+        let protos = b"\x06proto1\x06proto2";
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION_DRAFT23).unwrap();
+        config.verify_peer(false);
+        config.set_application_protos(protos).unwrap();
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION_DRAFT24).unwrap();
+        config.verify_peer(false);
+        config.set_application_protos(protos).unwrap();
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION_DRAFT25).unwrap();
+        config.verify_peer(false);
+        config.set_application_protos(protos).unwrap();
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION_DRAFT27).unwrap();
+        config.verify_peer(false);
+        config.set_application_protos(protos).unwrap();
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+    }
+
+    #[test]
     fn handshake() {
         let mut buf = [0; 65535];
 
@@ -3766,46 +4081,46 @@ mod tests {
         // Server sends initial flight.
         len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
-        assert!(!pipe.client.handshake_completed);
+        assert!(!pipe.client.is_established());
         assert!(!pipe.client.handshake_confirmed);
 
-        assert!(!pipe.server.handshake_completed);
+        assert!(!pipe.server.is_established());
         assert!(!pipe.server.handshake_confirmed);
 
         // Client sends Handshake packet and completes handshake.
         len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
 
-        assert!(pipe.client.handshake_completed);
+        assert!(pipe.client.is_established());
         assert!(!pipe.client.handshake_confirmed);
 
-        assert!(!pipe.server.handshake_completed);
+        assert!(!pipe.server.is_established());
         assert!(!pipe.server.handshake_confirmed);
 
         // Server completes handshake and sends HANDSHAKE_DONE.
         len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
-        assert!(pipe.client.handshake_completed);
+        assert!(pipe.client.is_established());
         assert!(!pipe.client.handshake_confirmed);
 
-        assert!(pipe.server.handshake_completed);
+        assert!(pipe.server.is_established());
         assert!(!pipe.server.handshake_confirmed);
 
         // Client acks 1-RTT packet, and confirms handshake.
         len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
 
-        assert!(pipe.client.handshake_completed);
+        assert!(pipe.client.is_established());
         assert!(pipe.client.handshake_confirmed);
 
-        assert!(pipe.server.handshake_completed);
+        assert!(pipe.server.is_established());
         assert!(!pipe.server.handshake_confirmed);
 
         // Server handshake is confirmed.
         testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
-        assert!(pipe.client.handshake_completed);
+        assert!(pipe.client.is_established());
         assert!(pipe.client.handshake_confirmed);
 
-        assert!(pipe.server.handshake_completed);
+        assert!(pipe.server.is_established());
         assert!(pipe.server.handshake_confirmed);
     }
 
@@ -3874,6 +4189,41 @@ mod tests {
         assert_eq!(&b[..12], b"hello, world");
 
         assert!(pipe.server.stream_finished(4));
+    }
+
+    #[test]
+    fn stream_send_on_32bit_arch() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(2_u64.pow(32) + 5);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(0);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // In 32bit arch, send_capacity() should be min(2^32+5, cwnd),
+        // not min(5, cwnd)
+        assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert!(!pipe.server.stream_finished(4));
     }
 
     #[test]
@@ -4382,12 +4732,27 @@ mod tests {
         assert!(pipe.client.is_established());
 
         // Send 1-RTT packet #0.
-        assert_eq!(pipe.client.stream_send(0, b"hello, world", true), Ok(12));
-        assert_eq!(pipe.advance(&mut buf), Ok(()));
+        let frames = [frame::Frame::Stream {
+            stream_id: 0,
+            data: stream::RangeBuf::from(b"hello, world", 0, true),
+        }];
+
+        let pkt_type = packet::Type::Short;
+        let written =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
 
         // Send 1-RTT packet #1.
-        assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
-        assert_eq!(pipe.advance(&mut buf), Ok(()));
+        let frames = [frame::Frame::Stream {
+            stream_id: 4,
+            data: stream::RangeBuf::from(b"hello, world", 0, true),
+        }];
+
+        let written =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
 
         assert!(!pipe.server.is_established());
 
@@ -4411,8 +4776,6 @@ mod tests {
                 .largest_rx_pkt_num,
             0
         );
-
-        assert_eq!(pipe.client.stats().sent, pipe.server.stats().recv + 2);
     }
 
     #[test]
@@ -4556,6 +4919,9 @@ mod tests {
         let mut r = pipe.client.readable();
         assert_eq!(r.next(), None);
 
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         // Server received stream.
@@ -4581,7 +4947,7 @@ mod tests {
         let mut r = pipe.client.readable();
         assert_eq!(r.next(), None);
 
-        // Server suts down stream.
+        // Server shuts down stream.
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), Some(4));
         assert_eq!(r.next(), None);
@@ -4706,7 +5072,7 @@ mod tests {
             Ok(15)
         );
         assert_eq!(pipe.advance(&mut buf), Ok(()));
-        assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
+        assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(0));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         let mut r = pipe.server.readable();
@@ -4743,6 +5109,37 @@ mod tests {
             pipe.server.recv(&mut buf[..written]),
             Err(Error::CryptoFail)
         );
+    }
+
+    #[test]
+    /// Tests that invalid packets don't cause the connection to be closed.
+    fn invalid_packet() {
+        let mut buf = [0; 65535];
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [frame::Frame::Padding { len: 10 }];
+
+        let written = testing::encode_pkt(
+            &mut pipe.client,
+            packet::Type::Short,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+
+        // Corrupt the packets's last byte to make decryption fail (the last
+        // byte is part of the AEAD tag, so changing it means that the packet
+        // cannot be authenticated during decryption).
+        buf[written - 1] = 0;
+
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
+
+        // Corrupt the packets's first byte to make the header fail decoding.
+        buf[0] = 255;
+
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
     }
 
     #[test]
@@ -4980,10 +5377,15 @@ mod tests {
         assert!(pipe.client.stream_finished(0));
         assert!(pipe.server.stream_finished(0));
 
-        assert_eq!(
-            pipe.client.stream_send(0, b"", true),
-            Err(Error::InvalidStreamState)
-        );
+        assert_eq!(pipe.client.stream_send(0, b"", true), Err(Error::Done));
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 0,
+            data: stream::RangeBuf::from(b"aa", 0, false),
+        }];
+
+        let pkt_type = packet::Type::Short;
+        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
     }
 
     #[test]

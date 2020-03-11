@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2019, Cloudflare, Inc.
+// Copyright (C) 2020, Cloudflare, Inc.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -29,46 +29,58 @@ extern crate log;
 
 use std::net;
 
+use std::io::prelude::*;
+
 use std::collections::HashMap;
 
 use ring::rand::*;
 
+use quiche_apps::*;
+
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
-struct PartialResponse {
-    body: Vec<u8>,
+const USAGE: &str = "Usage:
+  quiche-server [options]
+  quiche-server -h | --help
 
-    written: usize,
-}
-
-struct Client {
-    conn: std::pin::Pin<Box<quiche::Connection>>,
-
-    partial_responses: HashMap<u64, PartialResponse>,
-}
-
-type ClientMap = HashMap<Vec<u8>, (net::SocketAddr, Client)>;
+Options:
+  --listen <addr>             Listen on the given IP:port [default: 127.0.0.1:4433]
+  --cert <file>               TLS certificate path [default: src/bin/cert.crt]
+  --key <file>                TLS certificate key path [default: src/bin/cert.key]
+  --root <dir>                Root directory [default: src/bin/root/]
+  --index <name>              The file that will be used as index [default: index.html].
+  --name <str>                Name of the server [default: quic.tech]
+  --max-data BYTES            Connection-wide flow control limit [default: 10000000].
+  --max-stream-data BYTES     Per-stream flow control limit [default: 1000000].
+  --max-streams-bidi STREAMS  Number of allowed concurrent streams [default: 100].
+  --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 100].
+  --dump-packets PATH         Dump the incoming packets as files in the given directory.
+  --early-data                Enables receiving early data.
+  --no-retry                  Disable stateless retry.
+  --no-grease                 Don't send GREASE.
+  --http-version VERSION      HTTP version to use [default: all].
+  -h --help                   Show this screen.
+";
 
 fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
-    let mut args = std::env::args();
+    env_logger::builder()
+        .default_format_timestamp_nanos(true)
+        .init();
 
-    let cmd = &args.next().unwrap();
-
-    if args.len() != 0 {
-        println!("Usage: {}", cmd);
-        println!("\nSee tools/apps/ for more complete implementations.");
-        return;
-    }
+    // Parse CLI parameters.
+    let docopt = docopt::Docopt::new(USAGE).unwrap();
+    let conn_args = CommonArgs::with_docopt(&docopt);
+    let args = ServerArgs::with_docopt(&docopt);
 
     // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
     // Create the UDP listening socket, and register it with the event loop.
-    let socket = net::UdpSocket::bind("127.0.0.1:4433").unwrap();
+    let socket = net::UdpSocket::bind(args.listen).unwrap();
 
     let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
     poll.register(
@@ -82,35 +94,40 @@ fn main() {
     // Create the configuration for the QUIC connections.
     let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 
-    config
-        .load_cert_chain_from_pem_file("examples/cert.crt")
-        .unwrap();
-    config
-        .load_priv_key_from_pem_file("examples/cert.key")
-        .unwrap();
+    config.load_cert_chain_from_pem_file(&args.cert).unwrap();
+    config.load_priv_key_from_pem_file(&args.key).unwrap();
 
-    config
-        .set_application_protos(
-            b"\x05hq-27\x05hq-25\x05hq-24\x05hq-23\x08http/0.9",
-        )
-        .unwrap();
+    config.set_application_protos(&conn_args.alpns).unwrap();
 
     config.set_max_idle_timeout(5000);
     config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
-    config.set_initial_max_data(10_000_000);
-    config.set_initial_max_stream_data_bidi_local(1_000_000);
-    config.set_initial_max_stream_data_bidi_remote(1_000_000);
-    config.set_initial_max_stream_data_uni(1_000_000);
-    config.set_initial_max_streams_bidi(100);
-    config.set_initial_max_streams_uni(100);
+    config.set_initial_max_data(conn_args.max_data);
+    config.set_initial_max_stream_data_bidi_local(conn_args.max_stream_data);
+    config.set_initial_max_stream_data_bidi_remote(conn_args.max_stream_data);
+    config.set_initial_max_stream_data_uni(conn_args.max_stream_data);
+    config.set_initial_max_streams_bidi(conn_args.max_streams_bidi);
+    config.set_initial_max_streams_uni(conn_args.max_streams_uni);
     config.set_disable_active_migration(true);
-    config.enable_early_data();
+
+    if args.early_data {
+        config.enable_early_data();
+    }
+
+    if conn_args.no_grease {
+        config.grease(false);
+    }
+
+    if std::env::var_os("SSLKEYLOGFILE").is_some() {
+        config.log_keys();
+    }
 
     let rng = SystemRandom::new();
     let conn_id_seed =
         ring::hmac::Key::generate(ring::hmac::HMAC_SHA256, &rng).unwrap();
 
     let mut clients = ClientMap::new();
+
+    let mut pkt_count = 0;
 
     loop {
         // Find the shorter timeout from all the active connections.
@@ -128,7 +145,7 @@ fn main() {
             // has expired, so handle it without attempting to read packets. We
             // will then proceed with the send loop.
             if events.is_empty() {
-                debug!("timed out");
+                trace!("timed out");
 
                 clients.values_mut().for_each(|(_, c)| c.conn.on_timeout());
 
@@ -142,7 +159,7 @@ fn main() {
                     // There are no more UDP packets to read, so end the read
                     // loop.
                     if e.kind() == std::io::ErrorKind::WouldBlock {
-                        debug!("recv() would block");
+                        trace!("recv() would block");
                         break 'read;
                     }
 
@@ -150,9 +167,20 @@ fn main() {
                 },
             };
 
-            debug!("got {} bytes", len);
+            trace!("got {} bytes", len);
 
             let pkt_buf = &mut buf[..len];
+
+            if let Some(target_path) = conn_args.dump_packet_path.as_ref() {
+                let path = format!("{}/{}.pkt", target_path, pkt_count);
+
+                if let Ok(f) = std::fs::File::create(&path) {
+                    let mut f = std::io::BufWriter::new(f);
+                    f.write_all(pkt_buf).ok();
+                }
+            }
+
+            pkt_count += 1;
 
             // Parse the QUIC packet's header.
             let hdr = match quiche::Header::from_slice(
@@ -193,7 +221,7 @@ fn main() {
 
                     if let Err(e) = socket.send_to(out, &src) {
                         if e.kind() == std::io::ErrorKind::WouldBlock {
-                            debug!("send() would block");
+                            trace!("send() would block");
                             break;
                         }
 
@@ -205,50 +233,53 @@ fn main() {
                 let mut scid = [0; quiche::MAX_CONN_ID_LEN];
                 scid.copy_from_slice(&conn_id);
 
-                // Token is always present in Initial packets.
-                let token = hdr.token.as_ref().unwrap();
+                let mut odcid = None;
 
-                // Do stateless retry if the client didn't send a token.
-                if token.is_empty() {
-                    warn!("Doing stateless retry");
+                if !args.no_retry {
+                    // Token is always present in Initial packets.
+                    let token = hdr.token.as_ref().unwrap();
 
-                    let new_token = mint_token(&hdr, &src);
+                    // Do stateless retry if the client didn't send a token.
+                    if token.is_empty() {
+                        warn!("Doing stateless retry");
 
-                    let len = quiche::retry(
-                        &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
-                    )
-                    .unwrap();
+                        let new_token = mint_token(&hdr, &src);
 
-                    let out = &out[..len];
+                        let len = quiche::retry(
+                            &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
+                        )
+                        .unwrap();
+                        let out = &out[..len];
 
-                    if let Err(e) = socket.send_to(out, &src) {
-                        if e.kind() == std::io::ErrorKind::WouldBlock {
-                            debug!("send() would block");
-                            break;
+                        if let Err(e) = socket.send_to(out, &src) {
+                            if e.kind() == std::io::ErrorKind::WouldBlock {
+                                trace!("send() would block");
+                                break;
+                            }
+
+                            panic!("send() failed: {:?}", e);
                         }
-
-                        panic!("send() failed: {:?}", e);
+                        continue;
                     }
-                    continue;
+
+                    odcid = validate_token(&src, token);
+
+                    // The token was not valid, meaning the retry failed, so
+                    // drop the packet.
+                    if odcid == None {
+                        error!("Invalid address validation token");
+                        continue;
+                    }
+
+                    if scid.len() != hdr.dcid.len() {
+                        error!("Invalid destination connection ID");
+                        continue;
+                    }
+
+                    // Reuse the source connection ID we sent in the Retry
+                    // packet, instead of changing it again.
+                    scid.copy_from_slice(&hdr.dcid);
                 }
-
-                let odcid = validate_token(&src, token);
-
-                // The token was not valid, meaning the retry failed, so
-                // drop the packet.
-                if odcid == None {
-                    error!("Invalid address validation token");
-                    continue;
-                }
-
-                if scid.len() != hdr.dcid.len() {
-                    error!("Invalid destination connection ID");
-                    continue;
-                }
-
-                // Reuse the source connection ID we sent in the Retry
-                // packet, instead of changing it again.
-                scid.copy_from_slice(&hdr.dcid);
 
                 debug!(
                     "New connection: dcid={} scid={}",
@@ -260,6 +291,7 @@ fn main() {
 
                 let client = Client {
                     conn,
+                    http_conn: None,
                     partial_responses: HashMap::new(),
                 };
 
@@ -279,7 +311,7 @@ fn main() {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
-                    debug!("{} done reading", client.conn.trace_id());
+                    trace!("{} done reading", client.conn.trace_id());
                     break;
                 },
 
@@ -289,37 +321,53 @@ fn main() {
                 },
             };
 
-            debug!("{} processed {} bytes", client.conn.trace_id(), read);
+            trace!("{} processed {} bytes", client.conn.trace_id(), read);
 
-            if client.conn.is_in_early_data() || client.conn.is_established() {
+            // Create a new HTTP connection as soon as the QUIC connection
+            // is established.
+            if client.http_conn.is_none() &&
+                (client.conn.is_in_early_data() ||
+                    client.conn.is_established())
+            {
+                // At this stage the ALPN negotiation succeeded and selected a
+                // single application protocol name. We'll use this to construct
+                // the correct type of HttpConn but `application_proto()`
+                // returns a slice, so we have to convert it to a str in order
+                // to compare to our lists of protocols. We `unwrap()` because
+                // we need the value and if something fails at this stage, there
+                // is not much anyone can do to recover.
+                let app_proto = client.conn.application_proto();
+                let app_proto = &std::str::from_utf8(&app_proto).unwrap();
+
+                if alpns::HTTP_09.contains(app_proto) {
+                    client.http_conn = Some(Box::new(Http09Conn::default()));
+                } else if alpns::HTTP_3.contains(app_proto) {
+                    client.http_conn =
+                        Some(Http3Conn::with_conn(&mut client.conn));
+                }
+            }
+
+            if client.http_conn.is_some() {
+                let conn = &mut client.conn;
+                let http_conn = client.http_conn.as_mut().unwrap();
+                let partials = &mut client.partial_responses;
+
                 // Handle writable streams.
-                for stream_id in client.conn.writable() {
-                    handle_writable(client, stream_id);
+                for stream_id in conn.writable() {
+                    http_conn.handle_writable(conn, partials, stream_id);
                 }
 
-                // Process all readable streams.
-                for s in client.conn.readable() {
-                    while let Ok((read, fin)) =
-                        client.conn.stream_recv(s, &mut buf)
-                    {
-                        debug!(
-                            "{} received {} bytes",
-                            client.conn.trace_id(),
-                            read
-                        );
-
-                        let stream_buf = &buf[..read];
-
-                        debug!(
-                            "{} stream {} has {} bytes (fin? {})",
-                            client.conn.trace_id(),
-                            s,
-                            stream_buf.len(),
-                            fin
-                        );
-
-                        handle_stream(client, s, stream_buf, "examples/root");
-                    }
+                if http_conn
+                    .handle_requests(
+                        conn,
+                        partials,
+                        &args.root,
+                        &args.index,
+                        &mut buf,
+                    )
+                    .is_err()
+                {
+                    break 'read;
                 }
             }
         }
@@ -333,7 +381,7 @@ fn main() {
                     Ok(v) => v,
 
                     Err(quiche::Error::Done) => {
-                        debug!("{} done writing", client.conn.trace_id());
+                        trace!("{} done writing", client.conn.trace_id());
                         break;
                     },
 
@@ -348,20 +396,20 @@ fn main() {
                 // TODO: coalesce packets.
                 if let Err(e) = socket.send_to(&out[..write], &peer) {
                     if e.kind() == std::io::ErrorKind::WouldBlock {
-                        debug!("send() would block");
+                        trace!("send() would block");
                         break;
                     }
 
                     panic!("send() failed: {:?}", e);
                 }
 
-                debug!("{} written {} bytes", client.conn.trace_id(), write);
+                trace!("{} written {} bytes", client.conn.trace_id(), write);
             }
         }
 
         // Garbage collect closed connections.
         clients.retain(|_, (_, ref mut c)| {
-            debug!("Collecting garbage");
+            trace!("Collecting garbage");
 
             if c.conn.is_closed() {
                 info!(
@@ -434,91 +482,37 @@ fn validate_token<'a>(
     Some(&token[..])
 }
 
-/// Handles incoming HTTP/0.9 requests.
-fn handle_stream(client: &mut Client, stream_id: u64, buf: &[u8], root: &str) {
-    let conn = &mut client.conn;
-
-    if buf.len() > 4 && &buf[..4] == b"GET " {
-        let uri = &buf[4..buf.len()];
-        let uri = String::from_utf8(uri.to_vec()).unwrap();
-        let uri = String::from(uri.lines().next().unwrap());
-        let uri = std::path::Path::new(&uri);
-        let mut path = std::path::PathBuf::from(root);
-
-        for c in uri.components() {
-            if let std::path::Component::Normal(v) = c {
-                path.push(v)
-            }
-        }
-
-        info!(
-            "{} got GET request for {:?} on stream {}",
-            conn.trace_id(),
-            path,
-            stream_id
-        );
-
-        let body = std::fs::read(path.as_path())
-            .unwrap_or_else(|_| b"Not Found!\r\n".to_vec());
-
-        info!(
-            "{} sending response of size {} on stream {}",
-            conn.trace_id(),
-            body.len(),
-            stream_id
-        );
-
-        let written = match conn.stream_send(stream_id, &body, true) {
-            Ok(v) => v,
-
-            Err(quiche::Error::Done) => 0,
-
-            Err(e) => {
-                error!("{} stream send failed {:?}", conn.trace_id(), e);
-                return;
-            },
-        };
-
-        if written < body.len() {
-            let response = PartialResponse { body, written };
-            client.partial_responses.insert(stream_id, response);
-        }
-    }
+// Application-specific arguments that compliment the `CommonArgs`.
+struct ServerArgs {
+    listen: String,
+    no_retry: bool,
+    root: String,
+    index: String,
+    cert: String,
+    key: String,
+    early_data: bool,
 }
 
-/// Handles newly writable streams.
-fn handle_writable(client: &mut Client, stream_id: u64) {
-    let conn = &mut client.conn;
+impl Args for ServerArgs {
+    fn with_docopt(docopt: &docopt::Docopt) -> Self {
+        let args = docopt.parse().unwrap_or_else(|e| e.exit());
 
-    debug!("{} stream {} is writable", conn.trace_id(), stream_id);
+        let listen = args.get_str("--listen").to_string();
+        let no_retry = args.get_bool("--no-retry");
+        let early_data = args.get_bool("--early-data");
+        let root = args.get_str("--root").to_string();
+        let index = args.get_str("--index").to_string();
+        let cert = args.get_str("--cert").to_string();
+        let key = args.get_str("--key").to_string();
 
-    if !client.partial_responses.contains_key(&stream_id) {
-        return;
+        ServerArgs {
+            listen,
+            no_retry,
+            root,
+            index,
+            cert,
+            key,
+            early_data,
+        }
     }
-
-    let resp = client.partial_responses.get_mut(&stream_id).unwrap();
-    let body = &resp.body[resp.written..];
-
-    let written = match conn.stream_send(stream_id, &body, true) {
-        Ok(v) => v,
-
-        Err(quiche::Error::Done) => 0,
-
-        Err(e) => {
-            error!("{} stream send failed {:?}", conn.trace_id(), e);
-            return;
-        },
-    };
-
-    resp.written += written;
-
-    if resp.written == resp.body.len() {
-        client.partial_responses.remove(&stream_id);
-    }
-}
-
-fn hex_dump(buf: &[u8]) -> String {
-    let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
-
-    vec.join("")
 }

@@ -258,7 +258,7 @@ use crate::octets;
 ///
 /// [`Config::set_application_protos()`]:
 /// ../struct.Config.html#method.set_application_protos
-pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-25\x05h3-24\x05h3-23";
+pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-27\x05h3-25\x05h3-24\x05h3-23";
 
 /// A specialized [`Result`] type for quiche HTTP/3 operations.
 ///
@@ -277,29 +277,12 @@ pub enum Error {
     /// The provided buffer is too short.
     BufferTooShort,
 
-    /// Peer violated protocol requirements in a way which doesn’t match a
-    /// more specific error code, or endpoint declines to use the more
-    /// specific error code.
-    GeneralProtocolError,
-
     /// Internal error in the HTTP/3 stack.
     InternalError,
-
-    /// The client no longer needs the requested data.
-    RequestCancelled,
-
-    /// The request stream terminated before completing the request.
-    RequestIncomplete,
-
-    /// Forward connection failure for CONNECT target.
-    ConnectError,
 
     /// Endpoint detected that the peer is exhibiting behavior that causes.
     /// excessive load.
     ExcessiveLoad,
-
-    /// Operation cannot be served over HTTP/3. Retry over HTTP/1.1.
-    VersionFallback,
 
     /// Stream ID or Push ID greater that current maximum was
     /// used incorrectly, such as exceeding a limit, reducing a limit,
@@ -313,23 +296,11 @@ pub enum Error {
     /// A required critical stream was closed.
     ClosedCriticalStream,
 
-    /// Inform client that remainder of request is not needed. Used in
-    /// STOP_SENDING only.
-    EarlyResponse,
-
     /// No SETTINGS frame at beginning of control stream.
     MissingSettings,
 
     /// A frame was received which is not permitted in the current state.
     FrameUnexpected,
-
-    /// Server rejected request without performing any application processing.
-    RequestRejected,
-
-    /// An endpoint detected an error in the payload of a SETTINGS frame:
-    /// a duplicate setting was detected, a client-only setting was sent by a
-    /// server, or a server-only setting by a client.
-    SettingsError,
 
     /// Frame violated layout or size rules.
     FrameError,
@@ -337,21 +308,18 @@ pub enum Error {
     /// QPACK Header block decompression failure.
     QpackDecompressionFailed,
 
-    /// QPACK encoder stream error.
-    QpackEncoderStreamError,
-
-    /// QPACK decoder stream error.
-    QpackDecoderStreamError,
-
     /// Error originated from the transport layer.
     TransportError(crate::Error),
+
+    /// The underlying QUIC stream (or connection) doesn't have enough capacity
+    /// for the operation to complete. The application should retry later on.
+    StreamBlocked,
 }
 
 impl Error {
     fn to_wire(self) -> u64 {
         match self {
             Error::Done => 0x100,
-            Error::GeneralProtocolError => 0x101,
             Error::InternalError => 0x102,
             Error::StreamCreationError => 0x103,
             Error::ClosedCriticalStream => 0x104,
@@ -359,21 +327,11 @@ impl Error {
             Error::FrameError => 0x106,
             Error::ExcessiveLoad => 0x107,
             Error::IdError => 0x108,
-            Error::SettingsError => 0x109,
             Error::MissingSettings => 0x10A,
-            Error::RequestRejected => 0x10B,
-            Error::RequestCancelled => 0x10C,
-            Error::RequestIncomplete => 0x10D,
-            Error::EarlyResponse => 0x10E,
-            Error::ConnectError => 0x10F,
-            Error::VersionFallback => 0x110,
-
             Error::QpackDecompressionFailed => 0x200,
-            Error::QpackEncoderStreamError => 0x201,
-            Error::QpackDecoderStreamError => 0x202,
             Error::BufferTooShort => 0x999,
-
             Error::TransportError { .. } => 0xFF,
+            Error::StreamBlocked => 0xFF,
         }
     }
 
@@ -381,26 +339,17 @@ impl Error {
         match self {
             Error::Done => -1,
             Error::BufferTooShort => -2,
-            Error::GeneralProtocolError => -3,
-            Error::InternalError => -5,
-            Error::RequestCancelled => -7,
-            Error::RequestIncomplete => -8,
-            Error::ConnectError => -9,
-            Error::ExcessiveLoad => -10,
-            Error::VersionFallback => -11,
-            Error::IdError => -13,
-            Error::StreamCreationError => -15,
-            Error::ClosedCriticalStream => -17,
-            Error::EarlyResponse => -19,
-            Error::MissingSettings => -20,
-            Error::FrameUnexpected => -21,
-            Error::RequestRejected => -22,
-            Error::SettingsError => -23,
-            Error::FrameError => -24,
-            Error::QpackDecompressionFailed => -25,
-            Error::QpackEncoderStreamError => -26,
-            Error::QpackDecoderStreamError => -27,
-            Error::TransportError { .. } => -28,
+            Error::InternalError => -3,
+            Error::ExcessiveLoad => -4,
+            Error::IdError => -5,
+            Error::StreamCreationError => -6,
+            Error::ClosedCriticalStream => -7,
+            Error::MissingSettings => -8,
+            Error::FrameUnexpected => -9,
+            Error::FrameError => -10,
+            Error::QpackDecompressionFailed => -11,
+            Error::TransportError { .. } => -12,
+            Error::StreamBlocked => -13,
         }
     }
 }
@@ -539,8 +488,8 @@ struct QpackStreams {
 pub struct Connection {
     is_server: bool,
 
-    highest_request_stream_id: u64,
-    highest_uni_stream_id: u64,
+    next_request_stream_id: u64,
+    next_uni_stream_id: u64,
 
     streams: HashMap<u64, stream::Stream>,
 
@@ -570,8 +519,9 @@ impl Connection {
         Ok(Connection {
             is_server,
 
-            highest_request_stream_id: 0,
-            highest_uni_stream_id: initial_uni_stream_id,
+            next_request_stream_id: 0,
+
+            next_uni_stream_id: initial_uni_stream_id,
 
             streams: HashMap::new(),
 
@@ -642,19 +592,47 @@ impl Connection {
     /// a newly allocated stream.
     ///
     /// On success the newly allocated stream ID is returned.
+    ///
+    /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application should retry the operation once the stream is
+    /// reported as writable again.
+    ///
+    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_request(
         &mut self, conn: &mut super::Connection, headers: &[Header], fin: bool,
     ) -> Result<u64> {
-        let stream_id = self.get_available_request_stream()?;
+        let stream_id = self.next_request_stream_id;
+
         self.streams
             .insert(stream_id, stream::Stream::new(stream_id, true));
 
+        // The underlying QUIC stream does not exist yet, so calls to e.g.
+        // stream_capacity() will fail. By writing a 0-length buffer, we force
+        // the creation of the QUIC stream state, without actually writing
+        // anything.
+        conn.stream_send(stream_id, b"", false)?;
+
         self.send_headers(conn, stream_id, headers, fin)?;
+
+        // To avoid skipping stream IDs, we only calculate the next available
+        // stream ID when a request has been successfully buffered.
+        self.next_request_stream_id = self
+            .next_request_stream_id
+            .checked_add(4)
+            .ok_or(Error::IdError)?;
 
         Ok(stream_id)
     }
 
     /// Sends an HTTP/3 response on the specified stream.
+    ///
+    /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application should retry the operation once the stream is
+    /// reported as writable again.
+    ///
+    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_response(
         &mut self, conn: &mut super::Connection, stream_id: u64,
         headers: &[Header], fin: bool,
@@ -687,11 +665,20 @@ impl Connection {
         let mut d = [42; 10];
         let mut b = octets::Octets::with_slice(&mut d);
 
-        let header_block = self.encode_header_block(headers)?;
-
         if !self.frames_greased && conn.grease {
             self.send_grease_frames(conn, stream_id)?;
             self.frames_greased = true;
+        }
+
+        let stream_cap = conn.stream_capacity(stream_id)?;
+
+        let header_block = self.encode_header_block(headers)?;
+
+        let overhead = octets::varint_len(frame::HEADERS_FRAME_TYPE_ID) +
+            octets::varint_len(header_block.len() as u64);
+
+        if stream_cap < overhead + header_block.len() {
+            return Err(Error::StreamBlocked);
         }
 
         trace!(
@@ -713,6 +700,7 @@ impl Connection {
             b.put_varint(header_block.len() as u64)?,
             false,
         )?;
+
         conn.stream_send(stream_id, &header_block, fin)?;
 
         if fin && conn.stream_finished(stream_id) {
@@ -725,6 +713,11 @@ impl Connection {
     /// Sends an HTTP/3 body chunk on the given stream.
     ///
     /// On success the number of bytes written is returned.
+    ///
+    /// Note that the number of written bytes returned can be lower than the
+    /// length of the input buffer when the underlying QUIC stream doesn't have
+    /// enough capacity for the operation to complete. The application should
+    /// retry the operation once the stream is reported as writable again.
     pub fn send_body(
         &mut self, conn: &mut super::Connection, stream_id: u64, body: &[u8],
         fin: bool,
@@ -746,7 +739,7 @@ impl Connection {
         // least one byte of frame payload (this to avoid sending 0-length DATA
         // frames).
         if stream_cap <= overhead {
-            return Err(Error::Done);
+            return Ok(0);
         }
 
         // Cap the frame payload length to the stream's capacity.
@@ -877,37 +870,22 @@ impl Connection {
         Err(Error::Done)
     }
 
-    /// Allocates a new request stream ID for the local endpoint to use.
-    fn get_available_request_stream(&mut self) -> Result<u64> {
-        if self.highest_request_stream_id < std::u64::MAX {
-            let ret = self.highest_request_stream_id;
-            self.highest_request_stream_id += 4;
-            return Ok(ret);
-        }
-
-        Err(Error::IdError)
-    }
-
-    /// Allocates a new unidirectional stream ID for the local endpoint to use.
-    fn get_available_uni_stream(&mut self) -> Result<u64> {
-        if self.highest_uni_stream_id < std::u64::MAX {
-            let ret = self.highest_uni_stream_id;
-            self.highest_uni_stream_id += 4;
-            return Ok(ret);
-        }
-
-        Err(Error::IdError)
-    }
-
     fn open_uni_stream(
         &mut self, conn: &mut super::Connection, ty: u64,
     ) -> Result<u64> {
-        let stream_id = self.get_available_uni_stream()?;
+        let stream_id = self.next_uni_stream_id;
 
         let mut d = [0; 8];
         let mut b = octets::Octets::with_slice(&mut d);
 
         conn.stream_send(stream_id, b.put_varint(ty)?, false)?;
+
+        // To avoid skipping stream IDs, we only calculate the next available
+        // stream ID when data has been successfully buffered.
+        self.next_uni_stream_id = self
+            .next_uni_stream_id
+            .checked_add(4)
+            .ok_or(Error::IdError)?;
 
         Ok(stream_id)
     }
@@ -936,20 +914,43 @@ impl Connection {
     fn send_grease_frames(
         &mut self, conn: &mut super::Connection, stream_id: u64,
     ) -> Result<()> {
-        let mut d = [42; 128];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut d = [0; 8];
+
+        let stream_cap = conn.stream_capacity(stream_id)?;
+
+        let grease_frame1 = grease_value();
+        let grease_frame2 = grease_value();
+        let grease_payload = b"GREASE is the word";
+
+        let overhead = octets::varint_len(grease_frame1) + // frame type
+            1 + // payload len
+            octets::varint_len(grease_frame2) + // frame type
+            1 + // payload len
+            grease_payload.len(); // payload
+
+        // Don't send GREASE if there is not enough capacity for it. Greasing
+        // will _not_ be attempted again later on.
+        if stream_cap < overhead {
+            return Ok(());
+        }
 
         trace!("{} tx frm GREASE stream={}", conn.trace_id(), stream_id);
 
         // Empty GREASE frame.
-        conn.stream_send(stream_id, b.put_varint(grease_value())?, false)?;
+        let mut b = octets::Octets::with_slice(&mut d);
+        conn.stream_send(stream_id, b.put_varint(grease_frame1)?, false)?;
+
+        let mut b = octets::Octets::with_slice(&mut d);
         conn.stream_send(stream_id, b.put_varint(0)?, false)?;
 
         // GREASE frame with payload.
-        conn.stream_send(stream_id, b.put_varint(grease_value())?, false)?;
+        let mut b = octets::Octets::with_slice(&mut d);
+        conn.stream_send(stream_id, b.put_varint(grease_frame2)?, false)?;
+
+        let mut b = octets::Octets::with_slice(&mut d);
         conn.stream_send(stream_id, b.put_varint(18)?, false)?;
 
-        conn.stream_send(stream_id, b"GREASE is the word", false)?;
+        conn.stream_send(stream_id, grease_payload, false)?;
 
         Ok(())
     }
@@ -1437,30 +1438,6 @@ impl Connection {
                 }
 
                 // TODO: implement more checks and PUSH_PROMISE event
-            },
-
-            frame::Frame::DuplicatePush { .. } => {
-                if self.is_server {
-                    conn.close(
-                        true,
-                        Error::FrameUnexpected.to_wire(),
-                        b"DUPLICATE_PUSH received by server",
-                    )?;
-
-                    return Err(Error::FrameUnexpected);
-                }
-
-                if stream_id % 4 != 0 {
-                    conn.close(
-                        true,
-                        Error::FrameUnexpected.to_wire(),
-                        b"DUPLICATE_PUSH received on non-request stream",
-                    )?;
-
-                    return Err(Error::FrameUnexpected);
-                }
-
-                // TODO: implement DUPLICATE_PUSH
             },
 
             frame::Frame::CancelPush { .. } => {
@@ -2237,30 +2214,6 @@ mod tests {
     }
 
     #[test]
-    /// Send a DUPLICATE_PUSH frame from the client, which is forbidden.
-    fn duplicate_push_from_client() {
-        let mut s = Session::default().unwrap();
-        s.handshake().unwrap();
-
-        let (stream, req) = s.send_request(false).unwrap();
-
-        s.send_frame_client(
-            frame::Frame::DuplicatePush { push_id: 1 },
-            stream,
-            false,
-        )
-        .unwrap();
-
-        let ev_headers = Event::Headers {
-            list: req,
-            has_body: true,
-        };
-
-        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
-        assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
-    }
-
-    #[test]
     /// Send a GOAWAY frame from the client, which is forbidden.
     fn goaway_from_client() {
         let mut s = Session::default().unwrap();
@@ -2316,21 +2269,11 @@ mod tests {
     fn uni_stream_local_counting() {
         let config = Config::new().unwrap();
 
-        let mut h3_cln = Connection::new(&config, false).unwrap();
+        let h3_cln = Connection::new(&config, false).unwrap();
+        assert_eq!(h3_cln.next_uni_stream_id, 2);
 
-        assert_eq!(h3_cln.get_available_uni_stream().unwrap(), 2);
-        assert_eq!(h3_cln.get_available_uni_stream().unwrap(), 6);
-        assert_eq!(h3_cln.get_available_uni_stream().unwrap(), 10);
-        assert_eq!(h3_cln.get_available_uni_stream().unwrap(), 14);
-        assert_eq!(h3_cln.get_available_uni_stream().unwrap(), 18);
-
-        let mut h3_srv = Connection::new(&config, true).unwrap();
-
-        assert_eq!(h3_srv.get_available_uni_stream().unwrap(), 3);
-        assert_eq!(h3_srv.get_available_uni_stream().unwrap(), 7);
-        assert_eq!(h3_srv.get_available_uni_stream().unwrap(), 11);
-        assert_eq!(h3_srv.get_available_uni_stream().unwrap(), 15);
-        assert_eq!(h3_srv.get_available_uni_stream().unwrap(), 19);
+        let h3_srv = Connection::new(&config, true).unwrap();
+        assert_eq!(h3_srv.next_uni_stream_id, 3);
     }
 
     #[test]
@@ -2339,7 +2282,7 @@ mod tests {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
-        let stream_id = s.client.get_available_uni_stream().unwrap();
+        let stream_id = s.client.next_uni_stream_id;
 
         let mut d = [42; 8];
         let mut b = octets::Octets::with_slice(&mut d);
@@ -2687,6 +2630,52 @@ mod tests {
 
         // Try to call poll() again after an error occurred.
         assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::Done));
+    }
+
+    #[test]
+    /// Tests that we limit sending HEADERS based on the stream capacity.
+    fn headers_blocked() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let mut h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        let req = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":authority", "quic.tech"),
+            Header::new(":path", "/test"),
+        ];
+
+        assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
+
+        assert_eq!(
+            s.client.send_request(&mut s.pipe.client, &req, true),
+            Err(Error::StreamBlocked)
+        );
+
+        s.advance().ok();
+
+        // Once the server gives flow control credits back, we can send the
+        // request.
+        assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(4));
     }
 }
 

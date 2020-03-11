@@ -34,22 +34,17 @@ use std::io::BufReader;
 
 use quiche::h3;
 
-const USAGE: &str = "Usage:
-  qpack-encode [options] FILE
-  qpack-encode -h | --help
-
-Options:
-  -h --help  Show this screen.
-";
-
 fn main() {
-    env_logger::init();
+    let mut args = std::env::args();
 
-    let args = docopt::Docopt::new(USAGE)
-        .and_then(|dopt| dopt.parse())
-        .unwrap_or_else(|e| e.exit());
+    let cmd = &args.next().unwrap();
 
-    let file = File::open(args.get_str("FILE")).unwrap();
+    if args.len() != 1 {
+        println!("Usage: {} FILE", cmd);
+        return;
+    }
+
+    let file = File::open(&args.next().unwrap()).unwrap();
     let file = BufReader::new(&file);
 
     let mut enc = h3::qpack::Encoder::new();

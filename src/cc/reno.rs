@@ -82,13 +82,15 @@ impl cc::CongestionControl for Reno {
         self.congestion_recovery_start_time
     }
 
-    fn on_packet_sent_cc(&mut self, bytes_sent: usize, _trace_id: &str) {
+    fn on_packet_sent_cc(
+        &mut self, bytes_sent: usize, _now: Instant, _trace_id: &str,
+    ) {
         self.bytes_in_flight += bytes_sent;
     }
 
     fn on_packet_acked_cc(
         &mut self, packet: &Sent, _srtt: Duration, _min_rtt: Duration,
-        app_limited: bool, _trace_id: &str,
+        app_limited: bool, _now: Instant, _trace_id: &str,
     ) {
         self.bytes_in_flight -= packet.size;
 
@@ -144,10 +146,6 @@ mod tests {
 
     const TRACE_ID: &str = "test_id";
 
-    fn init() {
-        let _ = env_logger::builder().is_test(true).try_init();
-    }
-
     #[test]
     fn reno_init() {
         let cc = cc::new_congestion_control(cc::Algorithm::Reno);
@@ -158,36 +156,38 @@ mod tests {
 
     #[test]
     fn reno_send() {
-        init();
-
         let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
+        let now = Instant::now();
 
-        cc.on_packet_sent_cc(1000, TRACE_ID);
+        cc.on_packet_sent_cc(1000, now, TRACE_ID);
 
         assert_eq!(cc.bytes_in_flight(), 1000);
     }
 
     #[test]
     fn reno_slow_start() {
-        init();
-
         let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
+        let now = Instant::now();
 
         let p = Sent {
             pkt_num: 0,
             frames: vec![],
-            time: std::time::Instant::now(),
+            time: now,
             size: 5000,
             ack_eliciting: true,
             in_flight: true,
+            delivered: 0,
+            delivered_time: std::time::Instant::now(),
+            recent_delivered_packet_sent_time: std::time::Instant::now(),
+            is_app_limited: false,
         };
 
         // Send 5k x 4 = 20k, higher than default cwnd(~15k)
         // to become no longer app limited.
-        cc.on_packet_sent_cc(p.size, TRACE_ID);
-        cc.on_packet_sent_cc(p.size, TRACE_ID);
-        cc.on_packet_sent_cc(p.size, TRACE_ID);
-        cc.on_packet_sent_cc(p.size, TRACE_ID);
+        cc.on_packet_sent_cc(p.size, now, TRACE_ID);
+        cc.on_packet_sent_cc(p.size, now, TRACE_ID);
+        cc.on_packet_sent_cc(p.size, now, TRACE_ID);
+        cc.on_packet_sent_cc(p.size, now, TRACE_ID);
 
         let cwnd_prev = cc.cwnd();
 
@@ -196,6 +196,7 @@ mod tests {
             Duration::new(0, 1),
             Duration::new(0, 1),
             false,
+            now,
             TRACE_ID,
         );
 
@@ -205,16 +206,11 @@ mod tests {
 
     #[test]
     fn reno_congestion_event() {
-        init();
-
         let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
         let prev_cwnd = cc.cwnd();
+        let now = Instant::now();
 
-        cc.congestion_event(
-            std::time::Instant::now(),
-            std::time::Instant::now(),
-            TRACE_ID,
-        );
+        cc.congestion_event(now, now, TRACE_ID);
 
         // In Reno, after congestion event, cwnd will be cut in half.
         assert_eq!(prev_cwnd / 2, cc.cwnd());
@@ -222,19 +218,14 @@ mod tests {
 
     #[test]
     fn reno_congestion_avoidance() {
-        init();
-
         let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
         let prev_cwnd = cc.cwnd();
+        let now = Instant::now();
 
         // Send 20K bytes.
-        cc.on_packet_sent_cc(20000, TRACE_ID);
+        cc.on_packet_sent_cc(20000, now, TRACE_ID);
 
-        cc.congestion_event(
-            std::time::Instant::now(),
-            std::time::Instant::now(),
-            TRACE_ID,
-        );
+        cc.congestion_event(now, now, TRACE_ID);
 
         // In Reno, after congestion event, cwnd will be cut in half.
         assert_eq!(prev_cwnd / 2, cc.cwnd());
@@ -242,10 +233,14 @@ mod tests {
         let p = Sent {
             pkt_num: 0,
             frames: vec![],
-            time: std::time::Instant::now(),
+            time: now,
             size: 5000,
             ack_eliciting: true,
             in_flight: true,
+            delivered: 0,
+            delivered_time: std::time::Instant::now(),
+            recent_delivered_packet_sent_time: std::time::Instant::now(),
+            is_app_limited: false,
         };
 
         let prev_cwnd = cc.cwnd();
@@ -256,6 +251,7 @@ mod tests {
             Duration::new(0, 1),
             Duration::new(0, 1),
             false,
+            now,
             TRACE_ID,
         );
 
@@ -266,8 +262,6 @@ mod tests {
 
     #[test]
     fn reno_collapse_cwnd() {
-        init();
-
         let mut cc = cc::new_congestion_control(cc::Algorithm::Reno);
 
         // cwnd will be reset

@@ -87,7 +87,9 @@ where
     fn collapse_cwnd(&mut self);
 
     /// OnPacketSentCC(bytes_sent)
-    fn on_packet_sent_cc(&mut self, bytes_sent: usize, trace_id: &str);
+    fn on_packet_sent_cc(
+        &mut self, bytes_sent: usize, now: Instant, trace_id: &str,
+    );
 
     /// InCongestionRecovery(sent_time)
     fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
@@ -102,7 +104,7 @@ where
     /// OnPacketAckedCC(packet)
     fn on_packet_acked_cc(
         &mut self, packet: &Sent, srtt: Duration, min_rtt: Duration,
-        app_limited: bool, trace_id: &str,
+        app_limited: bool, now: Instant, trace_id: &str,
     );
 
     /// CongestionEvent(time_sent)

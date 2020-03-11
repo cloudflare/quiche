@@ -51,7 +51,7 @@ pub enum Frame {
 
     ResetStream {
         stream_id: u64,
-        error_code: u16,
+        error_code: u64,
         final_size: u64,
     },
 
@@ -167,7 +167,7 @@ impl Frame {
 
             0x04 => Frame::ResetStream {
                 stream_id: b.get_varint()?,
-                error_code: b.get_u16()?,
+                error_code: b.get_varint()?,
                 final_size: b.get_varint()?,
             },
 
@@ -346,7 +346,7 @@ impl Frame {
                 b.put_varint(0x04)?;
 
                 b.put_varint(*stream_id)?;
-                b.put_u16(*error_code)?;
+                b.put_varint(*error_code)?;
                 b.put_varint(*final_size)?;
             },
 
@@ -543,12 +543,12 @@ impl Frame {
 
             Frame::ResetStream {
                 stream_id,
+                error_code,
                 final_size,
-                ..
             } => {
                 1 + // frame type
                 octets::varint_len(*stream_id) + // stream_id
-                2 + // error_code
+                octets::varint_len(*error_code) + // error_code
                 octets::varint_len(*final_size) // final_size
             },
 
@@ -996,7 +996,7 @@ mod tests {
 
         let frame = Frame::ResetStream {
             stream_id: 123_213,
-            error_code: 15_352,
+            error_code: 21_123_767,
             final_size: 21_123_767,
         };
 
@@ -1005,7 +1005,7 @@ mod tests {
             frame.to_bytes(&mut b).unwrap()
         };
 
-        assert_eq!(wire_len, 11);
+        assert_eq!(wire_len, 13);
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
