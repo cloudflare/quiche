@@ -244,9 +244,6 @@ impl Stream {
                     (frame::PUSH_PROMISE_FRAME_TYPE_ID, true) =>
                         return Err(Error::FrameUnexpected),
 
-                    (frame::DUPLICATE_PUSH_FRAME_TYPE_ID, true) =>
-                        return Err(Error::FrameUnexpected),
-
                     // All other frames are ignored after initialization.
                     (_, true) => (),
                 }
@@ -297,9 +294,6 @@ impl Stream {
                         return Err(Error::FrameUnexpected),
 
                     frame::MAX_PUSH_FRAME_TYPE_ID =>
-                        return Err(Error::FrameUnexpected),
-
-                    frame::DUPLICATE_PUSH_FRAME_TYPE_ID =>
                         return Err(Error::FrameUnexpected),
 
                     _ => (),
