@@ -689,18 +689,12 @@ impl Connection {
             fin
         );
 
-        conn.stream_send(
-            stream_id,
-            b.put_varint(frame::HEADERS_FRAME_TYPE_ID)?,
-            false,
-        )?;
+        b.put_varint(frame::HEADERS_FRAME_TYPE_ID)?;
+        b.put_varint(header_block.len() as u64)?;
+        let off = b.off();
+        conn.stream_send(stream_id, &d[..off], false)?;
 
-        conn.stream_send(
-            stream_id,
-            b.put_varint(header_block.len() as u64)?,
-            false,
-        )?;
-
+        // Sending header block separately avoids unnecessary copy.
         conn.stream_send(stream_id, &header_block, fin)?;
 
         if fin && conn.stream_finished(stream_id) {
@@ -757,15 +751,13 @@ impl Connection {
             fin
         );
 
-        conn.stream_send(
-            stream_id,
-            b.put_varint(frame::DATA_FRAME_TYPE_ID)?,
-            false,
-        )?;
-
-        conn.stream_send(stream_id, b.put_varint(body_len as u64)?, false)?;
+        b.put_varint(frame::DATA_FRAME_TYPE_ID)?;
+        b.put_varint(body_len as u64)?;
+        let off = b.off();
+        conn.stream_send(stream_id, &d[..off], false)?;
 
         // Return how many bytes were written, excluding the frame header.
+        // Sending body separately avoids unnecessary copy.
         let written = conn.stream_send(stream_id, &body[..body_len], fin)?;
 
         if fin && written == body.len() && conn.stream_finished(stream_id) {
