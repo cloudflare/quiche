@@ -1808,6 +1808,9 @@ impl Connection {
 
                 if push_frame_to_pkt!(frames, frame, payload_len, left) {
                     self.handshake_done_sent = true;
+
+                    ack_eliciting = true;
+                    in_flight = true;
                 }
             }
 
