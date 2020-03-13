@@ -277,7 +277,7 @@ impl Recovery {
             // that as soon as we see an already-acked packet number
             // all following packet numbers will also be already
             // acked.
-            if let Some(lowest) = self.sent[epoch].values().nth(0) {
+            if let Some(lowest) = self.sent[epoch].values().next() {
                 if pn < lowest.pkt_num {
                     break;
                 }
