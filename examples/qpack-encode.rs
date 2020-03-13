@@ -80,7 +80,7 @@ fn main() {
             continue;
         }
 
-        let name = line.split('\t').nth(0).unwrap();
+        let name = line.split('\t').next().unwrap();
         let value = line.split('\t').last().unwrap();
 
         headers.push(h3::Header::new(name, value));
