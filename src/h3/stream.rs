@@ -132,6 +132,9 @@ pub struct Stream {
 
     /// Whether the stream has been initialized.
     initialized: bool,
+
+    /// Whether the stream has been locally initialized.
+    local_initialized: bool,
 }
 
 impl Stream {
@@ -167,6 +170,7 @@ impl Stream {
 
             is_local,
             initialized: false,
+            local_initialized: false,
         }
     }
 
@@ -359,6 +363,16 @@ impl Stream {
         }
 
         Ok(())
+    }
+
+    /// Initialize the local part of the stream.
+    pub fn initialize_local(&mut self) {
+        self.local_initialized = true
+    }
+
+    /// Whether the stream has been initialized.
+    pub fn local_initialized(&self) -> bool {
+        self.local_initialized
     }
 
     /// Tries to fill the state buffer by reading data from the given cursor.

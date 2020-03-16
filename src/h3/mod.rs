@@ -697,6 +697,10 @@ impl Connection {
         // Sending header block separately avoids unnecessary copy.
         conn.stream_send(stream_id, &header_block, fin)?;
 
+        if let Some(s) = self.streams.get_mut(&stream_id) {
+            s.initialize_local();
+        }
+
         if fin && conn.stream_finished(stream_id) {
             self.streams.remove(&stream_id);
         }
@@ -720,8 +724,19 @@ impl Connection {
         let mut b = octets::Octets::with_slice(&mut d);
 
         // Validate that it is sane to send data on the stream.
-        if !self.streams.contains_key(&stream_id) || stream_id % 4 != 0 {
+        if stream_id % 4 != 0 {
             return Err(Error::FrameUnexpected);
+        }
+
+        match self.streams.get(&stream_id) {
+            Some(s) =>
+                if !s.local_initialized() {
+                    return Err(Error::FrameUnexpected);
+                },
+
+            None => {
+                return Err(Error::FrameUnexpected);
+            },
         }
 
         let overhead = octets::varint_len(frame::DATA_FRAME_TYPE_ID) +
@@ -1986,6 +2001,84 @@ mod tests {
         }
 
         assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Try to send DATA frames before HEADERS.
+    fn body_response_before_headers() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(true).unwrap();
+        assert_eq!(stream, 0);
+
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: false,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        assert_eq!(
+            s.send_body_server(stream, true),
+            Err(Error::FrameUnexpected)
+        );
+
+        assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Try to send DATA frames on wrong streams, ensure the API returns an
+    /// error before anything hits the transport layer.
+    fn send_body_invalid_client_stream() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        assert_eq!(s.send_body_client(0, true), Err(Error::FrameUnexpected));
+
+        assert_eq!(
+            s.send_body_client(s.client.control_stream_id.unwrap(), true),
+            Err(Error::FrameUnexpected)
+        );
+
+        assert_eq!(
+            s.send_body_client(
+                s.client.local_qpack_streams.encoder_stream_id.unwrap(),
+                true
+            ),
+            Err(Error::FrameUnexpected)
+        );
+
+        assert_eq!(
+            s.send_body_client(
+                s.client.local_qpack_streams.decoder_stream_id.unwrap(),
+                true
+            ),
+            Err(Error::FrameUnexpected)
+        );
+
+        assert_eq!(
+            s.send_body_client(s.client.peer_control_stream_id.unwrap(), true),
+            Err(Error::FrameUnexpected)
+        );
+
+        assert_eq!(
+            s.send_body_client(
+                s.client.peer_qpack_streams.encoder_stream_id.unwrap(),
+                true
+            ),
+            Err(Error::FrameUnexpected)
+        );
+
+        assert_eq!(
+            s.send_body_client(
+                s.client.peer_qpack_streams.decoder_stream_id.unwrap(),
+                true
+            ),
+            Err(Error::FrameUnexpected)
+        );
     }
 
     #[test]
