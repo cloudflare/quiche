@@ -712,7 +712,7 @@ impl std::fmt::Debug for Recovery {
         write!(f, "{:?} ", self.cc)?;
         write!(f, "delivered={:?} ", self.delivered)?;
         if let Some(t) = self.delivered_time {
-            write!(f, "delivered_time={:?}", t.elapsed())?;
+            write!(f, "delivered_time={:?} ", t.elapsed())?;
         }
         if let Some(t) = self.recent_delivered_packet_sent_time {
             write!(f, "recent_delivered_packet_sent_time={:?} ", t.elapsed())?;

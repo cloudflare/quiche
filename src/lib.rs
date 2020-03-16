@@ -3176,7 +3176,7 @@ impl std::fmt::Debug for Stats {
             self.lost,
             self.rtt,
             self.cwnd,
-            self.delivery_rate
+            self.delivery_rate as u64
         )
     }
 }
