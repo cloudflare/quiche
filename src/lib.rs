@@ -3163,7 +3163,7 @@ pub struct Stats {
     pub cwnd: usize,
 
     /// The estimated data delivery rate in bytes/s.
-    pub delivery_rate: f64,
+    pub delivery_rate: u64,
 }
 
 impl std::fmt::Debug for Stats {
