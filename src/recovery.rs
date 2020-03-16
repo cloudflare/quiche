@@ -80,7 +80,7 @@ pub struct Sent {
 // https://tools.ietf.org/html/draft-cheng-iccrg-delivery-rate-estimation-00
 #[derive(Default)]
 pub struct RateSample {
-    delivery_rate: f64,
+    delivery_rate: u64,
 
     is_app_limited: bool,
 
@@ -383,7 +383,7 @@ impl Recovery {
         self.rtt() + cmp::max(self.rttvar * 4, GRANULARITY) + self.max_ack_delay
     }
 
-    pub fn delivery_rate(&self) -> f64 {
+    pub fn delivery_rate(&self) -> u64 {
         self.rate_sample.delivery_rate
     }
 
@@ -671,8 +671,9 @@ impl Recovery {
         }
 
         if self.rate_sample.interval.as_secs_f64() > 0.0 {
-            self.rate_sample.delivery_rate = self.rate_sample.delivered as f64 /
-                self.rate_sample.interval.as_secs_f64();
+            self.rate_sample.delivery_rate = (self.rate_sample.delivered as f64 /
+                self.rate_sample.interval.as_secs_f64())
+                as u64;
         }
     }
 
@@ -712,7 +713,7 @@ impl std::fmt::Debug for Recovery {
         write!(f, "{:?} ", self.cc)?;
         write!(f, "delivered={:?} ", self.delivered)?;
         if let Some(t) = self.delivered_time {
-            write!(f, "delivered_time={:?}", t.elapsed())?;
+            write!(f, "delivered_time={:?} ", t.elapsed())?;
         }
         if let Some(t) = self.recent_delivered_packet_sent_time {
             write!(f, "recent_delivered_packet_sent_time={:?} ", t.elapsed())?;
@@ -809,7 +810,7 @@ mod tests {
         recovery.rate_on_ack_received(pkt_2, Instant::now());
         recovery.rate_estimate();
 
-        assert!(recovery.rate_sample.delivery_rate > 0.0);
+        assert!(recovery.rate_sample.delivery_rate > 0);
     }
 
     #[test]
