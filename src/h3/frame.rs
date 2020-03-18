@@ -67,7 +67,7 @@ pub enum Frame {
     },
 
     GoAway {
-        stream_id: u64,
+        id: u64,
     },
 
     MaxPushId {
@@ -104,7 +104,7 @@ impl Frame {
                 parse_push_promise(payload_length, &mut b)?,
 
             GOAWAY_FRAME_TYPE_ID => Frame::GoAway {
-                stream_id: b.get_varint()?,
+                id: b.get_varint()?,
             },
 
             MAX_PUSH_FRAME_TYPE_ID => Frame::MaxPushId {
@@ -206,11 +206,11 @@ impl Frame {
                 b.put_bytes(header_block.as_ref())?;
             },
 
-            Frame::GoAway { stream_id } => {
+            Frame::GoAway { id } => {
                 b.put_varint(GOAWAY_FRAME_TYPE_ID)?;
-                b.put_varint(octets::varint_len(*stream_id) as u64)?;
+                b.put_varint(octets::varint_len(*id) as u64)?;
 
-                b.put_varint(*stream_id)?;
+                b.put_varint(*id)?;
             },
 
             Frame::MaxPushId { push_id } => {
@@ -263,8 +263,8 @@ impl std::fmt::Debug for Frame {
                 )?;
             },
 
-            Frame::GoAway { stream_id } => {
-                write!(f, "GOAWAY stream_id={}", stream_id)?;
+            Frame::GoAway { id } => {
+                write!(f, "GOAWAY id={}", id)?;
             },
 
             Frame::MaxPushId { push_id } => {
@@ -588,7 +588,7 @@ mod tests {
     fn goaway() {
         let mut d = [42; 128];
 
-        let frame = Frame::GoAway { stream_id: 32 };
+        let frame = Frame::GoAway { id: 32 };
 
         let frame_payload_len = 1;
         let frame_header_len = 2;

@@ -459,6 +459,7 @@ enum quiche_h3_event_type {
     QUICHE_H3_EVENT_DATA,
     QUICHE_H3_EVENT_FINISHED,
     QUICHE_H3_EVENT_DATAGRAM,
+    QUICHE_H3_EVENT_GOAWAY,
 };
 
 typedef struct Http3Event quiche_h3_event;

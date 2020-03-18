@@ -627,7 +627,7 @@ mod tests {
         let mut d = vec![42; 40];
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
-        let goaway = frame::Frame::GoAway { stream_id: 0 };
+        let goaway = frame::Frame::GoAway { id: 0 };
 
         let settings = frame::Frame::Settings {
             max_header_list_size: Some(0),
