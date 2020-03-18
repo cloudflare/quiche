@@ -26,6 +26,8 @@
 
 use std::cmp;
 
+use std::str::FromStr;
+
 use std::time::Duration;
 use std::time::Instant;
 
@@ -35,7 +37,6 @@ use crate::Config;
 use crate::Error;
 use crate::Result;
 
-use crate::cc;
 use crate::frame;
 use crate::minmax;
 use crate::packet;
@@ -53,6 +54,17 @@ const INITIAL_RTT: Duration = Duration::from_millis(500);
 const PERSISTENT_CONGESTION_THRESHOLD: u32 = 3;
 
 const RTT_WINDOW: Duration = Duration::from_secs(300);
+
+// Congestion Control
+const INITIAL_WINDOW_PACKETS: usize = 10;
+
+const INITIAL_WINDOW: usize = INITIAL_WINDOW_PACKETS * MAX_DATAGRAM_SIZE;
+
+const MINIMUM_WINDOW: usize = 2 * MAX_DATAGRAM_SIZE;
+
+const MAX_DATAGRAM_SIZE: usize = 1452;
+
+const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 
 pub struct Sent {
     pub pkt_num: u64,
@@ -132,10 +144,18 @@ pub struct Recovery {
 
     pub loss_probes: [usize; packet::EPOCH_COUNT],
 
-    pub cc: Box<dyn cc::CongestionControl>,
+    // Congestion control.
+    cc_ops: &'static CongestionControlOps,
 
-    app_limited: bool,
+    congestion_window: usize,
 
+    bytes_in_flight: usize,
+
+    ssthresh: usize,
+
+    congestion_recovery_start_time: Option<Instant>,
+
+    // Delivery rate estimation.
     delivered: usize,
 
     delivered_time: Option<Instant>,
@@ -145,6 +165,9 @@ pub struct Recovery {
     app_limited_at_pkt: usize,
 
     rate_sample: RateSample,
+
+    // Flags.
+    app_limited: bool,
 }
 
 impl Recovery {
@@ -184,9 +207,15 @@ impl Recovery {
 
             loss_probes: [0; packet::EPOCH_COUNT],
 
-            cc: cc::new_congestion_control(config.cc_algorithm),
+            congestion_window: INITIAL_WINDOW,
 
-            app_limited: false,
+            bytes_in_flight: 0,
+
+            ssthresh: std::usize::MAX,
+
+            congestion_recovery_start_time: None,
+
+            cc_ops: config.cc_algorithm.into(),
 
             delivered: 0,
 
@@ -197,6 +226,8 @@ impl Recovery {
             app_limited_at_pkt: 0,
 
             rate_sample: RateSample::default(),
+
+            app_limited: false,
         }
     }
 
@@ -221,15 +252,18 @@ impl Recovery {
             }
 
             self.app_limited =
-                (self.cc.bytes_in_flight() + sent_bytes) < self.cc.cwnd();
+                (self.bytes_in_flight + sent_bytes) < self.congestion_window;
 
-            // OnPacketSentCC
-            self.cc.on_packet_sent_cc(sent_bytes, now, trace_id);
+            self.on_packet_sent_cc(sent_bytes, now);
 
             self.set_loss_detection_timer(handshake_completed);
         }
 
         trace!("{} {:?}", trace_id, self);
+    }
+
+    fn on_packet_sent_cc(&mut self, sent_bytes: usize, now: Instant) {
+        (self.cc_ops.on_packet_sent)(self, sent_bytes, now);
     }
 
     pub fn on_ack_received(
@@ -290,7 +324,7 @@ impl Recovery {
                 }
             }
 
-            let newly_acked = self.on_packet_acked(pn, epoch, now, trace_id);
+            let newly_acked = self.on_packet_acked(pn, epoch, now);
             has_newly_acked = cmp::max(has_newly_acked, newly_acked);
 
             if newly_acked {
@@ -351,7 +385,7 @@ impl Recovery {
             unacked_bytes += p.size;
         }
 
-        self.cc.decrease_bytes_in_flight(unacked_bytes);
+        self.bytes_in_flight = self.bytes_in_flight.saturating_sub(unacked_bytes);
 
         self.loss_time[epoch] = None;
         self.loss_probes[epoch] = 0;
@@ -366,13 +400,17 @@ impl Recovery {
         self.loss_detection_timer
     }
 
+    pub fn cwnd(&self) -> usize {
+        self.congestion_window
+    }
+
     pub fn cwnd_available(&self) -> usize {
         // Ignore cwnd when sending probe packets.
         if self.loss_probes.iter().any(|&x| x > 0) {
             return std::usize::MAX;
         }
 
-        self.cc.cwnd().saturating_sub(self.cc.bytes_in_flight())
+        self.congestion_window.saturating_sub(self.bytes_in_flight)
     }
 
     pub fn rtt(&self) -> Duration {
@@ -460,7 +498,7 @@ impl Recovery {
             return;
         }
 
-        if self.cc.bytes_in_flight() == 0 {
+        if self.bytes_in_flight == 0 {
             // TODO: check if peer is awaiting address validation.
             self.loss_detection_timer = None;
             return;
@@ -531,28 +569,19 @@ impl Recovery {
         }
 
         if !lost_pkt.is_empty() {
-            self.on_packets_lost(lost_pkt, epoch, now, trace_id);
+            self.on_packets_lost(lost_pkt, epoch, now);
         }
     }
 
     fn on_packet_acked(
         &mut self, pkt_num: u64, epoch: packet::Epoch, now: Instant,
-        trace_id: &str,
     ) -> bool {
         // Check if packet is newly acked.
         if let Some(mut p) = self.sent[epoch].remove(&pkt_num) {
             self.acked[epoch].append(&mut p.frames);
 
             if p.in_flight {
-                // OnPacketAckedCC(acked_packet)
-                self.cc.on_packet_acked_cc(
-                    &p,
-                    self.rtt(),
-                    self.min_rtt,
-                    self.app_limited,
-                    now,
-                    trace_id,
-                );
+                self.on_packet_acked_cc(&p, now);
 
                 self.rate_on_ack_received(p, now);
             }
@@ -564,7 +593,19 @@ impl Recovery {
         false
     }
 
-    // TODO: move to Congestion Control and implement draft 24
+    fn on_packet_acked_cc(&mut self, packet: &Sent, now: Instant) {
+        (self.cc_ops.on_packet_acked)(self, packet, now);
+    }
+
+    fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
+        match self.congestion_recovery_start_time {
+            Some(congestion_recovery_start_time) =>
+                sent_time <= congestion_recovery_start_time,
+
+            None => false,
+        }
+    }
+
     fn in_persistent_congestion(&mut self, _largest_lost_pkt: &Sent) -> bool {
         let _congestion_period = self.pto() * PERSISTENT_CONGESTION_THRESHOLD;
 
@@ -572,10 +613,8 @@ impl Recovery {
         false
     }
 
-    // TODO: move to Congestion Control
     fn on_packets_lost(
         &mut self, lost_pkt: Vec<u64>, epoch: packet::Epoch, now: Instant,
-        trace_id: &str,
     ) {
         // Differently from OnPacketsLost(), we need to handle both
         // in-flight and non-in-flight packets, so need to keep track
@@ -592,7 +631,7 @@ impl Recovery {
                 continue;
             }
 
-            self.cc.decrease_bytes_in_flight(p.size);
+            self.bytes_in_flight = self.bytes_in_flight.saturating_sub(p.size);
 
             self.lost[epoch].append(&mut p.frames);
 
@@ -600,14 +639,20 @@ impl Recovery {
         }
 
         if let Some(largest_lost_pkt) = largest_lost_pkt {
-            // CongestionEvent
-            self.cc
-                .congestion_event(largest_lost_pkt.time, now, trace_id);
+            self.congestion_event(largest_lost_pkt.time, now);
 
             if self.in_persistent_congestion(&largest_lost_pkt) {
-                self.cc.collapse_cwnd();
+                self.collapse_cwnd();
             }
         }
+    }
+
+    fn congestion_event(&mut self, time_sent: Instant, now: Instant) {
+        (self.cc_ops.congestion_event)(self, time_sent, now);
+    }
+
+    fn collapse_cwnd(&mut self) {
+        self.congestion_window = MINIMUM_WINDOW;
     }
 
     fn rate_on_packet_sent(&mut self, pkt: &mut Sent, now: Instant) {
@@ -679,8 +724,49 @@ impl Recovery {
 
     pub fn rate_check_app_limited(&mut self) {
         if self.app_limited {
-            let limited = self.delivered + self.cc.bytes_in_flight();
+            let limited = self.delivered + self.bytes_in_flight;
             self.app_limited_at_pkt = if limited > 0 { limited } else { 1 };
+        }
+    }
+}
+
+/// Available congestion control algorithms.
+///
+/// This enum provides currently available list of congestion control
+/// algorithms.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum CongestionControlAlgorithm {
+    /// Reno congestion control algorithm (default). `reno` in a string form.
+    Reno = 0,
+}
+
+impl FromStr for CongestionControlAlgorithm {
+    type Err = crate::Error;
+
+    /// Converts a string to `CongestionControlAlgorithm`.
+    ///
+    /// If `name` is not valid, `Error::CongestionControl` is returned.
+    fn from_str(name: &str) -> std::result::Result<Self, Self::Err> {
+        match name {
+            "reno" => Ok(CongestionControlAlgorithm::Reno),
+
+            _ => Err(crate::Error::CongestionControl),
+        }
+    }
+}
+
+pub struct CongestionControlOps {
+    pub on_packet_sent: fn(r: &mut Recovery, sent_bytes: usize, now: Instant),
+
+    pub on_packet_acked: fn(r: &mut Recovery, packet: &Sent, now: Instant),
+
+    pub congestion_event: fn(r: &mut Recovery, time_sent: Instant, now: Instant),
+}
+
+impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
+    fn from(algo: CongestionControlAlgorithm) -> Self {
+        match algo {
+            CongestionControlAlgorithm::Reno => &reno::RENO,
         }
     }
 }
@@ -710,7 +796,9 @@ impl std::fmt::Debug for Recovery {
         write!(f, "rttvar={:?} ", self.rttvar)?;
         write!(f, "loss_time={:?} ", self.loss_time)?;
         write!(f, "loss_probes={:?} ", self.loss_probes)?;
-        write!(f, "{:?} ", self.cc)?;
+        write!(f, "cwnd={} ", self.congestion_window)?;
+        write!(f, "ssthresh={} ", self.ssthresh)?;
+        write!(f, "bytes_in_flight={}", self.bytes_in_flight)?;
         write!(f, "delivered={:?} ", self.delivered)?;
         if let Some(t) = self.delivered_time {
             write!(f, "delivered_time={:?} ", t.elapsed())?;
@@ -857,4 +945,32 @@ mod tests {
 
         assert_eq!(recvry.app_limited_at_pkt, 0);
     }
+
+    #[test]
+    fn lookup_cc_algo_ok() {
+        let algo = CongestionControlAlgorithm::from_str("reno").unwrap();
+        assert_eq!(algo, CongestionControlAlgorithm::Reno);
+    }
+
+    #[test]
+    fn lookup_cc_algo_bad() {
+        assert_eq!(
+            CongestionControlAlgorithm::from_str("???"),
+            Err(Error::CongestionControl)
+        );
+    }
+
+    #[test]
+    fn collapse_cwnd() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+
+        let mut r = Recovery::new(&cfg);
+
+        // cwnd will be reset.
+        r.collapse_cwnd();
+        assert_eq!(r.cwnd(), MINIMUM_WINDOW);
+    }
 }
+
+mod reno;
