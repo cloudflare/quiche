@@ -271,8 +271,6 @@ use std::time;
 use std::pin::Pin;
 use std::str::FromStr;
 
-pub use crate::cc::Algorithm as CongestionControlAlgorithm;
-
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_DRAFT27;
 
@@ -424,7 +422,7 @@ pub struct Config {
 
     grease: bool,
 
-    cc_algorithm: cc::Algorithm,
+    cc_algorithm: CongestionControlAlgorithm,
 }
 
 impl Config {
@@ -445,7 +443,7 @@ impl Config {
             tls_ctx,
             application_protos: Vec::new(),
             grease: true,
-            cc_algorithm: cc::Algorithm::Reno, // default cc algorithm
+            cc_algorithm: recovery::CongestionControlAlgorithm::Reno,
         })
     }
 
@@ -2653,7 +2651,7 @@ impl Connection {
             recv: self.recv_count,
             sent: self.sent_count,
             lost: self.recovery.lost_count,
-            cwnd: self.recovery.cc.cwnd(),
+            cwnd: self.recovery.cwnd(),
             rtt: self.recovery.rtt(),
             delivery_rate: self.recovery.delivery_rate(),
         }
@@ -5448,9 +5446,9 @@ mod tests {
 
 pub use crate::packet::Header;
 pub use crate::packet::Type;
+pub use crate::recovery::CongestionControlAlgorithm;
 pub use crate::stream::StreamIter;
 
-mod cc;
 mod crypto;
 mod ffi;
 mod frame;

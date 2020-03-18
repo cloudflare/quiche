@@ -226,7 +226,7 @@ pub extern fn quiche_config_set_cc_algorithm_name(
 
 #[no_mangle]
 pub extern fn quiche_config_set_cc_algorithm(
-    config: &mut Config, algo: cc::Algorithm,
+    config: &mut Config, algo: CongestionControlAlgorithm,
 ) {
     config.set_cc_algorithm(algo);
 }
