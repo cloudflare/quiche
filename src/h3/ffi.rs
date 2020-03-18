@@ -113,6 +113,8 @@ pub extern fn quiche_h3_event_type(ev: &h3::Event) -> u32 {
         h3::Event::Finished { .. } => 2,
 
         h3::Event::Datagram { .. } => 3,
+
+        h3::Event::GoAway { .. } => 4,
     }
 }
 

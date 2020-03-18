@@ -260,6 +260,10 @@ fn main() {
 
                     Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
 
+                    Ok((goaway_id, quiche::h3::Event::GoAway)) => {
+                        info!("GOAWAY id={}", goaway_id);
+                    },
+
                     Err(quiche::h3::Error::Done) => {
                         break;
                     },

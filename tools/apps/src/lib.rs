@@ -847,6 +847,7 @@ pub struct Http3Conn {
     h3_conn: quiche::h3::Connection,
     reqs_sent: usize,
     reqs_complete: usize,
+    largest_processed_request: u64,
     reqs: Vec<Http3Request>,
     body: Option<Vec<u8>>,
     dump_json: bool,
@@ -921,6 +922,7 @@ impl Http3Conn {
             .unwrap(),
             reqs_sent: 0,
             reqs_complete: 0,
+            largest_processed_request: 0,
             reqs,
             body: body.as_ref().map(|b| b.to_vec()),
             dump_json,
@@ -941,6 +943,7 @@ impl Http3Conn {
             .unwrap(),
             reqs_sent: 0,
             reqs_complete: 0,
+            largest_processed_request: 0,
             reqs: Vec::new(),
             body: None,
             dump_json: false,
@@ -1231,6 +1234,14 @@ impl HttpConn for Http3Conn {
                     );
                 },
 
+                Ok((goaway_id, quiche::h3::Event::GoAway)) => {
+                    info!(
+                        "{} got GOAWAY with ID {} ",
+                        conn.trace_id(),
+                        goaway_id
+                    );
+                },
+
                 Err(quiche::h3::Error::Done) => {
                     break;
                 },
@@ -1275,6 +1286,9 @@ impl HttpConn for Http3Conn {
                         &list,
                         stream_id
                     );
+
+                    self.largest_processed_request =
+                        std::cmp::max(self.largest_processed_request, stream_id);
 
                     // We decide the response based on headers alone, so
                     // stop reading the request stream so that any body
@@ -1362,6 +1376,16 @@ impl HttpConn for Http3Conn {
                         flow_id,
                         &buf[flow_id_len..len].to_vec()
                     );
+                },
+
+                Ok((goaway_id, quiche::h3::Event::GoAway)) => {
+                    trace!(
+                        "{} got GOAWAY with ID {} ",
+                        conn.trace_id(),
+                        goaway_id
+                    );
+                    self.h3_conn
+                        .send_goaway(conn, self.largest_processed_request)?;
                 },
 
                 Err(quiche::h3::Error::Done) => {
