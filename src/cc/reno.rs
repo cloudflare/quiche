@@ -28,6 +28,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::cc;
+use crate::cc::CCCommon;
 use crate::recovery::Sent;
 
 /// Reno congestion control implementation.
@@ -60,74 +61,6 @@ impl cc::CongestionControl for Reno {
              * ecn_ce_counters: [0; packet::EPOCH_COUNT], */
         }
     }
-
-    fn cwnd(&self) -> usize {
-        self.congestion_window
-    }
-
-    fn collapse_cwnd(&mut self) {
-        self.congestion_window = cc::MINIMUM_WINDOW;
-    }
-
-    fn bytes_in_flight(&self) -> usize {
-        self.bytes_in_flight
-    }
-
-    fn decrease_bytes_in_flight(&mut self, bytes_in_flight: usize) {
-        self.bytes_in_flight =
-            self.bytes_in_flight.saturating_sub(bytes_in_flight);
-    }
-
-    fn congestion_recovery_start_time(&self) -> Option<Instant> {
-        self.congestion_recovery_start_time
-    }
-
-    fn on_packet_sent_cc(
-        &mut self, bytes_sent: usize, _now: Instant, _trace_id: &str,
-    ) {
-        self.bytes_in_flight += bytes_sent;
-    }
-
-    fn on_packet_acked_cc(
-        &mut self, packet: &Sent, _srtt: Duration, _min_rtt: Duration,
-        app_limited: bool, _now: Instant, _trace_id: &str,
-    ) {
-        self.bytes_in_flight -= packet.size;
-
-        if self.in_congestion_recovery(packet.time) {
-            return;
-        }
-
-        if app_limited {
-            return;
-        }
-
-        if self.congestion_window < self.ssthresh {
-            // Slow start.
-            self.congestion_window += packet.size;
-        } else {
-            // Congestion avoidance.
-            self.congestion_window +=
-                (cc::MAX_DATAGRAM_SIZE * packet.size) / self.congestion_window;
-        }
-    }
-
-    fn congestion_event(
-        &mut self, time_sent: Instant, now: Instant, _trace_id: &str,
-    ) {
-        // Start a new congestion event if packet was sent after the
-        // start of the previous congestion recovery period.
-        if !self.in_congestion_recovery(time_sent) {
-            self.congestion_recovery_start_time = Some(now);
-
-            self.congestion_window = (self.congestion_window as f64 *
-                cc::LOSS_REDUCTION_FACTOR)
-                as usize;
-            self.congestion_window =
-                std::cmp::max(self.congestion_window, cc::MINIMUM_WINDOW);
-            self.ssthresh = self.congestion_window;
-        }
-    }
 }
 
 impl std::fmt::Debug for Reno {
@@ -139,6 +72,12 @@ impl std::fmt::Debug for Reno {
         )
     }
 }
+
+// Reno implementation moved to mod.rs
+impl_cc_common!(Reno);
+impl_cc_on_packet_sent_reno!(Reno);
+impl_cc_on_packet_acked_reno!(Reno);
+impl_cc_congestion_event_reno!(Reno);
 
 #[cfg(test)]
 mod tests {
