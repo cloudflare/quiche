@@ -480,6 +480,40 @@ impl Config {
         self.tls_ctx.use_privkey_file(file)
     }
 
+    /// Specifies a file where trusted CA certificates are stored for the
+    /// purposes of certificate verification.
+    ///
+    /// The content of `file` is parsed as a PEM-encoded certificate chain.
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut config = quiche::Config::new(0xbabababa)?;
+    /// config.load_verify_locations_from_file("/path/to/cert.pem")?;
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn load_verify_locations_from_file(&mut self, file: &str) -> Result<()> {
+        self.tls_ctx.load_verify_locations_from_file(file)
+    }
+
+    /// Specifies a directory where trusted CA certificates are stored for the
+    /// purposes of certificate verification.
+    ///
+    /// The content of `dir` a set of PEM-encoded certificate chains.
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut config = quiche::Config::new(0xbabababa)?;
+    /// config.load_verify_locations_from_directory("/path/to/certs")?;
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn load_verify_locations_from_directory(
+        &mut self, dir: &str,
+    ) -> Result<()> {
+        self.tls_ctx.load_verify_locations_from_directory(dir)
+    }
+
     /// Configures whether to verify the peer's certificate.
     ///
     /// The default value is `true` for client connections, and `false` for
@@ -4056,6 +4090,23 @@ mod tests {
     }
 
     #[test]
+    fn verify_custom_root() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config.verify_peer(true);
+        config
+            .load_verify_locations_from_file("examples/rootca.crt")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+    }
+
+    #[test]
     fn handshake() {
         let mut buf = [0; 65535];
 
@@ -5410,7 +5461,7 @@ mod tests {
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
         match pipe.client.peer_cert() {
-            Some(c) => assert_eq!(c.len(), 919),
+            Some(c) => assert_eq!(c.len(), 753),
 
             None => panic!("missing server certificate"),
         }
