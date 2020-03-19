@@ -149,6 +149,30 @@ impl Context {
         }
     }
 
+    pub fn load_verify_locations_from_file(&mut self, file: &str) -> Result<()> {
+        let file = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
+        map_result(unsafe {
+            SSL_CTX_load_verify_locations(
+                self.as_ptr(),
+                file.as_ptr(),
+                std::ptr::null(),
+            )
+        })
+    }
+
+    pub fn load_verify_locations_from_directory(
+        &mut self, path: &str,
+    ) -> Result<()> {
+        let path = ffi::CString::new(path).map_err(|_| Error::TlsFail)?;
+        map_result(unsafe {
+            SSL_CTX_load_verify_locations(
+                self.as_ptr(),
+                std::ptr::null(),
+                path.as_ptr(),
+            )
+        })
+    }
+
     pub fn use_certificate_chain_file(&mut self, file: &str) -> Result<()> {
         let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
         map_result(unsafe {
@@ -879,6 +903,10 @@ extern {
 
     fn SSL_CTX_use_PrivateKey_file(
         ctx: *mut SSL_CTX, file: *const c_char, ty: c_int,
+    ) -> c_int;
+
+    fn SSL_CTX_load_verify_locations(
+        ctx: *mut SSL_CTX, file: *const c_char, path: *const c_char,
     ) -> c_int;
 
     #[cfg(not(windows))]
