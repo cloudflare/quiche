@@ -1,4 +1,4 @@
-From b6fea2197af5c74bf51b5f0a07a2739445ad2690 Mon Sep 17 00:00:00 2001
+From 14d229013e0d8e1bc837aa22980a8d1015c7ab5f Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 10 Oct 2019 17:06:08 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -26,12 +26,12 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   29 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2174 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2196 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   77 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3650 insertions(+), 11 deletions(-)
+ 27 files changed, 3672 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -1566,10 +1566,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..8221b699e
+index 000000000..094015ad9
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2174 @@
+@@ -0,0 +1,2196 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -3471,6 +3471,11 @@ index 000000000..8221b699e
 +
 +    r->qstream->headers_sent = 1;
 +
++    if (r->done) {
++        fc->write->handler = ngx_http_v3_close_stream_handler;
++        fc->read->handler = ngx_http_empty_handler;
++    }
++
 +    ngx_post_event(c->write, &ngx_posted_events);
 +
 +    return NGX_OK;
@@ -3615,6 +3620,12 @@ index 000000000..8221b699e
 +    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, h3c->connection->log, 0,
 +                   "http3 close stream %ui", stream->id);
 +
++    if (stream->blocked) {
++        fc->write->handler = ngx_http_v3_close_stream_handler;
++        fc->read->handler = ngx_http_empty_handler;
++        return;
++    }
++
 +    quiche_conn_stream_shutdown(h3c->connection->quic->conn, stream->id,
 +                                QUICHE_SHUTDOWN_READ, 0);
 +
@@ -3688,6 +3699,8 @@ index 000000000..8221b699e
 +
 +    c = h3c->connection;
 +
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0, "http3 finalize connection");
++
 +    quiche_conn_close(c->quic->conn, true, status, NULL, 0);
 +
 +    c->error = 1;
@@ -3719,7 +3732,16 @@ index 000000000..8221b699e
 +
 +        fc->error = 1;
 +
-+        ev = fc->read;
++        if (stream->blocked) {
++            stream->blocked = 0;
++
++            ev = fc->write;
++            ev->active = 0;
++            ev->ready = 1;
++
++        } else {
++            ev = fc->read;
++        }
 +
 +        ev->eof = 1;
 +        ev->handler(ev);
