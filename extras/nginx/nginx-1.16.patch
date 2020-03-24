@@ -1,4 +1,4 @@
-From 357cb80e9326176ef5bfbcdcc5df9d5ea0bd5ca4 Mon Sep 17 00:00:00 2001
+From b6fea2197af5c74bf51b5f0a07a2739445ad2690 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 10 Oct 2019 17:06:08 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -26,12 +26,12 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   29 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2156 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2174 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   77 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3632 insertions(+), 11 deletions(-)
+ 27 files changed, 3650 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -1566,10 +1566,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..179ed614d
+index 000000000..8221b699e
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2156 @@
+@@ -0,0 +1,2174 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -3465,6 +3465,10 @@ index 000000000..179ed614d
 +        return NGX_ERROR;
 +    }
 +
++    if (fin) {
++        r->qstream->out_closed = 1;
++    }
++
 +    r->qstream->headers_sent = 1;
 +
 +    ngx_post_event(c->write, &ngx_posted_events);
@@ -3533,6 +3537,20 @@ index 000000000..179ed614d
 +    send = 0;
 +
 +    blocked = 0;
++
++    while (in) {
++        off_t size = ngx_buf_size(in->buf);
++
++        if (size || in->buf->last_buf) {
++            break;
++        }
++
++        in = in->next;
++    }
++
++    if (in == NULL || stream->out_closed) {
++        return NULL;
++    }
 +
 +    while (in) {
 +        prev_send = send;
@@ -4216,5 +4234,5 @@ index 000000000..72e189def
 +
 +#endif /* _NGX_HTTP_V3_MODULE_H_INCLUDED_ */
 -- 
-2.25.1
+2.26.0
 
