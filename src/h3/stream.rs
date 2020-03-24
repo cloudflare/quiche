@@ -130,8 +130,11 @@ pub struct Stream {
     /// Whether the stream was created locally, or by the peer.
     is_local: bool,
 
-    /// Whether the stream has been initialized.
-    initialized: bool,
+    /// Whether the stream has been remotely initialized.
+    remote_initialized: bool,
+
+    /// Whether the stream has been locally initialized.
+    local_initialized: bool,
 }
 
 impl Stream {
@@ -166,7 +169,8 @@ impl Stream {
             frame_type: None,
 
             is_local,
-            initialized: false,
+            remote_initialized: false,
+            local_initialized: false,
         }
     }
 
@@ -186,7 +190,7 @@ impl Stream {
             Type::Push => State::PushId,
 
             Type::QpackEncoder | Type::QpackDecoder => {
-                self.initialized = true;
+                self.remote_initialized = true;
 
                 State::QpackInstruction
             },
@@ -220,10 +224,10 @@ impl Stream {
                 // Control stream starts uninitialized and only SETTINGS is
                 // accepted in that state. Other frames cause an error. Once
                 // initialized, no more SETTINGS are permitted.
-                match (ty, self.initialized) {
+                match (ty, self.remote_initialized) {
                     // Initialize control stream.
                     (frame::SETTINGS_FRAME_TYPE_ID, false) =>
-                        self.initialized = true,
+                        self.remote_initialized = true,
 
                     // Non-SETTINGS frames not allowed on control stream
                     // before initialization.
@@ -253,9 +257,9 @@ impl Stream {
                 // Request stream starts uninitialized and only HEADERS
                 // is accepted. Other frames cause an error.
                 if !self.is_local {
-                    match (ty, self.initialized) {
+                    match (ty, self.remote_initialized) {
                         (frame::HEADERS_FRAME_TYPE_ID, false) =>
-                            self.initialized = true,
+                            self.remote_initialized = true,
 
                         (frame::CANCEL_PUSH_FRAME_TYPE_ID, _) =>
                             return Err(Error::FrameUnexpected),
@@ -359,6 +363,16 @@ impl Stream {
         }
 
         Ok(())
+    }
+
+    /// Initialize the local part of the stream.
+    pub fn initialize_local(&mut self) {
+        self.local_initialized = true
+    }
+
+    /// Whether the stream has been locally initialized.
+    pub fn local_initialized(&self) -> bool {
+        self.local_initialized
     }
 
     /// Tries to fill the state buffer by reading data from the given cursor.
