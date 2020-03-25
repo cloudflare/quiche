@@ -292,6 +292,7 @@ fn main() {
                 let client = Client {
                     conn,
                     http_conn: None,
+                    partial_requests: HashMap::new(),
                     partial_responses: HashMap::new(),
                 };
 
@@ -350,17 +351,18 @@ fn main() {
             if client.http_conn.is_some() {
                 let conn = &mut client.conn;
                 let http_conn = client.http_conn.as_mut().unwrap();
-                let partials = &mut client.partial_responses;
+                let partial_responses = &mut client.partial_responses;
 
                 // Handle writable streams.
                 for stream_id in conn.writable() {
-                    http_conn.handle_writable(conn, partials, stream_id);
+                    http_conn.handle_writable(conn, partial_responses, stream_id);
                 }
 
                 if http_conn
                     .handle_requests(
                         conn,
-                        partials,
+                        &mut client.partial_requests,
+                        partial_responses,
                         &args.root,
                         &args.index,
                         &mut buf,
