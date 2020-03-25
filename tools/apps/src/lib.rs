@@ -146,6 +146,10 @@ impl Args for CommonArgs {
     }
 }
 
+pub struct PartialRequest {
+    pub req: Vec<u8>,
+}
+
 pub struct PartialResponse {
     pub headers: Option<Vec<quiche::h3::Header>>,
 
@@ -158,6 +162,8 @@ pub struct Client {
     pub conn: std::pin::Pin<Box<quiche::Connection>>,
 
     pub http_conn: Option<Box<dyn crate::HttpConn>>,
+
+    pub partial_requests: std::collections::HashMap<u64, PartialRequest>,
 
     pub partial_responses: std::collections::HashMap<u64, PartialResponse>,
 }
@@ -221,6 +227,7 @@ pub trait HttpConn {
 
     fn handle_requests(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
+        partial_requests: &mut HashMap<u64, PartialRequest>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         index: &str, buf: &mut [u8],
     ) -> quiche::h3::Result<()>;
@@ -408,6 +415,7 @@ impl HttpConn for Http09Conn {
 
     fn handle_requests(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
+        partial_requests: &mut HashMap<u64, PartialRequest>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         index: &str, buf: &mut [u8],
     ) -> quiche::h3::Result<()> {
@@ -426,12 +434,36 @@ impl HttpConn for Http09Conn {
                     fin
                 );
 
-                if stream_buf.len() > 4 && &stream_buf[..4] == b"GET " {
-                    let uri = &buf[4..stream_buf.len()];
+                let stream_buf =
+                    if let Some(partial) = partial_requests.get_mut(&s) {
+                        partial.req.extend_from_slice(stream_buf);
+
+                        if !partial.req.ends_with(b"\r\n") {
+                            return Ok(());
+                        }
+
+                        &partial.req
+                    } else {
+                        if !stream_buf.ends_with(b"\r\n") {
+                            let request = PartialRequest {
+                                req: stream_buf.to_vec(),
+                            };
+
+                            partial_requests.insert(s, request);
+                            return Ok(());
+                        }
+
+                        stream_buf
+                    };
+
+                if stream_buf.starts_with(b"GET ") {
+                    let uri = &stream_buf[4..stream_buf.len() - 2];
                     let uri = String::from_utf8(uri.to_vec()).unwrap();
                     let uri = String::from(uri.lines().next().unwrap());
                     let uri = path::Path::new(&uri);
                     let mut path = path::PathBuf::from(root);
+
+                    partial_requests.remove(&s);
 
                     for c in uri.components() {
                         if let path::Component::Normal(v) = c {
@@ -479,6 +511,7 @@ impl HttpConn for Http09Conn {
                             body,
                             written,
                         };
+
                         partial_responses.insert(s, response);
                     }
                 }
@@ -811,6 +844,7 @@ impl HttpConn for Http3Conn {
 
     fn handle_requests(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
+        _partial_requests: &mut HashMap<u64, PartialRequest>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         index: &str, _buf: &mut [u8],
     ) -> quiche::h3::Result<()> {
