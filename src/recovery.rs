@@ -33,6 +33,9 @@ use std::time::Instant;
 
 use std::collections::BTreeMap;
 
+#[cfg(feature = "qlog")]
+use qlog::event::Event;
+
 use crate::Config;
 use crate::Error;
 use crate::Result;
@@ -727,6 +730,25 @@ impl Recovery {
             let limited = self.delivered + self.bytes_in_flight;
             self.app_limited_at_pkt = if limited > 0 { limited } else { 1 };
         }
+    }
+
+    #[cfg(feature = "qlog")]
+    pub fn to_qlog(&self) -> qlog::event::Event {
+        // QVis can't use all these fields and they can be large.
+        Event::metrics_updated(
+            Some(self.min_rtt.as_millis() as u64),
+            Some(self.rtt().as_millis() as u64),
+            Some(self.latest_rtt.as_millis() as u64),
+            Some(self.rttvar.as_millis() as u64),
+            None, // delay
+            None, // probe_count
+            Some(self.cwnd() as u64),
+            Some(self.bytes_in_flight as u64),
+            None, // ssthresh
+            None, // packets_in_flight
+            None, // in_recovery
+            None, // pacing_rate
+        )
     }
 }
 

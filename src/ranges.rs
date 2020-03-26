@@ -244,7 +244,8 @@ mod tests {
     fn insert_non_overlapping() {
         let mut r = RangeSet::default();
         assert_eq!(r.inner.len(), 0);
-        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[]);
+        let empty: &[u64] = &[];
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &empty);
 
         r.insert(4..7);
         assert_eq!(r.inner.len(), 1);
@@ -432,7 +433,9 @@ mod tests {
     fn flatten_rev() {
         let mut r = RangeSet::default();
         assert_eq!(r.inner.len(), 0);
-        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[]);
+
+        let empty: &[u64] = &[];
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &empty);
 
         r.insert(4..7);
         assert_eq!(r.inner.len(), 1);
@@ -451,7 +454,9 @@ mod tests {
     fn flatten_one() {
         let mut r = RangeSet::default();
         assert_eq!(r.inner.len(), 0);
-        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[]);
+
+        let empty: &[u64] = &[];
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &empty);
 
         r.insert(0..1);
         assert_eq!(r.inner.len(), 1);
@@ -496,7 +501,9 @@ mod tests {
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[19]);
 
         r.remove_until(20);
-        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[]);
+
+        let empty: &[u64] = &[];
+        assert_eq!(&r.flatten().collect::<Vec<u64>>(), &empty);
     }
 
     #[test]

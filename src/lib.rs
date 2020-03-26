@@ -271,6 +271,9 @@ use std::time;
 use std::pin::Pin;
 use std::str::FromStr;
 
+#[cfg(feature = "qlog")]
+use qlog::event::Event;
+
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_DRAFT27;
 
@@ -850,6 +853,14 @@ pub struct Connection {
 
     /// Whether to send GREASE.
     grease: bool,
+
+    /// Qlog streaming output.
+    #[cfg(feature = "qlog")]
+    qlog_streamer: Option<qlog::QlogStreamer>,
+
+    /// Whether peer transport parameters were qlogged.
+    #[cfg(feature = "qlog")]
+    qlogged_peer_params: bool,
 }
 
 /// Creates a new server-side connection.
@@ -1029,6 +1040,21 @@ macro_rules! push_frame_to_pkt {
     }};
 }
 
+/// Conditional qlog action.
+///
+/// Executes the provided body if the qlog feature is enabled and quiche
+/// has been condifigured with a log writer.
+macro_rules! qlog_with {
+    ($qlog_streamer:expr, $qlog_streamer_ref:ident, $body:block) => {{
+        #[cfg(feature = "qlog")]
+        {
+            if let Some($qlog_streamer_ref) = &mut $qlog_streamer {
+                $body
+            }
+        }
+    }};
+}
+
 impl Connection {
     fn new(
         scid: &[u8], odcid: Option<&[u8]>, config: &mut Config, is_server: bool,
@@ -1126,6 +1152,12 @@ impl Connection {
             closed: false,
 
             grease: config.grease,
+
+            #[cfg(feature = "qlog")]
+            qlog_streamer: None,
+
+            #[cfg(feature = "qlog")]
+            qlogged_peer_params: false,
         });
 
         if let Some(odcid) = odcid {
@@ -1155,6 +1187,60 @@ impl Connection {
         }
 
         Ok(conn)
+    }
+
+    /// Sets qlog output to the designated [`Writer`].
+    ///
+    /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
+    #[cfg(feature = "qlog")]
+    pub fn set_qlog(
+        &mut self, writer: Box<dyn std::io::Write>, title: String,
+        description: String,
+    ) {
+        let vp = if self.is_server {
+            qlog::VantagePointType::Server
+        } else {
+            qlog::VantagePointType::Client
+        };
+
+        let trace = qlog::Trace::new(
+            qlog::VantagePoint {
+                name: None,
+                ty: vp,
+                flow: None,
+            },
+            Some(title.to_string()),
+            Some(description.to_string()),
+            Some(qlog::Configuration {
+                time_offset: Some("0".to_string()),
+                time_units: Some(qlog::TimeUnits::Ms),
+                original_uris: None,
+            }),
+            None,
+        );
+
+        let mut streamer = qlog::QlogStreamer::new(
+            qlog::QLOG_VERSION.to_string(),
+            Some(title),
+            Some(description),
+            None,
+            std::time::Instant::now(),
+            trace,
+            writer,
+        );
+
+        streamer.start_log().ok();
+
+        let ev = self.peer_transport_params.to_qlog(
+            qlog::TransportOwner::Local,
+            self.version,
+            self.handshake.alpn_protocol(),
+            self.handshake.cipher(),
+        );
+
+        streamer.add_event(ev).ok();
+
+        self.qlog_streamer = Some(streamer);
     }
 
     /// Processes QUIC packets received from the peer.
@@ -1501,6 +1587,30 @@ impl Connection {
             pn
         );
 
+        qlog_with!(self.qlog_streamer, q, {
+            let packet_size = b.len();
+
+            let qlog_pkt_hdr = qlog::PacketHeader::with_type(
+                hdr.ty.to_qlog(),
+                pn,
+                Some(packet_size as u64),
+                Some(payload_len as u64),
+                Some(hdr.version),
+                Some(&hdr.scid),
+                Some(&hdr.dcid),
+            );
+
+            q.add_event(Event::packet_received(
+                hdr.ty.to_qlog(),
+                qlog_pkt_hdr,
+                Some(Vec::new()),
+                None,
+                None,
+                None,
+            ))
+            .ok();
+        });
+
         let mut payload =
             packet::decrypt_pkt(&mut b, pn, pn_len, payload_len, &aead).map_err(
                 |e| drop_pkt_on_err(e, self.recv_count, &self.trace_id),
@@ -1520,11 +1630,45 @@ impl Connection {
         while payload.cap() > 0 {
             let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
 
+            qlog_with!(self.qlog_streamer, q, {
+                q.add_frame(frame.to_qlog(), false).ok();
+            });
+
             if frame.ack_eliciting() {
                 ack_elicited = true;
             }
 
             self.process_frame(frame, epoch, now)?;
+        }
+
+        qlog_with!(self.qlog_streamer, q, {
+            // always conclude frame writing
+            q.finish_frames().ok();
+        });
+
+        // Only log the remote transport parameters once the connection is
+        // established (i.e. after frames have been fully parsed) and only
+        // once per connection.
+        if self.is_established() {
+            qlog_with!(self.qlog_streamer, q, {
+                // Always conclude frame writing.
+                q.finish_frames().ok();
+
+                if !self.qlogged_peer_params {
+                    let ev = self.peer_transport_params.to_qlog(
+                        qlog::TransportOwner::Remote,
+                        self.version,
+                        self.handshake.alpn_protocol(),
+                        self.handshake.cipher(),
+                    );
+
+                    if let Some(qlog_streamer) = self.qlog_streamer.as_mut() {
+                        qlog_streamer.add_event(ev).unwrap();
+                    }
+
+                    self.qlogged_peer_params = true;
+                }
+            });
         }
 
         // Process acked frames.
@@ -2115,12 +2259,40 @@ impl Connection {
             pn
         );
 
+        qlog_with!(self.qlog_streamer, q, {
+            let qlog_pkt_hdr = qlog::PacketHeader::with_type(
+                hdr.ty.to_qlog(),
+                pn,
+                Some(payload_len as u64 + payload_offset as u64),
+                Some(payload_len as u64),
+                Some(hdr.version),
+                Some(&hdr.scid),
+                Some(&hdr.dcid),
+            );
+
+            let packet_sent_ev = Event::packet_sent_min(
+                hdr.ty.to_qlog(),
+                qlog_pkt_hdr,
+                Some(Vec::new()),
+            );
+
+            q.add_event(packet_sent_ev).ok();
+        });
+
         // Encode frames into the output packet.
         for frame in &frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);
 
             frame.to_bytes(&mut b)?;
+
+            qlog_with!(self.qlog_streamer, q, {
+                q.add_frame(frame.to_qlog(), false).ok();
+            });
         }
+
+        qlog_with!(self.qlog_streamer, q, {
+            q.finish_frames().ok();
+        });
 
         let aead = match self.pkt_num_spaces[epoch].crypto_seal {
             Some(ref v) => v,
@@ -2156,6 +2328,11 @@ impl Connection {
             now,
             &self.trace_id,
         );
+
+        qlog_with!(self.qlog_streamer, q, {
+            let ev = self.recovery.to_qlog();
+            q.add_event(ev).ok();
+        });
 
         self.pkt_num_spaces[epoch].next_pkt_num += 1;
 
@@ -2568,6 +2745,10 @@ impl Connection {
             if draining_timer <= now {
                 trace!("{} draining timeout expired", self.trace_id);
 
+                qlog_with!(self.qlog_streamer, q, {
+                    q.finish_log().ok();
+                });
+
                 self.closed = true;
             }
 
@@ -2580,6 +2761,10 @@ impl Connection {
         if let Some(timer) = self.idle_timer {
             if timer <= now {
                 trace!("{} idle timeout expired", self.trace_id);
+
+                qlog_with!(self.qlog_streamer, q, {
+                    q.finish_log().ok();
+                });
 
                 self.closed = true;
                 return;
@@ -2595,6 +2780,11 @@ impl Connection {
                     now,
                     &self.trace_id,
                 );
+
+                qlog_with!(self.qlog_streamer, q, {
+                    let ev = self.recovery.to_qlog();
+                    q.add_event(ev).ok();
+                });
 
                 return;
             }
@@ -2853,6 +3043,11 @@ impl Connection {
                     now,
                     &self.trace_id,
                 )?;
+
+                qlog_with!(self.qlog_streamer, q, {
+                    let ev = self.recovery.to_qlog();
+                    q.add_event(ev).ok();
+                });
 
                 // When we receive an ACK for a 1-RTT packet after handshake
                 // completion, it means the handshake has been confirmed.
@@ -3572,6 +3767,42 @@ impl TransportParams {
         };
 
         Ok(&mut out[..out_len])
+    }
+
+    /// Creates a qlog event for connection transport parameters and TLS fields
+    #[cfg(feature = "qlog")]
+    pub fn to_qlog(
+        &self, owner: qlog::TransportOwner, version: u32, alpn: &[u8],
+        cipher: Option<crypto::Algorithm>,
+    ) -> qlog::event::Event {
+        let ocid =
+            qlog::HexSlice::maybe_string(self.original_connection_id.as_ref());
+        let stateless_reset_token =
+            qlog::HexSlice::maybe_string(self.stateless_reset_token.as_ref());
+
+        Event::transport_parameters_set(
+            Some(owner),
+            None, // resumption
+            None, // early data
+            String::from_utf8(alpn.to_vec()).ok(),
+            Some(format!("{:x?}", version)),
+            Some(format!("{:?}", cipher)),
+            ocid,
+            stateless_reset_token,
+            Some(self.disable_active_migration),
+            Some(self.max_idle_timeout),
+            Some(self.max_packet_size),
+            Some(self.ack_delay_exponent),
+            Some(self.max_ack_delay),
+            Some(self.active_conn_id_limit),
+            Some(self.initial_max_data.to_string()),
+            Some(self.initial_max_stream_data_bidi_local.to_string()),
+            Some(self.initial_max_stream_data_bidi_remote.to_string()),
+            Some(self.initial_max_stream_data_uni.to_string()),
+            Some(self.initial_max_streams_bidi.to_string()),
+            Some(self.initial_max_streams_uni.to_string()),
+            None, // preferred address
+        )
     }
 }
 

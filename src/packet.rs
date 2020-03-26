@@ -109,6 +109,23 @@ impl Type {
             _ => Err(Error::InvalidPacket),
         }
     }
+
+    #[cfg(feature = "qlog")]
+    pub(crate) fn to_qlog(self) -> qlog::PacketType {
+        match self {
+            Type::Initial => qlog::PacketType::Initial,
+
+            Type::Retry => qlog::PacketType::Retry,
+
+            Type::Handshake => qlog::PacketType::Handshake,
+
+            Type::ZeroRTT => qlog::PacketType::ZeroRtt,
+
+            Type::VersionNegotiation => qlog::PacketType::VersionNegotiation,
+
+            Type::Short => qlog::PacketType::OneRtt,
+        }
+    }
 }
 
 /// A QUIC packet's header.

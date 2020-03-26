@@ -62,6 +62,7 @@ libc = "0.2"
 ring = "0.16"
 criterion = { version = "0.3", optional = true }
 lazy_static = "1"
+qlog = { version = "0.2", optional = true }
 
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = ["wincrypt"] }
