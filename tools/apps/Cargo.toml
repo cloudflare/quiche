@@ -16,7 +16,8 @@ mio = "0.6"
 url = "1"
 log = "0.4"
 ring = "0.16"
-quiche = { path = "../../" }
+quiche = { path = "../../", features=["qlog"] }
+qlog = { version = "0.2", optional = true }
 
 [profile.release]
 debug = true

@@ -689,6 +689,154 @@ impl Frame {
             _ => true,
         }
     }
+
+    #[cfg(feature = "qlog")]
+    pub fn to_qlog(&self) -> qlog::QuicFrame {
+        match self {
+            Frame::Padding { .. } => qlog::QuicFrame::padding(),
+
+            Frame::Ping { .. } => qlog::QuicFrame::ping(),
+
+            Frame::ACK { ack_delay, ranges } => {
+                let ack_ranges =
+                    ranges.iter().map(|r| (r.start, r.end - 1)).collect();
+                qlog::QuicFrame::ack(
+                    Some(ack_delay.to_string()),
+                    Some(ack_ranges),
+                    None,
+                    None,
+                    None,
+                )
+            },
+
+            Frame::ResetStream {
+                stream_id,
+                error_code,
+                final_size,
+            } => qlog::QuicFrame::reset_stream(
+                stream_id.to_string(),
+                *error_code,
+                final_size.to_string(),
+            ),
+
+            Frame::StopSending {
+                stream_id,
+                error_code,
+            } =>
+                qlog::QuicFrame::stop_sending(stream_id.to_string(), *error_code),
+
+            Frame::Crypto { data } => qlog::QuicFrame::crypto(
+                data.off().to_string(),
+                data.len().to_string(),
+            ),
+
+            Frame::NewToken { token } => qlog::QuicFrame::new_token(
+                token.len().to_string(),
+                "TODO: https://github.com/quiclog/internet-drafts/issues/36"
+                    .to_string(),
+            ),
+
+            Frame::Stream { stream_id, data } => qlog::QuicFrame::stream(
+                stream_id.to_string(),
+                data.off().to_string(),
+                data.len().to_string(),
+                data.fin(),
+                None,
+            ),
+
+            Frame::MaxData { max } => qlog::QuicFrame::max_data(max.to_string()),
+
+            Frame::MaxStreamData { stream_id, max } =>
+                qlog::QuicFrame::max_stream_data(
+                    stream_id.to_string(),
+                    max.to_string(),
+                ),
+
+            Frame::MaxStreamsBidi { max } => qlog::QuicFrame::max_streams(
+                qlog::StreamType::Bidirectional,
+                max.to_string(),
+            ),
+
+            Frame::MaxStreamsUni { max } => qlog::QuicFrame::max_streams(
+                qlog::StreamType::Unidirectional,
+                max.to_string(),
+            ),
+
+            Frame::DataBlocked { limit } =>
+                qlog::QuicFrame::data_blocked(limit.to_string()),
+
+            Frame::StreamDataBlocked { stream_id, limit } =>
+                qlog::QuicFrame::stream_data_blocked(
+                    stream_id.to_string(),
+                    limit.to_string(),
+                ),
+
+            Frame::StreamsBlockedBidi { limit } =>
+                qlog::QuicFrame::streams_blocked(
+                    qlog::StreamType::Bidirectional,
+                    limit.to_string(),
+                ),
+
+            Frame::StreamsBlockedUni { limit } =>
+                qlog::QuicFrame::streams_blocked(
+                    qlog::StreamType::Unidirectional,
+                    limit.to_string(),
+                ),
+
+            Frame::NewConnectionId {
+                seq_num,
+                retire_prior_to,
+                conn_id,
+                ..
+            } => qlog::QuicFrame::new_connection_id(
+                seq_num.to_string(),
+                retire_prior_to.to_string(),
+                conn_id.len() as u64,
+                "TODO: https://github.com/quiclog/internet-drafts/issues/36"
+                    .to_string(),
+                "TODO: https://github.com/quiclog/internet-drafts/issues/36"
+                    .to_string(),
+            ),
+
+            Frame::RetireConnectionId { seq_num } =>
+                qlog::QuicFrame::retire_connection_id(seq_num.to_string()),
+
+            Frame::PathChallenge { .. } => qlog::QuicFrame::path_challenge(Some(
+                "TODO: https://github.com/quiclog/internet-drafts/issues/36"
+                    .to_string(),
+            )),
+
+            Frame::PathResponse { .. } => qlog::QuicFrame::path_response(Some(
+                "TODO: https://github.com/quiclog/internet-drafts/issues/36"
+                    .to_string(),
+            )),
+
+            Frame::ConnectionClose {
+                error_code, reason, ..
+            } => qlog::QuicFrame::connection_close(
+                qlog::ErrorSpace::TransportError,
+                *error_code,
+                *error_code,
+                String::from_utf8(reason.clone()).unwrap(),
+                Some(
+                    "TODO: https://github.com/quiclog/internet-drafts/issues/36"
+                        .to_string(),
+                ),
+            ),
+
+            Frame::ApplicationClose { error_code, reason } =>
+                qlog::QuicFrame::connection_close(
+                    qlog::ErrorSpace::ApplicationError,
+                    *error_code,
+                    *error_code,
+                    String::from_utf8(reason.clone()).unwrap(),
+                    None, /* Application variant of the frame has no trigger
+                           * frame type */
+                ),
+
+            _ => qlog::QuicFrame::unknown(std::u64::MAX),
+        }
+    }
 }
 
 impl std::fmt::Debug for Frame {

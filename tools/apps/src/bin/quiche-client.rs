@@ -139,6 +139,21 @@ fn main() {
     let mut conn =
         quiche::connect(connect_url.domain(), &scid, &mut config).unwrap();
 
+    // Only bother with qlog if the user specified it.
+    #[cfg(feature = "qlog")]
+    {
+        if let Some(dir) = std::env::var_os("QLOGDIR") {
+            let id = hex_dump(&scid);
+            let writer = make_qlog_writer(&dir, "client", &id);
+
+            conn.set_qlog(
+                std::boxed::Box::new(writer),
+                "quiche-client qlog".to_string(),
+                format!("{} id={}", "quiche-client qlog", id),
+            );
+        }
+    }
+
     info!(
         "connecting to {:} from {:} with scid {}",
         peer_addr,
