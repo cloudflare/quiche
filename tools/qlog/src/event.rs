@@ -40,6 +40,7 @@ use super::*;
 /// of several optional fields, so minimal versions of these functions are
 /// provided, which accept only mandatory qlog parameters. Minimal functions are
 /// identified by a `_min` suffix.
+#[derive(Clone)]
 pub struct Event {
     pub category: EventCategory,
     pub ty: EventType,

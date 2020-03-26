@@ -38,7 +38,7 @@
 //! [TypeScript schema]:
 //! https://github.com/quiclog/qlog/blob/master/TypeScript/draft-01/QLog.ts
 //!
-//! Getting Started
+//! Overview
 //! ---------------
 //! qlog is a hierarchical logging format, with a rough structure of:
 //!
@@ -69,6 +69,13 @@
 //! [`EventField::Event`] and [`EventField::Data`]. A set of methods are
 //! provided to assist in creating a Trace and appending events to it in this
 //! format.
+//!
+//! ## Writing out logs
+//! As events occur during the connection, the application appends them to the
+//! trace. The qlog crate supports two modes of writing logs: the buffered mode
+//! stores everything in memory and requires the application to serialize and write
+//! the output, the streaming mode progressively writes serialized JSON output to a
+//! writer designated by the application.
 //!
 //! ### Creating a Trace
 //!
@@ -125,16 +132,19 @@
 //!
 //! let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
 //! let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
+//!
 //! let pkt_hdr = qlog::PacketHeader::new(
 //!     0,
 //!     Some(1251),
 //!     Some(1224),
-//!     Some(0xff000018),
-//!     Some(&scid),
+//!     Some(0xff00001b),
+//!     Some(b"7e37e4dcc6682da8"),
 //!     Some(&dcid),
 //! );
+//!
 //! let frames =
 //!     vec![qlog::QuicFrame::crypto("0".to_string(), "1000".to_string())];
+//!
 //! let event = qlog::event::Event::packet_sent_min(
 //!     qlog::PacketType::Initial,
 //!     pkt_hdr,
@@ -146,7 +156,10 @@
 //!
 //! ### Serializing
 //!
-//! Simply:
+//! The qlog crate has only been tested with `serde_json`, however
+//! other serializer targets might work.
+//!
+//! For example, serializing the trace created above:
 //!
 //! ```
 //! # let mut trace = qlog::Trace::new (
@@ -198,7 +211,7 @@
 //!           "packet_number": "0",
 //!           "packet_size": 1251,
 //!           "payload_length": 1224,
-//!           "version": "ff000018",
+//!           "version": "ff00001b",
 //!           "scil": "8",
 //!           "dcil": "8",
 //!           "scid": "7e37e4dcc6682da8",
@@ -216,6 +229,237 @@
 //!   ]
 //! }
 //! ```
+//!
+//! Streaming Mode
+//! --------------
+//!
+//! Create the trace:
+//!
+//! ```
+//! let mut trace = qlog::Trace::new(
+//!     qlog::VantagePoint {
+//!         name: Some("Example client".to_string()),
+//!         ty: qlog::VantagePointType::Client,
+//!         flow: None,
+//!     },
+//!     Some("Example qlog trace".to_string()),
+//!     Some("Example qlog trace description".to_string()),
+//!     Some(qlog::Configuration {
+//!         time_offset: Some("0".to_string()),
+//!         time_units: Some(qlog::TimeUnits::Ms),
+//!         original_uris: None,
+//!     }),
+//!     None,
+//! );
+//! ```
+//! Create an object with the [`Write`] trait:
+//!
+//! ```
+//! let mut file = std::fs::File::create("foo.qlog").unwrap();
+//! ```
+//!
+//! Create a [`QlogStreamer`] and start serialization to foo.qlog
+//! using [`start_log()`]:
+//!
+//! ```
+//! # let mut trace = qlog::Trace::new(
+//! #    qlog::VantagePoint {
+//! #        name: Some("Example client".to_string()),
+//! #        ty: qlog::VantagePointType::Client,
+//! #        flow: None,
+//! #    },
+//! #    Some("Example qlog trace".to_string()),
+//! #    Some("Example qlog trace description".to_string()),
+//! #    Some(qlog::Configuration {
+//! #        time_offset: Some("0".to_string()),
+//! #        time_units: Some(qlog::TimeUnits::Ms),
+//! #        original_uris: None,
+//! #    }),
+//! #    None,
+//! # );
+//! # let mut file = std::fs::File::create("foo.qlog").unwrap();
+//! let mut streamer = qlog::QlogStreamer::new(
+//!     qlog::QLOG_VERSION.to_string(),
+//!     Some("Example qlog".to_string()),
+//!     Some("Example qlog description".to_string()),
+//!     None,
+//!     std::time::Instant::now(),
+//!     trace,
+//!     Box::new(file),
+//! );
+//!
+//! streamer.start_log().ok();
+//! ```
+//!
+//! ### Adding simple events
+//!
+//! Once logging has started you can stream events. Simple events
+//! can be written in one step using [`add_event()`]:
+//!
+//! ```
+//! # let mut trace = qlog::Trace::new(
+//! #    qlog::VantagePoint {
+//! #        name: Some("Example client".to_string()),
+//! #        ty: qlog::VantagePointType::Client,
+//! #        flow: None,
+//! #    },
+//! #    Some("Example qlog trace".to_string()),
+//! #    Some("Example qlog trace description".to_string()),
+//! #    Some(qlog::Configuration {
+//! #        time_offset: Some("0".to_string()),
+//! #        time_units: Some(qlog::TimeUnits::Ms),
+//! #        original_uris: None,
+//! #    }),
+//! #    None,
+//! # );
+//! # let mut file = std::fs::File::create("foo.qlog").unwrap();
+//! # let mut streamer = qlog::QlogStreamer::new(
+//! #     qlog::QLOG_VERSION.to_string(),
+//! #     Some("Example qlog".to_string()),
+//! #     Some("Example qlog description".to_string()),
+//! #     None,
+//! #     std::time::Instant::now(),
+//! #     trace,
+//! #     Box::new(file),
+//! # );
+//! let event = qlog::event::Event::metrics_updated_min();
+//! streamer.add_event(event).ok();
+//! ```
+//!
+//! ### Adding events with frames
+//! Some events contain optional arrays of QUIC frames. If the
+//! event has `Some(Vec<QuicFrame>)`, even if it is empty, the
+//! streamer enters a frame serializing mode that must be
+//! finalized before other events can be logged.
+//!
+//! In this example, a `PacketSent` event is created with an
+//! empty frame array and frames are written out later:
+//!
+//! ```
+//! # let mut trace = qlog::Trace::new(
+//! #    qlog::VantagePoint {
+//! #        name: Some("Example client".to_string()),
+//! #        ty: qlog::VantagePointType::Client,
+//! #        flow: None,
+//! #    },
+//! #    Some("Example qlog trace".to_string()),
+//! #    Some("Example qlog trace description".to_string()),
+//! #    Some(qlog::Configuration {
+//! #        time_offset: Some("0".to_string()),
+//! #        time_units: Some(qlog::TimeUnits::Ms),
+//! #        original_uris: None,
+//! #    }),
+//! #    None,
+//! # );
+//! # let mut file = std::fs::File::create("foo.qlog").unwrap();
+//! # let mut streamer = qlog::QlogStreamer::new(
+//! #     qlog::QLOG_VERSION.to_string(),
+//! #     Some("Example qlog".to_string()),
+//! #     Some("Example qlog description".to_string()),
+//! #     None,
+//! #     std::time::Instant::now(),
+//! #     trace,
+//! #     Box::new(file),
+//! # );
+//! let qlog_pkt_hdr = qlog::PacketHeader::with_type(
+//!     qlog::PacketType::OneRtt,
+//!     0,
+//!     Some(1251),
+//!     Some(1224),
+//!     Some(0xff00001b),
+//!     Some(b"7e37e4dcc6682da8"),
+//!     Some(b"36ce104eee50101c"),
+//! );
+//!
+//! let event = qlog::event::Event::packet_sent_min(
+//!     qlog::PacketType::OneRtt,
+//!     qlog_pkt_hdr,
+//!     Some(Vec::new()),
+//! );
+//!
+//! streamer.add_event(event).ok();
+//!
+//! ```
+//!
+//! In this example, the frames contained in the QUIC packet
+//! are PING and PADDING. Each frame is written using the
+//! [`add_frame()`] method. Frame writing is concluded with
+//! [`finish_frames()`].
+//!
+//! ```
+//! # let mut trace = qlog::Trace::new(
+//! #    qlog::VantagePoint {
+//! #        name: Some("Example client".to_string()),
+//! #        ty: qlog::VantagePointType::Client,
+//! #        flow: None,
+//! #    },
+//! #    Some("Example qlog trace".to_string()),
+//! #    Some("Example qlog trace description".to_string()),
+//! #    Some(qlog::Configuration {
+//! #        time_offset: Some("0".to_string()),
+//! #        time_units: Some(qlog::TimeUnits::Ms),
+//! #        original_uris: None,
+//! #    }),
+//! #    None,
+//! # );
+//! # let mut file = std::fs::File::create("foo.qlog").unwrap();
+//! # let mut streamer = qlog::QlogStreamer::new(
+//! #     qlog::QLOG_VERSION.to_string(),
+//! #     Some("Example qlog".to_string()),
+//! #     Some("Example qlog description".to_string()),
+//! #     None,
+//! #     std::time::Instant::now(),
+//! #     trace,
+//! #     Box::new(file),
+//! # );
+//!
+//! let ping = qlog::QuicFrame::ping();
+//! let padding = qlog::QuicFrame::padding();
+//!
+//! streamer.add_frame(ping, false).ok();
+//! streamer.add_frame(padding, false).ok();
+//!
+//! streamer.finish_frames().ok();
+//!
+//! ```
+//!
+//! Once all events have have been written, the log
+//! can be finalized with [`finish_log()`]:
+//!
+//! ```
+//! # let mut trace = qlog::Trace::new(
+//! #    qlog::VantagePoint {
+//! #        name: Some("Example client".to_string()),
+//! #        ty: qlog::VantagePointType::Client,
+//! #        flow: None,
+//! #    },
+//! #    Some("Example qlog trace".to_string()),
+//! #    Some("Example qlog trace description".to_string()),
+//! #    Some(qlog::Configuration {
+//! #        time_offset: Some("0".to_string()),
+//! #        time_units: Some(qlog::TimeUnits::Ms),
+//! #        original_uris: None,
+//! #    }),
+//! #    None,
+//! # );
+//! # let mut file = std::fs::File::create("foo.qlog").unwrap();
+//! # let mut streamer = qlog::QlogStreamer::new(
+//! #     qlog::QLOG_VERSION.to_string(),
+//! #     Some("Example qlog".to_string()),
+//! #     Some("Example qlog description".to_string()),
+//! #     None,
+//! #     std::time::Instant::now(),
+//! #     trace,
+//! #     Box::new(file),
+//! # );
+//! streamer.finish_log().ok();
+//! ```
+//!
+//! ### Serializing
+//!
+//! Serialization to JSON occurs as methods on the [`QlogStreamer`]
+//! are called. No additional steps are required.
+//!
 //! [`Trace`]: struct.Trace.html
 //! [`VantagePoint`]: struct.VantagePoint.html
 //! [`Configuration`]: struct.Configuration.html
@@ -228,12 +472,59 @@
 //! [`push_event()`]: struct.Trace.html#method.push_event
 //! [`packet_sent_min()`]: event/struct.Event.html#method.packet_sent_min
 //! [`QuicFrame::crypto()`]: enum.QuicFrame.html#variant.Crypto
+//! [`QlogStreamer`]: struct.QlogStreamer.html
+//! [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
+//! [`start_log()`]: struct.QlogStreamer.html#method.start_log
+//! [`add_event()`]: struct.QlogStreamer.html#method.add_event
+//! [`add_frame()`]: struct.QlogStreamer.html#method.add_frame
+//! [`finish_frames()`]: struct.QlogStreamer.html#method.finish_frames
+//! [`finish_log()`]: struct.QlogStreamer.html#method.finish_log
 use serde::{
     Deserialize,
     Serialize,
 };
 
+/// A quiche qlog error.
+#[derive(Debug)]
+pub enum Error {
+    /// There is no more work to do.
+    Done,
+
+    /// The operation cannot be completed because it was attempted
+    /// in an invalid state.
+    InvalidState,
+
+    /// I/O error.
+    IoError(std::io::Error),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
+impl std::convert::From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Error::IoError(err)
+    }
+}
+
 pub const QLOG_VERSION: &str = "draft-01";
+
+/// A specialized [`Result`] type for quiche qlog operations.
+///
+/// This type is used throughout the public API for any operation that
+/// can produce an error.
+///
+/// [`Result`]: https://doc.rust-lang.org/std/result/enum.Result.html
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Clone)]
@@ -255,6 +546,252 @@ impl Default for Qlog {
             summary: Some("Default qlog title".to_string()),
             traces: Vec::new(),
         }
+    }
+}
+
+#[derive(PartialEq)]
+pub enum StreamerState {
+    Initial,
+    Ready,
+    WritingFrames,
+    Finished,
+}
+
+/// A helper object specialized for streaming JSON-serialized qlog to a
+/// [`Write`] trait.
+///
+/// The object is responsible for the `Qlog` object that contains the provided
+/// `Trace`.
+///
+/// Serialization is progressively driven by method calls; once log streaming is
+/// started, `event::Events` can be written using `add_event()`. Some events
+/// can contain an array of `QuicFrame`s, when writing such an event, the
+/// streamer enters a frame-serialization mode where frames are be progressively
+/// written using `add_frame()`. This mode is concluded using
+/// `finished_frames()`. While serializing frames, any attempts to log
+/// additional events are ignored.
+///
+/// [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
+pub struct QlogStreamer {
+    start_time: std::time::Instant,
+    writer: Box<dyn std::io::Write>,
+    qlog: Qlog,
+    state: StreamerState,
+    first_event: bool,
+    first_frame: bool,
+}
+
+impl QlogStreamer {
+    /// Creates a QlogStreamer object.
+    ///
+    /// It owns a `Qlog` object that contains the provided `Trace`, which must
+    /// have the following ordered-set of names EventFields:
+    ///
+    /// ["relative_time", "category", "event".to_string(), "data"]
+    ///
+    /// All serialization will be written to the provided `Write`.
+    pub fn new(
+        qlog_version: String, title: Option<String>, description: Option<String>,
+        summary: Option<String>, start_time: std::time::Instant, trace: Trace,
+        writer: Box<dyn std::io::Write>,
+    ) -> Self {
+        let qlog = Qlog {
+            qlog_version,
+            title,
+            description,
+            summary,
+            traces: vec![trace],
+        };
+
+        QlogStreamer {
+            start_time,
+            writer,
+            qlog,
+            state: StreamerState::Initial,
+            first_event: true,
+            first_frame: false,
+        }
+    }
+
+    /// Starts qlog streaming serialization.
+    ///
+    /// This writes out the JSON-serialized form of all information up to qlog
+    /// `Trace`'s array of `EventField`s. EventFields are separately appended
+    /// using functions that accept and `event::Event`.
+    pub fn start_log(&mut self) -> Result<()> {
+        if self.state != StreamerState::Initial {
+            return Err(Error::Done);
+        }
+
+        // A qlog contains a trace holding a vector of events that we want to
+        // serialize in a streaming manner. So at the start of serialization,
+        // take off all closing delimiters, and leave us in a state to accept
+        // new events.
+        match serde_json::to_string(&self.qlog) {
+            Ok(mut out) => {
+                out.truncate(out.len() - 4);
+
+                self.writer.as_mut().write_all(out.as_bytes())?;
+
+                self.state = StreamerState::Ready;
+
+                self.first_event = self.qlog.traces[0].events.is_empty();
+            },
+
+            _ => return Err(Error::Done),
+        }
+
+        Ok(())
+    }
+
+    /// Finishes qlog streaming serialization.
+    ///
+    /// The JSON-serialized output has remaining close delimiters added.
+    /// After this is called, no more serialization will occur.
+    pub fn finish_log(&mut self) -> Result<()> {
+        if self.state == StreamerState::Initial ||
+            self.state == StreamerState::Finished
+        {
+            return Err(Error::InvalidState);
+        }
+
+        self.writer.as_mut().write_all(b"]}]}")?;
+
+        self.state = StreamerState::Finished;
+
+        self.writer.as_mut().flush()?;
+
+        Ok(())
+    }
+
+    /// Writes a JSON-serialized `EventField`s.
+    ///
+    /// Some qlog events can contain `QuicFrames`. If this is detected `true` is
+    /// returned and the streamer enters a frame-serialization mode that is only
+    /// concluded by `finish_frames()`. In this mode, attempts to log additional
+    /// events are ignored.
+    ///
+    /// If the event contains no array of `QuicFrames` return `false`.
+    pub fn add_event(&mut self, event: event::Event) -> Result<bool> {
+        if self.state != StreamerState::Ready {
+            return Err(Error::InvalidState);
+        }
+
+        let event_time = self.start_time.elapsed();
+
+        let rel = match &self.qlog.traces[0].configuration {
+            Some(conf) => match conf.time_units {
+                Some(TimeUnits::Ms) => event_time.as_millis().to_string(),
+
+                Some(TimeUnits::Us) => event_time.as_micros().to_string(),
+
+                None => String::from(""),
+            },
+
+            None => String::from(""),
+        };
+
+        let (ev_data, contains_frames) = match serde_json::to_string(&event.data)
+        {
+            Ok(mut ev_data_out) =>
+                if let Some(f) = event.data.contains_quic_frames() {
+                    ev_data_out.truncate(ev_data_out.len() - 2);
+
+                    if f == 0 {
+                        self.first_frame = true;
+                    }
+
+                    (ev_data_out, true)
+                } else {
+                    (ev_data_out, false)
+                },
+
+            _ => return Err(Error::Done),
+        };
+
+        let maybe_comma = if self.first_event {
+            self.first_event = false;
+            ""
+        } else {
+            ","
+        };
+
+        let maybe_terminate = if contains_frames { "" } else { "]" };
+
+        let ev_time = serde_json::to_string(&EventField::RelativeTime(rel)).ok();
+        let ev_cat =
+            serde_json::to_string(&EventField::Category(event.category)).ok();
+        let ev_ty = serde_json::to_string(&EventField::Event(event.ty)).ok();
+
+        if let (Some(ev_time), Some(ev_cat), Some(ev_ty)) =
+            (ev_time, ev_cat, ev_ty)
+        {
+            let out = format!(
+                "{}[{},{},{},{}{}",
+                maybe_comma, ev_time, ev_cat, ev_ty, ev_data, maybe_terminate
+            );
+
+            self.writer.as_mut().write_all(out.as_bytes())?;
+
+            if contains_frames {
+                self.state = StreamerState::WritingFrames
+            } else {
+                self.state = StreamerState::Ready
+            };
+
+            return Ok(contains_frames);
+        }
+
+        Err(Error::Done)
+    }
+
+    /// Writes a JSON-serialized `QuicFrame`.
+    ///
+    /// Only valid while in the frame-serialization mode.
+    pub fn add_frame(&mut self, frame: QuicFrame, last: bool) -> Result<()> {
+        if self.state != StreamerState::WritingFrames {
+            return Err(Error::InvalidState);
+        }
+
+        match serde_json::to_string(&frame) {
+            Ok(mut out) => {
+                if !self.first_frame {
+                    out.insert(0, ',');
+                } else {
+                    self.first_frame = false;
+                }
+
+                self.writer.as_mut().write_all(out.as_bytes())?;
+
+                if last {
+                    self.finish_frames()?;
+                }
+            },
+
+            _ => return Err(Error::Done),
+        }
+
+        Ok(())
+    }
+
+    /// Concludes `QuicFrame` streaming serialization.
+    ///
+    /// Only valid while in the frame-serialization mode.
+    pub fn finish_frames(&mut self) -> Result<()> {
+        if self.state != StreamerState::WritingFrames {
+            return Err(Error::InvalidState);
+        }
+
+        self.writer.as_mut().write_all(b"]}]")?;
+        self.state = StreamerState::Ready;
+
+        Ok(())
+    }
+
+    /// Returns the writer.
+    #[allow(clippy::borrowed_box)]
+    pub fn writer(&self) -> &Box<dyn std::io::Write> {
+        &self.writer
     }
 }
 
@@ -1027,6 +1564,29 @@ pub enum EventData {
     },
 }
 
+impl EventData {
+    /// Returns size of `EventData` array of `QuicFrame`s if it exists.
+    pub fn contains_quic_frames(&self) -> Option<usize> {
+        // For some EventData variants, the frame array is optional
+        // but for others it is mandatory.
+        match self {
+            EventData::PacketSent { frames, .. } |
+            EventData::PacketReceived { frames, .. } =>
+                if let Some(f) = frames {
+                    Some(f.len())
+                } else {
+                    None
+                },
+
+            EventData::PacketLost { frames, .. } |
+            EventData::MarkedForRetransmit { frames } |
+            EventData::FramesProcessed { frames } => Some(frames.len()),
+
+            _ => None,
+        }
+    }
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum PacketType {
@@ -1108,6 +1668,7 @@ pub struct PacketHeader {
 }
 
 impl PacketHeader {
+    /// Creates a new PacketHeader.
     pub fn new(
         packet_number: u64, packet_size: Option<u64>,
         payload_length: Option<u64>, version: Option<u32>, scid: Option<&[u8]>,
@@ -1146,6 +1707,37 @@ impl PacketHeader {
             dcil,
             scid,
             dcid,
+        }
+    }
+
+    /// Creates a new PacketHeader.
+    ///
+    /// Once a QUIC connection has formed, version, dcid and scid are stable, so
+    /// there are space benefits to not logging them in every packet, especially
+    /// PacketType::OneRtt.
+    pub fn with_type(
+        ty: PacketType, packet_number: u64, packet_size: Option<u64>,
+        payload_length: Option<u64>, version: Option<u32>, scid: Option<&[u8]>,
+        dcid: Option<&[u8]>,
+    ) -> Self {
+        match ty {
+            PacketType::OneRtt => PacketHeader::new(
+                packet_number,
+                packet_size,
+                payload_length,
+                None,
+                None,
+                None,
+            ),
+
+            _ => PacketHeader::new(
+                packet_number,
+                packet_size,
+                payload_length,
+                version,
+                scid,
+                dcid,
+            ),
         }
     }
 }
@@ -1865,24 +2457,50 @@ impl<'a> std::fmt::Display for HexSlice<'a> {
 }
 
 #[doc(hidden)]
-pub mod testing {}
+pub mod testing {
+    use super::*;
+
+    pub fn make_pkt_hdr() -> PacketHeader {
+        let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
+        let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
+
+        PacketHeader::new(
+            0,
+            Some(1251),
+            Some(1224),
+            Some(0xff00_0018),
+            Some(&scid),
+            Some(&dcid),
+        )
+    }
+
+    pub fn make_trace() -> Trace {
+        Trace::new(
+            VantagePoint {
+                name: None,
+                ty: VantagePointType::Server,
+                flow: None,
+            },
+            Some("Quiche qlog trace".to_string()),
+            Some("Quiche qlog trace description".to_string()),
+            Some(Configuration {
+                time_offset: Some("0".to_string()),
+                time_units: Some(TimeUnits::Ms),
+                original_uris: None,
+            }),
+            None,
+        )
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use testing::*;
 
     #[test]
     fn packet_header() {
-        let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
-        let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
-        let pkt_hdr = PacketHeader::new(
-            0,
-            Some(1251),
-            Some(1224),
-            Some(0xff000018),
-            Some(&scid),
-            Some(&dcid),
-        );
+        let pkt_hdr = make_pkt_hdr();
 
         let log_string = r#"{
   "packet_number": "0",
@@ -1906,7 +2524,7 @@ mod tests {
     "packet_number": "0",
     "packet_size": 1251,
     "payload_length": 1224,
-    "version": "ff000018",
+    "version": "ff00001b",
     "scil": "8",
     "dcil": "8",
     "scid": "7e37e4dcc6682da8",
@@ -1920,7 +2538,7 @@ mod tests {
             0,
             Some(1251),
             Some(1224),
-            Some(0xff000018),
+            Some(0xff00001b),
             Some(&scid),
             Some(&dcid),
         );
@@ -1971,16 +2589,7 @@ mod tests {
   ]
 }"#;
 
-        let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
-        let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
-        let pkt_hdr = PacketHeader::new(
-            0,
-            Some(1251),
-            Some(1224),
-            Some(0xff000018),
-            Some(&scid),
-            Some(&dcid),
-        );
+        let pkt_hdr = make_pkt_hdr();
 
         let mut frames = Vec::new();
         frames.push(QuicFrame::padding());
@@ -2031,29 +2640,14 @@ mod tests {
   "events": []
 }"#;
 
-        let trace = Trace::new(
-            VantagePoint {
-                name: None,
-                ty: VantagePointType::Server,
-                flow: None,
-            },
-            Some("Quiche qlog trace".to_string()),
-            Some("Quiche qlog trace description".to_string()),
-            Some(Configuration {
-                time_offset: Some("0".to_string()),
-                time_units: Some(TimeUnits::Ms),
-                original_uris: None,
-            }),
-            None,
-        );
+        let trace = make_trace();
 
         assert_eq!(serde_json::to_string_pretty(&trace).unwrap(), log_string);
     }
-}
 
-#[test]
-fn trace_single_transport_event() {
-    let log_string = r#"{
+    #[test]
+    fn trace_single_transport_event() {
+        let log_string = r#"{
   "vantage_point": {
     "type": "server"
   },
@@ -2100,109 +2694,213 @@ fn trace_single_transport_event() {
   ]
 }"#;
 
-    let mut trace = Trace::new(
-        VantagePoint {
-            name: None,
-            ty: VantagePointType::Server,
-            flow: None,
-        },
-        Some("Quiche qlog trace".to_string()),
-        Some("Quiche qlog trace description".to_string()),
-        Some(Configuration {
-            time_offset: Some("0".to_string()),
-            time_units: Some(TimeUnits::Ms),
-            original_uris: None,
-        }),
-        None,
-    );
+        let mut trace = make_trace();
 
-    let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
-    let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
-    let pkt_hdr = PacketHeader::new(
-        0,
-        Some(1251),
-        Some(1224),
-        Some(0xff000018),
-        Some(&scid),
-        Some(&dcid),
-    );
-    let frames = vec![QuicFrame::stream(
-        "0".to_string(),
-        "0".to_string(),
-        "100".to_string(),
-        true,
-        None,
-    )];
-    let event =
-        event::Event::packet_sent_min(PacketType::Initial, pkt_hdr, Some(frames));
+        let pkt_hdr = make_pkt_hdr();
 
-    trace.push_event(std::time::Duration::new(0, 0), event);
+        let frames = vec![QuicFrame::stream(
+            "0".to_string(),
+            "0".to_string(),
+            "100".to_string(),
+            true,
+            None,
+        )];
+        let event = event::Event::packet_sent_min(
+            PacketType::Initial,
+            pkt_hdr,
+            Some(frames),
+        );
 
-    assert_eq!(serde_json::to_string_pretty(&trace).unwrap(), log_string);
-}
+        trace.push_event(std::time::Duration::new(0, 0), event);
 
-#[test]
-fn test_event_validity() {
-    // Test a single event in each category
+        assert_eq!(serde_json::to_string_pretty(&trace).unwrap(), log_string);
+    }
 
-    let ev = event::Event::server_listening_min(443, 443);
-    assert!(ev.is_valid());
+    #[test]
+    fn test_event_validity() {
+        // Test a single event in each category
 
-    let ev = event::Event::transport_parameters_set_min();
-    assert!(ev.is_valid());
+        let ev = event::Event::server_listening_min(443, 443);
+        assert!(ev.is_valid());
 
-    let ev = event::Event::recovery_parameters_set_min();
-    assert!(ev.is_valid());
+        let ev = event::Event::transport_parameters_set_min();
+        assert!(ev.is_valid());
 
-    let ev = event::Event::h3_parameters_set_min();
-    assert!(ev.is_valid());
+        let ev = event::Event::recovery_parameters_set_min();
+        assert!(ev.is_valid());
 
-    let ev = event::Event::qpack_state_updated_min();
-    assert!(ev.is_valid());
+        let ev = event::Event::h3_parameters_set_min();
+        assert!(ev.is_valid());
 
-    let ev = event::Event {
-        category: EventCategory::Error,
-        ty: EventType::GenericEventType(GenericEventType::ConnectionError),
-        data: EventData::ConnectionError {
-            code: None,
-            description: None,
-        },
-    };
+        let ev = event::Event::qpack_state_updated_min();
+        assert!(ev.is_valid());
 
-    assert!(ev.is_valid());
-}
+        let ev = event::Event {
+            category: EventCategory::Error,
+            ty: EventType::GenericEventType(GenericEventType::ConnectionError),
+            data: EventData::ConnectionError {
+                code: None,
+                description: None,
+            },
+        };
 
-#[test]
-fn test_bogus_event_validity() {
-    // Test a single event in each category
+        assert!(ev.is_valid());
+    }
 
-    let mut ev = event::Event::server_listening_min(443, 443);
-    ev.category = EventCategory::Simulation;
-    assert!(!ev.is_valid());
+    #[test]
+    fn bogus_event_validity() {
+        // Test a single event in each category
 
-    let mut ev = event::Event::transport_parameters_set_min();
-    ev.category = EventCategory::Simulation;
-    assert!(!ev.is_valid());
+        let mut ev = event::Event::server_listening_min(443, 443);
+        ev.category = EventCategory::Simulation;
+        assert!(!ev.is_valid());
 
-    let mut ev = event::Event::recovery_parameters_set_min();
-    ev.category = EventCategory::Simulation;
-    assert!(!ev.is_valid());
+        let mut ev = event::Event::transport_parameters_set_min();
+        ev.category = EventCategory::Simulation;
+        assert!(!ev.is_valid());
 
-    let mut ev = event::Event::h3_parameters_set_min();
-    ev.category = EventCategory::Simulation;
-    assert!(!ev.is_valid());
+        let mut ev = event::Event::recovery_parameters_set_min();
+        ev.category = EventCategory::Simulation;
+        assert!(!ev.is_valid());
 
-    let mut ev = event::Event::qpack_state_updated_min();
-    ev.category = EventCategory::Simulation;
-    assert!(!ev.is_valid());
+        let mut ev = event::Event::h3_parameters_set_min();
+        ev.category = EventCategory::Simulation;
+        assert!(!ev.is_valid());
 
-    let ev = event::Event {
-        category: EventCategory::Error,
-        ty: EventType::GenericEventType(GenericEventType::ConnectionError),
-        data: EventData::FramesProcessed { frames: Vec::new() },
-    };
+        let mut ev = event::Event::qpack_state_updated_min();
+        ev.category = EventCategory::Simulation;
+        assert!(!ev.is_valid());
 
-    assert!(!ev.is_valid());
+        let ev = event::Event {
+            category: EventCategory::Error,
+            ty: EventType::GenericEventType(GenericEventType::ConnectionError),
+            data: EventData::FramesProcessed { frames: Vec::new() },
+        };
+
+        assert!(!ev.is_valid());
+    }
+
+    #[test]
+    fn serialization_states() {
+        let v: Vec<u8> = Vec::new();
+        let buff = std::io::Cursor::new(v);
+        let writer = Box::new(buff);
+
+        let mut trace = make_trace();
+        let pkt_hdr = make_pkt_hdr();
+
+        let frame1 = QuicFrame::stream(
+            "40".to_string(),
+            "40".to_string(),
+            "400".to_string(),
+            true,
+            None,
+        );
+
+        let event1 = event::Event::packet_sent_min(
+            PacketType::Handshake,
+            pkt_hdr.clone(),
+            Some(vec![frame1]),
+        );
+
+        trace.push_event(std::time::Duration::new(0, 0), event1);
+
+        let frame2 = QuicFrame::stream(
+            "0".to_string(),
+            "0".to_string(),
+            "100".to_string(),
+            true,
+            None,
+        );
+
+        let event2 = event::Event::packet_sent_min(
+            PacketType::Initial,
+            pkt_hdr,
+            Some(Vec::new()),
+        );
+
+        let mut s = QlogStreamer::new(
+            "version".to_string(),
+            Some("title".to_string()),
+            Some("description".to_string()),
+            None,
+            std::time::Instant::now(),
+            trace,
+            writer,
+        );
+
+        // Before the log is started all other operations should fail.
+        assert!(match s.add_event(event2.clone()) {
+            Err(Error::InvalidState) => true,
+            _ => false,
+        });
+        assert!(match s.add_frame(frame2.clone(), false) {
+            Err(Error::InvalidState) => true,
+            _ => false,
+        });
+        assert!(match s.finish_frames() {
+            Err(Error::InvalidState) => true,
+            _ => false,
+        });
+        assert!(match s.finish_log() {
+            Err(Error::InvalidState) => true,
+            _ => false,
+        });
+
+        // Once a log is started, can't write frames before an event.
+        assert!(match s.start_log() {
+            Ok(()) => true,
+            _ => false,
+        });
+        assert!(match s.add_frame(frame2.clone(), true) {
+            Err(Error::InvalidState) => true,
+            _ => false,
+        });
+        assert!(match s.finish_frames() {
+            Err(Error::InvalidState) => true,
+            _ => false,
+        });
+
+        // Some events hold frames, can't write any more events until frame
+        // writing is concluded.
+        assert!(match s.add_event(event2.clone()) {
+            Ok(true) => true,
+            _ => false,
+        });
+        assert!(match s.add_event(event2.clone()) {
+            Err(Error::InvalidState) => true,
+            _ => false,
+        });
+
+        // While writing frames, can't write events.
+        assert!(match s.add_frame(frame2.clone(), false) {
+            Ok(()) => true,
+            _ => false,
+        });
+        assert!(match s.add_event(event2.clone()) {
+            Err(Error::InvalidState) => true,
+            _ => false,
+        });
+
+        // Finish logging
+        assert!(match s.finish_frames() {
+            Ok(()) => true,
+            _ => false,
+        });
+        assert!(match s.finish_log() {
+            Ok(()) => true,
+            _ => false,
+        });
+
+        let r = s.writer();
+        let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
+
+        let log_string = r#"{"qlog_version":"version","title":"title","description":"description","traces":[{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_units":"ms","time_offset":"0"},"event_fields":["relative_time","category","event","data"],"events":[["0","transport","packet_sent",{"packet_type":"handshake","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"40","offset":"40","length":"400","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}]]}]}"#;
+
+        let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
+
+        assert_eq!(log_string, written_string);
+    }
 }
 
 pub mod event;
