@@ -115,6 +115,8 @@ pub struct Recovery {
     ssthresh: usize,
 
     congestion_recovery_start_time: Option<Instant>,
+
+    cubic_state: cubic::State,
 }
 
 impl Recovery {
@@ -165,6 +167,8 @@ impl Recovery {
             cc_ops: config.cc_algorithm.into(),
 
             delivery_rate: delivery_rate::Rate::default(),
+
+            cubic_state: cubic::State::default(),
 
             app_limited: false,
         }
@@ -598,7 +602,7 @@ impl Recovery {
     }
 
     fn collapse_cwnd(&mut self) {
-        self.congestion_window = MINIMUM_WINDOW;
+        (self.cc_ops.collapse_cwnd)(self);
     }
 
     pub fn rate_check_app_limited(&mut self) {
@@ -633,8 +637,10 @@ impl Recovery {
 /// algorithms.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum CongestionControlAlgorithm {
-    /// Reno congestion control algorithm (default). `reno` in a string form.
-    Reno = 0,
+    /// Reno congestion control algorithm. `reno` in a string form.
+    Reno  = 0,
+    /// CUBIC congestion control algorithm (default). `cubic` in a string form.
+    CUBIC = 1,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -646,6 +652,7 @@ impl FromStr for CongestionControlAlgorithm {
     fn from_str(name: &str) -> std::result::Result<Self, Self::Err> {
         match name {
             "reno" => Ok(CongestionControlAlgorithm::Reno),
+            "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
 
             _ => Err(crate::Error::CongestionControl),
         }
@@ -658,12 +665,15 @@ pub struct CongestionControlOps {
     pub on_packet_acked: fn(r: &mut Recovery, packet: &Sent, now: Instant),
 
     pub congestion_event: fn(r: &mut Recovery, time_sent: Instant, now: Instant),
+
+    pub collapse_cwnd: fn(r: &mut Recovery),
 }
 
 impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
     fn from(algo: CongestionControlAlgorithm) -> Self {
         match algo {
             CongestionControlAlgorithm::Reno => &reno::RENO,
+            CongestionControlAlgorithm::CUBIC => &cubic::CUBIC,
         }
     }
 }
@@ -1193,5 +1203,6 @@ mod tests {
     }
 }
 
+mod cubic;
 mod delivery_rate;
 mod reno;

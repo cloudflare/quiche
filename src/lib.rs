@@ -257,7 +257,7 @@
 //! Note that the CC algorithm should be configured before calling [`connect()`]
 //! or [`accept()`]. Otherwise the connection will use a default CC algorithm.
 //!
-//! [`CongestionControlAlgorithm`]: cc/enum.Algorithm.html
+//! [`CongestionControlAlgorithm`]: enum.CongestionControlAlgorithm.html
 
 #![allow(improper_ctypes)]
 #![warn(missing_docs)]
@@ -441,7 +441,7 @@ impl Config {
             tls_ctx,
             application_protos: Vec::new(),
             grease: true,
-            cc_algorithm: recovery::CongestionControlAlgorithm::Reno,
+            cc_algorithm: CongestionControlAlgorithm::CUBIC,
         })
     }
 
@@ -718,7 +718,7 @@ impl Config {
 
     /// Sets the congestion control algorithm used.
     ///
-    /// The default value is `quiche::CongestionControlAlgorithm::Reno`.
+    /// The default value is `CongestionControlAlgorithm::CUBIC`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
     }
