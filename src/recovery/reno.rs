@@ -35,14 +35,15 @@ pub static RENO: CongestionControlOps = CongestionControlOps {
     on_packet_sent,
     on_packet_acked,
     congestion_event,
+    collapse_cwnd,
 };
 
-fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
+pub fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
     r.bytes_in_flight += sent_bytes;
 }
 
 fn on_packet_acked(r: &mut Recovery, packet: &Sent, _now: Instant) {
-    r.bytes_in_flight -= packet.size;
+    r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
 
     if r.in_congestion_recovery(packet.time_sent) {
         return;
@@ -77,6 +78,10 @@ fn congestion_event(r: &mut Recovery, time_sent: Instant, now: Instant) {
 
         r.ssthresh = r.congestion_window;
     }
+}
+
+pub fn collapse_cwnd(r: &mut Recovery) {
+    r.congestion_window = recovery::MINIMUM_WINDOW;
 }
 
 #[cfg(test)]

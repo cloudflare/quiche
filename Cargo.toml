@@ -55,6 +55,7 @@ cmake = "0.1"
 [dependencies]
 log = { version = "0.4", features = ["std"] }
 libc = "0.2"
+libm = "0.2"
 ring = "0.16"
 lazy_static = "1"
 qlog = { version = "0.2", path = "tools/qlog", optional = true }
