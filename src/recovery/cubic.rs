@@ -30,11 +30,13 @@
 //!
 //! https://tools.ietf.org/html/rfc8312
 //!
+//! Note that Slow Start can use HyStart++ when enabled.
 
 use std::cmp;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::packet;
 use crate::recovery;
 use crate::recovery::reno;
 use crate::recovery::CongestionControlOps;
@@ -142,7 +144,9 @@ fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, now: Instant) {
     reno::on_packet_sent(r, sent_bytes, now);
 }
 
-fn on_packet_acked(r: &mut Recovery, packet: &Sent, now: Instant) {
+fn on_packet_acked(
+    r: &mut Recovery, epoch: packet::Epoch, packet: &Sent, now: Instant,
+) {
     let in_congestion_recovery = r.in_congestion_recovery(packet.time_sent);
     let cubic = &mut r.cubic_state;
 
@@ -158,7 +162,15 @@ fn on_packet_acked(r: &mut Recovery, packet: &Sent, now: Instant) {
 
     if r.congestion_window < r.ssthresh {
         // Slow start.
-        r.congestion_window += packet.size;
+        if r.hystart.enabled() && epoch == packet::EPOCH_APPLICATION {
+            let (cwnd, ssthresh) = r.hystart_on_packet_acked(packet);
+
+            r.congestion_window = cwnd;
+            r.ssthresh = ssthresh;
+        } else {
+            // Reno Slow Start.
+            r.congestion_window += packet.size;
+        }
     } else {
         // Congestion avoidance.
 
@@ -172,6 +184,7 @@ fn on_packet_acked(r: &mut Recovery, packet: &Sent, now: Instant) {
             // timeout. Following 4.7 of RFC, set k to 0 and reset
             // w_max to cwnd during this period.
             cubic.k = 0.0;
+
             cubic.w_max = r.congestion_window as f64;
         }
 
@@ -179,24 +192,41 @@ fn on_packet_acked(r: &mut Recovery, packet: &Sent, now: Instant) {
 
         // w_cubic(t + rtt)
         let w_cubic = cubic.w_cubic(t + r.min_rtt);
+
         // w_est(t)
         let w_est = cubic.w_est(t, r.min_rtt);
 
+        let mut cubic_cwnd = r.congestion_window;
+
         if w_cubic < w_est {
             // TCP friendly region.
-            r.congestion_window = cmp::max(r.congestion_window, w_est as usize);
-        } else if r.congestion_window < w_cubic as usize {
+            cubic_cwnd = cmp::max(cubic_cwnd, w_est as usize);
+        } else if cubic_cwnd < w_cubic as usize {
             // Concave region or convex region use same increment.
-            let cwnd_inc = (w_cubic - r.congestion_window as f64) /
-                r.congestion_window as f64 *
+            let cwnd_inc = (w_cubic - cubic_cwnd as f64) / cubic_cwnd as f64 *
                 recovery::MAX_DATAGRAM_SIZE as f64;
 
-            r.congestion_window += cwnd_inc as usize;
+            cubic_cwnd += cwnd_inc as usize;
         }
+
+        // When in Limited Slow Start, take the max of CA cwnd and
+        // LSS cwnd.
+        if r.hystart.enabled() &&
+            epoch == packet::EPOCH_APPLICATION &&
+            r.hystart.in_lss()
+        {
+            let (lss_cwnd, _) = r.hystart_on_packet_acked(packet);
+
+            cubic_cwnd = cmp::max(cubic_cwnd, lss_cwnd);
+        }
+
+        r.congestion_window = cubic_cwnd;
     }
 }
 
-fn congestion_event(r: &mut Recovery, time_sent: Instant, now: Instant) {
+fn congestion_event(
+    r: &mut Recovery, time_sent: Instant, epoch: packet::Epoch, now: Instant,
+) {
     let in_congestion_recovery = r.in_congestion_recovery(time_sent);
     let cubic = &mut r.cubic_state;
 
@@ -218,6 +248,10 @@ fn congestion_event(r: &mut Recovery, time_sent: Instant, now: Instant) {
         r.ssthresh = cmp::max(r.ssthresh, recovery::MINIMUM_WINDOW);
         r.congestion_window = r.ssthresh;
         cubic.k = cubic.cubic_k();
+
+        if r.hystart.enabled() && epoch == packet::EPOCH_APPLICATION {
+            r.hystart.congestion_event();
+        }
     }
 }
 
@@ -278,7 +312,7 @@ mod tests {
 
         let cwnd_prev = r.cwnd();
 
-        r.on_packet_acked_cc(&p, now);
+        r.on_packet_acked_cc(packet::EPOCH_APPLICATION, &p, now);
 
         // Check if cwnd increased by packet size (slow start)
         assert_eq!(r.cwnd(), cwnd_prev + p.size);
@@ -293,7 +327,7 @@ mod tests {
         let now = Instant::now();
         let prev_cwnd = r.cwnd();
 
-        r.congestion_event(now, now);
+        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
 
         // In CUBIC, after congestion event, cwnd will be reduced by (1 -
         // CUBIC_BETA)
@@ -313,7 +347,7 @@ mod tests {
         r.on_packet_sent_cc(20000, now);
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(now, now);
+        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
 
         // After congestion event, cwnd will be reduced.
         assert_eq!(prev_cwnd as f64 * BETA_CUBIC, r.cwnd() as f64);
@@ -336,7 +370,7 @@ mod tests {
 
         // Ack 1000 bytes with rtt=100ms
         r.update_rtt(rtt, Duration::from_millis(0), now);
-        r.on_packet_acked_cc(&p, now + rtt * 2);
+        r.on_packet_acked_cc(packet::EPOCH_APPLICATION, &p, now + rtt * 2);
 
         // Expecting a small increase (congestion avoidance mode)
         assert_eq!(r.cwnd(), 10408);
@@ -354,7 +388,7 @@ mod tests {
         r.on_packet_sent_cc(30000, now);
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(now, now);
+        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
 
         // After persistent congestion, cwnd should be MINIMUM_WINDOW
         r.collapse_cwnd();
@@ -379,11 +413,11 @@ mod tests {
         std::thread::sleep(rtt);
 
         // Ack 10000 x 2 to exit from slow start
-        r.on_packet_acked_cc(&p, now);
+        r.on_packet_acked_cc(packet::EPOCH_APPLICATION, &p, now);
         std::thread::sleep(rtt);
 
         // This will make CC into congestion avoidance mode
-        r.on_packet_acked_cc(&p, now);
+        r.on_packet_acked_cc(packet::EPOCH_APPLICATION, &p, now);
 
         assert_eq!(r.cwnd(), recovery::MINIMUM_WINDOW + 10000);
     }

@@ -24,8 +24,14 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+//! Reno Congestion Control
+//!
+//! Note that Slow Start can use HyStart++ when enabled.
+
+use std::cmp;
 use std::time::Instant;
 
+use crate::packet;
 use crate::recovery;
 use crate::recovery::CongestionControlOps;
 use crate::recovery::Recovery;
@@ -42,7 +48,9 @@ pub fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
     r.bytes_in_flight += sent_bytes;
 }
 
-fn on_packet_acked(r: &mut Recovery, packet: &Sent, _now: Instant) {
+fn on_packet_acked(
+    r: &mut Recovery, epoch: packet::Epoch, packet: &Sent, _now: Instant,
+) {
     r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
 
     if r.in_congestion_recovery(packet.time_sent) {
@@ -55,15 +63,38 @@ fn on_packet_acked(r: &mut Recovery, packet: &Sent, _now: Instant) {
 
     if r.congestion_window < r.ssthresh {
         // Slow start.
-        r.congestion_window += packet.size;
+        if r.hystart.enabled() && epoch == packet::EPOCH_APPLICATION {
+            let (cwnd, ssthresh) = r.hystart_on_packet_acked(packet);
+
+            r.congestion_window = cwnd;
+            r.ssthresh = ssthresh;
+        } else {
+            r.congestion_window += packet.size;
+        }
     } else {
         // Congestion avoidance.
-        r.congestion_window +=
-            (recovery::MAX_DATAGRAM_SIZE * packet.size) / r.congestion_window;
+        let mut reno_cwnd = r.congestion_window;
+
+        reno_cwnd += (recovery::MAX_DATAGRAM_SIZE * packet.size) / reno_cwnd;
+
+        // When in Limited Slow Start, take the max of CA cwnd and
+        // LSS cwnd.
+        if r.hystart.enabled() &&
+            epoch == packet::EPOCH_APPLICATION &&
+            r.hystart.in_lss()
+        {
+            let (lss_cwnd, _) = r.hystart_on_packet_acked(packet);
+
+            reno_cwnd = cmp::max(reno_cwnd, lss_cwnd);
+        }
+
+        r.congestion_window = reno_cwnd;
     }
 }
 
-fn congestion_event(r: &mut Recovery, time_sent: Instant, now: Instant) {
+fn congestion_event(
+    r: &mut Recovery, time_sent: Instant, epoch: packet::Epoch, now: Instant,
+) {
     // Start a new congestion event if packet was sent after the
     // start of the previous congestion recovery period.
     if !r.in_congestion_recovery(time_sent) {
@@ -74,9 +105,13 @@ fn congestion_event(r: &mut Recovery, time_sent: Instant, now: Instant) {
             as usize;
 
         r.congestion_window =
-            std::cmp::max(r.congestion_window, recovery::MINIMUM_WINDOW);
+            cmp::max(r.congestion_window, recovery::MINIMUM_WINDOW);
 
         r.ssthresh = r.congestion_window;
+
+        if r.hystart.enabled() && epoch == packet::EPOCH_APPLICATION {
+            r.hystart.congestion_event();
+        }
     }
 }
 
@@ -144,7 +179,7 @@ mod tests {
 
         let cwnd_prev = r.cwnd();
 
-        r.on_packet_acked_cc(&p, now);
+        r.on_packet_acked_cc(packet::EPOCH_APPLICATION, &p, now);
 
         // Check if cwnd increased by packet size (slow start).
         assert_eq!(r.cwnd(), cwnd_prev + p.size);
@@ -161,7 +196,7 @@ mod tests {
 
         let now = Instant::now();
 
-        r.congestion_event(now, now);
+        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
 
         // In Reno, after congestion event, cwnd will be cut in half.
         assert_eq!(prev_cwnd / 2, r.cwnd());
@@ -181,7 +216,7 @@ mod tests {
         // Send 20K bytes.
         r.on_packet_sent_cc(20000, now);
 
-        r.congestion_event(now, now);
+        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
 
         // In Reno, after congestion event, cwnd will be cut in half.
         assert_eq!(prev_cwnd / 2, r.cwnd());
@@ -202,7 +237,7 @@ mod tests {
         let prev_cwnd = r.cwnd();
 
         // Ack 5000 bytes.
-        r.on_packet_acked_cc(&p, now);
+        r.on_packet_acked_cc(packet::EPOCH_APPLICATION, &p, now);
 
         // Check if cwnd increase is smaller than a packet size (congestion
         // avoidance).

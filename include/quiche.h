@@ -172,6 +172,9 @@ enum quiche_cc_algorithm {
 // Sets the congestion control algorithm used.
 void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algorithm algo);
 
+// Configures whether to use HyStart++.
+void quiche_config_set_hystart(quiche_config *config, bool v);
+
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 

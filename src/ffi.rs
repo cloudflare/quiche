@@ -254,6 +254,11 @@ pub extern fn quiche_conn_set_qlog_fd(
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_hystart(config: &mut Config, v: bool) {
+    config.set_hystart(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_free(config: *mut Config) {
     unsafe { Box::from_raw(config) };
 }
