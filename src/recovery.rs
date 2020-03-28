@@ -33,9 +33,6 @@ use std::time::Instant;
 
 use std::collections::BTreeMap;
 
-#[cfg(feature = "qlog")]
-use qlog::event::Event;
-
 use crate::Config;
 use crate::Error;
 use crate::Result;
@@ -735,7 +732,7 @@ impl Recovery {
     #[cfg(feature = "qlog")]
     pub fn to_qlog(&self) -> qlog::event::Event {
         // QVis can't use all these fields and they can be large.
-        Event::metrics_updated(
+        qlog::event::Event::metrics_updated(
             Some(self.min_rtt.as_millis() as u64),
             Some(self.rtt().as_millis() as u64),
             Some(self.latest_rtt.as_millis() as u64),
