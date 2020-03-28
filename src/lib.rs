@@ -271,9 +271,6 @@ use std::time;
 use std::pin::Pin;
 use std::str::FromStr;
 
-#[cfg(feature = "qlog")]
-use qlog::event::Event;
-
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_DRAFT27;
 
@@ -1600,7 +1597,7 @@ impl Connection {
                 Some(&hdr.dcid),
             );
 
-            q.add_event(Event::packet_received(
+            q.add_event(qlog::event::Event::packet_received(
                 hdr.ty.to_qlog(),
                 qlog_pkt_hdr,
                 Some(Vec::new()),
@@ -2270,7 +2267,7 @@ impl Connection {
                 Some(&hdr.dcid),
             );
 
-            let packet_sent_ev = Event::packet_sent_min(
+            let packet_sent_ev = qlog::event::Event::packet_sent_min(
                 hdr.ty.to_qlog(),
                 qlog_pkt_hdr,
                 Some(Vec::new()),
@@ -3780,7 +3777,7 @@ impl TransportParams {
         let stateless_reset_token =
             qlog::HexSlice::maybe_string(self.stateless_reset_token.as_ref());
 
-        Event::transport_parameters_set(
+        qlog::event::Event::transport_parameters_set(
             Some(owner),
             None, // resumption
             None, // early data
