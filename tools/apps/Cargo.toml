@@ -12,6 +12,8 @@ fuzzing = ["quiche/fuzzing"]
 # Enable qlog support.
 qlog = ["quiche/qlog"]
 
+default = ["qlog"]
+
 [dependencies]
 docopt = "1"
 env_logger = "0.6"
