@@ -538,11 +538,14 @@ pub extern fn quiche_conn_writable(conn: &Connection) -> *mut StreamIter {
     Box::into_raw(Box::new(conn.writable()))
 }
 
+struct AppData(*mut c_void);
+unsafe impl Send for AppData {}
+
 #[no_mangle]
 pub extern fn quiche_conn_stream_init_application_data(
     conn: &mut Connection, stream_id: u64, data: *mut c_void,
 ) -> c_int {
-    match conn.stream_init_application_data(stream_id, data) {
+    match conn.stream_init_application_data(stream_id, AppData(data)) {
         Ok(_) => 0,
 
         Err(e) => e.to_c() as c_int,
@@ -554,7 +557,7 @@ pub extern fn quiche_conn_stream_application_data(
     conn: &mut Connection, stream_id: u64,
 ) -> *mut c_void {
     match conn.stream_application_data(stream_id) {
-        Some(v) => *v.downcast_mut::<*mut c_void>().unwrap(),
+        Some(v) => v.downcast_mut::<AppData>().unwrap().0,
 
         None => ptr::null_mut(),
     }

@@ -405,7 +405,7 @@ pub struct Stream {
     pub local: bool,
 
     /// Application data.
-    pub data: Option<Box<dyn std::any::Any>>,
+    pub data: Option<Box<dyn Send + std::any::Any>>,
 }
 
 impl Stream {
