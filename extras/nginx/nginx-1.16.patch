@@ -1,4 +1,4 @@
-From 14d229013e0d8e1bc837aa22980a8d1015c7ab5f Mon Sep 17 00:00:00 2001
+From cce80d20634af3f68ecf119737b7431b7df97672 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 10 Oct 2019 17:06:08 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -14,7 +14,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  auto/options                            |    9 +
  src/core/ngx_connection.h               |    7 +
  src/core/ngx_core.h                     |    3 +
- src/event/ngx_event_quic.c              |  585 ++++++
+ src/event/ngx_event_quic.c              |  589 ++++++
  src/event/ngx_event_quic.h              |   49 +
  src/event/ngx_event_udp.c               |    8 +
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
@@ -26,12 +26,12 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   29 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2196 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2204 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   77 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3672 insertions(+), 11 deletions(-)
+ 27 files changed, 3684 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -338,10 +338,10 @@ index 93ca9174d..d0441f034 100644
  #include <ngx_module.h>
 diff --git a/src/event/ngx_event_quic.c b/src/event/ngx_event_quic.c
 new file mode 100644
-index 000000000..8c9f8b5be
+index 000000000..a80998ebb
 --- /dev/null
 +++ b/src/event/ngx_event_quic.c
-@@ -0,0 +1,585 @@
+@@ -0,0 +1,589 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -843,6 +843,10 @@ index 000000000..8c9f8b5be
 +                   "finalize quic connection: %d", c->fd);
 +
 +    c->error = 1;
++
++    if (quiche_conn_is_closed(c->quic->conn)) {
++        c->close = 1;
++    }
 +
 +    quiche_conn_close(c->quic->conn, false, status, NULL, 0);
 +
@@ -1566,10 +1570,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..094015ad9
+index 000000000..c63d53b82
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2196 @@
+@@ -0,0 +1,2204 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -3107,6 +3111,10 @@ index 000000000..094015ad9
 +
 +    fc = r->connection;
 +
++    if (fc->error) {
++        return NGX_ERROR;
++    }
++
 +    h3c = r->qstream->connection;
 +    c = h3c->connection;
 +
@@ -3731,6 +3739,10 @@ index 000000000..094015ad9
 +        fc = r->connection;
 +
 +        fc->error = 1;
++
++        if (c->close) {
++            fc->close = 1;
++        }
 +
 +        if (stream->blocked) {
 +            stream->blocked = 0;
