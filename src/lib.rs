@@ -2684,9 +2684,9 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn writable(&self) -> StreamIter {
-        // If there is not enough connection-level flow control capacity, none
-        // of the streams are writable, so return an empty iterator.
-        if self.max_tx_data <= self.tx_data {
+        // If there is not enough connection-level send capacity, none of the
+        // streams are writable, so return an empty iterator.
+        if self.send_capacity() == 0 {
             return StreamIter::default();
         }
 
