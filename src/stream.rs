@@ -27,6 +27,7 @@
 use std::cmp;
 
 use std::collections::hash_map;
+use std::collections::BTreeMap;
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -36,6 +37,8 @@ use crate::Error;
 use crate::Result;
 
 use crate::ranges;
+
+const DEFAULT_PRIORITY: u64 = 127;
 
 const MAX_WRITE_SIZE: usize = 1000;
 
@@ -83,7 +86,7 @@ pub struct StreamMap {
     /// enough flow control credits to send at least some of that data.
     ///
     /// Streams are added to the back of the list, and removed from the front.
-    flushable: VecDeque<u64>,
+    flushable: BTreeMap<u64, VecDeque<u64>>,
 
     /// Set of stream IDs corresponding to streams that have outstanding data
     /// to read. This is used to generate a `StreamIter` of streams without
@@ -237,7 +240,8 @@ impl StreamMap {
         Ok(stream)
     }
 
-    /// Pushes the stream ID to the back of the flushable streams queue.
+    /// Pushes the stream ID to the back of the flushable streams queue with
+    /// the specified priority.
     ///
     /// Note that the caller is responsible for checking that the specified
     /// stream ID was not in the queue already before calling this.
@@ -245,17 +249,62 @@ impl StreamMap {
     /// Queueing a stream multiple times simultaneously means that it might be
     /// unfairly scheduled more often than other streams, and might also cause
     /// spurious cycles through the queue, so it should be avoided.
-    pub fn push_flushable(&mut self, stream_id: u64) {
-        self.flushable.push_back(stream_id);
+    pub fn push_flushable(&mut self, stream_id: u64, priority: u64) {
+        // Push the element to the back of the queue corresponding to the given
+        // priority. If the queue doesn't exist yet, create it first.
+        self.flushable
+            .entry(priority)
+            .or_insert_with(VecDeque::new)
+            .push_back(stream_id);
     }
 
     /// Removes and returns the first stream ID from the flushable streams
-    /// queue.
+    /// queue with the specified priority.
     ///
     /// Note that if the stream is still flushable after sending some of its
     /// outstanding data, it needs to be added back to the queu.
     pub fn pop_flushable(&mut self) -> Option<u64> {
-        self.flushable.pop_front()
+        // Remove the first element from the queue corresponding to the lowest
+        // priority that has elements.
+        let (node, clear) =
+            if let Some((priority, queue)) = self.flushable.iter_mut().next() {
+                let node = queue.pop_front();
+
+                let clear = if queue.is_empty() {
+                    Some(*priority)
+                } else {
+                    None
+                };
+
+                (node, clear)
+            } else {
+                (None, None)
+            };
+
+        // Remove the queue from the list of queues if it is now empty, so that
+        // the next time `pop_flushable()` is called the next queue with elements
+        // is used.
+        if let Some(priority) = &clear {
+            self.flushable.remove(priority);
+        }
+
+        node
+    }
+
+    /// Removes the given stream ID from the flushable streams queue with the
+    /// specified priority.
+    ///
+    /// Unlike `pop_flushable()`, this removes the specific element from the
+    /// queue, rather than the first element. This can be useful for example
+    /// when chaning the priority of a stream that was already flushable.
+    pub fn remove_flushable(&mut self, stream_id: u64, priority: u64) {
+        // TODO: this is pretty ineffcient as it requires scanning the whole
+        // list to delete the given element, and shifting the remaining elements.
+        if let Some(queue) = self.flushable.get_mut(&priority) {
+            if let Some(index) = queue.iter().position(|&s| s == stream_id) {
+                queue.remove(index);
+            }
+        }
     }
 
     /// Adds or removes the stream ID to/from the readable streams set.
@@ -433,6 +482,10 @@ pub struct Stream {
 
     /// Application data.
     pub data: Option<Box<dyn Send + std::any::Any>>,
+
+    /// The stream's priority (lower is better). `DEFAULT_PRIORITY` is the
+    /// default value.
+    pub priority: u64,
 }
 
 impl Stream {
@@ -446,6 +499,7 @@ impl Stream {
             bidi,
             local,
             data: None,
+            priority: DEFAULT_PRIORITY,
         }
     }
 
