@@ -27,6 +27,7 @@
 use std::cmp;
 
 use std::collections::hash_map;
+use std::collections::BTreeMap;
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -36,6 +37,8 @@ use crate::Error;
 use crate::Result;
 
 use crate::ranges;
+
+const DEFAULT_URGENCY: u8 = 127;
 
 const MAX_WRITE_SIZE: usize = 1000;
 
@@ -82,8 +85,14 @@ pub struct StreamMap {
     /// ready to be sent to the peer. This also implies that the stream has
     /// enough flow control credits to send at least some of that data.
     ///
-    /// Streams are added to the back of the list, and removed from the front.
-    flushable: VecDeque<u64>,
+    /// Streams are grouped by their priority, where each urgency level has two
+    /// queues, one for non-incremental streams and one for incremental ones.
+    ///
+    /// Streams with lower urgency level are scheduled first, and within the
+    /// same urgency level Non-incremental streams are scheduled first, in the
+    /// order of their stream IDs, and incremental streams are scheduled in a
+    /// round-robin fashion after all non-incremental streams have been flushed.
+    flushable: BTreeMap<u8, (BinaryHeap<std::cmp::Reverse<u64>>, VecDeque<u64>)>,
 
     /// Set of stream IDs corresponding to streams that have outstanding data
     /// to read. This is used to generate a `StreamIter` of streams without
@@ -237,7 +246,8 @@ impl StreamMap {
         Ok(stream)
     }
 
-    /// Pushes the stream ID to the back of the flushable streams queue.
+    /// Pushes the stream ID to the back of the flushable streams queue with
+    /// the specified urgency.
     ///
     /// Note that the caller is responsible for checking that the specified
     /// stream ID was not in the queue already before calling this.
@@ -245,17 +255,58 @@ impl StreamMap {
     /// Queueing a stream multiple times simultaneously means that it might be
     /// unfairly scheduled more often than other streams, and might also cause
     /// spurious cycles through the queue, so it should be avoided.
-    pub fn push_flushable(&mut self, stream_id: u64) {
-        self.flushable.push_back(stream_id);
+    pub fn push_flushable(&mut self, stream_id: u64, urgency: u8, incr: bool) {
+        // Push the element to the back of the queue corresponding to the given
+        // urgency. If the queue doesn't exist yet, create it first.
+        let queues = self
+            .flushable
+            .entry(urgency)
+            .or_insert_with(|| (BinaryHeap::new(), VecDeque::new()));
+
+        if !incr {
+            // Non-incremental streams are scheduled in order of their stream ID.
+            queues.0.push(std::cmp::Reverse(stream_id))
+        } else {
+            // Incremental streams are scheduled in a round-robin fashion.
+            queues.1.push_back(stream_id)
+        };
     }
 
     /// Removes and returns the first stream ID from the flushable streams
-    /// queue.
+    /// queue with the specified urgency.
     ///
     /// Note that if the stream is still flushable after sending some of its
-    /// outstanding data, it needs to be added back to the queu.
+    /// outstanding data, it needs to be added back to the queue.
     pub fn pop_flushable(&mut self) -> Option<u64> {
-        self.flushable.pop_front()
+        // Remove the first element from the queue corresponding to the lowest
+        // urgency that has elements.
+        let (node, clear) =
+            if let Some((urgency, queues)) = self.flushable.iter_mut().next() {
+                let node = if !queues.0.is_empty() {
+                    queues.0.pop().map(|x| x.0)
+                } else {
+                    queues.1.pop_front()
+                };
+
+                let clear = if queues.0.is_empty() && queues.1.is_empty() {
+                    Some(*urgency)
+                } else {
+                    None
+                };
+
+                (node, clear)
+            } else {
+                (None, None)
+            };
+
+        // Remove the queue from the list of queues if it is now empty, so that
+        // the next time `pop_flushable()` is called the next queue with elements
+        // is used.
+        if let Some(urgency) = &clear {
+            self.flushable.remove(urgency);
+        }
+
+        node
     }
 
     /// Adds or removes the stream ID to/from the readable streams set.
@@ -433,6 +484,12 @@ pub struct Stream {
 
     /// Application data.
     pub data: Option<Box<dyn Send + std::any::Any>>,
+
+    /// The stream's urgency (lower is better). Default is `DEFAULT_URGENCY`.
+    pub urgency: u8,
+
+    /// Whether the stream can be flushed incrementally. Default is `true`.
+    pub incremental: bool,
 }
 
 impl Stream {
@@ -446,6 +503,8 @@ impl Stream {
             bidi,
             local,
             data: None,
+            urgency: DEFAULT_URGENCY,
+            incremental: true,
         }
     }
 
