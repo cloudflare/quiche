@@ -528,6 +528,8 @@ impl Handshake {
     }
 }
 
+unsafe impl std::marker::Send for Handshake {}
+
 impl Drop for Handshake {
     fn drop(&mut self) {
         unsafe { SSL_free(self.as_ptr()) }

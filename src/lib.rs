@@ -2593,7 +2593,7 @@ impl Connection {
     /// method will return [`Done`].
     ///
     /// [`Done`]: enum.Error.html#variant.Done
-    pub fn stream_init_application_data<T>(
+    pub fn stream_init_application_data<T: Send>(
         &mut self, stream_id: u64, data: T,
     ) -> Result<()>
     where
@@ -5720,6 +5720,14 @@ mod tests {
 
         let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
         assert_eq!(&hdr.token.unwrap(), token);
+    }
+
+    fn check_send(_: &mut impl Send) {}
+
+    #[test]
+    fn connection_must_be_send() {
+        let mut pipe = testing::Pipe::default().unwrap();
+        check_send(&mut pipe.client);
     }
 }
 
