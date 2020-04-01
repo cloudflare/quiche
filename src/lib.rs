@@ -1639,7 +1639,7 @@ impl Connection {
         }
 
         qlog_with!(self.qlog_streamer, q, {
-            // always conclude frame writing
+            // Always conclude frame writing.
             q.finish_frames().ok();
         });
 
@@ -1653,9 +1653,6 @@ impl Connection {
         // once per connection.
         if self.is_established() {
             qlog_with!(self.qlog_streamer, q, {
-                // Always conclude frame writing.
-                q.finish_frames().ok();
-
                 if !self.qlogged_peer_params {
                     let ev = self.peer_transport_params.to_qlog(
                         qlog::TransportOwner::Remote,
