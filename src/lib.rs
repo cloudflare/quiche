@@ -1661,9 +1661,7 @@ impl Connection {
                         self.handshake.cipher(),
                     );
 
-                    if let Some(qlog_streamer) = self.qlog_streamer.as_mut() {
-                        qlog_streamer.add_event(ev).unwrap();
-                    }
+                    q.add_event(ev).ok();
 
                     self.qlogged_peer_params = true;
                 }
