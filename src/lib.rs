@@ -1191,7 +1191,7 @@ impl Connection {
     /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
     #[cfg(feature = "qlog")]
     pub fn set_qlog(
-        &mut self, writer: Box<dyn std::io::Write>, title: String,
+        &mut self, writer: Box<dyn std::io::Write + Send>, title: String,
         description: String,
     ) {
         let vp = if self.is_server {
@@ -2588,11 +2588,11 @@ impl Connection {
     /// method will return [`Done`].
     ///
     /// [`Done`]: enum.Error.html#variant.Done
-    pub fn stream_init_application_data<T: Send>(
+    pub fn stream_init_application_data<T>(
         &mut self, stream_id: u64, data: T,
     ) -> Result<()>
     where
-        T: std::any::Any,
+        T: std::any::Any + Send,
     {
         // Get existing stream.
         let stream = self.streams.get_mut(stream_id).ok_or(Error::Done)?;
