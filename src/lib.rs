@@ -1643,6 +1643,11 @@ impl Connection {
             q.finish_frames().ok();
         });
 
+        qlog_with!(self.qlog_streamer, q, {
+            let ev = self.recovery.to_qlog();
+            q.add_event(ev).ok();
+        });
+
         // Only log the remote transport parameters once the connection is
         // established (i.e. after frames have been fully parsed) and only
         // once per connection.
@@ -3040,11 +3045,6 @@ impl Connection {
                     now,
                     &self.trace_id,
                 )?;
-
-                qlog_with!(self.qlog_streamer, q, {
-                    let ev = self.recovery.to_qlog();
-                    q.add_event(ev).ok();
-                });
 
                 // When we receive an ACK for a 1-RTT packet after handshake
                 // completion, it means the handshake has been confirmed.
