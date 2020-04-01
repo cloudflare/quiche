@@ -74,8 +74,3 @@ debug = true
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
-
-[[bench]]
-name = "benches"
-harness = false
-required-features = ["bench"]
