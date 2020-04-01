@@ -574,7 +574,7 @@ pub enum StreamerState {
 /// [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
 pub struct QlogStreamer {
     start_time: std::time::Instant,
-    writer: Box<dyn std::io::Write>,
+    writer: Box<dyn std::io::Write + Send>,
     qlog: Qlog,
     state: StreamerState,
     first_event: bool,
@@ -593,7 +593,7 @@ impl QlogStreamer {
     pub fn new(
         qlog_version: String, title: Option<String>, description: Option<String>,
         summary: Option<String>, start_time: std::time::Instant, trace: Trace,
-        writer: Box<dyn std::io::Write>,
+        writer: Box<dyn std::io::Write + Send>,
     ) -> Self {
         let qlog = Qlog {
             qlog_version,
@@ -790,7 +790,7 @@ impl QlogStreamer {
 
     /// Returns the writer.
     #[allow(clippy::borrowed_box)]
-    pub fn writer(&self) -> &Box<dyn std::io::Write> {
+    pub fn writer(&self) -> &Box<dyn std::io::Write + Send> {
         &self.writer
     }
 }
