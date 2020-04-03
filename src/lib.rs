@@ -806,6 +806,9 @@ pub struct Connection {
     /// Received path challenge.
     challenge: Option<Vec<u8>>,
 
+    /// The connection-level limit at which send blocking occurred.
+    blocked_limit: Option<u64>,
+
     /// Idle timeout expiration time.
     idle_timer: Option<time::Instant>,
 
@@ -1120,6 +1123,8 @@ impl Connection {
             app_reason: Vec::new(),
 
             challenge: None,
+
+            blocked_limit: None,
 
             idle_timer: None,
 
@@ -2029,6 +2034,18 @@ impl Connection {
                 }
             }
 
+            // Create DATA_BLOCKED frame.
+            if let Some(limit) = self.blocked_limit {
+                let frame = frame::Frame::DataBlocked { limit };
+
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    self.blocked_limit = None;
+
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
+            }
+
             // Create MAX_STREAM_DATA frames as needed.
             for stream_id in self.streams.almost_full() {
                 let stream = match self.streams.get_mut(stream_id) {
@@ -2462,6 +2479,15 @@ impl Connection {
             !stream::is_local(stream_id, self.is_server)
         {
             return Err(Error::InvalidStreamState);
+        }
+
+        // Mark the connection as blocked if the connection-level flow control
+        // limit doesn't let us buffer all the data.
+        //
+        // Note that this is separate from "send capacity" as that also takes
+        // congestion control into consideration.
+        if self.max_tx_data - self.tx_data < buf.len() as u64 {
+            self.blocked_limit = Some(self.max_tx_data);
         }
 
         // Truncate the input buffer based on the connection's send capacity if
@@ -2989,6 +3015,7 @@ impl Connection {
         // If there are flushable streams, use Application.
         if self.is_established() &&
             (self.should_update_max_data() ||
+                self.blocked_limit.is_some() ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
@@ -5723,6 +5750,46 @@ mod tests {
     fn connection_must_be_send() {
         let mut pipe = testing::Pipe::default().unwrap();
         check_send(&mut pipe.client);
+    }
+
+    #[test]
+    fn data_blocked() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(0, b"aaaaaaaaaa", false), Ok(10));
+        assert_eq!(pipe.client.blocked_limit, None);
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(4, b"aaaaaaaaaa", false), Ok(10));
+        assert_eq!(pipe.client.blocked_limit, None);
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(8, b"aaaaaaaaaaa", false), Ok(10));
+        assert_eq!(pipe.client.blocked_limit, Some(30));
+
+        let len = pipe.client.send(&mut buf).unwrap();
+        assert_eq!(pipe.client.blocked_limit, None);
+
+        let frames =
+            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+
+        let mut iter = frames.iter();
+
+        assert_eq!(iter.next(), Some(&frame::Frame::DataBlocked { limit: 30 }));
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::Stream {
+                stream_id: 8,
+                data: stream::RangeBuf::from(b"aaaaaaaaaa", 0, false),
+            })
+        );
+
+        assert_eq!(iter.next(), None);
     }
 }
 
