@@ -101,6 +101,11 @@ pub struct StreamMap {
     /// generate a `StreamIter` of streams without having to iterate over the
     /// full list of streams.
     almost_full: HashSet<u64>,
+
+    /// Set of stream IDs corresponding to streams that are blocked. The value
+    /// of the map elements represents the offset of the stream at which the
+    /// blocking occurred.
+    blocked: HashMap<u64, u64>,
 }
 
 impl StreamMap {
@@ -289,6 +294,18 @@ impl StreamMap {
         }
     }
 
+    /// Adds or removes the stream ID to/from the blocked streams set with the
+    /// given offset value.
+    ///
+    /// If the stream was already in the list, this does nothing.
+    pub fn mark_blocked(&mut self, stream_id: u64, blocked: bool, off: u64) {
+        if blocked {
+            self.blocked.insert(stream_id, off);
+        } else {
+            self.blocked.remove(&stream_id);
+        }
+    }
+
     /// Updates the peer's maximum bidirectional stream count limit.
     pub fn update_peer_max_streams_bidi(&mut self, v: u64) {
         self.peer_max_streams_bidi = cmp::max(self.peer_max_streams_bidi, v);
@@ -355,6 +372,11 @@ impl StreamMap {
         StreamIter::from(&self.almost_full)
     }
 
+    /// Creates an iterator over streams that need to send STREAM_DATA_BLOCKED.
+    pub fn blocked(&self) -> hash_map::Iter<u64, u64> {
+        self.blocked.iter()
+    }
+
     /// Returns true if there are any streams that have data to write.
     pub fn has_flushable(&self) -> bool {
         !self.flushable.is_empty()
@@ -364,6 +386,11 @@ impl StreamMap {
     /// flow control limit.
     pub fn has_almost_full(&self) -> bool {
         !self.almost_full.is_empty()
+    }
+
+    /// Returns true if there are any streams that are blocked.
+    pub fn has_blocked(&self) -> bool {
+        !self.blocked.is_empty()
     }
 
     /// Returns true if the max bidirectional streams count needs to be updated
@@ -989,6 +1016,11 @@ impl SendBuf {
 
             None => self.off,
         }
+    }
+
+    /// The maximum offset we are allowed to send to the peer.
+    pub fn max_off(&self) -> u64 {
+        self.max_data
     }
 
     /// Returns true if all data in the stream has been sent.
