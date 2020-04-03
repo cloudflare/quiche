@@ -93,8 +93,6 @@ if [ "$ROLE" == "client" ]; then
     echo "## Test case: $TESTCASE"
     run_quiche_client_tests
 elif [ "$ROLE" == "server" ]; then
-    # Wait for the simulator to start up.
-    /wait-for-it.sh sim:57832 -s -t 30
     echo "## Starting quiche server..."
     echo "## Server params: $SERVER_PARAMS"
     echo "## Test case: $TESTCASE"
