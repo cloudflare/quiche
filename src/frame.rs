@@ -834,7 +834,7 @@ impl Frame {
                            * frame type */
                 ),
 
-            _ => qlog::QuicFrame::unknown(std::u64::MAX),
+            Frame::HandshakeDone => qlog::QuicFrame::handshake_done(),
         }
     }
 }
