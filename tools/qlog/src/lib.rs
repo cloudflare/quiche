@@ -1648,6 +1648,7 @@ pub enum QuicFrameTypeName {
     PathResponse,
     ConnectionClose,
     ApplicationClose,
+    HandshakeDone,
     Unknown,
 }
 
@@ -1958,6 +1959,10 @@ pub enum QuicFrame {
         trigger_frame_type: Option<String>,
     },
 
+    HandshakeDone {
+        frame_type: QuicFrameTypeName,
+    },
+
     Unknown {
         frame_type: QuicFrameTypeName,
         raw_frame_type: u64,
@@ -2132,6 +2137,12 @@ impl QuicFrame {
             raw_error_code,
             reason,
             trigger_frame_type,
+        }
+    }
+
+    pub fn handshake_done() -> Self {
+        QuicFrame::HandshakeDone {
+            frame_type: QuicFrameTypeName::HandshakeDone,
         }
     }
 
