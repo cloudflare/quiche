@@ -2073,6 +2073,23 @@ impl Connection {
                     in_flight = true;
                 }
             }
+
+            // Create STREAM_DATA_BLOCKED frames as needed.
+            for (stream_id, limit) in self
+                .streams
+                .blocked()
+                .map(|(&k, &v)| (k, v))
+                .collect::<Vec<(u64, u64)>>()
+            {
+                let frame = frame::Frame::StreamDataBlocked { stream_id, limit };
+
+                if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    self.streams.mark_blocked(stream_id, false, 0);
+
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
+            }
         }
 
         // Create CONNECTION_CLOSE frame.
@@ -2512,6 +2529,14 @@ impl Connection {
         let writable = stream.is_writable();
 
         let empty_fin = buf.is_empty() && fin;
+
+        if sent < buf.len() {
+            let max_off = stream.send.max_off();
+
+            self.streams.mark_blocked(stream_id, true, max_off);
+        } else {
+            self.streams.mark_blocked(stream_id, false, 0);
+        }
 
         // If the stream is now flushable push it to the flushable queue, but
         // only if it wasn't already queued.
@@ -3012,14 +3037,16 @@ impl Connection {
             }
         }
 
-        // If there are flushable streams, use Application.
+        // If there are flushable, almost full or blocked streams, use the
+        // Application epoch.
         if self.is_established() &&
             (self.should_update_max_data() ||
                 self.blocked_limit.is_some() ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
-                self.streams.has_almost_full())
+                self.streams.has_almost_full() ||
+                self.streams.has_blocked())
         {
             return Ok(packet::EPOCH_APPLICATION);
         }
@@ -5788,6 +5815,97 @@ mod tests {
                 data: stream::RangeBuf::from(b"aaaaaaaaaa", 0, false),
             })
         );
+
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn stream_data_blocked() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.streams.blocked().len(), 0);
+
+        assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.streams.blocked().len(), 0);
+
+        assert_eq!(pipe.client.stream_send(0, b"aaaaaa", false), Ok(5));
+        assert_eq!(pipe.client.streams.blocked().len(), 1);
+
+        let len = pipe.client.send(&mut buf).unwrap();
+        assert_eq!(pipe.client.streams.blocked().len(), 0);
+
+        let frames =
+            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+
+        let mut iter = frames.iter();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::StreamDataBlocked {
+                stream_id: 0,
+                limit: 15,
+            })
+        );
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::Stream {
+                stream_id: 0,
+                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+            })
+        );
+
+        assert_eq!(iter.next(), None);
+
+        // Send from another stream, make sure we don't send STREAM_DATA_BLOCKED
+        // again.
+        assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
+
+        let len = pipe.client.send(&mut buf).unwrap();
+        assert_eq!(pipe.client.streams.blocked().len(), 0);
+
+        let frames =
+            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+
+        let mut iter = frames.iter();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            })
+        );
+
+        assert_eq!(iter.next(), None);
+
+        // Send again from blocked stream and make sure it is marked as blocked
+        // again.
+        assert_eq!(pipe.client.stream_send(0, b"aaaaaa", false), Ok(0));
+        assert_eq!(pipe.client.streams.blocked().len(), 1);
+
+        let len = pipe.client.send(&mut buf).unwrap();
+        assert_eq!(pipe.client.streams.blocked().len(), 0);
+
+        let frames =
+            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+
+        let mut iter = frames.iter();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::StreamDataBlocked {
+                stream_id: 0,
+                limit: 15,
+            })
+        );
+
+        assert_eq!(iter.next(), Some(&frame::Frame::Padding { len: 1 }));
 
         assert_eq!(iter.next(), None);
     }
