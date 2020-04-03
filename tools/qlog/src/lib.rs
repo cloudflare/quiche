@@ -514,7 +514,7 @@ impl std::convert::From<std::io::Error> for Error {
     }
 }
 
-pub const QLOG_VERSION: &str = "draft-01";
+pub const QLOG_VERSION: &str = "draft-02-wip";
 
 /// A specialized [`Result`] type for quiche qlog operations.
 ///
