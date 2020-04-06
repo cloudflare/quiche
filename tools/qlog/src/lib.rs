@@ -73,9 +73,9 @@
 //! ## Writing out logs
 //! As events occur during the connection, the application appends them to the
 //! trace. The qlog crate supports two modes of writing logs: the buffered mode
-//! stores everything in memory and requires the application to serialize and write
-//! the output, the streaming mode progressively writes serialized JSON output to a
-//! writer designated by the application.
+//! stores everything in memory and requires the application to serialize and
+//! write the output, the streaming mode progressively writes serialized JSON
+//! output to a writer designated by the application.
 //!
 //! ### Creating a Trace
 //!
@@ -378,7 +378,6 @@
 //! );
 //!
 //! streamer.add_event(event).ok();
-//!
 //! ```
 //!
 //! In this example, the frames contained in the QUIC packet
@@ -420,7 +419,6 @@
 //! streamer.add_frame(padding, false).ok();
 //!
 //! streamer.finish_frames().ok();
-//!
 //! ```
 //!
 //! Once all events have have been written, the log
