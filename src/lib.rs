@@ -1500,11 +1500,6 @@ impl Connection {
             b.get_varint()? as usize
         };
 
-        if b.cap() < payload_len {
-            trace!("{} payload length mismatch", self.trace_id);
-            return Err(Error::Done);
-        }
-
         let header_len = b.off();
 
         if !self.is_server && !self.got_peer_conn_id {
@@ -5439,6 +5434,78 @@ mod tests {
         assert_eq!(
             pipe.server.recv(&mut buf[..written]),
             Err(Error::CryptoFail)
+        );
+
+        assert!(pipe.server.is_closed());
+    }
+
+    #[test]
+    /// Tests that packets with invalid payload length received before any other
+    /// valid packet cause the server to close the connection immediately.
+    fn invalid_initial_payload() {
+        let mut buf = [0; 65535];
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        let mut b = octets::Octets::with_slice(&mut buf);
+
+        let epoch = packet::Type::Initial.to_epoch().unwrap();
+
+        let pn = 0;
+        let pn_len = packet::pkt_num_len(pn).unwrap();
+
+        let hdr = Header {
+            ty: packet::Type::Initial,
+            version: pipe.client.version,
+            dcid: pipe.client.dcid.clone(),
+            scid: pipe.client.scid.clone(),
+            pkt_num: 0,
+            pkt_num_len: pn_len,
+            token: pipe.client.token.clone(),
+            versions: None,
+            key_phase: false,
+        };
+
+        hdr.to_bytes(&mut b).unwrap();
+
+        // Payload length is invalid!!!
+        let payload_len = 4096;
+
+        let len = pn_len + payload_len;
+        b.put_varint(len as u64).unwrap();
+
+        packet::encode_pkt_num(pn, &mut b).unwrap();
+
+        let payload_offset = b.off();
+
+        let frames = [frame::Frame::Padding { len: 10 }];
+
+        for frame in &frames {
+            frame.to_bytes(&mut b).unwrap();
+        }
+
+        let space = &mut pipe.client.pkt_num_spaces[epoch];
+
+        // Use correct payload length when encrypting the packet.
+        let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len()) +
+            space.overhead().unwrap();
+
+        let aead = space.crypto_seal.as_ref().unwrap();
+
+        let written = packet::encrypt_pkt(
+            &mut b,
+            pn,
+            pn_len,
+            payload_len,
+            payload_offset,
+            aead,
+        )
+        .unwrap();
+
+        assert_eq!(pipe.server.timeout(), None);
+
+        assert_eq!(
+            pipe.server.recv(&mut buf[..written]),
+            Err(Error::BufferTooShort)
         );
 
         assert!(pipe.server.is_closed());
