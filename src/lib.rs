@@ -2871,6 +2871,11 @@ impl Connection {
             self.error = Some(err);
         }
 
+        // When no packet was successfully processed close connection immediately.
+        if self.recv_count == 0 {
+            self.closed = true;
+        }
+
         Ok(())
     }
 
@@ -5435,6 +5440,8 @@ mod tests {
             pipe.server.recv(&mut buf[..written]),
             Err(Error::CryptoFail)
         );
+
+        assert!(pipe.server.is_closed());
     }
 
     #[test]
