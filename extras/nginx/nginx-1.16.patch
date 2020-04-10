@@ -1,4 +1,4 @@
-From ab4917ce8797ff545723983d99803fa3689d3446 Mon Sep 17 00:00:00 2001
+From d8f9979b4e316fa89d374ef109cae5ff291de4c7 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 10 Oct 2019 17:06:08 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -20,18 +20,18 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
  src/http/ngx_http.c                     |   33 +-
  src/http/ngx_http.h                     |    4 +
- src/http/ngx_http_core_module.c         |    7 +
+ src/http/ngx_http_core_module.c         |   11 +
  src/http/ngx_http_core_module.h         |    3 +
  src/http/ngx_http_request.c             |  144 +-
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   29 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2204 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2212 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   77 +
- src/http/v3/ngx_http_v3_filter_module.c |   68 +
+ src/http/v3/ngx_http_v3_filter_module.c |   78 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3684 insertions(+), 11 deletions(-)
+ 27 files changed, 3706 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -1179,10 +1179,21 @@ index 8b43857e..444f9353 100644
  #include <ngx_http_cache.h>
  #endif
 diff --git a/src/http/ngx_http_core_module.c b/src/http/ngx_http_core_module.c
-index cb49ef74..1e991c0b 100644
+index cb49ef74..13db45d7 100644
 --- a/src/http/ngx_http_core_module.c
 +++ b/src/http/ngx_http_core_module.c
-@@ -4099,6 +4099,13 @@ ngx_http_core_listen(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+@@ -2298,6 +2298,10 @@ ngx_http_subrequest(ngx_http_request_t *r,
+     sr->stream = r->stream;
+ #endif
+ 
++#if (NGX_HTTP_V3)
++    sr->qstream = r->qstream;
++#endif
++
+     sr->method = NGX_HTTP_GET;
+     sr->http_version = r->http_version;
+ 
+@@ -4099,6 +4103,13 @@ ngx_http_core_listen(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
              continue;
          }
  
@@ -1570,10 +1581,10 @@ index a7391d09..398af279 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 00000000..f2fe0eee
+index 00000000..a19eb2f7
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2204 @@
+@@ -0,0 +1,2212 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -2702,18 +2713,22 @@ index 00000000..f2fe0eee
 +static void
 +ngx_http_v3_run_request(ngx_http_request_t *r)
 +{
++    ngx_connection_t  *fc;
++
++    fc = r->connection;
++
 +    if (ngx_http_v3_construct_request_line(r) != NGX_OK) {
-+        return;
++        goto failed;
 +    }
 +
 +    if (ngx_http_v3_construct_cookie_header(r) != NGX_OK) {
-+        return;
++        goto failed;
 +    }
 +
 +    r->http_state = NGX_HTTP_PROCESS_REQUEST_STATE;
 +
 +    if (ngx_http_process_request_header(r) != NGX_OK) {
-+        return;
++        goto failed;
 +    }
 +
 +    if (r->headers_in.content_length_n > 0 && r->qstream->in_closed) {
@@ -2723,7 +2738,7 @@ index 00000000..f2fe0eee
 +        r->qstream->skip_data = 1;
 +
 +        ngx_http_finalize_request(r, NGX_HTTP_BAD_REQUEST);
-+        return;
++        goto failed;
 +    }
 +
 +    if (r->headers_in.content_length_n == -1 && !r->qstream->in_closed) {
@@ -2731,6 +2746,10 @@ index 00000000..f2fe0eee
 +    }
 +
 +    ngx_http_process_request(r);
++
++failed:
++
++    ngx_http_run_posted_requests(fc);
 +}
 +
 +
@@ -3863,10 +3882,10 @@ index 00000000..45a55b89
 +#endif /* _NGX_HTTP_V3_H_INCLUDED_ */
 diff --git a/src/http/v3/ngx_http_v3_filter_module.c b/src/http/v3/ngx_http_v3_filter_module.c
 new file mode 100644
-index 00000000..5bbff860
+index 00000000..68069095
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3_filter_module.c
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,78 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -3921,6 +3940,16 @@ index 00000000..5bbff860
 +{
 +    if (!r->qstream) {
 +        return ngx_http_next_header_filter(r);
++    }
++
++    if (r->header_sent) {
++        return NGX_OK;
++    }
++
++    r->header_sent = 1;
++
++    if (r != r->main) {
++        return NGX_OK;
 +    }
 +
 +    return ngx_http_v3_send_response(r);
