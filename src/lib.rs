@@ -1289,6 +1289,17 @@ impl Connection {
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         let len = buf.len();
 
+        // Keep track of how many bytes we received from the client, so we
+        // can limit bytes sent back before address validation, to a multiple
+        // of this. The limit needs to be increased early on, so that if there
+        // is an error there is enough credit to send a CONNECTION_CLOSE.
+        //
+        // It doesn't matter if the packets received were valid or not, we only
+        // need to track the total amount of bytes received.
+        if !self.verified_peer_address {
+            self.max_send_bytes += len * MAX_AMPLIFICATION_FACTOR;
+        }
+
         let mut done = 0;
         let mut left = len;
 
@@ -1309,17 +1320,6 @@ impl Connection {
 
             done += read;
             left -= read;
-        }
-
-        // Keep track of how many bytes we received from the client, so we
-        // can limit bytes sent back before address validation, to a multiple
-        // of this. The limit needs to be increased early on, so that if there
-        // is an error there is enough credit to send a CONNECTION_CLOSE.
-        //
-        // It doesn't matter if the packets received were valid or not, we only
-        // need to track the total amount of bytes received.
-        if !self.verified_peer_address {
-            self.max_send_bytes += buf.len() * MAX_AMPLIFICATION_FACTOR;
         }
 
         Ok(done)
@@ -1461,7 +1461,11 @@ impl Connection {
         //
         // TODO: buffer packets instead of discarding as an optimization.
         if hdr.ty == packet::Type::Short && !self.is_established() {
-            return Ok(b.len());
+            return Err(drop_pkt_on_err(
+                Error::InvalidPacket,
+                self.recv_count,
+                &self.trace_id,
+            ));
         }
 
         if self.is_server && !self.did_version_negotiation {
@@ -1499,8 +1503,6 @@ impl Connection {
         } else {
             b.get_varint()? as usize
         };
-
-        let header_len = b.off();
 
         if !self.is_server && !self.got_peer_conn_id {
             // Replace the randomly generated destination connection ID with
@@ -1543,23 +1545,18 @@ impl Connection {
                 Some(ref v) => v,
 
                 // Ignore packets that can't be decrypted because we don't have
-                // the necessary decryption key (either because we
-                // don't yet have it or because we already dropped
-                // it).
+                // the necessary decryption key (either because we don't yet
+                // have it or because we already dropped it).
                 //
                 // For example, this is necessary to prevent packet reordering
-                // (e.g. between Initial and Handshake) from
-                // causing the connection to be closed.
-                None => {
-                    trace!(
-                        "{} dropped undecryptable packet type={:?} len={}",
-                        self.trace_id,
-                        hdr.ty,
-                        payload_len
-                    );
-
-                    return Ok(header_len + payload_len);
-                },
+                // (e.g. between Initial and Handshake) from causing the
+                // connection to be closed.
+                None =>
+                    return Err(drop_pkt_on_err(
+                        Error::CryptoFail,
+                        self.recv_count,
+                        &self.trace_id,
+                    )),
             }
         };
 
@@ -5067,7 +5064,7 @@ mod tests {
         let written =
             testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
                 .unwrap();
-        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
 
         // Send 1-RTT packet #1.
         let frames = [frame::Frame::Stream {
@@ -5078,7 +5075,7 @@ mod tests {
         let written =
             testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
                 .unwrap();
-        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
 
         assert!(!pipe.server.is_established());
 
