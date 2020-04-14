@@ -477,10 +477,8 @@
 //! [`add_frame()`]: struct.QlogStreamer.html#method.add_frame
 //! [`finish_frames()`]: struct.QlogStreamer.html#method.finish_frames
 //! [`finish_log()`]: struct.QlogStreamer.html#method.finish_log
-use serde::{
-    Deserialize,
-    Serialize,
-};
+
+use serde::Serialize;
 
 /// A quiche qlog error.
 #[derive(Debug)]
@@ -1655,7 +1653,7 @@ pub enum QuicFrameTypeName {
 
 // TODO: search for pub enum Error { to see how best to encode errors in qlog.
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize)]
 pub struct PacketHeader {
     pub packet_number: String,
     pub packet_size: Option<u64>,
