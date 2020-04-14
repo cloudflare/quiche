@@ -2162,7 +2162,7 @@ impl Connection {
                     None => continue,
                 };
 
-                let off = stream.send.off();
+                let off = stream.send.off_front();
 
                 // Try to accurately account for the STREAM frame's overhead,
                 // such that we can fill as much of the packet buffer as
@@ -2426,6 +2426,9 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        #[cfg(feature = "qlog")]
+        let offset = stream.recv.off_back();
+
         let (read, fin) = stream.recv.pop(out)?;
 
         self.max_rx_data_next = self.max_rx_data_next.saturating_add(read as u64);
@@ -2447,6 +2450,18 @@ impl Connection {
         if complete {
             self.streams.collect(stream_id, local);
         }
+
+        qlog_with!(self.qlog_streamer, q, {
+            let ev = qlog::event::Event::h3_data_moved(
+                stream_id.to_string(),
+                Some(offset.to_string()),
+                Some(read as u64),
+                Some(qlog::H3DataRecipient::Transport),
+                None,
+                None,
+            );
+            q.add_event(ev).ok();
+        });
 
         Ok((read, fin))
     }
@@ -2512,6 +2527,9 @@ impl Connection {
         // Get existing stream or create a new one.
         let stream = self.get_or_create_stream(stream_id, true)?;
 
+        #[cfg(feature = "qlog")]
+        let offset = stream.send.off_back();
+
         let was_flushable = stream.is_flushable();
 
         let sent = stream.send.push_slice(buf, fin)?;
@@ -2546,6 +2564,18 @@ impl Connection {
         self.tx_data += sent as u64;
 
         self.recovery.rate_check_app_limited();
+
+        qlog_with!(self.qlog_streamer, q, {
+            let ev = qlog::event::Event::h3_data_moved(
+                stream_id.to_string(),
+                Some(offset.to_string()),
+                Some(sent as u64),
+                None,
+                Some(qlog::H3DataRecipient::Transport),
+                None,
+            );
+            q.add_event(ev).ok();
+        });
 
         Ok(sent)
     }

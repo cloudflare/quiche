@@ -465,7 +465,7 @@ impl Stream {
     /// Returns true if the stream has data to send and is allowed to send at
     /// least some of it.
     pub fn is_flushable(&self) -> bool {
-        self.send.ready() && self.send.off() < self.send.max_data
+        self.send.ready() && self.send.off_front() < self.send.max_data
     }
 
     /// Returns true if the stream is complete.
@@ -769,6 +769,12 @@ impl RecvBuf {
         Ok(())
     }
 
+    /// Returns the largest offset of data buffered.
+    #[allow(dead_code)]
+    pub fn off_back(&self) -> u64 {
+        self.off
+    }
+
     /// Returns true if we need to update the local flow control limit.
     pub fn almost_full(&self) -> bool {
         // Send MAX_STREAM_DATA when the new limit is at least double the
@@ -946,8 +952,8 @@ impl SendBuf {
 
         while out_len > 0 &&
             self.ready() &&
-            self.off() == out_off &&
-            self.off() < self.max_data
+            self.off_front() == out_off &&
+            self.off_front() < self.max_data
         {
             let mut buf = match self.data.pop() {
                 Some(v) => v,
@@ -1009,8 +1015,14 @@ impl SendBuf {
         Ok(())
     }
 
+    /// Returns the largest offset of data buffered.
+    #[allow(dead_code)]
+    pub fn off_back(&self) -> u64 {
+        self.off
+    }
+
     /// Returns the lowest offset of data buffered.
-    pub fn off(&self) -> u64 {
+    pub fn off_front(&self) -> u64 {
         match self.data.peek() {
             Some(v) => v.off(),
 
@@ -1756,16 +1768,16 @@ mod tests {
     fn resend() {
         let mut send = SendBuf::new(std::u64::MAX);
         assert_eq!(send.len, 0);
-        assert_eq!(send.off(), 0);
+        assert_eq!(send.off_front(), 0);
 
         let first = b"something";
         let second = b"helloworld";
 
         assert!(send.push_slice(first, false).is_ok());
-        assert_eq!(send.off(), 0);
+        assert_eq!(send.off_front(), 0);
 
         assert!(send.push_slice(second, true).is_ok());
-        assert_eq!(send.off(), 0);
+        assert_eq!(send.off_front(), 0);
 
         let write1 = send.pop(4).unwrap();
         assert_eq!(write1.off(), 0);
@@ -1773,7 +1785,7 @@ mod tests {
         assert_eq!(write1.fin(), false);
         assert_eq!(&write1[..], b"some");
         assert_eq!(send.len, 15);
-        assert_eq!(send.off(), 4);
+        assert_eq!(send.off_front(), 4);
 
         let write2 = send.pop(5).unwrap();
         assert_eq!(write2.off(), 4);
@@ -1781,7 +1793,7 @@ mod tests {
         assert_eq!(write2.fin(), false);
         assert_eq!(&write2[..], b"thing");
         assert_eq!(send.len, 10);
-        assert_eq!(send.off(), 9);
+        assert_eq!(send.off_front(), 9);
 
         let write3 = send.pop(5).unwrap();
         assert_eq!(write3.off(), 9);
@@ -1789,15 +1801,15 @@ mod tests {
         assert_eq!(write3.fin(), false);
         assert_eq!(&write3[..], b"hello");
         assert_eq!(send.len, 5);
-        assert_eq!(send.off(), 14);
+        assert_eq!(send.off_front(), 14);
 
         send.push(write2).unwrap();
         assert_eq!(send.len, 10);
-        assert_eq!(send.off(), 4);
+        assert_eq!(send.off_front(), 4);
 
         send.push(write1).unwrap();
         assert_eq!(send.len, 14);
-        assert_eq!(send.off(), 0);
+        assert_eq!(send.off_front(), 0);
 
         let write4 = send.pop(11).unwrap();
         assert_eq!(write4.off(), 0);
@@ -1805,7 +1817,7 @@ mod tests {
         assert_eq!(write4.fin(), false);
         assert_eq!(&write4[..], b"something");
         assert_eq!(send.len, 5);
-        assert_eq!(send.off(), 14);
+        assert_eq!(send.off_front(), 14);
 
         let write5 = send.pop(11).unwrap();
         assert_eq!(write5.off(), 14);
@@ -1813,7 +1825,7 @@ mod tests {
         assert_eq!(write5.fin(), true);
         assert_eq!(&write5[..], b"world");
         assert_eq!(send.len, 0);
-        assert_eq!(send.off(), 19);
+        assert_eq!(send.off_front(), 19);
     }
 
     #[test]
