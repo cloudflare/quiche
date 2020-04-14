@@ -704,8 +704,9 @@ impl Event {
     /// * `EventType`=`Http3EventType::DataMoved`
     /// * `EventData`=`H3DataMoved`.
     pub fn h3_data_moved(
-        stream_id: String, offset: Option<String>, from: Option<H3DataRecipient>,
-        to: Option<H3DataRecipient>, raw: Option<String>,
+        stream_id: String, offset: Option<String>, length: Option<u64>,
+        from: Option<H3DataRecipient>, to: Option<H3DataRecipient>,
+        raw: Option<String>,
     ) -> Self {
         Event {
             category: EventCategory::Http,
@@ -713,6 +714,7 @@ impl Event {
             data: EventData::H3DataMoved {
                 stream_id,
                 offset,
+                length,
                 from,
                 to,
                 raw,
@@ -721,7 +723,7 @@ impl Event {
     }
 
     pub fn h3_data_moved_min(stream_id: String) -> Self {
-        Event::h3_data_moved(stream_id, None, None, None, None)
+        Event::h3_data_moved(stream_id, None, None, None, None, None)
     }
 
     /// Returns:
