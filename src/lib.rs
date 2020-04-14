@@ -1248,15 +1248,14 @@ impl Connection {
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
-    /// returned, or [`Done`]. On error the connection will be closed by
-    /// calling [`close()`] with the appropriate error code.
+    /// returned. On error the connection will be closed by calling [`close()`]
+    /// with the appropriate error code.
     ///
     /// Coalesced packets will be processed as necessary.
     ///
     /// Note that the contents of the input buffer `buf` might be modified by
     /// this function due to, for example, in-place decryption.
     ///
-    /// [`Done`]: enum.Error.html#variant.Done
     /// [`close()`]: struct.Connection.html#method.close
     ///
     /// ## Examples:
@@ -1272,11 +1271,6 @@ impl Connection {
     ///
     ///     let read = match conn.recv(&mut buf[..read]) {
     ///         Ok(v) => v,
-    ///
-    ///         Err(quiche::Error::Done) => {
-    ///             // Done reading.
-    ///             break;
-    ///         },
     ///
     ///         Err(e) => {
     ///             // An error occurred, handle it.
@@ -1308,7 +1302,7 @@ impl Connection {
             let read = match self.recv_single(&mut buf[len - left..len]) {
                 Ok(v) => v,
 
-                Err(Error::Done) => return Err(Error::Done),
+                Err(Error::Done) => left,
 
                 Err(e) => {
                     // In case of error processing the incoming packet, close
@@ -1326,6 +1320,14 @@ impl Connection {
     }
 
     /// Processes a single QUIC packet received from the peer.
+    ///
+    /// On success the number of bytes processed from the input buffer is
+    /// returned. When the [`Done`] error is returned, processing of the
+    /// remainder of the incoming UDP datagram should be interrupted.
+    ///
+    /// On error, an error other than [`Done`] is returned.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
     fn recv_single(&mut self, buf: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
 
@@ -4322,7 +4324,7 @@ mod tests {
         let hdr = packet::Header::from_slice(&mut buf[..len], 0).unwrap();
         len = crate::negotiate_version(&hdr.scid, &hdr.dcid, &mut buf).unwrap();
 
-        assert_eq!(pipe.client.recv(&mut buf[..len]), Err(Error::Done));
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
     }
@@ -5064,7 +5066,7 @@ mod tests {
         let written =
             testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
                 .unwrap();
-        assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
 
         // Send 1-RTT packet #1.
         let frames = [frame::Frame::Stream {
@@ -5075,7 +5077,7 @@ mod tests {
         let written =
             testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
                 .unwrap();
-        assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
 
         assert!(!pipe.server.is_established());
 
@@ -5531,12 +5533,12 @@ mod tests {
         // cannot be authenticated during decryption).
         buf[written - 1] = !buf[written - 1];
 
-        assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
 
         // Corrupt the packets's first byte to make the header fail decoding.
         buf[0] = 255;
 
-        assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
     }
 
     #[test]
@@ -5834,7 +5836,7 @@ mod tests {
             packet::retry(&hdr.scid, &hdr.dcid, &scid, token, &mut buf).unwrap();
 
         // Client receives Retry and sends new Initial.
-        assert_eq!(pipe.client.recv(&mut buf[..len]), Err(Error::Done));
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
 
         len = pipe.client.send(&mut buf).unwrap();
 
