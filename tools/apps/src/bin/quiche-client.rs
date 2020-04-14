@@ -227,19 +227,16 @@ fn main() {
             let read = match conn.recv(&mut buf[..len]) {
                 Ok(v) => v,
 
-                Err(quiche::Error::Done) => {
-                    trace!("done reading");
-                    break;
-                },
-
                 Err(e) => {
                     error!("recv failed: {:?}", e);
-                    break 'read;
+                    continue 'read;
                 },
             };
 
             trace!("processed {} bytes", read);
         }
+
+        trace!("done reading");
 
         if conn.is_closed() {
             info!("connection closed, {:?}", conn.stats());

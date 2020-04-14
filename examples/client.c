@@ -110,18 +110,15 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
         ssize_t done = quiche_conn_recv(conn_io->conn, buf, read);
 
-        if (done == QUICHE_ERR_DONE) {
-            fprintf(stderr, "done reading\n");
-            break;
-        }
-
         if (done < 0) {
             fprintf(stderr, "failed to process packet\n");
-            return;
+            continue;
         }
 
         fprintf(stderr, "recv %zd bytes\n", done);
     }
+
+    fprintf(stderr, "done reading\n");
 
     if (quiche_conn_is_closed(conn_io->conn)) {
         fprintf(stderr, "connection closed\n");
