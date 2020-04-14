@@ -85,11 +85,6 @@ loop {
     let read = match conn.recv(&mut buf[..read]) {
         Ok(v) => v,
 
-        Err(quiche::Error::Done) => {
-            // Done reading.
-            break;
-        },
-
         Err(e) => {
             // An error occurred, handle it.
             break;
