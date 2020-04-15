@@ -204,9 +204,13 @@ mod tests {
             is_app_limited: false,
         };
 
-        recovery.delivery_rate.on_packet_sent(&mut pkt_1, Instant::now());
+        recovery
+            .delivery_rate
+            .on_packet_sent(&mut pkt_1, Instant::now());
         std::thread::sleep(Duration::from_millis(50));
-        recovery.delivery_rate.on_ack_received(pkt_1, Instant::now());
+        recovery
+            .delivery_rate
+            .on_ack_received(pkt_1, Instant::now());
 
         let mut pkt_2 = Sent {
             pkt_num: 1,
@@ -221,9 +225,13 @@ mod tests {
             is_app_limited: false,
         };
 
-        recovery.delivery_rate.on_packet_sent(&mut pkt_2, Instant::now());
+        recovery
+            .delivery_rate
+            .on_packet_sent(&mut pkt_2, Instant::now());
         std::thread::sleep(Duration::from_millis(50));
-        recovery.delivery_rate.on_ack_received(pkt_2, Instant::now());
+        recovery
+            .delivery_rate
+            .on_ack_received(pkt_2, Instant::now());
         recovery.delivery_rate.estimate();
 
         assert!(recovery.delivery_rate() > 0);
@@ -247,7 +255,9 @@ mod tests {
             is_app_limited: false,
         };
 
-        recvry.delivery_rate.on_packet_sent(&mut pkt_1, Instant::now());
+        recvry
+            .delivery_rate
+            .on_packet_sent(&mut pkt_1, Instant::now());
         std::thread::sleep(Duration::from_millis(50));
         recvry.delivery_rate.on_ack_received(pkt_1, Instant::now());
 
@@ -265,8 +275,12 @@ mod tests {
         };
 
         recvry.app_limited = true;
-        recvry.delivery_rate.check_app_limited(recvry.bytes_in_flight);
-        recvry.delivery_rate.on_packet_sent(&mut pkt_2, Instant::now());
+        recvry
+            .delivery_rate
+            .check_app_limited(recvry.bytes_in_flight);
+        recvry
+            .delivery_rate
+            .on_packet_sent(&mut pkt_2, Instant::now());
         std::thread::sleep(Duration::from_millis(50));
         recvry.delivery_rate.on_ack_received(pkt_2, Instant::now());
         recvry.delivery_rate.estimate();
