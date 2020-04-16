@@ -587,13 +587,16 @@ impl Http3Conn {
         let mut reqs = Vec::new();
         for url in urls {
             for i in 1..=reqs_cardinal {
+                let authority = match url.port() {
+                    Some(port) => format!("{}:{}", url.host_str().unwrap(), port),
+
+                    None => url.host_str().unwrap().to_string(),
+                };
+
                 let mut hdrs = vec![
                     quiche::h3::Header::new(":method", &method),
                     quiche::h3::Header::new(":scheme", url.scheme()),
-                    quiche::h3::Header::new(
-                        ":authority",
-                        url.host_str().unwrap(),
-                    ),
+                    quiche::h3::Header::new(":authority", &authority),
                     quiche::h3::Header::new(
                         ":path",
                         &url[url::Position::BeforePath..],
@@ -668,14 +671,24 @@ impl Http3Conn {
         root: &str, index: &str, request: &[quiche::h3::Header],
     ) -> (Vec<quiche::h3::Header>, Vec<u8>) {
         let mut file_path = path::PathBuf::from(root);
-        let mut path = path::PathBuf::from("");
+        let mut scheme = "";
+        let mut host = "";
+        let mut path = "";
         let mut method = "";
 
-        // Look for the request's path and method.
+        // Parse some of the request headers.
         for hdr in request {
             match hdr.name() {
+                ":scheme" => {
+                    scheme = hdr.value();
+                },
+
+                ":authority" | "host" => {
+                    host = hdr.value();
+                },
+
                 ":path" => {
-                    path = path::PathBuf::from(hdr.value());
+                    path = hdr.value();
                 },
 
                 ":method" => {
@@ -686,11 +699,24 @@ impl Http3Conn {
             }
         }
 
-        path = autoindex(path, index);
+        if scheme != "http" && scheme != "https" {
+            let headers = vec![
+                quiche::h3::Header::new(":status", &"400".to_string()),
+                quiche::h3::Header::new("server", "quiche"),
+            ];
+
+            return (headers, b"Invalid scheme".to_vec());
+        }
+
+        let url = format!("{}://{}{}", scheme, host, path);
+        let url = url::Url::parse(&url).unwrap();
+
+        let pathbuf = path::PathBuf::from(url.path());
+        let pathbuf = autoindex(pathbuf, index);
 
         let (status, body) = match method {
             "GET" => {
-                for c in path.components() {
+                for c in pathbuf.components() {
                     if let path::Component::Normal(v) = c {
                         file_path.push(v)
                     }

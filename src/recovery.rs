@@ -88,27 +88,6 @@ pub struct Sent {
     pub is_app_limited: bool,
 }
 
-// Rate estimation
-// https://tools.ietf.org/html/draft-cheng-iccrg-delivery-rate-estimation-00
-#[derive(Default)]
-pub struct RateSample {
-    delivery_rate: u64,
-
-    is_app_limited: bool,
-
-    interval: Duration,
-
-    delivered: usize,
-
-    prior_delivered: usize,
-
-    prior_time: Option<Instant>,
-
-    send_elapsed: Duration,
-
-    ack_elapsed: Duration,
-}
-
 pub struct Recovery {
     loss_detection_timer: Option<Instant>,
 
@@ -144,6 +123,10 @@ pub struct Recovery {
 
     pub loss_probes: [usize; packet::EPOCH_COUNT],
 
+    app_limited: bool,
+
+    delivery_rate: delivery_rate::Rate,
+
     // Congestion control.
     cc_ops: &'static CongestionControlOps,
 
@@ -154,20 +137,6 @@ pub struct Recovery {
     ssthresh: usize,
 
     congestion_recovery_start_time: Option<Instant>,
-
-    // Delivery rate estimation.
-    delivered: usize,
-
-    delivered_time: Option<Instant>,
-
-    recent_delivered_packet_sent_time: Option<Instant>,
-
-    app_limited_at_pkt: usize,
-
-    rate_sample: RateSample,
-
-    // Flags.
-    app_limited: bool,
 }
 
 impl Recovery {
@@ -217,15 +186,7 @@ impl Recovery {
 
             cc_ops: config.cc_algorithm.into(),
 
-            delivered: 0,
-
-            delivered_time: None,
-
-            recent_delivered_packet_sent_time: None,
-
-            app_limited_at_pkt: 0,
-
-            rate_sample: RateSample::default(),
+            delivery_rate: delivery_rate::Rate::default(),
 
             app_limited: false,
         }
@@ -239,7 +200,7 @@ impl Recovery {
         let in_flight = pkt.in_flight;
         let sent_bytes = pkt.size;
 
-        self.rate_on_packet_sent(&mut pkt, now);
+        self.delivery_rate.on_packet_sent(&mut pkt, now);
 
         self.largest_sent_pkt[epoch] =
             cmp::max(self.largest_sent_pkt[epoch], pkt.pkt_num);
@@ -332,7 +293,8 @@ impl Recovery {
             }
         }
 
-        self.rate_estimate();
+        self.delivery_rate.estimate();
+
         if !has_newly_acked {
             return Ok(());
         }
@@ -422,7 +384,7 @@ impl Recovery {
     }
 
     pub fn delivery_rate(&self) -> u64 {
-        self.rate_sample.delivery_rate
+        self.delivery_rate.delivery_rate()
     }
 
     fn update_rtt(
@@ -583,7 +545,7 @@ impl Recovery {
             if p.in_flight {
                 self.on_packet_acked_cc(&p, now);
 
-                self.rate_on_ack_received(p, now);
+                self.delivery_rate.on_ack_received(p, now);
             }
 
             return true;
@@ -655,77 +617,9 @@ impl Recovery {
         self.congestion_window = MINIMUM_WINDOW;
     }
 
-    fn rate_on_packet_sent(&mut self, pkt: &mut Sent, now: Instant) {
-        if self.delivered_time.is_none() {
-            self.delivered_time = Some(now);
-        }
-
-        if self.recent_delivered_packet_sent_time.is_none() {
-            self.recent_delivered_packet_sent_time = Some(now);
-        }
-
-        pkt.delivered = self.delivered;
-        pkt.delivered_time = self.delivered_time.unwrap();
-
-        pkt.recent_delivered_packet_sent_time =
-            self.recent_delivered_packet_sent_time.unwrap();
-
-        pkt.is_app_limited = self.app_limited_at_pkt > 0;
-    }
-
-    fn rate_on_ack_received(&mut self, pkt: Sent, now: Instant) {
-        self.rate_sample.prior_time = Some(pkt.delivered_time);
-
-        self.delivered += pkt.size;
-        self.delivered_time = Some(now);
-
-        if pkt.delivered > self.rate_sample.prior_delivered {
-            self.rate_sample.prior_delivered = pkt.delivered;
-            self.rate_sample.is_app_limited = pkt.is_app_limited;
-
-            self.rate_sample.send_elapsed =
-                pkt.time - pkt.recent_delivered_packet_sent_time;
-
-            self.rate_sample.ack_elapsed = self
-                .delivered_time
-                .unwrap()
-                .duration_since(pkt.delivered_time);
-
-            self.recent_delivered_packet_sent_time = Some(pkt.time);
-        }
-    }
-
-    fn rate_estimate(&mut self) {
-        if (self.app_limited_at_pkt > 0) &&
-            (self.delivered > self.app_limited_at_pkt)
-        {
-            self.app_limited_at_pkt = 0;
-        }
-
-        match self.rate_sample.prior_time {
-            Some(_) => {
-                self.rate_sample.delivered =
-                    self.delivered - self.rate_sample.prior_delivered;
-
-                self.rate_sample.interval = cmp::max(
-                    self.rate_sample.send_elapsed,
-                    self.rate_sample.ack_elapsed,
-                );
-            },
-            None => return,
-        }
-
-        if self.rate_sample.interval.as_secs_f64() > 0.0 {
-            self.rate_sample.delivery_rate = (self.rate_sample.delivered as f64 /
-                self.rate_sample.interval.as_secs_f64())
-                as u64;
-        }
-    }
-
     pub fn rate_check_app_limited(&mut self) {
         if self.app_limited {
-            let limited = self.delivered + self.bytes_in_flight;
-            self.app_limited_at_pkt = if limited > 0 { limited } else { 1 };
+            self.delivery_rate.check_app_limited(self.bytes_in_flight)
         }
     }
 
@@ -817,31 +711,8 @@ impl std::fmt::Debug for Recovery {
         write!(f, "loss_probes={:?} ", self.loss_probes)?;
         write!(f, "cwnd={} ", self.congestion_window)?;
         write!(f, "ssthresh={} ", self.ssthresh)?;
-        write!(f, "bytes_in_flight={}", self.bytes_in_flight)?;
-        write!(f, "delivered={:?} ", self.delivered)?;
-        if let Some(t) = self.delivered_time {
-            write!(f, "delivered_time={:?} ", t.elapsed())?;
-        }
-        if let Some(t) = self.recent_delivered_packet_sent_time {
-            write!(f, "recent_delivered_packet_sent_time={:?} ", t.elapsed())?;
-        }
-        write!(f, "app_limited_at_pkt={:?} ", self.app_limited_at_pkt)?;
-
-        Ok(())
-    }
-}
-
-impl std::fmt::Debug for RateSample {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "delivery_rate={:?} ", self.delivery_rate)?;
-        write!(f, "interval={:?} ", self.interval)?;
-        write!(f, "delivered={:?} ", self.delivered)?;
-        write!(f, "prior_delivered={:?} ", self.prior_delivered)?;
-        write!(f, "send_elapsed={:?} ", self.send_elapsed)?;
-        write!(f, "ack_elapsed={:?} ", self.ack_elapsed)?;
-        if let Some(t) = self.prior_time {
-            write!(f, "prior_time={:?} ", t.elapsed())?;
-        }
+        write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
+        write!(f, "{:?}", self.delivery_rate)?;
 
         Ok(())
     }
@@ -878,94 +749,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rate_check() {
-        let config = Config::new(0xbabababa).unwrap();
-        let mut recovery = Recovery::new(&config);
-
-        let mut pkt_1 = Sent {
-            pkt_num: 0,
-            frames: vec![],
-            time: Instant::now(),
-            size: 1200,
-            ack_eliciting: true,
-            in_flight: true,
-            delivered: 0,
-            delivered_time: Instant::now(),
-            recent_delivered_packet_sent_time: Instant::now(),
-            is_app_limited: false,
-        };
-
-        recovery.rate_on_packet_sent(&mut pkt_1, Instant::now());
-        std::thread::sleep(Duration::from_millis(50));
-        recovery.rate_on_ack_received(pkt_1, Instant::now());
-
-        let mut pkt_2 = Sent {
-            pkt_num: 1,
-            frames: vec![],
-            time: Instant::now(),
-            size: 1200,
-            ack_eliciting: true,
-            in_flight: true,
-            delivered: 0,
-            delivered_time: Instant::now(),
-            recent_delivered_packet_sent_time: Instant::now(),
-            is_app_limited: false,
-        };
-
-        recovery.rate_on_packet_sent(&mut pkt_2, Instant::now());
-        std::thread::sleep(Duration::from_millis(50));
-        recovery.rate_on_ack_received(pkt_2, Instant::now());
-        recovery.rate_estimate();
-
-        assert!(recovery.rate_sample.delivery_rate > 0);
-    }
-
-    #[test]
-    fn app_limited_check() {
-        let config = Config::new(0xbabababa).unwrap();
-        let mut recvry = Recovery::new(&config);
-
-        let mut pkt_1 = Sent {
-            pkt_num: 0,
-            frames: vec![],
-            time: Instant::now(),
-            size: 1200,
-            ack_eliciting: true,
-            in_flight: true,
-            delivered: 0,
-            delivered_time: Instant::now(),
-            recent_delivered_packet_sent_time: Instant::now(),
-            is_app_limited: false,
-        };
-
-        recvry.rate_on_packet_sent(&mut pkt_1, Instant::now());
-        std::thread::sleep(Duration::from_millis(50));
-        recvry.rate_on_ack_received(pkt_1, Instant::now());
-
-        let mut pkt_2 = Sent {
-            pkt_num: 1,
-            frames: vec![],
-            time: Instant::now(),
-            size: 1200,
-            ack_eliciting: true,
-            in_flight: true,
-            delivered: 0,
-            delivered_time: Instant::now(),
-            recent_delivered_packet_sent_time: Instant::now(),
-            is_app_limited: false,
-        };
-
-        recvry.app_limited = true;
-        recvry.rate_check_app_limited();
-        recvry.rate_on_packet_sent(&mut pkt_2, Instant::now());
-        std::thread::sleep(Duration::from_millis(50));
-        recvry.rate_on_ack_received(pkt_2, Instant::now());
-        recvry.rate_estimate();
-
-        assert_eq!(recvry.app_limited_at_pkt, 0);
-    }
-
-    #[test]
     fn lookup_cc_algo_ok() {
         let algo = CongestionControlAlgorithm::from_str("reno").unwrap();
         assert_eq!(algo, CongestionControlAlgorithm::Reno);
@@ -992,4 +775,5 @@ mod tests {
     }
 }
 
+mod delivery_rate;
 mod reno;

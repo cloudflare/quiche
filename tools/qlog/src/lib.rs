@@ -1456,6 +1456,7 @@ pub enum EventData {
     H3DataMoved {
         stream_id: String,
         offset: Option<String>,
+        length: Option<u64>,
 
         from: Option<H3DataRecipient>,
         to: Option<H3DataRecipient>,

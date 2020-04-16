@@ -265,7 +265,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 if (written < 0) {
                     fprintf(stderr, "failed to create vneg packet: %zd\n",
                             written);
-                    return;
+                    continue;
                 }
 
                 ssize_t sent = sendto(conns->sock, out, written, 0,
@@ -273,11 +273,11 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                                       peer_addr_len);
                 if (sent != written) {
                     perror("failed to send");
-                    return;
+                    continue;
                 }
 
                 fprintf(stderr, "sent %zd bytes\n", sent);
-                return;
+                continue;
             }
 
             if (token_len == 0) {
@@ -295,7 +295,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 if (written < 0) {
                     fprintf(stderr, "failed to create retry packet: %zd\n",
                             written);
-                    return;
+                    continue;
                 }
 
                 ssize_t sent = sendto(conns->sock, out, written, 0,
@@ -303,23 +303,23 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                                       peer_addr_len);
                 if (sent != written) {
                     perror("failed to send");
-                    return;
+                    continue;
                 }
 
                 fprintf(stderr, "sent %zd bytes\n", sent);
-                return;
+                continue;
             }
 
 
             if (!validate_token(token, token_len, &peer_addr, peer_addr_len,
                                odcid, &odcid_len)) {
                 fprintf(stderr, "invalid address validation token\n");
-                return;
+                continue;
             }
 
             conn_io = create_conn(odcid, odcid_len);
             if (conn_io == NULL) {
-                return;
+                continue;
             }
 
             memcpy(&conn_io->peer_addr, &peer_addr, peer_addr_len);
@@ -328,14 +328,9 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
         ssize_t done = quiche_conn_recv(conn_io->conn, buf, read);
 
-        if (done == QUICHE_ERR_DONE) {
-            fprintf(stderr, "done reading\n");
-            break;
-        }
-
         if (done < 0) {
             fprintf(stderr, "failed to process packet: %zd\n", done);
-            return;
+            continue;
         }
 
         fprintf(stderr, "recv %zd bytes\n", done);
@@ -348,7 +343,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                                                                    http3_config);
                 if (conn_io->http3 == NULL) {
                     fprintf(stderr, "failed to create HTTP/3 connection\n");
-                    return;
+                    continue;
                 }
             }
 
@@ -427,7 +422,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
             quiche_conn_stats(conn_io->conn, &stats);
             fprintf(stderr, "connection closed, recv=%zu sent=%zu lost=%zu rtt=%" PRIu64 "ns cwnd=%zu\n",
-					stats.recv, stats.sent, stats.lost, stats.rtt, stats.cwnd);
+                    stats.recv, stats.sent, stats.lost, stats.rtt, stats.cwnd);
 
             HASH_DELETE(hh, conns->h, conn_io);
 
@@ -452,7 +447,7 @@ static void timeout_cb(EV_P_ ev_timer *w, int revents) {
 
         quiche_conn_stats(conn_io->conn, &stats);
         fprintf(stderr, "connection closed, recv=%zu sent=%zu lost=%zu rtt=%" PRIu64 "ns cwnd=%zu\n",
-				stats.recv, stats.sent, stats.lost, stats.rtt, stats.cwnd);
+                stats.recv, stats.sent, stats.lost, stats.rtt, stats.cwnd);
 
         HASH_DELETE(hh, conns->h, conn_io);
 

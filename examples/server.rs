@@ -163,7 +163,7 @@ fn main() {
 
                 Err(e) => {
                     error!("Parsing packet header failed: {:?}", e);
-                    continue;
+                    continue 'read;
                 },
             };
 
@@ -179,7 +179,7 @@ fn main() {
             {
                 if hdr.ty != quiche::Type::Initial {
                     error!("Packet is not Initial");
-                    continue;
+                    continue 'read;
                 }
 
                 if !quiche::version_is_supported(hdr.version) {
@@ -199,7 +199,7 @@ fn main() {
 
                         panic!("send() failed: {:?}", e);
                     }
-                    continue;
+                    continue 'read;
                 }
 
                 let mut scid = [0; quiche::MAX_CONN_ID_LEN];
@@ -229,7 +229,7 @@ fn main() {
 
                         panic!("send() failed: {:?}", e);
                     }
-                    continue;
+                    continue 'read;
                 }
 
                 let odcid = validate_token(&src, token);
@@ -238,12 +238,12 @@ fn main() {
                 // drop the packet.
                 if odcid == None {
                     error!("Invalid address validation token");
-                    continue;
+                    continue 'read;
                 }
 
                 if scid.len() != hdr.dcid.len() {
                     error!("Invalid destination connection ID");
-                    continue;
+                    continue 'read;
                 }
 
                 // Reuse the source connection ID we sent in the Retry
@@ -278,14 +278,9 @@ fn main() {
             let read = match client.conn.recv(pkt_buf) {
                 Ok(v) => v,
 
-                Err(quiche::Error::Done) => {
-                    debug!("{} done reading", client.conn.trace_id());
-                    break;
-                },
-
                 Err(e) => {
                     error!("{} recv failed: {:?}", client.conn.trace_id(), e);
-                    break 'read;
+                    continue 'read;
                 },
             };
 

@@ -1248,15 +1248,14 @@ impl Connection {
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
-    /// returned, or [`Done`]. On error the connection will be closed by
-    /// calling [`close()`] with the appropriate error code.
+    /// returned. On error the connection will be closed by calling [`close()`]
+    /// with the appropriate error code.
     ///
     /// Coalesced packets will be processed as necessary.
     ///
     /// Note that the contents of the input buffer `buf` might be modified by
     /// this function due to, for example, in-place decryption.
     ///
-    /// [`Done`]: enum.Error.html#variant.Done
     /// [`close()`]: struct.Connection.html#method.close
     ///
     /// ## Examples:
@@ -1273,11 +1272,6 @@ impl Connection {
     ///     let read = match conn.recv(&mut buf[..read]) {
     ///         Ok(v) => v,
     ///
-    ///         Err(quiche::Error::Done) => {
-    ///             // Done reading.
-    ///             break;
-    ///         },
-    ///
     ///         Err(e) => {
     ///             // An error occurred, handle it.
     ///             break;
@@ -1289,6 +1283,17 @@ impl Connection {
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         let len = buf.len();
 
+        // Keep track of how many bytes we received from the client, so we
+        // can limit bytes sent back before address validation, to a multiple
+        // of this. The limit needs to be increased early on, so that if there
+        // is an error there is enough credit to send a CONNECTION_CLOSE.
+        //
+        // It doesn't matter if the packets received were valid or not, we only
+        // need to track the total amount of bytes received.
+        if !self.verified_peer_address {
+            self.max_send_bytes += len * MAX_AMPLIFICATION_FACTOR;
+        }
+
         let mut done = 0;
         let mut left = len;
 
@@ -1297,7 +1302,7 @@ impl Connection {
             let read = match self.recv_single(&mut buf[len - left..len]) {
                 Ok(v) => v,
 
-                Err(Error::Done) => return Err(Error::Done),
+                Err(Error::Done) => left,
 
                 Err(e) => {
                     // In case of error processing the incoming packet, close
@@ -1311,21 +1316,18 @@ impl Connection {
             left -= read;
         }
 
-        // Keep track of how many bytes we received from the client, so we
-        // can limit bytes sent back before address validation, to a multiple
-        // of this. The limit needs to be increased early on, so that if there
-        // is an error there is enough credit to send a CONNECTION_CLOSE.
-        //
-        // It doesn't matter if the packets received were valid or not, we only
-        // need to track the total amount of bytes received.
-        if !self.verified_peer_address {
-            self.max_send_bytes += buf.len() * MAX_AMPLIFICATION_FACTOR;
-        }
-
         Ok(done)
     }
 
     /// Processes a single QUIC packet received from the peer.
+    ///
+    /// On success the number of bytes processed from the input buffer is
+    /// returned. When the [`Done`] error is returned, processing of the
+    /// remainder of the incoming UDP datagram should be interrupted.
+    ///
+    /// On error, an error other than [`Done`] is returned.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
     fn recv_single(&mut self, buf: &mut [u8]) -> Result<usize> {
         let now = time::Instant::now();
 
@@ -1461,7 +1463,11 @@ impl Connection {
         //
         // TODO: buffer packets instead of discarding as an optimization.
         if hdr.ty == packet::Type::Short && !self.is_established() {
-            return Ok(b.len());
+            return Err(drop_pkt_on_err(
+                Error::InvalidPacket,
+                self.recv_count,
+                &self.trace_id,
+            ));
         }
 
         if self.is_server && !self.did_version_negotiation {
@@ -1499,13 +1505,6 @@ impl Connection {
         } else {
             b.get_varint()? as usize
         };
-
-        if b.cap() < payload_len {
-            trace!("{} payload length mismatch", self.trace_id);
-            return Err(Error::Done);
-        }
-
-        let header_len = b.off();
 
         if !self.is_server && !self.got_peer_conn_id {
             // Replace the randomly generated destination connection ID with
@@ -1548,23 +1547,18 @@ impl Connection {
                 Some(ref v) => v,
 
                 // Ignore packets that can't be decrypted because we don't have
-                // the necessary decryption key (either because we
-                // don't yet have it or because we already dropped
-                // it).
+                // the necessary decryption key (either because we don't yet
+                // have it or because we already dropped it).
                 //
                 // For example, this is necessary to prevent packet reordering
-                // (e.g. between Initial and Handshake) from
-                // causing the connection to be closed.
-                None => {
-                    trace!(
-                        "{} dropped undecryptable packet type={:?} len={}",
-                        self.trace_id,
-                        hdr.ty,
-                        payload_len
-                    );
-
-                    return Ok(header_len + payload_len);
-                },
+                // (e.g. between Initial and Handshake) from causing the
+                // connection to be closed.
+                None =>
+                    return Err(drop_pkt_on_err(
+                        Error::CryptoFail,
+                        self.recv_count,
+                        &self.trace_id,
+                    )),
             }
         };
 
@@ -2170,7 +2164,7 @@ impl Connection {
                     None => continue,
                 };
 
-                let off = stream.send.off();
+                let off = stream.send.off_front();
 
                 // Try to accurately account for the STREAM frame's overhead,
                 // such that we can fill as much of the packet buffer as
@@ -2434,6 +2428,9 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        #[cfg(feature = "qlog")]
+        let offset = stream.recv.off_back();
+
         let (read, fin) = stream.recv.pop(out)?;
 
         self.max_rx_data_next = self.max_rx_data_next.saturating_add(read as u64);
@@ -2455,6 +2452,18 @@ impl Connection {
         if complete {
             self.streams.collect(stream_id, local);
         }
+
+        qlog_with!(self.qlog_streamer, q, {
+            let ev = qlog::event::Event::h3_data_moved(
+                stream_id.to_string(),
+                Some(offset.to_string()),
+                Some(read as u64),
+                Some(qlog::H3DataRecipient::Transport),
+                None,
+                None,
+            );
+            q.add_event(ev).ok();
+        });
 
         Ok((read, fin))
     }
@@ -2520,6 +2529,9 @@ impl Connection {
         // Get existing stream or create a new one.
         let stream = self.get_or_create_stream(stream_id, true)?;
 
+        #[cfg(feature = "qlog")]
+        let offset = stream.send.off_back();
+
         let was_flushable = stream.is_flushable();
 
         let sent = stream.send.push_slice(buf, fin)?;
@@ -2554,6 +2566,18 @@ impl Connection {
         self.tx_data += sent as u64;
 
         self.recovery.rate_check_app_limited();
+
+        qlog_with!(self.qlog_streamer, q, {
+            let ev = qlog::event::Event::h3_data_moved(
+                stream_id.to_string(),
+                Some(offset.to_string()),
+                Some(sent as u64),
+                None,
+                Some(qlog::H3DataRecipient::Transport),
+                None,
+            );
+            q.add_event(ev).ok();
+        });
 
         Ok(sent)
     }
@@ -4330,7 +4354,7 @@ mod tests {
         let hdr = packet::Header::from_slice(&mut buf[..len], 0).unwrap();
         len = crate::negotiate_version(&hdr.scid, &hdr.dcid, &mut buf).unwrap();
 
-        assert_eq!(pipe.client.recv(&mut buf[..len]), Err(Error::Done));
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
     }
@@ -5445,6 +5469,78 @@ mod tests {
     }
 
     #[test]
+    /// Tests that packets with invalid payload length received before any other
+    /// valid packet cause the server to close the connection immediately.
+    fn invalid_initial_payload() {
+        let mut buf = [0; 65535];
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        let mut b = octets::Octets::with_slice(&mut buf);
+
+        let epoch = packet::Type::Initial.to_epoch().unwrap();
+
+        let pn = 0;
+        let pn_len = packet::pkt_num_len(pn).unwrap();
+
+        let hdr = Header {
+            ty: packet::Type::Initial,
+            version: pipe.client.version,
+            dcid: pipe.client.dcid.clone(),
+            scid: pipe.client.scid.clone(),
+            pkt_num: 0,
+            pkt_num_len: pn_len,
+            token: pipe.client.token.clone(),
+            versions: None,
+            key_phase: false,
+        };
+
+        hdr.to_bytes(&mut b).unwrap();
+
+        // Payload length is invalid!!!
+        let payload_len = 4096;
+
+        let len = pn_len + payload_len;
+        b.put_varint(len as u64).unwrap();
+
+        packet::encode_pkt_num(pn, &mut b).unwrap();
+
+        let payload_offset = b.off();
+
+        let frames = [frame::Frame::Padding { len: 10 }];
+
+        for frame in &frames {
+            frame.to_bytes(&mut b).unwrap();
+        }
+
+        let space = &mut pipe.client.pkt_num_spaces[epoch];
+
+        // Use correct payload length when encrypting the packet.
+        let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len()) +
+            space.overhead().unwrap();
+
+        let aead = space.crypto_seal.as_ref().unwrap();
+
+        let written = packet::encrypt_pkt(
+            &mut b,
+            pn,
+            pn_len,
+            payload_len,
+            payload_offset,
+            aead,
+        )
+        .unwrap();
+
+        assert_eq!(pipe.server.timeout(), None);
+
+        assert_eq!(
+            pipe.server.recv(&mut buf[..written]),
+            Err(Error::BufferTooShort)
+        );
+
+        assert!(pipe.server.is_closed());
+    }
+
+    #[test]
     /// Tests that invalid packets don't cause the connection to be closed.
     fn invalid_packet() {
         let mut buf = [0; 65535];
@@ -5467,12 +5563,12 @@ mod tests {
         // cannot be authenticated during decryption).
         buf[written - 1] = !buf[written - 1];
 
-        assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
 
         // Corrupt the packets's first byte to make the header fail decoding.
         buf[0] = 255;
 
-        assert_eq!(pipe.server.recv(&mut buf[..written]), Err(Error::Done));
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
     }
 
     #[test]
@@ -5770,7 +5866,7 @@ mod tests {
             packet::retry(&hdr.scid, &hdr.dcid, &scid, token, &mut buf).unwrap();
 
         // Client receives Retry and sends new Initial.
-        assert_eq!(pipe.client.recv(&mut buf[..len]), Err(Error::Done));
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
 
         len = pipe.client.send(&mut buf).unwrap();
 
