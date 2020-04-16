@@ -30,6 +30,7 @@ use super::Result;
 use crate::octets;
 
 use super::frame;
+use super::priority::Priority;
 
 pub const HTTP3_CONTROL_STREAM_TYPE_ID: u64 = 0x0;
 pub const HTTP3_PUSH_STREAM_TYPE_ID: u64 = 0x1;
@@ -135,6 +136,8 @@ pub struct Stream {
 
     /// Whether the stream has been locally initialized.
     local_initialized: bool,
+
+    pub priority: Priority,
 }
 
 impl Stream {
@@ -171,6 +174,8 @@ impl Stream {
             is_local,
             remote_initialized: false,
             local_initialized: false,
+
+            priority: Priority::default(),
         }
     }
 

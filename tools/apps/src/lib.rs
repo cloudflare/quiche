@@ -39,6 +39,8 @@ use std::collections::HashMap;
 use std::net;
 use std::path;
 
+use quiche::h3::priority;
+
 /// Returns a String containing a pretty printed version of the `buf` slice.
 pub fn hex_dump(buf: &[u8]) -> String {
     let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
@@ -669,12 +671,13 @@ impl Http3Conn {
     /// Builds an HTTP/3 response given a request.
     fn build_h3_response(
         root: &str, index: &str, request: &[quiche::h3::Header],
-    ) -> (Vec<quiche::h3::Header>, Vec<u8>) {
+    ) -> (Vec<quiche::h3::Header>, Vec<u8>, priority::Priority) {
         let mut file_path = path::PathBuf::from(root);
         let mut scheme = "";
         let mut host = "";
         let mut path = "";
         let mut method = "";
+        let mut priority = priority::Priority::default();
 
         // Parse some of the request headers.
         for hdr in request {
@@ -695,6 +698,10 @@ impl Http3Conn {
                     method = hdr.value();
                 },
 
+                "priority" => {
+                    priority = priority::Priority::from_wire(hdr.value());
+                },
+
                 _ => (),
             }
         }
@@ -705,7 +712,7 @@ impl Http3Conn {
                 quiche::h3::Header::new("server", "quiche"),
             ];
 
-            return (headers, b"Invalid scheme".to_vec());
+            return (headers, b"Invalid scheme".to_vec(), priority);
         }
 
         let url = format!("{}://{}{}", scheme, host, path);
@@ -713,6 +720,24 @@ impl Http3Conn {
 
         let pathbuf = path::PathBuf::from(url.path());
         let pathbuf = autoindex(pathbuf, index);
+
+        // Priority query string takes precedence over the header.
+        // Rebuild the priority header field value, including any
+        // duplicates, and let it's parser handle them.
+        let mut query_priority = "".to_string();
+        for param in url.query_pairs() {
+            if param.0 == "u" {
+                query_priority.push_str(&format!("{}={},", param.0, param.1));
+            }
+
+            if param.0 == "i" && param.1 == "1" {
+                query_priority.push_str("i,");
+            }
+        }
+
+        if !query_priority.is_empty() {
+            priority = priority::Priority::from_wire(&query_priority);
+        }
 
         let (status, body) = match method {
             "GET" => {
@@ -736,9 +761,10 @@ impl Http3Conn {
             quiche::h3::Header::new(":status", &status.to_string()),
             quiche::h3::Header::new("server", "quiche"),
             quiche::h3::Header::new("content-length", &body.len().to_string()),
+            quiche::h3::Header::new("priority", &priority.to_wire()),
         ];
 
-        (headers, body)
+        (headers, body, priority)
     }
 }
 
@@ -910,8 +936,10 @@ impl HttpConn for Http3Conn {
                     conn.stream_shutdown(stream_id, quiche::Shutdown::Read, 0)
                         .unwrap();
 
-                    let (headers, body) =
+                    let (headers, body, priority) =
                         Http3Conn::build_h3_response(root, index, &list);
+
+                    self.h3_conn.response_priority(stream_id, priority)?;
 
                     match self
                         .h3_conn
@@ -921,7 +949,7 @@ impl HttpConn for Http3Conn {
 
                         Err(quiche::h3::Error::StreamBlocked) => {
                             let response = PartialResponse {
-                                headers: Some(headers),
+                                headers: Some(headers.to_vec()),
                                 body,
                                 written: 0,
                             };

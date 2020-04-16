@@ -728,15 +728,33 @@ impl Connection {
             return Err(Error::FrameUnexpected);
         }
 
-        match self.streams.get(&stream_id) {
-            Some(s) =>
+        let http_priority = match self.streams.get(&stream_id) {
+            Some(s) => {
                 if !s.local_initialized() {
                     return Err(Error::FrameUnexpected);
-                },
+                }
+
+                &s.priority
+            },
 
             None => {
                 return Err(Error::FrameUnexpected);
             },
+        };
+
+        // TODO: for testing purposes we calculate the quic priority every time
+        // that we write bytes into the the transport. This allows incremental
+        // streams to react to the changing set of streams in the connection.
+        // However, the call is pretty costly so perhaps there is a better way to
+        // approach this.
+        let quic_priority = http_priority.to_quiche(stream_id, &self.streams);
+
+        match conn.stream_priority(stream_id, quic_priority) {
+            Ok(_) => (),
+
+            Err(crate::Error::Done) => (),
+
+            Err(e) => return Err(Error::TransportError(e)),
         }
 
         let overhead = octets::varint_len(frame::DATA_FRAME_TYPE_ID) +
@@ -1049,6 +1067,33 @@ impl Connection {
 
             return Err(Error::ClosedCriticalStream);
         }
+
+        Ok(())
+    }
+
+    /// Sets the HTTP/3 response priority on the specified stream.
+    ///
+    /// Stream priority is used by quiche to schedule the sending of response
+    /// body data. The priority can only be set for request streams that quiche
+    /// has received. It can be set multiple time before or during the response
+    /// but not after the stream has been closed.
+    ///
+    /// The [`InvalidStreamState`] error is returned if any of the above
+    /// conditions are false.
+    pub fn response_priority(
+        &mut self, stream_id: u64, priority: priority::Priority,
+    ) -> Result<()> {
+        if stream_id % 4 != 0 {
+            return Err(Error::IdError);
+        }
+
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or(Error::TransportError(crate::Error::InvalidStreamState))?;
+
+        // TODO: validate urgency is within bounds
+        stream.priority = priority;
 
         Ok(())
     }
@@ -2766,6 +2811,8 @@ mod tests {
 
 mod ffi;
 mod frame;
+#[doc(hidden)]
+pub mod priority;
 #[doc(hidden)]
 pub mod qpack;
 mod stream;
