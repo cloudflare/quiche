@@ -260,6 +260,9 @@ use crate::octets;
 /// ../struct.Config.html#method.set_application_protos
 pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-29\x05h3-28\x05h3-27";
 
+// The offset used when converting HTTP/3 urgency to quiche urgency.
+const PRIORITY_URGENCY_OFFSET: u8 = 124;
+
 /// A specialized [`Result`] type for quiche HTTP/3 operations.
 ///
 /// This type is used throughout quiche's HTTP/3 public API for any operation
@@ -628,7 +631,7 @@ impl Connection {
         Ok(stream_id)
     }
 
-    /// Sends an HTTP/3 response on the specified stream.
+    /// Sends an HTTP/3 response on the specified stream with default priority.
     ///
     /// This method sends the provided `headers` without a body. To include a
     /// body, set `fin` as `false` and subsequently call [`send_body()`] with
@@ -645,6 +648,66 @@ impl Connection {
         &mut self, conn: &mut super::Connection, stream_id: u64,
         headers: &[Header], fin: bool,
     ) -> Result<()> {
+        let priority = "u=3";
+
+        self.send_response_with_priority(
+            conn, stream_id, headers, priority, fin,
+        )?;
+
+        Ok(())
+    }
+
+    /// Sends an HTTP/3 response on the specified stream with specified
+    /// priority.
+    ///
+    /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application should retry the operation once the stream is
+    /// reported as writable again.
+    ///
+    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
+    pub fn send_response_with_priority(
+        &mut self, conn: &mut super::Connection, stream_id: u64,
+        headers: &[Header], priority: &str, fin: bool,
+    ) -> Result<()> {
+        if !self.streams.contains_key(&stream_id) {
+            return Err(Error::FrameUnexpected);
+        }
+
+        let mut urgency = 3;
+        let mut incremental = false;
+
+        for param in priority.split(',') {
+            if param.trim() == "i" {
+                incremental = true;
+                continue;
+            }
+
+            if param.trim().starts_with("u=") {
+                // u is an sh-integer (an i64) but it has a constrained range of
+                // 0-7. So detect anything outside that range and clamp it to
+                // the lowest urgency in order to avoid it interfering with
+                // valid items.
+                //
+                // TODO: this also detects when u is not an sh-integer and
+                // clamps it in the same way. A real structured header parser
+                // would actually fail to parse.
+                let mut u =
+                    i64::from_str_radix(param.rsplit('=').next().unwrap(), 10)
+                        .unwrap_or(7);
+
+                if u < 0 || u > 7 {
+                    u = 7;
+                }
+
+                // The HTTP/3 urgency needs to be shifted into the quiche
+                // urgency range.
+                urgency = (u as u8).saturating_add(PRIORITY_URGENCY_OFFSET);
+            }
+        }
+
+        conn.stream_priority(stream_id, urgency, incremental)?;
+
         self.send_headers(conn, stream_id, headers, fin)?;
 
         Ok(())
@@ -751,7 +814,7 @@ impl Connection {
             None => {
                 return Err(Error::FrameUnexpected);
             },
-        }
+        };
 
         let overhead = octets::varint_len(frame::DATA_FRAME_TYPE_ID) +
             octets::varint_len(body.len() as u64);
@@ -898,6 +961,23 @@ impl Connection {
 
         let mut d = [0; 8];
         let mut b = octets::OctetsMut::with_slice(&mut d);
+
+        match ty {
+            // Control and QPACK streams are the most important to schedule.
+            stream::HTTP3_CONTROL_STREAM_TYPE_ID |
+            stream::QPACK_ENCODER_STREAM_TYPE_ID |
+            stream::QPACK_DECODER_STREAM_TYPE_ID => {
+                conn.stream_priority(stream_id, 0, true)?;
+            },
+
+            // TODO: Server push
+            stream::HTTP3_PUSH_STREAM_TYPE_ID => (),
+
+            // Anything else is a GREASE stream, so make it the least important.
+            _ => {
+                conn.stream_priority(stream_id, 255, true)?;
+            },
+        }
 
         conn.stream_send(stream_id, b.put_varint(ty)?, false)?;
 

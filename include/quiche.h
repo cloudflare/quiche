@@ -480,10 +480,16 @@ int64_t quiche_h3_send_request(quiche_h3_conn *conn, quiche_conn *quic_conn,
                                quiche_h3_header *headers, size_t headers_len,
                                bool fin);
 
-// Sends an HTTP/3 response on the specified stream.
+// Sends an HTTP/3 response on the specified stream with default priority.
 int quiche_h3_send_response(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t stream_id, quiche_h3_header *headers,
                             size_t headers_len, bool fin);
+
+// Sends an HTTP/3 response on the specified stream with specified priority.
+int quiche_h3_send_response_with_priority(quiche_h3_conn *conn,
+                            quiche_conn *quic_conn, uint64_t stream_id,
+                            quiche_h3_header *headers, size_t headers_len,
+                            const char *priority, bool fin);
 
 // Sends an HTTP/3 body chunk on the given stream.
 ssize_t quiche_h3_send_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
