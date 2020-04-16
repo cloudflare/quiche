@@ -24,10 +24,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::ffi;
 use std::ptr;
 use std::slice;
 use std::str;
 
+use libc::c_char;
 use libc::c_int;
 use libc::c_void;
 use libc::size_t;
@@ -191,6 +193,28 @@ pub extern fn quiche_h3_send_response(
     let resp_headers = headers_from_ptr(headers, headers_len);
 
     match conn.send_response(quic_conn, stream_id, &resp_headers, fin) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_h3_send_response_with_priority(
+    conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
+    headers: *const Header, headers_len: size_t, priority: *const c_char,
+    fin: bool,
+) -> c_int {
+    let resp_headers = headers_from_ptr(headers, headers_len);
+    let priority = unsafe { ffi::CStr::from_ptr(priority).to_str().unwrap() };
+
+    match conn.send_response_with_priority(
+        quic_conn,
+        stream_id,
+        &resp_headers,
+        &priority,
+        fin,
+    ) {
         Ok(_) => 0,
 
         Err(e) => e.to_c() as c_int,
