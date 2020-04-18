@@ -393,7 +393,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                         };
 
                         quiche_h3_send_response(conn_io->http3, conn_io->conn,
-                                                s, headers, 3, true);
+                                                s, headers, 3, false);
 
                         quiche_h3_send_body(conn_io->http3, conn_io->conn,
                                             s, (uint8_t *) "byez\n", 5, true);
