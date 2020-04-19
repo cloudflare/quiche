@@ -44,7 +44,7 @@ fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
 fn on_packet_acked(r: &mut Recovery, packet: &Sent, _now: Instant) {
     r.bytes_in_flight -= packet.size;
 
-    if r.in_congestion_recovery(packet.time) {
+    if r.in_congestion_recovery(packet.time_sent) {
         return;
     }
 
@@ -120,7 +120,7 @@ mod tests {
         let p = Sent {
             pkt_num: 0,
             frames: vec![],
-            time: now,
+            time_sent: now,
             size: 5000,
             ack_eliciting: true,
             in_flight: true,
@@ -184,7 +184,7 @@ mod tests {
         let p = Sent {
             pkt_num: 0,
             frames: vec![],
-            time: now,
+            time_sent: now,
             size: 5000,
             ack_eliciting: true,
             in_flight: true,

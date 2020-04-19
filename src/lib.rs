@@ -2334,7 +2334,7 @@ impl Connection {
         let sent_pkt = recovery::Sent {
             pkt_num: pn,
             frames,
-            time: now,
+            time_sent: now,
             size: if ack_eliciting { written } else { 0 },
             ack_eliciting,
             in_flight,
