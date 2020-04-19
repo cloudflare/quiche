@@ -779,6 +779,418 @@ mod tests {
         r.collapse_cwnd();
         assert_eq!(r.cwnd(), MINIMUM_WINDOW);
     }
+
+    #[test]
+    fn loss_on_pto() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+
+        let mut r = Recovery::new(&cfg);
+
+        let mut now = Instant::now();
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
+
+        // Start by sending a few packets.
+        let p = Sent {
+            pkt_num: 0,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
+        assert_eq!(r.bytes_in_flight, 1000);
+
+        let p = Sent {
+            pkt_num: 1,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 2);
+        assert_eq!(r.bytes_in_flight, 2000);
+
+        let p = Sent {
+            pkt_num: 2,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
+        assert_eq!(r.bytes_in_flight, 3000);
+
+        let p = Sent {
+            pkt_num: 3,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
+        assert_eq!(r.bytes_in_flight, 4000);
+
+        // Wait for 10ms.
+        now += Duration::from_millis(10);
+
+        // Only the first 2 packets are acked.
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..2);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::EPOCH_APPLICATION,
+                true,
+                now,
+                ""
+            ),
+            Ok(())
+        );
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 2);
+        assert_eq!(r.bytes_in_flight, 2000);
+        assert_eq!(r.lost_count, 0);
+
+        // Wait until loss detection timer expires.
+        now = r.loss_detection_timer().unwrap();
+
+        // PTO.
+        r.on_loss_detection_timeout(true, now, "");
+        assert_eq!(r.loss_probes[packet::EPOCH_APPLICATION], 2);
+        assert_eq!(r.lost_count, 0);
+        assert_eq!(r.pto_count, 1);
+
+        let p = Sent {
+            pkt_num: 4,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
+        assert_eq!(r.bytes_in_flight, 3000);
+
+        let p = Sent {
+            pkt_num: 5,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
+        assert_eq!(r.bytes_in_flight, 4000);
+        assert_eq!(r.lost_count, 0);
+
+        // Wait for 10ms.
+        now += Duration::from_millis(10);
+
+        // PTO packets are acked.
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(4..6);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::EPOCH_APPLICATION,
+                true,
+                now,
+                ""
+            ),
+            Ok(())
+        );
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
+        assert_eq!(r.bytes_in_flight, 0);
+
+        assert_eq!(r.lost_count, 2);
+    }
+
+    #[test]
+    fn loss_on_timer() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+
+        let mut r = Recovery::new(&cfg);
+
+        let mut now = Instant::now();
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
+
+        // Start by sending a few packets.
+        let p = Sent {
+            pkt_num: 0,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
+        assert_eq!(r.bytes_in_flight, 1000);
+
+        let p = Sent {
+            pkt_num: 1,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 2);
+        assert_eq!(r.bytes_in_flight, 2000);
+
+        let p = Sent {
+            pkt_num: 2,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
+        assert_eq!(r.bytes_in_flight, 3000);
+
+        let p = Sent {
+            pkt_num: 3,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
+        assert_eq!(r.bytes_in_flight, 4000);
+
+        // Wait for 10ms.
+        now += Duration::from_millis(10);
+
+        // Only the first 2 packets and the last one are acked.
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..2);
+        acked.insert(3..4);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::EPOCH_APPLICATION,
+                true,
+                now,
+                ""
+            ),
+            Ok(())
+        );
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
+        assert_eq!(r.bytes_in_flight, 1000);
+        assert_eq!(r.lost_count, 0);
+
+        // Wait until loss detection timer expires.
+        now = r.loss_detection_timer().unwrap();
+
+        // Packet is declared lost.
+        r.on_loss_detection_timeout(true, now, "");
+        assert_eq!(r.loss_probes[packet::EPOCH_APPLICATION], 0);
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
+        assert_eq!(r.bytes_in_flight, 0);
+
+        assert_eq!(r.lost_count, 1);
+    }
+
+    #[test]
+    fn loss_on_reordering() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+
+        let mut r = Recovery::new(&cfg);
+
+        let mut now = Instant::now();
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
+
+        // Start by sending a few packets.
+        let p = Sent {
+            pkt_num: 0,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
+        assert_eq!(r.bytes_in_flight, 1000);
+
+        let p = Sent {
+            pkt_num: 1,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 2);
+        assert_eq!(r.bytes_in_flight, 2000);
+
+        let p = Sent {
+            pkt_num: 2,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
+        assert_eq!(r.bytes_in_flight, 3000);
+
+        let p = Sent {
+            pkt_num: 3,
+            frames: vec![],
+            time_sent: now,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
+        assert_eq!(r.bytes_in_flight, 4000);
+
+        // Wait for 10ms.
+        now += Duration::from_millis(10);
+
+        // ACKs are reordered.
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(2..4);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::EPOCH_APPLICATION,
+                true,
+                now,
+                ""
+            ),
+            Ok(())
+        );
+
+        now += Duration::from_millis(10);
+
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..2);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::EPOCH_APPLICATION,
+                true,
+                now,
+                ""
+            ),
+            Ok(())
+        );
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
+        assert_eq!(r.bytes_in_flight, 0);
+
+        // Spurious loss.
+        assert_eq!(r.lost_count, 1);
+    }
 }
 
 mod delivery_rate;
