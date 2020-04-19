@@ -318,7 +318,9 @@ impl Recovery {
         trace!("{} {:?}", trace_id, self);
     }
 
-    pub fn drop_unacked_data(&mut self, epoch: packet::Epoch) {
+    pub fn on_pkt_num_space_discarded(
+        &mut self, epoch: packet::Epoch, handshake_completed: bool,
+    ) {
         let mut unacked_bytes = 0;
 
         for p in self.sent[epoch].values_mut().filter(|p| p.in_flight) {
@@ -327,13 +329,15 @@ impl Recovery {
 
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(unacked_bytes);
 
-        self.loss_time[epoch] = None;
-        self.loss_probes[epoch] = 0;
-        self.time_of_last_sent_ack_eliciting_pkt[epoch] = None;
-
         self.sent[epoch].clear();
         self.lost[epoch].clear();
         self.acked[epoch].clear();
+
+        self.time_of_last_sent_ack_eliciting_pkt[epoch] = None;
+        self.loss_time[epoch] = None;
+        self.loss_probes[epoch] = 0;
+
+        self.set_loss_detection_timer(handshake_completed);
     }
 
     pub fn loss_detection_timer(&self) -> Option<Instant> {
