@@ -2413,6 +2413,8 @@ impl Connection {
             pkt_num: pn,
             frames,
             time_sent: now,
+            time_acked: None,
+            time_lost: None,
             size: if ack_eliciting { written } else { 0 },
             ack_eliciting,
             in_flight,

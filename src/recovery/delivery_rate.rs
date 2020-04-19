@@ -68,7 +68,7 @@ impl Rate {
         pkt.is_app_limited = self.app_limited_at_pkt > 0;
     }
 
-    pub fn on_ack_received(&mut self, pkt: Sent, now: Instant) {
+    pub fn on_packet_acked(&mut self, pkt: &Sent, now: Instant) {
         self.rate_sample.prior_time = Some(pkt.delivered_time);
 
         self.delivered += pkt.size;
@@ -195,6 +195,8 @@ mod tests {
             pkt_num: 0,
             frames: vec![],
             time_sent: Instant::now(),
+            time_acked: None,
+            time_lost: None,
             size: 1200,
             ack_eliciting: true,
             in_flight: true,
@@ -210,12 +212,14 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         recovery
             .delivery_rate
-            .on_ack_received(pkt_1, Instant::now());
+            .on_packet_acked(&pkt_1, Instant::now());
 
         let mut pkt_2 = Sent {
             pkt_num: 1,
             frames: vec![],
             time_sent: Instant::now(),
+            time_acked: None,
+            time_lost: None,
             size: 1200,
             ack_eliciting: true,
             in_flight: true,
@@ -231,7 +235,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         recovery
             .delivery_rate
-            .on_ack_received(pkt_2, Instant::now());
+            .on_packet_acked(&pkt_2, Instant::now());
         recovery.delivery_rate.estimate();
 
         assert!(recovery.delivery_rate() > 0);
@@ -246,6 +250,8 @@ mod tests {
             pkt_num: 0,
             frames: vec![],
             time_sent: Instant::now(),
+            time_acked: None,
+            time_lost: None,
             size: 1200,
             ack_eliciting: true,
             in_flight: true,
@@ -259,12 +265,14 @@ mod tests {
             .delivery_rate
             .on_packet_sent(&mut pkt_1, Instant::now());
         std::thread::sleep(Duration::from_millis(50));
-        recvry.delivery_rate.on_ack_received(pkt_1, Instant::now());
+        recvry.delivery_rate.on_packet_acked(&pkt_1, Instant::now());
 
         let mut pkt_2 = Sent {
             pkt_num: 1,
             frames: vec![],
             time_sent: Instant::now(),
+            time_acked: None,
+            time_lost: None,
             size: 1200,
             ack_eliciting: true,
             in_flight: true,
@@ -282,7 +290,7 @@ mod tests {
             .delivery_rate
             .on_packet_sent(&mut pkt_2, Instant::now());
         std::thread::sleep(Duration::from_millis(50));
-        recvry.delivery_rate.on_ack_received(pkt_2, Instant::now());
+        recvry.delivery_rate.on_packet_acked(&pkt_2, Instant::now());
         recvry.delivery_rate.estimate();
 
         assert_eq!(recvry.delivery_rate.app_limited_at_pkt, 0);
