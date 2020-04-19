@@ -66,28 +66,6 @@ const MAX_DATAGRAM_SIZE: usize = 1452;
 
 const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 
-pub struct Sent {
-    pub pkt_num: u64,
-
-    pub frames: Vec<frame::Frame>,
-
-    pub time: Instant,
-
-    pub size: usize,
-
-    pub ack_eliciting: bool,
-
-    pub in_flight: bool,
-
-    pub delivered: usize,
-
-    pub delivered_time: Instant,
-
-    pub recent_delivered_packet_sent_time: Instant,
-
-    pub is_app_limited: bool,
-}
-
 pub struct Recovery {
     loss_detection_timer: Option<Instant>,
 
@@ -254,7 +232,7 @@ impl Recovery {
 
         if let Some(pkt) = self.sent[epoch].get(&self.largest_acked_pkt[epoch]) {
             if pkt.ack_eliciting {
-                let latest_rtt = now - pkt.time;
+                let latest_rtt = now - pkt.time_sent;
 
                 let ack_delay = if epoch == packet::EPOCH_APPLICATION {
                     Duration::from_micros(ack_delay)
@@ -503,7 +481,7 @@ impl Recovery {
 
         for (_, unacked) in self.sent[epoch].range(..=largest_acked) {
             // Mark packet as lost, or set time when it should be marked.
-            if unacked.time <= lost_send_time ||
+            if unacked.time_sent <= lost_send_time ||
                 largest_acked >= unacked.pkt_num + PACKET_THRESHOLD
             {
                 if unacked.in_flight {
@@ -520,10 +498,10 @@ impl Recovery {
                 lost_pkt.push(unacked.pkt_num);
             } else {
                 let loss_time = match self.loss_time[epoch] {
-                    None => unacked.time + loss_delay,
+                    None => unacked.time_sent + loss_delay,
 
                     Some(loss_time) =>
-                        cmp::min(loss_time, unacked.time + loss_delay),
+                        cmp::min(loss_time, unacked.time_sent + loss_delay),
                 };
 
                 self.loss_time[epoch] = Some(loss_time);
@@ -601,7 +579,7 @@ impl Recovery {
         }
 
         if let Some(largest_lost_pkt) = largest_lost_pkt {
-            self.congestion_event(largest_lost_pkt.time, now);
+            self.congestion_event(largest_lost_pkt.time_sent, now);
 
             if self.in_persistent_congestion(&largest_lost_pkt) {
                 self.collapse_cwnd();
@@ -718,10 +696,32 @@ impl std::fmt::Debug for Recovery {
     }
 }
 
+pub struct Sent {
+    pub pkt_num: u64,
+
+    pub frames: Vec<frame::Frame>,
+
+    pub time_sent: Instant,
+
+    pub size: usize,
+
+    pub ack_eliciting: bool,
+
+    pub in_flight: bool,
+
+    pub delivered: usize,
+
+    pub delivered_time: Instant,
+
+    pub recent_delivered_packet_sent_time: Instant,
+
+    pub is_app_limited: bool,
+}
+
 impl std::fmt::Debug for Sent {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "pkt_num={:?} ", self.pkt_num)?;
-        write!(f, "pkt_sent_time={:?} ", self.time.elapsed())?;
+        write!(f, "pkt_sent_time={:?} ", self.time_sent.elapsed())?;
         write!(f, "pkt_size={:?} ", self.size)?;
         write!(f, "delivered={:?} ", self.delivered)?;
         write!(f, "delivered_time ={:?} ", self.delivered_time.elapsed())?;

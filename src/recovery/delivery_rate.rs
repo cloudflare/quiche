@@ -79,14 +79,14 @@ impl Rate {
             self.rate_sample.is_app_limited = pkt.is_app_limited;
 
             self.rate_sample.send_elapsed =
-                pkt.time - pkt.recent_delivered_packet_sent_time;
+                pkt.time_sent - pkt.recent_delivered_packet_sent_time;
 
             self.rate_sample.ack_elapsed = self
                 .delivered_time
                 .unwrap()
                 .duration_since(pkt.delivered_time);
 
-            self.recent_delivered_packet_sent_time = Some(pkt.time);
+            self.recent_delivered_packet_sent_time = Some(pkt.time_sent);
         }
     }
 
@@ -194,7 +194,7 @@ mod tests {
         let mut pkt_1 = Sent {
             pkt_num: 0,
             frames: vec![],
-            time: Instant::now(),
+            time_sent: Instant::now(),
             size: 1200,
             ack_eliciting: true,
             in_flight: true,
@@ -215,7 +215,7 @@ mod tests {
         let mut pkt_2 = Sent {
             pkt_num: 1,
             frames: vec![],
-            time: Instant::now(),
+            time_sent: Instant::now(),
             size: 1200,
             ack_eliciting: true,
             in_flight: true,
@@ -245,7 +245,7 @@ mod tests {
         let mut pkt_1 = Sent {
             pkt_num: 0,
             frames: vec![],
-            time: Instant::now(),
+            time_sent: Instant::now(),
             size: 1200,
             ack_eliciting: true,
             in_flight: true,
@@ -264,7 +264,7 @@ mod tests {
         let mut pkt_2 = Sent {
             pkt_num: 1,
             frames: vec![],
-            time: Instant::now(),
+            time_sent: Instant::now(),
             size: 1200,
             ack_eliciting: true,
             in_flight: true,
