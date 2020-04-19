@@ -1390,8 +1390,9 @@ impl Connection {
 
             // Reset connection state to force sending another Initial packet.
             self.got_peer_conn_id = false;
-            self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
+            self.recovery
+                .on_pkt_num_space_discarded(packet::EPOCH_INITIAL, false);
             self.handshake.clear()?;
 
             // Encode transport parameters again, as the new version might be
@@ -1448,8 +1449,9 @@ impl Connection {
 
             // Reset connection state to force sending another Initial packet.
             self.got_peer_conn_id = false;
-            self.recovery.drop_unacked_data(packet::EPOCH_INITIAL);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
+            self.recovery
+                .on_pkt_num_space_discarded(packet::EPOCH_INITIAL, false);
             self.handshake.clear()?;
 
             return Err(Error::Done);
@@ -3356,7 +3358,9 @@ impl Connection {
         self.pkt_num_spaces[epoch].crypto_open = None;
         self.pkt_num_spaces[epoch].crypto_seal = None;
         self.pkt_num_spaces[epoch].clear();
-        self.recovery.drop_unacked_data(epoch);
+
+        self.recovery
+            .on_pkt_num_space_discarded(epoch, self.is_established());
 
         trace!("{} dropped epoch {} state", self.trace_id, epoch);
     }
