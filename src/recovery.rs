@@ -448,8 +448,10 @@ impl Recovery {
         let timeout = match self.smoothed_rtt {
             None => INITIAL_RTT * 2,
 
-            Some(_) => self.pto() * 2_u32.pow(self.pto_count),
+            Some(_) => self.pto(),
         };
+
+        let timeout = timeout * 2_u32.pow(self.pto_count);
 
         let (sent_time, _) = self.earliest_loss_time(
             self.time_of_last_sent_ack_eliciting_pkt,
