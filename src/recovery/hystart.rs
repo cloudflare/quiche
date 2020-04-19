@@ -111,7 +111,7 @@ impl Hystart {
 
     // Returns a new (ssthresh, cwnd) during slow start.
     pub fn on_packet_acked(
-        &mut self, packet: &recovery::Sent, rtt: Duration, cwnd: usize,
+        &mut self, packet: &recovery::Acked, rtt: Duration, cwnd: usize,
         ssthresh: usize, now: Instant,
     ) -> (usize, usize) {
         let mut ssthresh = ssthresh;
@@ -206,17 +206,10 @@ mod tests {
 
         assert_eq!(hspp.window_end, Some(pkt_num));
 
-        let p = recovery::Sent {
+        let p = recovery::Acked {
             pkt_num,
-            frames: vec![],
             time_sent: now + Duration::from_millis(10),
             size,
-            ack_eliciting: true,
-            in_flight: true,
-            delivered: 0,
-            delivered_time: now,
-            recent_delivered_packet_sent_time: now,
-            is_app_limited: false,
         };
 
         let init_cwnd = 30000;
@@ -256,17 +249,10 @@ mod tests {
 
         // 1st round.
         for _ in 0..N_RTT_SAMPLE + 1 {
-            let p = recovery::Sent {
+            let p = recovery::Acked {
                 pkt_num,
-                frames: vec![],
                 time_sent: now + Duration::from_millis(pkt_num),
                 size,
-                ack_eliciting: true,
-                in_flight: true,
-                delivered: 0,
-                delivered_time: now,
-                recent_delivered_packet_sent_time: now,
-                is_app_limited: false,
             };
 
             // We use a fixed rtt for 1st round.
@@ -287,17 +273,10 @@ mod tests {
         hspp.start_round(pkt_1st * 2 + 1);
 
         for _ in 0..N_RTT_SAMPLE + 1 {
-            let p = recovery::Sent {
+            let p = recovery::Acked {
                 pkt_num,
-                frames: vec![],
                 time_sent: now + Duration::from_millis(pkt_num),
                 size,
-                ack_eliciting: true,
-                in_flight: true,
-                delivered: 0,
-                delivered_time: now,
-                recent_delivered_packet_sent_time: now,
-                is_app_limited: false,
             };
 
             // Keep increasing rtt to simulate buffer queueing delay
