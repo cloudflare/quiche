@@ -43,9 +43,11 @@ use crate::packet;
 use crate::ranges;
 
 // Loss Recovery
-const PACKET_THRESHOLD: u64 = 3;
+const INITIAL_PACKET_THRESHOLD: u64 = 3;
 
-const TIME_THRESHOLD: f64 = 9.0 / 8.0;
+const MAX_PACKET_THRESHOLD: u64 = 20;
+
+const INITIAL_TIME_THRESHOLD: f64 = 9.0 / 8.0;
 
 const GRANULARITY: Duration = Duration::from_millis(1);
 
@@ -97,6 +99,8 @@ pub struct Recovery {
 
     pub lost_count: usize,
 
+    pub lost_spurious_count: usize,
+
     pub loss_probes: [usize; packet::EPOCH_COUNT],
 
     in_flight_count: [usize; packet::EPOCH_COUNT],
@@ -104,6 +108,10 @@ pub struct Recovery {
     app_limited: bool,
 
     delivery_rate: delivery_rate::Rate,
+
+    pkt_thresh: u64,
+
+    time_thresh: f64,
 
     // Congestion control.
     cc_ops: &'static CongestionControlOps,
@@ -178,6 +186,7 @@ impl Recovery {
             acked: [Vec::new(), Vec::new(), Vec::new()],
 
             lost_count: 0,
+            lost_spurious_count: 0,
 
             loss_probes: [0; packet::EPOCH_COUNT],
 
@@ -185,6 +194,10 @@ impl Recovery {
 
             congestion_window: config.max_send_udp_payload_size *
                 INITIAL_WINDOW_PACKETS,
+
+            pkt_thresh: INITIAL_PACKET_THRESHOLD,
+
+            time_thresh: INITIAL_TIME_THRESHOLD,
 
             bytes_in_flight: 0,
 
@@ -351,23 +364,49 @@ impl Recovery {
 
         let mut newly_acked = Vec::new();
 
+        let mut undo_cwnd = false;
+
+        let max_rtt = cmp::max(self.latest_rtt, self.rtt());
+
         // Detect and mark acked packets, without removing them from the sent
         // packets list.
         for r in ranges.iter() {
-            let lowest_acked = r.start;
-            let largest_acked = r.end - 1;
+            let lowest_acked_in_block = r.start;
+            let largest_acked_in_block = r.end - 1;
 
             let unacked_iter = self.sent[epoch]
                 .iter_mut()
                 // Skip packets that precede the lowest acked packet in the block.
-                .skip_while(|p| p.pkt_num < lowest_acked)
+                .skip_while(|p| p.pkt_num < lowest_acked_in_block)
                 // Skip packets that follow the largest acked packet in the block.
-                .take_while(|p| p.pkt_num <= largest_acked)
+                .take_while(|p| p.pkt_num <= largest_acked_in_block)
                 // Skip packets that have already been acked or lost.
-                .filter(|p| p.time_acked.is_none() && p.time_lost.is_none());
+                .filter(|p| p.time_acked.is_none());
 
             for unacked in unacked_iter {
                 unacked.time_acked = Some(now);
+
+                // Check if acked packet was already declared lost.
+                if unacked.time_lost.is_some() {
+                    // Calculate new packet reordering threshold.
+                    let pkt_thresh =
+                        self.largest_acked_pkt[epoch] - unacked.pkt_num + 1;
+                    let pkt_thresh = cmp::min(MAX_PACKET_THRESHOLD, pkt_thresh);
+
+                    self.pkt_thresh = cmp::max(self.pkt_thresh, pkt_thresh);
+
+                    // Calculate new time reordering threshold.
+                    let loss_delay = max_rtt.mul_f64(self.time_thresh);
+                    if now.duration_since(unacked.time_sent) > loss_delay {
+                        // TODO: do time threshold update
+                        self.time_thresh = 5_f64 / 4_f64;
+                    }
+
+                    undo_cwnd = true;
+
+                    self.lost_spurious_count += 1;
+                    continue;
+                }
 
                 if unacked.ack_eliciting {
                     has_ack_eliciting = true;
@@ -395,6 +434,11 @@ impl Recovery {
 
                 trace!("{} packet newly acked {}", trace_id, unacked.pkt_num);
             }
+        }
+
+        // Undo congestion window update.
+        if undo_cwnd {
+            (self.cc_ops.rollback)(self);
         }
 
         self.delivery_rate.estimate();
@@ -425,7 +469,7 @@ impl Recovery {
 
         self.set_loss_detection_timer(handshake_status, now);
 
-        self.drain_packets(epoch);
+        self.drain_packets(epoch, now);
 
         Ok(())
     }
@@ -697,7 +741,7 @@ impl Recovery {
         self.loss_time[epoch] = None;
 
         let loss_delay =
-            cmp::max(self.latest_rtt, self.rtt()).mul_f64(TIME_THRESHOLD);
+            cmp::max(self.latest_rtt, self.rtt()).mul_f64(self.time_thresh);
 
         // Minimum time of kGranularity before packets are deemed lost.
         let loss_delay = cmp::max(loss_delay, GRANULARITY);
@@ -719,7 +763,7 @@ impl Recovery {
         for unacked in unacked_iter {
             // Mark packet as lost, or set time when it should be marked.
             if unacked.time_sent <= lost_send_time ||
-                largest_acked >= unacked.pkt_num + PACKET_THRESHOLD
+                largest_acked >= unacked.pkt_num + self.pkt_thresh
             {
                 self.lost[epoch].append(&mut unacked.frames);
 
@@ -762,10 +806,10 @@ impl Recovery {
             self.on_packets_lost(lost_bytes, &pkt, epoch, now);
         }
 
-        self.drain_packets(epoch);
+        self.drain_packets(epoch, now);
     }
 
-    fn drain_packets(&mut self, epoch: packet::Epoch) {
+    fn drain_packets(&mut self, epoch: packet::Epoch, now: Instant) {
         let mut lowest_non_expired_pkt_index = self.sent[epoch].len();
 
         // In order to avoid removing elements from the middle of the list
@@ -779,6 +823,13 @@ impl Recovery {
 
         // First, find the first element that is neither acked nor lost.
         for (i, pkt) in self.sent[epoch].iter().enumerate() {
+            if let Some(time_lost) = pkt.time_lost {
+                if time_lost + self.rtt() > now {
+                    lowest_non_expired_pkt_index = i;
+                    break;
+                }
+            }
+
             if pkt.time_acked.is_none() && pkt.time_lost.is_none() {
                 lowest_non_expired_pkt_index = i;
                 break;
@@ -1321,10 +1372,17 @@ mod tests {
             Ok(())
         );
 
-        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
         assert_eq!(r.bytes_in_flight, 0);
 
         assert_eq!(r.lost_count, 2);
+
+        // Wait 1 RTT.
+        now += r.rtt();
+
+        r.detect_lost_packets(packet::EPOCH_APPLICATION, now, "");
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
     }
 
     #[test]
@@ -1474,10 +1532,17 @@ mod tests {
         r.on_loss_detection_timeout(HandshakeStatus::default(), now, "");
         assert_eq!(r.loss_probes[packet::EPOCH_APPLICATION], 0);
 
-        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 2);
         assert_eq!(r.bytes_in_flight, 0);
 
         assert_eq!(r.lost_count, 1);
+
+        // Wait 1 RTT.
+        now += r.rtt();
+
+        r.detect_lost_packets(packet::EPOCH_APPLICATION, now, "");
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
     }
 
     #[test]
@@ -1620,6 +1685,8 @@ mod tests {
         let mut acked = ranges::RangeSet::default();
         acked.insert(0..2);
 
+        assert_eq!(r.pkt_thresh, INITIAL_PACKET_THRESHOLD);
+
         assert_eq!(
             r.on_ack_received(
                 &acked,
@@ -1632,11 +1699,22 @@ mod tests {
             Ok(())
         );
 
-        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
         assert_eq!(r.bytes_in_flight, 0);
 
         // Spurious loss.
         assert_eq!(r.lost_count, 1);
+        assert_eq!(r.lost_spurious_count, 1);
+
+        // Packet threshold was increased.
+        assert_eq!(r.pkt_thresh, 4);
+
+        // Wait 1 RTT.
+        now += r.rtt();
+
+        r.detect_lost_packets(packet::EPOCH_APPLICATION, now, "");
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
     }
 
     #[test]
