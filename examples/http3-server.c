@@ -499,8 +499,8 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    quiche_config_load_cert_chain_from_pem_file(config, "examples/cert.crt");
-    quiche_config_load_priv_key_from_pem_file(config, "examples/cert.key");
+    quiche_config_load_cert_chain_from_pem_file(config, "./cert.crt");
+    quiche_config_load_priv_key_from_pem_file(config, "./cert.key");
 
     quiche_config_set_application_protos(config,
         (uint8_t *) QUICHE_H3_APPLICATION_PROTOCOL,
