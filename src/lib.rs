@@ -1335,7 +1335,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        if self.draining_timer.is_some() {
+        if self.is_closed() || self.draining_timer.is_some() {
             return Err(Error::Done);
         }
 
@@ -1802,7 +1802,7 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
-        if self.draining_timer.is_some() {
+        if self.is_closed() || self.draining_timer.is_some() {
             return Err(Error::Done);
         }
 
@@ -2775,7 +2775,7 @@ impl Connection {
     ///
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
     pub fn timeout(&self) -> Option<time::Duration> {
-        if self.closed {
+        if self.is_closed() {
             return None;
         }
 
@@ -2880,7 +2880,7 @@ impl Connection {
     /// [`timeout()`]: struct.Connection.html#method.timeout
     /// [`is_closed()`]: struct.Connection.html#method.is_closed
     pub fn close(&mut self, app: bool, err: u64, reason: &[u8]) -> Result<()> {
-        if self.draining_timer.is_some() {
+        if self.is_closed() || self.draining_timer.is_some() {
             return Err(Error::Done);
         }
 
