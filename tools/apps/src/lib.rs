@@ -644,7 +644,7 @@ impl Http3Conn {
             reqs_sent: 0,
             reqs_complete: 0,
             reqs,
-            body: None,
+            body: body.as_ref().map(|b| b.to_vec()),
         };
 
         Box::new(h_conn)
