@@ -364,8 +364,6 @@ impl Error {
             Error::InvalidFrame => 0x7,
             Error::InvalidStreamState => 0x5,
             Error::InvalidTransportParam => 0x8,
-            Error::CryptoFail => 0x100,
-            Error::TlsFail => 0x100,
             Error::FlowControl => 0x3,
             Error::StreamLimit => 0x4,
             Error::FinalSize => 0x6,
