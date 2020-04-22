@@ -4102,7 +4102,7 @@ index 00000000..2e8aaa7c
 +{
 +    ngx_log_t *log = ngx_cycle->log;
 +
-+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0, line);
++    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, log, 0, "%s", line);
 +}
 +#endif
 +
