@@ -37,8 +37,6 @@ use libc::c_uint;
 use libc::c_void;
 use libc::size_t;
 
-use lazy_static;
-
 use crate::Error;
 use crate::Result;
 
