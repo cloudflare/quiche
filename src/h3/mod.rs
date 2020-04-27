@@ -83,7 +83,7 @@
 //!     quiche::h3::Header::new(":scheme", "https"),
 //!     quiche::h3::Header::new(":authority", "quic.tech"),
 //!     quiche::h3::Header::new(":path", "/"),
-//!     quiche::h3::Header::new(":user-agent", "quiche"),
+//!     quiche::h3::Header::new("user-agent", "quiche"),
 //! ];
 //!
 //! h3_conn.send_request(&mut conn, &req, true)?;
@@ -104,7 +104,7 @@
 //!     quiche::h3::Header::new(":scheme", "https"),
 //!     quiche::h3::Header::new(":authority", "quic.tech"),
 //!     quiche::h3::Header::new(":path", "/"),
-//!     quiche::h3::Header::new(":user-agent", "quiche"),
+//!     quiche::h3::Header::new("user-agent", "quiche"),
 //! ];
 //!
 //! let stream_id = h3_conn.send_request(&mut conn, &req, false)?;
