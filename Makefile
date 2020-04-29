@@ -6,6 +6,9 @@ BASE_TAG  = latest
 QNS_REPO  = cloudflare/quiche-qns
 QNS_TAG   = latest
 
+FUZZ_REPO = kestrel.forallsecure.com:5000/ghedo/quiche-libfuzzer
+FUZZ_TAG  = latest
+
 docker-build: docker-base docker-qns
 
 # build quiche-apps only
@@ -28,9 +31,25 @@ docker-publish:
 	$(DOCKER) push $(BASE_REPO):$(BASE_TAG)
 	$(DOCKER) push $(QNS_REPO):$(QNS_TAG)
 
+# build fuzzers
+.PHONY: build-fuzz
+build-fuzz:
+	cargo +nightly fuzz run packet_recv_client -- -runs=1
+	cargo +nightly fuzz run packet_recv_server -- -runs=1
+	cargo +nightly fuzz run qpack_decode -- -runs=1
+
+# build fuzzing image
+.PHONY: docker-fuzz
+docker-fuzz: build-fuzz
+	$(DOCKER) build --tag $(FUZZ_REPO):$(FUZZ_TAG) fuzz
+
+.PHONY: docker-fuzz-publish
+docker-fuzz-publish:
+	$(DOCKER) push $(FUZZ_REPO):$(FUZZ_TAG)
+
 .PHONY: clean
 clean:
-	@for id in `$(DOCKER) images -q $(BASE_REPO)` `$(DOCKER) images -q $(QNS_REPO)`; do \
+	@for id in `$(DOCKER) images -q $(BASE_REPO)` `$(DOCKER) images -q $(QNS_REPO)` `$(DOCKER) images -q $(FUZZ_REPO)`; do \
 		echo ">> Removing $$id"; \
 		$(DOCKER) rmi -f $$id; \
 	done
