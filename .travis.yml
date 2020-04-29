@@ -47,6 +47,8 @@ matrix:
       - cargo clippy --manifest-path tools/apps/Cargo.toml -- -D warnings
       # x86 cross build
       - RUSTFLAGS="-D warnings" cargo build --target=$TARGET_32
+      # docker
+      - make docker-build
    - name: "nightly Linux x86_64"
      language: rust
      rust: nightly
@@ -197,7 +199,7 @@ deploy:
     skip-cleanup: true
     script: >-
       echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin &&
-      make -C extras/docker all publish
+      make docker-publish
     on:
       branch: master
       condition: $DEPLOY_BUILD = yes
