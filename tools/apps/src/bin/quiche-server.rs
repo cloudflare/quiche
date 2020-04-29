@@ -59,6 +59,7 @@ Options:
   --no-retry                  Disable stateless retry.
   --no-grease                 Don't send GREASE.
   --http-version VERSION      HTTP version to use [default: all].
+  --cc-algorithm NAME         Specify which congestion control algorithm to use [default: cubic].
   -h --help                   Show this screen.
 ";
 
@@ -120,6 +121,10 @@ fn main() {
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
         config.log_keys();
     }
+
+    config
+        .set_cc_algorithm_name(&conn_args.cc_algorithm)
+        .unwrap();
 
     let rng = SystemRandom::new();
     let conn_id_seed =

@@ -80,6 +80,7 @@ pub struct CommonArgs {
     pub max_streams_uni: u64,
     pub dump_packet_path: Option<String>,
     pub no_grease: bool,
+    pub cc_algorithm: String,
 }
 
 /// Creates a new `CommonArgs` structure using the provided [`Docopt`].
@@ -91,8 +92,9 @@ pub struct CommonArgs {
 /// --max-stream-data BYTES  Per-stream flow control limit.
 /// --max-streams-bidi STREAMS  Number of allowed concurrent streams.
 /// --max-streams-uni STREAMS   Number of allowed concurrent streams.
-/// --dump-packets PATH         Dump the incoming packets as files in the
-/// given directory. --no-grease                 Don't send GREASE.
+/// --dump-packets PATH         Dump the incoming packets in PATH.
+/// --no-grease                 Don't send GREASE.
+/// --cc-algorithm NAME         Set a congestion control algorithm.
 ///
 /// [`Docopt`]: https://docs.rs/docopt/1.1.0/docopt/
 impl Args for CommonArgs {
@@ -134,6 +136,8 @@ impl Args for CommonArgs {
 
         let no_grease = args.get_bool("--no-grease");
 
+        let cc_algorithm = args.get_str("--cc-algorithm");
+
         CommonArgs {
             alpns,
             max_data,
@@ -142,6 +146,7 @@ impl Args for CommonArgs {
             max_streams_uni,
             dump_packet_path,
             no_grease,
+            cc_algorithm: cc_algorithm.to_string(),
         }
     }
 }
