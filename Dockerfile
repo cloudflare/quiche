@@ -1,3 +1,17 @@
+FROM rust:1.39 as build
+
+WORKDIR /build
+
+COPY deps/ ./deps/
+COPY src/ ./src/
+COPY tools/ ./tools/
+COPY Cargo.toml .
+
+RUN apt-get update && apt-get install -y cmake golang-go && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN cargo build --manifest-path tools/apps/Cargo.toml
+
 ##
 ## quiche-base: quiche image for apps
 ##
@@ -6,8 +20,9 @@ FROM debian:latest as quiche-base
 RUN apt-get update && apt-get install -y ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-COPY tools/apps/target/debug/quiche-client \
-     tools/apps/target/debug/quiche-server \
+COPY --from=build \
+     /build/tools/apps/target/debug/quiche-client \
+     /build/tools/apps/target/debug/quiche-server \
      /usr/local/bin/
 
 ENV PATH="/usr/local/bin/:${PATH}"
@@ -25,9 +40,10 @@ WORKDIR /quiche
 # copy binaries and sample certificate for server
 COPY examples/cert.crt examples/cert.key examples/
 
-COPY tools/apps/target/debug/quiche-client \
-     tools/apps/target/debug/quiche-server \
-     tools/qns/run_endpoint.sh \
+COPY --from=build \
+     /build/tools/apps/target/debug/quiche-client \
+     /build/tools/apps/target/debug/quiche-server \
+     /build/tools/qns/run_endpoint.sh \
      ./
 
 ENV RUST_LOG=trace

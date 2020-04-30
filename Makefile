@@ -18,12 +18,12 @@ build-apps:
 
 # build base image
 .PHONY: docker-base
-docker-base: build-apps Dockerfile
+docker-base: Dockerfile
 	$(DOCKER) build --target quiche-base -t $(BASE_REPO):$(BASE_TAG) .
 
 # build qns image
 .PHONY: docker-qns
-docker-qns: build-apps Dockerfile tools/qns/run_endpoint.sh
+docker-qns: Dockerfile tools/qns/run_endpoint.sh
 	$(DOCKER) build --target quiche-qns -t $(QNS_REPO):$(QNS_TAG) .
 
 .PHONY: docker-publish
