@@ -638,6 +638,14 @@ impl Recovery {
         )
     }
 
+    pub fn update_app_limited(&mut self, v: bool) {
+        self.app_limited = v;
+    }
+
+    pub fn app_limited(&mut self) -> bool {
+        self.app_limited
+    }
+
     #[cfg(feature = "qlog")]
     pub fn to_qlog(&self) -> qlog::event::Event {
         // QVis can't use all these fields and they can be large.
@@ -739,6 +747,7 @@ impl std::fmt::Debug for Recovery {
         write!(f, "cwnd={} ", self.congestion_window)?;
         write!(f, "ssthresh={} ", self.ssthresh)?;
         write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
+        write!(f, "app_limited={} ", self.app_limited)?;
         write!(f, "{:?} ", self.delivery_rate)?;
 
         if self.hystart.enabled() {
