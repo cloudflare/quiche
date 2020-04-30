@@ -1889,8 +1889,9 @@ impl Connection {
         let pn_len = packet::pkt_num_len(pn)?;
 
         // The AEAD overhead at the current encryption level.
-        let overhead =
-            self.pkt_num_spaces[epoch].overhead().ok_or(Error::Done)?;
+        let crypto_overhead = self.pkt_num_spaces[epoch]
+            .crypto_overhead()
+            .ok_or(Error::Done)?;
 
         let hdr = Header {
             ty: pkt_type,
@@ -1923,16 +1924,30 @@ impl Connection {
 
         hdr.to_bytes(&mut b)?;
 
-        // Make sure we have enough space left for the header, the payload
-        // length, the packet number and the AEAD overhead.
-        left = left
-            .checked_sub(b.off() + pn_len + overhead)
-            .ok_or(Error::Done)?;
+        // Calculate the space required for the packet, including the header
+        // the payload length, the packet number and the AEAD overhead.
+        let mut overhead = b.off() + pn_len + crypto_overhead;
 
         // We assume that the payload length, which is only present in long
         // header packets, can always be encoded with a 2-byte varint.
         if pkt_type != packet::Type::Short {
-            left = left.checked_sub(2).ok_or(Error::Done)?;
+            overhead += 2;
+        }
+
+        // Make sure we have enough space left for the packet.
+        match left.checked_sub(overhead) {
+            Some(v) => left = v,
+
+            None => {
+                // We can't send more because there isn't enough space available
+                // in the output buffer.
+                //
+                // This usually happens when we try to send a new packet but
+                // failed because cwnd is almost full. In such case app_limited
+                // is set to false here to make cwnd grow when ACK is received.
+                self.recovery.update_app_limited(false);
+                return Err(Error::Done);
+            },
         }
 
         let mut frames: Vec<frame::Frame> = Vec::new();
@@ -2224,12 +2239,15 @@ impl Connection {
         }
 
         if frames.is_empty() {
+            // When we reach this point we are not able to write more, so set
+            // app_limited to false.
+            self.recovery.update_app_limited(false);
             return Err(Error::Done);
         }
 
         // Pad the client's initial packet.
         if !self.is_server && pkt_type == packet::Type::Initial {
-            let pkt_len = pn_len + payload_len + overhead;
+            let pkt_len = pn_len + payload_len + crypto_overhead;
 
             let frame = frame::Frame::Padding {
                 len: cmp::min(MIN_CLIENT_INITIAL_LEN - pkt_len, left),
@@ -2255,7 +2273,7 @@ impl Connection {
             in_flight = true;
         }
 
-        payload_len += overhead;
+        payload_len += crypto_overhead;
 
         // Only long header packets have an explicit length field.
         if pkt_type != packet::Type::Short {
@@ -4045,7 +4063,7 @@ pub mod testing {
         hdr.to_bytes(&mut b)?;
 
         let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len()) +
-            space.overhead().unwrap();
+            space.crypto_overhead().unwrap();
 
         if pkt_type != packet::Type::Short {
             let len = pn_len + payload_len;
@@ -5333,7 +5351,7 @@ mod tests {
 
         // Use correct payload length when encrypting the packet.
         let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len()) +
-            space.overhead().unwrap();
+            space.crypto_overhead().unwrap();
 
         let aead = space.crypto_seal.as_ref().unwrap();
 
@@ -5828,6 +5846,153 @@ mod tests {
         assert_eq!(iter.next(), Some(&frame::Frame::Padding { len: 1 }));
 
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn app_limited_true() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(50000);
+        config.set_initial_max_stream_data_bidi_local(50000);
+        config.set_initial_max_stream_data_bidi_remote(50000);
+        config.set_max_packet_size(1200);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // Client sends stream data.
+        assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server reads stream data.
+        let mut b = [0; 15];
+        pipe.server.stream_recv(0, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server sends stream data smaller than cwnd.
+        let send_buf = [0; 10000];
+        assert_eq!(pipe.server.stream_send(0, &send_buf, false), Ok(10000));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // app_limited should be true because we send less than cwnd.
+        assert_eq!(pipe.server.recovery.app_limited(), true);
+    }
+
+    #[test]
+    fn app_limited_false() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(50000);
+        config.set_initial_max_stream_data_bidi_local(50000);
+        config.set_initial_max_stream_data_bidi_remote(50000);
+        config.set_max_packet_size(1200);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // Client sends stream data.
+        assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server reads stream data.
+        let mut b = [0; 15];
+        pipe.server.stream_recv(0, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server sends stream data bigger than cwnd.
+        let send_buf1 = [0; 20000];
+        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(14085));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // We can't create a new packet header because there is no room by cwnd.
+        // app_limited should be false because we can't send more by cwnd.
+        assert_eq!(pipe.server.recovery.app_limited(), false);
+    }
+
+    #[test]
+    fn app_limited_false_no_frame() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(50000);
+        config.set_initial_max_stream_data_bidi_local(50000);
+        config.set_initial_max_stream_data_bidi_remote(50000);
+        config.set_max_packet_size(1405);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // Client sends stream data.
+        assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server reads stream data.
+        let mut b = [0; 15];
+        pipe.server.stream_recv(0, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server sends stream data bigger than cwnd.
+        let send_buf1 = [0; 20000];
+        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(14085));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // We can't create a new packet header because there is no room by cwnd.
+        // app_limited should be false because we can't send more by cwnd.
+        assert_eq!(pipe.server.recovery.app_limited(), false);
+    }
+
+    #[test]
+    fn app_limited_false_no_header() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(50000);
+        config.set_initial_max_stream_data_bidi_local(50000);
+        config.set_initial_max_stream_data_bidi_remote(50000);
+        config.set_max_packet_size(1406);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // Client sends stream data.
+        assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server reads stream data.
+        let mut b = [0; 15];
+        pipe.server.stream_recv(0, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server sends stream data bigger than cwnd.
+        let send_buf1 = [0; 20000];
+        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(14085));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // We can't create a new frame because there is no room by cwnd.
+        // app_limited should be false because we can't send more by cwnd.
+        assert_eq!(pipe.server.recovery.app_limited(), false);
     }
 }
 
