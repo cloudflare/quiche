@@ -1457,19 +1457,6 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        // Discard 1-RTT packets received before handshake is completed (even
-        // if the frames are not immediately processed) to avoid potential side
-        // effects.
-        //
-        // TODO: buffer packets instead of discarding as an optimization.
-        if hdr.ty == packet::Type::Short && !self.is_established() {
-            return Err(drop_pkt_on_err(
-                Error::InvalidPacket,
-                self.recv_count,
-                &self.trace_id,
-            ));
-        }
-
         if self.is_server && !self.did_version_negotiation {
             if !version_is_supported(hdr.version) {
                 return Err(Error::UnknownVersion);
@@ -1538,6 +1525,8 @@ impl Connection {
         let aead = if hdr.ty == packet::Type::ZeroRTT &&
             self.pkt_num_spaces[epoch].crypto_0rtt_open.is_some()
         {
+            // TODO: buffer 0-RTT packets instead of discarding when key is not
+            // available yet, as an optimization.
             self.pkt_num_spaces[epoch]
                 .crypto_0rtt_open
                 .as_ref()
@@ -1553,6 +1542,9 @@ impl Connection {
                 // For example, this is necessary to prevent packet reordering
                 // (e.g. between Initial and Handshake) from causing the
                 // connection to be closed.
+                //
+                // TODO: buffer 1-RTT packets instead of discarding when key is
+                // not available yet, as an optimization.
                 None =>
                     return Err(drop_pkt_on_err(
                         Error::CryptoFail,
