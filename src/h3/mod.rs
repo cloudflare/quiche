@@ -1304,7 +1304,7 @@ impl Connection {
                 };
             },
 
-            frame::Frame::Headers { mut header_block } => {
+            frame::Frame::Headers { header_block } => {
                 if Some(stream_id) == self.peer_control_stream_id {
                     conn.close(
                         true,
@@ -1324,7 +1324,7 @@ impl Connection {
 
                 let headers = self
                     .qpack_decoder
-                    .decode(&mut header_block[..], max_size)
+                    .decode(&header_block[..], max_size)
                     .map_err(|e| match e {
                         qpack::Error::HeaderListTooLarge => Error::ExcessiveLoad,
 

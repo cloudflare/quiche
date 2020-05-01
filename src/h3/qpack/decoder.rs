@@ -89,10 +89,8 @@ impl Decoder {
     }
 
     /// Decodes a QPACK header block into a list of headers.
-    pub fn decode(
-        &mut self, buf: &mut [u8], max_size: u64,
-    ) -> Result<Vec<Header>> {
-        let mut b = octets::OctetsMut::with_slice(buf);
+    pub fn decode(&mut self, buf: &[u8], max_size: u64) -> Result<Vec<Header>> {
+        let mut b = octets::Octets::with_slice(buf);
 
         let mut out = Vec::new();
 
@@ -324,7 +322,7 @@ fn lookup_static(idx: u64) -> Result<(&'static str, &'static str)> {
     Ok(hdr)
 }
 
-fn decode_int(b: &mut octets::OctetsMut, prefix: usize) -> Result<u64> {
+fn decode_int(b: &mut octets::Octets, prefix: usize) -> Result<u64> {
     let mask = 2u64.pow(prefix as u32) - 1;
 
     let mut val = u64::from(b.get_u8()?);
@@ -355,7 +353,7 @@ fn decode_int(b: &mut octets::OctetsMut, prefix: usize) -> Result<u64> {
     Err(Error::BufferTooShort)
 }
 
-fn decode_str<'a>(b: &'a mut octets::OctetsMut) -> Result<String> {
+fn decode_str<'a>(b: &'a mut octets::Octets) -> Result<String> {
     let first = b.peek_u8()?;
 
     let huff = first & 0x80 == 0x80;
@@ -383,7 +381,7 @@ mod tests {
     #[test]
     fn decode_int1() {
         let mut encoded = [0b01010, 0x02];
-        let mut b = octets::OctetsMut::with_slice(&mut encoded);
+        let mut b = octets::Octets::with_slice(&mut encoded);
 
         assert_eq!(decode_int(&mut b, 5), Ok(10));
     }
@@ -391,7 +389,7 @@ mod tests {
     #[test]
     fn decode_int2() {
         let mut encoded = [0b11111, 0b10011010, 0b00001010];
-        let mut b = octets::OctetsMut::with_slice(&mut encoded);
+        let mut b = octets::Octets::with_slice(&mut encoded);
 
         assert_eq!(decode_int(&mut b, 5), Ok(1337));
     }
@@ -399,7 +397,7 @@ mod tests {
     #[test]
     fn decode_int3() {
         let mut encoded = [0b101010];
-        let mut b = octets::OctetsMut::with_slice(&mut encoded);
+        let mut b = octets::Octets::with_slice(&mut encoded);
 
         assert_eq!(decode_int(&mut b, 8), Ok(42));
     }

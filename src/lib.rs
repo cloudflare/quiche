@@ -562,9 +562,7 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn set_application_protos(&mut self, protos: &[u8]) -> Result<()> {
-        let mut protos = protos.to_vec();
-
-        let mut b = octets::OctetsMut::with_slice(&mut protos);
+        let mut b = octets::Octets::with_slice(&protos);
 
         let mut protos_list = Vec::new();
 
@@ -2975,10 +2973,10 @@ impl Connection {
         }
 
         if !self.parsed_peer_transport_params {
-            let mut raw_params = self.handshake.quic_transport_params().to_vec();
+            let raw_params = self.handshake.quic_transport_params();
 
             let peer_params = TransportParams::decode(
-                &mut raw_params,
+                &raw_params,
                 self.version,
                 self.is_server,
             )?;
@@ -3519,9 +3517,9 @@ impl Default for TransportParams {
 
 impl TransportParams {
     fn decode(
-        buf: &mut [u8], version: u32, is_server: bool,
+        buf: &[u8], version: u32, is_server: bool,
     ) -> Result<TransportParams> {
-        let mut b = octets::OctetsMut::with_slice(buf);
+        let mut b = octets::Octets::with_slice(buf);
 
         let mut tp = TransportParams::default();
 
@@ -4196,13 +4194,13 @@ mod tests {
         };
 
         let mut raw_params = [42; 256];
-        let mut raw_params =
+        let raw_params =
             TransportParams::encode(&tp, PROTOCOL_VERSION, true, &mut raw_params)
                 .unwrap();
         assert_eq!(raw_params.len(), 73);
 
         let new_tp =
-            TransportParams::decode(&mut raw_params, PROTOCOL_VERSION, false)
+            TransportParams::decode(&raw_params, PROTOCOL_VERSION, false)
                 .unwrap();
 
         assert_eq!(new_tp, tp);
@@ -4226,7 +4224,7 @@ mod tests {
         };
 
         let mut raw_params = [42; 256];
-        let mut raw_params = TransportParams::encode(
+        let raw_params = TransportParams::encode(
             &tp,
             PROTOCOL_VERSION,
             false,
@@ -4236,8 +4234,7 @@ mod tests {
         assert_eq!(raw_params.len(), 55);
 
         let new_tp =
-            TransportParams::decode(&mut raw_params, PROTOCOL_VERSION, true)
-                .unwrap();
+            TransportParams::decode(&raw_params, PROTOCOL_VERSION, true).unwrap();
 
         assert_eq!(new_tp, tp);
     }
@@ -4263,7 +4260,7 @@ mod tests {
         };
 
         let mut raw_params = [42; 256];
-        let mut raw_params = TransportParams::encode(
+        let raw_params = TransportParams::encode(
             &tp,
             PROTOCOL_VERSION_DRAFT25,
             true,
@@ -4272,12 +4269,9 @@ mod tests {
         .unwrap();
         assert_eq!(raw_params.len(), 101);
 
-        let new_tp = TransportParams::decode(
-            &mut raw_params,
-            PROTOCOL_VERSION_DRAFT25,
-            false,
-        )
-        .unwrap();
+        let new_tp =
+            TransportParams::decode(&raw_params, PROTOCOL_VERSION_DRAFT25, false)
+                .unwrap();
 
         assert_eq!(new_tp, tp);
 
@@ -4300,7 +4294,7 @@ mod tests {
         };
 
         let mut raw_params = [42; 256];
-        let mut raw_params = TransportParams::encode(
+        let raw_params = TransportParams::encode(
             &tp,
             PROTOCOL_VERSION_DRAFT25,
             false,
@@ -4309,12 +4303,9 @@ mod tests {
         .unwrap();
         assert_eq!(raw_params.len(), 81);
 
-        let new_tp = TransportParams::decode(
-            &mut raw_params,
-            PROTOCOL_VERSION_DRAFT25,
-            true,
-        )
-        .unwrap();
+        let new_tp =
+            TransportParams::decode(&raw_params, PROTOCOL_VERSION_DRAFT25, true)
+                .unwrap();
 
         assert_eq!(new_tp, tp);
     }

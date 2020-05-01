@@ -782,8 +782,8 @@ extern fn select_alpn(
         return 3; // SSL_TLSEXT_ERR_NOACK
     }
 
-    let mut protos = octets::OctetsMut::with_slice(unsafe {
-        slice::from_raw_parts_mut(inp, in_len as usize)
+    let mut protos = octets::Octets::with_slice(unsafe {
+        slice::from_raw_parts(inp, in_len as usize)
     });
 
     while let Ok(proto) = protos.get_bytes_with_u8_length() {
