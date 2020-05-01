@@ -24,6 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#![allow(dead_code)]
+
 /// Zero-copy abstraction for parsing and constructing network packets.
 use std::mem;
 use std::ptr;
@@ -109,16 +111,205 @@ macro_rules! put_u {
     }};
 }
 
-/// A zero-copy mutable byte buffer.
+/// A zero-copy immutable byte buffer.
 ///
-/// `OctetsMut` wraps an in-memory buffer of bytes and provides utility functions
+/// `Octets` wraps an in-memory buffer of bytes and provides utility functions
 /// for manipulating it. The underlying buffer is provided by the user and is
-/// not copied when creating an `OctetsMut`. Operations are panic-free and will
+/// not copied when creating an `Octets`. Operations are panic-free and will
 /// avoid indexing the buffer past its end.
 ///
 /// Additionally, an offset (initially set to the start of the buffer) is
 /// incremented as bytes are read from / written to the buffer, to allow for
 /// sequential operations.
+#[derive(Debug, PartialEq)]
+pub struct Octets<'a> {
+    buf: &'a [u8],
+    off: usize,
+}
+
+impl<'a> Octets<'a> {
+    /// Creates an `Octets` from the given slice, without copying.
+    ///
+    /// Since there's no copy, the input slice needs to be mutable to allow
+    /// modifications.
+    pub fn with_slice(buf: &'a [u8]) -> Self {
+        Octets { buf, off: 0 }
+    }
+
+    /// Reads an unsigned 8-bit integer from the current offset and advances
+    /// the buffer.
+    pub fn get_u8(&mut self) -> Result<u8> {
+        get_u!(self, u8, 1)
+    }
+
+    /// Reads an unsigned 8-bit integer from the current offset without
+    /// advancing the buffer.
+    pub fn peek_u8(&mut self) -> Result<u8> {
+        peek_u!(self, u8, 1)
+    }
+
+    /// Reads an unsigned 16-bit integer in network byte-order from the current
+    /// offset and advances the buffer.
+    pub fn get_u16(&mut self) -> Result<u16> {
+        get_u!(self, u16, 2)
+    }
+
+    /// Reads an unsigned 24-bit integer in network byte-order from the current
+    /// offset and advances the buffer.
+    pub fn get_u24(&mut self) -> Result<u32> {
+        get_u!(self, u32, 3)
+    }
+
+    /// Reads an unsigned 32-bit integer in network byte-order from the current
+    /// offset and advances the buffer.
+    pub fn get_u32(&mut self) -> Result<u32> {
+        get_u!(self, u32, 4)
+    }
+
+    /// Reads an unsigned 64-bit integer in network byte-order from the current
+    /// offset and advances the buffer.
+    pub fn get_u64(&mut self) -> Result<u64> {
+        get_u!(self, u64, 8)
+    }
+
+    /// Reads an unsigned variable-length integer in network byte-order from
+    /// the current offset and advances the buffer.
+    pub fn get_varint(&mut self) -> Result<u64> {
+        let first = self.peek_u8()?;
+
+        let len = varint_parse_len(first);
+
+        if len > self.cap() {
+            return Err(BufferTooShortError);
+        }
+
+        let mut vec = self.get_bytes(len)?.to_vec();
+
+        // Mask the 2 most significant bits to remove the encoded length.
+        vec[0] &= 0x3f;
+
+        let mut b = OctetsMut::with_slice(&mut vec);
+
+        let out = match len {
+            1 => u64::from(b.get_u8()?),
+            2 => u64::from(b.get_u16()?),
+            4 => u64::from(b.get_u32()?),
+            8 => b.get_u64()?,
+            _ => unreachable!(),
+        };
+
+        Ok(out)
+    }
+
+    /// Reads `len` bytes from the current offset without copying and advances
+    /// the buffer.
+    pub fn get_bytes(&mut self, len: usize) -> Result<Octets> {
+        if self.cap() < len {
+            return Err(BufferTooShortError);
+        }
+
+        let out = Octets {
+            buf: &self.buf[self.off..self.off + len],
+            off: 0,
+        };
+
+        self.off += len;
+
+        Ok(out)
+    }
+
+    /// Reads `len` bytes from the current offset without copying and advances
+    /// the buffer, where `len` is an unsigned 8-bit integer prefix.
+    pub fn get_bytes_with_u8_length(&mut self) -> Result<Octets> {
+        let len = self.get_u8()?;
+        self.get_bytes(len as usize)
+    }
+
+    /// Reads `len` bytes from the current offset without copying and advances
+    /// the buffer, where `len` is an unsigned 16-bit integer prefix in network
+    /// byte-order.
+    pub fn get_bytes_with_u16_length(&mut self) -> Result<Octets> {
+        let len = self.get_u16()?;
+        self.get_bytes(len as usize)
+    }
+
+    /// Reads `len` bytes from the current offset without copying and advances
+    /// the buffer, where `len` is an unsigned variable-length integer prefix
+    /// in network byte-order.
+    pub fn get_bytes_with_varint_length(&mut self) -> Result<Octets> {
+        let len = self.get_varint()?;
+        self.get_bytes(len as usize)
+    }
+
+    /// Reads `len` bytes from the current offset without copying and without
+    /// advancing the buffer.
+    pub fn peek_bytes(&self, len: usize) -> Result<Octets> {
+        if self.cap() < len {
+            return Err(BufferTooShortError);
+        }
+
+        let out = Octets {
+            buf: &self.buf[self.off..self.off + len],
+            off: 0,
+        };
+
+        Ok(out)
+    }
+
+    /// Returns a slice of `len` elements from the current offset.
+    pub fn slice(&'a self, len: usize) -> Result<&'a [u8]> {
+        if len > self.cap() {
+            return Err(BufferTooShortError);
+        }
+
+        Ok(&self.buf[self.off..self.off + len])
+    }
+
+    /// Returns a slice of `len` elements from the end of the buffer.
+    pub fn slice_last(&'a self, len: usize) -> Result<&'a [u8]> {
+        if len > self.cap() {
+            return Err(BufferTooShortError);
+        }
+
+        let cap = self.cap();
+        Ok(&self.buf[cap - len..])
+    }
+
+    /// Returns the remaining capacity in the buffer.
+    pub fn cap(&self) -> usize {
+        self.buf.len() - self.off
+    }
+
+    /// Returns the total length of the buffer.
+    pub fn len(&self) -> usize {
+        self.buf.len()
+    }
+
+    /// Returns the current offset of the buffer.
+    pub fn off(&self) -> usize {
+        self.off
+    }
+
+    /// Returns a reference to the internal buffer.
+    pub fn buf(&self) -> &[u8] {
+        self.buf
+    }
+
+    /// Copies the buffer from the current offset into a new `Vec<u8>`.
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.as_ref().to_vec()
+    }
+}
+
+impl<'a> AsRef<[u8]> for Octets<'a> {
+    fn as_ref(&self) -> &[u8] {
+        &self.buf[self.off..]
+    }
+}
+
+/// A zero-copy mutable byte buffer.
+///
+/// Like `Octets` but mutable.
 #[derive(Debug, PartialEq)]
 pub struct OctetsMut<'a> {
     buf: &'a mut [u8],
@@ -130,7 +321,7 @@ impl<'a> OctetsMut<'a> {
     ///
     /// Since there's no copy, the input slice needs to be mutable to allow
     /// modifications.
-    pub fn with_slice(buf: &'a mut [u8]) -> OctetsMut {
+    pub fn with_slice(buf: &'a mut [u8]) -> Self {
         OctetsMut { buf, off: 0 }
     }
 
@@ -273,7 +464,24 @@ impl<'a> OctetsMut<'a> {
 
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer.
-    pub fn get_bytes(&mut self, len: usize) -> Result<OctetsMut> {
+    pub fn get_bytes(&mut self, len: usize) -> Result<Octets> {
+        if self.cap() < len {
+            return Err(BufferTooShortError);
+        }
+
+        let out = Octets {
+            buf: &self.buf[self.off..self.off + len],
+            off: 0,
+        };
+
+        self.off += len;
+
+        Ok(out)
+    }
+
+    /// Reads `len` bytes from the current offset without copying and advances
+    /// the buffer.
+    pub fn get_bytes_mut(&mut self, len: usize) -> Result<OctetsMut> {
         if self.cap() < len {
             return Err(BufferTooShortError);
         }
@@ -290,7 +498,7 @@ impl<'a> OctetsMut<'a> {
 
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer, where `len` is an unsigned 8-bit integer prefix.
-    pub fn get_bytes_with_u8_length(&mut self) -> Result<OctetsMut> {
+    pub fn get_bytes_with_u8_length(&mut self) -> Result<Octets> {
         let len = self.get_u8()?;
         self.get_bytes(len as usize)
     }
@@ -298,7 +506,7 @@ impl<'a> OctetsMut<'a> {
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer, where `len` is an unsigned 16-bit integer prefix in network
     /// byte-order.
-    pub fn get_bytes_with_u16_length(&mut self) -> Result<OctetsMut> {
+    pub fn get_bytes_with_u16_length(&mut self) -> Result<Octets> {
         let len = self.get_u16()?;
         self.get_bytes(len as usize)
     }
@@ -306,14 +514,29 @@ impl<'a> OctetsMut<'a> {
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer, where `len` is an unsigned variable-length integer prefix
     /// in network byte-order.
-    pub fn get_bytes_with_varint_length(&mut self) -> Result<OctetsMut> {
+    pub fn get_bytes_with_varint_length(&mut self) -> Result<Octets> {
         let len = self.get_varint()?;
         self.get_bytes(len as usize)
     }
 
     /// Reads `len` bytes from the current offset without copying and without
     /// advancing the buffer.
-    pub fn peek_bytes(&mut self, len: usize) -> Result<OctetsMut> {
+    pub fn peek_bytes(&mut self, len: usize) -> Result<Octets> {
+        if self.cap() < len {
+            return Err(BufferTooShortError);
+        }
+
+        let out = Octets {
+            buf: &self.buf[self.off..self.off + len],
+            off: 0,
+        };
+
+        Ok(out)
+    }
+
+    /// Reads `len` bytes from the current offset without copying and without
+    /// advancing the buffer.
+    pub fn peek_bytes_mut(&mut self, len: usize) -> Result<OctetsMut> {
         if self.cap() < len {
             return Err(BufferTooShortError);
         }
@@ -451,6 +674,43 @@ mod tests {
 
     #[test]
     fn get_u() {
+        let d = [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+        ];
+
+        let mut b = Octets::with_slice(&d);
+        assert_eq!(b.cap(), 18);
+        assert_eq!(b.off(), 0);
+
+        assert_eq!(b.get_u8().unwrap(), 1);
+        assert_eq!(b.cap(), 17);
+        assert_eq!(b.off(), 1);
+
+        assert_eq!(b.get_u16().unwrap(), 0x203);
+        assert_eq!(b.cap(), 15);
+        assert_eq!(b.off(), 3);
+
+        assert_eq!(b.get_u24().unwrap(), 0x40506);
+        assert_eq!(b.cap(), 12);
+        assert_eq!(b.off(), 6);
+
+        assert_eq!(b.get_u32().unwrap(), 0x0708090a);
+        assert_eq!(b.cap(), 8);
+        assert_eq!(b.off(), 10);
+
+        assert_eq!(b.get_u64().unwrap(), 0x0b0c0d0e0f101112);
+        assert_eq!(b.cap(), 0);
+        assert_eq!(b.off(), 18);
+
+        assert!(b.get_u8().is_err());
+        assert!(b.get_u16().is_err());
+        assert!(b.get_u24().is_err());
+        assert!(b.get_u32().is_err());
+        assert!(b.get_u64().is_err());
+    }
+
+    #[test]
+    fn get_u_mut() {
         let mut d = [
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
         ];
@@ -488,6 +748,27 @@ mod tests {
 
     #[test]
     fn peek_u() {
+        let d = [1, 2];
+
+        let mut b = Octets::with_slice(&d);
+        assert_eq!(b.cap(), 2);
+        assert_eq!(b.off(), 0);
+
+        assert_eq!(b.peek_u8().unwrap(), 1);
+        assert_eq!(b.cap(), 2);
+        assert_eq!(b.off(), 0);
+
+        assert_eq!(b.peek_u8().unwrap(), 1);
+        assert_eq!(b.cap(), 2);
+        assert_eq!(b.off(), 0);
+
+        b.get_u16().unwrap();
+
+        assert!(b.peek_u8().is_err());
+    }
+
+    #[test]
+    fn peek_u_mut() {
         let mut d = [1, 2];
 
         let mut b = OctetsMut::with_slice(&mut d);
@@ -509,6 +790,32 @@ mod tests {
 
     #[test]
     fn get_bytes() {
+        let d = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let mut b = Octets::with_slice(&d);
+        assert_eq!(b.cap(), 10);
+        assert_eq!(b.off(), 0);
+
+        assert_eq!(b.get_bytes(5).unwrap().as_ref(), [1, 2, 3, 4, 5]);
+        assert_eq!(b.cap(), 5);
+        assert_eq!(b.off(), 5);
+
+        assert_eq!(b.get_bytes(3).unwrap().as_ref(), [6, 7, 8]);
+        assert_eq!(b.cap(), 2);
+        assert_eq!(b.off(), 8);
+
+        assert!(b.get_bytes(3).is_err());
+        assert_eq!(b.cap(), 2);
+        assert_eq!(b.off(), 8);
+
+        assert_eq!(b.get_bytes(2).unwrap().as_ref(), [9, 10]);
+        assert_eq!(b.cap(), 0);
+        assert_eq!(b.off(), 10);
+
+        assert!(b.get_bytes(2).is_err());
+    }
+
+    #[test]
+    fn get_bytes_mut() {
         let mut d = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.cap(), 10);
@@ -535,6 +842,24 @@ mod tests {
 
     #[test]
     fn peek_bytes() {
+        let d = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let mut b = Octets::with_slice(&d);
+        assert_eq!(b.cap(), 10);
+        assert_eq!(b.off(), 0);
+
+        assert_eq!(b.peek_bytes(5).unwrap().as_ref(), [1, 2, 3, 4, 5]);
+        assert_eq!(b.cap(), 10);
+        assert_eq!(b.off(), 0);
+
+        assert_eq!(b.peek_bytes(5).unwrap().as_ref(), [1, 2, 3, 4, 5]);
+        assert_eq!(b.cap(), 10);
+        assert_eq!(b.off(), 0);
+
+        b.get_bytes(5).unwrap();
+    }
+
+    #[test]
+    fn peek_bytes_mut() {
         let mut d = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.cap(), 10);
@@ -553,6 +878,39 @@ mod tests {
 
     #[test]
     fn get_varint() {
+        let d = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
+        let mut b = Octets::with_slice(&d);
+        assert_eq!(b.get_varint().unwrap(), 151288809941952652);
+        assert_eq!(b.cap(), 0);
+        assert_eq!(b.off(), 8);
+
+        let d = [0x9d, 0x7f, 0x3e, 0x7d];
+        let mut b = Octets::with_slice(&d);
+        assert_eq!(b.get_varint().unwrap(), 494878333);
+        assert_eq!(b.cap(), 0);
+        assert_eq!(b.off(), 4);
+
+        let d = [0x7b, 0xbd];
+        let mut b = Octets::with_slice(&d);
+        assert_eq!(b.get_varint().unwrap(), 15293);
+        assert_eq!(b.cap(), 0);
+        assert_eq!(b.off(), 2);
+
+        let d = [0x40, 0x25];
+        let mut b = Octets::with_slice(&d);
+        assert_eq!(b.get_varint().unwrap(), 37);
+        assert_eq!(b.cap(), 0);
+        assert_eq!(b.off(), 2);
+
+        let d = [0x25];
+        let mut b = Octets::with_slice(&d);
+        assert_eq!(b.get_varint().unwrap(), 37);
+        assert_eq!(b.cap(), 0);
+        assert_eq!(b.off(), 1);
+    }
+
+    #[test]
+    fn get_varint_mut() {
         let mut d = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
         let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.get_varint().unwrap(), 151288809941952652);
@@ -775,6 +1133,36 @@ mod tests {
 
     #[test]
     fn slice() {
+        let d = b"helloworld".to_vec();
+
+        {
+            let b = Octets::with_slice(&d);
+            let exp = b"hello".to_vec();
+            assert_eq!(b.slice(5), Ok(&exp[..]));
+        }
+
+        {
+            let b = Octets::with_slice(&d);
+            let exp = b"".to_vec();
+            assert_eq!(b.slice(0), Ok(&exp[..]));
+        }
+
+        {
+            let mut b = Octets::with_slice(&d);
+            b.get_bytes(5).unwrap();
+
+            let exp = b"world".to_vec();
+            assert_eq!(b.slice(5), Ok(&exp[..]));
+        }
+
+        {
+            let b = Octets::with_slice(&d);
+            assert!(b.slice(11).is_err());
+        }
+    }
+
+    #[test]
+    fn slice_mut() {
         let mut d = b"helloworld".to_vec();
 
         {
@@ -805,6 +1193,40 @@ mod tests {
 
     #[test]
     fn slice_last() {
+        let d = b"helloworld".to_vec();
+
+        {
+            let b = Octets::with_slice(&d);
+            let exp = b"orld".to_vec();
+            assert_eq!(b.slice_last(4), Ok(&exp[..]));
+        }
+
+        {
+            let b = Octets::with_slice(&d);
+            let exp = b"d".to_vec();
+            assert_eq!(b.slice_last(1), Ok(&exp[..]));
+        }
+
+        {
+            let b = Octets::with_slice(&d);
+            let exp = b"".to_vec();
+            assert_eq!(b.slice_last(0), Ok(&exp[..]));
+        }
+
+        {
+            let b = Octets::with_slice(&d);
+            let exp = b"helloworld".to_vec();
+            assert_eq!(b.slice_last(10), Ok(&exp[..]));
+        }
+
+        {
+            let b = Octets::with_slice(&d);
+            assert!(b.slice_last(11).is_err());
+        }
+    }
+
+    #[test]
+    fn slice_last_mut() {
         let mut d = b"helloworld".to_vec();
 
         {
