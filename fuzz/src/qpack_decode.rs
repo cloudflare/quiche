@@ -21,7 +21,7 @@ fuzz_target!(|data: &[u8]| {
     let encoded_size = encoder.encode(&hdrs, &mut encoded_hdrs).unwrap();
 
     let decoded_hdrs = decoder
-        .decode(&mut encoded_hdrs[..encoded_size], std::u64::MAX)
+        .decode(&encoded_hdrs[..encoded_size], std::u64::MAX)
         .unwrap();
 
     assert_eq!(hdrs, decoded_hdrs)

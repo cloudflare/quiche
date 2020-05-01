@@ -79,9 +79,9 @@ pub enum Frame {
 
 impl Frame {
     pub fn from_bytes(
-        frame_type: u64, payload_length: u64, bytes: &mut [u8],
+        frame_type: u64, payload_length: u64, bytes: &[u8],
     ) -> Result<Frame> {
-        let mut b = octets::OctetsMut::with_slice(bytes);
+        let mut b = octets::Octets::with_slice(bytes);
 
         // TODO: handling of 0-length frames
         let frame = match frame_type {
@@ -281,7 +281,7 @@ impl std::fmt::Debug for Frame {
 }
 
 fn parse_settings_frame(
-    b: &mut octets::OctetsMut, settings_length: usize,
+    b: &mut octets::Octets, settings_length: usize,
 ) -> Result<Frame> {
     let mut max_header_list_size = None;
     let mut qpack_max_table_capacity = None;
@@ -318,7 +318,7 @@ fn parse_settings_frame(
 }
 
 fn parse_push_promise(
-    payload_length: u64, b: &mut octets::OctetsMut,
+    payload_length: u64, b: &mut octets::Octets,
 ) -> Result<Frame> {
     let push_id = b.get_varint()?;
     let header_block_length = payload_length - octets::varint_len(push_id) as u64;
@@ -355,7 +355,7 @@ mod tests {
             Frame::from_bytes(
                 DATA_FRAME_TYPE_ID,
                 frame_payload_len as u64,
-                &mut d[frame_header_len..]
+                &d[frame_header_len..]
             )
             .unwrap(),
             frame
@@ -383,7 +383,7 @@ mod tests {
             Frame::from_bytes(
                 HEADERS_FRAME_TYPE_ID,
                 frame_payload_len as u64,
-                &mut d[frame_header_len..]
+                &d[frame_header_len..]
             )
             .unwrap(),
             frame
@@ -410,7 +410,7 @@ mod tests {
             Frame::from_bytes(
                 CANCEL_PUSH_FRAME_TYPE_ID,
                 frame_payload_len as u64,
-                &mut d[frame_header_len..]
+                &d[frame_header_len..]
             )
             .unwrap(),
             frame
@@ -442,7 +442,7 @@ mod tests {
             Frame::from_bytes(
                 SETTINGS_FRAME_TYPE_ID,
                 frame_payload_len as u64,
-                &mut d[frame_header_len..]
+                &d[frame_header_len..]
             )
             .unwrap(),
             frame
@@ -482,7 +482,7 @@ mod tests {
             Frame::from_bytes(
                 SETTINGS_FRAME_TYPE_ID,
                 frame_payload_len as u64,
-                &mut d[frame_header_len..]
+                &d[frame_header_len..]
             )
             .unwrap(),
             frame_parsed
@@ -514,7 +514,7 @@ mod tests {
             Frame::from_bytes(
                 SETTINGS_FRAME_TYPE_ID,
                 frame_payload_len as u64,
-                &mut d[frame_header_len..]
+                &d[frame_header_len..]
             )
             .unwrap(),
             frame
@@ -546,7 +546,7 @@ mod tests {
             Frame::from_bytes(
                 SETTINGS_FRAME_TYPE_ID,
                 frame_payload_len as u64,
-                &mut d[frame_header_len..]
+                &d[frame_header_len..]
             )
             .unwrap(),
             frame
@@ -577,7 +577,7 @@ mod tests {
             Frame::from_bytes(
                 PUSH_PROMISE_FRAME_TYPE_ID,
                 frame_payload_len as u64,
-                &mut d[frame_header_len..]
+                &d[frame_header_len..]
             )
             .unwrap(),
             frame
@@ -604,7 +604,7 @@ mod tests {
             Frame::from_bytes(
                 GOAWAY_FRAME_TYPE_ID,
                 frame_payload_len as u64,
-                &mut d[frame_header_len..]
+                &d[frame_header_len..]
             )
             .unwrap(),
             frame
@@ -631,7 +631,7 @@ mod tests {
             Frame::from_bytes(
                 MAX_PUSH_FRAME_TYPE_ID,
                 frame_payload_len as u64,
-                &mut d[frame_header_len..]
+                &d[frame_header_len..]
             )
             .unwrap(),
             frame
@@ -640,11 +640,8 @@ mod tests {
 
     #[test]
     fn unknown_type() {
-        let mut d = [42; 12];
+        let d = [42; 12];
 
-        assert_eq!(
-            Frame::from_bytes(255, 12345, &mut d[..]),
-            Ok(Frame::Unknown)
-        );
+        assert_eq!(Frame::from_bytes(255, 12345, &d[..]), Ok(Frame::Unknown));
     }
 }

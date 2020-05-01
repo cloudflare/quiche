@@ -409,8 +409,7 @@ impl Stream {
             return Err(Error::Done);
         }
 
-        let varint =
-            octets::OctetsMut::with_slice(&mut self.state_buf).get_varint()?;
+        let varint = octets::Octets::with_slice(&self.state_buf).get_varint()?;
 
         Ok(varint)
     }
@@ -421,7 +420,7 @@ impl Stream {
         let frame = frame::Frame::from_bytes(
             self.frame_type.unwrap(),
             self.state_len as u64,
-            &mut self.state_buf,
+            &self.state_buf,
         )?;
 
         self.state_transition(State::FrameType, 1, true)?;

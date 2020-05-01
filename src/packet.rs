@@ -427,7 +427,7 @@ pub fn decrypt_hdr(
         first_buf.as_ref()[0]
     };
 
-    let mut pn_and_sample = b.peek_bytes(MAX_PKT_NUM_LEN + SAMPLE_LEN)?;
+    let mut pn_and_sample = b.peek_bytes_mut(MAX_PKT_NUM_LEN + SAMPLE_LEN)?;
 
     let (mut ciphertext, sample) =
         pn_and_sample.split_at(MAX_PKT_NUM_LEN).unwrap();
@@ -500,7 +500,7 @@ pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize) -> u64 
 pub fn decrypt_pkt<'a>(
     b: &'a mut octets::OctetsMut, pn: u64, pn_len: usize, payload_len: usize,
     aead: &crypto::Open,
-) -> Result<octets::OctetsMut<'a>> {
+) -> Result<octets::Octets<'a>> {
     let payload_offset = b.off();
 
     let (header, mut payload) = b.split_at(payload_offset)?;
@@ -509,7 +509,7 @@ pub fn decrypt_pkt<'a>(
         .checked_sub(pn_len)
         .ok_or(Error::InvalidPacket)?;
 
-    let mut ciphertext = payload.peek_bytes(payload_len)?;
+    let mut ciphertext = payload.peek_bytes_mut(payload_len)?;
 
     let payload_len =
         aead.open_with_u64_counter(pn, header.as_ref(), ciphertext.as_mut())?;
