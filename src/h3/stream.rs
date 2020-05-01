@@ -410,7 +410,7 @@ impl Stream {
         }
 
         let varint =
-            octets::Octets::with_slice(&mut self.state_buf).get_varint()?;
+            octets::OctetsMut::with_slice(&mut self.state_buf).get_varint()?;
 
         Ok(varint)
     }
@@ -509,7 +509,7 @@ mod tests {
         assert_eq!(stream.state, State::StreamType);
 
         let mut d = vec![42; 40];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let frame = frame::Frame::Settings {
             max_header_list_size: Some(0),
@@ -564,7 +564,7 @@ mod tests {
         assert_eq!(stream.state, State::StreamType);
 
         let mut d = vec![42; 40];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let frame = frame::Frame::Settings {
             max_header_list_size: Some(0),
@@ -626,7 +626,7 @@ mod tests {
         assert_eq!(stream.state, State::StreamType);
 
         let mut d = vec![42; 40];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let goaway = frame::Frame::GoAway { stream_id: 0 };
 
@@ -667,7 +667,7 @@ mod tests {
         assert_eq!(stream.state, State::StreamType);
 
         let mut d = vec![42; 40];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let hdrs = frame::Frame::Headers { header_block };
@@ -730,7 +730,7 @@ mod tests {
         let mut stream = Stream::new(0, false);
 
         let mut d = vec![42; 128];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -802,7 +802,7 @@ mod tests {
         let mut stream = Stream::new(2, false);
 
         let mut d = vec![42; 128];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -895,7 +895,7 @@ mod tests {
         let mut stream = Stream::new(2, false);
 
         let mut d = vec![42; 20];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         b.put_varint(33).unwrap();
 
