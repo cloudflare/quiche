@@ -2474,7 +2474,13 @@ impl Connection {
     /// capacity for the operation to complete. The application should retry the
     /// operation once the stream is reported as writable again.
     ///
+    /// Applications should call this method only after the handshake is
+    /// completed (whenever [`is_established()`] returns `true`) or during
+    /// early data if enabled (whenever [`is_in_early_data()`] returns `true`).
+    ///
     /// [`Done`]: enum.Error.html#variant.Done
+    /// [`is_established()`]: struct.Connection.html#method.is_established
+    /// [`is_in_early_data()`]: struct.Connection.html#method.is_in_early_data
     ///
     /// ## Examples:
     ///
@@ -2973,40 +2979,14 @@ impl Connection {
             return Err(Error::TlsFail);
         }
 
-        if !self.parsed_peer_transport_params {
-            let raw_params = self.handshake.quic_transport_params();
-
-            let peer_params =
-                TransportParams::decode(&raw_params, self.is_server)?;
-
-            if peer_params.original_connection_id != self.odcid {
-                return Err(Error::InvalidTransportParam);
-            }
-
-            self.max_tx_data = peer_params.initial_max_data;
-
-            self.streams.update_peer_max_streams_bidi(
-                peer_params.initial_max_streams_bidi,
-            );
-            self.streams
-                .update_peer_max_streams_uni(peer_params.initial_max_streams_uni);
-
-            self.recovery.max_ack_delay =
-                time::Duration::from_millis(peer_params.max_ack_delay);
-
-            self.peer_transport_params = peer_params;
-
-            self.parsed_peer_transport_params = true;
-
-            trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
-                   &self.trace_id,
-                   std::str::from_utf8(self.application_proto()),
-                   self.handshake.cipher(),
-                   self.handshake.curve(),
-                   self.handshake.sigalg(),
-                   self.is_resumed(),
-                   self.peer_transport_params);
-        }
+        trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
+               &self.trace_id,
+               std::str::from_utf8(self.application_proto()),
+               self.handshake.cipher(),
+               self.handshake.curve(),
+               self.handshake.sigalg(),
+               self.is_resumed(),
+               self.peer_transport_params);
 
         Ok(())
     }
@@ -3033,8 +3013,8 @@ impl Connection {
         }
 
         for epoch in packet::EPOCH_INITIAL..packet::EPOCH_COUNT {
-            // Only send 1-RTT packets when handshake is complete.
-            if epoch == packet::EPOCH_APPLICATION && !self.is_established() {
+            // Only send packets in a space when we have the send keys for it.
+            if self.pkt_num_spaces[epoch].crypto_seal.is_none() {
                 continue;
             }
 
@@ -3056,7 +3036,7 @@ impl Connection {
 
         // If there are flushable, almost full or blocked streams, use the
         // Application epoch.
-        if self.is_established() &&
+        if (self.is_established() || self.is_in_early_data()) &&
             (self.should_update_max_data() ||
                 self.blocked_limit.is_some() ||
                 self.streams.should_update_max_streams_bidi() ||
@@ -3187,6 +3167,39 @@ impl Connection {
                 }
 
                 self.do_handshake()?;
+
+                // Try to parse transport parameters as soon as the first flight
+                // of handshake data is processed.
+                //
+                // This is potentially dangerous as the handshake hasn't been
+                // completed yet, though it's required to be able to send data
+                // in 0.5 RTT.
+                let raw_params = self.handshake.quic_transport_params();
+
+                if !self.parsed_peer_transport_params && !raw_params.is_empty() {
+                    let peer_params =
+                        TransportParams::decode(&raw_params, self.is_server)?;
+
+                    if peer_params.original_connection_id != self.odcid {
+                        return Err(Error::InvalidTransportParam);
+                    }
+
+                    self.max_tx_data = peer_params.initial_max_data;
+
+                    self.streams.update_peer_max_streams_bidi(
+                        peer_params.initial_max_streams_bidi,
+                    );
+                    self.streams.update_peer_max_streams_uni(
+                        peer_params.initial_max_streams_uni,
+                    );
+
+                    self.recovery.max_ack_delay =
+                        time::Duration::from_millis(peer_params.max_ack_delay);
+
+                    self.peer_transport_params = peer_params;
+
+                    self.parsed_peer_transport_params = true;
+                }
             },
 
             // TODO: implement stateless retry
