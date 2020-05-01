@@ -53,7 +53,7 @@ impl Encoder {
     pub fn encode(
         &mut self, headers: &[Header], out: &mut [u8],
     ) -> Result<usize> {
-        let mut b = octets::Octets::with_slice(out);
+        let mut b = octets::OctetsMut::with_slice(out);
 
         // Request Insert Count.
         encode_int(0, 0, 8, &mut b)?;
@@ -247,7 +247,7 @@ fn lookup_static(h: &Header) -> Option<(u64, bool)> {
 }
 
 fn encode_int(
-    mut v: u64, first: u8, prefix: usize, b: &mut octets::Octets,
+    mut v: u64, first: u8, prefix: usize, b: &mut octets::OctetsMut,
 ) -> Result<()> {
     let mask = 2u64.pow(prefix as u32) - 1;
 
@@ -275,7 +275,7 @@ fn encode_int(
     Ok(())
 }
 
-fn encode_str(v: &str, prefix: usize, b: &mut octets::Octets) -> Result<()> {
+fn encode_str(v: &str, prefix: usize, b: &mut octets::OctetsMut) -> Result<()> {
     let len = super::huffman::encode_output_length(v.as_bytes())?;
 
     encode_int(len as u64, 0x80, prefix, b)?;
@@ -295,7 +295,7 @@ mod tests {
     fn encode_int1() {
         let expected = [0b01010];
         let mut encoded = [0; 1];
-        let mut b = octets::Octets::with_slice(&mut encoded);
+        let mut b = octets::OctetsMut::with_slice(&mut encoded);
 
         assert!(encode_int(10, 0, 5, &mut b).is_ok());
 
@@ -306,7 +306,7 @@ mod tests {
     fn encode_int2() {
         let expected = [0b11111, 0b10011010, 0b00001010];
         let mut encoded = [0; 3];
-        let mut b = octets::Octets::with_slice(&mut encoded);
+        let mut b = octets::OctetsMut::with_slice(&mut encoded);
 
         assert!(encode_int(1337, 0, 5, &mut b).is_ok());
 
@@ -317,7 +317,7 @@ mod tests {
     fn encode_int3() {
         let expected = [0b101010];
         let mut encoded = [0; 1];
-        let mut b = octets::Octets::with_slice(&mut encoded);
+        let mut b = octets::OctetsMut::with_slice(&mut encoded);
 
         assert!(encode_int(42, 0, 8, &mut b).is_ok());
 

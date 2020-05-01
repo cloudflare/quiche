@@ -81,7 +81,7 @@ impl Frame {
     pub fn from_bytes(
         frame_type: u64, payload_length: u64, bytes: &mut [u8],
     ) -> Result<Frame> {
-        let mut b = octets::Octets::with_slice(bytes);
+        let mut b = octets::OctetsMut::with_slice(bytes);
 
         // TODO: handling of 0-length frames
         let frame = match frame_type {
@@ -117,7 +117,7 @@ impl Frame {
         Ok(frame)
     }
 
-    pub fn to_bytes(&self, b: &mut octets::Octets) -> Result<usize> {
+    pub fn to_bytes(&self, b: &mut octets::OctetsMut) -> Result<usize> {
         let before = b.cap();
 
         match self {
@@ -281,7 +281,7 @@ impl std::fmt::Debug for Frame {
 }
 
 fn parse_settings_frame(
-    b: &mut octets::Octets, settings_length: usize,
+    b: &mut octets::OctetsMut, settings_length: usize,
 ) -> Result<Frame> {
     let mut max_header_list_size = None;
     let mut qpack_max_table_capacity = None;
@@ -318,7 +318,7 @@ fn parse_settings_frame(
 }
 
 fn parse_push_promise(
-    payload_length: u64, b: &mut octets::Octets,
+    payload_length: u64, b: &mut octets::OctetsMut,
 ) -> Result<Frame> {
     let push_id = b.get_varint()?;
     let header_block_length = payload_length - octets::varint_len(push_id) as u64;
@@ -345,7 +345,7 @@ mod tests {
         let frame = Frame::Data { payload };
 
         let wire_len = {
-            let mut b = octets::Octets::with_slice(&mut d);
+            let mut b = octets::OctetsMut::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
@@ -373,7 +373,7 @@ mod tests {
         let frame = Frame::Headers { header_block };
 
         let wire_len = {
-            let mut b = octets::Octets::with_slice(&mut d);
+            let mut b = octets::OctetsMut::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
@@ -400,7 +400,7 @@ mod tests {
         let frame_header_len = 2;
 
         let wire_len = {
-            let mut b = octets::Octets::with_slice(&mut d);
+            let mut b = octets::OctetsMut::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
@@ -432,7 +432,7 @@ mod tests {
         let frame_header_len = 2;
 
         let wire_len = {
-            let mut b = octets::Octets::with_slice(&mut d);
+            let mut b = octets::OctetsMut::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
@@ -472,7 +472,7 @@ mod tests {
         let frame_header_len = 2;
 
         let wire_len = {
-            let mut b = octets::Octets::with_slice(&mut d);
+            let mut b = octets::OctetsMut::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
@@ -504,7 +504,7 @@ mod tests {
         let frame_header_len = 2;
 
         let wire_len = {
-            let mut b = octets::Octets::with_slice(&mut d);
+            let mut b = octets::OctetsMut::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
@@ -536,7 +536,7 @@ mod tests {
         let frame_header_len = 2;
 
         let wire_len = {
-            let mut b = octets::Octets::with_slice(&mut d);
+            let mut b = octets::OctetsMut::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
@@ -567,7 +567,7 @@ mod tests {
         };
 
         let wire_len = {
-            let mut b = octets::Octets::with_slice(&mut d);
+            let mut b = octets::OctetsMut::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
@@ -594,7 +594,7 @@ mod tests {
         let frame_header_len = 2;
 
         let wire_len = {
-            let mut b = octets::Octets::with_slice(&mut d);
+            let mut b = octets::OctetsMut::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
@@ -621,7 +621,7 @@ mod tests {
         let frame_header_len = 2;
 
         let wire_len = {
-            let mut b = octets::Octets::with_slice(&mut d);
+            let mut b = octets::OctetsMut::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 

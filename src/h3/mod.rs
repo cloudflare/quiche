@@ -663,7 +663,7 @@ impl Connection {
         headers: &[Header], fin: bool,
     ) -> Result<()> {
         let mut d = [42; 10];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         if !self.frames_greased && conn.grease {
             self.send_grease_frames(conn, stream_id)?;
@@ -721,7 +721,7 @@ impl Connection {
         fin: bool,
     ) -> Result<usize> {
         let mut d = [42; 10];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         // Validate that it is sane to send data on the stream.
         if stream_id % 4 != 0 {
@@ -883,7 +883,7 @@ impl Connection {
         let stream_id = self.next_uni_stream_id;
 
         let mut d = [0; 8];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         conn.stream_send(stream_id, b.put_varint(ty)?, false)?;
 
@@ -944,17 +944,17 @@ impl Connection {
         trace!("{} tx frm GREASE stream={}", conn.trace_id(), stream_id);
 
         // Empty GREASE frame.
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         conn.stream_send(stream_id, b.put_varint(grease_frame1)?, false)?;
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         conn.stream_send(stream_id, b.put_varint(0)?, false)?;
 
         // GREASE frame with payload.
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         conn.stream_send(stream_id, b.put_varint(grease_frame2)?, false)?;
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         conn.stream_send(stream_id, b.put_varint(18)?, false)?;
 
         conn.stream_send(stream_id, grease_payload, false)?;
@@ -1006,7 +1006,7 @@ impl Connection {
         };
 
         let mut d = [42; 128];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         frame.to_bytes(&mut b)?;
 
@@ -1696,7 +1696,7 @@ pub mod testing {
         ) -> Result<()> {
             let mut d = [42; 65535];
 
-            let mut b = octets::Octets::with_slice(&mut d);
+            let mut b = octets::OctetsMut::with_slice(&mut d);
 
             frame.to_bytes(&mut b)?;
 
@@ -1714,7 +1714,7 @@ pub mod testing {
         ) -> Result<()> {
             let mut d = [42; 65535];
 
-            let mut b = octets::Octets::with_slice(&mut d);
+            let mut b = octets::OctetsMut::with_slice(&mut d);
 
             frame.to_bytes(&mut b)?;
 
@@ -2370,7 +2370,7 @@ mod tests {
         let stream_id = s.client.next_uni_stream_id;
 
         let mut d = [42; 8];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         s.pipe
             .client
@@ -2498,7 +2498,7 @@ mod tests {
         s.handshake().unwrap();
 
         let mut d = [42; 128];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let frame_type = b.put_varint(frame::DATA_FRAME_TYPE_ID).unwrap();
         s.pipe.client.stream_send(0, frame_type, false).unwrap();
@@ -2517,7 +2517,7 @@ mod tests {
         s.handshake().unwrap();
 
         let mut d = [42; 128];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let frame_type = b.put_varint(148_764_065_110_560_899).unwrap();
         s.pipe.client.stream_send(0, frame_type, false).unwrap();
@@ -2680,7 +2680,7 @@ mod tests {
         s.handshake().unwrap();
 
         let mut d = [42; 128];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let frame_type = b.put_varint(frame::DATA_FRAME_TYPE_ID).unwrap();
         s.pipe.client.stream_send(0, frame_type, false).unwrap();
@@ -2699,7 +2699,7 @@ mod tests {
         s.handshake().unwrap();
 
         let mut d = [42; 128];
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let frame_type = b.put_varint(148_764_065_110_560_899).unwrap();
         s.pipe.client.stream_send(0, frame_type, false).unwrap();

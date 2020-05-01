@@ -564,7 +564,7 @@ impl Config {
     pub fn set_application_protos(&mut self, protos: &[u8]) -> Result<()> {
         let mut protos = protos.to_vec();
 
-        let mut b = octets::Octets::with_slice(&mut protos);
+        let mut b = octets::OctetsMut::with_slice(&mut protos);
 
         let mut protos_list = Vec::new();
 
@@ -1343,7 +1343,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let mut b = octets::Octets::with_slice(buf);
+        let mut b = octets::OctetsMut::with_slice(buf);
 
         let mut hdr = Header::from_bytes(&mut b, self.scid.len())
             .map_err(|e| drop_pkt_on_err(e, self.recv_count, &self.trace_id))?;
@@ -1810,7 +1810,7 @@ impl Connection {
             self.do_handshake()?;
         }
 
-        let mut b = octets::Octets::with_slice(out);
+        let mut b = octets::OctetsMut::with_slice(out);
 
         let epoch = self.write_epoch()?;
 
@@ -3521,7 +3521,7 @@ impl TransportParams {
     fn decode(
         buf: &mut [u8], version: u32, is_server: bool,
     ) -> Result<TransportParams> {
-        let mut b = octets::Octets::with_slice(buf);
+        let mut b = octets::OctetsMut::with_slice(buf);
 
         let mut tp = TransportParams::default();
 
@@ -3656,7 +3656,7 @@ impl TransportParams {
     }
 
     fn encode_param(
-        b: &mut octets::Octets, ty: u64, len: usize, version: u32,
+        b: &mut octets::OctetsMut, ty: u64, len: usize, version: u32,
     ) -> Result<()> {
         if version < PROTOCOL_VERSION_DRAFT27 {
             b.put_u16(ty as u16)?;
@@ -3675,7 +3675,7 @@ impl TransportParams {
         let mut params = [0; 128];
 
         let params_len = {
-            let mut b = octets::Octets::with_slice(&mut params);
+            let mut b = octets::OctetsMut::with_slice(&mut params);
 
             if is_server {
                 if let Some(ref odcid) = tp.original_connection_id {
@@ -3821,7 +3821,7 @@ impl TransportParams {
         };
 
         let out_len = {
-            let mut b = octets::Octets::with_slice(out);
+            let mut b = octets::OctetsMut::with_slice(out);
 
             // TODO: once we drop support for drafts < 27, we should simplify
             // the encoding to serialize the parameters into the output buffer
@@ -4077,7 +4077,7 @@ pub mod testing {
         conn: &mut Connection, pkt_type: packet::Type, frames: &[frame::Frame],
         buf: &mut [u8],
     ) -> Result<usize> {
-        let mut b = octets::Octets::with_slice(buf);
+        let mut b = octets::OctetsMut::with_slice(buf);
 
         let epoch = pkt_type.to_epoch()?;
 
@@ -4138,7 +4138,7 @@ pub mod testing {
     pub fn decode_pkt(
         conn: &mut Connection, buf: &mut [u8], len: usize,
     ) -> Result<Vec<frame::Frame>> {
-        let mut b = octets::Octets::with_slice(&mut buf[..len]);
+        let mut b = octets::OctetsMut::with_slice(&mut buf[..len]);
 
         let mut hdr = Header::from_bytes(&mut b, conn.scid.len()).unwrap();
 
@@ -5469,7 +5469,7 @@ mod tests {
         let mut buf = [0; 65535];
         let mut pipe = testing::Pipe::default().unwrap();
 
-        let mut b = octets::Octets::with_slice(&mut buf);
+        let mut b = octets::OctetsMut::with_slice(&mut buf);
 
         let epoch = packet::Type::Initial.to_epoch().unwrap();
 

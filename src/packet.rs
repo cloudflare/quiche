@@ -183,12 +183,12 @@ impl Header {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn from_slice(buf: &mut [u8], dcid_len: usize) -> Result<Header> {
-        let mut b = octets::Octets::with_slice(buf);
+        let mut b = octets::OctetsMut::with_slice(buf);
         Header::from_bytes(&mut b, dcid_len)
     }
 
     pub(crate) fn from_bytes(
-        b: &mut octets::Octets, dcid_len: usize,
+        b: &mut octets::OctetsMut, dcid_len: usize,
     ) -> Result<Header> {
         let first = b.get_u8()?;
 
@@ -283,7 +283,7 @@ impl Header {
         })
     }
 
-    pub(crate) fn to_bytes(&self, out: &mut octets::Octets) -> Result<()> {
+    pub(crate) fn to_bytes(&self, out: &mut octets::OctetsMut) -> Result<()> {
         let mut first = 0;
 
         // Encode pkt num length.
@@ -420,7 +420,7 @@ pub fn pkt_num_len(pn: u64) -> Result<usize> {
 }
 
 pub fn decrypt_hdr(
-    b: &mut octets::Octets, hdr: &mut Header, aead: &crypto::Open,
+    b: &mut octets::OctetsMut, hdr: &mut Header, aead: &crypto::Open,
 ) -> Result<()> {
     let mut first = {
         let (first_buf, _) = b.split_at(1)?;
@@ -498,9 +498,9 @@ pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize) -> u64 
 }
 
 pub fn decrypt_pkt<'a>(
-    b: &'a mut octets::Octets, pn: u64, pn_len: usize, payload_len: usize,
+    b: &'a mut octets::OctetsMut, pn: u64, pn_len: usize, payload_len: usize,
     aead: &crypto::Open,
-) -> Result<octets::Octets<'a>> {
+) -> Result<octets::OctetsMut<'a>> {
     let payload_offset = b.off();
 
     let (header, mut payload) = b.split_at(payload_offset)?;
@@ -518,7 +518,7 @@ pub fn decrypt_pkt<'a>(
 }
 
 pub fn encrypt_hdr(
-    b: &mut octets::Octets, pn_len: usize, payload: &[u8], aead: &crypto::Seal,
+    b: &mut octets::OctetsMut, pn_len: usize, payload: &[u8], aead: &crypto::Seal,
 ) -> Result<()> {
     let sample = &payload[4 - pn_len..16 + (4 - pn_len)];
 
@@ -543,7 +543,7 @@ pub fn encrypt_hdr(
 }
 
 pub fn encrypt_pkt(
-    b: &mut octets::Octets, pn: u64, pn_len: usize, payload_len: usize,
+    b: &mut octets::OctetsMut, pn: u64, pn_len: usize, payload_len: usize,
     payload_offset: usize, aead: &crypto::Seal,
 ) -> Result<usize> {
     let (mut header, mut payload) = b.split_at(payload_offset)?;
@@ -557,7 +557,7 @@ pub fn encrypt_pkt(
     Ok(payload_offset + payload_len)
 }
 
-pub fn encode_pkt_num(pn: u64, b: &mut octets::Octets) -> Result<()> {
+pub fn encode_pkt_num(pn: u64, b: &mut octets::OctetsMut) -> Result<()> {
     let len = pkt_num_len(pn)?;
 
     match len {
@@ -578,7 +578,7 @@ pub fn encode_pkt_num(pn: u64, b: &mut octets::Octets) -> Result<()> {
 pub fn negotiate_version(
     scid: &[u8], dcid: &[u8], out: &mut [u8],
 ) -> Result<usize> {
-    let mut b = octets::Octets::with_slice(out);
+    let mut b = octets::OctetsMut::with_slice(out);
 
     let first = rand::rand_u8() | FORM_BIT;
 
@@ -599,7 +599,7 @@ pub fn negotiate_version(
 pub fn retry(
     scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], out: &mut [u8],
 ) -> Result<usize> {
-    let mut b = octets::Octets::with_slice(out);
+    let mut b = octets::OctetsMut::with_slice(out);
 
     let hdr = Header {
         ty: Type::Retry,
@@ -622,7 +622,7 @@ pub fn retry(
     Ok(b.off())
 }
 
-pub fn verify_retry_integrity(b: &octets::Octets, odcid: &[u8]) -> Result<()> {
+pub fn verify_retry_integrity(b: &octets::OctetsMut, odcid: &[u8]) -> Result<()> {
     let tag = compute_retry_integrity_tag(b, odcid)?;
 
     ring::constant_time::verify_slices_are_equal(
@@ -635,7 +635,7 @@ pub fn verify_retry_integrity(b: &octets::Octets, odcid: &[u8]) -> Result<()> {
 }
 
 fn compute_retry_integrity_tag(
-    b: &octets::Octets, odcid: &[u8],
+    b: &octets::OctetsMut, odcid: &[u8],
 ) -> Result<aead::Tag> {
     const RETRY_INTEGRITY_KEY: [u8; 16] = [
         0x4d, 0x32, 0xec, 0xdb, 0x2a, 0x21, 0x33, 0xc8, 0x41, 0xe4, 0x04, 0x3d,
@@ -650,7 +650,7 @@ fn compute_retry_integrity_tag(
 
     let mut pseudo = vec![0; 1 + odcid.len() + hdr_len];
 
-    let mut pb = octets::Octets::with_slice(&mut pseudo);
+    let mut pb = octets::OctetsMut::with_slice(&mut pseudo);
 
     pb.put_u8(odcid.len() as u8)?;
     pb.put_bytes(odcid)?;
@@ -807,13 +807,13 @@ mod tests {
 
         let mut d = [0; 63];
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
 
         // Add fake retry integrity token.
         b.put_bytes(&vec![0xba; 16]).unwrap();
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
     }
 
@@ -833,10 +833,10 @@ mod tests {
 
         let mut d = [0; 50];
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
     }
 
@@ -859,10 +859,10 @@ mod tests {
 
         let mut d = [0; 50];
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 21), Err(Error::InvalidPacket));
     }
 
@@ -885,10 +885,10 @@ mod tests {
 
         let mut d = [0; 50];
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 9), Err(Error::InvalidPacket));
     }
 
@@ -911,10 +911,10 @@ mod tests {
 
         let mut d = [0; 50];
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
     }
 
@@ -934,10 +934,10 @@ mod tests {
 
         let mut d = [0; 50];
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
     }
 
@@ -957,10 +957,10 @@ mod tests {
 
         let mut d = [0; 50];
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert!(hdr.to_bytes(&mut b).is_ok());
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
     }
 
@@ -1080,7 +1080,7 @@ mod tests {
         pkt: &mut [u8], dcid: &[u8], is_server: bool, expected_frames: &[u8],
         expected_pn: u64, expected_pn_len: usize,
     ) {
-        let mut b = octets::Octets::with_slice(pkt);
+        let mut b = octets::OctetsMut::with_slice(pkt);
 
         let mut hdr = Header::from_bytes(&mut b, 0).unwrap();
         assert_eq!(hdr.ty, Type::Initial);
@@ -1284,13 +1284,13 @@ mod tests {
         header: &mut [u8], dcid: &[u8], frames: &[u8], pn: u64, pn_len: usize,
         is_server: bool, expected_pkt: &[u8],
     ) {
-        let mut b = octets::Octets::with_slice(header);
+        let mut b = octets::OctetsMut::with_slice(header);
 
         let hdr = Header::from_bytes(&mut b, 0).unwrap();
         assert_eq!(hdr.ty, Type::Initial);
 
         let mut out = vec![0; expected_pkt.len()];
-        let mut b = octets::Octets::with_slice(&mut out);
+        let mut b = octets::OctetsMut::with_slice(&mut out);
 
         b.put_bytes(header).unwrap();
 
@@ -1590,7 +1590,7 @@ mod tests {
     #[test]
     fn decrypto_pkt_underflow() {
         let mut buf = [0; 65535];
-        let mut b = octets::Octets::with_slice(&mut buf);
+        let mut b = octets::OctetsMut::with_slice(&mut buf);
 
         let hdr = Header {
             ty: Type::Initial,

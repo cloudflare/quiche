@@ -28,15 +28,15 @@
 use std::mem;
 use std::ptr;
 
-/// A specialized [`Result`] type for [`Octets`] operations.
+/// A specialized [`Result`] type for [`OctetsMut`] operations.
 ///
 /// [`Result`]: https://doc.rust-lang.org/std/result/enum.Result.html
-/// [`Octets`]: struct.Octets.html
+/// [`OctetsMut`]: struct.OctetsMut.html
 pub type Result<T> = std::result::Result<T, BufferTooShortError>;
 
-/// An error indicating that the provided [`Octets`] is not big enough.
+/// An error indicating that the provided [`OctetsMut`] is not big enough.
 ///
-/// [`Octets`]: struct.Octets.html
+/// [`OctetsMut`]: struct.OctetsMut.html
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BufferTooShortError;
 
@@ -111,27 +111,27 @@ macro_rules! put_u {
 
 /// A zero-copy mutable byte buffer.
 ///
-/// `Octets` wraps an in-memory buffer of bytes and provides utility functions
+/// `OctetsMut` wraps an in-memory buffer of bytes and provides utility functions
 /// for manipulating it. The underlying buffer is provided by the user and is
-/// not copied when creating an `Octets`. Operations are panic-free and will
+/// not copied when creating an `OctetsMut`. Operations are panic-free and will
 /// avoid indexing the buffer past its end.
 ///
 /// Additionally, an offset (initially set to the start of the buffer) is
 /// incremented as bytes are read from / written to the buffer, to allow for
 /// sequential operations.
 #[derive(Debug, PartialEq)]
-pub struct Octets<'a> {
+pub struct OctetsMut<'a> {
     buf: &'a mut [u8],
     off: usize,
 }
 
-impl<'a> Octets<'a> {
-    /// Creates an `Octets` from the given slice, without copying.
+impl<'a> OctetsMut<'a> {
+    /// Creates an `OctetsMut` from the given slice, without copying.
     ///
     /// Since there's no copy, the input slice needs to be mutable to allow
     /// modifications.
-    pub fn with_slice(buf: &'a mut [u8]) -> Octets {
-        Octets { buf, off: 0 }
+    pub fn with_slice(buf: &'a mut [u8]) -> OctetsMut {
+        OctetsMut { buf, off: 0 }
     }
 
     /// Reads an unsigned 8-bit integer from the current offset and advances
@@ -216,7 +216,7 @@ impl<'a> Octets<'a> {
         // Mask the 2 most significant bits to remove the encoded length.
         vec[0] &= 0x3f;
 
-        let mut b = Octets::with_slice(&mut vec);
+        let mut b = OctetsMut::with_slice(&mut vec);
 
         let out = match len {
             1 => u64::from(b.get_u8()?),
@@ -273,12 +273,12 @@ impl<'a> Octets<'a> {
 
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer.
-    pub fn get_bytes(&mut self, len: usize) -> Result<Octets> {
+    pub fn get_bytes(&mut self, len: usize) -> Result<OctetsMut> {
         if self.cap() < len {
             return Err(BufferTooShortError);
         }
 
-        let out = Octets {
+        let out = OctetsMut {
             buf: &mut self.buf[self.off..self.off + len],
             off: 0,
         };
@@ -290,7 +290,7 @@ impl<'a> Octets<'a> {
 
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer, where `len` is an unsigned 8-bit integer prefix.
-    pub fn get_bytes_with_u8_length(&mut self) -> Result<Octets> {
+    pub fn get_bytes_with_u8_length(&mut self) -> Result<OctetsMut> {
         let len = self.get_u8()?;
         self.get_bytes(len as usize)
     }
@@ -298,7 +298,7 @@ impl<'a> Octets<'a> {
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer, where `len` is an unsigned 16-bit integer prefix in network
     /// byte-order.
-    pub fn get_bytes_with_u16_length(&mut self) -> Result<Octets> {
+    pub fn get_bytes_with_u16_length(&mut self) -> Result<OctetsMut> {
         let len = self.get_u16()?;
         self.get_bytes(len as usize)
     }
@@ -306,19 +306,19 @@ impl<'a> Octets<'a> {
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer, where `len` is an unsigned variable-length integer prefix
     /// in network byte-order.
-    pub fn get_bytes_with_varint_length(&mut self) -> Result<Octets> {
+    pub fn get_bytes_with_varint_length(&mut self) -> Result<OctetsMut> {
         let len = self.get_varint()?;
         self.get_bytes(len as usize)
     }
 
     /// Reads `len` bytes from the current offset without copying and without
     /// advancing the buffer.
-    pub fn peek_bytes(&mut self, len: usize) -> Result<Octets> {
+    pub fn peek_bytes(&mut self, len: usize) -> Result<OctetsMut> {
         if self.cap() < len {
             return Err(BufferTooShortError);
         }
 
-        let out = Octets {
+        let out = OctetsMut {
             buf: &mut self.buf[self.off..self.off + len],
             off: 0,
         };
@@ -347,16 +347,16 @@ impl<'a> Octets<'a> {
     }
 
     /// Splits the buffer in two at the given absolute offset.
-    pub fn split_at(&mut self, off: usize) -> Result<(Octets, Octets)> {
+    pub fn split_at(&mut self, off: usize) -> Result<(OctetsMut, OctetsMut)> {
         if self.len() < off {
             return Err(BufferTooShortError);
         }
 
         let (left, right) = self.buf.split_at_mut(off);
 
-        let first = Octets { buf: left, off: 0 };
+        let first = OctetsMut { buf: left, off: 0 };
 
-        let last = Octets { buf: right, off: 0 };
+        let last = OctetsMut { buf: right, off: 0 };
 
         Ok((first, last))
     }
@@ -406,13 +406,13 @@ impl<'a> Octets<'a> {
     }
 }
 
-impl<'a> AsRef<[u8]> for Octets<'a> {
+impl<'a> AsRef<[u8]> for OctetsMut<'a> {
     fn as_ref(&self) -> &[u8] {
         &self.buf[self.off..]
     }
 }
 
-impl<'a> AsMut<[u8]> for Octets<'a> {
+impl<'a> AsMut<[u8]> for OctetsMut<'a> {
     fn as_mut(&mut self) -> &mut [u8] {
         &mut self.buf[self.off..]
     }
@@ -455,7 +455,7 @@ mod tests {
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
         ];
 
-        let mut b = Octets::with_slice(&mut d);
+        let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.cap(), 18);
         assert_eq!(b.off(), 0);
 
@@ -490,7 +490,7 @@ mod tests {
     fn peek_u() {
         let mut d = [1, 2];
 
-        let mut b = Octets::with_slice(&mut d);
+        let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.cap(), 2);
         assert_eq!(b.off(), 0);
 
@@ -510,7 +510,7 @@ mod tests {
     #[test]
     fn get_bytes() {
         let mut d = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        let mut b = Octets::with_slice(&mut d);
+        let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.cap(), 10);
         assert_eq!(b.off(), 0);
 
@@ -536,7 +536,7 @@ mod tests {
     #[test]
     fn peek_bytes() {
         let mut d = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        let mut b = Octets::with_slice(&mut d);
+        let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.cap(), 10);
         assert_eq!(b.off(), 0);
 
@@ -554,31 +554,31 @@ mod tests {
     #[test]
     fn get_varint() {
         let mut d = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
-        let mut b = Octets::with_slice(&mut d);
+        let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.get_varint().unwrap(), 151288809941952652);
         assert_eq!(b.cap(), 0);
         assert_eq!(b.off(), 8);
 
         let mut d = [0x9d, 0x7f, 0x3e, 0x7d];
-        let mut b = Octets::with_slice(&mut d);
+        let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.get_varint().unwrap(), 494878333);
         assert_eq!(b.cap(), 0);
         assert_eq!(b.off(), 4);
 
         let mut d = [0x7b, 0xbd];
-        let mut b = Octets::with_slice(&mut d);
+        let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.get_varint().unwrap(), 15293);
         assert_eq!(b.cap(), 0);
         assert_eq!(b.off(), 2);
 
         let mut d = [0x40, 0x25];
-        let mut b = Octets::with_slice(&mut d);
+        let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.get_varint().unwrap(), 37);
         assert_eq!(b.cap(), 0);
         assert_eq!(b.off(), 2);
 
         let mut d = [0x25];
-        let mut b = Octets::with_slice(&mut d);
+        let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.get_varint().unwrap(), 37);
         assert_eq!(b.cap(), 0);
         assert_eq!(b.off(), 1);
@@ -588,7 +588,7 @@ mod tests {
     fn put_varint() {
         let mut d = [0; 8];
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             assert!(b.put_varint(151288809941952652).is_ok());
             assert_eq!(b.cap(), 0);
             assert_eq!(b.off(), 8);
@@ -598,7 +598,7 @@ mod tests {
 
         let mut d = [0; 4];
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             assert!(b.put_varint(494878333).is_ok());
             assert_eq!(b.cap(), 0);
             assert_eq!(b.off(), 4);
@@ -608,7 +608,7 @@ mod tests {
 
         let mut d = [0; 2];
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             assert!(b.put_varint(15293).is_ok());
             assert_eq!(b.cap(), 0);
             assert_eq!(b.off(), 2);
@@ -618,7 +618,7 @@ mod tests {
 
         let mut d = [0; 1];
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             assert!(b.put_varint(37).is_ok());
             assert_eq!(b.cap(), 0);
             assert_eq!(b.off(), 1);
@@ -628,7 +628,7 @@ mod tests {
 
         let mut d = [0; 3];
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             assert!(b.put_varint(151288809941952652).is_err());
             assert_eq!(b.cap(), 3);
             assert_eq!(b.off(), 0);
@@ -641,7 +641,7 @@ mod tests {
     #[should_panic]
     fn varint_too_large() {
         let mut d = [0; 3];
-        let mut b = Octets::with_slice(&mut d);
+        let mut b = OctetsMut::with_slice(&mut d);
         assert!(b.put_varint(std::u64::MAX).is_err());
     }
 
@@ -650,7 +650,7 @@ mod tests {
         let mut d = [0; 18];
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             assert_eq!(b.cap(), 18);
             assert_eq!(b.off(), 0);
 
@@ -688,7 +688,7 @@ mod tests {
         let mut d = [0; 5];
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             assert_eq!(b.cap(), 5);
             assert_eq!(b.off(), 0);
 
@@ -708,7 +708,7 @@ mod tests {
     fn split() {
         let mut d = b"helloworld".to_vec();
 
-        let mut b = Octets::with_slice(&mut d);
+        let mut b = OctetsMut::with_slice(&mut d);
         assert_eq!(b.cap(), 10);
         assert_eq!(b.off(), 0);
         assert_eq!(b.as_ref(), b"helloworld");
@@ -735,7 +735,7 @@ mod tests {
         let mut d = b"helloworld".to_vec();
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             let (first, second) = b.split_at(5).unwrap();
 
             let mut exp1 = b"hello".to_vec();
@@ -746,7 +746,7 @@ mod tests {
         }
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             let (first, second) = b.split_at(10).unwrap();
 
             let mut exp1 = b"helloworld".to_vec();
@@ -757,7 +757,7 @@ mod tests {
         }
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             let (first, second) = b.split_at(9).unwrap();
 
             let mut exp1 = b"helloworl".to_vec();
@@ -768,7 +768,7 @@ mod tests {
         }
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             assert!(b.split_at(11).is_err());
         }
     }
@@ -778,19 +778,19 @@ mod tests {
         let mut d = b"helloworld".to_vec();
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             let mut exp = b"hello".to_vec();
             assert_eq!(b.slice(5), Ok(&mut exp[..]));
         }
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             let mut exp = b"".to_vec();
             assert_eq!(b.slice(0), Ok(&mut exp[..]));
         }
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             b.get_bytes(5).unwrap();
 
             let mut exp = b"world".to_vec();
@@ -798,7 +798,7 @@ mod tests {
         }
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             assert!(b.slice(11).is_err());
         }
     }
@@ -808,31 +808,31 @@ mod tests {
         let mut d = b"helloworld".to_vec();
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             let mut exp = b"orld".to_vec();
             assert_eq!(b.slice_last(4), Ok(&mut exp[..]));
         }
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             let mut exp = b"d".to_vec();
             assert_eq!(b.slice_last(1), Ok(&mut exp[..]));
         }
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             let mut exp = b"".to_vec();
             assert_eq!(b.slice_last(0), Ok(&mut exp[..]));
         }
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             let mut exp = b"helloworld".to_vec();
             assert_eq!(b.slice_last(10), Ok(&mut exp[..]));
         }
 
         {
-            let mut b = Octets::with_slice(&mut d);
+            let mut b = OctetsMut::with_slice(&mut d);
             assert!(b.slice_last(11).is_err());
         }
     }
