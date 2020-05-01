@@ -30,12 +30,21 @@ use std::collections::btree_map;
 use std::collections::BTreeMap;
 use std::collections::Bound;
 
-#[derive(Clone, Default, PartialEq, PartialOrd)]
+#[derive(Clone, PartialEq, PartialOrd)]
 pub struct RangeSet {
     inner: BTreeMap<u64, u64>,
+
+    capacity: usize,
 }
 
 impl RangeSet {
+    pub fn new(capacity: usize) -> Self {
+        RangeSet {
+            inner: BTreeMap::default(),
+            capacity,
+        }
+    }
+
     // TODO: use RangeInclusive
     pub fn insert(&mut self, item: Range<u64>) {
         let mut start = item.start;
@@ -72,6 +81,12 @@ impl RangeSet {
             end = std::cmp::max(end, r.end);
         }
 
+        if self.inner.len() >= self.capacity {
+            if let Some(first) = self.inner.keys().next().copied() {
+                self.inner.remove(&first);
+            }
+        }
+
         self.inner.insert(start, end);
     }
 
@@ -97,8 +112,16 @@ impl RangeSet {
         self.insert(item..item + 1);
     }
 
-    pub fn largest(&self) -> Option<u64> {
+    pub fn first(&self) -> Option<u64> {
+        self.flatten().next()
+    }
+
+    pub fn last(&self) -> Option<u64> {
         self.flatten().next_back()
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
     }
 
     pub fn iter(&self) -> Iter {
@@ -127,6 +150,12 @@ impl RangeSet {
             .range((Bound::Included(item), Bound::Unbounded))
             .map(|(&s, &e)| (s..e))
             .next()
+    }
+}
+
+impl Default for RangeSet {
+    fn default() -> Self {
+        Self::new(std::usize::MAX)
     }
 }
 
@@ -527,5 +556,59 @@ mod tests {
 
         r.insert(4..17);
         assert_eq!(r, expected);
+    }
+
+    #[test]
+    fn first_last() {
+        let mut r = RangeSet::default();
+        assert_eq!(r.first(), None);
+        assert_eq!(r.last(), None);
+
+        r.insert(10..11);
+        assert_eq!(r.first(), Some(10));
+        assert_eq!(r.last(), Some(10));
+
+        r.insert(13..14);
+        assert_eq!(r.first(), Some(10));
+        assert_eq!(r.last(), Some(13));
+
+        r.insert(3..6);
+        assert_eq!(r.first(), Some(3));
+        assert_eq!(r.last(), Some(13));
+
+        r.insert(16..20);
+        assert_eq!(r.first(), Some(3));
+        assert_eq!(r.last(), Some(19));
+
+        r.insert(4..17);
+        assert_eq!(r.first(), Some(3));
+        assert_eq!(r.last(), Some(19));
+    }
+
+    #[test]
+    fn capacity() {
+        let mut r = RangeSet::new(3);
+        assert_eq!(r.first(), None);
+        assert_eq!(r.last(), None);
+
+        r.insert(10..11);
+        assert_eq!(r.first(), Some(10));
+        assert_eq!(r.last(), Some(10));
+
+        r.insert(13..14);
+        assert_eq!(r.first(), Some(10));
+        assert_eq!(r.last(), Some(13));
+
+        r.insert(3..6);
+        assert_eq!(r.first(), Some(3));
+        assert_eq!(r.last(), Some(13));
+
+        r.insert(16..20);
+        assert_eq!(r.first(), Some(10));
+        assert_eq!(r.last(), Some(19));
+
+        r.insert(4..17);
+        assert_eq!(r.first(), Some(4));
+        assert_eq!(r.last(), Some(19));
     }
 }

@@ -228,7 +228,7 @@ impl Recovery {
         epoch: packet::Epoch, handshake_completed: bool, now: Instant,
         trace_id: &str,
     ) -> Result<()> {
-        let largest_acked = ranges.largest().unwrap();
+        let largest_acked = ranges.last().unwrap();
 
         // If the largest packet number acked exceeds any packet number we have
         // sent, then the ACK is obviously invalid, so there's no need to

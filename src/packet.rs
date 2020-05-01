@@ -698,7 +698,7 @@ impl PktNumSpace {
 
             next_pkt_num: 0,
 
-            recv_pkt_need_ack: ranges::RangeSet::default(),
+            recv_pkt_need_ack: ranges::RangeSet::new(crate::MAX_ACK_RANGES),
 
             recv_pkt_num: PktNumWindow::default(),
 
