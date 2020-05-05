@@ -1347,8 +1347,15 @@ impl Connection {
 
         let mut b = octets::OctetsMut::with_slice(buf);
 
-        let mut hdr = Header::from_bytes(&mut b, self.scid.len())
-            .map_err(|e| drop_pkt_on_err(e, self.recv_count, &self.trace_id))?;
+        let mut hdr =
+            Header::from_bytes(&mut b, self.scid.len()).map_err(|e| {
+                drop_pkt_on_err(
+                    e,
+                    self.recv_count,
+                    self.is_server,
+                    &self.trace_id,
+                )
+            })?;
 
         if hdr.ty == packet::Type::VersionNegotiation {
             // Version negotiation packets can only be sent by the server.
@@ -1549,6 +1556,7 @@ impl Connection {
                     return Err(drop_pkt_on_err(
                         Error::CryptoFail,
                         self.recv_count,
+                        self.is_server,
                         &self.trace_id,
                     )),
             }
@@ -1556,8 +1564,9 @@ impl Connection {
 
         let aead_tag_len = aead.alg().tag_len();
 
-        packet::decrypt_hdr(&mut b, &mut hdr, &aead)
-            .map_err(|e| drop_pkt_on_err(e, self.recv_count, &self.trace_id))?;
+        packet::decrypt_hdr(&mut b, &mut hdr, &aead).map_err(|e| {
+            drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
+        })?;
 
         let pn = packet::decode_pkt_num(
             self.pkt_num_spaces[epoch].largest_rx_pkt_num,
@@ -1599,10 +1608,16 @@ impl Connection {
             .ok();
         });
 
-        let mut payload =
-            packet::decrypt_pkt(&mut b, pn, pn_len, payload_len, &aead).map_err(
-                |e| drop_pkt_on_err(e, self.recv_count, &self.trace_id),
-            )?;
+        let mut payload = packet::decrypt_pkt(
+            &mut b,
+            pn,
+            pn_len,
+            payload_len,
+            &aead,
+        )
+        .map_err(|e| {
+            drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
+        })?;
 
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
@@ -3440,15 +3455,19 @@ impl Connection {
 ///
 /// This function maps an error to `Error::Done` to ignore a packet failure
 /// without aborting the connection, except when no other packet was previously
-/// received, in which case the error itself is returned.
+/// received, in which case the error itself is returned, but only on the
+/// server-side as the client will already have armed the idle timer.
 ///
 /// This must only be used for errors preceding packet authentication. Failures
 /// happening after a packet has been authenticated should still cause the
 /// connection to be aborted.
-fn drop_pkt_on_err(e: Error, recv_count: usize, trace_id: &str) -> Error {
-    // If no other packet has been successflully processed, abort the connection
-    // to avoid keeping the connection open when only junk is received.
-    if recv_count == 0 {
+fn drop_pkt_on_err(
+    e: Error, recv_count: usize, is_server: bool, trace_id: &str,
+) -> Error {
+    // On the server, if no other packet has been successflully processed, abort
+    // the connection to avoid keeping the connection open when only junk is
+    // received.
+    if is_server && recv_count == 0 {
         return e;
     }
 
@@ -3858,6 +3877,7 @@ pub mod testing {
             config.set_initial_max_stream_data_uni(10);
             config.set_initial_max_streams_bidi(3);
             config.set_initial_max_streams_uni(3);
+            config.set_max_idle_timeout(180_000);
             config.verify_peer(false);
 
             Pipe::with_config(&mut config)
@@ -5274,7 +5294,7 @@ mod tests {
     #[test]
     /// Tests that invalid packets received before any other valid ones cause
     /// the server to close the connection immediately.
-    fn invalid_initial() {
+    fn invalid_initial_server() {
         let mut buf = [0; 65535];
         let mut pipe = testing::Pipe::default().unwrap();
 
@@ -5301,6 +5321,44 @@ mod tests {
         );
 
         assert!(pipe.server.is_closed());
+    }
+
+    #[test]
+    /// Tests that invalid Initial packets received to cause
+    /// the client to close the connection immediately.
+    fn invalid_initial_client() {
+        let mut buf = [0; 65535];
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Client sends initial flight.
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        // Server sends initial flight.
+        assert_eq!(pipe.server.recv(&mut buf[..len]), Ok(1200));
+
+        let frames = [frame::Frame::Padding { len: 10 }];
+
+        let written = testing::encode_pkt(
+            &mut pipe.server,
+            packet::Type::Initial,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+
+        // Corrupt the packets's last byte to make decryption fail (the last
+        // byte is part of the AEAD tag, so changing it means that the packet
+        // cannot be authenticated during decryption).
+        buf[written - 1] = !buf[written - 1];
+
+        // Client will ignore invalid packet.
+        assert_eq!(pipe.client.recv(&mut buf[..written]), Ok(68));
+
+        // The connection should be alive...
+        assert_eq!(pipe.client.is_closed(), false);
+
+        // ...and the idle timeout should be armed.
+        assert!(pipe.client.idle_timer.is_some());
     }
 
     #[test]
