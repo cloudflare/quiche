@@ -136,7 +136,7 @@ fn main() {
     }
 
     if conn_args.disable_hystart {
-        config.set_hystart(false);
+        config.enable_hystart(false);
     }
 
     let mut http_conn: Option<Box<dyn HttpConn>> = None;

@@ -128,7 +128,7 @@ fn main() {
         .unwrap();
 
     if conn_args.disable_hystart {
-        config.set_hystart(false);
+        config.enable_hystart(false);
     }
 
     let rng = SystemRandom::new();
