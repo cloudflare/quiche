@@ -81,20 +81,22 @@ pub struct CommonArgs {
     pub dump_packet_path: Option<String>,
     pub no_grease: bool,
     pub cc_algorithm: String,
+    pub disable_hystart: bool,
 }
 
 /// Creates a new `CommonArgs` structure using the provided [`Docopt`].
 ///
 /// The `Docopt` usage String needs to include the following:
 ///
-/// --http-version VERSION   HTTP version to use
-/// --max-data BYTES         Connection-wide flow control limit.
-/// --max-stream-data BYTES  Per-stream flow control limit.
+/// --http-version VERSION      HTTP version to use
+/// --max-data BYTES            Connection-wide flow control limit.
+/// --max-stream-data BYTES     Per-stream flow control limit.
 /// --max-streams-bidi STREAMS  Number of allowed concurrent streams.
 /// --max-streams-uni STREAMS   Number of allowed concurrent streams.
 /// --dump-packets PATH         Dump the incoming packets in PATH.
 /// --no-grease                 Don't send GREASE.
 /// --cc-algorithm NAME         Set a congestion control algorithm.
+/// --disable-hystart           Disable HyStart++.
 ///
 /// [`Docopt`]: https://docs.rs/docopt/1.1.0/docopt/
 impl Args for CommonArgs {
@@ -138,6 +140,8 @@ impl Args for CommonArgs {
 
         let cc_algorithm = args.get_str("--cc-algorithm");
 
+        let disable_hystart = args.get_bool("--disable-hystart");
+
         CommonArgs {
             alpns,
             max_data,
@@ -147,6 +151,7 @@ impl Args for CommonArgs {
             dump_packet_path,
             no_grease,
             cc_algorithm: cc_algorithm.to_string(),
+            disable_hystart,
         }
     }
 }

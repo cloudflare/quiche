@@ -60,6 +60,7 @@ Options:
   --no-grease                 Don't send GREASE.
   --http-version VERSION      HTTP version to use [default: all].
   --cc-algorithm NAME         Specify which congestion control algorithm to use [default: cubic].
+  --disable-hystart           Disable HyStart++.
   -h --help                   Show this screen.
 ";
 
@@ -125,6 +126,10 @@ fn main() {
     config
         .set_cc_algorithm_name(&conn_args.cc_algorithm)
         .unwrap();
+
+    if conn_args.disable_hystart {
+        config.enable_hystart(false);
+    }
 
     let rng = SystemRandom::new();
     let conn_id_seed =

@@ -55,6 +55,7 @@ Options:
   --no-verify              Don't verify server's certificate.
   --no-grease              Don't send GREASE.
   --cc-algorithm NAME      Specify which congestion control algorithm to use [default: cubic].
+  --disable-hystart        Disable HyStart++.
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
   -h --help                Show this screen.
@@ -132,6 +133,10 @@ fn main() {
 
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
         config.log_keys();
+    }
+
+    if conn_args.disable_hystart {
+        config.enable_hystart(false);
     }
 
     let mut http_conn: Option<Box<dyn HttpConn>> = None;

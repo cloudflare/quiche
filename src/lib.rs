@@ -421,6 +421,8 @@ pub struct Config {
     grease: bool,
 
     cc_algorithm: CongestionControlAlgorithm,
+
+    hystart: bool,
 }
 
 impl Config {
@@ -442,6 +444,7 @@ impl Config {
             application_protos: Vec::new(),
             grease: true,
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
+            hystart: true,
         })
     }
 
@@ -719,6 +722,13 @@ impl Config {
     /// The default value is `CongestionControlAlgorithm::CUBIC`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
+    }
+
+    /// Configures whether to enable HyStart++.
+    ///
+    /// The default value is `true`.
+    pub fn enable_hystart(&mut self, v: bool) {
+        self.hystart = v;
     }
 }
 

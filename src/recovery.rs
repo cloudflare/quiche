@@ -117,6 +117,9 @@ pub struct Recovery {
     congestion_recovery_start_time: Option<Instant>,
 
     cubic_state: cubic::State,
+
+    // HyStart++.
+    hystart: hystart::Hystart,
 }
 
 impl Recovery {
@@ -171,6 +174,8 @@ impl Recovery {
             cubic_state: cubic::State::default(),
 
             app_limited: false,
+
+            hystart: hystart::Hystart::new(config.hystart),
         }
     }
 
@@ -181,11 +186,12 @@ impl Recovery {
         let ack_eliciting = pkt.ack_eliciting;
         let in_flight = pkt.in_flight;
         let sent_bytes = pkt.size;
+        let pkt_num = pkt.pkt_num;
 
         self.delivery_rate.on_packet_sent(&mut pkt, now);
 
         self.largest_sent_pkt[epoch] =
-            cmp::max(self.largest_sent_pkt[epoch], pkt.pkt_num);
+            cmp::max(self.largest_sent_pkt[epoch], pkt_num);
 
         self.sent[epoch].insert(pkt.pkt_num, pkt);
 
@@ -200,6 +206,14 @@ impl Recovery {
             self.on_packet_sent_cc(sent_bytes, now);
 
             self.set_loss_detection_timer(handshake_completed);
+        }
+
+        // HyStart++: Start of the round in a slow start.
+        if self.hystart.enabled() &&
+            epoch == packet::EPOCH_APPLICATION &&
+            self.congestion_window < self.ssthresh
+        {
+            self.hystart.start_round(pkt_num);
         }
 
         trace!("{} {:?}", trace_id, self);
@@ -531,7 +545,7 @@ impl Recovery {
             self.acked[epoch].append(&mut p.frames);
 
             if p.in_flight {
-                self.on_packet_acked_cc(&p, now);
+                self.on_packet_acked_cc(epoch, &p, now);
 
                 self.delivery_rate.on_ack_received(p, now);
             }
@@ -543,8 +557,10 @@ impl Recovery {
         false
     }
 
-    fn on_packet_acked_cc(&mut self, packet: &Sent, now: Instant) {
-        (self.cc_ops.on_packet_acked)(self, packet, now);
+    fn on_packet_acked_cc(
+        &mut self, epoch: packet::Epoch, packet: &Sent, now: Instant,
+    ) {
+        (self.cc_ops.on_packet_acked)(self, epoch, packet, now);
     }
 
     fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
@@ -589,7 +605,7 @@ impl Recovery {
         }
 
         if let Some(largest_lost_pkt) = largest_lost_pkt {
-            self.congestion_event(largest_lost_pkt.time_sent, now);
+            self.congestion_event(largest_lost_pkt.time_sent, epoch, now);
 
             if self.in_persistent_congestion(&largest_lost_pkt) {
                 self.collapse_cwnd();
@@ -597,8 +613,10 @@ impl Recovery {
         }
     }
 
-    fn congestion_event(&mut self, time_sent: Instant, now: Instant) {
-        (self.cc_ops.congestion_event)(self, time_sent, now);
+    fn congestion_event(
+        &mut self, time_sent: Instant, epoch: packet::Epoch, now: Instant,
+    ) {
+        (self.cc_ops.congestion_event)(self, time_sent, epoch, now);
     }
 
     fn collapse_cwnd(&mut self) {
@@ -609,6 +627,15 @@ impl Recovery {
         if self.app_limited {
             self.delivery_rate.check_app_limited(self.bytes_in_flight)
         }
+    }
+
+    fn hystart_on_packet_acked(&mut self, packet: &Sent) -> (usize, usize) {
+        self.hystart.on_packet_acked(
+            packet,
+            self.latest_rtt,
+            self.congestion_window,
+            self.ssthresh,
+        )
     }
 
     #[cfg(feature = "qlog")]
@@ -662,9 +689,15 @@ impl FromStr for CongestionControlAlgorithm {
 pub struct CongestionControlOps {
     pub on_packet_sent: fn(r: &mut Recovery, sent_bytes: usize, now: Instant),
 
-    pub on_packet_acked: fn(r: &mut Recovery, packet: &Sent, now: Instant),
+    pub on_packet_acked:
+        fn(r: &mut Recovery, epoch: packet::Epoch, packet: &Sent, now: Instant),
 
-    pub congestion_event: fn(r: &mut Recovery, time_sent: Instant, now: Instant),
+    pub congestion_event: fn(
+        r: &mut Recovery,
+        time_sent: Instant,
+        epoch: packet::Epoch,
+        now: Instant,
+    ),
 
     pub collapse_cwnd: fn(r: &mut Recovery),
 }
@@ -706,7 +739,11 @@ impl std::fmt::Debug for Recovery {
         write!(f, "cwnd={} ", self.congestion_window)?;
         write!(f, "ssthresh={} ", self.ssthresh)?;
         write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
-        write!(f, "{:?}", self.delivery_rate)?;
+        write!(f, "{:?} ", self.delivery_rate)?;
+
+        if self.hystart.enabled() {
+            write!(f, "hystart={:?} ", self.hystart)?;
+        }
 
         Ok(())
     }
@@ -1205,4 +1242,5 @@ mod tests {
 
 mod cubic;
 mod delivery_rate;
+mod hystart;
 mod reno;
