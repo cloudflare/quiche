@@ -254,8 +254,8 @@ pub extern fn quiche_conn_set_qlog_fd(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_hystart(config: &mut Config, v: bool) {
-    config.set_hystart(v);
+pub extern fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
+    config.enable_hystart(v);
 }
 
 #[no_mangle]

@@ -729,7 +729,7 @@ impl Config {
     /// Configures whether to enable HyStart++.
     ///
     /// The default value is `true`.
-    pub fn set_hystart(&mut self, v: bool) {
+    pub fn enable_hystart(&mut self, v: bool) {
         self.hystart = v;
     }
 }
