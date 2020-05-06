@@ -803,4 +803,19 @@ mod httpbin_tests {
         let reqs = request_check_status("links/10", 302);
         do_test(reqs, assert_headers_only, true);
     }
+
+    #[test]
+    fn zero_length_body() {
+        let mut reqs = Vec::new();
+
+        let expect_hdrs = Some(vec![Header::new(":status", "200")]);
+
+        let url = endpoint(Some("stream/0"));
+
+        let req = Http3Req::new("GET", &url, None, expect_hdrs);
+        reqs.push(req.clone());
+        reqs.push(req);
+
+        do_test(reqs, assert_headers_only, true);
+    }
 }
