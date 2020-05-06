@@ -28,16 +28,14 @@ use ring::rand::*;
 
 pub fn run(
     test: &mut crate::Http3Test, peer_addr: std::net::SocketAddr,
-    verify_peer: bool, idle_timeout: u64,
+    verify_peer: bool, idle_timeout: u64, max_data: u64,
 ) {
     const MAX_DATAGRAM_SIZE: usize = 1350;
 
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
-    let max_data = 1_000_000;
-
-    let max_stream_data = 1_000_000;
+    let max_stream_data = max_data;
 
     let version = if let Some(v) = std::env::var_os("QUIC_VERSION") {
         match v.to_str() {
