@@ -710,12 +710,18 @@ impl Connection {
 
     /// Sends an HTTP/3 body chunk on the given stream.
     ///
-    /// On success the number of bytes written is returned.
+    /// On success the number of bytes written is returned, or [`Done`] if no
+    /// bytes could be written (e.g. because the stream is blocked).
     ///
     /// Note that the number of written bytes returned can be lower than the
     /// length of the input buffer when the underlying QUIC stream doesn't have
-    /// enough capacity for the operation to complete. The application should
-    /// retry the operation once the stream is reported as writable again.
+    /// enough capacity for the operation to complete.
+    ///
+    /// When a partial write happens (including when [`Done`] is returned) the
+    /// application should retry the operation once the stream is reported as
+    /// writable again.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
     pub fn send_body(
         &mut self, conn: &mut super::Connection, stream_id: u64, body: &[u8],
         fin: bool,
@@ -748,7 +754,7 @@ impl Connection {
         // least one byte of frame payload (this to avoid sending 0-length DATA
         // frames).
         if stream_cap <= overhead {
-            return Ok(0);
+            return Err(Error::Done);
         }
 
         // Cap the frame payload length to the stream's capacity.
@@ -2761,6 +2767,54 @@ mod tests {
         // Once the server gives flow control credits back, we can send the
         // request.
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(4));
+    }
+
+    #[test]
+    /// Tests that blocked 0-length DATA writes are reported correctly.
+    fn zero_length_data_blocked() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let mut h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        let req = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":authority", "quic.tech"),
+            Header::new(":path", "/test"),
+        ];
+
+        assert_eq!(
+            s.client.send_request(&mut s.pipe.client, &req, false),
+            Ok(0)
+        );
+
+        assert_eq!(
+            s.client.send_body(&mut s.pipe.client, 0, b"", true),
+            Err(Error::Done)
+        );
+
+        s.advance().ok();
+
+        // Once the server gives flow control credits back, we can send the body.
+        assert_eq!(s.client.send_body(&mut s.pipe.client, 0, b"", true), Ok(0));
     }
 }
 
