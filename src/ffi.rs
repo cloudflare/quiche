@@ -243,7 +243,8 @@ pub extern fn quiche_conn_set_qlog(
     let filename = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
 
     let file_res = std::fs::OpenOptions::new()
-        .write(true).create_new(true)
+        .write(true)
+        .create_new(true)
         .open(filename);
 
     let writer = match file_res {
