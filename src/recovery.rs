@@ -629,12 +629,15 @@ impl Recovery {
         }
     }
 
-    fn hystart_on_packet_acked(&mut self, packet: &Sent) -> (usize, usize) {
+    fn hystart_on_packet_acked(
+        &mut self, packet: &Sent, now: Instant,
+    ) -> (usize, usize) {
         self.hystart.on_packet_acked(
             packet,
             self.latest_rtt,
             self.congestion_window,
             self.ssthresh,
+            now,
         )
     }
 
@@ -748,6 +751,11 @@ impl std::fmt::Debug for Recovery {
         write!(f, "ssthresh={} ", self.ssthresh)?;
         write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
         write!(f, "app_limited={} ", self.app_limited)?;
+        write!(
+            f,
+            "congestion_recovery_start_time={:?} ",
+            self.congestion_recovery_start_time
+        )?;
         write!(f, "{:?} ", self.delivery_rate)?;
 
         if self.hystart.enabled() {
