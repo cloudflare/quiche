@@ -49,7 +49,7 @@ pub fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
 }
 
 fn on_packet_acked(
-    r: &mut Recovery, epoch: packet::Epoch, packet: &Sent, _now: Instant,
+    r: &mut Recovery, epoch: packet::Epoch, packet: &Sent, now: Instant,
 ) {
     r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
 
@@ -64,7 +64,7 @@ fn on_packet_acked(
     if r.congestion_window < r.ssthresh {
         // Slow start.
         if r.hystart.enabled() && epoch == packet::EPOCH_APPLICATION {
-            let (cwnd, ssthresh) = r.hystart_on_packet_acked(packet);
+            let (cwnd, ssthresh) = r.hystart_on_packet_acked(packet, now);
 
             r.congestion_window = cwnd;
             r.ssthresh = ssthresh;
@@ -81,9 +81,9 @@ fn on_packet_acked(
         // LSS cwnd.
         if r.hystart.enabled() &&
             epoch == packet::EPOCH_APPLICATION &&
-            r.hystart.in_lss()
+            r.hystart.lss_start_time().is_some()
         {
-            let (lss_cwnd, _) = r.hystart_on_packet_acked(packet);
+            let (lss_cwnd, _) = r.hystart_on_packet_acked(packet, now);
 
             reno_cwnd = cmp::max(reno_cwnd, lss_cwnd);
         }

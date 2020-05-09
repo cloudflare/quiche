@@ -32,6 +32,7 @@
 
 use std::cmp;
 use std::time::Duration;
+use std::time::Instant;
 
 use crate::recovery;
 
@@ -42,9 +43,9 @@ const MIN_RTT_THRESH: Duration = Duration::from_millis(4);
 
 const MAX_RTT_THRESH: Duration = Duration::from_millis(16);
 
-const LSS_DIVISOR: f64 = 0.25;
+pub const LSS_DIVISOR: f64 = 0.25;
 
-const N_RTT_SAMPLE: usize = 8;
+pub const N_RTT_SAMPLE: usize = 8;
 
 #[derive(Default)]
 pub struct Hystart {
@@ -58,7 +59,7 @@ pub struct Hystart {
 
     rtt_sample_count: usize,
 
-    lss: bool,
+    lss_start_time: Option<Instant>,
 }
 
 impl std::fmt::Debug for Hystart {
@@ -67,7 +68,7 @@ impl std::fmt::Debug for Hystart {
         write!(f, "last_round_min_rtt={:?} ", self.last_round_min_rtt)?;
         write!(f, "current_round_min_rtt={:?} ", self.current_round_min_rtt)?;
         write!(f, "rtt_sample_count={:?} ", self.rtt_sample_count)?;
-        write!(f, "lss={:?} ", self.lss)?;
+        write!(f, "lss_start_time={:?} ", self.lss_start_time)?;
 
         Ok(())
     }
@@ -86,8 +87,8 @@ impl Hystart {
         self.enabled
     }
 
-    pub fn in_lss(&self) -> bool {
-        self.lss
+    pub fn lss_start_time(&self) -> Option<Instant> {
+        self.lss_start_time
     }
 
     pub fn start_round(&mut self, pkt_num: u64) {
@@ -103,7 +104,7 @@ impl Hystart {
 
                 rtt_sample_count: 0,
 
-                lss: false,
+                lss_start_time: None,
             };
         }
     }
@@ -111,12 +112,12 @@ impl Hystart {
     // Returns a new (ssthresh, cwnd) during slow start.
     pub fn on_packet_acked(
         &mut self, packet: &recovery::Sent, rtt: Duration, cwnd: usize,
-        ssthresh: usize,
+        ssthresh: usize, now: Instant,
     ) -> (usize, usize) {
         let mut ssthresh = ssthresh;
         let mut cwnd = cwnd;
 
-        if !self.lss {
+        if self.lss_start_time().is_none() {
             // Reno Slow Start.
             cwnd += packet.size;
 
@@ -148,7 +149,7 @@ impl Hystart {
                 {
                     ssthresh = cwnd;
 
-                    self.lss = true;
+                    self.lss_start_time = Some(now);
                 }
             }
 
@@ -174,7 +175,7 @@ impl Hystart {
         if self.window_end.is_some() {
             self.window_end = None;
 
-            self.lss = false;
+            self.lss_start_time = None;
         }
     }
 }
@@ -182,7 +183,6 @@ impl Hystart {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
 
     #[test]
     fn start_round() {
@@ -227,10 +227,11 @@ mod tests {
             Duration::from_millis(10),
             init_cwnd,
             init_ssthresh,
+            now,
         );
 
         // Expecting Reno slow start.
-        assert_eq!(hspp.lss, false);
+        assert_eq!(hspp.lss_start_time().is_some(), false);
         assert_eq!((cwnd, ssthresh), (init_cwnd + size, init_ssthresh));
     }
 
@@ -272,7 +273,7 @@ mod tests {
             let rtt = Duration::from_millis(rtt_1st);
 
             let (new_cwnd, new_ssthresh) =
-                hspp.on_packet_acked(&p, rtt, cwnd, ssthresh);
+                hspp.on_packet_acked(&p, rtt, cwnd, ssthresh, now);
 
             cwnd = new_cwnd;
             ssthresh = new_ssthresh;
@@ -304,7 +305,7 @@ mod tests {
             let rtt = Duration::from_millis(rtt_2nd + pkt_num * 4);
 
             let (new_cwnd, new_ssthresh) =
-                hspp.on_packet_acked(&p, rtt, cwnd, ssthresh);
+                hspp.on_packet_acked(&p, rtt, cwnd, ssthresh, now);
 
             cwnd = new_cwnd;
             ssthresh = new_ssthresh;
@@ -313,7 +314,7 @@ mod tests {
         }
 
         // At this point, cwnd exits to LSS mode.
-        assert_eq!(hspp.lss, true);
+        assert_eq!(hspp.lss_start_time().is_some(), true);
 
         // Check if current cwnd is in LSS.
         let cur_ssthresh = 47000;
