@@ -33,6 +33,14 @@ extern "C" {
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#ifdef __unix__
+#include <sys/types.h>
+#endif
+#ifdef _MSC_VER
+#include <BaseTsd.h>
+#define ssize_t SSIZE_T
+#endif
 
 // QUIC transport API.
 //
