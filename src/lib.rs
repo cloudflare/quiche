@@ -2163,13 +2163,14 @@ impl Connection {
             while let Some(len) = self.dgram_queue.peek_writable() {
                 // Make sure we can fit the data in the packet.
                 if left > frame::MAX_DGRAM_OVERHEAD + len {
-                    let data = match self.dgram_queue.pop_writable() {
-                        Some(v) => v,
+                    let mut buf = vec![0; len];
+                    match self.dgram_queue.pop_writable(&mut buf) {
+                        Ok(v) => v,
 
-                        None => continue,
+                        Err(_) => continue,
                     };
 
-                    let frame = frame::Frame::Datagram { data };
+                    let frame = frame::Frame::Datagram { data: buf };
 
                     payload_len += frame.wire_len();
                     left -= frame.wire_len();
@@ -2310,10 +2311,7 @@ impl Connection {
 
         trace!(
             "{} tx pkt {:?} len={} pn={}",
-            self.trace_id,
-            hdr,
-            payload_len,
-            pn
+            self.trace_id, hdr, payload_len, pn
         );
 
         qlog_with!(self.qlog_streamer, q, {
@@ -2821,22 +2819,21 @@ impl Connection {
     /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
     /// # let scid = [0xba; 16];
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
-    /// while let Ok((data)) = conn.dgram_recv() {
-    ///     println!("Got {} bytes of Datagram", data.len());
+    /// let mut dgram_buf = [0; 512];
+    /// while let Ok((len)) = conn.dgram_recv(&mut dgram_buf) {
+    ///     println!("Got {} bytes of Datagram", len);
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn dgram_recv(&mut self) -> Result<Vec<u8>> {
-        let data = self.dgram_queue.pop_readable()?.to_vec();
+    pub fn dgram_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
+        let len = self.dgram_queue.pop_readable(buf)?;
 
-        if data.len() >
-            self.local_transport_params.max_datagram_frame_size as usize
-        {
+        if len > self.local_transport_params.max_datagram_frame_size as usize {
             trace!("received a DATAGRAM larger than max_datagram_frame_size");
             return Err(Error::BufferTooShort);
         }
 
-        Ok(data)
+        Ok(len)
     }
 
     /// Send data in a Datagram frame.
@@ -2867,9 +2864,7 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
-        let data = stream::RangeBuf::from(buf, 0, true);
-
-        self.dgram_queue.push_writable(data)?;
+        self.dgram_queue.push_writable(buf)?;
 
         Ok(())
     }
@@ -3452,11 +3447,7 @@ impl Connection {
             },
 
             frame::Frame::Datagram { data } => {
-                self.dgram_queue.push_readable(stream::RangeBuf::from(
-                    data.as_ref(),
-                    0,
-                    true,
-                ))?;
+                self.dgram_queue.push_readable(&data)?;
             },
         }
 

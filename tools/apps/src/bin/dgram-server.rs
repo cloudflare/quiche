@@ -68,6 +68,7 @@ type ClientMap = HashMap<Vec<u8>, (net::SocketAddr, Client)>;
 fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
+    let mut dgram_buf = [0; 65535];
 
     env_logger::builder()
         .default_format_timestamp_nanos(true)
@@ -341,9 +342,11 @@ fn main() {
                 (client.conn.is_in_early_data() ||
                     client.conn.is_established())
             {
-                match client.conn.dgram_recv() {
-                    Ok(v) => {
-                        let data = unsafe { std::str::from_utf8_unchecked(&v) };
+                match client.conn.dgram_recv(&mut dgram_buf) {
+                    Ok(len) => {
+                        let data = unsafe {
+                            std::str::from_utf8_unchecked(&dgram_buf[..len])
+                        };
                         info!("Received DATAGRAM data {:?}", data);
 
                         // TODO
@@ -418,7 +421,8 @@ fn main() {
                 loop {
                     let http3_conn = client.http3_conn.as_mut().unwrap();
 
-                    match http3_conn.poll_dgram(&mut client.conn) {
+                    match http3_conn.poll_dgram(&mut client.conn, &mut dgram_buf)
+                    {
                         Ok((
                             flow_id,
                             quiche::h3::DatagramEvent::Received(data),

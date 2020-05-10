@@ -29,15 +29,13 @@ use std::collections::VecDeque;
 use crate::Error;
 use crate::Result;
 
-use crate::stream;
-
 const MAX_FRAME_COUNT: usize = 1000;
 
 /// Keeps track of Datagram frames.
 #[derive(Default)]
 pub struct DatagramQueue {
-    pub readable: VecDeque<stream::RangeBuf>,
-    pub writable: VecDeque<stream::RangeBuf>,
+    readable: VecDeque<Vec<u8>>,
+    writable: VecDeque<Vec<u8>>,
 }
 
 impl DatagramQueue {
@@ -48,46 +46,59 @@ impl DatagramQueue {
         }
     }
 
-    pub fn push_readable(&mut self, data: stream::RangeBuf) -> Result<()> {
-        if self.writable.len() == MAX_FRAME_COUNT {
+    fn push(queue: &mut VecDeque<Vec<u8>>, data: &[u8]) -> Result<()> {
+        if queue.len() == MAX_FRAME_COUNT {
             return Err(Error::Done);
         }
 
-        self.readable.push_back(data);
-
+        queue.push_back(data.to_vec());
         Ok(())
     }
 
-    pub fn pop_readable(&mut self) -> Result<stream::RangeBuf> {
-        match self.readable.pop_front() {
-            Some(v) => Ok(v),
-
-            None => Err(Error::Done),
-        }
+    fn peek(queue: &VecDeque<Vec<u8>>) -> Option<usize> {
+        queue.front().map(|d| d.len())
     }
 
-    pub fn push_writable(&mut self, data: stream::RangeBuf) -> Result<()> {
-        if self.writable.len() == MAX_FRAME_COUNT {
-            return Err(Error::Done);
+    fn pop(queue: &mut VecDeque<Vec<u8>>, buf: &mut [u8]) -> Result<usize> {
+        match queue.front() {
+            Some(d) =>
+                if d.len() > buf.len() {
+                    return Err(Error::BufferTooShort);
+                },
+
+            None => return Err(Error::Done),
         }
 
-        self.writable.push_back(data);
+        if let Some(d) = queue.pop_front() {
+            buf[..d.len()].copy_from_slice(&d);
+            return Ok(d.len());
+        }
 
-        Ok(())
+        Err(Error::Done)
+    }
+
+    pub fn push_readable(&mut self, data: &[u8]) -> Result<()> {
+        DatagramQueue::push(&mut self.readable, data)
+    }
+
+    #[allow(dead_code)]
+    pub fn peek_readable(&self) -> Option<usize> {
+        DatagramQueue::peek(&self.readable)
+    }
+
+    pub fn pop_readable(&mut self, buf: &mut [u8]) -> Result<usize> {
+        DatagramQueue::pop(&mut self.readable, buf)
+    }
+
+    pub fn push_writable(&mut self, data: &[u8]) -> Result<()> {
+        DatagramQueue::push(&mut self.writable, data)
     }
 
     pub fn peek_writable(&self) -> Option<usize> {
-        let data = self.writable.front()?.as_ref();
-        Some(data.len())
+        DatagramQueue::peek(&self.writable)
     }
 
-    pub fn pop_writable(&mut self) -> Option<stream::RangeBuf> {
-        self.writable.pop_front()
-
-        // match self.writable.pop_front() {
-        // Some(v) => Ok(v),
-        //
-        // None => Err(Error::Done)
-        // }
+    pub fn pop_writable(&mut self, buf: &mut [u8]) -> Result<usize> {
+        DatagramQueue::pop(&mut self.writable, buf)
     }
 }

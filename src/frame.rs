@@ -141,7 +141,7 @@ pub enum Frame {
     HandshakeDone,
 
     Datagram {
-        data: stream::RangeBuf,
+        data: Vec<u8>,
     },
 }
 
@@ -1087,9 +1087,10 @@ fn parse_datagram_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
     };
 
     let data = b.get_bytes(len)?;
-    let data = stream::RangeBuf::from(data.as_ref(), 0, true);
 
-    Ok(Frame::Datagram { data })
+    Ok(Frame::Datagram {
+        data: Vec::from(data.buf()),
+    })
 }
 
 #[cfg(test)]
@@ -1773,11 +1774,9 @@ mod tests {
     fn datagram() {
         let mut d = [42; 128];
 
-        let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
-        let frame = Frame::Datagram {
-            data: stream::RangeBuf::from(&data, 0, true),
-        };
+        let frame = Frame::Datagram { data };
 
         let wire_len = {
             let mut b = octets::OctetsMut::with_slice(&mut d);

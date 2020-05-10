@@ -808,9 +808,7 @@ impl Connection {
         b.put_varint(flow_id)?;
         b.put_bytes(buf)?;
 
-        let data = super::stream::RangeBuf::from(&d, 0, true);
-
-        conn.dgram_queue.push_writable(data)?;
+        conn.dgram_queue.push_writable(&d)?;
 
         Ok(())
     }
@@ -912,10 +910,10 @@ impl Connection {
 
     /// todo
     pub fn poll_dgram(
-        &mut self, conn: &mut super::Connection,
+        &mut self, conn: &mut super::Connection, buf: &mut [u8],
     ) -> Result<(u64, DatagramEvent)> {
         // Process Datagrams
-        let ev = match self.process_dgram(conn) {
+        let ev = match self.process_dgram(conn, buf) {
             Ok(v) => Some(v),
 
             Err(Error::Done) => None,
@@ -1334,10 +1332,10 @@ impl Connection {
 
     /// Process Datagrams
     pub fn process_dgram(
-        &mut self, conn: &mut super::Connection,
+        &mut self, conn: &mut super::Connection, buf: &mut [u8],
     ) -> Result<(u64, DatagramEvent)> {
-        let mut v = conn.dgram_recv()?;
-        let mut b = octets::Octets::with_slice(&mut v);
+        conn.dgram_recv(buf)?;
+        let mut b = octets::Octets::with_slice(buf);
         let flow_id = b.get_varint()?;
         let data = b.get_bytes(b.len() - b.off())?;
         Ok((flow_id, DatagramEvent::Received(data.to_vec())))

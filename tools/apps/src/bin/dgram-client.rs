@@ -61,6 +61,7 @@ Options:
 fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
+    let mut dgram_buf = [0; 65535];
 
     env_logger::builder()
         .default_format_timestamp_nanos(true)
@@ -102,7 +103,6 @@ fn main() {
             initial_max_streams_bidi: 0,
             initial_max_streams_uni: 0,
         },
-
 
         _ => panic!("Application protocol \"{}\" not supported", app_proto),
     };
@@ -162,7 +162,6 @@ fn main() {
     config.set_max_datagram_frame_size(max_datagram_frame);
 
     let mut http3_conn = None;
-    let mut quictransport_conn = None;
 
     if args.get_bool("--no-verify") {
         config.verify_peer(false);
@@ -263,9 +262,11 @@ fn main() {
             // If we negotiated SiDUCK, once the QUIC connection is established
             // try to read datagrams.
             if app_params.proto == SIDUCK_ALPN && conn.is_established() {
-                match conn.dgram_recv() {
-                    Ok(v) => {
-                        let data = unsafe { std::str::from_utf8_unchecked(&v) };
+                match conn.dgram_recv(&mut dgram_buf) {
+                    Ok(len) => {
+                        let data = unsafe {
+                            std::str::from_utf8_unchecked(&dgram_buf[..len])
+                        };
 
                         info!("Received DATAGRAM data {:?}", data);
                         dgrams_complete += 1;
@@ -340,7 +341,6 @@ fn main() {
             dgrams_sent += dgrams_done;
         }
 
-
         // If we negotiated HTTP/3, once the QUIC connection is established
         // create a new HTTP/3 connection.
         if app_params.proto == quiche::h3::APPLICATION_PROTOCOL &&
@@ -379,7 +379,7 @@ fn main() {
         if let Some(http3_conn) = &mut http3_conn {
             // Process HTTP/3 events.
             loop {
-                match http3_conn.poll_dgram(&mut conn) {
+                match http3_conn.poll_dgram(&mut conn, &mut dgram_buf) {
                     Ok((flow_id, quiche::h3::DatagramEvent::Received(data))) => {
                         info!(
                             "Received DATAGRAM flow_id={} dat= {:?}",
