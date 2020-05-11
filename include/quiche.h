@@ -218,6 +218,10 @@ quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
                                       quiche_config *config, void *ssl,
                                       bool is_server);
 
+// Enables qlog to the specified file path. Returns true on success.
+bool quiche_conn_set_qlog_path(quiche_conn *conn, const char *path,
+                          const char *log_title, const char *log_desc);
+
 // Enables qlog to the specified file descriptor. Unix only.
 void quiche_conn_set_qlog_fd(quiche_conn *conn, int fd, const char * log_title,
                              const char * log_desc);
