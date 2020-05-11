@@ -9,6 +9,9 @@ addons:
       - libev-dev
       - uthash-dev
       - protobuf-compiler
+  homebrew:
+    packages:
+      - libev
 
 matrix:
   include:
@@ -35,7 +38,7 @@ matrix:
       - RUSTFLAGS="-D warnings" cargo package --verbose --allow-dirty
       - cargo clippy --examples -- -D warnings
       - cargo doc --no-deps
-      - make -C examples
+      - (cd examples && cmake . && cmake --build .)
       # http3_test
       - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
       - cargo clippy --manifest-path tools/http3_test/Cargo.toml -- -D warnings
@@ -69,7 +72,7 @@ matrix:
       - RUSTFLAGS="-D warnings" cargo package --verbose --allow-dirty
       - cargo fmt -- --check
       - cargo doc --no-deps
-      - make -C examples
+      - (cd examples && cmake . && cmake --build .)
       # fuzzers
       - RUSTFLAGS="-D warnings" cargo fuzz run packet_recv_client -- -runs=1
       - RUSTFLAGS="-D warnings" cargo fuzz run packet_recv_server -- -runs=1
@@ -98,6 +101,7 @@ matrix:
       # iOS
       - cargo install --force cargo-lipo
       - RUSTFLAGS="-D warnings" cargo lipo --verbose
+      - cmake -S examples -B examples/build && cmake --build examples/build
    - name: "stable Windows x86_64/x86"
      language: rust
      rust: stable
@@ -109,6 +113,8 @@ matrix:
       - choco install golang nasm
       # Update $PATH
       - export PATH="$(powershell -Command '("Process", "Machine" | % { [Environment]::GetEnvironmentVariable("PATH", $_) -Split ";" -Replace "\\$", "" } | Select -Unique | % { cygpath $_ }) -Join ":"')"
+      - cmake -S examples/cmake/libev-dep -B ../libev64 -Ax64   && cmake --build ../libev64
+      - cmake -S examples/cmake/libev-dep -B ../libev32 -AWin32 && cmake --build ../libev32
      install:
       - rustup target add $TARGET_32 $TARGET_64
      script:
@@ -116,8 +122,11 @@ matrix:
       - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET_64
       - RUSTFLAGS="-D warnings" cargo build --verbose --target=$TARGET_32
       - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET_32
+      - cmake -S examples -B examples/build64 -Ax64   -DLibev_ROOT=$PWD/../libev64 && cmake --build examples/build64
+      - cmake -S examples -B examples/build32 -AWin32 -DLibev_ROOT=$PWD/../libev32 && cmake --build examples/build32
    - name: "stable Android"
      language: android
+     # Android builds are only supported on the Trusty image, see https://docs.travis-ci.com/user/languages/android/
      dist: trusty
      env:
        NDK_VER_OLD=r13b
