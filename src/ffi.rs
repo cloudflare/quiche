@@ -236,7 +236,7 @@ pub extern fn quiche_config_set_cc_algorithm(
 
 #[no_mangle]
 #[cfg(feature = "qlog")]
-pub extern fn quiche_conn_set_qlog(
+pub extern fn quiche_conn_set_qlog_path(
     conn: &mut Connection, path: *const c_char, log_title: *const c_char,
     log_desc: *const c_char,
 ) -> bool {
