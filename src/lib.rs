@@ -2179,7 +2179,7 @@ impl Connection {
 
                     ack_eliciting = true;
                     in_flight = true;
-
+                } else {
                     break;
                 }
             }
