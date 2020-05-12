@@ -98,6 +98,10 @@ impl DatagramQueue {
         DatagramQueue::peek(&self.writable)
     }
 
+    pub fn has_writable(&self) -> bool {
+        !&self.writable.is_empty()
+    }
+
     pub fn pop_writable(&mut self, buf: &mut [u8]) -> Result<usize> {
         DatagramQueue::pop(&mut self.writable, buf)
     }
