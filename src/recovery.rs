@@ -181,7 +181,8 @@ impl Recovery {
 
     pub fn on_packet_sent(
         &mut self, mut pkt: Sent, epoch: packet::Epoch,
-        handshake_completed: bool, now: Instant, trace_id: &str,
+        handshake_completed: bool, data_pending: bool,
+        now: Instant, trace_id: &str,
     ) {
         let ack_eliciting = pkt.ack_eliciting;
         let in_flight = pkt.in_flight;
@@ -200,7 +201,7 @@ impl Recovery {
                 self.time_of_last_sent_ack_eliciting_pkt[epoch] = Some(now);
             }
 
-            self.app_limited =
+            self.app_limited = !data_pending &&
                 (self.bytes_in_flight + sent_bytes) < self.congestion_window;
 
             self.on_packet_sent_cc(sent_bytes, now);
@@ -852,7 +853,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
         assert_eq!(r.bytes_in_flight, 1000);
 
@@ -869,7 +870,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 2);
         assert_eq!(r.bytes_in_flight, 2000);
 
@@ -886,7 +887,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
         assert_eq!(r.bytes_in_flight, 3000);
 
@@ -903,7 +904,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
         assert_eq!(r.bytes_in_flight, 4000);
 
@@ -952,7 +953,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
         assert_eq!(r.bytes_in_flight, 3000);
 
@@ -969,7 +970,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
         assert_eq!(r.bytes_in_flight, 4000);
         assert_eq!(r.lost_count, 0);
@@ -1024,7 +1025,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
         assert_eq!(r.bytes_in_flight, 1000);
 
@@ -1041,7 +1042,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 2);
         assert_eq!(r.bytes_in_flight, 2000);
 
@@ -1058,7 +1059,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
         assert_eq!(r.bytes_in_flight, 3000);
 
@@ -1075,7 +1076,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
         assert_eq!(r.bytes_in_flight, 4000);
 
@@ -1141,7 +1142,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
         assert_eq!(r.bytes_in_flight, 1000);
 
@@ -1158,7 +1159,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 2);
         assert_eq!(r.bytes_in_flight, 2000);
 
@@ -1175,7 +1176,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
         assert_eq!(r.bytes_in_flight, 3000);
 
@@ -1192,7 +1193,7 @@ mod tests {
             is_app_limited: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
         assert_eq!(r.bytes_in_flight, 4000);
 
@@ -1237,6 +1238,72 @@ mod tests {
 
         // Spurious loss.
         assert_eq!(r.lost_count, 1);
+    }
+
+    #[test]
+    fn app_limited_more_data_pending() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
+
+        // Start by sending a few packets.
+        let p = Sent {
+            pkt_num: 0,
+            frames: vec![],
+            time_sent: now,
+            size: 5,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
+        assert_eq!(r.bytes_in_flight, 5);
+        assert_eq!(r.app_limited, true);
+
+        let p = Sent {
+            pkt_num: 1,
+            frames: vec![],
+            time_sent: now,
+            size: 5,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, true, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 2);
+        assert_eq!(r.bytes_in_flight, 10);
+        assert_eq!(r.app_limited, false);
+
+        let p = Sent {
+            pkt_num: 2,
+            frames: vec![],
+            time_sent: now,
+            size: 5,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            recent_delivered_packet_sent_time: now,
+            is_app_limited: false,
+        };
+
+        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, false, now, "");
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
+        assert_eq!(r.bytes_in_flight, 15);
+        assert_eq!(r.app_limited, true);
     }
 }
 
