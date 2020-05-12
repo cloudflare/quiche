@@ -110,9 +110,20 @@ fn get_boringssl_cmake_config() -> cmake::Config {
                 }
             }
 
-            // bitcode on
-            boringssl_cmake.define("CMAKE_ASM_FLAGS", "-fembed-bitcode");
-            boringssl_cmake.cflag("-fembed-bitcode");
+            // Bitcode is always on.
+            let bitcode_cflag = "-fembed-bitcode";
+
+            // Hack for Xcode 10.1.
+            let target_cflag = if arch == "x86_64" {
+                "-target x86_64-apple-ios-simulator"
+            } else {
+                ""
+            };
+
+            let cflag = format!("{} {}", bitcode_cflag, target_cflag);
+
+            boringssl_cmake.define("CMAKE_ASM_FLAGS", &cflag);
+            boringssl_cmake.cflag(&cflag);
 
             boringssl_cmake
         },
