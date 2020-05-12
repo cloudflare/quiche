@@ -673,7 +673,11 @@ impl QlogStreamer {
             return Err(Error::InvalidState);
         }
 
-        let event_time = self.start_time.elapsed();
+        let event_time = if cfg!(test) {
+            std::time::Duration::from_secs(0)
+        } else {
+            self.start_time.elapsed()
+        };
 
         let rel = match &self.qlog.traces[0].configuration {
             Some(conf) => match conf.time_units {
@@ -2870,10 +2874,7 @@ mod tests {
         });
 
         // Some events hold frames, can't write any more events until frame
-        // writing is concluded. Store event add time so that we can substitute
-        // it back into the qlog test output and avoid time-base flappiness.
-        let event_add_time =
-            format!("\"{}\"", s.start_time.elapsed().as_millis().to_string());
+        // writing is concluded.
         assert!(match s.add_event(event2.clone()) {
             Ok(true) => true,
             _ => false,
@@ -2906,8 +2907,8 @@ mod tests {
         let r = s.writer();
         let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
 
-        let log_string = r#"{"qlog_version":"version","title":"title","description":"description","traces":[{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_units":"ms","time_offset":"0"},"event_fields":["relative_time","category","event","data"],"events":[["0","transport","packet_sent",{"packet_type":"handshake","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"40","offset":"40","length":"400","fin":true}]}],[event_add_time,"transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}]]}]}"#;
-        let log_string = log_string.replace("event_add_time", &event_add_time);
+        let log_string = r#"{"qlog_version":"version","title":"title","description":"description","traces":[{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_units":"ms","time_offset":"0"},"event_fields":["relative_time","category","event","data"],"events":[["0","transport","packet_sent",{"packet_type":"handshake","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"40","offset":"40","length":"400","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}]]}]}"#;
+
         let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
 
         assert_eq!(log_string, written_string);
