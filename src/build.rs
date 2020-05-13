@@ -33,14 +33,6 @@ const CMAKE_PARAMS_IOS: &[(&str, &[(&str, &str)])] = &[
         ("CMAKE_OSX_ARCHITECTURES", "arm64"),
         ("CMAKE_OSX_SYSROOT", "iphoneos"),
     ]),
-    ("arm", &[
-        ("CMAKE_OSX_ARCHITECTURES", "arm"),
-        ("CMAKE_OSX_SYSROOT", "iphoneos"),
-    ]),
-    ("x86", &[
-        ("CMAKE_OSX_ARCHITECTURES", "x86"),
-        ("CMAKE_OSX_SYSROOT", "iphonesimulator"),
-    ]),
     ("x86_64", &[
         ("CMAKE_OSX_ARCHITECTURES", "x86_64"),
         ("CMAKE_OSX_SYSROOT", "iphonesimulator"),
