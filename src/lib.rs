@@ -1876,7 +1876,7 @@ impl Connection {
                 },
 
                 frame::Frame::MaxStreamData { stream_id, max: _ } => {
-                    if self.streams.get_mut(stream_id).is_some() {
+                    if self.streams.get(stream_id).is_some() {
                         self.streams.mark_almost_full(stream_id, true);
                     }
                 },
