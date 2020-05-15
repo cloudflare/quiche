@@ -783,6 +783,9 @@ pub struct Connection {
     /// trigger sending MAX_DATA frames after a certain threshold.
     max_rx_data_next: u64,
 
+    /// Whether we send MAX_DATA frame.
+    almost_full: bool,
+
     /// Total number of bytes sent to the peer.
     tx_data: u64,
 
@@ -1111,6 +1114,7 @@ impl Connection {
             rx_data: 0,
             max_rx_data,
             max_rx_data_next: max_rx_data,
+            almost_full: false,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -1909,6 +1913,10 @@ impl Connection {
                     }
                 },
 
+                frame::Frame::MaxData { .. } => {
+                    self.almost_full = true;
+                },
+
                 _ => (),
             }
         }
@@ -2077,12 +2085,15 @@ impl Connection {
             }
 
             // Create MAX_DATA frame as needed.
-            if self.should_update_max_data() {
+            if self.almost_full {
                 let frame = frame::Frame::MaxData {
                     max: self.max_rx_data_next,
                 };
 
                 if push_frame_to_pkt!(frames, frame, payload_len, left) {
+                    self.almost_full = false;
+
+                    // Commits the new max_rx_data limit.
                     self.max_rx_data = self.max_rx_data_next;
 
                     ack_eliciting = true;
@@ -2529,6 +2540,10 @@ impl Connection {
             );
             q.add_event(ev).ok();
         });
+
+        if self.should_update_max_data() {
+            self.almost_full = true;
+        }
 
         Ok((read, fin))
     }
@@ -3125,7 +3140,7 @@ impl Connection {
         // If there are flushable, almost full or blocked streams, use the
         // Application epoch.
         if (self.is_established() || self.is_in_early_data()) &&
-            (self.should_update_max_data() ||
+            (self.almost_full ||
                 self.blocked_limit.is_some() ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
