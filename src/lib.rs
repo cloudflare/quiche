@@ -1875,7 +1875,7 @@ impl Connection {
                     self.handshake_done_sent = false;
                 },
 
-                frame::Frame::MaxStreamData { stream_id, max: _ } => {
+                frame::Frame::MaxStreamData { stream_id, .. } => {
                     if self.streams.get(stream_id).is_some() {
                         self.streams.mark_almost_full(stream_id, true);
                     }
