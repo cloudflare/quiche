@@ -822,7 +822,7 @@ impl Connection {
             conn.trace_id(),
             stream_id,
             header_block.len(),
-            fin
+            fin,
         );
 
         b.put_varint(frame::HEADERS_FRAME_TYPE_ID)?;
@@ -3098,12 +3098,22 @@ mod tests {
             Header::new(":path", "/test"),
         ];
 
+        let ev_headers = Event::Headers {
+            list: req.clone(),
+            has_body: false,
+        };
+
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
 
         assert_eq!(
             s.client.send_request(&mut s.pipe.client, &req, true),
             Err(Error::StreamBlocked)
         );
+
+        s.advance().ok();
+
+        // The server should consume the request to update flow control credit.
+        assert_eq!(s.server.poll(&mut s.pipe.server), Ok((0, ev_headers)));
 
         s.advance().ok();
 
@@ -3144,6 +3154,11 @@ mod tests {
             Header::new(":path", "/test"),
         ];
 
+        let ev_headers = Event::Headers {
+            list: req.clone(),
+            has_body: true,
+        };
+
         assert_eq!(
             s.client.send_request(&mut s.pipe.client, &req, false),
             Ok(0)
@@ -3153,6 +3168,11 @@ mod tests {
             s.client.send_body(&mut s.pipe.client, 0, b"", true),
             Err(Error::Done)
         );
+
+        s.advance().ok();
+
+        // The server should consume the request to update flow control credit.
+        assert_eq!(s.server.poll(&mut s.pipe.server), Ok((0, ev_headers)));
 
         s.advance().ok();
 
