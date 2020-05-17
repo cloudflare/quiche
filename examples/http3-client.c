@@ -29,14 +29,24 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <unistd.h>
 
 #include <fcntl.h>
 #include <errno.h>
 
 #include <sys/types.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ntsecapi.h>   /* for RtlGenRandom */
+#include <io.h>         /* for _open_osfhandle */
+#include <ws2tcpip.h>
+#else   /* ! _WIN32 */
+#include <unistd.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#define INVALID_SOCKET -1
+typedef int SOCKET;
+#endif  /* ! _WIN32 */
 
 #include <ev.h>
 
@@ -57,6 +67,14 @@ struct conn_io {
 
     quiche_h3_conn *http3;
 };
+
+#ifdef _WIN32
+/* Winsock does not propate errors through errno. */
+static void print_winsock_error(const char *s) {
+    fprintf(stderr, "%s: error code %d\n", s, WSAGetLastError());
+}
+#define perror print_winsock_error
+#endif  /* _WIN32 */
 
 static void debug_log(const char *line, void *argp) {
     fprintf(stderr, "%s\n", line);
@@ -112,7 +130,11 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         ssize_t read = recv(conn_io->sock, buf, sizeof(buf), 0);
 
         if (read < 0) {
+#ifdef _WIN32
+            if (WSAGetLastError() == WSAEWOULDBLOCK) {
+#else
             if ((errno == EWOULDBLOCK) || (errno == EAGAIN)) {
+#endif
                 fprintf(stderr, "recv would block\n");
                 break;
             }
@@ -295,22 +317,39 @@ int main(int argc, char *argv[]) {
         .ai_protocol = IPPROTO_UDP
     };
 
+#ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        fprintf(stderr, "WSAStartup failed\n");
+        return -1;
+    }
+#endif
+
     quiche_enable_debug_logging(debug_log, NULL);
 
     struct addrinfo *peer;
     int s = getaddrinfo(host, port, &hints, &peer);
     if (s != 0) {
+#ifdef _WIN32
+        fprintf(stderr, "failed to resolve host: %d\n", s);
+#else
         fprintf(stderr, "failed to resolve host: %s\n", gai_strerror(s));
+#endif
         return -1;
     }
 
     int sock = socket(peer->ai_family, SOCK_DGRAM, 0);
-    if (sock < 0) {
+    if (sock == INVALID_SOCKET) {
         perror("failed to create socket");
         return -1;
     }
 
+#ifdef _WIN32
+    u_long iMode = 1;
+    if (ioctlsocket(sock, FIONBIO, &iMode) != 0) {
+#else
     if (fcntl(sock, F_SETFL, O_NONBLOCK) != 0) {
+#endif
         perror("failed to make socket non-blocking");
         return -1;
     }
@@ -348,6 +387,12 @@ int main(int argc, char *argv[]) {
     // ABC: old config creation here
 
     uint8_t scid[LOCAL_CONN_ID_LEN];
+#ifdef _WIN32
+    if (!RtlGenRandom(scid, LOCAL_CONN_ID_LEN)) {
+        fprintf(stderr, "failed to create connection ID");
+        return -1;
+    }
+#else   /* ! _WIN32 */
     int rng = open("/dev/urandom", O_RDONLY);
     if (rng < 0) {
         perror("failed to open /dev/urandom");
@@ -360,6 +405,7 @@ int main(int argc, char *argv[]) {
         return -1;
     }
     close(rng);
+#endif  /* ! _WIN32 */
 
     quiche_conn *conn = quiche_connect(host, (const uint8_t *) scid,
                                        sizeof(scid), config);
@@ -382,7 +428,12 @@ int main(int argc, char *argv[]) {
 
     struct ev_loop *loop = ev_default_loop(0);
 
-    ev_io_init(&watcher, recv_cb, conn_io->sock, EV_READ);
+#ifdef _WIN32
+    int sockfd = _open_osfhandle(conn_io->sock, 0);
+    ev_io_init(&watcher, recv_cb, sockfd, EV_READ);
+#else
+    ev_io_init(&watcher, recv_cb, sock, EV_READ);
+#endif
     ev_io_start(loop, &watcher);
     watcher.data = conn_io;
 
@@ -398,6 +449,10 @@ int main(int argc, char *argv[]) {
     quiche_conn_free(conn);
 
     quiche_config_free(config);
+
+#ifdef _WIN32
+    WSACleanup();
+#endif
 
     return 0;
 }
