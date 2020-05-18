@@ -354,7 +354,7 @@ To build quiche for iOS, you need the following:
 - Install the Rust toolchain for iOS architectures:
 
 ```bash
- $ rustup target add aarch64-apple-ios armv7-apple-ios armv7s-apple-ios x86_64-apple-ios i386-apple-ios
+ $ rustup target add aarch64-apple-ios x86_64-apple-ios
 ```
 
 - Install `cargo-lipo`:
@@ -374,6 +374,8 @@ or
 ```bash
  $ cargo lipo --release
 ```
+
+iOS build is tested in Xcode 10.1 and Xcode 11.2.
 
 ### Building Docker images
 
