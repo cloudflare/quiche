@@ -627,11 +627,16 @@ impl Connection {
 
     /// Sends an HTTP/3 response on the specified stream.
     ///
+    /// This method sends the provided `headers` without a body. To include a body,
+    /// set `fin` as `false` and subsequently call [`send_body`] with the same
+    /// connection and stream.
+    ///
     /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
     /// doesn't have enough capacity for the operation to complete. When this
     /// happens the application should retry the operation once the stream is
     /// reported as writable again.
     ///
+    /// [`send_body`]: struct.Connection.html#method.send_body
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_response(
         &mut self, conn: &mut super::Connection, stream_id: u64,
