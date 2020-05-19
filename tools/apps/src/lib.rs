@@ -955,6 +955,8 @@ impl HttpConn for Http3Conn {
                     {
                         Ok(v) => v,
 
+                        Err(quiche::h3::Error::Done) => 0,
+
                         Err(e) => {
                             error!(
                                 "{} stream send failed {:?}",
@@ -1035,6 +1037,10 @@ impl HttpConn for Http3Conn {
 
         let written = match self.h3_conn.send_body(conn, stream_id, body, true) {
             Ok(v) => v,
+
+            Err(quiche::h3::Error::Done) => {
+                return;
+            },
 
             Err(e) => {
                 error!("{} stream send failed {:?}", conn.trace_id(), e);
