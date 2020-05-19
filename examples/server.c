@@ -171,6 +171,7 @@ static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
         perror("failed to create connection ID");
         return NULL;
     }
+    close(rng);
 
     quiche_conn *conn = quiche_accept(conn_io->cid, LOCAL_CONN_ID_LEN,
                                       odcid, odcid_len, config);
@@ -407,8 +408,9 @@ int main(int argc, char *argv[]) {
     quiche_enable_debug_logging(debug_log, NULL);
 
     struct addrinfo *local;
-    if (getaddrinfo(host, port, &hints, &local) != 0) {
-        perror("failed to resolve host");
+    int s = getaddrinfo(host, port, &hints, &local);
+    if (s != 0) {
+        fprintf(stderr, "failed to resolve host: %s\n", gai_strerror(s));
         return -1;
     }
 
@@ -427,6 +429,7 @@ int main(int argc, char *argv[]) {
         perror("failed to connect socket");
         return -1;
     }
+    freeaddrinfo(local);
 
     config = quiche_config_new(QUICHE_PROTOCOL_VERSION);
     if (config == NULL) {
@@ -463,8 +466,6 @@ int main(int argc, char *argv[]) {
     watcher.data = &c;
 
     ev_loop(loop, 0);
-
-    freeaddrinfo(local);
 
     quiche_config_free(config);
 

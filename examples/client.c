@@ -212,8 +212,9 @@ int main(int argc, char *argv[]) {
     quiche_enable_debug_logging(debug_log, NULL);
 
     struct addrinfo *peer;
-    if (getaddrinfo(host, port, &hints, &peer) != 0) {
-        perror("failed to resolve host");
+    int s = getaddrinfo(host, port, &hints, &peer);
+    if (s != 0) {
+        fprintf(stderr, "failed to resolve host: %s\n", gai_strerror(s));
         return -1;
     }
 
@@ -232,6 +233,7 @@ int main(int argc, char *argv[]) {
         perror("failed to connect socket");
         return -1;
     }
+    freeaddrinfo(peer);
 
     quiche_config *config = quiche_config_new(0xbabababa);
     if (config == NULL) {
@@ -267,6 +269,7 @@ int main(int argc, char *argv[]) {
         perror("failed to create connection ID");
         return -1;
     }
+    close(rng);
 
     quiche_conn *conn = quiche_connect(host, (const uint8_t *) scid,
                                        sizeof(scid), config);
@@ -298,8 +301,6 @@ int main(int argc, char *argv[]) {
     flush_egress(loop, conn_io);
 
     ev_loop(loop, 0);
-
-    freeaddrinfo(peer);
 
     quiche_conn_free(conn);
 
