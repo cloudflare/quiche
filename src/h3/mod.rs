@@ -590,8 +590,8 @@ impl Connection {
     ///
     /// The request is encoded from the provided list of headers without a
     /// body, and sent on a newly allocated stream. To include a body,
-    /// set `fin` as `false` and subsequently call [`send_body`] with the
-    /// same connection and the stream_id returned from this method.
+    /// set `fin` as `false` and subsequently call [`send_body()`] with the
+    /// same `conn` and the `stream_id` returned from this method.
     ///
     /// On success the newly allocated stream ID is returned.
     ///
@@ -600,7 +600,7 @@ impl Connection {
     /// happens the application should retry the operation once the stream is
     /// reported as writable again.
     ///
-    /// [`send_body`]: struct.Connection.html#method.send_body
+    /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_request(
         &mut self, conn: &mut super::Connection, headers: &[Header], fin: bool,
@@ -631,15 +631,15 @@ impl Connection {
     /// Sends an HTTP/3 response on the specified stream.
     ///
     /// This method sends the provided `headers` without a body. To include a
-    /// body, set `fin` as `false` and subsequently call [`send_body`] with the
-    /// same connection and stream_id.
+    /// body, set `fin` as `false` and subsequently call [`send_body()`] with the
+    /// same `conn` and `stream_id`.
     ///
     /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
     /// doesn't have enough capacity for the operation to complete. When this
     /// happens the application should retry the operation once the stream is
     /// reported as writable again.
     ///
-    /// [`send_body`]: struct.Connection.html#method.send_body
+    /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_response(
         &mut self, conn: &mut super::Connection, stream_id: u64,
