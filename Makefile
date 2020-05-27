@@ -6,7 +6,7 @@ BASE_TAG  = latest
 QNS_REPO  = cloudflare/quiche-qns
 QNS_TAG   = latest
 
-FUZZ_REPO = kestrel.forallsecure.com:5000/ghedo/quiche-libfuzzer
+FUZZ_REPO = mayhem.cloudflare-security.com:5000/ghedo/quiche-libfuzzer
 FUZZ_TAG  = latest
 
 docker-build: docker-base docker-qns
