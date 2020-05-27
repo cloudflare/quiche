@@ -1,4 +1,4 @@
-From efb37c5c76ab31451590374138de8bfbc6429940 Mon Sep 17 00:00:00 2001
+From 6f72209d81fbe999eda58e289164bfba60205b8b Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 10 Oct 2019 17:06:08 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -126,7 +126,7 @@ index 000000000..23219d92a
 +fi
 diff --git a/auto/lib/quiche/make b/auto/lib/quiche/make
 new file mode 100644
-index 000000000..bd1bec8b7
+index 000000000..1e8f8a9c0
 --- /dev/null
 +++ b/auto/lib/quiche/make
 @@ -0,0 +1,22 @@
@@ -149,7 +149,7 @@ index 000000000..bd1bec8b7
 +$QUICHE/target/$QUICHE_BUILD_TARGET/libquiche.a: \\
 +		$OPENSSL/.openssl/include/openssl/ssl.h \\
 +		$NGX_MAKEFILE
-+	cd $QUICHE && cargo build $QUICHE_BUILD_FLAGS
++	cd $QUICHE && cargo build $QUICHE_BUILD_FLAGS $QUICHE_OPT
 +
 +END
 diff --git a/auto/make b/auto/make
