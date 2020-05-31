@@ -631,8 +631,8 @@ impl Connection {
     /// Sends an HTTP/3 response on the specified stream.
     ///
     /// This method sends the provided `headers` without a body. To include a
-    /// body, set `fin` as `false` and subsequently call [`send_body()`] with the
-    /// same `conn` and `stream_id`.
+    /// body, set `fin` as `false` and subsequently call [`send_body()`] with
+    /// the same `conn` and `stream_id`.
     ///
     /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
     /// doesn't have enough capacity for the operation to complete. When this
