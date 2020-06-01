@@ -319,6 +319,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         // Send 5k x 4 = 20k, higher than default cwnd(~15k)
@@ -456,6 +457,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         // 1st round.

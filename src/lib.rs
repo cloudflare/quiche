@@ -2080,6 +2080,7 @@ impl Connection {
 
         let mut ack_eliciting = false;
         let mut in_flight = false;
+        let mut has_data = false;
 
         let mut payload_len = 0;
 
@@ -2284,6 +2285,7 @@ impl Connection {
             if push_frame_to_pkt!(frames, frame, payload_len, left) {
                 ack_eliciting = true;
                 in_flight = true;
+                has_data = true;
             }
         }
 
@@ -2329,6 +2331,7 @@ impl Connection {
                 if push_frame_to_pkt!(frames, frame, payload_len, left) {
                     ack_eliciting = true;
                     in_flight = true;
+                    has_data = true;
                 }
 
                 // If the stream is still flushable, push it to the back of the
@@ -2347,45 +2350,6 @@ impl Connection {
                 }
 
                 break;
-            }
-        }
-
-        // Try to retransmit old frames on PTO, if there is space left.
-        if self.recovery.loss_probes[epoch] > 0 &&
-            left > cmp::min(
-                frame::MAX_CRYPTO_OVERHEAD,
-                frame::MAX_STREAM_OVERHEAD,
-            ) &&
-            !is_closing
-        {
-            let unacked_iter = self.recovery.sent[epoch]
-                .iter_mut()
-                // Skip packets that have already been acked or lost and packets
-                // that are not in-flight.
-                .filter(|p| p.in_flight && p.time_acked.is_none() && p.time_lost.is_none());
-
-            'unacked_iter: for unacked in unacked_iter {
-                for frame in &unacked.frames {
-                    // Only retransmit CRYPTO and STREAM frames.
-                    match frame {
-                        frame::Frame::Crypto { .. } |
-                        frame::Frame::Stream { .. } => (),
-
-                        _ => continue,
-                    }
-
-                    // Skip frame if it's too big.
-                    if left < frame.wire_len() {
-                        break 'unacked_iter;
-                    }
-
-                    push_frame_to_pkt!(frames, frame.clone(), payload_len, left);
-
-                    ack_eliciting = true;
-                    in_flight = true;
-
-                    break 'unacked_iter;
-                }
             }
         }
 
@@ -2525,6 +2489,7 @@ impl Connection {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data,
         };
 
         self.recovery.on_packet_sent(

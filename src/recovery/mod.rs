@@ -55,6 +55,8 @@ const PERSISTENT_CONGESTION_THRESHOLD: u32 = 3;
 
 const RTT_WINDOW: Duration = Duration::from_secs(300);
 
+const PTO_PROBES_COUNT: usize = 2;
+
 // Congestion Control
 const INITIAL_WINDOW_PACKETS: usize = 10;
 
@@ -91,7 +93,7 @@ pub struct Recovery {
 
     loss_time: [Option<Instant>; packet::EPOCH_COUNT],
 
-    pub sent: [VecDeque<Sent>; packet::EPOCH_COUNT],
+    sent: [VecDeque<Sent>; packet::EPOCH_COUNT],
 
     pub lost: [Vec<frame::Frame>; packet::EPOCH_COUNT],
 
@@ -354,7 +356,27 @@ impl Recovery {
             handshake_completed,
         );
 
-        self.loss_probes[epoch] = 2;
+        let unacked_iter = self.sent[epoch]
+            .iter_mut()
+            // Skip packets that have already been acked or lost, and packets
+            // that don't contain either CRYPTO or STREAM frames.
+            .filter(|p| p.has_data && p.time_acked.is_none() && p.time_lost.is_none())
+            // Only return as many packets as the number of probe packets that
+            // will be sent.
+            .take(PTO_PROBES_COUNT);
+
+        // Retransmit the frames from the oldest sent packets on PTO. However
+        // the packets are not actually declared lost (so there is no effect to
+        // congestion control), we just reschedule the data they carried.
+        //
+        // This will also trigger sending an ACK and retransmitting frames like
+        // HANDSHAKE_DONE and MAX_DATA / MAX_STREAM_DATA as well, in addition
+        // to CRYPTO and STREAM, if the original packet carried them.
+        for unacked in unacked_iter {
+            self.lost[epoch].extend_from_slice(&unacked.frames);
+        }
+
+        self.loss_probes[epoch] = PTO_PROBES_COUNT;
 
         self.pto_count += 1;
 
@@ -823,6 +845,8 @@ pub struct Sent {
     pub recent_delivered_packet_sent_time: Instant,
 
     pub is_app_limited: bool,
+
+    pub has_data: bool,
 }
 
 impl std::fmt::Debug for Sent {
@@ -831,13 +855,14 @@ impl std::fmt::Debug for Sent {
         write!(f, "pkt_sent_time={:?} ", self.time_sent.elapsed())?;
         write!(f, "pkt_size={:?} ", self.size)?;
         write!(f, "delivered={:?} ", self.delivered)?;
-        write!(f, "delivered_time ={:?} ", self.delivered_time.elapsed())?;
+        write!(f, "delivered_time={:?} ", self.delivered_time.elapsed())?;
         write!(
             f,
             "recent_delivered_packet_sent_time={:?} ",
             self.recent_delivered_packet_sent_time.elapsed()
         )?;
-        write!(f, "is_app_limited={:?} ", self.is_app_limited)?;
+        write!(f, "is_app_limited={} ", self.is_app_limited)?;
+        write!(f, "has_data={} ", self.has_data)?;
 
         Ok(())
     }
@@ -915,6 +940,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -934,6 +960,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -953,6 +980,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -972,6 +1000,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -1023,6 +1052,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -1042,6 +1072,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -1099,6 +1130,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -1118,6 +1150,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -1137,6 +1170,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -1156,6 +1190,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -1224,6 +1259,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -1243,6 +1279,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -1262,6 +1299,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
@@ -1281,6 +1319,7 @@ mod tests {
             delivered_time: now,
             recent_delivered_packet_sent_time: now,
             is_app_limited: false,
+            has_data: false,
         };
 
         r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
