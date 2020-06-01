@@ -1374,6 +1374,12 @@ impl Connection {
                 return Err(Error::Done);
             }
 
+            // Ignore version negotiation if any other packet has already been
+            // successfully processed.
+            if self.recv_count > 0 {
+                return Err(Error::Done);
+            }
+
             if hdr.dcid != self.scid {
                 return Err(Error::Done);
             }
@@ -1386,7 +1392,13 @@ impl Connection {
 
             let versions = hdr.versions.ok_or(Error::Done)?;
 
-            match versions.iter().filter(|v| version_is_supported(**v)).max() {
+            // Ignore version negotiation if the version already selected is
+            // listed.
+            if versions.iter().any(|&v| v == self.version) {
+                return Err(Error::Done);
+            }
+
+            match versions.iter().filter(|&&v| version_is_supported(v)).max() {
                 Some(v) => self.version = *v,
 
                 None => {
