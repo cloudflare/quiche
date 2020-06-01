@@ -796,9 +796,13 @@ pub struct Connection {
     /// Streams map, indexed by stream ID.
     streams: stream::StreamMap,
 
-    /// Peer's original connection ID. Used by the client during stateless
-    /// retry to validate the server's transport parameter.
+    /// Peer's original destination connection ID. Used by the client to
+    /// validate the server's transport parameter.
     odcid: Option<Vec<u8>>,
+
+    /// Peer's retry source connection ID. Used by the client during stateless
+    /// retry to validate the server's transport parameter.
+    rscid: Option<Vec<u8>>,
 
     /// Received address verification token.
     token: Option<Vec<u8>>,
@@ -834,8 +838,7 @@ pub struct Connection {
     /// relevant for client connections.
     did_version_negotiation: bool,
 
-    /// Whether a retry packet has already been received. Only relevant for
-    /// client connections.
+    /// Whether stateless retry has been performed.
     did_retry: bool,
 
     /// Whether the peer already updated its connection ID.
@@ -1121,6 +1124,8 @@ impl Connection {
 
             odcid: None,
 
+            rscid: None,
+
             token: None,
 
             error: None,
@@ -1169,11 +1174,21 @@ impl Connection {
         });
 
         if let Some(odcid) = odcid {
-            conn.local_transport_params.original_connection_id =
-                Some(odcid.to_vec());
+            conn.local_transport_params
+                .original_destination_connection_id = Some(odcid.to_vec());
+
+            conn.local_transport_params.retry_source_connection_id =
+                Some(scid.to_vec());
+
+            conn.did_retry = true;
         }
 
+        conn.local_transport_params.initial_source_connection_id =
+            Some(scid.to_vec());
+
         conn.handshake.init(&conn)?;
+
+        conn.encode_transport_params()?;
 
         // Derive initial secrets for the client. We can do this here because
         // we already generated the random destination connection ID.
@@ -1424,15 +1439,7 @@ impl Connection {
 
             // Encode transport parameters again, as the new version might be
             // using a different format.
-            let mut raw_params = [0; 128];
-
-            let raw_params = TransportParams::encode(
-                &self.local_transport_params,
-                self.is_server,
-                &mut raw_params,
-            )?;
-
-            self.handshake.set_quic_transport_params(raw_params)?;
+            self.encode_transport_params()?;
 
             return Err(Error::Done);
         }
@@ -1464,6 +1471,8 @@ impl Connection {
             self.dcid.resize(hdr.scid.len(), 0);
             self.dcid.copy_from_slice(&hdr.scid);
 
+            self.rscid = Some(self.dcid.clone());
+
             // Derive Initial secrets using the new connection ID.
             let (aead_open, aead_seal) =
                 crypto::derive_initial_key_material(&hdr.scid, self.is_server)?;
@@ -1493,15 +1502,7 @@ impl Connection {
 
             // Encode transport parameters again, as the new version might be
             // using a different format.
-            let mut raw_params = [0; 128];
-
-            let raw_params = TransportParams::encode(
-                &self.local_transport_params,
-                self.is_server,
-                &mut raw_params,
-            )?;
-
-            self.handshake.set_quic_transport_params(raw_params)?;
+            self.encode_transport_params()?;
         }
 
         if hdr.ty != packet::Type::Short && hdr.version != self.version {
@@ -1518,15 +1519,6 @@ impl Connection {
             b.get_varint()? as usize
         };
 
-        if !self.is_server && !self.got_peer_conn_id {
-            // Replace the randomly generated destination connection ID with
-            // the one supplied by the server.
-            self.dcid.resize(hdr.scid.len(), 0);
-            self.dcid.copy_from_slice(&hdr.scid);
-
-            self.got_peer_conn_id = true;
-        }
-
         // Derive initial secrets on the server.
         if !self.derived_initial_secrets {
             let (aead_open, aead_seal) =
@@ -1538,9 +1530,6 @@ impl Connection {
                 Some(aead_seal);
 
             self.derived_initial_secrets = true;
-
-            self.dcid.extend_from_slice(&hdr.scid);
-            self.got_peer_conn_id = true;
         }
 
         // Select packet number space epoch based on the received packet's type.
@@ -1640,6 +1629,32 @@ impl Connection {
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
             return Err(Error::Done);
+        }
+
+        if !self.is_server && !self.got_peer_conn_id {
+            if self.odcid.is_none() {
+                self.odcid = Some(self.dcid.clone());
+            }
+
+            // Replace the randomly generated destination connection ID with
+            // the one supplied by the server.
+            self.dcid.resize(hdr.scid.len(), 0);
+            self.dcid.copy_from_slice(&hdr.scid);
+
+            self.got_peer_conn_id = true;
+        }
+
+        if self.is_server && !self.got_peer_conn_id {
+            self.dcid.extend_from_slice(&hdr.scid);
+
+            if !self.did_retry && self.version >= PROTOCOL_VERSION_DRAFT28 {
+                self.local_transport_params
+                    .original_destination_connection_id = Some(hdr.dcid.to_vec());
+
+                self.encode_transport_params()?;
+            }
+
+            self.got_peer_conn_id = true;
         }
 
         // To avoid sending an ACK in response to an ACK-only packet, we need
@@ -3014,6 +3029,20 @@ impl Connection {
         }
     }
 
+    fn encode_transport_params(&mut self) -> Result<()> {
+        let mut raw_params = [0; 128];
+
+        let raw_params = TransportParams::encode(
+            &self.local_transport_params,
+            self.is_server,
+            &mut raw_params,
+        )?;
+
+        self.handshake.set_quic_transport_params(raw_params)?;
+
+        Ok(())
+    }
+
     /// Continues the handshake.
     ///
     /// If the connection is already established, it does nothing.
@@ -3239,10 +3268,62 @@ impl Connection {
                     let peer_params =
                         TransportParams::decode(&raw_params, self.is_server)?;
 
-                    if peer_params.original_connection_id != self.odcid {
-                        return Err(Error::InvalidTransportParam);
+                    if self.version >= PROTOCOL_VERSION_DRAFT28 {
+                        // Validate initial_source_connection_id.
+                        match &peer_params.initial_source_connection_id {
+                            Some(v) if v != &self.dcid =>
+                                return Err(Error::InvalidTransportParam),
+
+                            Some(_) => (),
+
+                            // initial_source_connection_id must be sent by
+                            // both endpoints.
+                            None => return Err(Error::InvalidTransportParam),
+                        }
+
+                        // Validate original_destination_connection_id.
+                        if let Some(odcid) = &self.odcid {
+                            match &peer_params.original_destination_connection_id
+                            {
+                                Some(v) if v != odcid =>
+                                    return Err(Error::InvalidTransportParam),
+
+                                Some(_) => (),
+
+                                // original_destination_connection_id must be
+                                // sent by the server.
+                                None if !self.is_server =>
+                                    return Err(Error::InvalidTransportParam),
+
+                                None => (),
+                            }
+                        }
+
+                        // Validate retry_source_connection_id.
+                        if let Some(rscid) = &self.rscid {
+                            match &peer_params.retry_source_connection_id {
+                                Some(v) if v != rscid =>
+                                    return Err(Error::InvalidTransportParam),
+
+                                Some(_) => (),
+
+                                // retry_source_connection_id must be sent by
+                                // the server.
+                                None => return Err(Error::InvalidTransportParam),
+                            }
+                        }
+                    } else {
+                        // Legacy validation of the original connection ID when
+                        // stateless retry is performed, for drafts < 28.
+                        if self.did_retry &&
+                            peer_params.original_destination_connection_id !=
+                                self.odcid
+                        {
+                            return Err(Error::InvalidTransportParam);
+                        }
                     }
 
+                    // Update flow control limits.
                     self.max_tx_data = peer_params.initial_max_data;
 
                     self.streams.update_peer_max_streams_bidi(
@@ -3547,7 +3628,7 @@ impl std::fmt::Debug for Stats {
 
 #[derive(Clone, Debug, PartialEq)]
 struct TransportParams {
-    pub original_connection_id: Option<Vec<u8>>,
+    pub original_destination_connection_id: Option<Vec<u8>>,
     pub max_idle_timeout: u64,
     pub stateless_reset_token: Option<Vec<u8>>,
     pub max_udp_payload_size: u64,
@@ -3562,12 +3643,14 @@ struct TransportParams {
     pub disable_active_migration: bool,
     // pub preferred_address: ...,
     pub active_conn_id_limit: u64,
+    pub initial_source_connection_id: Option<Vec<u8>>,
+    pub retry_source_connection_id: Option<Vec<u8>>,
 }
 
 impl Default for TransportParams {
     fn default() -> TransportParams {
         TransportParams {
-            original_connection_id: None,
+            original_destination_connection_id: None,
             max_idle_timeout: 0,
             stateless_reset_token: None,
             max_udp_payload_size: 65527,
@@ -3581,6 +3664,8 @@ impl Default for TransportParams {
             max_ack_delay: 25,
             disable_active_migration: false,
             active_conn_id_limit: 2,
+            initial_source_connection_id: None,
+            retry_source_connection_id: None,
         }
     }
 }
@@ -3604,7 +3689,7 @@ impl TransportParams {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    tp.original_connection_id = Some(val.to_vec());
+                    tp.original_destination_connection_id = Some(val.to_vec());
                 },
 
                 0x0001 => {
@@ -3705,6 +3790,18 @@ impl TransportParams {
                     tp.active_conn_id_limit = limit;
                 },
 
+                0x000f => {
+                    tp.initial_source_connection_id = Some(val.to_vec());
+                },
+
+                0x00010 => {
+                    if is_server {
+                        return Err(Error::InvalidTransportParam);
+                    }
+
+                    tp.retry_source_connection_id = Some(val.to_vec());
+                },
+
                 // Ignore unknown parameters.
                 _ => (),
             }
@@ -3728,7 +3825,7 @@ impl TransportParams {
         let mut b = octets::OctetsMut::with_slice(out);
 
         if is_server {
-            if let Some(ref odcid) = tp.original_connection_id {
+            if let Some(ref odcid) = tp.original_destination_connection_id {
                 TransportParams::encode_param(&mut b, 0x0000, odcid.len())?;
                 b.put_bytes(&odcid)?;
             }
@@ -3846,6 +3943,18 @@ impl TransportParams {
             b.put_varint(tp.active_conn_id_limit)?;
         }
 
+        if let Some(scid) = &tp.initial_source_connection_id {
+            TransportParams::encode_param(&mut b, 0x000f, scid.len())?;
+            b.put_bytes(&scid)?;
+        }
+
+        if is_server {
+            if let Some(scid) = &tp.retry_source_connection_id {
+                TransportParams::encode_param(&mut b, 0x0010, scid.len())?;
+                b.put_bytes(&scid)?;
+            }
+        }
+
         let out_len = b.off();
 
         Ok(&mut out[..out_len])
@@ -3857,8 +3966,9 @@ impl TransportParams {
         &self, owner: qlog::TransportOwner, version: u32, alpn: &[u8],
         cipher: Option<crypto::Algorithm>,
     ) -> qlog::event::Event {
-        let ocid =
-            qlog::HexSlice::maybe_string(self.original_connection_id.as_ref());
+        let ocid = qlog::HexSlice::maybe_string(
+            self.original_destination_connection_id.as_ref(),
+        );
         let stateless_reset_token =
             qlog::HexSlice::maybe_string(self.stateless_reset_token.as_ref());
 
@@ -4193,7 +4303,7 @@ mod tests {
     fn transport_params() {
         // Server encodes, client decodes.
         let tp = TransportParams {
-            original_connection_id: None,
+            original_destination_connection_id: None,
             max_idle_timeout: 30,
             stateless_reset_token: Some(vec![0xba; 16]),
             max_udp_payload_size: 23_421,
@@ -4207,12 +4317,14 @@ mod tests {
             max_ack_delay: 2_u64.pow(14) - 1,
             disable_active_migration: true,
             active_conn_id_limit: 8,
+            initial_source_connection_id: Some(b"woot woot".to_vec()),
+            retry_source_connection_id: Some(b"retry".to_vec()),
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 73);
+        assert_eq!(raw_params.len(), 91);
 
         let new_tp = TransportParams::decode(&raw_params, false).unwrap();
 
@@ -4220,7 +4332,7 @@ mod tests {
 
         // Client encodes, server decodes.
         let tp = TransportParams {
-            original_connection_id: None,
+            original_destination_connection_id: None,
             max_idle_timeout: 30,
             stateless_reset_token: None,
             max_udp_payload_size: 23_421,
@@ -4234,12 +4346,14 @@ mod tests {
             max_ack_delay: 2_u64.pow(14) - 1,
             disable_active_migration: true,
             active_conn_id_limit: 8,
+            initial_source_connection_id: Some(b"woot woot".to_vec()),
+            retry_source_connection_id: None,
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, false, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 55);
+        assert_eq!(raw_params.len(), 66);
 
         let new_tp = TransportParams::decode(&raw_params, true).unwrap();
 
@@ -4295,6 +4409,50 @@ mod tests {
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
+    }
+
+    #[test]
+    fn missing_initial_source_connection_id() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Reset initial_source_connection_id.
+        pipe.client
+            .local_transport_params
+            .initial_source_connection_id = None;
+        assert_eq!(pipe.client.encode_transport_params(), Ok(()));
+
+        // Client sends initial flight.
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        // Server rejects transport parameters.
+        assert_eq!(
+            testing::recv_send(&mut pipe.server, &mut buf, len),
+            Err(Error::InvalidTransportParam)
+        );
+    }
+
+    #[test]
+    fn invalid_initial_source_connection_id() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Scramble initial_source_connection_id.
+        pipe.client
+            .local_transport_params
+            .initial_source_connection_id = Some(b"bogus value".to_vec());
+        assert_eq!(pipe.client.encode_transport_params(), Ok(()));
+
+        // Client sends initial flight.
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        // Server rejects transport parameters.
+        assert_eq!(
+            testing::recv_send(&mut pipe.server, &mut buf, len),
+            Err(Error::InvalidTransportParam)
+        );
     }
 
     #[test]
@@ -5774,7 +5932,70 @@ mod tests {
     fn retry() {
         let mut buf = [0; 65535];
 
-        let mut pipe = testing::Pipe::default().unwrap();
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\06proto2")
+            .unwrap();
+
+        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
+
+        // Client sends initial flight.
+        let mut len = pipe.client.send(&mut buf).unwrap();
+
+        // Server sends Retry packet.
+        let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
+
+        let odcid = hdr.dcid.to_vec();
+
+        let mut scid = [0; MAX_CONN_ID_LEN];
+        rand::rand_bytes(&mut scid[..]);
+
+        let token = b"quiche test retry token";
+
+        len =
+            packet::retry(&hdr.scid, &hdr.dcid, &scid, token, &mut buf).unwrap();
+
+        // Client receives Retry and sends new Initial.
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
+
+        len = pipe.client.send(&mut buf).unwrap();
+
+        let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
+        assert_eq!(&hdr.token.unwrap(), token);
+
+        // Server accepts connection and send first flight.
+        pipe.server = accept(&scid, Some(&odcid), &mut config).unwrap();
+
+        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+        len = testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
+        testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert!(pipe.client.is_established());
+        assert!(pipe.server.is_established());
+    }
+
+    #[test]
+    fn missing_retry_source_connection_id() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\06proto2")
+            .unwrap();
+
+        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
 
         // Client sends initial flight.
         let mut len = pipe.client.send(&mut buf).unwrap();
@@ -5795,8 +6016,64 @@ mod tests {
 
         len = pipe.client.send(&mut buf).unwrap();
 
+        // Server accepts connection and send first flight. But original
+        // destination connection ID is ignored.
+        pipe.server = accept(&scid, None, &mut config).unwrap();
+
+        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert_eq!(
+            pipe.client.recv(&mut buf[..len]),
+            Err(Error::InvalidTransportParam)
+        );
+    }
+
+    #[test]
+    fn invalid_retry_source_connection_id() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\06proto2")
+            .unwrap();
+
+        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
+
+        // Client sends initial flight.
+        let mut len = pipe.client.send(&mut buf).unwrap();
+
+        // Server sends Retry packet.
         let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
-        assert_eq!(&hdr.token.unwrap(), token);
+
+        let mut scid = [0; MAX_CONN_ID_LEN];
+        rand::rand_bytes(&mut scid[..]);
+
+        let token = b"quiche test retry token";
+
+        len =
+            packet::retry(&hdr.scid, &hdr.dcid, &scid, token, &mut buf).unwrap();
+
+        // Client receives Retry and sends new Initial.
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
+
+        len = pipe.client.send(&mut buf).unwrap();
+
+        // Server accepts connection and send first flight. But original
+        // destination connection ID is invalid.
+        pipe.server = accept(&scid, Some(b"bogus value"), &mut config).unwrap();
+
+        len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert_eq!(
+            pipe.client.recv(&mut buf[..len]),
+            Err(Error::InvalidTransportParam)
+        );
     }
 
     fn check_send(_: &mut impl Send) {}

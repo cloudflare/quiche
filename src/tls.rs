@@ -41,7 +41,6 @@ use crate::Error;
 use crate::Result;
 
 use crate::Connection;
-use crate::TransportParams;
 
 use crate::crypto;
 use crate::octets;
@@ -324,16 +323,6 @@ impl Handshake {
         self.set_quic_method()?;
 
         self.set_quiet_shutdown(true);
-
-        let mut raw_params = [0; 128];
-
-        let raw_params = TransportParams::encode(
-            &conn.local_transport_params,
-            conn.is_server,
-            &mut raw_params,
-        )?;
-
-        self.set_quic_transport_params(raw_params)?;
 
         Ok(())
     }
