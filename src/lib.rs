@@ -3579,7 +3579,7 @@ impl Default for TransportParams {
             ack_delay_exponent: 3,
             max_ack_delay: 25,
             disable_active_migration: false,
-            active_conn_id_limit: 0,
+            active_conn_id_limit: 2,
         }
     }
 }
@@ -3695,7 +3695,13 @@ impl TransportParams {
                 },
 
                 0x000e => {
-                    tp.active_conn_id_limit = val.get_varint()?;
+                    let limit = val.get_varint()?;
+
+                    if limit < 2 {
+                        return Err(Error::InvalidTransportParam);
+                    }
+
+                    tp.active_conn_id_limit = limit;
                 },
 
                 // Ignore unknown parameters.
@@ -3736,8 +3742,8 @@ impl TransportParams {
             b.put_varint(tp.max_idle_timeout)?;
         }
 
-        if let Some(ref token) = tp.stateless_reset_token {
-            if is_server {
+        if is_server {
+            if let Some(ref token) = tp.stateless_reset_token {
                 TransportParams::encode_param(&mut b, 0x0002, token.len())?;
                 b.put_bytes(&token)?;
             }
@@ -3830,7 +3836,7 @@ impl TransportParams {
 
         // TODO: encode preferred_address
 
-        if tp.active_conn_id_limit != 0 {
+        if tp.active_conn_id_limit != 2 {
             TransportParams::encode_param(
                 &mut b,
                 0x000e,
