@@ -588,11 +588,11 @@ impl Config {
         self.local_transport_params.max_idle_timeout = v;
     }
 
-    /// Sets the `max_packet_size transport` parameter.
+    /// Sets the `max_udp_payload_size transport` parameter.
     ///
     /// The default value is `65527`.
-    pub fn set_max_packet_size(&mut self, v: u64) {
-        self.local_transport_params.max_packet_size = v;
+    pub fn set_max_udp_payload_size(&mut self, v: u64) {
+        self.local_transport_params.max_udp_payload_size = v;
     }
 
     /// Sets the `initial_max_data` transport parameter.
@@ -1900,20 +1900,21 @@ impl Connection {
 
         let mut left = b.cap();
 
-        // Use max_packet_size as sent by the peer, except during the handshake
-        // when we haven't parsed transport parameters yet, so use a default
-        // value then.
+        // Use max_udp_payload_size as sent by the peer, except during the
+        // handshake when we haven't parsed transport parameters yet, so
+        // use a default value then.
         let max_pkt_len = if self.is_established() {
             // We cap the maximum packet size to 16KB or so, so that it can be
             // always encoded with a 2-byte varint.
-            cmp::min(16383, self.peer_transport_params.max_packet_size) as usize
+            cmp::min(16383, self.peer_transport_params.max_udp_payload_size)
+                as usize
         } else {
             // Allow for 1200 bytes (minimum QUIC packet size) during the
             // handshake.
             1200
         };
 
-        // Limit output packet size to respect peer's max_packet_size limit.
+        // Limit output packet size to respect peer's max_udp_payload_size limit.
         left = cmp::min(left, max_pkt_len);
 
         // Limit output packet size by congestion window size.
@@ -3549,7 +3550,7 @@ struct TransportParams {
     pub original_connection_id: Option<Vec<u8>>,
     pub max_idle_timeout: u64,
     pub stateless_reset_token: Option<Vec<u8>>,
-    pub max_packet_size: u64,
+    pub max_udp_payload_size: u64,
     pub initial_max_data: u64,
     pub initial_max_stream_data_bidi_local: u64,
     pub initial_max_stream_data_bidi_remote: u64,
@@ -3569,7 +3570,7 @@ impl Default for TransportParams {
             original_connection_id: None,
             max_idle_timeout: 0,
             stateless_reset_token: None,
-            max_packet_size: 65527,
+            max_udp_payload_size: 65527,
             initial_max_data: 0,
             initial_max_stream_data_bidi_local: 0,
             initial_max_stream_data_bidi_remote: 0,
@@ -3619,9 +3620,9 @@ impl TransportParams {
                 },
 
                 0x0003 => {
-                    tp.max_packet_size = val.get_varint()?;
+                    tp.max_udp_payload_size = val.get_varint()?;
 
-                    if tp.max_packet_size < 1200 {
+                    if tp.max_udp_payload_size < 1200 {
                         return Err(Error::InvalidTransportParam);
                     }
                 },
@@ -3749,13 +3750,13 @@ impl TransportParams {
             }
         }
 
-        if tp.max_packet_size != 0 {
+        if tp.max_udp_payload_size != 0 {
             TransportParams::encode_param(
                 &mut b,
                 0x0003,
-                octets::varint_len(tp.max_packet_size),
+                octets::varint_len(tp.max_udp_payload_size),
             )?;
-            b.put_varint(tp.max_packet_size)?;
+            b.put_varint(tp.max_udp_payload_size)?;
         }
 
         if tp.initial_max_data != 0 {
@@ -3872,7 +3873,7 @@ impl TransportParams {
             stateless_reset_token,
             Some(self.disable_active_migration),
             Some(self.max_idle_timeout),
-            Some(self.max_packet_size),
+            Some(self.max_udp_payload_size),
             Some(self.ack_delay_exponent),
             Some(self.max_ack_delay),
             Some(self.active_conn_id_limit),
@@ -4195,7 +4196,7 @@ mod tests {
             original_connection_id: None,
             max_idle_timeout: 30,
             stateless_reset_token: Some(vec![0xba; 16]),
-            max_packet_size: 23_421,
+            max_udp_payload_size: 23_421,
             initial_max_data: 424_645_563,
             initial_max_stream_data_bidi_local: 154_323_123,
             initial_max_stream_data_bidi_remote: 6_587_456,
@@ -4222,7 +4223,7 @@ mod tests {
             original_connection_id: None,
             max_idle_timeout: 30,
             stateless_reset_token: None,
-            max_packet_size: 23_421,
+            max_udp_payload_size: 23_421,
             initial_max_data: 424_645_563,
             initial_max_stream_data_bidi_local: 154_323_123,
             initial_max_stream_data_bidi_remote: 6_587_456,
@@ -5948,7 +5949,7 @@ mod tests {
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
         config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_packet_size(1200);
+        config.set_max_udp_payload_size(1200);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -5984,7 +5985,7 @@ mod tests {
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
         config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_packet_size(1200);
+        config.set_max_udp_payload_size(1200);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -6021,7 +6022,7 @@ mod tests {
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
         config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_packet_size(1405);
+        config.set_max_udp_payload_size(1405);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -6058,7 +6059,7 @@ mod tests {
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
         config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_packet_size(1406);
+        config.set_max_udp_payload_size(1406);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();

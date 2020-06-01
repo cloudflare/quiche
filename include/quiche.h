@@ -142,8 +142,8 @@ int quiche_config_set_application_protos(quiche_config *config,
 // Sets the `max_idle_timeout` transport parameter.
 void quiche_config_set_max_idle_timeout(quiche_config *config, uint64_t v);
 
-// Sets the `max_packet_size` transport parameter.
-void quiche_config_set_max_packet_size(quiche_config *config, uint64_t v);
+// Sets the `max_udp_payload_size transport` parameter.
+void quiche_config_set_max_udp_payload_size(quiche_config *config, uint64_t v);
 
 // Sets the `initial_max_data` transport parameter.
 void quiche_config_set_initial_max_data(quiche_config *config, uint64_t v);
