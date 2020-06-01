@@ -98,7 +98,7 @@ fn main() {
         .unwrap();
 
     config.set_max_idle_timeout(5000);
-    config.set_max_packet_size(MAX_DATAGRAM_SIZE as u64);
+    config.set_max_udp_payload_size(MAX_DATAGRAM_SIZE as u64);
     config.set_initial_max_data(10_000_000);
     config.set_initial_max_stream_data_bidi_local(1_000_000);
     config.set_initial_max_stream_data_bidi_remote(1_000_000);
