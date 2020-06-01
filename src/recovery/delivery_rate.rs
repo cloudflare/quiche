@@ -204,6 +204,7 @@ mod tests {
             delivered_time: Instant::now(),
             recent_delivered_packet_sent_time: Instant::now(),
             is_app_limited: false,
+            has_data: false,
         };
 
         recovery
@@ -227,6 +228,7 @@ mod tests {
             delivered_time: Instant::now(),
             recent_delivered_packet_sent_time: Instant::now(),
             is_app_limited: false,
+            has_data: false,
         };
 
         recovery
@@ -259,6 +261,7 @@ mod tests {
             delivered_time: Instant::now(),
             recent_delivered_packet_sent_time: Instant::now(),
             is_app_limited: false,
+            has_data: false,
         };
 
         recvry
@@ -280,6 +283,7 @@ mod tests {
             delivered_time: Instant::now(),
             recent_delivered_packet_sent_time: Instant::now(),
             is_app_limited: false,
+            has_data: false,
         };
 
         recvry.app_limited = true;

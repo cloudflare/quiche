@@ -171,6 +171,7 @@ mod tests {
             delivered_time: std::time::Instant::now(),
             recent_delivered_packet_sent_time: std::time::Instant::now(),
             is_app_limited: false,
+            has_data: false,
         };
 
         // Send 5k x 4 = 20k, higher than default cwnd(~15k)
