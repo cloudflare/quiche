@@ -35,7 +35,6 @@ use libc::c_int;
 use libc::c_long;
 use libc::c_uint;
 use libc::c_void;
-use libc::size_t;
 
 use crate::Error;
 use crate::Result;
@@ -322,6 +321,10 @@ impl Handshake {
 
         self.set_quic_method()?;
 
+        // TODO: the early data context should include transport parameters and
+        // HTTP/3 SETTINGS in wire format.
+        self.set_quic_early_data_context(b"quiche")?;
+
         self.set_quiet_shutdown(true);
 
         Ok(())
@@ -347,6 +350,16 @@ impl Handshake {
     pub fn set_quic_method(&self) -> Result<()> {
         map_result(unsafe {
             SSL_set_quic_method(self.as_ptr(), &QUICHE_STREAM_METHOD)
+        })
+    }
+
+    pub fn set_quic_early_data_context(&self, context: &[u8]) -> Result<()> {
+        map_result(unsafe {
+            SSL_set_quic_early_data_context(
+                self.as_ptr(),
+                context.as_ptr(),
+                context.len(),
+            )
         })
     }
 
@@ -973,6 +986,10 @@ extern {
         ssl: *mut SSL, quic_method: *const SSL_QUIC_METHOD,
     ) -> c_int;
 
+    fn SSL_set_quic_early_data_context(
+        ssl: *mut SSL, context: *const u8, context_len: usize,
+    ) -> c_int;
+
     fn SSL_get_peer_quic_transport_params(
         ssl: *mut SSL, out_params: *mut *const u8, out_params_len: *mut usize,
     );
@@ -1004,7 +1021,7 @@ extern {
 
     // X509_VERIFY_PARAM
     fn X509_VERIFY_PARAM_set1_host(
-        param: *mut X509_VERIFY_PARAM, name: *const c_char, namelen: size_t,
+        param: *mut X509_VERIFY_PARAM, name: *const c_char, namelen: usize,
     ) -> c_int;
 
     // X509_STORE
