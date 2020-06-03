@@ -29,7 +29,7 @@ use std::ptr;
 use std::slice;
 use std::sync::atomic;
 
-#[cfg(all(unix, feature = "qlog"))]
+#[cfg(unix)]
 use std::os::unix::io::FromRawFd;
 
 use libc::c_char;
@@ -237,55 +237,6 @@ pub extern fn quiche_config_set_cc_algorithm(
 }
 
 #[no_mangle]
-#[cfg(feature = "qlog")]
-pub extern fn quiche_conn_set_qlog_path(
-    conn: &mut Connection, path: *const c_char, log_title: *const c_char,
-    log_desc: *const c_char,
-) -> bool {
-    let filename = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
-
-    let file_res = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(filename);
-
-    let writer = match file_res {
-        Ok(f) => std::io::BufWriter::new(f),
-        Err(_) => return false,
-    };
-
-    let title = unsafe { ffi::CStr::from_ptr(log_title).to_str().unwrap() };
-    let description = unsafe { ffi::CStr::from_ptr(log_desc).to_str().unwrap() };
-
-    conn.set_qlog(
-        std::boxed::Box::new(writer),
-        title.to_string(),
-        format!("{} id={}", description, conn.trace_id),
-    );
-
-    true
-}
-
-#[no_mangle]
-#[cfg(all(unix, feature = "qlog"))]
-pub extern fn quiche_conn_set_qlog_fd(
-    conn: &mut Connection, fd: c_int, log_title: *const c_char,
-    log_desc: *const c_char,
-) {
-    let f = unsafe { std::fs::File::from_raw_fd(fd) };
-    let writer = std::io::BufWriter::new(f);
-
-    let title = unsafe { ffi::CStr::from_ptr(log_title).to_str().unwrap() };
-    let description = unsafe { ffi::CStr::from_ptr(log_desc).to_str().unwrap() };
-
-    conn.set_qlog(
-        std::boxed::Box::new(writer),
-        title.to_string(),
-        format!("{} id={}", description, conn.trace_id),
-    );
-}
-
-#[no_mangle]
 pub extern fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
     config.enable_hystart(v);
 }
@@ -460,6 +411,87 @@ pub extern fn quiche_conn_new_with_tls(
 
         Err(_) => ptr::null_mut(),
     }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_set_keylog_path(
+    conn: &mut Connection, path: *const c_char,
+) -> bool {
+    let filename = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
+
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(filename);
+
+    let writer = match file {
+        Ok(f) => std::io::BufWriter::new(f),
+
+        Err(_) => return false,
+    };
+
+    conn.set_keylog(Box::new(writer));
+
+    true
+}
+
+#[no_mangle]
+#[cfg(unix)]
+pub extern fn quiche_conn_set_keylog_fd(conn: &mut Connection, fd: c_int) {
+    let f = unsafe { std::fs::File::from_raw_fd(fd) };
+    let writer = std::io::BufWriter::new(f);
+
+    conn.set_keylog(Box::new(writer));
+}
+
+#[no_mangle]
+#[cfg(feature = "qlog")]
+pub extern fn quiche_conn_set_qlog_path(
+    conn: &mut Connection, path: *const c_char, log_title: *const c_char,
+    log_desc: *const c_char,
+) -> bool {
+    let filename = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
+
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(filename);
+
+    let writer = match file {
+        Ok(f) => std::io::BufWriter::new(f),
+
+        Err(_) => return false,
+    };
+
+    let title = unsafe { ffi::CStr::from_ptr(log_title).to_str().unwrap() };
+    let description = unsafe { ffi::CStr::from_ptr(log_desc).to_str().unwrap() };
+
+    conn.set_qlog(
+        Box::new(writer),
+        title.to_string(),
+        format!("{} id={}", description, conn.trace_id),
+    );
+
+    true
+}
+
+#[no_mangle]
+#[cfg(all(unix, feature = "qlog"))]
+pub extern fn quiche_conn_set_qlog_fd(
+    conn: &mut Connection, fd: c_int, log_title: *const c_char,
+    log_desc: *const c_char,
+) {
+    let f = unsafe { std::fs::File::from_raw_fd(fd) };
+    let writer = std::io::BufWriter::new(f);
+
+    let title = unsafe { ffi::CStr::from_ptr(log_title).to_str().unwrap() };
+    let description = unsafe { ffi::CStr::from_ptr(log_desc).to_str().unwrap() };
+
+    conn.set_qlog(
+        Box::new(writer),
+        title.to_string(),
+        format!("{} id={}", description, conn.trace_id),
+    );
 }
 
 #[no_mangle]

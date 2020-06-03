@@ -533,10 +533,11 @@ impl Config {
 
     /// Enables logging of secrets.
     ///
-    /// A connection's cryptographic secrets will be logged in the [keylog]
-    /// format in the file pointed to by the `SSLKEYLOGFILE` environment
-    /// variable.
+    /// When logging is enabled, the [`set_keylog()`] method must be called on
+    /// the connection for its cryptographic secrets to be logged in the
+    /// [keylog] format to the specified writer.
     ///
+    /// [`set_keylog()`]: struct.Connection.html#method.set_keylog
     /// [keylog]: https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/Key_Log_Format
     pub fn log_keys(&mut self) {
         self.tls_ctx.enable_keylog();
@@ -869,6 +870,9 @@ pub struct Connection {
     /// Whether to send GREASE.
     grease: bool,
 
+    /// TLS keylog writer.
+    keylog: Option<Box<dyn std::io::Write + Send>>,
+
     /// Qlog streaming output.
     #[cfg(feature = "qlog")]
     qlog_streamer: Option<qlog::QlogStreamer>,
@@ -1170,6 +1174,8 @@ impl Connection {
 
             grease: config.grease,
 
+            keylog: None,
+
             #[cfg(feature = "qlog")]
             qlog_streamer: None,
 
@@ -1216,7 +1222,20 @@ impl Connection {
         Ok(conn)
     }
 
+    /// Sets keylog output to the designated [`Writer`].
+    ///
+    /// This needs to be called as soon as the connection is created, to avoid
+    /// missing some early logs.
+    ///
+    /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
+    pub fn set_keylog(&mut self, writer: Box<dyn std::io::Write + Send>) {
+        self.keylog = Some(writer);
+    }
+
     /// Sets qlog output to the designated [`Writer`].
+    ///
+    /// This needs to be called as soon as the connection is created, to avoid
+    /// missing some early logs.
     ///
     /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
     #[cfg(feature = "qlog")]

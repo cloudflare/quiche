@@ -123,6 +123,20 @@ fn main() {
     config.set_initial_max_streams_uni(conn_args.max_streams_uni);
     config.set_disable_active_migration(true);
 
+    let mut keylog = None;
+
+    if let Some(keylog_path) = std::env::var_os("SSLKEYLOGFILE") {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(keylog_path)
+            .unwrap();
+
+        keylog = Some(file);
+
+        config.log_keys();
+    }
+
     if conn_args.no_grease {
         config.grease(false);
     }
@@ -130,10 +144,6 @@ fn main() {
     config
         .set_cc_algorithm_name(&conn_args.cc_algorithm)
         .unwrap();
-
-    if std::env::var_os("SSLKEYLOGFILE").is_some() {
-        config.log_keys();
-    }
 
     if conn_args.disable_hystart {
         config.enable_hystart(false);
@@ -148,6 +158,12 @@ fn main() {
     // Create a QUIC connection and initiate handshake.
     let mut conn =
         quiche::connect(connect_url.domain(), &scid, &mut config).unwrap();
+
+    if let Some(keylog) = &mut keylog {
+        if let Ok(keylog) = keylog.try_clone() {
+            conn.set_keylog(Box::new(keylog));
+        }
+    }
 
     // Only bother with qlog if the user specified it.
     #[cfg(feature = "qlog")]
