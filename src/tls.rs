@@ -28,8 +28,6 @@ use std::ffi;
 use std::ptr;
 use std::slice;
 
-use std::io::prelude::*;
-
 use libc::c_char;
 use libc::c_int;
 use libc::c_long;
@@ -713,20 +711,22 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int {
     1
 }
 
-extern fn keylog(_: *mut SSL, line: *const c_char) {
-    if let Some(path) = std::env::var_os("SSLKEYLOGFILE") {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path);
+extern fn keylog(ssl: *mut SSL, line: *const c_char) {
+    let conn =
+        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
+            Some(v) => v,
 
-        if let Ok(mut file) = file {
-            let data = unsafe { ffi::CStr::from_ptr(line).to_bytes() };
-            let mut full_line = Vec::with_capacity(data.len() + 1);
-            full_line.extend_from_slice(data);
-            full_line.push(b'\n');
-            file.write_all(&full_line[..]).unwrap_or(());
-        }
+            None => return,
+        };
+
+    if let Some(keylog) = &mut conn.keylog {
+        let data = unsafe { ffi::CStr::from_ptr(line).to_bytes() };
+
+        let mut full_line = Vec::with_capacity(data.len() + 1);
+        full_line.extend_from_slice(data);
+        full_line.push(b'\n');
+
+        keylog.write_all(&full_line[..]).ok();
     }
 }
 

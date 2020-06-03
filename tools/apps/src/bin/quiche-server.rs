@@ -111,16 +111,26 @@ fn main() {
     config.set_initial_max_streams_uni(conn_args.max_streams_uni);
     config.set_disable_active_migration(true);
 
+    let mut keylog = None;
+
+    if let Some(keylog_path) = std::env::var_os("SSLKEYLOGFILE") {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(keylog_path)
+            .unwrap();
+
+        keylog = Some(file);
+
+        config.log_keys();
+    }
+
     if args.early_data {
         config.enable_early_data();
     }
 
     if conn_args.no_grease {
         config.grease(false);
-    }
-
-    if std::env::var_os("SSLKEYLOGFILE").is_some() {
-        config.log_keys();
     }
 
     config
@@ -299,6 +309,12 @@ fn main() {
 
                 #[allow(unused_mut)]
                 let mut conn = quiche::accept(&scid, odcid, &mut config).unwrap();
+
+                if let Some(keylog) = &mut keylog {
+                    if let Ok(keylog) = keylog.try_clone() {
+                        conn.set_keylog(Box::new(keylog));
+                    }
+                }
 
                 // Only bother with qlog if the user specified it.
                 #[cfg(feature = "qlog")]
