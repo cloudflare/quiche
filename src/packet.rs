@@ -429,8 +429,7 @@ pub fn decrypt_hdr(
 
     let mut pn_and_sample = b.peek_bytes_mut(MAX_PKT_NUM_LEN + SAMPLE_LEN)?;
 
-    let (mut ciphertext, sample) =
-        pn_and_sample.split_at(MAX_PKT_NUM_LEN).unwrap();
+    let (mut ciphertext, sample) = pn_and_sample.split_at(MAX_PKT_NUM_LEN)?;
 
     let ciphertext = ciphertext.as_mut();
 
@@ -1075,7 +1074,7 @@ mod tests {
         assert!(win.contains(std::u64::MAX - 1));
     }
 
-    fn test_decrypt_pkt(
+    fn assert_decrypt_initial_pkt(
         pkt: &mut [u8], dcid: &[u8], is_server: bool, expected_frames: &[u8],
         expected_pn: u64, expected_pn_len: usize,
     ) {
@@ -1090,10 +1089,10 @@ mod tests {
             crypto::derive_initial_key_material(dcid, is_server).unwrap();
 
         decrypt_hdr(&mut b, &mut hdr, &aead).unwrap();
-        let pn = decode_pkt_num(0, hdr.pkt_num, hdr.pkt_num_len);
-
-        assert_eq!(hdr.pkt_num, expected_pn);
         assert_eq!(hdr.pkt_num_len, expected_pn_len);
+
+        let pn = decode_pkt_num(0, hdr.pkt_num, hdr.pkt_num_len);
+        assert_eq!(pn, expected_pn);
 
         let payload =
             decrypt_pkt(&mut b, pn, hdr.pkt_num_len, payload_len, &aead).unwrap();
@@ -1241,7 +1240,7 @@ mod tests {
             0x40, 0x01,
         ];
 
-        test_decrypt_pkt(&mut pkt, &dcid, true, &frames, 2, 4);
+        assert_decrypt_initial_pkt(&mut pkt, &dcid, true, &frames, 2, 4);
     }
 
     #[test]
@@ -1276,10 +1275,47 @@ mod tests {
             0x2b, 0xb9, 0xda, 0x1a, 0x00, 0x2b, 0x00, 0x02, 0x03, 0x04,
         ];
 
-        test_decrypt_pkt(&mut pkt, &dcid, false, &frames, 1, 2);
+        assert_decrypt_initial_pkt(&mut pkt, &dcid, false, &frames, 1, 2);
     }
 
-    fn test_encrypt_pkt(
+    #[test]
+    fn decrypt_chacha20() {
+        let secret = [
+            0x9a, 0xc3, 0x12, 0xa7, 0xf8, 0x77, 0x46, 0x8e, 0xbe, 0x69, 0x42,
+            0x27, 0x48, 0xad, 0x00, 0xa1, 0x54, 0x43, 0xf1, 0x82, 0x03, 0xa0,
+            0x7d, 0x60, 0x60, 0xf6, 0x88, 0xf3, 0x0f, 0x21, 0x63, 0x2b,
+        ];
+
+        let mut pkt = [
+            0x4c, 0xfe, 0x41, 0x89, 0x65, 0x5e, 0x5c, 0xd5, 0x5c, 0x41, 0xf6,
+            0x90, 0x80, 0x57, 0x5d, 0x79, 0x99, 0xc2, 0x5a, 0x5b, 0xfb,
+        ];
+
+        let mut b = octets::OctetsMut::with_slice(&mut pkt);
+
+        let alg = crypto::Algorithm::ChaCha20_Poly1305;
+
+        let aead = crypto::Open::from_secret(alg, &secret).unwrap();
+
+        let mut hdr = Header::from_bytes(&mut b, 0).unwrap();
+        assert_eq!(hdr.ty, Type::Short);
+
+        let payload_len = b.cap();
+
+        decrypt_hdr(&mut b, &mut hdr, &aead).unwrap();
+        assert_eq!(hdr.pkt_num_len, 3);
+
+        let pn = decode_pkt_num(654_360_564, hdr.pkt_num, hdr.pkt_num_len);
+        assert_eq!(pn, 654_360_564);
+
+        let payload =
+            decrypt_pkt(&mut b, pn, hdr.pkt_num_len, payload_len, &aead).unwrap();
+
+        let payload = payload.as_ref();
+        assert_eq!(&payload, &[0x01]);
+    }
+
+    fn assert_encrypt_initial_pkt(
         header: &mut [u8], dcid: &[u8], frames: &[u8], pn: u64, pn_len: usize,
         is_server: bool, expected_pkt: &[u8],
     ) {
@@ -1543,7 +1579,15 @@ mod tests {
             0x69,
         ];
 
-        test_encrypt_pkt(&mut header, &dcid, &frames, 2, 4, false, &pkt);
+        assert_encrypt_initial_pkt(
+            &mut header,
+            &dcid,
+            &frames,
+            2,
+            4,
+            false,
+            &pkt,
+        );
     }
 
     #[test]
@@ -1583,11 +1627,61 @@ mod tests {
             0xc4, 0x13,
         ];
 
-        test_encrypt_pkt(&mut header, &dcid, &frames, 1, 2, true, &pkt);
+        assert_encrypt_initial_pkt(&mut header, &dcid, &frames, 1, 2, true, &pkt);
     }
 
     #[test]
-    fn decrypto_pkt_underflow() {
+    fn encrypt_chacha20() {
+        let secret = [
+            0x9a, 0xc3, 0x12, 0xa7, 0xf8, 0x77, 0x46, 0x8e, 0xbe, 0x69, 0x42,
+            0x27, 0x48, 0xad, 0x00, 0xa1, 0x54, 0x43, 0xf1, 0x82, 0x03, 0xa0,
+            0x7d, 0x60, 0x60, 0xf6, 0x88, 0xf3, 0x0f, 0x21, 0x63, 0x2b,
+        ];
+
+        let mut header = [0x42, 0x00, 0xbf, 0xf4];
+
+        let expected_pkt = [
+            0x4c, 0xfe, 0x41, 0x89, 0x65, 0x5e, 0x5c, 0xd5, 0x5c, 0x41, 0xf6,
+            0x90, 0x80, 0x57, 0x5d, 0x79, 0x99, 0xc2, 0x5a, 0x5b, 0xfb,
+        ];
+
+        let mut b = octets::OctetsMut::with_slice(&mut header);
+
+        let hdr = Header::from_bytes(&mut b, 0).unwrap();
+        assert_eq!(hdr.ty, Type::Short);
+
+        let mut out = vec![0; expected_pkt.len()];
+        let mut b = octets::OctetsMut::with_slice(&mut out);
+
+        b.put_bytes(&header).unwrap();
+
+        let alg = crypto::Algorithm::ChaCha20_Poly1305;
+
+        let aead = crypto::Seal::from_secret(alg, &secret).unwrap();
+
+        let pn = 654_360_564;
+        let pn_len = 3;
+
+        let frames = [01];
+
+        let overhead = aead.alg().tag_len();
+
+        let payload_len = frames.len() + overhead;
+
+        let payload_offset = b.off();
+
+        b.put_bytes(&frames).unwrap();
+
+        let written =
+            encrypt_pkt(&mut b, pn, pn_len, payload_len, payload_offset, &aead)
+                .unwrap();
+
+        assert_eq!(written, expected_pkt.len());
+        assert_eq!(&out[..written], &expected_pkt[..]);
+    }
+
+    #[test]
+    fn decrypt_pkt_underflow() {
         let mut buf = [0; 65535];
         let mut b = octets::OctetsMut::with_slice(&mut buf);
 
