@@ -305,7 +305,6 @@ mod tests {
         assert_eq!(f.estimate[2].value, bw_200);
     }
 
-
     #[test]
     fn get_windowed_min_estimates_rtt() {
         let mut f = Minmax::new(Duration::new(0, 0));
@@ -370,7 +369,6 @@ mod tests {
         assert_eq!(f.estimate[2].value, bw_200);
     }
 
-
     #[test]
     fn get_windowed_max_estimates_rtt() {
         let mut f = Minmax::new(Duration::new(0, 0));
@@ -433,5 +431,5 @@ mod tests {
         assert_eq!(bw_max, bw_600);
         assert_eq!(f.estimate[1].value, bw_600);
         assert_eq!(f.estimate[2].value, bw_600);
-   }
+    }
 }
