@@ -141,6 +141,21 @@ impl Open {
         })
     }
 
+    pub fn from_secret(aead: Algorithm, secret: &[u8]) -> Result<Open> {
+        let key_len = aead.key_len();
+        let nonce_len = aead.nonce_len();
+
+        let mut key = vec![0; key_len];
+        let mut iv = vec![0; nonce_len];
+        let mut pn_key = vec![0; key_len];
+
+        derive_pkt_key(aead, &secret, &mut key)?;
+        derive_pkt_iv(aead, &secret, &mut iv)?;
+        derive_hdr_key(aead, &secret, &mut pn_key)?;
+
+        Open::new(aead, &key, &iv, &pn_key)
+    }
+
     pub fn open_with_u64_counter(
         &self, counter: u64, ad: &[u8], buf: &mut [u8],
     ) -> Result<usize> {
@@ -208,6 +223,21 @@ impl Seal {
 
             alg,
         })
+    }
+
+    pub fn from_secret(aead: Algorithm, secret: &[u8]) -> Result<Seal> {
+        let key_len = aead.key_len();
+        let nonce_len = aead.nonce_len();
+
+        let mut key = vec![0; key_len];
+        let mut iv = vec![0; nonce_len];
+        let mut pn_key = vec![0; key_len];
+
+        derive_pkt_key(aead, &secret, &mut key)?;
+        derive_pkt_iv(aead, &secret, &mut iv)?;
+        derive_hdr_key(aead, &secret, &mut pn_key)?;
+
+        Seal::new(aead, &key, &iv, &pn_key)
     }
 
     pub fn seal_with_u64_counter(

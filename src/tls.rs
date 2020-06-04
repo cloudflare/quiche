@@ -584,30 +584,11 @@ extern fn set_read_secret(
         Err(_) => return 0,
     };
 
-    let key_len = aead.key_len();
-    let nonce_len = aead.nonce_len();
-
-    let mut key = vec![0; key_len];
-    let mut iv = vec![0; nonce_len];
-    let mut pn_key = vec![0; key_len];
-
     // 0-RTT read secrets are present only on the server.
     if level != crypto::Level::ZeroRTT || conn.is_server {
         let secret = unsafe { slice::from_raw_parts(secret, secret_len) };
 
-        if crypto::derive_pkt_key(aead, &secret, &mut key).is_err() {
-            return 0;
-        }
-
-        if crypto::derive_pkt_iv(aead, &secret, &mut iv).is_err() {
-            return 0;
-        }
-
-        if crypto::derive_hdr_key(aead, &secret, &mut pn_key).is_err() {
-            return 0;
-        }
-
-        let open = match crypto::Open::new(aead, &key, &iv, &pn_key) {
+        let open = match crypto::Open::from_secret(aead, &secret) {
             Ok(v) => v,
 
             Err(_) => return 0,
@@ -653,30 +634,11 @@ extern fn set_write_secret(
         Err(_) => return 0,
     };
 
-    let key_len = aead.key_len();
-    let nonce_len = aead.nonce_len();
-
-    let mut key = vec![0; key_len];
-    let mut iv = vec![0; nonce_len];
-    let mut pn_key = vec![0; key_len];
-
     // 0-RTT write secrets are present only on the client.
     if level != crypto::Level::ZeroRTT || !conn.is_server {
         let secret = unsafe { slice::from_raw_parts(secret, secret_len) };
 
-        if crypto::derive_pkt_key(aead, &secret, &mut key).is_err() {
-            return 0;
-        }
-
-        if crypto::derive_pkt_iv(aead, &secret, &mut iv).is_err() {
-            return 0;
-        }
-
-        if crypto::derive_hdr_key(aead, &secret, &mut pn_key).is_err() {
-            return 0;
-        }
-
-        let seal = match crypto::Seal::new(aead, &key, &iv, &pn_key) {
+        let seal = match crypto::Seal::from_secret(aead, &secret) {
             Ok(v) => v,
 
             Err(_) => return 0,
