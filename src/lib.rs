@@ -1209,8 +1209,11 @@ impl Connection {
             let mut dcid = [0; 16];
             rand::rand_bytes(&mut dcid[..]);
 
-            let (aead_open, aead_seal) =
-                crypto::derive_initial_key_material(&dcid, conn.is_server)?;
+            let (aead_open, aead_seal) = crypto::derive_initial_key_material(
+                &dcid,
+                conn.version,
+                conn.is_server,
+            )?;
 
             conn.dcid.extend_from_slice(&dcid);
 
@@ -1456,6 +1459,18 @@ impl Connection {
 
             self.did_version_negotiation = true;
 
+            // Derive Initial secrets based on the new version.
+            let (aead_open, aead_seal) = crypto::derive_initial_key_material(
+                &self.dcid,
+                self.version,
+                self.is_server,
+            )?;
+
+            self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
+                Some(aead_open);
+            self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_seal =
+                Some(aead_seal);
+
             // Reset connection state to force sending another Initial packet.
             self.got_peer_conn_id = false;
             self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
@@ -1500,8 +1515,11 @@ impl Connection {
             self.rscid = Some(self.dcid.clone());
 
             // Derive Initial secrets using the new connection ID.
-            let (aead_open, aead_seal) =
-                crypto::derive_initial_key_material(&hdr.scid, self.is_server)?;
+            let (aead_open, aead_seal) = crypto::derive_initial_key_material(
+                &hdr.scid,
+                self.version,
+                self.is_server,
+            )?;
 
             self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
                 Some(aead_open);
@@ -1547,8 +1565,11 @@ impl Connection {
 
         // Derive initial secrets on the server.
         if !self.derived_initial_secrets {
-            let (aead_open, aead_seal) =
-                crypto::derive_initial_key_material(&hdr.dcid, self.is_server)?;
+            let (aead_open, aead_seal) = crypto::derive_initial_key_material(
+                &hdr.dcid,
+                self.version,
+                self.is_server,
+            )?;
 
             self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
                 Some(aead_open);
@@ -4431,6 +4452,9 @@ mod tests {
         assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.version, PROTOCOL_VERSION);
+        assert_eq!(pipe.server.version, PROTOCOL_VERSION);
     }
 
     #[test]
