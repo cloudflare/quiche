@@ -50,8 +50,8 @@ pub fn hex_dump(buf: &[u8]) -> String {
 ///
 /// This module contains constants and functions for working with ALPN.
 pub mod alpns {
-    pub const HTTP_09: [&str; 3] = ["hq-28", "hq-27", "http/0.9"];
-    pub const HTTP_3: [&str; 2] = ["h3-28", "h3-27"];
+    pub const HTTP_09: [&str; 4] = ["hq-29", "hq-28", "hq-27", "http/0.9"];
+    pub const HTTP_3: [&str; 3] = ["h3-29", "h3-28", "h3-27"];
 
     pub fn length_prefixed(alpns: &[&str]) -> Vec<u8> {
         let mut out = Vec::new();

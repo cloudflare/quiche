@@ -272,13 +272,14 @@ use std::pin::Pin;
 use std::str::FromStr;
 
 /// The current QUIC wire version.
-pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_DRAFT28;
+pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_DRAFT29;
 
 /// Supported QUIC versions.
 ///
 /// Note that the older ones might not be fully supported.
 const PROTOCOL_VERSION_DRAFT27: u32 = 0xff00_001b;
 const PROTOCOL_VERSION_DRAFT28: u32 = 0xff00_001c;
+const PROTOCOL_VERSION_DRAFT29: u32 = 0xff00_001d;
 
 /// The maximum length of a connection ID.
 pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
@@ -1030,7 +1031,9 @@ pub fn retry(
 /// Returns true if the given protocol version is supported.
 pub fn version_is_supported(version: u32) -> bool {
     match version {
-        PROTOCOL_VERSION_DRAFT27 | PROTOCOL_VERSION_DRAFT28 => true,
+        PROTOCOL_VERSION_DRAFT27 |
+        PROTOCOL_VERSION_DRAFT28 |
+        PROTOCOL_VERSION_DRAFT29 => true,
 
         _ => false,
     }
