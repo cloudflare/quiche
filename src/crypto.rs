@@ -288,7 +288,7 @@ impl Seal {
 }
 
 pub fn derive_initial_key_material(
-    cid: &[u8], is_server: bool,
+    cid: &[u8], version: u32, is_server: bool,
 ) -> Result<(Open, Seal)> {
     let mut secret = [0; 32];
 
@@ -297,7 +297,7 @@ pub fn derive_initial_key_material(
     let key_len = aead.key_len();
     let nonce_len = aead.nonce_len();
 
-    let initial_secret = derive_initial_secret(&cid)?;
+    let initial_secret = derive_initial_secret(&cid, version)?;
 
     // Client.
     let mut client_key = vec![0; key_len];
@@ -334,13 +334,25 @@ pub fn derive_initial_key_material(
     Ok((open, seal))
 }
 
-fn derive_initial_secret(secret: &[u8]) -> Result<hkdf::Prk> {
+fn derive_initial_secret(secret: &[u8], version: u32) -> Result<hkdf::Prk> {
     const INITIAL_SALT: [u8; 20] = [
+        0xaf, 0xbf, 0xec, 0x28, 0x99, 0x93, 0xd2, 0x4c, 0x9e, 0x97, 0x86, 0xf1,
+        0x9c, 0x61, 0x11, 0xe0, 0x43, 0x90, 0xa8, 0x99,
+    ];
+
+    const INITIAL_SALT_OLD: [u8; 20] = [
         0xc3, 0xee, 0xf7, 0x12, 0xc7, 0x2e, 0xbb, 0x5a, 0x11, 0xa7, 0xd2, 0x43,
         0x2b, 0xb4, 0x63, 0x65, 0xbe, 0xf9, 0xf5, 0x02,
     ];
 
-    let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, &INITIAL_SALT);
+    let salt = match version {
+        crate::PROTOCOL_VERSION_DRAFT27 | crate::PROTOCOL_VERSION_DRAFT28 =>
+            &INITIAL_SALT_OLD,
+
+        _ => &INITIAL_SALT,
+    };
+
+    let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, salt);
     Ok(salt.extract(secret))
 }
 
@@ -456,7 +468,88 @@ mod tests {
 
         let aead = Algorithm::AES128_GCM;
 
-        let initial_secret = derive_initial_secret(&dcid).unwrap();
+        let initial_secret =
+            derive_initial_secret(&dcid, crate::PROTOCOL_VERSION).unwrap();
+
+        // Client.
+        assert!(
+            derive_client_initial_secret(&initial_secret, &mut secret).is_ok()
+        );
+        let expected_client_initial_secret = [
+            0x00, 0x88, 0x11, 0x92, 0x88, 0xf1, 0xd8, 0x66, 0x73, 0x3c, 0xee,
+            0xed, 0x15, 0xff, 0x9d, 0x50, 0x90, 0x2c, 0xf8, 0x29, 0x52, 0xee,
+            0xe2, 0x7e, 0x9d, 0x4d, 0x49, 0x18, 0xea, 0x37, 0x1d, 0x87,
+        ];
+        assert_eq!(&secret, &expected_client_initial_secret);
+
+        assert!(derive_pkt_key(aead, &secret, &mut pkt_key).is_ok());
+        let expected_client_pkt_key = [
+            0x17, 0x52, 0x57, 0xa3, 0x1e, 0xb0, 0x9d, 0xea, 0x93, 0x66, 0xd8,
+            0xbb, 0x79, 0xad, 0x80, 0xba,
+        ];
+        assert_eq!(&pkt_key, &expected_client_pkt_key);
+
+        assert!(derive_pkt_iv(aead, &secret, &mut pkt_iv).is_ok());
+        let expected_client_pkt_iv = [
+            0x6b, 0x26, 0x11, 0x4b, 0x9c, 0xba, 0x2b, 0x63, 0xa9, 0xe8, 0xdd,
+            0x4f,
+        ];
+        assert_eq!(&pkt_iv, &expected_client_pkt_iv);
+
+        assert!(derive_hdr_key(aead, &secret, &mut hdr_key).is_ok());
+        let expected_client_hdr_key = [
+            0x9d, 0xdd, 0x12, 0xc9, 0x94, 0xc0, 0x69, 0x8b, 0x89, 0x37, 0x4a,
+            0x9c, 0x07, 0x7a, 0x30, 0x77,
+        ];
+        assert_eq!(&hdr_key, &expected_client_hdr_key);
+
+        // Server.
+        assert!(
+            derive_server_initial_secret(&initial_secret, &mut secret).is_ok()
+        );
+        let expected_server_initial_secret = [
+            0x00, 0x6f, 0x88, 0x13, 0x59, 0x24, 0x4d, 0xd9, 0xad, 0x1a, 0xcf,
+            0x85, 0xf5, 0x95, 0xba, 0xd6, 0x7c, 0x13, 0xf9, 0xf5, 0x58, 0x6f,
+            0x5e, 0x64, 0xe1, 0xac, 0xae, 0x1d, 0x9e, 0xa8, 0xf6, 0x16,
+        ];
+        assert_eq!(&secret, &expected_server_initial_secret);
+
+        assert!(derive_pkt_key(aead, &secret, &mut pkt_key).is_ok());
+        let expected_server_pkt_key = [
+            0x14, 0x9d, 0x0b, 0x16, 0x62, 0xab, 0x87, 0x1f, 0xbe, 0x63, 0xc4,
+            0x9b, 0x5e, 0x65, 0x5a, 0x5d,
+        ];
+        assert_eq!(&pkt_key, &expected_server_pkt_key);
+
+        assert!(derive_pkt_iv(aead, &secret, &mut pkt_iv).is_ok());
+        let expected_server_pkt_iv = [
+            0xba, 0xb2, 0xb1, 0x2a, 0x4c, 0x76, 0x01, 0x6a, 0xce, 0x47, 0x85,
+            0x6d,
+        ];
+        assert_eq!(&pkt_iv, &expected_server_pkt_iv);
+
+        assert!(derive_hdr_key(aead, &secret, &mut hdr_key).is_ok());
+        let expected_server_hdr_key = [
+            0xc0, 0xc4, 0x99, 0xa6, 0x5a, 0x60, 0x02, 0x4a, 0x18, 0xa2, 0x50,
+            0x97, 0x4e, 0xa0, 0x1d, 0xfa,
+        ];
+        assert_eq!(&hdr_key, &expected_server_hdr_key);
+    }
+
+    #[test]
+    fn derive_initial_secrets_old() {
+        let dcid = [0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
+
+        let mut secret = [0; 32];
+        let mut pkt_key = [0; 16];
+        let mut pkt_iv = [0; 12];
+        let mut hdr_key = [0; 16];
+
+        let aead = Algorithm::AES128_GCM;
+
+        let initial_secret =
+            derive_initial_secret(&dcid, crate::PROTOCOL_VERSION_DRAFT28)
+                .unwrap();
 
         // Client.
         assert!(
