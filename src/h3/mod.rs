@@ -258,7 +258,7 @@ use crate::octets;
 ///
 /// [`Config::set_application_protos()`]:
 /// ../struct.Config.html#method.set_application_protos
-pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-28\x05h3-27";
+pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-29\x05h3-28\x05h3-27";
 
 /// A specialized [`Result`] type for quiche HTTP/3 operations.
 ///
