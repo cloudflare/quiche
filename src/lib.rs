@@ -1004,7 +1004,7 @@ pub fn negotiate_version(
 ///     let new_token = mint_token(&hdr, &src);
 ///
 ///     let len = quiche::retry(
-///         &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
+///         &hdr.scid, &hdr.dcid, &scid, &new_token, hdr.version, &mut out,
 ///     )?;
 ///
 ///     socket.send_to(&out[..len], &src).unwrap();
@@ -1023,9 +1023,10 @@ pub fn negotiate_version(
 /// # Ok::<(), quiche::Error>(())
 /// ```
 pub fn retry(
-    scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], out: &mut [u8],
+    scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], version: u32,
+    out: &mut [u8],
 ) -> Result<usize> {
-    packet::retry(scid, dcid, new_scid, token, out)
+    packet::retry(scid, dcid, new_scid, token, version, out)
 }
 
 /// Returns true if the given protocol version is supported.
@@ -1497,7 +1498,9 @@ impl Connection {
             }
 
             // Check if Retry packet is valid.
-            if packet::verify_retry_integrity(&b, &self.dcid).is_err() {
+            if packet::verify_retry_integrity(&b, &self.dcid, self.version)
+                .is_err()
+            {
                 return Err(Error::Done);
             }
 
@@ -6021,8 +6024,15 @@ mod tests {
 
         let token = b"quiche test retry token";
 
-        len =
-            packet::retry(&hdr.scid, &hdr.dcid, &scid, token, &mut buf).unwrap();
+        len = packet::retry(
+            &hdr.scid,
+            &hdr.dcid,
+            &scid,
+            token,
+            hdr.version,
+            &mut buf,
+        )
+        .unwrap();
 
         // Client receives Retry and sends new Initial.
         assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
@@ -6071,8 +6081,15 @@ mod tests {
 
         let token = b"quiche test retry token";
 
-        len =
-            packet::retry(&hdr.scid, &hdr.dcid, &scid, token, &mut buf).unwrap();
+        len = packet::retry(
+            &hdr.scid,
+            &hdr.dcid,
+            &scid,
+            token,
+            hdr.version,
+            &mut buf,
+        )
+        .unwrap();
 
         // Client receives Retry and sends new Initial.
         assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
@@ -6119,8 +6136,15 @@ mod tests {
 
         let token = b"quiche test retry token";
 
-        len =
-            packet::retry(&hdr.scid, &hdr.dcid, &scid, token, &mut buf).unwrap();
+        len = packet::retry(
+            &hdr.scid,
+            &hdr.dcid,
+            &scid,
+            token,
+            hdr.version,
+            &mut buf,
+        )
+        .unwrap();
 
         // Client receives Retry and sends new Initial.
         assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));

@@ -266,9 +266,15 @@ fn main() {
                         let new_token = mint_token(&hdr, &src);
 
                         let len = quiche::retry(
-                            &hdr.scid, &hdr.dcid, &scid, &new_token, &mut out,
+                            &hdr.scid,
+                            &hdr.dcid,
+                            &scid,
+                            &new_token,
+                            hdr.version,
+                            &mut out,
                         )
                         .unwrap();
+
                         let out = &out[..len];
 
                         if let Err(e) = socket.send_to(out, &src) {
