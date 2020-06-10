@@ -278,7 +278,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                                                dcid, dcid_len,
                                                dcid, dcid_len,
                                                token, token_len,
-                                               out, sizeof(out));
+                                               version, out, sizeof(out));
 
                 if (written < 0) {
                     fprintf(stderr, "failed to create retry packet: %zd\n",

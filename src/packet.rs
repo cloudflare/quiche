@@ -596,13 +596,18 @@ pub fn negotiate_version(
 }
 
 pub fn retry(
-    scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], out: &mut [u8],
+    scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], version: u32,
+    out: &mut [u8],
 ) -> Result<usize> {
     let mut b = octets::OctetsMut::with_slice(out);
 
+    if !crate::version_is_supported(version) {
+        return Err(Error::UnknownVersion);
+    }
+
     let hdr = Header {
         ty: Type::Retry,
-        version: crate::PROTOCOL_VERSION,
+        version,
         dcid: scid.to_vec(),
         scid: new_scid.to_vec(),
         pkt_num: 0,
@@ -614,15 +619,17 @@ pub fn retry(
 
     hdr.to_bytes(&mut b)?;
 
-    let tag = compute_retry_integrity_tag(&b, dcid)?;
+    let tag = compute_retry_integrity_tag(&b, dcid, version)?;
 
     b.put_bytes(tag.as_ref())?;
 
     Ok(b.off())
 }
 
-pub fn verify_retry_integrity(b: &octets::OctetsMut, odcid: &[u8]) -> Result<()> {
-    let tag = compute_retry_integrity_tag(b, odcid)?;
+pub fn verify_retry_integrity(
+    b: &octets::OctetsMut, odcid: &[u8], version: u32,
+) -> Result<()> {
+    let tag = compute_retry_integrity_tag(b, odcid, version)?;
 
     ring::constant_time::verify_slices_are_equal(
         &b.as_ref()[..aead::AES_128_GCM.tag_len()],
@@ -634,7 +641,7 @@ pub fn verify_retry_integrity(b: &octets::OctetsMut, odcid: &[u8]) -> Result<()>
 }
 
 fn compute_retry_integrity_tag(
-    b: &octets::OctetsMut, odcid: &[u8],
+    b: &octets::OctetsMut, odcid: &[u8], version: u32,
 ) -> Result<aead::Tag> {
     const RETRY_INTEGRITY_KEY: [u8; 16] = [
         0xcc, 0xce, 0x18, 0x7e, 0xd0, 0x9a, 0x09, 0xd0, 0x57, 0x28, 0x15, 0x5a,
@@ -644,6 +651,22 @@ fn compute_retry_integrity_tag(
     const RETRY_INTEGRITY_NONCE: [u8; aead::NONCE_LEN] = [
         0xe5, 0x49, 0x30, 0xf9, 0x7f, 0x21, 0x36, 0xf0, 0x53, 0x0a, 0x8c, 0x1c,
     ];
+
+    const RETRY_INTEGRITY_KEY_OLD: [u8; 16] = [
+        0x4d, 0x32, 0xec, 0xdb, 0x2a, 0x21, 0x33, 0xc8, 0x41, 0xe4, 0x04, 0x3d,
+        0xf2, 0x7d, 0x44, 0x30,
+    ];
+
+    const RETRY_INTEGRITY_NONCE_OLD: [u8; aead::NONCE_LEN] = [
+        0x4d, 0x16, 0x11, 0xd0, 0x55, 0x13, 0xa5, 0x52, 0xc5, 0x87, 0xd5, 0x75,
+    ];
+
+    let (key, nonce) = match version {
+        crate::PROTOCOL_VERSION_DRAFT27 | crate::PROTOCOL_VERSION_DRAFT28 =>
+            (&RETRY_INTEGRITY_KEY_OLD, RETRY_INTEGRITY_NONCE_OLD),
+
+        _ => (&RETRY_INTEGRITY_KEY, RETRY_INTEGRITY_NONCE),
+    };
 
     let hdr_len = b.off();
 
@@ -656,11 +679,11 @@ fn compute_retry_integrity_tag(
     pb.put_bytes(&b.buf()[..hdr_len])?;
 
     let key = aead::LessSafeKey::new(
-        aead::UnboundKey::new(&aead::AES_128_GCM, &RETRY_INTEGRITY_KEY)
+        aead::UnboundKey::new(&aead::AES_128_GCM, key)
             .map_err(|_| Error::CryptoFail)?,
     );
 
-    let nonce = aead::Nonce::assume_unique_for_key(RETRY_INTEGRITY_NONCE);
+    let nonce = aead::Nonce::assume_unique_for_key(nonce);
 
     let aad = aead::Aad::from(&pseudo);
 

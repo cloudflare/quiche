@@ -216,7 +216,7 @@ ssize_t quiche_retry(const uint8_t *scid, size_t scid_len,
                      const uint8_t *dcid, size_t dcid_len,
                      const uint8_t *new_scid, size_t new_scid_len,
                      const uint8_t *token, size_t token_len,
-                     uint8_t *out, size_t out_len);
+                     uint32_t version, uint8_t *out, size_t out_len);
 
 // Returns true if the given protocol version is supported.
 bool quiche_version_is_supported(uint32_t version);
