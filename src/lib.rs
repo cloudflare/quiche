@@ -1283,7 +1283,7 @@ impl Connection {
 
         streamer.start_log().ok();
 
-        let ev = self.peer_transport_params.to_qlog(
+        let ev = self.local_transport_params.to_qlog(
             qlog::TransportOwner::Local,
             self.version,
             self.handshake.alpn_protocol(),
