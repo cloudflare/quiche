@@ -51,7 +51,7 @@ matrix:
       - make docker-build
    - name: "nightly Linux x86_64"
      language: rust
-     rust: nightly
+     rust: nightly-2020-06-10
      addons:
        apt:
          packages:
