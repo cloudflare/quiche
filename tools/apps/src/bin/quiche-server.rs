@@ -101,7 +101,7 @@ fn main() {
 
     config.set_application_protos(&conn_args.alpns).unwrap();
 
-    config.set_max_idle_timeout(5000);
+    config.set_max_idle_timeout(30000);
     config.set_max_udp_payload_size(MAX_DATAGRAM_SIZE as u64);
     config.set_initial_max_data(conn_args.max_data);
     config.set_initial_max_stream_data_bidi_local(conn_args.max_stream_data);
