@@ -2343,7 +2343,46 @@ impl Connection {
             }
         }
 
-        // Create PING for PTO probe.
+        // Try to retransmit old frames on PTO, if there is space left.
+        if self.recovery.loss_probes[epoch] > 0 &&
+            left > cmp::min(
+                frame::MAX_CRYPTO_OVERHEAD,
+                frame::MAX_STREAM_OVERHEAD,
+            ) &&
+            !is_closing
+        {
+            let unacked_iter = self.recovery.sent[epoch]
+                .iter_mut()
+                // Skip packets that have already been acked or lost and packets
+                // that are not in-flight.
+                .filter(|p| p.in_flight && p.time_acked.is_none() && p.time_lost.is_none());
+
+            'unacked_iter: for unacked in unacked_iter {
+                for frame in &unacked.frames {
+                    // Only retransmit CRYPTO and STREAM frames.
+                    match frame {
+                        frame::Frame::Crypto { .. } |
+                        frame::Frame::Stream { .. } => (),
+
+                        _ => continue,
+                    }
+
+                    // Skip frame if it's too big.
+                    if left < frame.wire_len() {
+                        break 'unacked_iter;
+                    }
+
+                    push_frame_to_pkt!(frames, frame.clone(), payload_len, left);
+
+                    ack_eliciting = true;
+                    in_flight = true;
+
+                    break 'unacked_iter;
+                }
+            }
+        }
+
+        // Create PING for PTO probe if no other ack-elicitng frame is sent.
         if self.recovery.loss_probes[epoch] > 0 &&
             !ack_eliciting &&
             left >= 1 &&
@@ -6942,6 +6981,49 @@ mod tests {
         );
 
         assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
+    }
+
+    #[test]
+    /// Tests that old data is retransmitted on PTO.
+    fn early_retransmit() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // Client sends stream data.
+        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Client sends more stream data, but packet is lost
+        assert_eq!(pipe.client.stream_send(4, b"b", false), Ok(1));
+        assert!(pipe.client.send(&mut buf).is_ok());
+
+        // Wait until PTO expires. Since the RTT is very low, wait a bit more.
+        let timer = pipe.client.timeout().unwrap();
+        std::thread::sleep(timer + time::Duration::from_millis(1));
+
+        pipe.client.on_timeout();
+
+        let epoch = packet::EPOCH_APPLICATION;
+        assert_eq!(pipe.client.recovery.loss_probes[epoch], 2);
+
+        // Client retransmits stream data in PTO probe.
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        let epoch = packet::EPOCH_APPLICATION;
+        assert_eq!(pipe.client.recovery.loss_probes[epoch], 1);
+
+        let frames =
+            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert_eq!(
+            frames.iter().next(),
+            Some(&frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"b", 0, false),
+            })
+        );
     }
 }
 

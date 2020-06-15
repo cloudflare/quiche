@@ -91,7 +91,7 @@ pub struct Recovery {
 
     loss_time: [Option<Instant>; packet::EPOCH_COUNT],
 
-    sent: [VecDeque<Sent>; packet::EPOCH_COUNT],
+    pub sent: [VecDeque<Sent>; packet::EPOCH_COUNT],
 
     pub lost: [Vec<frame::Frame>; packet::EPOCH_COUNT],
 
