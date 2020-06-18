@@ -303,6 +303,9 @@ const MAX_AMPLIFICATION_FACTOR: usize = 3;
 // This represents more or less how many ack blocks can fit in a typical packet.
 const MAX_ACK_RANGES: usize = 68;
 
+// The highest possible stream ID allowed.
+const MAX_STREAM_ID: u64 = 1 << 60;
+
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -3537,16 +3540,16 @@ impl Connection {
             },
 
             frame::Frame::MaxStreamsBidi { max } => {
-                if max > 2u64.pow(60) {
-                    return Err(Error::StreamLimit);
+                if max > MAX_STREAM_ID {
+                    return Err(Error::InvalidFrame);
                 }
 
                 self.streams.update_peer_max_streams_bidi(max);
             },
 
             frame::Frame::MaxStreamsUni { max } => {
-                if max > 2u64.pow(60) {
-                    return Err(Error::StreamLimit);
+                if max > MAX_STREAM_ID {
+                    return Err(Error::InvalidFrame);
                 }
 
                 self.streams.update_peer_max_streams_uni(max);
@@ -3556,9 +3559,15 @@ impl Connection {
 
             frame::Frame::StreamDataBlocked { .. } => (),
 
-            frame::Frame::StreamsBlockedBidi { .. } => (),
+            frame::Frame::StreamsBlockedBidi { limit } =>
+                if limit > MAX_STREAM_ID {
+                    return Err(Error::InvalidFrame);
+                },
 
-            frame::Frame::StreamsBlockedUni { .. } => (),
+            frame::Frame::StreamsBlockedUni { limit } =>
+                if limit > MAX_STREAM_ID {
+                    return Err(Error::InvalidFrame);
+                },
 
             // TODO: implement connection migration
             frame::Frame::NewConnectionId { .. } => (),
@@ -3840,8 +3849,8 @@ impl TransportParams {
                 0x0008 => {
                     let max = val.get_varint()?;
 
-                    if max > 2u64.pow(60) {
-                        return Err(Error::StreamLimit);
+                    if max > MAX_STREAM_ID {
+                        return Err(Error::InvalidTransportParam);
                     }
 
                     tp.initial_max_streams_bidi = max;
@@ -3850,8 +3859,8 @@ impl TransportParams {
                 0x0009 => {
                     let max = val.get_varint()?;
 
-                    if max > 2u64.pow(60) {
-                        return Err(Error::StreamLimit);
+                    if max > MAX_STREAM_ID {
+                        return Err(Error::InvalidTransportParam);
                     }
 
                     tp.initial_max_streams_uni = max;
@@ -5001,19 +5010,19 @@ mod tests {
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
-        let frames = [frame::Frame::MaxStreamsBidi { max: 2u64.pow(60) }];
+        let frames = [frame::Frame::MaxStreamsBidi { max: MAX_STREAM_ID }];
 
         let pkt_type = packet::Type::Short;
         assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
         let frames = [frame::Frame::MaxStreamsBidi {
-            max: 2u64.pow(60) + 1,
+            max: MAX_STREAM_ID + 1,
         }];
 
         let pkt_type = packet::Type::Short;
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::StreamLimit),
+            Err(Error::InvalidFrame),
         );
     }
 
@@ -5071,19 +5080,71 @@ mod tests {
 
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
-        let frames = [frame::Frame::MaxStreamsUni { max: 2u64.pow(60) }];
+        let frames = [frame::Frame::MaxStreamsUni { max: MAX_STREAM_ID }];
 
         let pkt_type = packet::Type::Short;
         assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
         let frames = [frame::Frame::MaxStreamsUni {
-            max: 2u64.pow(60) + 1,
+            max: MAX_STREAM_ID + 1,
         }];
 
         let pkt_type = packet::Type::Short;
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::StreamLimit),
+            Err(Error::InvalidFrame),
+        );
+    }
+
+    #[test]
+    fn streams_blocked_max_bidi() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [frame::Frame::StreamsBlockedBidi {
+            limit: MAX_STREAM_ID,
+        }];
+
+        let pkt_type = packet::Type::Short;
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+        let frames = [frame::Frame::StreamsBlockedBidi {
+            limit: MAX_STREAM_ID + 1,
+        }];
+
+        let pkt_type = packet::Type::Short;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::InvalidFrame),
+        );
+    }
+
+    #[test]
+    fn streams_blocked_max_uni() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [frame::Frame::StreamsBlockedUni {
+            limit: MAX_STREAM_ID,
+        }];
+
+        let pkt_type = packet::Type::Short;
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+        let frames = [frame::Frame::StreamsBlockedUni {
+            limit: MAX_STREAM_ID + 1,
+        }];
+
+        let pkt_type = packet::Type::Short;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::InvalidFrame),
         );
     }
 
