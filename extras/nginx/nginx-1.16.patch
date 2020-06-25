@@ -1,4 +1,4 @@
-From 6f72209d81fbe999eda58e289164bfba60205b8b Mon Sep 17 00:00:00 2001
+From bcefe4e043b6777a8da70b64ec789bf5569847ec Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 10 Oct 2019 17:06:08 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -26,12 +26,12 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   29 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2206 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2228 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   77 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3686 insertions(+), 11 deletions(-)
+ 27 files changed, 3708 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -1570,10 +1570,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..7e44e2f07
+index 000000000..358a36528
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2206 @@
+@@ -0,0 +1,2228 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -2454,7 +2454,10 @@ index 000000000..7e44e2f07
 +static ngx_int_t
 +ngx_http_v3_parse_scheme(ngx_http_request_t *r, ngx_str_t *value)
 +{
-+    if (r->schema_start) {
++    u_char      c, ch;
++    ngx_uint_t  i;
++
++    if (r->schema.len) {
 +        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
 +                      "client sent duplicate :scheme header");
 +
@@ -2468,8 +2471,27 @@ index 000000000..7e44e2f07
 +        return NGX_DECLINED;
 +    }
 +
-+    r->schema_start = value->data;
-+    r->schema_end = value->data + value->len;
++    for (i = 0; i < value->len; i++) {
++        ch = value->data[i];
++
++        c = (u_char) (ch | 0x20);
++        if (c >= 'a' && c <= 'z') {
++            continue;
++        }
++
++        if (((ch >= '0' && ch <= '9') || ch == '+' || ch == '-' || ch == '.')
++            && i > 0)
++        {
++            continue;
++        }
++
++        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
++                      "client sent invalid :scheme header: \"%V\"", value);
++
++        return NGX_DECLINED;
++    }
++
++    r->schema = *value;
 +
 +    return NGX_OK;
 +}
@@ -2532,14 +2554,14 @@ index 000000000..7e44e2f07
 +    static const u_char ending[] = " HTTP/3";
 +
 +    if (r->method_name.len == 0
-+        || r->schema_start == NULL
++        || r->schema.len == 0
 +        || r->unparsed_uri.len == 0)
 +    {
 +        if (r->method_name.len == 0) {
 +            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
 +                          "client sent no :method header");
 +
-+        } else if (r->schema_start == NULL) {
++        } else if (r->schema.len == 0) {
 +            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
 +                          "client sent no :scheme header");
 +
@@ -4270,5 +4292,5 @@ index 000000000..72e189def
 +
 +#endif /* _NGX_HTTP_V3_MODULE_H_INCLUDED_ */
 -- 
-2.26.2
+2.27.0
 
