@@ -6981,13 +6981,11 @@ mod tests {
         pipe.client.on_timeout();
 
         let epoch = packet::EPOCH_APPLICATION;
-        assert_eq!(pipe.client.recovery.loss_probes[epoch], 2);
+        assert_eq!(pipe.client.recovery.loss_probes[epoch], 1);
 
         // Client retransmits stream data in PTO probe.
         let len = pipe.client.send(&mut buf).unwrap();
-
-        let epoch = packet::EPOCH_APPLICATION;
-        assert_eq!(pipe.client.recovery.loss_probes[epoch], 1);
+        assert_eq!(pipe.client.recovery.loss_probes[epoch], 0);
 
         let frames =
             testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
