@@ -2085,7 +2085,10 @@ impl Connection {
         let mut payload_len = 0;
 
         // Create ACK frame.
-        if self.pkt_num_spaces[epoch].ack_elicited && !is_closing {
+        if (self.pkt_num_spaces[epoch].ack_elicited ||
+            self.recovery.loss_probes[epoch] > 0) &&
+            !is_closing
+        {
             let ack_delay =
                 self.pkt_num_spaces[epoch].largest_rx_pkt_time.elapsed();
 
@@ -6989,8 +6992,13 @@ mod tests {
         let frames =
             testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
 
+        let mut iter = frames.iter();
+
+        // Skip ACK frame.
+        iter.next();
+
         assert_eq!(
-            frames.iter().next(),
+            iter.next(),
             Some(&frame::Frame::Stream {
                 stream_id: 4,
                 data: stream::RangeBuf::from(b"b", 0, false),
