@@ -55,7 +55,7 @@ const PERSISTENT_CONGESTION_THRESHOLD: u32 = 3;
 
 const RTT_WINDOW: Duration = Duration::from_secs(300);
 
-const PTO_PROBES_COUNT: usize = 2;
+const MAX_PTO_PROBES_COUNT: usize = 2;
 
 // Congestion Control
 const INITIAL_WINDOW_PACKETS: usize = 10;
@@ -356,6 +356,11 @@ impl Recovery {
             handshake_completed,
         );
 
+        self.pto_count += 1;
+
+        self.loss_probes[epoch] =
+            cmp::min(self.pto_count as usize, MAX_PTO_PROBES_COUNT);
+
         let unacked_iter = self.sent[epoch]
             .iter_mut()
             // Skip packets that have already been acked or lost, and packets
@@ -363,7 +368,7 @@ impl Recovery {
             .filter(|p| p.has_data && p.time_acked.is_none() && p.time_lost.is_none())
             // Only return as many packets as the number of probe packets that
             // will be sent.
-            .take(PTO_PROBES_COUNT);
+            .take(self.loss_probes[epoch]);
 
         // Retransmit the frames from the oldest sent packets on PTO. However
         // the packets are not actually declared lost (so there is no effect to
@@ -375,10 +380,6 @@ impl Recovery {
         for unacked in unacked_iter {
             self.lost[epoch].extend_from_slice(&unacked.frames);
         }
-
-        self.loss_probes[epoch] = PTO_PROBES_COUNT;
-
-        self.pto_count += 1;
 
         self.set_loss_detection_timer(handshake_completed);
 
@@ -1035,7 +1036,7 @@ mod tests {
 
         // PTO.
         r.on_loss_detection_timeout(true, now, "");
-        assert_eq!(r.loss_probes[packet::EPOCH_APPLICATION], 2);
+        assert_eq!(r.loss_probes[packet::EPOCH_APPLICATION], 1);
         assert_eq!(r.lost_count, 0);
         assert_eq!(r.pto_count, 1);
 
