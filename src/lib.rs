@@ -1727,7 +1727,14 @@ impl Connection {
                 ack_elicited = true;
             }
 
-            self.process_frame(frame, epoch, now)?;
+            if let Err(e) = self.process_frame(frame, epoch, now) {
+                qlog_with!(self.qlog_streamer, q, {
+                    // Always conclude frame writing on error.
+                    q.finish_frames().ok();
+                });
+
+                return Err(e);
+            }
         }
 
         qlog_with!(self.qlog_streamer, q, {
