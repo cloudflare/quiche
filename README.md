@@ -253,7 +253,7 @@ Note that [BoringSSL], which is used to implement QUIC's cryptographic handshake
 based on TLS, needs to be built and linked to quiche. This is done automatically
 when building quiche using cargo, but requires the `cmake`, `go` and `perl`
 commands to be available during the build process. On Windows you also need
-[NASM](https://www.nasm.us/). The 
+[NASM](https://www.nasm.us/). The
 [official BoringSSL documentation](https://github.com/google/boringssl/blob/master/BUILDING.md)
 has more details.
 
@@ -310,7 +310,7 @@ See [build_android_ndk19.sh] for more information.
 Note that building with NDK version 18 appears to be broken.
 
 [cargo-ndk]: https://docs.rs/crate/cargo-ndk
-[build_android_ndk19.sh]: https://github.com/cloudflare/quiche/blob/master/tools/build_android_ndk19.sh
+[build_android_ndk19.sh]: https://github.com/cloudflare/quiche/blob/master/tools/android/build_android_ndk19.sh
 
 #### NDK version < 18
 
@@ -319,7 +319,7 @@ If you need to use NDK version < 18 (gcc), you can build quiche in the following
 To prepare the cross-compiling toolchain, run the following command:
 
 ```bash
- $ tools/setup_android.sh
+ $ tools/android/setup_android.sh
 ```
 
 It will create a standalone toolchain for arm64/arm/x86 architectures under the
@@ -329,7 +329,7 @@ variable, the current directory will be used.
 After it run successfully, run the following script to build libquiche:
 
 ```bash
- $ tools/build_android.sh --features ndk-old-gcc
+ $ tools/android/build_android.sh --features ndk-old-gcc
 ```
 
 It will build binaries for aarch64, armv7 and i686. You can pass parameters to
@@ -337,7 +337,7 @@ this script for cargo build. For example if you want to build a release binary
 with verbose logs, do the following:
 
 ```bash
- $ tools/build_android.sh --features ndk-old-gcc --release -vv
+ $ tools/android/build_android.sh --features ndk-old-gcc --release -vv
 ```
 
 ### Building for iOS
