@@ -175,11 +175,20 @@ static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
         return NULL;
     }
 
+    conn_io->conn = NULL;
+
+    HASH_ADD(hh, conns->h, cid, LOCAL_CONN_ID_LEN, conn_io);
+
+    return conn_io;
+}
+
+static ssize_t accept_conn(struct conn_io *conn_io, uint8_t *odcid, size_t odcid_len) {
+
     quiche_conn *conn = quiche_accept(conn_io->cid, LOCAL_CONN_ID_LEN,
                                       odcid, odcid_len, config);
     if (conn == NULL) {
         fprintf(stderr, "failed to create connection\n");
-        return NULL;
+        return -1;
     }
 
     conn_io->sock = conns->sock;
@@ -188,11 +197,9 @@ static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
     ev_init(&conn_io->timer, timeout_cb);
     conn_io->timer.data = conn_io;
 
-    HASH_ADD(hh, conns->h, cid, LOCAL_CONN_ID_LEN, conn_io);
-
     fprintf(stderr, "new connection\n");
 
-    return conn_io;
+    return 0;
 }
 
 static int for_each_header(uint8_t *name, size_t name_len,
@@ -205,6 +212,7 @@ static int for_each_header(uint8_t *name, size_t name_len,
 }
 
 static void recv_cb(EV_P_ ev_io *w, int revents) {
+    fprintf(stderr, "receiving\n");
     struct conn_io *tmp, *conn_io = NULL;
 
     static uint8_t buf[65535];
@@ -283,12 +291,17 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             if (token_len == 0) {
                 fprintf(stderr, "stateless retry\n");
 
+                conn_io = create_conn(odcid, odcid_len);
+                if (conn_io == NULL) {
+                    continue;
+                }
+
                 mint_token(dcid, dcid_len, &peer_addr, peer_addr_len,
                            token, &token_len);
 
                 ssize_t written = quiche_retry(scid, scid_len,
                                                dcid, dcid_len,
-                                               dcid, dcid_len,
+                                               conn_io->cid, LOCAL_CONN_ID_LEN,
                                                token, token_len,
                                                version, out, sizeof(out));
 
@@ -309,112 +322,118 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 fprintf(stderr, "sent %zd bytes\n", sent);
                 continue;
             }
+        }
 
-
+        if (conn_io != NULL && conn_io->conn == NULL) {
             if (!validate_token(token, token_len, &peer_addr, peer_addr_len,
-                               odcid, &odcid_len)) {
+                                odcid, &odcid_len)) {
                 fprintf(stderr, "invalid address validation token\n");
                 continue;
             }
 
-            conn_io = create_conn(odcid, odcid_len);
-            if (conn_io == NULL) {
+            if (accept_conn(conn_io, odcid, odcid_len) < 0) {
+                continue;
+            }
+        }
+
+        memcpy(&conn_io->peer_addr, &peer_addr, peer_addr_len);
+        conn_io->peer_addr_len = peer_addr_len;
+
+        if (conn_io != NULL && conn_io->conn != NULL) {
+            ssize_t done = quiche_conn_recv(conn_io->conn, buf, read);
+
+            if (done < 0) {
+                fprintf(stderr, "failed to process packet: %zd\n", done);
                 continue;
             }
 
-            memcpy(&conn_io->peer_addr, &peer_addr, peer_addr_len);
-            conn_io->peer_addr_len = peer_addr_len;
-        }
+            fprintf(stderr, "recv %zd bytes\n", done);
 
-        ssize_t done = quiche_conn_recv(conn_io->conn, buf, read);
+            if (quiche_conn_is_established(conn_io->conn)) {
+                quiche_h3_event *ev;
 
-        if (done < 0) {
-            fprintf(stderr, "failed to process packet: %zd\n", done);
-            continue;
-        }
-
-        fprintf(stderr, "recv %zd bytes\n", done);
-
-        if (quiche_conn_is_established(conn_io->conn)) {
-            quiche_h3_event *ev;
-
-            if (conn_io->http3 == NULL) {
-                conn_io->http3 = quiche_h3_conn_new_with_transport(conn_io->conn,
-                                                                   http3_config);
                 if (conn_io->http3 == NULL) {
-                    fprintf(stderr, "failed to create HTTP/3 connection\n");
-                    continue;
-                }
-            }
-
-            while (1) {
-                int64_t s = quiche_h3_conn_poll(conn_io->http3,
-                                                conn_io->conn,
-                                                &ev);
-
-                if (s < 0) {
-                    break;
+                    conn_io->http3 = quiche_h3_conn_new_with_transport(conn_io->conn,
+                                                                    http3_config);
+                    if (conn_io->http3 == NULL) {
+                        fprintf(stderr, "failed to create HTTP/3 connection\n");
+                        continue;
+                    }
                 }
 
-                switch (quiche_h3_event_type(ev)) {
-                    case QUICHE_H3_EVENT_HEADERS: {
-                        int rc = quiche_h3_event_for_each_header(ev,
-                                                                 for_each_header,
-                                                                 NULL);
+                while (1) {
+                    int64_t s = quiche_h3_conn_poll(conn_io->http3,
+                                                    conn_io->conn,
+                                                    &ev);
 
-                        if (rc != 0) {
-                            fprintf(stderr, "failed to process headers\n");
+                    if (s < 0) {
+                        break;
+                    }
+
+                    switch (quiche_h3_event_type(ev)) {
+                        case QUICHE_H3_EVENT_HEADERS: {
+                            int rc = quiche_h3_event_for_each_header(ev,
+                                                                    for_each_header,
+                                                                    NULL);
+
+                            if (rc != 0) {
+                                fprintf(stderr, "failed to process headers\n");
+                            }
+
+                            quiche_h3_header headers[] = {
+                                {
+                                    .name = (const uint8_t *) ":status",
+                                    .name_len = sizeof(":status") - 1,
+
+                                    .value = (const uint8_t *) "200",
+                                    .value_len = sizeof("200") - 1,
+                                },
+
+                                {
+                                    .name = (const uint8_t *) "server",
+                                    .name_len = sizeof("server") - 1,
+
+                                    .value = (const uint8_t *) "quiche",
+                                    .value_len = sizeof("quiche") - 1,
+                                },
+
+                                {
+                                    .name = (const uint8_t *) "content-length",
+                                    .name_len = sizeof("content-length") - 1,
+
+                                    .value = (const uint8_t *) "5",
+                                    .value_len = sizeof("5") - 1,
+                                },
+                            };
+
+                            quiche_h3_send_response(conn_io->http3, conn_io->conn,
+                                                    s, headers, 3, false);
+
+                            quiche_h3_send_body(conn_io->http3, conn_io->conn,
+                                                s, (uint8_t *) "byez\n", 5, true);
+                            break;
                         }
 
-                        quiche_h3_header headers[] = {
-                            {
-                                .name = (const uint8_t *) ":status",
-                                .name_len = sizeof(":status") - 1,
+                        case QUICHE_H3_EVENT_DATA: {
+                            fprintf(stderr, "got HTTP data\n");
+                            break;
+                        }
 
-                                .value = (const uint8_t *) "200",
-                                .value_len = sizeof("200") - 1,
-                            },
-
-                            {
-                                .name = (const uint8_t *) "server",
-                                .name_len = sizeof("server") - 1,
-
-                                .value = (const uint8_t *) "quiche",
-                                .value_len = sizeof("quiche") - 1,
-                            },
-
-                            {
-                                .name = (const uint8_t *) "content-length",
-                                .name_len = sizeof("content-length") - 1,
-
-                                .value = (const uint8_t *) "5",
-                                .value_len = sizeof("5") - 1,
-                            },
-                        };
-
-                        quiche_h3_send_response(conn_io->http3, conn_io->conn,
-                                                s, headers, 3, false);
-
-                        quiche_h3_send_body(conn_io->http3, conn_io->conn,
-                                            s, (uint8_t *) "byez\n", 5, true);
-                        break;
+                        case QUICHE_H3_EVENT_FINISHED:
+                            break;
                     }
 
-                    case QUICHE_H3_EVENT_DATA: {
-                        fprintf(stderr, "got HTTP data\n");
-                        break;
-                    }
-
-                    case QUICHE_H3_EVENT_FINISHED:
-                        break;
+                    quiche_h3_event_free(ev);
                 }
-
-                quiche_h3_event_free(ev);
             }
         }
     }
 
     HASH_ITER(hh, conns->h, conn_io, tmp) {
+        if (conn_io->conn == NULL) {
+            break;
+        }
+
         flush_egress(loop, conn_io);
 
         if (quiche_conn_is_closed(conn_io->conn)) {
@@ -432,10 +451,16 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             free(conn_io);
         }
     }
+
+    fprintf(stderr, "left HASH_ITER\n");
 }
 
 static void timeout_cb(EV_P_ ev_timer *w, int revents) {
     struct conn_io *conn_io = w->data;
+    if (conn_io->conn == NULL) {
+        return;
+    }
+
     quiche_conn_on_timeout(conn_io->conn);
 
     fprintf(stderr, "timeout\n");

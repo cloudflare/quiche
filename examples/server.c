@@ -153,7 +153,7 @@ static bool validate_token(const uint8_t *token, size_t token_len,
     return true;
 }
 
-static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
+static struct conn_io *create_conn() {
     struct conn_io *conn_io = malloc(sizeof(*conn_io));
     if (conn_io == NULL) {
         fprintf(stderr, "failed to allocate connection IO\n");
@@ -172,11 +172,19 @@ static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
         return NULL;
     }
 
+    conn_io->conn = NULL;
+
+    HASH_ADD(hh, conns->h, cid, LOCAL_CONN_ID_LEN, conn_io);
+
+    return conn_io;
+}
+
+static ssize_t accept_conn(struct conn_io *conn_io, uint8_t *odcid, size_t odcid_len) {
     quiche_conn *conn = quiche_accept(conn_io->cid, LOCAL_CONN_ID_LEN,
                                       odcid, odcid_len, config);
     if (conn == NULL) {
         fprintf(stderr, "failed to create connection\n");
-        return NULL;
+        return -1;
     }
 
     conn_io->sock = conns->sock;
@@ -185,11 +193,9 @@ static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
     ev_init(&conn_io->timer, timeout_cb);
     conn_io->timer.data = conn_io;
 
-    HASH_ADD(hh, conns->h, cid, LOCAL_CONN_ID_LEN, conn_io);
-
     fprintf(stderr, "new connection\n");
 
-    return conn_io;
+    return 0;
 }
 
 static void recv_cb(EV_P_ ev_io *w, int revents) {
@@ -271,12 +277,17 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             if (token_len == 0) {
                 fprintf(stderr, "stateless retry\n");
 
+                conn_io = create_conn(odcid, odcid_len);
+                if (conn_io == NULL) {
+                    continue;
+                }
+
                 mint_token(dcid, dcid_len, &peer_addr, peer_addr_len,
                            token, &token_len);
 
                 ssize_t written = quiche_retry(scid, scid_len,
                                                dcid, dcid_len,
-                                               dcid, dcid_len,
+                                               conn_io->cid, LOCAL_CONN_ID_LEN,
                                                token, token_len,
                                                version, out, sizeof(out));
 
@@ -297,60 +308,66 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 fprintf(stderr, "sent %zd bytes\n", sent);
                 continue;
             }
+        }
 
-
+        if (conn_io != NULL && conn_io->conn == NULL) {
             if (!validate_token(token, token_len, &peer_addr, peer_addr_len,
-                               odcid, &odcid_len)) {
+                                odcid, &odcid_len)) {
                 fprintf(stderr, "invalid address validation token\n");
                 continue;
             }
 
-            conn_io = create_conn(odcid, odcid_len);
-            if (conn_io == NULL) {
+            if (accept_conn(conn_io, odcid, odcid_len) < 0) {
+                continue;
+            }
+        }
+
+        memcpy(&conn_io->peer_addr, &peer_addr, peer_addr_len);
+        conn_io->peer_addr_len = peer_addr_len;
+
+        if (conn_io != NULL && conn_io->conn != NULL) {
+            ssize_t done = quiche_conn_recv(conn_io->conn, buf, read);
+
+            if (done < 0) {
+                fprintf(stderr, "failed to process packet: %zd\n", done);
                 continue;
             }
 
-            memcpy(&conn_io->peer_addr, &peer_addr, peer_addr_len);
-            conn_io->peer_addr_len = peer_addr_len;
-        }
+            fprintf(stderr, "recv %zd bytes\n", done);
 
-        ssize_t done = quiche_conn_recv(conn_io->conn, buf, read);
+            if (quiche_conn_is_established(conn_io->conn)) {
+                uint64_t s = 0;
 
-        if (done < 0) {
-            fprintf(stderr, "failed to process packet: %zd\n", done);
-            continue;
-        }
+                quiche_stream_iter *readable = quiche_conn_readable(conn_io->conn);
 
-        fprintf(stderr, "recv %zd bytes\n", done);
+                while (quiche_stream_iter_next(readable, &s)) {
+                    fprintf(stderr, "stream %" PRIu64 " is readable\n", s);
 
-        if (quiche_conn_is_established(conn_io->conn)) {
-            uint64_t s = 0;
+                    bool fin = false;
+                    ssize_t recv_len = quiche_conn_stream_recv(conn_io->conn, s,
+                                                            buf, sizeof(buf),
+                                                            &fin);
+                    if (recv_len < 0) {
+                        break;
+                    }
 
-            quiche_stream_iter *readable = quiche_conn_readable(conn_io->conn);
-
-            while (quiche_stream_iter_next(readable, &s)) {
-                fprintf(stderr, "stream %" PRIu64 " is readable\n", s);
-
-                bool fin = false;
-                ssize_t recv_len = quiche_conn_stream_recv(conn_io->conn, s,
-                                                           buf, sizeof(buf),
-                                                           &fin);
-                if (recv_len < 0) {
-                    break;
+                    if (fin) {
+                        static const char *resp = "byez\n";
+                        quiche_conn_stream_send(conn_io->conn, s, (uint8_t *) resp,
+                                                5, true);
+                    }
                 }
 
-                if (fin) {
-                    static const char *resp = "byez\n";
-                    quiche_conn_stream_send(conn_io->conn, s, (uint8_t *) resp,
-                                            5, true);
-                }
+                quiche_stream_iter_free(readable);
             }
-
-            quiche_stream_iter_free(readable);
         }
     }
 
     HASH_ITER(hh, conns->h, conn_io, tmp) {
+        if (conn_io->conn == NULL) {
+            break;
+        }
+
         flush_egress(loop, conn_io);
 
         if (quiche_conn_is_closed(conn_io->conn)) {
@@ -371,6 +388,10 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
 static void timeout_cb(EV_P_ ev_timer *w, int revents) {
     struct conn_io *conn_io = w->data;
+    if (conn_io->conn == NULL) {
+        return;
+    }
+
     quiche_conn_on_timeout(conn_io->conn);
 
     fprintf(stderr, "timeout\n");
