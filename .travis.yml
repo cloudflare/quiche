@@ -148,8 +148,8 @@ matrix:
       # Setup android toolchain
       - export TOOLCHAIN_DIR=$(pwd)/toolchain
       - mkdir -p $TOOLCHAIN_DIR
-      - tools/setup_android.sh
-      - tools/build_android.sh --verbose --features ndk-old-gcc
+      - tools/android/setup_android.sh
+      - tools/android/build_android.sh --verbose --features ndk-old-gcc
       - rm -fr $TOOLCHAIN_DIR && rm -f .cargo/config
       #
       # NDK 19 or higher. Here we use 21 (long term support)
@@ -159,7 +159,7 @@ matrix:
       - export ANDROID_NDK_HOME=$HOME/android-ndk-$NDK_VER
       - cargo install cargo-ndk
       - cargo clean
-      - tools/build_android_ndk19.sh --verbose
+      - tools/android/build_android_ndk19.sh --verbose
    - name: "NGINX"
      language: rust
      rust: stable
