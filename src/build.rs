@@ -47,15 +47,15 @@ const CMAKE_PARAMS_IOS: &[(&str, &[(&str, &str)])] = &[
 fn get_boringssl_platform_output_path(lib: &str) -> String {
     if cfg!(windows) {
         // Code under this branch should match the logic in cmake-rs
-        let debug_env_var = std::env::var("DEBUG")
-            .expect("DEBUG variable not defined in env");
+        let debug_env_var =
+            std::env::var("DEBUG").expect("DEBUG variable not defined in env");
 
         let deb_info = match &debug_env_var[..] {
             "false" => false,
             "true" => true,
             unknown => {
                 panic!("Unknown DEBUG={} env var.", unknown);
-            }
+            },
         };
 
         let opt_env_var = std::env::var("OPT_LEVEL")
@@ -63,11 +63,16 @@ fn get_boringssl_platform_output_path(lib: &str) -> String {
 
         let subdir = match &opt_env_var[..] {
             "0" => "Debug",
-            "1" | "2" | "3" => if deb_info { "RelWithDebInfo" } else { "Release" },
+            "1" | "2" | "3" =>
+                if deb_info {
+                    "RelWithDebInfo"
+                } else {
+                    "Release"
+                },
             "s" | "z" => "MinSizeRel",
             unknown => {
                 panic!("Unknown OPT_LEVEL={} env var.", unknown);
-            }
+            },
         };
 
         format!("{}/{}", lib, subdir)
