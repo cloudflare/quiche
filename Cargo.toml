@@ -47,7 +47,7 @@ fuzzing = []
 ndk-old-gcc = []
 
 [package.metadata.docs.rs]
-default-features = false
+no-default-features = true
 
 [build-dependencies]
 cmake = "0.1"
