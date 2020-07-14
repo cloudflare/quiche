@@ -49,7 +49,7 @@ const TIME_THRESHOLD: f64 = 9.0 / 8.0;
 
 const GRANULARITY: Duration = Duration::from_millis(1);
 
-const INITIAL_RTT: Duration = Duration::from_millis(500);
+const INITIAL_RTT: Duration = Duration::from_millis(333);
 
 const PERSISTENT_CONGESTION_THRESHOLD: u32 = 3;
 
@@ -139,15 +139,19 @@ impl Recovery {
 
             latest_rtt: Duration::new(0, 0),
 
+            // This field should be initialized to `INITIAL_RTT` for the initial
+            // PTO calculation, but it also needs to be an `Option` to track
+            // whether any RTT sample was received, so the initial value is
+            // handled by the `rtt()` method instead.
             smoothed_rtt: None,
 
             minmax_filter: minmax::Minmax::new(Duration::new(0, 0)),
 
             min_rtt: Duration::new(0, 0),
 
-            rttvar: Duration::new(0, 0),
+            rttvar: INITIAL_RTT / 2,
 
-            max_ack_delay: Duration::from_millis(25),
+            max_ack_delay: Duration::new(0, 0),
 
             loss_time: [None; packet::EPOCH_COUNT],
 
@@ -518,12 +522,7 @@ impl Recovery {
         }
 
         // PTO timer.
-        let timeout = match self.smoothed_rtt {
-            None => INITIAL_RTT * 2,
-
-            Some(_) => self.pto(),
-        };
-
+        let timeout = self.pto();
         let timeout = timeout * 2_u32.pow(self.pto_count);
 
         let (sent_time, _) = self.earliest_loss_time(
