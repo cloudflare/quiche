@@ -90,8 +90,8 @@ index 126a23875..3af2ae557 100644
 +	&& cmake -DCMAKE_C_FLAGS="$OPENSSL_OPT" -DCMAKE_CXX_FLAGS="$OPENSSL_OPT" .. \\
 +	&& \$(MAKE) VERBOSE=1 \\
 +	&& cd .. \\
-+	&& cp -r include/openssl/*.h .openssl/include/openssl \\
-+	&& cp build/ssl/libssl.a build/crypto/libcrypto.a .openssl/lib
++	&& cp -r src/include/openssl/*.h .openssl/include/openssl \\
++	&& cp build/libssl.a build/libcrypto.a .openssl/lib
  
  END
  
