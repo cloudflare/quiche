@@ -22,11 +22,6 @@ matrix:
        apt:
          packages:
          - [*linux_deps, gcc-multilib, g++-multilib]
-     before_install:
-      # Install and use the current stable release of Go
-      - gimme --list
-      - eval "$(gimme stable)"
-      - gimme --list
      install:
       - rustup component add clippy
       - rustup target add $TARGET_32
@@ -56,11 +51,6 @@ matrix:
        apt:
          packages:
          - [*linux_deps]
-     before_install:
-      # Install and use the current stable release of Go
-      - gimme --list
-      - eval "$(gimme stable)"
-      - gimme --list
      install:
       - rustup component add rustfmt
       - cargo install cargo-fuzz
@@ -106,7 +96,7 @@ matrix:
        TARGET_64=x86_64-pc-windows-msvc
        TARGET_32=i686-pc-windows-msvc
      before_install:
-      - choco install golang nasm
+      - choco install nasm
       # Update $PATH
       - export PATH="$(powershell -Command '("Process", "Machine" | % { [Environment]::GetEnvironmentVariable("PATH", $_) -Split ";" -Replace "\\$", "" } | Select -Unique | % { cygpath $_ }) -Join ":"')"
      install:
@@ -169,11 +159,6 @@ matrix:
        apt:
          packages:
          - [*linux_deps]
-     before_install:
-      # Install and use the current stable release of Go
-      - gimme --list
-      - eval "$(gimme stable)"
-      - gimme --list
      script:
       - curl -O https://nginx.org/download/nginx-$NGINX_VER.tar.gz
       - tar xzf nginx-$NGINX_VER.tar.gz

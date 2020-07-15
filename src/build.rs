@@ -44,7 +44,7 @@ const CMAKE_PARAMS_IOS: &[(&str, &[(&str, &str)])] = &[
 /// MSVC generator on Windows place static libs in a target sub-folder,
 /// so adjust library location based on platform and build target.
 /// See issue: https://github.com/alexcrichton/cmake-rs/issues/18
-fn get_boringssl_platform_output_path(lib: &str) -> String {
+fn get_boringssl_platform_output_path() -> String {
     if cfg!(windows) {
         // Code under this branch should match the logic in cmake-rs
         let debug_env_var =
@@ -53,9 +53,7 @@ fn get_boringssl_platform_output_path(lib: &str) -> String {
         let deb_info = match &debug_env_var[..] {
             "false" => false,
             "true" => true,
-            unknown => {
-                panic!("Unknown DEBUG={} env var.", unknown);
-            },
+            unknown => panic!("Unknown DEBUG={} env var.", unknown),
         };
 
         let opt_env_var = std::env::var("OPT_LEVEL")
@@ -70,14 +68,12 @@ fn get_boringssl_platform_output_path(lib: &str) -> String {
                     "Release"
                 },
             "s" | "z" => "MinSizeRel",
-            unknown => {
-                panic!("Unknown OPT_LEVEL={} env var.", unknown);
-            },
+            unknown => panic!("Unknown OPT_LEVEL={} env var.", unknown),
         };
 
-        format!("{}/{}", lib, subdir)
+        subdir.to_string()
     } else {
-        lib.to_string()
+        "".to_string()
     }
 }
 
@@ -158,7 +154,7 @@ fn get_boringssl_cmake_config() -> cmake::Config {
             if arch == "x86" && os != "windows" {
                 boringssl_cmake.define(
                     "CMAKE_TOOLCHAIN_FILE",
-                    pwd.join("deps/boringssl/util/32-bit-toolchain.cmake")
+                    pwd.join("deps/boringssl/src/util/32-bit-toolchain.cmake")
                         .as_os_str(),
                 );
             }
@@ -213,14 +209,11 @@ fn main() {
             cfg.build_target("bssl").build().display().to_string()
         });
 
-        let crypto_path = get_boringssl_platform_output_path("crypto");
-        let crypto_dir = format!("{}/build/{}", bssl_dir, crypto_path);
-        println!("cargo:rustc-link-search=native={}", crypto_dir);
-        println!("cargo:rustc-link-lib=static=crypto");
+        let build_path = get_boringssl_platform_output_path();
+        let build_dir = format!("{}/build/{}", bssl_dir, build_path);
+        println!("cargo:rustc-link-search=native={}", build_dir);
 
-        let ssl_path = get_boringssl_platform_output_path("ssl");
-        let ssl_dir = format!("{}/build/{}", bssl_dir, ssl_path);
-        println!("cargo:rustc-link-search=native={}", ssl_dir);
+        println!("cargo:rustc-link-lib=static=crypto");
         println!("cargo:rustc-link-lib=static=ssl");
     }
 
