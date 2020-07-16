@@ -2085,8 +2085,9 @@ impl Connection {
         let mut payload_len = 0;
 
         // Create ACK frame.
-        if (self.pkt_num_spaces[epoch].ack_elicited ||
-            self.recovery.loss_probes[epoch] > 0) &&
+        if self.pkt_num_spaces[epoch].recv_pkt_need_ack.len() > 0 &&
+            (self.pkt_num_spaces[epoch].ack_elicited ||
+                self.recovery.loss_probes[epoch] > 0) &&
             !is_closing
         {
             let ack_delay =
