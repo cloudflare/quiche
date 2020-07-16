@@ -153,24 +153,31 @@ static bool validate_token(const uint8_t *token, size_t token_len,
     return true;
 }
 
-static struct conn_io *create_conn(uint8_t *odcid, size_t odcid_len) {
-    struct conn_io *conn_io = malloc(sizeof(*conn_io));
-    if (conn_io == NULL) {
-        fprintf(stderr, "failed to allocate connection IO\n");
-        return NULL;
-    }
-
+static uint8_t *gen_cid(uint8_t *cid, size_t cid_len) {
     int rng = open("/dev/urandom", O_RDONLY);
     if (rng < 0) {
         perror("failed to open /dev/urandom");
         return NULL;
     }
 
-    ssize_t rand_len = read(rng, conn_io->cid, LOCAL_CONN_ID_LEN);
+    ssize_t rand_len = read(rng, cid, cid_len);
     if (rand_len < 0) {
         perror("failed to create connection ID");
         return NULL;
     }
+
+    return cid;
+}
+
+static struct conn_io *create_conn(uint8_t *dcid, size_t dcid_len, uint8_t *odcid,
+                                   size_t odcid_len) {
+    struct conn_io *conn_io = malloc(sizeof(*conn_io));
+    if (conn_io == NULL) {
+        fprintf(stderr, "failed to allocate connection IO\n");
+        return NULL;
+    }
+
+    memcpy(conn_io->cid, dcid, LOCAL_CONN_ID_LEN);
 
     quiche_conn *conn = quiche_accept(conn_io->cid, LOCAL_CONN_ID_LEN,
                                       odcid, odcid_len, config);
@@ -274,9 +281,15 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 mint_token(dcid, dcid_len, &peer_addr, peer_addr_len,
                            token, &token_len);
 
+                uint8_t new_cid[LOCAL_CONN_ID_LEN];
+
+                if (gen_cid(new_cid, LOCAL_CONN_ID_LEN) == NULL) {
+                    continue;
+                }
+
                 ssize_t written = quiche_retry(scid, scid_len,
                                                dcid, dcid_len,
-                                               dcid, dcid_len,
+                                               new_cid, LOCAL_CONN_ID_LEN,
                                                token, token_len,
                                                version, out, sizeof(out));
 
@@ -305,7 +318,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 continue;
             }
 
-            conn_io = create_conn(odcid, odcid_len);
+            conn_io = create_conn(dcid, dcid_len, odcid, odcid_len);
             if (conn_io == NULL) {
                 continue;
             }
