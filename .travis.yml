@@ -107,26 +107,14 @@ matrix:
       - RUSTFLAGS="-D warnings" cargo build --verbose --target=$TARGET_32
       - RUSTFLAGS="-D warnings" cargo test --verbose --target=$TARGET_32
    - name: "stable Android"
-     language: android
-     dist: trusty
+     language: rust
+     rust: stable
      env:
        NDK_VER_OLD=r13b
        NDK_VER=r21
-       CMAKE_VER=3.6.4111459
-     android:
-       components:
-        - build-tools-26.0.1
-        # Minimum API level supported
-        - android-21
      install:
-      # Install rust manually
-      - curl https://build.travis-ci.org/files/rustup-init.sh -sSf | sh -s -- -y --default-toolchain stable
-      - export PATH=$HOME/.cargo/bin:$PATH
-      - rustup default stable
       - rustup target add aarch64-linux-android arm-linux-androideabi armv7-linux-androideabi i686-linux-android
-      # Additional Android components
-      - echo y | sdkmanager "cmake;$CMAKE_VER"
-      - export PATH=$ANDROID_HOME/cmake/$CMAKE_VER/bin/:$PATH
+      - cargo install cargo-ndk
      script:
       #
       # Old NDK. Here we use 13b
@@ -141,14 +129,13 @@ matrix:
       - tools/android/setup_android.sh
       - tools/android/build_android.sh --verbose --features ndk-old-gcc
       - rm -fr $TOOLCHAIN_DIR && rm -f .cargo/config
+      - cargo clean
       #
       # NDK 19 or higher. Here we use 21 (long term support)
       #
       - curl -ondk.zip -q $(printf $NDK_URL $NDK_VER)
       - unzip -q ndk.zip -d $HOME
       - export ANDROID_NDK_HOME=$HOME/android-ndk-$NDK_VER
-      - cargo install cargo-ndk
-      - cargo clean
       - tools/android/build_android_ndk19.sh --verbose
    - name: "NGINX"
      language: rust
