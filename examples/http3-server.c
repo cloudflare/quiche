@@ -156,7 +156,7 @@ static bool validate_token(const uint8_t *token, size_t token_len,
     return true;
 }
 
-static uint8_t* gen_cid(uint8_t* cid, size_t cid_len) {
+static uint8_t *gen_cid(uint8_t *cid, size_t cid_len) {
     int rng = open("/dev/urandom", O_RDONLY);
     if (rng < 0) {
         perror("failed to open /dev/urandom");
