@@ -15,12 +15,31 @@ and an HTTP/3 one at ``https://quic.tech:8443/``, that can be used for
 experimentation.
 
 For more information on how quiche came about and some insights into its design
-you can read a [post] on Cloudflare's (where this library is used in production)
-blog that goes into some more detail.
+you can read a [post] on Cloudflare's blog that goes into some more detail.
 
 [quiche]: https://docs.quic.tech/quiche/
 [ietf]: https://quicwg.org/
 [post]: https://blog.cloudflare.com/enjoy-a-slice-of-quic-and-rust/
+
+Who uses quiche?
+----------------
+
+### Cloudflare
+
+quiche powers Cloudflare edge network's [HTTP/3 support][cloudflare-http3].
+
+### curl
+
+quiche can be [integrated into curl][curl-http3] to provide support for HTTP/3.
+
+### NGINX (unofficial)
+
+quiche can be [integrated into NGINX][nginx-http3] using an unofficial patch to
+provide support for HTTP/3.
+
+[cloudflare-http3]: https://blog.cloudflare.com/http3-the-past-present-and-future/
+[curl-http3]: https://github.com/curl/curl/blob/master/docs/HTTP3.md#quiche-version
+[nginx-http3]: https://github.com/cloudflare/quiche/tree/master/extras/nginx
 
 Getting Started
 ---------------
