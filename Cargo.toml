@@ -11,20 +11,20 @@ keywords = ["quic", "http3"]
 categories = ["network-programming"]
 license = "BSD-2-Clause"
 include = [
-     "/*.md",
-     "/*.toml",
-     "/CODEOWNERS",
-     "/COPYING",
-     "/benches",
-     "/deps/boringssl/**/*.[chS]",
-     "/deps/boringssl/**/*.cc",
-     "/deps/boringssl/**/CMakeLists.txt",
-     "/deps/boringssl/**/sources.cmake",
-     "/deps/boringssl/LICENSE",
-     "/examples",
-     "/include",
-     "/quiche.svg",
-     "/src",
+    "/*.md",
+    "/*.toml",
+    "/CODEOWNERS",
+    "/COPYING",
+    "/benches",
+    "/deps/boringssl/**/*.[chS]",
+    "/deps/boringssl/src/**/*.cc",
+    "/deps/boringssl/**/CMakeLists.txt",
+    "/deps/boringssl/**/sources.cmake",
+    "/deps/boringssl/LICENSE",
+    "/examples",
+    "/include",
+    "/quiche.svg",
+    "/src",
 ]
 
 [features]
