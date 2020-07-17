@@ -222,6 +222,10 @@ fn main() {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-undefined,dynamic_lookup");
     }
 
+    if cfg!(target_os = "android") {
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,libquiche.so");
+    }
+
     if cfg!(feature = "pkg-config-meta") {
         write_pkg_config();
     }
