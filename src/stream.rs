@@ -158,13 +158,13 @@ impl StreamMap {
     ) -> Result<&mut Stream> {
         let stream = match self.streams.entry(id) {
             hash_map::Entry::Vacant(v) => {
-                if local != is_local(id, is_server) {
-                    return Err(Error::InvalidStreamState);
-                }
-
                 // Stream has already been closed and garbage collected.
                 if self.collected.contains(&id) {
                     return Err(Error::Done);
+                }
+
+                if local != is_local(id, is_server) {
+                    return Err(Error::InvalidStreamState);
                 }
 
                 let (max_rx_data, max_tx_data) = match (local, is_bidi(id)) {
