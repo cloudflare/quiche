@@ -76,7 +76,12 @@ fn on_packet_acked(
         // Congestion avoidance.
         let mut reno_cwnd = r.congestion_window;
 
-        reno_cwnd += (recovery::MAX_DATAGRAM_SIZE * packet.size) / reno_cwnd;
+        r.bytes_acked += packet.size;
+
+        if r.bytes_acked >= r.congestion_window {
+            r.bytes_acked -= r.congestion_window;
+            reno_cwnd += recovery::MAX_DATAGRAM_SIZE;
+        }
 
         // When in Limited Slow Start, take the max of CA cwnd and
         // LSS cwnd.
@@ -108,6 +113,9 @@ fn congestion_event(
         r.congestion_window =
             cmp::max(r.congestion_window, recovery::MINIMUM_WINDOW);
 
+        r.bytes_acked = (r.congestion_window as f64 *
+            recovery::LOSS_REDUCTION_FACTOR) as usize;
+
         r.ssthresh = r.congestion_window;
 
         if r.hystart.enabled() && epoch == packet::EPOCH_APPLICATION {
@@ -118,11 +126,14 @@ fn congestion_event(
 
 pub fn collapse_cwnd(r: &mut Recovery) {
     r.congestion_window = recovery::MINIMUM_WINDOW;
+    r.bytes_acked = 0;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::time::Duration;
 
     #[test]
     fn reno_init() {
@@ -218,32 +229,35 @@ mod tests {
         cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::Reno);
 
         let mut r = Recovery::new(&cfg);
-
+        let now = Instant::now();
         let prev_cwnd = r.cwnd();
 
-        let now = Instant::now();
-
-        // Send 20K bytes.
+        // Fill up bytes_in_flight to avoid app_limited=true
         r.on_packet_sent_cc(20000, now);
 
+        // Trigger congestion event to update ssthresh
         r.congestion_event(now, packet::EPOCH_APPLICATION, now);
 
-        // In Reno, after congestion event, cwnd will be cut in half.
-        assert_eq!(prev_cwnd / 2, r.cwnd());
+        // After congestion event, cwnd will be reduced.
+        let cur_cwnd =
+            (prev_cwnd as f64 * recovery::LOSS_REDUCTION_FACTOR) as usize;
+        assert_eq!(r.cwnd(), cur_cwnd);
+
+        let rtt = Duration::from_millis(100);
 
         let acked = vec![Acked {
             pkt_num: 0,
-            time_sent: now,
-            size: 5000,
+            // To exit from recovery
+            time_sent: now + rtt,
+            // More than cur_cwnd to increase cwnd
+            size: 8000,
         }];
 
-        let prev_cwnd = r.cwnd();
+        // Ack more than cwnd bytes with rtt=100ms
+        r.update_rtt(rtt, Duration::from_millis(0), now);
+        r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now + rtt * 2);
 
-        // Ack 5000 bytes.
-        r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
-
-        // Check if cwnd increase is smaller than a packet size (congestion
-        // avoidance).
-        assert!(r.cwnd() < prev_cwnd + 1111);
+        // After acking more than cwnd, expect cwnd increased by MSS
+        assert_eq!(r.cwnd(), cur_cwnd + recovery::MAX_DATAGRAM_SIZE);
     }
 }
