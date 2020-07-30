@@ -103,6 +103,8 @@ pub struct Recovery {
 
     pub loss_probes: [usize; packet::EPOCH_COUNT],
 
+    in_flight_count: [usize; packet::EPOCH_COUNT],
+
     app_limited: bool,
 
     delivery_rate: delivery_rate::Rate,
@@ -165,6 +167,8 @@ impl Recovery {
 
             loss_probes: [0; packet::EPOCH_COUNT],
 
+            in_flight_count: [0; packet::EPOCH_COUNT],
+
             congestion_window: INITIAL_WINDOW,
 
             bytes_in_flight: 0,
@@ -187,7 +191,7 @@ impl Recovery {
 
     pub fn on_packet_sent(
         &mut self, mut pkt: Sent, epoch: packet::Epoch,
-        handshake_completed: bool, now: Instant, trace_id: &str,
+        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     ) {
         let ack_eliciting = pkt.ack_eliciting;
         let in_flight = pkt.in_flight;
@@ -206,12 +210,14 @@ impl Recovery {
                 self.time_of_last_sent_ack_eliciting_pkt[epoch] = Some(now);
             }
 
+            self.in_flight_count[epoch] += 1;
+
             self.app_limited =
                 (self.bytes_in_flight + sent_bytes) < self.congestion_window;
 
             self.on_packet_sent_cc(sent_bytes, now);
 
-            self.set_loss_detection_timer(handshake_completed);
+            self.set_loss_detection_timer(handshake_status, now);
         }
 
         // HyStart++: Start of the round in a slow start.
@@ -231,7 +237,7 @@ impl Recovery {
 
     pub fn on_ack_received(
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
-        epoch: packet::Epoch, handshake_completed: bool, now: Instant,
+        epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
         trace_id: &str,
     ) -> Result<()> {
         let largest_acked = ranges.last().unwrap();
@@ -289,6 +295,9 @@ impl Recovery {
                 self.acked[epoch].append(&mut unacked.frames);
 
                 if unacked.in_flight {
+                    self.in_flight_count[epoch] =
+                        self.in_flight_count[epoch].saturating_sub(1);
+
                     self.delivery_rate.on_packet_acked(&unacked, now);
                 }
 
@@ -330,7 +339,7 @@ impl Recovery {
 
         self.pto_count = 0;
 
-        self.set_loss_detection_timer(handshake_completed);
+        self.set_loss_detection_timer(handshake_status, now);
 
         self.drain_packets(epoch);
 
@@ -340,25 +349,37 @@ impl Recovery {
     }
 
     pub fn on_loss_detection_timeout(
-        &mut self, handshake_completed: bool, now: Instant, trace_id: &str,
+        &mut self, handshake_status: HandshakeStatus, now: Instant,
+        trace_id: &str,
     ) {
-        let (earliest_loss_time, epoch) =
-            self.earliest_loss_time(self.loss_time, handshake_completed);
+        let (earliest_loss_time, epoch) = self.loss_time_and_space();
 
         if earliest_loss_time.is_some() {
+            // Time threshold loss detection.
             self.detect_lost_packets(epoch, now, trace_id);
-            self.set_loss_detection_timer(handshake_completed);
+
+            self.set_loss_detection_timer(handshake_status, now);
 
             trace!("{} {:?}", trace_id, self);
             return;
         }
 
-        // TODO: handle client without 1-RTT keys case.
+        let epoch = if self.bytes_in_flight > 0 {
+            // Send new data if available, else retransmit old data. If neither
+            // is available, send a single PING frame.
+            let (_, e) = self.pto_time_and_space(handshake_status, now);
 
-        let (_, epoch) = self.earliest_loss_time(
-            self.time_of_last_sent_ack_eliciting_pkt,
-            handshake_completed,
-        );
+            e
+        } else {
+            // Client sends an anti-deadlock packet: Initial is padded to earn
+            // more anti-amplification credit, a Handshake packet proves address
+            // ownership.
+            if handshake_status.has_handshake_keys {
+                packet::EPOCH_HANDSHAKE
+            } else {
+                packet::EPOCH_INITIAL
+            }
+        };
 
         self.pto_count += 1;
 
@@ -385,13 +406,14 @@ impl Recovery {
             self.lost[epoch].extend_from_slice(&unacked.frames);
         }
 
-        self.set_loss_detection_timer(handshake_completed);
+        self.set_loss_detection_timer(handshake_status, now);
 
         trace!("{} {:?}", trace_id, self);
     }
 
     pub fn on_pkt_num_space_discarded(
-        &mut self, epoch: packet::Epoch, handshake_completed: bool,
+        &mut self, epoch: packet::Epoch, handshake_status: HandshakeStatus,
+        now: Instant,
     ) {
         let unacked_bytes = self.sent[epoch]
             .iter()
@@ -409,8 +431,9 @@ impl Recovery {
         self.time_of_last_sent_ack_eliciting_pkt[epoch] = None;
         self.loss_time[epoch] = None;
         self.loss_probes[epoch] = 0;
+        self.in_flight_count[epoch] = 0;
 
-        self.set_loss_detection_timer(handshake_completed);
+        self.set_loss_detection_timer(handshake_status, now);
     }
 
     pub fn loss_detection_timer(&self) -> Option<Instant> {
@@ -435,7 +458,7 @@ impl Recovery {
     }
 
     pub fn pto(&self) -> Duration {
-        self.rtt() + cmp::max(self.rttvar * 4, GRANULARITY) + self.max_ack_delay
+        self.rtt() + cmp::max(self.rttvar * 4, GRANULARITY)
     }
 
     pub fn delivery_rate(&self) -> u64 {
@@ -480,23 +503,16 @@ impl Recovery {
         }
     }
 
-    fn earliest_loss_time(
-        &mut self, times: [Option<Instant>; packet::EPOCH_COUNT],
-        handshake_completed: bool,
-    ) -> (Option<Instant>, packet::Epoch) {
+    fn loss_time_and_space(&self) -> (Option<Instant>, packet::Epoch) {
         let mut epoch = packet::EPOCH_INITIAL;
-        let mut time = times[epoch];
+        let mut time = self.loss_time[epoch];
 
         // Iterate over all packet number spaces starting from Handshake.
         #[allow(clippy::needless_range_loop)]
         for e in packet::EPOCH_HANDSHAKE..packet::EPOCH_COUNT {
-            let new_time = times[e];
+            let new_time = self.loss_time[e];
 
-            if e == packet::EPOCH_APPLICATION && !handshake_completed {
-                continue;
-            }
-
-            if new_time.is_some() && (time.is_none() || new_time < time) {
+            if time.is_none() || new_time < time {
                 time = new_time;
                 epoch = e;
             }
@@ -505,9 +521,55 @@ impl Recovery {
         (time, epoch)
     }
 
-    fn set_loss_detection_timer(&mut self, handshake_completed: bool) {
-        let (earliest_loss_time, _) =
-            self.earliest_loss_time(self.loss_time, handshake_completed);
+    fn pto_time_and_space(
+        &self, handshake_status: HandshakeStatus, now: Instant,
+    ) -> (Option<Instant>, packet::Epoch) {
+        let mut duration = self.pto() * 2_u32.pow(self.pto_count);
+
+        // Arm PTO from now when there are no inflight packets.
+        if self.bytes_in_flight == 0 {
+            if handshake_status.has_handshake_keys {
+                return (Some(now + duration), packet::EPOCH_HANDSHAKE);
+            } else {
+                return (Some(now + duration), packet::EPOCH_INITIAL);
+            }
+        }
+
+        let mut pto_timeout = None;
+        let mut pto_space = packet::EPOCH_INITIAL;
+
+        // Iterate over all packet number spaces.
+        for e in packet::EPOCH_INITIAL..packet::EPOCH_COUNT {
+            if self.in_flight_count[e] == 0 {
+                continue;
+            }
+
+            if e == packet::EPOCH_APPLICATION {
+                // Skip Application Data until handshake completes.
+                if !handshake_status.completed {
+                    return (pto_timeout, pto_space);
+                }
+
+                // Include max_ack_delay and backoff for Application Data.
+                duration += self.max_ack_delay * 2_u32.pow(self.pto_count);
+            }
+
+            let new_time =
+                self.time_of_last_sent_ack_eliciting_pkt[e].map(|t| t + duration);
+
+            if pto_timeout.is_none() || new_time < pto_timeout {
+                pto_timeout = new_time;
+                pto_space = e;
+            }
+        }
+
+        (pto_timeout, pto_space)
+    }
+
+    fn set_loss_detection_timer(
+        &mut self, handshake_status: HandshakeStatus, now: Instant,
+    ) {
+        let (earliest_loss_time, _) = self.loss_time_and_space();
 
         if earliest_loss_time.is_some() {
             // Time threshold loss detection.
@@ -515,24 +577,14 @@ impl Recovery {
             return;
         }
 
-        if self.bytes_in_flight == 0 {
-            // TODO: check if peer is awaiting address validation.
+        if self.bytes_in_flight == 0 && handshake_status.peer_verified_address {
             self.loss_detection_timer = None;
             return;
         }
 
         // PTO timer.
-        let timeout = self.pto();
-        let timeout = timeout * 2_u32.pow(self.pto_count);
-
-        let (sent_time, _) = self.earliest_loss_time(
-            self.time_of_last_sent_ack_eliciting_pkt,
-            handshake_completed,
-        );
-
-        if let Some(sent_time) = sent_time {
-            self.loss_detection_timer = Some(sent_time + timeout);
-        }
+        let (timeout, _) = self.pto_time_and_space(handshake_status, now);
+        self.loss_detection_timer = timeout;
     }
 
     fn detect_lost_packets(
@@ -577,6 +629,9 @@ impl Recovery {
                     // Frames have already been removed from the packet, so
                     // cloning the whole packet should be relatively cheap.
                     largest_lost_pkt = Some(unacked.clone());
+
+                    self.in_flight_count[epoch] =
+                        self.in_flight_count[epoch].saturating_sub(1);
 
                     trace!(
                         "{} packet {} lost on epoch {}",
@@ -877,6 +932,28 @@ pub struct Acked {
     pub size: usize,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct HandshakeStatus {
+    pub has_handshake_keys: bool,
+
+    pub peer_verified_address: bool,
+
+    pub completed: bool,
+}
+
+#[cfg(test)]
+impl Default for HandshakeStatus {
+    fn default() -> HandshakeStatus {
+        HandshakeStatus {
+            has_handshake_keys: true,
+
+            peer_verified_address: true,
+
+            completed: true,
+        }
+    }
+}
+
 fn sub_abs(lhs: Duration, rhs: Duration) -> Duration {
     if lhs > rhs {
         lhs - rhs
@@ -943,7 +1020,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
         assert_eq!(r.bytes_in_flight, 1000);
 
@@ -963,7 +1046,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 2);
         assert_eq!(r.bytes_in_flight, 2000);
 
@@ -983,7 +1072,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
         assert_eq!(r.bytes_in_flight, 3000);
 
@@ -1003,7 +1098,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
         assert_eq!(r.bytes_in_flight, 4000);
 
@@ -1019,7 +1120,7 @@ mod tests {
                 &acked,
                 25,
                 packet::EPOCH_APPLICATION,
-                true,
+                HandshakeStatus::default(),
                 now,
                 ""
             ),
@@ -1034,7 +1135,7 @@ mod tests {
         now = r.loss_detection_timer().unwrap();
 
         // PTO.
-        r.on_loss_detection_timeout(true, now, "");
+        r.on_loss_detection_timeout(HandshakeStatus::default(), now, "");
         assert_eq!(r.loss_probes[packet::EPOCH_APPLICATION], 1);
         assert_eq!(r.lost_count, 0);
         assert_eq!(r.pto_count, 1);
@@ -1055,7 +1156,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
         assert_eq!(r.bytes_in_flight, 3000);
 
@@ -1075,7 +1182,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
         assert_eq!(r.bytes_in_flight, 4000);
         assert_eq!(r.lost_count, 0);
@@ -1092,7 +1205,7 @@ mod tests {
                 &acked,
                 25,
                 packet::EPOCH_APPLICATION,
-                true,
+                HandshakeStatus::default(),
                 now,
                 ""
             ),
@@ -1133,7 +1246,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
         assert_eq!(r.bytes_in_flight, 1000);
 
@@ -1153,7 +1272,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 2);
         assert_eq!(r.bytes_in_flight, 2000);
 
@@ -1173,7 +1298,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
         assert_eq!(r.bytes_in_flight, 3000);
 
@@ -1193,7 +1324,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
         assert_eq!(r.bytes_in_flight, 4000);
 
@@ -1210,7 +1347,7 @@ mod tests {
                 &acked,
                 25,
                 packet::EPOCH_APPLICATION,
-                true,
+                HandshakeStatus::default(),
                 now,
                 ""
             ),
@@ -1225,7 +1362,7 @@ mod tests {
         now = r.loss_detection_timer().unwrap();
 
         // Packet is declared lost.
-        r.on_loss_detection_timeout(true, now, "");
+        r.on_loss_detection_timeout(HandshakeStatus::default(), now, "");
         assert_eq!(r.loss_probes[packet::EPOCH_APPLICATION], 0);
 
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
@@ -1262,7 +1399,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
         assert_eq!(r.bytes_in_flight, 1000);
 
@@ -1282,7 +1425,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 2);
         assert_eq!(r.bytes_in_flight, 2000);
 
@@ -1302,7 +1451,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
         assert_eq!(r.bytes_in_flight, 3000);
 
@@ -1322,7 +1477,13 @@ mod tests {
             has_data: false,
         };
 
-        r.on_packet_sent(p, packet::EPOCH_APPLICATION, true, now, "");
+        r.on_packet_sent(
+            p,
+            packet::EPOCH_APPLICATION,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 4);
         assert_eq!(r.bytes_in_flight, 4000);
 
@@ -1338,7 +1499,7 @@ mod tests {
                 &acked,
                 25,
                 packet::EPOCH_APPLICATION,
-                true,
+                HandshakeStatus::default(),
                 now,
                 ""
             ),
@@ -1355,7 +1516,7 @@ mod tests {
                 &acked,
                 25,
                 packet::EPOCH_APPLICATION,
-                true,
+                HandshakeStatus::default(),
                 now,
                 ""
             ),

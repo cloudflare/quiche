@@ -855,6 +855,9 @@ pub struct Connection {
     /// Whether the peer's address has been verified.
     verified_peer_address: bool,
 
+    /// Whether the peer has verified our address.
+    peer_verified_address: bool,
+
     /// Whether the peer's transport parameters were parsed.
     parsed_peer_transport_params: bool,
 
@@ -1169,6 +1172,9 @@ impl Connection {
             // If we did stateless retry assume the peer's address is verified.
             verified_peer_address: odcid.is_some(),
 
+            // Assume clients validate the server's address implicitly.
+            peer_verified_address: is_server,
+
             parsed_peer_transport_params: false,
 
             handshake_done_sent: false,
@@ -1470,17 +1476,15 @@ impl Connection {
                 self.is_server,
             )?;
 
+            // Reset connection state to force sending another Initial packet.
+            self.drop_epoch_state(packet::EPOCH_INITIAL, now);
+            self.got_peer_conn_id = false;
+            self.handshake.clear()?;
+
             self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
                 Some(aead_open);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_seal =
                 Some(aead_seal);
-
-            // Reset connection state to force sending another Initial packet.
-            self.got_peer_conn_id = false;
-            self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
-            self.recovery
-                .on_pkt_num_space_discarded(packet::EPOCH_INITIAL, false);
-            self.handshake.clear()?;
 
             // Encode transport parameters again, as the new version might be
             // using a different format.
@@ -1527,17 +1531,15 @@ impl Connection {
                 self.is_server,
             )?;
 
+            // Reset connection state to force sending another Initial packet.
+            self.drop_epoch_state(packet::EPOCH_INITIAL, now);
+            self.got_peer_conn_id = false;
+            self.handshake.clear()?;
+
             self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
                 Some(aead_open);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_seal =
                 Some(aead_seal);
-
-            // Reset connection state to force sending another Initial packet.
-            self.got_peer_conn_id = false;
-            self.pkt_num_spaces[packet::EPOCH_INITIAL].clear();
-            self.recovery
-                .on_pkt_num_space_discarded(packet::EPOCH_INITIAL, false);
-            self.handshake.clear()?;
 
             return Err(Error::Done);
         }
@@ -1835,7 +1837,7 @@ impl Connection {
         // successfully processed, so we can drop the initial state and consider
         // the client's address to be verified.
         if self.is_server && hdr.ty == packet::Type::Handshake {
-            self.drop_epoch_state(packet::EPOCH_INITIAL);
+            self.drop_epoch_state(packet::EPOCH_INITIAL, now);
 
             self.verified_peer_address = true;
         }
@@ -2499,7 +2501,7 @@ impl Connection {
         self.recovery.on_packet_sent(
             sent_pkt,
             epoch,
-            self.is_established(),
+            self.handshake_status(),
             now,
             &self.trace_id,
         );
@@ -2515,7 +2517,7 @@ impl Connection {
 
         // On the client, drop initial state after sending an Handshake packet.
         if !self.is_server && hdr.ty == packet::Type::Handshake {
-            self.drop_epoch_state(packet::EPOCH_INITIAL);
+            self.drop_epoch_state(packet::EPOCH_INITIAL, now);
         }
 
         self.max_send_bytes = self.max_send_bytes.saturating_sub(written);
@@ -3044,7 +3046,7 @@ impl Connection {
                 trace!("{} loss detection timeout expired", self.trace_id);
 
                 self.recovery.on_loss_detection_timeout(
-                    self.is_established(),
+                    self.handshake_status(),
                     now,
                     &self.trace_id,
                 );
@@ -3296,23 +3298,30 @@ impl Connection {
                     ))
                     .ok_or(Error::InvalidFrame)?;
 
-                self.recovery.on_ack_received(
-                    &ranges,
-                    ack_delay,
-                    epoch,
-                    self.is_established(),
-                    now,
-                    &self.trace_id,
-                )?;
+                if epoch == packet::EPOCH_HANDSHAKE {
+                    self.peer_verified_address = true;
+                }
 
                 // When we receive an ACK for a 1-RTT packet after handshake
                 // completion, it means the handshake has been confirmed.
                 if epoch == packet::EPOCH_APPLICATION && self.is_established() {
-                    self.handshake_confirmed = true;
+                    self.peer_verified_address = true;
 
-                    // Once the handshake is confirmed, we can drop Handshake
-                    // keys.
-                    self.drop_epoch_state(packet::EPOCH_HANDSHAKE);
+                    self.handshake_confirmed = true;
+                }
+
+                self.recovery.on_ack_received(
+                    &ranges,
+                    ack_delay,
+                    epoch,
+                    self.handshake_status(),
+                    now,
+                    &self.trace_id,
+                )?;
+
+                // Once the handshake is confirmed, we can drop Handshake keys.
+                if self.handshake_confirmed {
+                    self.drop_epoch_state(packet::EPOCH_HANDSHAKE, now);
                 }
             },
 
@@ -3609,10 +3618,12 @@ impl Connection {
                     return Err(Error::InvalidPacket);
                 }
 
+                self.peer_verified_address = true;
+
                 self.handshake_confirmed = true;
 
                 // Once the handshake is confirmed, we can drop Handshake keys.
-                self.drop_epoch_state(packet::EPOCH_HANDSHAKE);
+                self.drop_epoch_state(packet::EPOCH_HANDSHAKE, now);
             },
         }
 
@@ -3620,7 +3631,7 @@ impl Connection {
     }
 
     /// Drops the keys and recovery state for the given epoch.
-    fn drop_epoch_state(&mut self, epoch: packet::Epoch) {
+    fn drop_epoch_state(&mut self, epoch: packet::Epoch, now: time::Instant) {
         if self.pkt_num_spaces[epoch].crypto_open.is_none() {
             return;
         }
@@ -3629,8 +3640,11 @@ impl Connection {
         self.pkt_num_spaces[epoch].crypto_seal = None;
         self.pkt_num_spaces[epoch].clear();
 
-        self.recovery
-            .on_pkt_num_space_discarded(epoch, self.is_established());
+        self.recovery.on_pkt_num_space_discarded(
+            epoch,
+            self.handshake_status(),
+            now,
+        );
 
         trace!("{} dropped epoch {} state", self.trace_id, epoch);
     }
@@ -3680,6 +3694,18 @@ impl Connection {
     fn send_capacity(&self) -> usize {
         let cap = self.max_tx_data - self.tx_data;
         cmp::min(cap, self.recovery.cwnd_available() as u64) as usize
+    }
+
+    /// Returns the connection's handshake status for use in loss recovery.
+    fn handshake_status(&self) -> recovery::HandshakeStatus {
+        recovery::HandshakeStatus {
+            has_handshake_keys: self.pkt_num_spaces[packet::EPOCH_HANDSHAKE]
+                .has_keys(),
+
+            peer_verified_address: self.peer_verified_address,
+
+            completed: self.is_established(),
+        }
     }
 }
 
@@ -7003,6 +7029,56 @@ mod tests {
                 data: stream::RangeBuf::from(b"b", 0, false),
             })
         );
+    }
+
+    #[test]
+    /// Tests that client avoids handshake deadlock by arming PTO.
+    fn handshake_anti_deadlock() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert-big.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\06proto2")
+            .unwrap();
+
+        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
+
+        assert_eq!(pipe.client.handshake_status().has_handshake_keys, false);
+        assert_eq!(pipe.client.handshake_status().peer_verified_address, false);
+        assert_eq!(pipe.server.handshake_status().has_handshake_keys, false);
+        assert_eq!(pipe.server.handshake_status().peer_verified_address, true);
+
+        // Client sends padded Initial.
+        let len = pipe.client.send(&mut buf).unwrap();
+        assert_eq!(len, 1200);
+
+        // Server receives client's Initial and sends own Initial and Handshake
+        // until it's blocked by the anti-amplification limit.
+        let len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+        assert_eq!(pipe.server.send(&mut buf[len..]), Err(Error::Done));
+
+        assert_eq!(pipe.client.handshake_status().has_handshake_keys, false);
+        assert_eq!(pipe.client.handshake_status().peer_verified_address, false);
+        assert_eq!(pipe.server.handshake_status().has_handshake_keys, true);
+        assert_eq!(pipe.server.handshake_status().peer_verified_address, true);
+
+        // Client receives the server flight and sends Handshake ACK, but it is
+        // lost.
+        assert!(testing::recv_send(&mut pipe.client, &mut buf, len).is_ok());
+
+        assert_eq!(pipe.client.handshake_status().has_handshake_keys, true);
+        assert_eq!(pipe.client.handshake_status().peer_verified_address, false);
+        assert_eq!(pipe.server.handshake_status().has_handshake_keys, true);
+        assert_eq!(pipe.server.handshake_status().peer_verified_address, true);
+
+        // Make sure client's PTO timer is armed.
+        assert!(pipe.client.timeout().is_some());
     }
 }
 
