@@ -757,6 +757,10 @@ impl PktNumSpace {
     pub fn ready(&self) -> bool {
         self.crypto_stream.is_flushable() || self.ack_elicited
     }
+
+    pub fn has_keys(&self) -> bool {
+        self.crypto_open.is_some() && self.crypto_seal.is_some()
+    }
 }
 
 #[derive(Clone, Copy, Default)]
