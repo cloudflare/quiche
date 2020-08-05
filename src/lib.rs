@@ -1568,7 +1568,14 @@ impl Connection {
         let payload_len = if hdr.ty == packet::Type::Short {
             b.cap()
         } else {
-            b.get_varint()? as usize
+            b.get_varint().map_err(|e| {
+                drop_pkt_on_err(
+                    e.into(),
+                    self.recv_count,
+                    self.is_server,
+                    &self.trace_id,
+                )
+            })? as usize
         };
 
         // Derive initial secrets on the server.
@@ -7079,6 +7086,46 @@ mod tests {
 
         // Make sure client's PTO timer is armed.
         assert!(pipe.client.timeout().is_some());
+    }
+
+    #[test]
+    /// Tests that packets with corrupted type (from Handshake to Initial) are
+    /// properly ignored.
+    fn handshake_packet_type_corruption() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Client sends padded Initial.
+        let len = pipe.client.send(&mut buf).unwrap();
+        assert_eq!(len, 1200);
+
+        // Server receives client's Initial and sends own Initial and Handshake.
+        let len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
+
+        // Client sends Initial packet with ACK.
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        let hdr = Header::from_slice(&mut buf[..len], 0).unwrap();
+        assert_eq!(hdr.ty, Type::Initial);
+
+        assert_eq!(pipe.server.recv(&mut buf[..len]), Ok(len));
+
+        // Client sends Handshake packet.
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        let hdr = Header::from_slice(&mut buf[..len], 0).unwrap();
+        assert_eq!(hdr.ty, Type::Handshake);
+
+        // Packet type is corrupted to Initial..
+        buf[0] &= !(0x20);
+
+        let hdr = Header::from_slice(&mut buf[..len], 0).unwrap();
+        assert_eq!(hdr.ty, Type::Initial);
+
+        // Server receives corrupted packet without returning an error.
+        assert_eq!(pipe.server.recv(&mut buf[..len]), Ok(len));
     }
 }
 
