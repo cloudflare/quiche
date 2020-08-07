@@ -118,6 +118,8 @@ pub struct Recovery {
 
     ssthresh: usize,
 
+    bytes_acked: usize,
+
     congestion_recovery_start_time: Option<Instant>,
 
     cubic_state: cubic::State,
@@ -174,6 +176,8 @@ impl Recovery {
             bytes_in_flight: 0,
 
             ssthresh: std::usize::MAX,
+
+            bytes_acked: 0,
 
             congestion_recovery_start_time: None,
 
