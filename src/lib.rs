@@ -1597,39 +1597,25 @@ impl Connection {
         // Select packet number space epoch based on the received packet's type.
         let epoch = hdr.ty.to_epoch()?;
 
-        // TODO: somehow deal with re-ordered 0-RTT data.
-        let aead = if hdr.ty == packet::Type::ZeroRTT &&
-            self.pkt_num_spaces[epoch].crypto_0rtt_open.is_some()
-        {
-            // TODO: buffer 0-RTT packets instead of discarding when key is not
-            // available yet, as an optimization.
-            self.pkt_num_spaces[epoch]
-                .crypto_0rtt_open
-                .as_ref()
-                .unwrap()
-        } else {
-            match self.pkt_num_spaces[epoch].crypto_open {
-                Some(ref v) => v,
-
-                // Ignore packets that can't be decrypted because we don't have
-                // the necessary decryption key (either because we don't yet
-                // have it or because we already dropped it).
-                //
-                // For example, this is necessary to prevent packet reordering
-                // (e.g. between Initial and Handshake) from causing the
-                // connection to be closed.
-                //
-                // TODO: buffer 1-RTT packets instead of discarding when key is
-                // not available yet, as an optimization.
-                None =>
-                    return Err(drop_pkt_on_err(
-                        Error::CryptoFail,
-                        self.recv_count,
-                        self.is_server,
-                        &self.trace_id,
-                    )),
-            }
-        };
+        // Select AEAD context used to open incoming packet.
+        #[allow(clippy::or_fun_call)]
+        let aead = (self.pkt_num_spaces[epoch].crypto_0rtt_open.as_ref())
+            // Only use 0-RTT key if incoming packet is 0-RTT.
+            .filter(|_| hdr.ty == packet::Type::ZeroRTT)
+            // Otherwise use the packet number space's main key.
+            .or(self.pkt_num_spaces[epoch].crypto_open.as_ref())
+            // Finally, discard packet if no usable key is available.
+            //
+            // TODO: buffer 0-RTT/1-RTT packets instead of discarding when the
+            // required key is not available yet, as an optimization.
+            .ok_or_else(|| {
+                drop_pkt_on_err(
+                    Error::CryptoFail,
+                    self.recv_count,
+                    self.is_server,
+                    &self.trace_id,
+                )
+            })?;
 
         let aead_tag_len = aead.alg().tag_len();
 
