@@ -2012,7 +2012,9 @@ impl Connection {
         left = cmp::min(left, max_pkt_len);
 
         // Limit output packet size by congestion window size.
-        left = cmp::min(left, self.recovery.cwnd_available());
+        if self.recovery.loss_probes[epoch] <= 0 {
+            left = cmp::min(left, self.recovery.cwnd_available());
+        }
 
         // Limit data sent by the server based on the amount of data received
         // from the client before its address is validated.
