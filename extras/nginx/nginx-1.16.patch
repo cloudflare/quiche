@@ -26,12 +26,12 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   29 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2228 +++++++++++++++++++++++
- src/http/v3/ngx_http_v3.h               |   77 +
- src/http/v3/ngx_http_v3_filter_module.c |   68 +
+ src/http/v3/ngx_http_v3.c               | 2286 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.h               |   78 +
+ src/http/v3/ngx_http_v3_filter_module.c |   74 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3708 insertions(+), 11 deletions(-)
+ 27 files changed, 3773 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -73,7 +73,7 @@ index b64e32908..c8f34ae2e 100644
      . auto/lib/zlib/make
  fi
 diff --git a/auto/lib/openssl/make b/auto/lib/openssl/make
-index 126a23875..3af2ae557 100644
+index 126a23875..139008207 100644
 --- a/auto/lib/openssl/make
 +++ b/auto/lib/openssl/make
 @@ -49,11 +49,13 @@ END
@@ -1570,10 +1570,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..358a36528
+index 000000000..563c63dcb
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2228 @@
+@@ -0,0 +1,2286 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -1631,6 +1631,8 @@ index 000000000..358a36528
 +    ngx_uint_t do_read, ngx_uint_t last);
 +static ngx_int_t ngx_http_v3_filter_request_body(ngx_http_request_t *r);
 +static void ngx_http_v3_read_client_request_body_handler(ngx_http_request_t *r);
++
++static ngx_int_t ngx_http_v3_stream_send_headers(ngx_http_request_t *r);
 +
 +static ngx_chain_t *ngx_http_v3_send_chain(ngx_connection_t *fc,
 +    ngx_chain_t *in, off_t limit);
@@ -1926,13 +1928,14 @@ index 000000000..358a36528
 +}
 +
 +
-+static void
++static ngx_int_t
 +ngx_http_v3_process_blocked_streams(ngx_http_v3_connection_t *h3c)
 +{
 +    ngx_event_t               *wev;
 +    quiche_stream_iter        *writable;
 +    ngx_http_v3_stream_t      *stream;
 +    uint64_t                   stream_id;
++    ngx_int_t                  rc;
 +
 +    writable = quiche_conn_writable(h3c->connection->quic->conn);
 +
@@ -1958,7 +1961,10 @@ index 000000000..358a36528
 +        wev->ready = 1;
 +
 +        if (!stream->headers_sent) {
-+            ngx_http_v3_send_response(stream->request);
++            rc = ngx_http_v3_stream_send_headers(stream->request);
++            if (rc != NGX_OK) {
++                return rc;
++            }
 +        }
 +
 +        if (!wev->delayed) {
@@ -1967,6 +1973,7 @@ index 000000000..358a36528
 +    }
 +
 +    quiche_stream_iter_free(writable);
++    return NGX_OK;
 +}
 +
 +
@@ -1975,6 +1982,7 @@ index 000000000..358a36528
 +{
 +    ngx_http_v3_connection_t  *h3c;
 +    ngx_http_v3_stream_t      *stream;
++    ngx_int_t                  rc;
 +
 +    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0, "http3 handler");
 +
@@ -1985,7 +1993,11 @@ index 000000000..358a36528
 +        return;
 +    }
 +
-+    ngx_http_v3_process_blocked_streams(h3c);
++    rc = ngx_http_v3_process_blocked_streams(h3c);
++    if (rc != NGX_OK) {
++        ngx_http_v3_finalize_connection(h3c, rc);
++        return;
++    }
 +
 +    while (!c->error) {
 +        quiche_h3_event  *ev;
@@ -3108,23 +3120,90 @@ index 000000000..358a36528
 +/* End of functions copied from HTTP/2 module. */
 +
 +
++static ngx_int_t
++ngx_http_v3_stream_send_headers(ngx_http_request_t *r)
++{
++    ngx_int_t                  rc;
++    ngx_uint_t                 fin;
++    ngx_connection_t          *c, *fc;
++    ngx_http_v3_connection_t  *h3c;
++    ngx_array_t               *headers;
++
++    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
++                   "http3 send response stream %ui", r->qstream->id);
++
++    fc = r->connection;
++
++    if (r->qstream->headers_sent) {
++        return NGX_OK;
++    }
++
++    if (fc->error) {
++        return NGX_ERROR;
++    }
++
++    if (r->qstream->headers == NULL) {
++        return NGX_ERROR;
++    }
++
++    h3c = r->qstream->connection;
++    c = h3c->connection;
++    headers = r->qstream->headers;
++
++    fin = r->header_only
++          || (r->headers_out.content_length_n == 0 && !r->expect_trailers);
++
++    rc = quiche_h3_send_response(h3c->h3, c->quic->conn, r->qstream->id,
++                                headers->elts, headers->nelts, fin);
++
++    if (rc == QUICHE_H3_ERR_STREAM_BLOCKED) {
++        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
++                       "http3 stream blocked %ui", r->qstream->id);
++
++        r->qstream->blocked = 1;
++
++        fc->write->active = 1;
++        fc->write->ready = 0;
++
++        return NGX_OK;
++    }
++
++    ngx_array_destroy(r->qstream->headers);
++    r->qstream->headers = NULL;
++
++    if (rc != NGX_OK) {
++        return NGX_ERROR;
++    }
++
++    if (fin) {
++        r->qstream->out_closed = 1;
++    }
++
++    r->qstream->headers_sent = 1;
++
++    if (r->done) {
++        fc->write->handler = ngx_http_v3_close_stream_handler;
++        fc->read->handler = ngx_http_empty_handler;
++    }
++
++    ngx_post_event(c->write, &ngx_posted_events);
++
++    return NGX_OK;
++}
++
++
 +ngx_int_t
 +ngx_http_v3_send_response(ngx_http_request_t *r)
 +{
-+    int                        rc;
 +    u_char                    *tmp;
-+    u_char                     status[3], content_len[NGX_OFF_T_LEN],
-+                               last_modified[sizeof("Wed, 31 Dec 1986 18:00:00 GMT") - 1],
-+                               addr[NGX_SOCKADDR_STRLEN];
 +    size_t                     len;
 +    ngx_array_t               *headers;
 +    ngx_str_t                  host, location;
-+    ngx_uint_t                 i, port, fin;
++    ngx_uint_t                 i, port;
 +    ngx_list_part_t           *part;
 +    ngx_table_elt_t           *header;
-+    ngx_connection_t          *c, *fc;
++    ngx_connection_t          *fc;
 +    quiche_h3_header          *h;
-+    ngx_http_v3_connection_t  *h3c;
 +    ngx_http_core_loc_conf_t  *clcf;
 +    ngx_http_core_srv_conf_t  *cscf;
 +
@@ -3136,9 +3215,6 @@ index 000000000..358a36528
 +    if (fc->error) {
 +        return NGX_ERROR;
 +    }
-+
-+    h3c = r->qstream->connection;
-+    c = h3c->connection;
 +
 +    if (r->method == NGX_HTTP_HEAD) {
 +        r->header_only = 1;
@@ -3188,9 +3264,14 @@ index 000000000..358a36528
 +        h->name = (u_char *) ":status";
 +        h->name_len = sizeof(":status") - 1;
 +
-+        h->value = status;
++        tmp = ngx_pnalloc(r->pool, 3);
++        if (tmp == NULL) {
++            return NGX_ERROR;
++        }
++
 +        h->value_len =
-+            ngx_sprintf(status, "%03ui", r->headers_out.status) - status;
++            ngx_sprintf(tmp, "%03ui", r->headers_out.status) - tmp;
++        h->value = tmp;
 +    }
 +
 +    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
@@ -3292,10 +3373,14 @@ index 000000000..358a36528
 +        h->name = (u_char *) "content-length";
 +        h->name_len = sizeof("content-length") - 1;
 +
-+        h->value = content_len;
-+        h->value_len =
-+            ngx_sprintf(content_len, "%O", r->headers_out.content_length_n) -
-+            content_len;
++        tmp = ngx_pnalloc(r->pool, NGX_OFF_T_LEN);
++        if (tmp == NULL) {
++            return NGX_ERROR;
++        }
++
++        h->value_len = 
++            ngx_sprintf(tmp, "%O", r->headers_out.content_length_n) - tmp;
++        h->value = tmp;
 +    }
 +
 +    /* Generate Last-Modified header. */
@@ -3307,17 +3392,21 @@ index 000000000..358a36528
 +            return NGX_ERROR;
 +        }
 +
-+        ngx_http_time(last_modified, r->headers_out.last_modified_time);
++        h->value_len = sizeof("Wed, 31 Dec 1986 18:00:00 GMT") - 1;
++        tmp = ngx_pcalloc(r->pool, h->value_len);
++        if (tmp == NULL) {
++            return NGX_ERROR;
++        }
++
++        ngx_http_time(tmp, r->headers_out.last_modified_time);
++        h->value = tmp;
 +
 +        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, fc->log, 0,
 +                       "http3 output header: \"last-modified: %*.s\"",
-+                       sizeof(last_modified), last_modified);
++                       h->value_len, h->value);
 +
 +        h->name = (u_char *) "last-modified";
 +        h->name_len = sizeof("last-modified") - 1;
-+
-+        h->value = last_modified;
-+        h->value_len = sizeof(last_modified);
 +    }
 +
 +    /* Generate Location header. */
@@ -3335,7 +3424,11 @@ index 000000000..358a36528
 +
 +            } else {
 +                host.len = NGX_SOCKADDR_STRLEN;
-+                host.data = addr;
++                host.data = ngx_pnalloc(r->pool, NGX_SOCKADDR_STRLEN);
++
++                if (host.data == NULL) {
++                    return NGX_ERROR;
++                }
 +
 +                if (ngx_connection_local_sockaddr(fc, &host, 0) != NGX_OK) {
 +                    return NGX_ERROR;
@@ -3471,44 +3564,9 @@ index 000000000..358a36528
 +        h->value_len = header[i].value.len;
 +    }
 +
-+    fin = r->header_only
-+          || (r->headers_out.content_length_n == 0 && !r->expect_trailers);
++    r->qstream->headers = headers;
 +
-+    rc = quiche_h3_send_response(h3c->h3, c->quic->conn, r->qstream->id,
-+                                headers->elts, headers->nelts, fin);
-+
-+    ngx_array_destroy(headers);
-+
-+    if (rc == QUICHE_H3_ERR_STREAM_BLOCKED) {
-+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
-+                       "http3 stream blocked %ui", r->qstream->id);
-+
-+        r->qstream->blocked = 1;
-+
-+        fc->write->active = 1;
-+        fc->write->ready = 0;
-+
-+        return NGX_AGAIN;
-+    }
-+
-+    if (rc != NGX_OK) {
-+        return NGX_ERROR;
-+    }
-+
-+    if (fin) {
-+        r->qstream->out_closed = 1;
-+    }
-+
-+    r->qstream->headers_sent = 1;
-+
-+    if (r->done) {
-+        fc->write->handler = ngx_http_v3_close_stream_handler;
-+        fc->read->handler = ngx_http_empty_handler;
-+    }
-+
-+    ngx_post_event(c->write, &ngx_posted_events);
-+
-+    return NGX_OK;
++    return ngx_http_v3_stream_send_headers(r);
 +}
 +
 +
@@ -3804,10 +3862,10 @@ index 000000000..358a36528
 +}
 diff --git a/src/http/v3/ngx_http_v3.h b/src/http/v3/ngx_http_v3.h
 new file mode 100644
-index 000000000..45a55b898
+index 000000000..c7f21b788
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.h
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,78 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -3856,6 +3914,7 @@ index 000000000..45a55b898
 +
 +    ngx_http_v3_connection_t  *connection;
 +
++    ngx_array_t               *headers;
 +    ngx_array_t               *cookies;
 +
 +    ngx_http_v3_stream_t      *next;
@@ -3887,10 +3946,10 @@ index 000000000..45a55b898
 +#endif /* _NGX_HTTP_V3_H_INCLUDED_ */
 diff --git a/src/http/v3/ngx_http_v3_filter_module.c b/src/http/v3/ngx_http_v3_filter_module.c
 new file mode 100644
-index 000000000..5bbff8602
+index 000000000..02a7b07ba
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3_filter_module.c
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,74 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -3946,6 +4005,12 @@ index 000000000..5bbff8602
 +    if (!r->qstream) {
 +        return ngx_http_next_header_filter(r);
 +    }
++
++    if (r->header_sent) {
++        return NGX_OK;
++    }
++
++    r->header_sent = 1;
 +
 +    return ngx_http_v3_send_response(r);
 +}
