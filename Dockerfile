@@ -37,9 +37,6 @@ FROM martenseemann/quic-network-simulator-endpoint:latest as quiche-qns
 
 WORKDIR /quiche
 
-# copy binaries and sample certificate for server
-COPY examples/cert.crt examples/cert.key examples/
-
 COPY --from=build \
      /build/tools/apps/target/debug/quiche-client \
      /build/tools/apps/target/debug/quiche-server \
