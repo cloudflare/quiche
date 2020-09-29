@@ -1,6 +1,6 @@
-From bcefe4e043b6777a8da70b64ec789bf5569847ec Mon Sep 17 00:00:00 2001
+From 6b265aa6ff74d0e61ca2bfd8014d02fe014f5ca6 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
-Date: Thu, 10 Oct 2019 17:06:08 +0100
+Date: Mon, 20 Jul 2020 13:26:10 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
 
 ---
@@ -14,7 +14,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  auto/options                            |    9 +
  src/core/ngx_connection.h               |    7 +
  src/core/ngx_core.h                     |    3 +
- src/event/ngx_event_quic.c              |  589 ++++++
+ src/event/ngx_event_quic.c              |  575 ++++++
  src/event/ngx_event_quic.h              |   49 +
  src/event/ngx_event_udp.c               |    8 +
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
@@ -31,7 +31,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3708 insertions(+), 11 deletions(-)
+ 27 files changed, 3694 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -73,7 +73,7 @@ index b64e32908..c8f34ae2e 100644
      . auto/lib/zlib/make
  fi
 diff --git a/auto/lib/openssl/make b/auto/lib/openssl/make
-index 126a23875..3af2ae557 100644
+index 126a23875..139008207 100644
 --- a/auto/lib/openssl/make
 +++ b/auto/lib/openssl/make
 @@ -49,11 +49,13 @@ END
@@ -338,10 +338,10 @@ index 93ca9174d..d0441f034 100644
  #include <ngx_module.h>
 diff --git a/src/event/ngx_event_quic.c b/src/event/ngx_event_quic.c
 new file mode 100644
-index 000000000..9f8b2cb98
+index 000000000..b9cc9ec0a
 --- /dev/null
 +++ b/src/event/ngx_event_quic.c
-@@ -0,0 +1,589 @@
+@@ -0,0 +1,575 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -556,10 +556,6 @@ index 000000000..9f8b2cb98
 +        return NGX_ERROR;
 +    }
 +
-+    if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
-+        return NGX_ERROR;
-+    }
-+
 +    c->read->handler = ngx_quic_read_handler;
 +    c->write->handler = ngx_quic_write_handler;
 +
@@ -632,11 +628,6 @@ index 000000000..9f8b2cb98
 +
 +    ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "quic done reading");
 +
-+    if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
-+        ngx_quic_finalize_connection(c, NGX_QUIC_INTERNAL_ERROR);
-+        return;
-+    }
-+
 +    ngx_post_event(c->write, &ngx_posted_events);
 +}
 +
@@ -691,11 +682,6 @@ index 000000000..9f8b2cb98
 +            ngx_quic_finalize_connection(c, NGX_QUIC_INTERNAL_ERROR);
 +            return;
 +        }
-+    }
-+
-+    if (ngx_handle_write_event(c->write, 0) != NGX_OK) {
-+        ngx_quic_finalize_connection(c, NGX_QUIC_INTERNAL_ERROR);
-+        return;
 +    }
 +
 +    expiry = quiche_conn_timeout_as_millis(c->quic->conn);
@@ -4295,5 +4281,5 @@ index 000000000..72e189def
 +
 +#endif /* _NGX_HTTP_V3_MODULE_H_INCLUDED_ */
 -- 
-2.27.0
+2.28.0
 
