@@ -12,12 +12,6 @@ fuzzing = ["quiche/fuzzing"]
 # Enable qlog support.
 qlog = ["quiche/qlog"]
 
-# Enable quiche's datagram support.
-quic-dgram = ["quiche/quic-dgram"]
-h3-dgram = ["quiche/h3-dgram"]
-
-default = ["qlog", "quic-dgram", "h3-dgram"]
-
 [dependencies]
 docopt = "1"
 env_logger = "0.6"

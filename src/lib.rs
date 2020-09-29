@@ -306,11 +306,9 @@ const MAX_ACK_RANGES: usize = 68;
 // The highest possible stream ID allowed.
 const MAX_STREAM_ID: u64 = 1 << 60;
 
-#[cfg(feature = "quic-dgram")]
 // The default length of DATAGRAM queues if not specified by the user in config.
 const DEFAULT_DGRAM_MAX_QUEUE_LEN: usize = 1000;
 
-#[cfg(feature = "quic-dgram")]
 // The DATAGRAM standard recommends either none or 65536 as maximum DATAGRAM
 // frames size. We enforce the recommendation for forward compatibility.
 const MAX_DGRAM_FRAME_SIZE: u64 = 65536;
@@ -440,9 +438,7 @@ pub struct Config {
 
     hystart: bool,
 
-    #[cfg(feature = "quic-dgram")]
     dgram_recv_max_queue_len: usize,
-    #[cfg(feature = "quic-dgram")]
     dgram_send_max_queue_len: usize,
 }
 
@@ -467,9 +463,7 @@ impl Config {
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
             hystart: true,
 
-            #[cfg(feature = "quic-dgram")]
             dgram_recv_max_queue_len: DEFAULT_DGRAM_MAX_QUEUE_LEN,
-            #[cfg(feature = "quic-dgram")]
             dgram_send_max_queue_len: DEFAULT_DGRAM_MAX_QUEUE_LEN,
         })
     }
@@ -756,7 +750,6 @@ impl Config {
     /// recommended by the current draft of the standard.
     ///
     /// The default is `false`.
-    #[cfg(feature = "quic-dgram")]
     pub fn set_dgram_frames_supported(&mut self, supported: bool) {
         self.local_transport_params.max_datagram_frame_size = if supported {
             Some(MAX_DGRAM_FRAME_SIZE)
@@ -775,7 +768,6 @@ impl Config {
     /// Sets the maximum length of the DATAGRAM send queue.
     ///
     /// The default is `1000`.
-    #[cfg(feature = "quic-dgram")]
     pub fn set_dgram_send_max_queue_len(&mut self, v: usize) {
         self.dgram_send_max_queue_len = v;
     }
@@ -783,7 +775,6 @@ impl Config {
     /// Sets the maximum length of the DATAGRAM receive queue.
     ///
     /// The default is `1000`.
-    #[cfg(feature = "quic-dgram")]
     pub fn set_dgram_recv_max_queue_len(&mut self, v: usize) {
         self.dgram_recv_max_queue_len = v;
     }
@@ -938,9 +929,7 @@ pub struct Connection {
     qlogged_peer_params: bool,
 
     /// DATAGRAM queues.
-    #[cfg(feature = "quic-dgram")]
     dgram_recv_queue: dgram::DatagramQueue,
-    #[cfg(feature = "quic-dgram")]
     dgram_send_queue: dgram::DatagramQueue,
 }
 
@@ -1249,12 +1238,10 @@ impl Connection {
             #[cfg(feature = "qlog")]
             qlogged_peer_params: false,
 
-            #[cfg(feature = "quic-dgram")]
             dgram_recv_queue: dgram::DatagramQueue::new(
                 config.dgram_recv_max_queue_len,
             ),
 
-            #[cfg(feature = "quic-dgram")]
             dgram_send_queue: dgram::DatagramQueue::new(
                 config.dgram_send_max_queue_len,
             ),
@@ -2339,7 +2326,6 @@ impl Connection {
         }
 
         // Create DATAGRAM frame.
-        #[cfg(feature = "quic-dgram")]
         if pkt_type == packet::Type::Short &&
             left > frame::MAX_DGRAM_OVERHEAD &&
             !is_closing
@@ -2600,7 +2586,6 @@ impl Connection {
 
         self.sent_count += 1;
 
-        #[cfg(feature = "quic-dgram")]
         if self.dgram_send_queue.pending_bytes() > self.recovery.cwnd_available()
         {
             self.recovery.update_app_limited(false);
@@ -3094,7 +3079,6 @@ impl Connection {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    #[cfg(feature = "quic-dgram")]
     pub fn dgram_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         self.dgram_recv_queue.pop(buf)
     }
@@ -3127,7 +3111,6 @@ impl Connection {
     /// conn.dgram_send(b"hello")?;
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    #[cfg(feature = "quic-dgram")]
     pub fn dgram_send(&mut self, buf: &[u8]) -> Result<()> {
         let max_payload_len = match self.dgram_max_writable_len() {
             Some(v) => v as usize,
@@ -3170,7 +3153,6 @@ impl Connection {
     /// conn.dgram_purge_outgoing(&|d: &[u8]| -> bool { d[0] == 0 });
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    #[cfg(feature = "quic-dgram")]
     pub fn dgram_purge_outgoing<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
         self.dgram_send_queue.purge(f);
     }
@@ -3197,7 +3179,6 @@ impl Connection {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    #[cfg(feature = "quic-dgram")]
     pub fn dgram_max_writable_len(&self) -> Option<usize> {
         match self.peer_transport_params.max_datagram_frame_size {
             None => None,
@@ -3505,7 +3486,6 @@ impl Connection {
         #[allow(unused_variables)]
         let dgram_pending = false;
 
-        #[cfg(feature = "quic-dgram")]
         let dgram_pending = self.dgram_send_queue.has_pending();
 
         // If there are flushable, almost full or blocked streams, use the
@@ -3886,7 +3866,6 @@ impl Connection {
                 self.drop_epoch_state(packet::EPOCH_HANDSHAKE, now);
             },
 
-            #[cfg(feature = "quic-dgram")]
             frame::Frame::Datagram { data } => {
                 // Close the connection if DATAGRAMs are not enabled.
                 // quiche always advertises support for 64K sized DATAGRAM
@@ -7439,7 +7418,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "quic-dgram")]
     fn dgram_send_app_limited() {
         let mut buf = [0; 65535];
         let send_buf = [0xcf; 1000];
@@ -7492,7 +7470,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "quic-dgram")]
     fn dgram_single_datagram() {
         let mut buf = [0; 65535];
 
@@ -7533,7 +7510,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "quic-dgram")]
     fn dgram_multiple_datagrams() {
         let mut buf = [0; 65535];
 
@@ -7586,7 +7562,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "quic-dgram")]
     fn dgram_send_queue_overflow() {
         let mut buf = [0; 65535];
 
@@ -7636,7 +7611,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "quic-dgram")]
     fn dgram_recv_queue_overflow() {
         let mut buf = [0; 65535];
 

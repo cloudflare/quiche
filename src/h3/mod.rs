@@ -509,7 +509,6 @@ pub enum Event {
     Finished,
 }
 
-#[cfg(feature = "h3-dgram")]
 /// An HTTP/3 DATAGRAM event.
 pub enum DatagramEvent {
     /// DATAGRAM was received
@@ -903,7 +902,6 @@ impl Connection {
 
     /// Sends an HTTP/3 DATAGRAM with the specified flow ID, as defined in
     /// draft-schinazi-quic-h3-datagram-03
-    #[cfg(feature = "h3-dgram")]
     pub fn dgram_send(
         &mut self, conn: &mut super::Connection, flow_id: u64, buf: &[u8],
     ) -> Result<()> {
@@ -922,7 +920,6 @@ impl Connection {
     /// Gets the size of the largest Datagram frame payload that can be sent,
     /// given the maximum size supported by the peer, the current maximum
     /// packet length and the space required by the HTTP/3 and QUIC overheads.
-    #[cfg(feature = "h3-dgram")]
     pub fn dgram_max_writable_len(
         &self, conn: &super::Connection, flow_id: u64,
     ) -> Option<usize> {
@@ -1028,7 +1025,6 @@ impl Connection {
         Err(Error::Done)
     }
 
-    #[cfg(feature = "h3-dgram")]
     /// Processes HTTP/3 DATAGRAMs received from the peer.
     ///
     /// On success it returns a [`DatagramEvent`] as well as the event's flow
@@ -1476,7 +1472,6 @@ impl Connection {
     }
 
     /// Process DATAGRAMs
-    #[cfg(feature = "h3-dgram")]
     fn process_dgram(
         &mut self, conn: &mut super::Connection, buf: &mut [u8],
     ) -> Result<(u64, DatagramEvent)> {
