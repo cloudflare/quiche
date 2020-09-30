@@ -7325,7 +7325,8 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config.set_application_protos(b"\x06proto1\06proto2")
+        config
+            .set_application_protos(b"\x06proto1\06proto2")
             .unwrap();
 
         let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
