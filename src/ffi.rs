@@ -801,7 +801,7 @@ pub extern fn quiche_conn_dgram_recv(
 
 #[no_mangle]
 pub extern fn quiche_conn_dgram_purge_outgoing(
-    conn: &mut Connection, f: fn(*const u8, size_t) -> bool,
+    conn: &mut Connection, f: extern fn(*const u8, size_t) -> bool,
 ) {
     conn.dgram_purge_outgoing(|d: &[u8]| -> bool {
         let ptr: *const u8 = d.as_ptr();
