@@ -39,6 +39,8 @@ use std::collections::HashMap;
 use std::net;
 use std::path;
 
+use quiche::h3::NameValue;
+
 /// Returns a String containing a pretty printed version of the `buf` slice.
 pub fn hex_dump(buf: &[u8]) -> String {
     let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();

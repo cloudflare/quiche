@@ -37,6 +37,8 @@ use libc::ssize_t;
 
 use crate::*;
 
+use crate::h3::NameValue;
+
 #[no_mangle]
 pub extern fn quiche_h3_config_new() -> *mut h3::Config {
     match h3::Config::new() {
@@ -262,7 +264,9 @@ pub extern fn quiche_h3_conn_free(conn: *mut h3::Connection) {
     unsafe { Box::from_raw(conn) };
 }
 
-fn headers_from_ptr(ptr: *const Header, len: size_t) -> Vec<h3::Header> {
+fn headers_from_ptr<'a>(
+    ptr: *const Header, len: size_t,
+) -> Vec<h3::HeaderRef<'a>> {
     let headers = unsafe { slice::from_raw_parts(ptr, len) };
 
     let mut out = Vec::new();
@@ -279,7 +283,7 @@ fn headers_from_ptr(ptr: *const Header, len: size_t) -> Vec<h3::Header> {
                 str::from_utf8_unchecked(slice)
             };
 
-            h3::Header::new(name, value)
+            h3::HeaderRef::new(name, value)
         });
     }
 
