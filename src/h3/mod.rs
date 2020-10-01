@@ -122,6 +122,8 @@
 //! [`send_response()`] and [`send_body()`]:
 //!
 //! ```no_run
+//! use quiche::h3::NameValue;
+//!
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
@@ -175,6 +177,8 @@
 //! An HTTP/3 client uses [`poll()`] to read responses:
 //!
 //! ```no_run
+//! use quiche::h3::NameValue;
+//!
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = [0xba; 16];
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
@@ -424,27 +428,56 @@ impl Config {
     }
 }
 
-/// A name-value pair representing a raw HTTP header.
+/// A trait for types with associated string name and value.
+pub trait NameValue {
+    /// Returns the object's name.
+    fn name(&self) -> &str;
+
+    /// Returns the object's value.
+    fn value(&self) -> &str;
+}
+
+/// An owned name-value pair representing a raw HTTP header.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Header(String, String);
 
 impl Header {
     /// Creates a new header.
     ///
-    /// Both `name` and `value` will be cloned, and `name` will also be
-    /// converted into lower-case.
+    /// Both `name` and `value` will be cloned.
     pub fn new(name: &str, value: &str) -> Self {
         Self(String::from(name), String::from(value))
     }
+}
 
-    /// Returns the header's name.
-    pub fn name(&self) -> &str {
+impl NameValue for Header {
+    fn name(&self) -> &str {
         &self.0
     }
 
-    /// Returns the header's value.
-    pub fn value(&self) -> &str {
+    fn value(&self) -> &str {
         &self.1
+    }
+}
+
+/// A non-owned name-value pair representing a raw HTTP header.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeaderRef<'a>(&'a str, &'a str);
+
+impl<'a> HeaderRef<'a> {
+    /// Creates a new header.
+    pub fn new(name: &'a str, value: &'a str) -> Self {
+        Self(name, value)
+    }
+}
+
+impl<'a> NameValue for HeaderRef<'a> {
+    fn name(&self) -> &str {
+        self.0
+    }
+
+    fn value(&self) -> &str {
+        self.1
     }
 }
 
@@ -605,8 +638,8 @@ impl Connection {
     ///
     /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
-    pub fn send_request(
-        &mut self, conn: &mut super::Connection, headers: &[Header], fin: bool,
+    pub fn send_request<T: NameValue>(
+        &mut self, conn: &mut super::Connection, headers: &[T], fin: bool,
     ) -> Result<u64> {
         let stream_id = self.next_request_stream_id;
 
@@ -644,9 +677,9 @@ impl Connection {
     ///
     /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
-    pub fn send_response(
-        &mut self, conn: &mut super::Connection, stream_id: u64,
-        headers: &[Header], fin: bool,
+    pub fn send_response<T: NameValue>(
+        &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
+        fin: bool,
     ) -> Result<()> {
         let priority = "u=3";
 
@@ -666,9 +699,9 @@ impl Connection {
     /// reported as writable again.
     ///
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
-    pub fn send_response_with_priority(
-        &mut self, conn: &mut super::Connection, stream_id: u64,
-        headers: &[Header], priority: &str, fin: bool,
+    pub fn send_response_with_priority<T: NameValue>(
+        &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
+        priority: &str, fin: bool,
     ) -> Result<()> {
         if !self.streams.contains_key(&stream_id) {
             return Err(Error::FrameUnexpected);
@@ -713,7 +746,9 @@ impl Connection {
         Ok(())
     }
 
-    fn encode_header_block(&mut self, headers: &[Header]) -> Result<Vec<u8>> {
+    fn encode_header_block<T: NameValue>(
+        &mut self, headers: &[T],
+    ) -> Result<Vec<u8>> {
         let headers_len = headers
             .iter()
             .fold(0, |acc, h| acc + h.value().len() + h.name().len() + 32);
@@ -729,9 +764,9 @@ impl Connection {
         Ok(header_block)
     }
 
-    fn send_headers(
-        &mut self, conn: &mut super::Connection, stream_id: u64,
-        headers: &[Header], fin: bool,
+    fn send_headers<T: NameValue>(
+        &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
+        fin: bool,
     ) -> Result<()> {
         let mut d = [42; 10];
         let mut b = octets::OctetsMut::with_slice(&mut d);

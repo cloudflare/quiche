@@ -28,7 +28,7 @@ use super::Result;
 
 use crate::octets;
 
-use crate::h3::Header;
+use crate::h3::NameValue;
 
 use super::INDEXED;
 use super::LITERAL;
@@ -50,8 +50,8 @@ impl Encoder {
     }
 
     /// Encodes a list of headers into a QPACK header block.
-    pub fn encode(
-        &mut self, headers: &[Header], out: &mut [u8],
+    pub fn encode<T: NameValue>(
+        &mut self, headers: &[T], out: &mut [u8],
     ) -> Result<usize> {
         let mut b = octets::OctetsMut::with_slice(out);
 
@@ -75,21 +75,21 @@ impl Encoder {
 
                     // Encode value as literal with static name reference.
                     encode_int(idx, LITERAL_WITH_NAME_REF | STATIC, 4, &mut b)?;
-                    encode_str(&h.1, 7, &mut b)?;
+                    encode_str(h.value(), 7, &mut b)?;
                 },
 
                 None => {
                     // Encode as fully literal.
                     let name_len = super::huffman::encode_output_length(
-                        h.0.as_bytes(),
+                        h.name().as_bytes(),
                         true,
                     )?;
 
                     encode_int(name_len as u64, LITERAL | 0x08, 3, &mut b)?;
 
-                    super::huffman::encode(h.0.as_bytes(), &mut b, true)?;
+                    super::huffman::encode(h.name().as_bytes(), &mut b, true)?;
 
-                    encode_str(&h.1, 7, &mut b)?;
+                    encode_str(h.value(), 7, &mut b)?;
                 },
             };
         }
@@ -98,7 +98,7 @@ impl Encoder {
     }
 }
 
-fn lookup_static(h: &Header) -> Option<(u64, bool)> {
+fn lookup_static<T: NameValue>(h: &T) -> Option<(u64, bool)> {
     let mut name_match = None;
 
     for (i, e) in super::static_table::STATIC_TABLE.iter().enumerate() {

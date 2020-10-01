@@ -133,6 +133,23 @@ mod tests {
         let headers_out = dec.decode(&mut encoded, std::u64::MAX).unwrap();
 
         assert_eq!(headers_expected, headers_out);
+
+        // HeaderRef.
+        let headers_in = vec![
+            crate::h3::HeaderRef::new(":StAtUs", "200"),
+            crate::h3::HeaderRef::new(":PaTh", "/HeLlO"),
+            crate::h3::HeaderRef::new("WooT", "woot"),
+            crate::h3::HeaderRef::new("hello", "WorlD"),
+            crate::h3::HeaderRef::new("fOo", "BaR"),
+        ];
+
+        let mut enc = Encoder::new();
+        assert_eq!(enc.encode(&headers_in, &mut encoded), Ok(35));
+
+        let mut dec = Decoder::new();
+        let headers_out = dec.decode(&mut encoded, std::u64::MAX).unwrap();
+
+        assert_eq!(headers_expected, headers_out);
     }
 }
 
