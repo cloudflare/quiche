@@ -1184,7 +1184,7 @@ impl RangeBuf {
         self.len() == 0
     }
 
-    /// Consumes the starting `count` butes of `self`.
+    /// Consumes the starting `count` bytes of `self`.
     pub fn consume(&mut self, count: usize) {
         self.pos += count;
     }
