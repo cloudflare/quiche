@@ -55,8 +55,24 @@ impl DatagramQueue {
         Ok(())
     }
 
-    pub fn peek(&self) -> Option<usize> {
+    pub fn peek_front_len(&self) -> Option<usize> {
         self.queue.front().map(|d| d.len())
+    }
+
+    pub fn peek_front_bytes(&self, buf: &mut [u8], len: usize) -> Result<usize> {
+        match self.queue.front() {
+            Some(d) => {
+                let len = std::cmp::min(len, d.len());
+                if buf.len() < len {
+                    return Err(Error::BufferTooShort);
+                }
+
+                buf[..len].copy_from_slice(&d[..len]);
+                Ok(len)
+            },
+
+            None => Err(Error::Done),
+        }
     }
 
     pub fn discard_front(&mut self) -> Result<()> {

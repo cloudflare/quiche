@@ -358,7 +358,7 @@ fn main() {
             for _ in dgrams_sent..dgrams_count {
                 info!("sending HTTP/3 DATAGRAM with data {:?}", dgram_data);
 
-                match h3_conn.dgram_send(&mut conn, 0, dgram_data.as_bytes()) {
+                match h3_conn.send_dgram(&mut conn, 0, dgram_data.as_bytes()) {
                     Ok(v) => v,
 
                     Err(e) => {
@@ -376,12 +376,19 @@ fn main() {
         if let Some(http3_conn) = &mut http3_conn {
             // Process HTTP/3 events.
             loop {
-                match http3_conn.poll_dgram(&mut conn, &mut dgram_buf) {
-                    Ok((flow_id, quiche::h3::DatagramEvent::Received(data))) => {
+                match http3_conn.poll(&mut conn) {
+                    Ok((_, quiche::h3::Event::Datagram)) => {
+                        let (len, flow_id, flow_id_len) = http3_conn
+                            .recv_dgram(&mut conn, &mut dgram_buf)
+                            .unwrap();
+
                         info!(
-                            "Received DATAGRAM flow_id={} dat= {:?}",
-                            flow_id, data
+                            "Received DATAGRAM flow_id={} len={} data={:?}",
+                            flow_id,
+                            len,
+                            dgram_buf[flow_id_len..len].to_vec()
                         );
+
                         dgrams_complete += 1;
 
                         debug!(
@@ -407,6 +414,12 @@ fn main() {
                             break;
                         }
                     },
+
+                    Ok((_stream_id, quiche::h3::Event::Headers { .. })) => (),
+
+                    Ok((_stream_id, quiche::h3::Event::Data)) => (),
+
+                    Ok((_stream_id, quiche::h3::Event::Finished)) => (),
 
                     Err(quiche::h3::Error::Done) => {
                         break;

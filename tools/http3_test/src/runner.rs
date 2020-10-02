@@ -273,6 +273,8 @@ pub fn run(
                         }
                     },
 
+                    Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
+
                     Err(quiche::h3::Error::Done) => {
                         break;
                     },

@@ -895,6 +895,8 @@ impl HttpConn for Http3Conn {
                     }
                 },
 
+                Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
+
                 Err(quiche::h3::Error::Done) => {
                     break;
                 },
@@ -1012,6 +1014,8 @@ impl HttpConn for Http3Conn {
                 },
 
                 Ok((_stream_id, quiche::h3::Event::Finished)) => (),
+
+                Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
 
                 Err(quiche::h3::Error::Done) => {
                     break;

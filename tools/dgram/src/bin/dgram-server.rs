@@ -426,21 +426,22 @@ fn main() {
                 loop {
                     let http3_conn = client.http3_conn.as_mut().unwrap();
 
-                    match http3_conn.poll_dgram(&mut client.conn, &mut dgram_buf)
-                    {
-                        Ok((
-                            flow_id,
-                            quiche::h3::DatagramEvent::Received(data),
-                        )) => {
+                    match http3_conn.poll(&mut client.conn) {
+                        Ok((_, quiche::h3::Event::Datagram)) => {
+                            let (len, flow_id, flow_id_len) = http3_conn
+                                .recv_dgram(&mut client.conn, &mut dgram_buf)
+                                .unwrap();
+
                             info!(
-                                "Received DATAGRAM flow_id={} dat= {:?}",
-                                flow_id, data
+                                "Received DATAGRAM flow_id={} data={:?}",
+                                flow_id,
+                                dgram_buf[flow_id_len..len].to_vec()
                             );
 
-                            match http3_conn.dgram_send(
+                            match http3_conn.send_dgram(
                                 &mut client.conn,
                                 flow_id,
-                                &data,
+                                &dgram_buf[flow_id_len..len],
                             ) {
                                 Ok(v) => v,
 
@@ -450,6 +451,12 @@ fn main() {
                                 },
                             }
                         },
+
+                        Ok((_stream_id, quiche::h3::Event::Headers { .. })) => (),
+
+                        Ok((_stream_id, quiche::h3::Event::Data)) => (),
+
+                        Ok((_stream_id, quiche::h3::Event::Finished)) => (),
 
                         Err(quiche::h3::Error::Done) => {
                             break;

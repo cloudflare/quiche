@@ -2331,7 +2331,7 @@ impl Connection {
             !is_closing
         {
             if let Some(max_dgram_payload) = self.dgram_max_writable_len() {
-                while let Some(len) = self.dgram_send_queue.peek() {
+                while let Some(len) = self.dgram_send_queue.peek_front_len() {
                     if (len + frame::MAX_DGRAM_OVERHEAD) <= left {
                         // Front of the queue fits this packet, send it
                         let mut buf = vec![0; len];
@@ -3058,10 +3058,14 @@ impl Connection {
         self.streams.writable()
     }
 
-    /// Attempts to read a stored DATAGRAM.
+    /// Attempts to read the first stored DATAGRAM.
     ///
-    /// On success the DATAGRAM's data is returned, or [`Done`] if there is no
-    /// data to read.
+    /// On success the DATAGRAM's data is returned along with it's size.
+    ///
+    /// [`Done`] is returned if there is no data to read.
+    ///
+    /// [`BufferTooShort`] is returned if the provided buffer is too small for
+    /// the DATAGRAM.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     ///
@@ -3081,6 +3085,27 @@ impl Connection {
     /// ```
     pub fn dgram_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         self.dgram_recv_queue.pop(buf)
+    }
+
+    /// Attempt to peek at the first stored DATAGRAM's data.
+    ///
+    /// On success the DATAGRAM's data is returned along with the actual number
+    /// of bytes peeked. The requested length cannot exceed the DATAGRAM's
+    /// actual length.
+    ///
+    /// [`Done`] is returned if there is no data to read.
+    ///
+    /// [`BufferTooShort`] is returned if the provided buffer is smaller the
+    /// number of bytes to peek.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    pub fn dgram_recv_peek(&self, buf: &mut [u8], len: usize) -> Result<usize> {
+        self.dgram_recv_queue.peek_front_bytes(buf, len)
+    }
+
+    /// Returns the length of the first stored DATAGRAM.
+    pub fn dgram_recv_front_len(&self) -> Option<usize> {
+        self.dgram_recv_queue.peek_front_len()
     }
 
     /// Send data in a DATAGRAM frame.

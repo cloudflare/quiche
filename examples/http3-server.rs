@@ -357,6 +357,8 @@ fn main() {
 
                         Ok((_stream_id, quiche::h3::Event::Finished)) => (),
 
+                        Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
+
                         Err(quiche::h3::Error::Done) => {
                             break;
                         },
