@@ -124,7 +124,8 @@ impl Decoder {
                         .checked_sub((name.len() + value.len()) as u64)
                         .ok_or(Error::HeaderListTooLarge)?;
 
-                    out.push(Header::new(&name, &value));
+                    let hdr = Header::new(name, value);
+                    out.push(hdr);
                 },
 
                 Representation::IndexedWithPostBase => {
@@ -141,27 +142,35 @@ impl Decoder {
                     let name_len = decode_int(&mut b, 3)? as usize;
 
                     let mut name = b.get_bytes(name_len)?;
+
                     let name = if name_huff {
-                        super::huffman::decode(&mut name)?
+                        let name = super::huffman::decode(&mut name, true)?;
+
+                        String::from_utf8(name)
+                            .map_err(|_| Error::InvalidHeaderValue)?
                     } else {
-                        name.to_vec()
+                        let name = std::str::from_utf8(name.as_ref())
+                            .map_err(|_| Error::InvalidHeaderValue)?;
+
+                        name.to_ascii_lowercase()
                     };
 
-                    let name = String::from_utf8(name)
-                        .map_err(|_| Error::InvalidHeaderValue)?;
                     let value = decode_str(&mut b)?;
 
                     trace!(
                         "Literal Without Name Reference name={:?} value={:?}",
                         name,
-                        value
+                        value,
                     );
 
                     left = left
                         .checked_sub((name.len() + value.len()) as u64)
                         .ok_or(Error::HeaderListTooLarge)?;
 
-                    out.push(Header::new(&name, &value));
+                    // Instead of calling Header::new(), create Header directly
+                    // from `name` and `value`, which are already String.
+                    let hdr = Header(name, value);
+                    out.push(hdr);
                 },
 
                 Representation::LiteralWithNameRef => {
@@ -189,7 +198,11 @@ impl Decoder {
                         .checked_sub((name.len() + value.len()) as u64)
                         .ok_or(Error::HeaderListTooLarge)?;
 
-                    out.push(Header::new(name, &value));
+                    // Instead of calling Header::new(), create Header directly
+                    // from `value`, which is already String, but clone `name`
+                    // as it is just a reference.
+                    let hdr = Header(name.to_string(), value);
+                    out.push(hdr);
                 },
 
                 Representation::LiteralWithPostBase => {
@@ -254,7 +267,7 @@ fn decode_str<'a>(b: &'a mut octets::Octets) -> Result<String> {
     let mut val = b.get_bytes(len)?;
 
     let val = if huff {
-        super::huffman::decode(&mut val)?
+        super::huffman::decode(&mut val, false)?
     } else {
         val.to_vec()
     };
