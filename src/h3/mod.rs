@@ -433,8 +433,8 @@ impl Header {
     ///
     /// Both `name` and `value` will be cloned, and `name` will also be
     /// converted into lower-case.
-    pub fn new(name: &str, value: &str) -> Header {
-        Header(name.to_lowercase(), String::from(value))
+    pub fn new(name: &str, value: &str) -> Self {
+        Self(String::from(name), String::from(value))
     }
 
     /// Returns the header's name.

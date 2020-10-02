@@ -99,10 +99,40 @@ mod tests {
         ];
 
         let mut enc = Encoder::new();
-        assert!(enc.encode(&headers, &mut encoded).is_ok());
+        assert_eq!(enc.encode(&headers, &mut encoded), Ok(240));
 
         let mut dec = Decoder::new();
         assert_eq!(dec.decode(&mut encoded, std::u64::MAX), Ok(headers));
+    }
+
+    #[test]
+    fn lower_case() {
+        let mut encoded = [0u8; 35];
+
+        let headers_expected = vec![
+            crate::h3::Header::new(":status", "200"),
+            crate::h3::Header::new(":path", "/HeLlO"),
+            crate::h3::Header::new("woot", "woot"),
+            crate::h3::Header::new("hello", "WorlD"),
+            crate::h3::Header::new("foo", "BaR"),
+        ];
+
+        // Header.
+        let headers_in = vec![
+            crate::h3::Header::new(":StAtUs", "200"),
+            crate::h3::Header::new(":PaTh", "/HeLlO"),
+            crate::h3::Header::new("WooT", "woot"),
+            crate::h3::Header::new("hello", "WorlD"),
+            crate::h3::Header::new("fOo", "BaR"),
+        ];
+
+        let mut enc = Encoder::new();
+        assert_eq!(enc.encode(&headers_in, &mut encoded), Ok(35));
+
+        let mut dec = Decoder::new();
+        let headers_out = dec.decode(&mut encoded, std::u64::MAX).unwrap();
+
+        assert_eq!(headers_expected, headers_out);
     }
 }
 
@@ -112,3 +142,4 @@ pub use encoder::Encoder;
 mod decoder;
 mod encoder;
 mod huffman;
+mod static_table;

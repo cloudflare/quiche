@@ -57,11 +57,13 @@ pub fn decode(b: &mut octets::Octets) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-pub fn encode(src: &[u8], out: &mut octets::OctetsMut) -> Result<()> {
+pub fn encode(src: &[u8], out: &mut octets::OctetsMut, low: bool) -> Result<()> {
     let mut bits: u64 = 0;
     let mut bits_left = 40;
 
     for &b in src {
+        let b = if low { b.to_ascii_lowercase() } else { b };
+
         let (nbits, code) = ENCODE_TABLE[b as usize];
 
         bits |= code << (bits_left - nbits);
@@ -85,10 +87,12 @@ pub fn encode(src: &[u8], out: &mut octets::OctetsMut) -> Result<()> {
     Ok(())
 }
 
-pub fn encode_output_length(src: &[u8]) -> Result<usize> {
+pub fn encode_output_length(src: &[u8], low: bool) -> Result<usize> {
     let mut bits: usize = 0;
 
     for &b in src {
+        let b = if low { b.to_ascii_lowercase() } else { b };
+
         let (nbits, _) = ENCODE_TABLE[b as usize];
         bits += nbits;
     }
