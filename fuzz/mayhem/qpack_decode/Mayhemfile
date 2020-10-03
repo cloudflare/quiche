@@ -1,10 +1,10 @@
-version: '1.0'
+version: '1.5'
 
-project: quiche
+project: protocols/quiche
 
 target: qpack-decode-libfuzzer
 
-baseimage: mayhem.cloudflare-security.com:5000/ghedo/quiche-libfuzzer:latest
+baseimage: mayhem.cloudflare-security.com:5000/protocols/quiche-libfuzzer:latest
 
 advanced_triage: false
 
