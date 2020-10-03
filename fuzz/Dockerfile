@@ -9,6 +9,6 @@ RUN apt-get update && apt-get install llvm -y
 COPY ./cert.crt ./
 COPY ./cert.key ./
 
-COPY ./target/x86_64-unknown-linux-gnu/debug/packet_recv_client ./
-COPY ./target/x86_64-unknown-linux-gnu/debug/packet_recv_server ./
-COPY ./target/x86_64-unknown-linux-gnu/debug/qpack_decode ./
+COPY ./target/x86_64-unknown-linux-gnu/release/packet_recv_client ./
+COPY ./target/x86_64-unknown-linux-gnu/release/packet_recv_server ./
+COPY ./target/x86_64-unknown-linux-gnu/release/qpack_decode ./
