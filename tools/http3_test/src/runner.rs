@@ -277,6 +277,29 @@ pub fn run(
 
                     Ok((_goaway_id, quiche::h3::Event::GoAway)) => (),
 
+                    Ok((
+                        stream_id,
+                        quiche::h3::Event::StopSending { error_code },
+                    )) => {
+                        info!(
+                            "StopSending received for stream {} error_code {}",
+                            stream_id, error_code
+                        );
+                    },
+
+                    Ok((
+                        stream_id,
+                        quiche::h3::Event::ResetStream {
+                            error_code,
+                            final_size,
+                        },
+                    )) => {
+                        info!(
+                            "ResetStream received from stream {} error_code {} final_size {}",
+                            stream_id, error_code, final_size
+                        );
+                    },
+
                     Err(quiche::h3::Error::Done) => {
                         break;
                     },

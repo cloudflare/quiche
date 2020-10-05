@@ -166,6 +166,14 @@
 //!              // Peer signalled it is going away, handle it.
 //!         },
 //!
+//!         Ok((stream_id, quiche::h3::Event::StopSending {error_code})) => {
+//!             // Peer sent STOP_SENDING, handle it.
+//!         },
+//!
+//!         Ok((stream_id, quiche::h3::Event::ResetStream {error_code, final_size})) => {
+//!             // Peer sent RESET_STREAM, handle it.
+//!         },
+//!
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
 //!             break;
@@ -174,7 +182,7 @@
 //!         Err(e) => {
 //!             // An error occurred, handle it.
 //!             break;
-//!         },
+//!         }
 //!     }
 //! }
 //! # Ok::<(), quiche::h3::Error>(())
@@ -217,6 +225,14 @@
 //!
 //!         Ok((goaway_id, quiche::h3::Event::GoAway)) => {
 //!              // Peer signalled it is going away, handle it.
+//!         },
+//!
+//!         Ok((stream_id, quiche::h3::Event::StopSending {error_code})) => {
+//!             // Peer sent STOP_SENDING, handle it.
+//!         },
+//!
+//!         Ok((stream_id, quiche::h3::Event::ResetStream {error_code, final_size})) => {
+//!             // Peer sent RESET_STREAM, handle it.
 //!         },
 //!
 //!         Err(quiche::h3::Error::Done) => {
@@ -265,6 +281,7 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
+use crate::h3::stream::Type;
 use crate::octets;
 
 /// List of ALPN tokens of supported HTTP/3 versions.
@@ -563,6 +580,20 @@ pub enum Event {
 
     /// GOAWAY was received.
     GoAway,
+
+    /// STOP_SENDING was received.
+    StopSending {
+        /// Application Protocol Error Code
+        error_code: u64,
+    },
+
+    /// RESET_STREAM was received.
+    ResetStream {
+        /// Application Protocol Error Code
+        error_code: u64,
+        /// The final offset of data in this stream
+        final_size: u64,
+    },
 }
 
 struct ConnectionSettings {
@@ -1160,6 +1191,43 @@ impl Connection {
 
             if let Some(ev) = ev {
                 return Ok(ev);
+            }
+        }
+
+        // Process STOP_SENDING, trigger an event for one `Request` stream
+        while let Some((stream_id, error_code)) = conn.poll_stop_sending() {
+            match self.streams.get(&stream_id) {
+                Some(stream) => match stream.ty() {
+                    Some(Type::Request) =>
+                        return Ok((stream_id, Event::StopSending { error_code })),
+                    _ => trace!(
+                        "StopSending: stream {} is not Request type",
+                        stream_id
+                    ),
+                },
+                None =>
+                    trace!("StopSending: stream {} does not exists", stream_id),
+            }
+        }
+
+        // Process RESET_STREAM, trigger an event for one `Request` stream
+        while let Some((stream_id, error_code, final_size)) =
+            conn.poll_reset_stream()
+        {
+            match self.streams.get(&stream_id) {
+                Some(stream) => match stream.ty() {
+                    Some(Type::Request) =>
+                        return Ok((stream_id, Event::ResetStream {
+                            error_code,
+                            final_size,
+                        })),
+                    _ => trace!(
+                        "ResetStream: stream {} is not Request type",
+                        stream_id
+                    ),
+                },
+                None =>
+                    trace!("ResetStream: stream {} does not exists", stream_id),
             }
         }
 
@@ -2120,6 +2188,8 @@ mod tests {
     use super::*;
 
     use super::testing::*;
+
+    use crate::Shutdown;
 
     #[test]
     /// Make sure that random GREASE values is within the specified limit.
@@ -3355,6 +3425,60 @@ mod tests {
         s.pipe.advance(&mut buf).unwrap();
 
         assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::SettingsError));
+    }
+
+    #[test]
+    /// Tests that `stream_shutdown` `read` will trigger StopSending event on
+    /// the server, and the server will send back RESET_STREAM, trigger
+    /// ResetStream event on the client.
+    fn stop_sending_and_reset_stream() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        // Send the request
+        let (stream_id, req) = s.send_request(true).unwrap();
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: false,
+        };
+        assert_eq!(s.poll_server(), Ok((stream_id, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream_id, Event::Finished)));
+
+        // Start the response
+        let resp = s.send_response(stream_id, false).unwrap();
+        let body = s.send_body_server(stream_id, false).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+        let ev_headers = Event::Headers {
+            list: resp,
+            has_body: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream_id, ev_headers)));
+        assert_eq!(s.poll_client(), Ok((stream_id, Event::Data)));
+        assert_eq!(s.recv_body_client(stream_id, &mut recv_buf), Ok(body.len()));
+
+        // The client shutdown will send STOP_SENDING to the server
+        let error_code = 12345;
+        s.pipe
+            .client
+            .stream_shutdown(stream_id, Shutdown::Read, error_code)
+            .unwrap();
+        s.advance().ok();
+
+        // Verify StopSending event received on the server
+        let stop_sending = Event::StopSending { error_code };
+        assert_eq!(s.poll_server(), Ok((stream_id, stop_sending)));
+
+        // Server should respond with a RESET_STREAM
+        // Verify ResetStream event received on the client
+        let client_stream = s.pipe.client.streams.get(stream_id).unwrap();
+        let final_size = client_stream.recv.max_off();
+        let reset_stream = Event::ResetStream {
+            error_code,
+            final_size,
+        };
+        assert_eq!(s.poll_client(), Ok((stream_id, reset_stream)));
     }
 }
 

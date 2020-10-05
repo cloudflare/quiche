@@ -121,7 +121,7 @@ pub struct Stream {
 
     /// The write offset in the state buffer, that is, how many bytes have
     /// already been read from the transport for the current state. When
-    /// it reaches `stream_len` the state can be completed.
+    /// it reaches `state_len` the state can be completed.
     state_off: usize,
 
     /// The type of the frame currently being parsed.
@@ -176,6 +176,10 @@ impl Stream {
 
     pub fn state(&self) -> State {
         self.state
+    }
+
+    pub fn ty(&self) -> Option<Type> {
+        self.ty
     }
 
     /// Sets the stream's type and transitions to the next state.

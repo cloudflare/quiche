@@ -1255,6 +1255,31 @@ impl HttpConn for Http3Conn {
                     );
                 },
 
+                Ok((
+                    stream_id,
+                    quiche::h3::Event::StopSending { error_code },
+                )) => {
+                    info!(
+                        "Received STOP_SENDING stream_id={} error_code={}",
+                        stream_id, error_code
+                    );
+                },
+
+                Ok((
+                    stream_id,
+                    quiche::h3::Event::ResetStream {
+                        error_code,
+                        final_size,
+                    },
+                )) => {
+                    info!(
+                        "Received RESET_STREAM stream_id={} error_code={} final_size={}",
+                        stream_id,
+                        error_code,
+                        final_size
+                    );
+                },
+
                 Err(quiche::h3::Error::Done) => {
                     break;
                 },
@@ -1403,6 +1428,31 @@ impl HttpConn for Http3Conn {
                     );
                     self.h3_conn
                         .send_goaway(conn, self.largest_processed_request)?;
+                },
+
+                Ok((
+                    stream_id,
+                    quiche::h3::Event::StopSending { error_code },
+                )) => {
+                    info!(
+                        "Received STOP_SENDING stream_id={} error_code={}",
+                        stream_id, error_code
+                    );
+                },
+
+                Ok((
+                    stream_id,
+                    quiche::h3::Event::ResetStream {
+                        error_code,
+                        final_size,
+                    },
+                )) => {
+                    info!(
+                        "Received RESET_STREAM stream_id={} error_code={} final_size={}",
+                        stream_id,
+                        error_code,
+                        final_size
+                    );
                 },
 
                 Err(quiche::h3::Error::Done) => {

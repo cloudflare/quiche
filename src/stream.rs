@@ -123,6 +123,23 @@ pub struct StreamMap {
     /// of the map elements represents the offset of the stream at which the
     /// blocking occurred.
     blocked: HashMap<u64, u64>,
+
+    /// Set of stream IDs corresponding to streams that have shut down recv and
+    /// need to send STOP_SENDING. The value of the map elements represents
+    /// Application Error Code.
+    recv_aborted: HashMap<u64, u64>,
+
+    /// Set of stream IDs corresponding to streams that have shut down send or
+    /// received STOP_SENDING. In both cases, we want to send RESET_STREAM to
+    /// the peer. The value of the map elements represents the error code.
+    will_reset: HashMap<u64, u64>,
+
+    /// Queue of (stream_id, error_code) corresponding to STOP_SENDING received.
+    stop_sending: VecDeque<(u64, u64)>,
+
+    /// Queue of (stream_id, error_code, final_size) corresponding to
+    /// RESET_STREAM received.
+    reset_stream: VecDeque<(u64, u64, u64)>,
 }
 
 impl StreamMap {
@@ -365,6 +382,45 @@ impl StreamMap {
         }
     }
 
+    pub fn mark_recv_aborted(
+        &mut self, stream_id: u64, aborted: bool, error_code: u64,
+    ) {
+        if aborted {
+            self.recv_aborted.insert(stream_id, error_code);
+        } else {
+            self.recv_aborted.remove(&stream_id);
+        }
+    }
+
+    pub fn mark_will_reset(
+        &mut self, stream_id: u64, reset: bool, error_code: u64,
+    ) {
+        if reset {
+            self.will_reset.insert(stream_id, error_code);
+        } else {
+            self.will_reset.remove(&stream_id);
+        }
+    }
+
+    pub fn mark_stop_sending(&mut self, stream_id: u64, error_code: u64) {
+        self.stop_sending.push_back((stream_id, error_code));
+    }
+
+    pub fn poll_stop_sending(&mut self) -> Option<(u64, u64)> {
+        self.stop_sending.pop_front()
+    }
+
+    pub fn mark_reset_stream(
+        &mut self, stream_id: u64, error_code: u64, final_size: u64,
+    ) {
+        self.reset_stream
+            .push_back((stream_id, error_code, final_size));
+    }
+
+    pub fn poll_reset_stream(&mut self) -> Option<(u64, u64, u64)> {
+        self.reset_stream.pop_front()
+    }
+
     /// Updates the peer's maximum bidirectional stream count limit.
     pub fn update_peer_max_streams_bidi(&mut self, v: u64) {
         self.peer_max_streams_bidi = cmp::max(self.peer_max_streams_bidi, v);
@@ -431,6 +487,14 @@ impl StreamMap {
         StreamIter::from(&self.almost_full)
     }
 
+    pub fn recv_aborted(&self) -> hash_map::Iter<u64, u64> {
+        self.recv_aborted.iter()
+    }
+
+    pub fn will_reset(&self) -> hash_map::Iter<u64, u64> {
+        self.will_reset.iter()
+    }
+
     /// Creates an iterator over streams that need to send STREAM_DATA_BLOCKED.
     pub fn blocked(&self) -> hash_map::Iter<u64, u64> {
         self.blocked.iter()
@@ -455,6 +519,10 @@ impl StreamMap {
     /// Returns true if there are any streams that are blocked.
     pub fn has_blocked(&self) -> bool {
         !self.blocked.is_empty()
+    }
+
+    pub fn has_stop_sending(&self) -> bool {
+        !self.recv_aborted.is_empty()
     }
 
     /// Returns true if the max bidirectional streams count needs to be updated
