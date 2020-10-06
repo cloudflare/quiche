@@ -645,7 +645,7 @@ index 000000000..9f8b2cb98
 +ngx_quic_write_handler(ngx_event_t *wev)
 +{
 +    ngx_connection_t   *c;
-+    ngx_msec_t          expiry;
++    uint64_t            expiry;
 +    static uint8_t      out[MAX_DATAGRAM_SIZE];
 +
 +    c = wev->data;
@@ -709,7 +709,7 @@ index 000000000..9f8b2cb98
 +     * should be unset (this would be equvalent to returning Option::None in
 +     * Rust). To avoid overflow we need to explicitly check for this value. */
 +    if (expiry != UINT64_MAX) {
-+        ngx_add_timer(wev, expiry);
++        ngx_add_timer(wev, (ngx_msec_t)expiry);
 +    }
 +}
 +
