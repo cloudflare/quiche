@@ -31,6 +31,15 @@ check_testcase () {
         echo "supported"
         RUST_LOG="info"
         ;;
+    chacha20 )
+        if [ "$ROLE" == "client" ]; then
+            # We don't support selecting a cipher on the client-side.
+            echo "unsupported"
+            exit 127
+        elif [ "$ROLE" == "server" ]; then
+            echo "supported"
+        fi
+        ;;
     resumption | zerortt )
         if [ "$ROLE" == "client" ]; then
             # We don't support session resumption on the client-side yet.
