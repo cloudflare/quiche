@@ -4383,15 +4383,6 @@ impl TransportParams {
             b.put_varint(tp.max_ack_delay)?;
         }
 
-        if let Some(max_datagram_frame_size) = tp.max_datagram_frame_size {
-            TransportParams::encode_param(
-                &mut b,
-                0x0020,
-                octets::varint_len(max_datagram_frame_size),
-            )?;
-            b.put_varint(max_datagram_frame_size)?;
-        }
-
         if tp.disable_active_migration {
             TransportParams::encode_param(&mut b, 0x000c, 0)?;
         }
@@ -4417,6 +4408,15 @@ impl TransportParams {
                 TransportParams::encode_param(&mut b, 0x0010, scid.len())?;
                 b.put_bytes(&scid)?;
             }
+        }
+
+        if let Some(max_datagram_frame_size) = tp.max_datagram_frame_size {
+            TransportParams::encode_param(
+                &mut b,
+                0x0020,
+                octets::varint_len(max_datagram_frame_size),
+            )?;
+            b.put_varint(max_datagram_frame_size)?;
         }
 
         let out_len = b.off();
