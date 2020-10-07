@@ -144,16 +144,13 @@ impl Decoder {
                     let mut name = b.get_bytes(name_len)?;
 
                     let name = if name_huff {
-                        let name = super::huffman::decode(&mut name, true)?;
-
-                        String::from_utf8(name)
-                            .map_err(|_| Error::InvalidHeaderValue)?
+                        super::huffman::decode(&mut name)?
                     } else {
-                        let name = std::str::from_utf8(name.as_ref())
-                            .map_err(|_| Error::InvalidHeaderValue)?;
-
-                        name.to_ascii_lowercase()
+                        name.to_vec()
                     };
+
+                    let name = String::from_utf8(name)
+                        .map_err(|_| Error::InvalidHeaderValue)?;
 
                     let value = decode_str(&mut b)?;
 
@@ -267,7 +264,7 @@ fn decode_str<'a>(b: &'a mut octets::Octets) -> Result<String> {
     let mut val = b.get_bytes(len)?;
 
     let val = if huff {
-        super::huffman::decode(&mut val, false)?
+        super::huffman::decode(&mut val)?
     } else {
         val.to_vec()
     };

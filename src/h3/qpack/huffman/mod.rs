@@ -32,7 +32,7 @@ use super::Result;
 use self::table::DECODE_TABLE;
 use self::table::ENCODE_TABLE;
 
-pub fn decode(b: &mut octets::Octets, low: bool) -> Result<Vec<u8>> {
+pub fn decode(b: &mut octets::Octets) -> Result<Vec<u8>> {
     // Max compression ratio is >= 0.5
     let mut out = Vec::with_capacity(b.len() << 1);
 
@@ -42,12 +42,10 @@ pub fn decode(b: &mut octets::Octets, low: bool) -> Result<Vec<u8>> {
         let byte = b.get_u8()?;
 
         if let Some(b) = decoder.decode4(byte >> 4)? {
-            let b = if low { b.to_ascii_lowercase() } else { b };
             out.push(b);
         }
 
         if let Some(b) = decoder.decode4(byte & 0xf)? {
-            let b = if low { b.to_ascii_lowercase() } else { b };
             out.push(b);
         }
     }
