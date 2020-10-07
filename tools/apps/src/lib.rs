@@ -103,8 +103,7 @@ pub struct CommonArgs {
 /// --disable-hystart           Disable HyStart++.
 /// --dgram-proto PROTO         DATAGRAM application protocol.
 /// --dgram-count COUNT         Number of DATAGRAMs to send.
-///  --dgram-data DATA          Data to send for certain types of DATAGRAM
-/// application protocol [default: quack].
+///  --dgram-data DATA          DATAGRAM data to send.
 ///
 /// [`Docopt`]: https://docs.rs/docopt/1.1.0/docopt/
 impl Args for CommonArgs {

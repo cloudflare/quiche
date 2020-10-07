@@ -116,7 +116,7 @@ impl DatagramQueue {
         self.queue.len() == self.queue_max_len
     }
 
-    pub fn pending_bytes(&self) -> usize {
+    pub fn byte_size(&self) -> usize {
         self.queue_bytes_size
     }
 }

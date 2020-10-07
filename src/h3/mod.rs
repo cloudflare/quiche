@@ -944,9 +944,7 @@ impl Connection {
         Ok((len, flow_id, b.off()))
     }
 
-    /// Gets the size of the largest Datagram frame payload that can be sent,
-    /// given the maximum size supported by the peer, the current maximum
-    /// packet length and the space required by the HTTP/3 and QUIC overheads.
+    /// Returns the maximum HTTP/3 DATAGRAM payload that can be sent.
     pub fn dgram_max_writable_len(
         &self, conn: &super::Connection, flow_id: u64,
     ) -> Option<usize> {
@@ -1040,21 +1038,17 @@ impl Connection {
         // Process DATAGRAMs
         let mut d = [0; 8];
 
-        let ev = match conn.dgram_recv_peek(&mut d, 8) {
+        match conn.dgram_recv_peek(&mut d, 8) {
             Ok(_) => {
                 let mut b = octets::Octets::with_slice(&d);
                 let flow_id = b.get_varint()?;
-                Some(flow_id)
+                return Ok((flow_id, Event::Datagram));
             },
 
-            Err(crate::Error::Done) => None,
+            Err(crate::Error::Done) => (),
 
             Err(e) => return Err(Error::TransportError(e)),
         };
-
-        if let Some(ev) = ev {
-            return Ok((ev, Event::Datagram));
-        }
 
         // Process HTTP/3 data from readable streams.
         for s in conn.readable() {

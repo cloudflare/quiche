@@ -758,7 +758,9 @@ impl Config {
     /// to 65536 as recommended by draft-ietf-quic-datagram-01.
     ///
     /// The default is `false`.
-    pub fn enable_dgram(&mut self, enabled: bool, recv_queue_len: usize, send_queue_len: usize) {
+    pub fn enable_dgram(
+        &mut self, enabled: bool, recv_queue_len: usize, send_queue_len: usize,
+    ) {
         self.local_transport_params.max_datagram_frame_size = if enabled {
             Some(MAX_DGRAM_FRAME_SIZE)
         } else {
@@ -1423,7 +1425,7 @@ impl Connection {
     ///
     /// On success the number of bytes processed from the input buffer is
     /// returned. When the [`Done`] error is returned, processing of the
-    /// remainder of the incoming UDP DATAGRAM should be interrupted.
+    /// remainder of the incoming UDP datagram should be interrupted.
     ///
     /// On error, an error other than [`Done`] is returned.
     ///
@@ -2575,8 +2577,7 @@ impl Connection {
 
         self.sent_count += 1;
 
-        if self.dgram_send_queue.pending_bytes() > self.recovery.cwnd_available()
-        {
+        if self.dgram_send_queue.byte_size() > self.recovery.cwnd_available() {
             self.recovery.update_app_limited(false);
         }
 
@@ -3146,16 +3147,14 @@ impl Connection {
 
         self.dgram_send_queue.push(buf)?;
 
-        if self.dgram_send_queue.pending_bytes() > self.recovery.cwnd_available()
-        {
+        if self.dgram_send_queue.byte_size() > self.recovery.cwnd_available() {
             self.recovery.update_app_limited(false);
         }
 
         Ok(())
     }
 
-    /// Iterates over the outgoing queue and purges DATAGRAMs
-    /// matching the predicate.
+    /// Purges queued outgoing DATAGRAMs matching the predicate.
     ///
     /// In other words, remove all elements `e` such that `f(&e)` returns true.
     ///
@@ -3173,9 +3172,7 @@ impl Connection {
         self.dgram_send_queue.purge(f);
     }
 
-    /// Gets the size of the largest Datagram frame payload that can be sent,
-    /// given the maximum size supported by the peer, the current maximum
-    /// packet length and the space required by the transport overhead.
+    /// Returns the maximum DATAGRAM payload that can be sent.
     ///
     /// [`None`] is returned if the peer hasn't advertised a maximum DATAGRAM
     /// frame size.
@@ -3221,8 +3218,8 @@ impl Connection {
 
     fn dgram_enabled(&self) -> bool {
         self.local_transport_params
-                    .max_datagram_frame_size
-                    .is_none()
+            .max_datagram_frame_size
+            .is_none()
     }
 
     /// Returns the amount of time until the next timeout event.
@@ -3891,8 +3888,7 @@ impl Connection {
                 // quiche always advertises support for 64K sized DATAGRAM
                 // frames, as recommended by the standard, so we don't need a
                 // size check.
-                if self.dgram_enabled()
-                {
+                if self.dgram_enabled() {
                     trace!(
                         "received a DATAGRAM without \
                             max_datagram_frame_size; closing."
@@ -7455,7 +7451,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 1000,1000);
+        config.enable_dgram(true, 1000, 1000);
         config.set_max_udp_payload_size(1200);
         config.verify_peer(false);
 
@@ -7469,19 +7465,19 @@ mod tests {
         }
 
         assert!(!pipe.client.recovery.app_limited());
-        assert_eq!(pipe.client.dgram_send_queue.pending_bytes(), 1_000_000);
+        assert_eq!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
 
         let len = pipe.client.send(&mut buf).unwrap();
 
-        assert_ne!(pipe.client.dgram_send_queue.pending_bytes(), 0);
-        assert_ne!(pipe.client.dgram_send_queue.pending_bytes(), 1_000_000);
+        assert_ne!(pipe.client.dgram_send_queue.byte_size(), 0);
+        assert_ne!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
         assert!(!pipe.client.recovery.app_limited());
 
         testing::recv_send(&mut pipe.client, &mut buf, len).unwrap();
         testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
-        assert_ne!(pipe.client.dgram_send_queue.pending_bytes(), 0);
-        assert_ne!(pipe.client.dgram_send_queue.pending_bytes(), 1_000_000);
+        assert_ne!(pipe.client.dgram_send_queue.byte_size(), 0);
+        assert_ne!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
 
         assert!(!pipe.client.recovery.app_limited());
     }
@@ -7506,7 +7502,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 10,10);
+        config.enable_dgram(true, 10, 10);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
@@ -7544,7 +7540,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 10,10);
+        config.enable_dgram(true, 10, 10);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
@@ -7594,7 +7590,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 10,2);
+        config.enable_dgram(true, 10, 2);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
@@ -7641,7 +7637,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 2,10);
+        config.enable_dgram(true, 2, 10);
         config.set_max_udp_payload_size(1200);
         config.verify_peer(false);
 
@@ -7689,7 +7685,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 10,10);
+        config.enable_dgram(true, 10, 10);
         config.set_max_udp_payload_size(1452);
         config.verify_peer(false);
 
