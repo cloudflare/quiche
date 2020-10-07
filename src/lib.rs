@@ -3218,7 +3218,10 @@ impl Connection {
                 // ...subtract the packet number (max len)...
                 max_len = max_len.saturating_sub(packet::MAX_PKT_NUM_LEN);
                 // ...subtract the crypto overhead...
-                max_len = max_len.saturating_sub(frame::MAX_CRYPTO_OVERHEAD);
+                max_len = max_len.saturating_sub(
+                    self.pkt_num_spaces[packet::EPOCH_APPLICATION]
+                        .crypto_overhead()?,
+                );
                 // ...clamp to what peer can support...
                 max_len = cmp::min(peer_frame_len as usize, max_len);
                 // ...subtract frame overhead, checked for underflow.
@@ -7685,6 +7688,54 @@ mod tests {
 
         let result3 = pipe.server.dgram_recv(&mut buf);
         assert_eq!(result3, Err(Error::Done));
+    }
+
+    #[test]
+    fn dgram_send_max_size() {
+        let mut buf = [0; MAX_DGRAM_FRAME_SIZE as usize];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_dgram_frames_supported(true);
+        config.set_dgram_recv_max_queue_len(10);
+        config.set_dgram_send_max_queue_len(10);
+        config.set_max_udp_payload_size(1452);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        // Before handshake (before peer settings) we don't know max dgram size
+        assert_eq!(pipe.client.dgram_max_writable_len(), None);
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let max_dgram_size = pipe.client.dgram_max_writable_len().unwrap();
+
+        let dgram_packet: Vec<u8> = vec![42; max_dgram_size];
+
+        assert_eq!(pipe.client.dgram_send(&dgram_packet), Ok(()));
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let result1 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result1, Ok(max_dgram_size));
+
+        let result2 = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(result2, Err(Error::Done));
     }
 }
 
