@@ -3068,6 +3068,7 @@ impl Connection {
     /// the DATAGRAM.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    /// [`BufferTooShort`]: enum.Error.html#variant.BufferTooShort
     ///
     /// ## Examples:
     ///
@@ -3099,6 +3100,7 @@ impl Connection {
     /// number of bytes to peek.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    /// [`BufferTooShort`]: enum.Error.html#variant.BufferTooShort
     pub fn dgram_recv_peek(&self, buf: &mut [u8], len: usize) -> Result<usize> {
         self.dgram_recv_queue.peek_front_bytes(buf, len)
     }

@@ -1265,10 +1265,8 @@ impl HttpConn for Http3Conn {
                 Ok((_stream_id, quiche::h3::Event::Finished)) => (),
 
                 Ok((_, quiche::h3::Event::Datagram)) => {
-                    let (len, flow_id, flow_id_len) = self
-                        .h3_conn
-                        .recv_dgram(conn, buf)
-                        .unwrap();
+                    let (len, flow_id, flow_id_len) =
+                        self.h3_conn.recv_dgram(conn, buf).unwrap();
 
                     info!(
                         "Received DATAGRAM flow_id={} data={:?}",

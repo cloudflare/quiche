@@ -931,8 +931,10 @@ impl Connection {
     /// [`BufferTooShort`] is returned if the provided buffer is too small for
     /// the data.
     ///
-    /// [`poll()`]: struct.Connection.html#method.poll [`Datagram`]:
-    /// enum.Event.html#variant.Datagrams [`Done`]: enum.Error.html#variant.Done
+    /// [`poll()`]: struct.Connection.html#method.poll
+    /// [`Datagram`]: enum.Event.html#variant.Datagram
+    /// [`Done`]: enum.Error.html#variant.Done
+    /// [`BufferTooShort`]: enum.Error.html#variant.BufferTooShort
     pub fn recv_dgram(
         &mut self, conn: &mut super::Connection, buf: &mut [u8],
     ) -> Result<(usize, u64, usize)> {

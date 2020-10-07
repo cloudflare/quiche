@@ -74,9 +74,6 @@ matrix:
       # quiche-apps
       - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/apps/Cargo.toml
       - cargo fmt --manifest-path tools/apps/Cargo.toml -- --check
-      # dgram-apps
-      - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/dgram/Cargo.toml
-      - cargo fmt --manifest-path tools/apps/Cargo.toml -- --check
    - name: "stable macOS + iOS"
      language: rust
      rust: stable
