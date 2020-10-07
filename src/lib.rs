@@ -3513,17 +3513,12 @@ impl Connection {
             }
         }
 
-        #[allow(unused_variables)]
-        let dgram_pending = false;
-
-        let dgram_pending = self.dgram_send_queue.has_pending();
-
         // If there are flushable, almost full or blocked streams, use the
         // Application epoch.
         if (self.is_established() || self.is_in_early_data()) &&
             (self.almost_full ||
                 self.blocked_limit.is_some() ||
-                dgram_pending ||
+                self.dgram_send_queue.has_pending() ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
