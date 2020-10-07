@@ -237,29 +237,15 @@ pub extern fn quiche_config_set_cc_algorithm(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_dgram_recv_max_queue_len(
-    config: &mut Config, v: size_t,
-) {
-    config.set_dgram_recv_max_queue_len(v);
-}
-
-#[no_mangle]
-pub extern fn quiche_config_set_dgram_send_max_queue_len(
-    config: &mut Config, v: size_t,
-) {
-    config.set_dgram_send_max_queue_len(v);
-}
-
-#[no_mangle]
 pub extern fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
     config.enable_hystart(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_dgram_frames_supported(
-    config: &mut Config, v: bool,
+pub extern fn quiche_config_enable_dgram(
+    config: &mut Config, enabled: bool, recv_queue_len: size_t, send_queue_len: size_t
 ) {
-    config.set_dgram_frames_supported(v);
+    config.enable_dgram(enabled, recv_queue_len, send_queue_len);
 }
 
 #[no_mangle]

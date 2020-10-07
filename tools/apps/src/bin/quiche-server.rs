@@ -145,7 +145,7 @@ fn main() {
     }
 
     if conn_args.dgrams_enabled {
-        config.set_dgram_frames_supported(true)
+        config.enable_dgram(true, 1000,1000);
     }
 
     let rng = SystemRandom::new();

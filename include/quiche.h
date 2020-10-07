@@ -183,14 +183,10 @@ void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algori
 // Configures whether to use HyStart++.
 void quiche_config_enable_hystart(quiche_config *config, bool v);
 
-// Enables support for receiving DAT frames.
-void quiche_config_set_dgram_frames_supported(quiche_config *config, bool v);
-
-// Sets the maximum length of the DATAGRAM receive queue.
-void quiche_config_set_dgram_recv_max_queue_len(quiche_config *config, size_t v);
-
-// Sets the maximum length of the DATAGRAM send queue.
-void quiche_config_set_dgram_send_max_queue_len(quiche_config *config, size_t v);
+// Enables support for receiving DATAGRAM frames.
+void quiche_config_enable_dgram(quiche_config *config, bool enabled,
+                                size_t recv_queue_len,
+                                size_t send_queue_len);
 
 // Frees the config object.
 void quiche_config_free(quiche_config *config);

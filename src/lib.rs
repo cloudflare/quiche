@@ -306,8 +306,8 @@ const MAX_ACK_RANGES: usize = 68;
 // The highest possible stream ID allowed.
 const MAX_STREAM_ID: u64 = 1 << 60;
 
-// The default length of DATAGRAM queues if not specified by the user in config.
-const DEFAULT_DGRAM_MAX_QUEUE_LEN: usize = 1000;
+// The default length of DATAGRAM queues.
+const DEFAULT_MAX_DGRAM_QUEUE_LEN: usize = 0;
 
 // The DATAGRAM standard recommends either none or 65536 as maximum DATAGRAM
 // frames size. We enforce the recommendation for forward compatibility.
@@ -463,8 +463,8 @@ impl Config {
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
             hystart: true,
 
-            dgram_recv_max_queue_len: DEFAULT_DGRAM_MAX_QUEUE_LEN,
-            dgram_send_max_queue_len: DEFAULT_DGRAM_MAX_QUEUE_LEN,
+            dgram_recv_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
+            dgram_send_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
         })
     }
 
@@ -745,19 +745,6 @@ impl Config {
         self.cc_algorithm = algo;
     }
 
-    /// Enables support for receiving DATAGRAM frames. When enabled, the
-    /// `max_datagram_frame_size` transport parameter is set to 65536 as
-    /// recommended by the current draft of the standard.
-    ///
-    /// The default is `false`.
-    pub fn set_dgram_frames_supported(&mut self, supported: bool) {
-        self.local_transport_params.max_datagram_frame_size = if supported {
-            Some(MAX_DGRAM_FRAME_SIZE)
-        } else {
-            None
-        };
-    }
-
     /// Configures whether to enable HyStart++.
     ///
     /// The default value is `true`.
@@ -765,18 +752,20 @@ impl Config {
         self.hystart = v;
     }
 
-    /// Sets the maximum length of the DATAGRAM send queue.
+    /// Configures whether to enable receiving DATAGRAM frames.
     ///
-    /// The default is `1000`.
-    pub fn set_dgram_send_max_queue_len(&mut self, v: usize) {
-        self.dgram_send_max_queue_len = v;
-    }
-
-    /// Sets the maximum length of the DATAGRAM receive queue.
+    /// When enabled, the `max_datagram_frame_size` transport parameter is set
+    /// to 65536 as recommended by draft-ietf-quic-datagram-01.
     ///
-    /// The default is `1000`.
-    pub fn set_dgram_recv_max_queue_len(&mut self, v: usize) {
-        self.dgram_recv_max_queue_len = v;
+    /// The default is `false`.
+    pub fn enable_dgram(&mut self, enabled: bool, recv_queue_len: usize, send_queue_len: usize) {
+        self.local_transport_params.max_datagram_frame_size = if enabled {
+            Some(MAX_DGRAM_FRAME_SIZE)
+        } else {
+            None
+        };
+        self.dgram_recv_max_queue_len = recv_queue_len;
+        self.dgram_send_max_queue_len = send_queue_len;
     }
 }
 
@@ -3230,6 +3219,12 @@ impl Connection {
         }
     }
 
+    fn dgram_enabled(&self) -> bool {
+        self.local_transport_params
+                    .max_datagram_frame_size
+                    .is_none()
+    }
+
     /// Returns the amount of time until the next timeout event.
     ///
     /// Once the given duration has elapsed, the [`on_timeout()`] method should
@@ -3896,10 +3891,7 @@ impl Connection {
                 // quiche always advertises support for 64K sized DATAGRAM
                 // frames, as recommended by the standard, so we don't need a
                 // size check.
-                if self
-                    .local_transport_params
-                    .max_datagram_frame_size
-                    .is_none()
+                if self.dgram_enabled()
                 {
                     trace!(
                         "received a DATAGRAM without \
@@ -7463,7 +7455,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.set_dgram_frames_supported(true);
+        config.enable_dgram(true, 1000,1000);
         config.set_max_udp_payload_size(1200);
         config.verify_peer(false);
 
@@ -7514,9 +7506,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.set_dgram_frames_supported(true);
-        config.set_dgram_recv_max_queue_len(10);
-        config.set_dgram_send_max_queue_len(10);
+        config.enable_dgram(true, 10,10);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
@@ -7554,9 +7544,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.set_dgram_frames_supported(true);
-        config.set_dgram_recv_max_queue_len(10);
-        config.set_dgram_send_max_queue_len(10);
+        config.enable_dgram(true, 10,10);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
@@ -7606,9 +7594,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.set_dgram_frames_supported(true);
-        config.set_dgram_recv_max_queue_len(10);
-        config.set_dgram_send_max_queue_len(2);
+        config.enable_dgram(true, 10,2);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
@@ -7655,9 +7641,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.set_dgram_frames_supported(true);
-        config.set_dgram_recv_max_queue_len(2);
-        config.set_dgram_send_max_queue_len(10);
+        config.enable_dgram(true, 2,10);
         config.set_max_udp_payload_size(1200);
         config.verify_peer(false);
 
@@ -7705,9 +7689,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.set_dgram_frames_supported(true);
-        config.set_dgram_recv_max_queue_len(10);
-        config.set_dgram_send_max_queue_len(10);
+        config.enable_dgram(true, 10,10);
         config.set_max_udp_payload_size(1452);
         config.verify_peer(false);
 
