@@ -526,11 +526,11 @@ ssize_t quiche_h3_recv_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t stream_id, uint8_t *out, size_t out_len);
 
 // Writes data to the DATAGRAM send queue.
-ssize_t quiche_h3_send_data(quiche_h3_conn *conn, quiche_conn *quic_conn,
+ssize_t quiche_h3_send_dgram(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t flow_id, uint8_t *data, size_t data_len);
 
 // Reads data from the DATAGRAM receive queue.
-ssize_t quiche_h3_recv_data(quiche_h3_conn *conn, quiche_conn *quic_conn,
+ssize_t quiche_h3_recv_dgram(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t *flow_id, uint8_t *out, size_t out_len);
 
 // Frees the HTTP/3 connection object.

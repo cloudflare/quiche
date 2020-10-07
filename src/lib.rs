@@ -3058,9 +3058,9 @@ impl Connection {
         self.streams.writable()
     }
 
-    /// Attempts to read the first stored DATAGRAM.
+    /// Reads the first received DATAGRAM.
     ///
-    /// On success the DATAGRAM's data is returned along with it's size.
+    /// On success the DATAGRAM's data is returned along with its size.
     ///
     /// [`Done`] is returned if there is no data to read.
     ///
@@ -3088,7 +3088,7 @@ impl Connection {
         self.dgram_recv_queue.pop(buf)
     }
 
-    /// Attempt to peek at the first stored DATAGRAM's data.
+    /// Reads the first received DATAGRAM without removing it from the queue.
     ///
     /// On success the DATAGRAM's data is returned along with the actual number
     /// of bytes peeked. The requested length cannot exceed the DATAGRAM's
@@ -3110,7 +3110,7 @@ impl Connection {
         self.dgram_recv_queue.peek_front_len()
     }
 
-    /// Send data in a DATAGRAM frame.
+    /// Sends data in a DATAGRAM frame.
     ///
     /// [`Done`] is returned if no data was written.
     /// [`InvalidState`] is returned if the peer does not support DATAGRAM.
@@ -3210,18 +3210,18 @@ impl Connection {
         match self.peer_transport_params.max_datagram_frame_size {
             None => None,
             Some(peer_frame_len) => {
-                // start from the maximum packet size
+                // Start from the maximum packet size...
                 let mut max_len = self.max_send_udp_payload_len();
-                // subtract the Short packet header overhead
+                // ...subtract the Short packet header overhead...
                 // (1 byte of pkt_len + len of dcid)
                 max_len = max_len.saturating_sub(1 + self.dcid.len());
-                // subtract the packet number (max len)
+                // ...subtract the packet number (max len)...
                 max_len = max_len.saturating_sub(packet::MAX_PKT_NUM_LEN);
-                // subtract the crypto overhead
+                // ...subtract the crypto overhead...
                 max_len = max_len.saturating_sub(frame::MAX_CRYPTO_OVERHEAD);
-                // clamp to what peer can support
+                // ...clamp to what peer can support...
                 max_len = cmp::min(peer_frame_len as usize, max_len);
-                // subtract frame overhead, checked for underflow
+                // ...subtract frame overhead, checked for underflow.
                 max_len.checked_sub(frame::MAX_DGRAM_OVERHEAD)
             },
         }
@@ -7431,7 +7431,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "quic-dgram")]
     fn dgram_send_fails_invalidstate() {
         let mut buf = [0; 65535];
 

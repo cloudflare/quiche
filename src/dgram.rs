@@ -1,4 +1,4 @@
-// Copyright (C) 2019, Cloudflare, Inc.
+// Copyright (C) 2020, Cloudflare, Inc.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -26,6 +26,7 @@
 
 use crate::Error;
 use crate::Result;
+
 use std::collections::VecDeque;
 
 /// Keeps track of DATAGRAM frames.
