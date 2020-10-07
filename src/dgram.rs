@@ -83,23 +83,13 @@ impl DatagramQueue {
         }
     }
 
-    pub fn pop(&mut self, buf: &mut [u8]) -> Result<usize> {
-        match self.queue.front() {
-            Some(d) =>
-                if d.len() > buf.len() {
-                    return Err(Error::BufferTooShort);
-                },
-
-            None => return Err(Error::Done),
-        }
-
+    pub fn pop(&mut self) -> Option<Vec<u8>> {
         if let Some(d) = self.queue.pop_front() {
-            buf[..d.len()].copy_from_slice(&d);
             self.queue_bytes_size = self.queue_bytes_size.saturating_sub(d.len());
-            return Ok(d.len());
+            return Some(d);
         }
 
-        Err(Error::Done)
+        None
     }
 
     pub fn has_pending(&self) -> bool {

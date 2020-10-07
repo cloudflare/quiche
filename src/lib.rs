@@ -2325,22 +2325,21 @@ impl Connection {
                 while let Some(len) = self.dgram_send_queue.peek_front_len() {
                     if (len + frame::MAX_DGRAM_OVERHEAD) <= left {
                         // Front of the queue fits this packet, send it
-                        let mut buf = vec![0; len];
-                        match self.dgram_send_queue.pop(&mut buf) {
-                            Ok(v) => v,
+                        match self.dgram_send_queue.pop() {
+                            Some(data) => {
+                                let frame = frame::Frame::Datagram { data };
 
-                            Err(_) => continue,
+                                payload_len += frame.wire_len();
+                                left -= frame.wire_len();
+
+                                frames.push(frame);
+
+                                ack_eliciting = true;
+                                in_flight = true;
+                            },
+
+                            None => continue,
                         };
-
-                        let frame = frame::Frame::Datagram { data: buf };
-
-                        payload_len += frame.wire_len();
-                        left -= frame.wire_len();
-
-                        frames.push(frame);
-
-                        ack_eliciting = true;
-                        in_flight = true;
                     } else if len > max_dgram_payload {
                         // this dgram frame will never fit. Let's purge it.
                         self.dgram_send_queue.discard_front().ok();
@@ -3075,7 +3074,18 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn dgram_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
-        self.dgram_recv_queue.pop(buf)
+        match self.dgram_recv_queue.pop() {
+            Some(d) => {
+                if d.len() > buf.len() {
+                    return Err(Error::BufferTooShort);
+                }
+
+                buf[..d.len()].copy_from_slice(&d);
+                Ok(d.len())
+            },
+
+            None => Err(Error::Done),
+        }
     }
 
     /// Reads the first received DATAGRAM without removing it from the queue.
