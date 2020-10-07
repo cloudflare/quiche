@@ -2329,13 +2329,15 @@ impl Connection {
                             Some(data) => {
                                 let frame = frame::Frame::Datagram { data };
 
-                                payload_len += frame.wire_len();
-                                left -= frame.wire_len();
-
-                                frames.push(frame);
-
-                                ack_eliciting = true;
-                                in_flight = true;
+                                if push_frame_to_pkt!(
+                                    frames,
+                                    frame,
+                                    payload_len,
+                                    left
+                                ) {
+                                    ack_eliciting = true;
+                                    in_flight = true;
+                                }
                             },
 
                             None => continue,
