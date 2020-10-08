@@ -1037,13 +1037,12 @@ pub fn retry(
 
 /// Returns true if the given protocol version is supported.
 pub fn version_is_supported(version: u32) -> bool {
-    match version {
+    matches!(
+        version,
         PROTOCOL_VERSION_DRAFT27 |
-        PROTOCOL_VERSION_DRAFT28 |
-        PROTOCOL_VERSION_DRAFT29 => true,
-
-        _ => false,
-    }
+            PROTOCOL_VERSION_DRAFT28 |
+            PROTOCOL_VERSION_DRAFT29
+    )
 }
 
 /// Pushes a frame to the output packet if there is enough space.
