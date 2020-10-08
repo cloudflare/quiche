@@ -712,12 +712,10 @@ impl Frame {
             Frame::ConnectionClose { .. })
     }
 
-    pub fn retransmittable(&self) -> bool {
-        #[allow(clippy::match_single_binding)]
-        match self {
-            Frame::Datagram { .. } => false,
-
-            _ => true,
+    pub fn shrink_for_retransmission(&mut self) {
+        if let Frame::Datagram { data } = self {
+            data.clear();
+            data.shrink_to_fit();
         }
     }
 
@@ -1782,7 +1780,7 @@ mod tests {
 
         let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
-        let frame = Frame::Datagram { data };
+        let mut frame = Frame::Datagram { data: data.clone() };
 
         let wire_len = {
             let mut b = octets::OctetsMut::with_slice(&mut d);
@@ -1792,7 +1790,10 @@ mod tests {
         assert_eq!(wire_len, 14);
 
         let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Short),
+            Ok(frame.clone())
+        );
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
@@ -1802,5 +1803,23 @@ mod tests {
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+
+        let frame_data = match &frame {
+            Frame::Datagram { data } => data.clone(),
+
+            _ => unreachable!(),
+        };
+
+        assert_eq!(frame_data, data);
+
+        frame.shrink_for_retransmission();
+
+        let frame_data = match &frame {
+            Frame::Datagram { data } => data.clone(),
+
+            _ => unreachable!(),
+        };
+
+        assert_eq!(frame_data.len(), 0);
     }
 }

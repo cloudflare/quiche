@@ -2511,7 +2511,7 @@ impl Connection {
         });
 
         // Encode frames into the output packet.
-        for frame in &frames {
+        for frame in frames.iter_mut() {
             trace!("{} tx frm {:?}", self.trace_id, frame);
 
             frame.to_bytes(&mut b)?;
@@ -2519,6 +2519,11 @@ impl Connection {
             qlog_with!(self.qlog_streamer, q, {
                 q.add_frame(frame.to_qlog(), false).ok();
             });
+
+            // Once frames have been serialized they are passed to the Recovery
+            // module which manages retransmission. However, some frames do not
+            // contain retransmittable data, so drop it here.
+            frame.shrink_for_retransmission();
         }
 
         qlog_with!(self.qlog_streamer, q, {
@@ -2538,12 +2543,6 @@ impl Connection {
             payload_offset,
             aead,
         )?;
-
-        // Once frames have been serialized they are passed to the Recovery
-        // module which manages retransmission. However, some frames are not
-        // retransmittable and storing them is a waste of resources.
-        // So drop them here.
-        frames.retain(|f| f.retransmittable());
 
         let sent_pkt = recovery::Sent {
             pkt_num: pn,
