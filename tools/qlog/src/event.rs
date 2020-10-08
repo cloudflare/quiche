@@ -919,18 +919,15 @@ impl Event {
             (
                 EventCategory::Connectivity,
                 EventType::ConnectivityEventType(_),
-            ) => match &self.data {
+            ) => matches!(&self.data,
                 EventData::ServerListening { .. } |
                 EventData::ConnectionStarted { .. } |
                 EventData::ConnectionIdUpdated { .. } |
                 EventData::SpinBitUpdated { .. } |
-                EventData::ConnectionStateUpdated { .. } => true,
-
-                _ => false,
-            },
+                EventData::ConnectionStateUpdated { .. }),
 
             (EventCategory::Transport, EventType::TransportEventType(_)) =>
-                match &self.data {
+                matches!(&self.data,
                     EventData::TransportParametersSet { .. } |
                     EventData::DatagramsReceived { .. } |
                     EventData::DatagramsSent { .. } |
@@ -940,70 +937,50 @@ impl Event {
                     EventData::PacketDropped { .. } |
                     EventData::PacketBuffered { .. } |
                     EventData::StreamStateUpdated { .. } |
-                    EventData::FramesProcessed { .. } => true,
-
-                    _ => false,
-                },
+                    EventData::FramesProcessed { .. }),
 
             (EventCategory::Security, EventType::SecurityEventType(_)) =>
-                match &self.data {
+                matches!(&self.data,
                     EventData::KeyUpdated { .. } |
-                    EventData::KeyRetired { .. } => true,
-
-                    _ => false,
-                },
+                    EventData::KeyRetired { .. }),
 
             (EventCategory::Recovery, EventType::RecoveryEventType(_)) =>
-                match &self.data {
+                matches!(&self.data,
                     EventData::RecoveryParametersSet { .. } |
                     EventData::MetricsUpdated { .. } |
                     EventData::CongestionStateUpdated { .. } |
                     EventData::LossTimerSet { .. } |
                     EventData::PacketLost { .. } |
-                    EventData::MarkedForRetransmit { .. } => true,
+                    EventData::MarkedForRetransmit { .. }),
 
-                    _ => false,
-                },
-
-            (EventCategory::Http, EventType::Http3EventType(_)) => {
-                match &self.data {
+            (EventCategory::Http, EventType::Http3EventType(_)) =>
+                matches!(&self.data,
                     EventData::H3ParametersSet { .. } |
                     EventData::H3StreamTypeSet { .. } |
                     EventData::H3FrameCreated { .. } |
                     EventData::H3FrameParsed { .. } |
                     EventData::H3DataMoved { .. } |
-                    EventData::H3PushResolved { .. } => true,
+                    EventData::H3PushResolved { .. }),
 
-                    _ => false,
-                }
-            },
-
-            (EventCategory::Qpack, EventType::QpackEventType(_)) => {
-                match &self.data {
+            (EventCategory::Qpack, EventType::QpackEventType(_)) =>
+                matches!(&self.data,
                     EventData::QpackStateUpdated { .. } |
                     EventData::QpackStreamStateUpdated { .. } |
                     EventData::QpackDynamicTableUpdated { .. } |
                     EventData::QpackHeadersEncoded { .. } |
                     EventData::QpackHeadersDecoded { .. } |
                     EventData::QpackInstructionSent { .. } |
-                    EventData::QpackInstructionReceived { .. } => true,
-
-                    _ => false,
-                }
-            },
+                    EventData::QpackInstructionReceived { .. }),
 
             // TODO: in qlog-01 there is no sane default category defined for
             // GenericEventType
-            (_, EventType::GenericEventType(_)) => match &self.data {
+            (_, EventType::GenericEventType(_)) => matches!(&self.data,
                 EventData::ConnectionError { .. } |
                 EventData::ApplicationError { .. } |
                 EventData::InternalError { .. } |
                 EventData::InternalWarning { .. } |
                 EventData::Message { .. } |
-                EventData::Marker { .. } => true,
-
-                _ => false,
-            },
+                EventData::Marker { .. }),
 
             _ => false,
         }
