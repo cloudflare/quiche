@@ -343,7 +343,6 @@ impl SiDuckConn {
         &mut self, conn: &mut quiche::Connection, buf: &mut [u8],
     ) -> quiche::h3::Result<()> {
         loop {
-            error!("momomo");
             match conn.dgram_recv(buf) {
                 Ok(len) => {
                     let data =
