@@ -258,6 +258,8 @@ fn main() {
                         conn.close(true, 0x00, b"kthxbye").unwrap();
                     },
 
+                    Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
+
                     Err(quiche::h3::Error::Done) => {
                         break;
                     },

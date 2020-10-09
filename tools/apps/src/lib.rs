@@ -54,6 +54,7 @@ pub fn hex_dump(buf: &[u8]) -> String {
 pub mod alpns {
     pub const HTTP_09: [&str; 4] = ["hq-29", "hq-28", "hq-27", "http/0.9"];
     pub const HTTP_3: [&str; 3] = ["h3-29", "h3-28", "h3-27"];
+    pub const SIDUCK: [&str; 2] = ["siduck", "siduck-00"];
 
     pub fn length_prefixed(alpns: &[&str]) -> Vec<u8> {
         let mut out = Vec::new();
@@ -82,13 +83,16 @@ pub struct CommonArgs {
     pub no_grease: bool,
     pub cc_algorithm: String,
     pub disable_hystart: bool,
+    pub dgrams_enabled: bool,
+    pub dgram_count: u64,
+    pub dgram_data: String,
 }
 
 /// Creates a new `CommonArgs` structure using the provided [`Docopt`].
 ///
 /// The `Docopt` usage String needs to include the following:
 ///
-/// --http-version VERSION      HTTP version to use
+/// --http-version VERSION      HTTP version to use.
 /// --max-data BYTES            Connection-wide flow control limit.
 /// --max-stream-data BYTES     Per-stream flow control limit.
 /// --max-streams-bidi STREAMS  Number of allowed concurrent streams.
@@ -97,6 +101,9 @@ pub struct CommonArgs {
 /// --no-grease                 Don't send GREASE.
 /// --cc-algorithm NAME         Set a congestion control algorithm.
 /// --disable-hystart           Disable HyStart++.
+/// --dgram-proto PROTO         DATAGRAM application protocol.
+/// --dgram-count COUNT         Number of DATAGRAMs to send.
+///  --dgram-data DATA          DATAGRAM data to send.
 ///
 /// [`Docopt`]: https://docs.rs/docopt/1.1.0/docopt/
 impl Args for CommonArgs {
@@ -104,19 +111,38 @@ impl Args for CommonArgs {
         let args = docopt.parse().unwrap_or_else(|e| e.exit());
 
         let http_version = args.get_str("--http-version");
-        let alpns = match http_version {
-            "HTTP/0.9" => alpns::length_prefixed(&alpns::HTTP_09),
+        let dgram_proto = args.get_str("--dgram-proto");
+        let (alpns, dgrams_enabled) = match (http_version, dgram_proto) {
+            ("HTTP/0.9", "none") =>
+                (alpns::length_prefixed(&alpns::HTTP_09), false),
 
-            "HTTP/3" => alpns::length_prefixed(&alpns::HTTP_3),
+            ("HTTP/0.9", _) =>
+                panic!("Unsupported HTTP version and DATAGRAM protocol."),
 
-            "all" => [
-                alpns::length_prefixed(&alpns::HTTP_3),
-                alpns::length_prefixed(&alpns::HTTP_09),
-            ]
-            .concat(),
+            ("HTTP/3", "none") => (alpns::length_prefixed(&alpns::HTTP_3), false),
 
-            _ => panic!("Unsupported HTTP version"),
+            ("HTTP/3", "oneway") =>
+                (alpns::length_prefixed(&alpns::HTTP_3), true),
+
+            ("all", "none") => (
+                [
+                    alpns::length_prefixed(&alpns::HTTP_3),
+                    alpns::length_prefixed(&alpns::HTTP_09),
+                ]
+                .concat(),
+                false,
+            ),
+
+            // SiDuck is it's own application protocol.
+            (_, "siduck") => (alpns::length_prefixed(&alpns::SIDUCK), true),
+
+            (..) => panic!("Unsupported HTTP version and DATAGRAM protocol."),
         };
+
+        let dgram_count = args.get_str("--dgram-count");
+        let dgram_count = u64::from_str_radix(dgram_count, 10).unwrap();
+
+        let dgram_data = args.get_str("--dgram-data").to_string();
 
         let max_data = args.get_str("--max-data");
         let max_data = u64::from_str_radix(max_data, 10).unwrap();
@@ -152,6 +178,9 @@ impl Args for CommonArgs {
             no_grease,
             cc_algorithm: cc_algorithm.to_string(),
             disable_hystart,
+            dgrams_enabled,
+            dgram_count,
+            dgram_data,
         }
     }
 }
@@ -172,6 +201,10 @@ pub struct Client {
     pub conn: std::pin::Pin<Box<quiche::Connection>>,
 
     pub http_conn: Option<Box<dyn crate::HttpConn>>,
+
+    pub siduck_conn: Option<SiDuckConn>,
+
+    pub app_proto_selected: bool,
 
     pub partial_requests: std::collections::HashMap<u64, PartialRequest>,
 
@@ -264,6 +297,158 @@ pub trait HttpConn {
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     );
+}
+
+pub struct SiDuckConn {
+    quacks_to_make: u64,
+    quack_contents: String,
+    quacks_sent: u64,
+    quacks_acked: u64,
+}
+
+impl SiDuckConn {
+    pub fn new(quacks_to_make: u64, quack_contents: String) -> Self {
+        Self {
+            quacks_to_make,
+            quack_contents,
+            quacks_sent: 0,
+            quacks_acked: 0,
+        }
+    }
+
+    pub fn send_quacks(&mut self, conn: &mut quiche::Connection) {
+        trace!("sending quacks");
+        let mut quacks_done = 0;
+
+        for _ in self.quacks_sent..self.quacks_to_make {
+            info!("sending QUIC DATAGRAM with data {:?}", self.quack_contents);
+
+            match conn.dgram_send(self.quack_contents.as_bytes()) {
+                Ok(v) => v,
+
+                Err(e) => {
+                    error!("failed to send dgram {:?}", e);
+
+                    break;
+                },
+            }
+
+            quacks_done += 1;
+        }
+
+        self.quacks_sent += quacks_done;
+    }
+
+    pub fn handle_quacks(
+        &mut self, conn: &mut quiche::Connection, buf: &mut [u8],
+    ) -> quiche::h3::Result<()> {
+        loop {
+            error!("momomo");
+            match conn.dgram_recv(buf) {
+                Ok(len) => {
+                    let data =
+                        unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
+                    info!("Received DATAGRAM data {:?}", data);
+
+                    // TODO
+                    if data != "quack" {
+                        match conn.close(true, 0x101, b"only quacks echo") {
+                            // Already closed.
+                            Ok(_) | Err(quiche::Error::Done) => (),
+
+                            Err(e) => panic!("error closing conn: {:?}", e),
+                        }
+
+                        break;
+                    }
+
+                    match conn.dgram_send(format!("{}-ack", data).as_bytes()) {
+                        Ok(v) => v,
+
+                        Err(quiche::Error::Done) => (),
+
+                        Err(e) => {
+                            error!("failed to send quack ack {:?}", e);
+                            return Err(From::from(e));
+                        },
+                    }
+                },
+
+                Err(quiche::Error::Done) => break,
+
+                Err(e) => {
+                    error!("failure receiving DATAGRAM failure {:?}", e);
+
+                    return Err(From::from(e));
+                },
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn handle_quack_acks(
+        &mut self, conn: &mut quiche::Connection, buf: &mut [u8],
+        start: &std::time::Instant,
+    ) {
+        trace!("handle_quack_acks");
+
+        loop {
+            match conn.dgram_recv(buf) {
+                Ok(len) => {
+                    let data =
+                        unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
+
+                    info!("Received DATAGRAM data {:?}", data);
+                    self.quacks_acked += 1;
+
+                    debug!(
+                        "{}/{} quacks acked",
+                        self.quacks_acked, self.quacks_to_make
+                    );
+
+                    if self.quacks_acked == self.quacks_to_make {
+                        info!(
+                            "{}/{} dgrams(s) received in {:?}, closing...",
+                            self.quacks_acked,
+                            self.quacks_to_make,
+                            start.elapsed()
+                        );
+
+                        match conn.close(true, 0x00, b"kthxbye") {
+                            // Already closed.
+                            Ok(_) | Err(quiche::Error::Done) => (),
+
+                            Err(e) => panic!("error closing conn: {:?}", e),
+                        }
+
+                        break;
+                    }
+                },
+
+                Err(quiche::Error::Done) => {
+                    break;
+                },
+
+                Err(e) => {
+                    error!("failure receiving DATAGRAM failure {:?}", e);
+
+                    break;
+                },
+            }
+        }
+    }
+
+    pub fn report_incomplete(&self, start: &std::time::Instant) {
+        if self.quacks_acked != self.quacks_to_make {
+            error!(
+                "connection timed out after {:?} and only received {}/{} quack-acks",
+                start.elapsed(),
+                self.quacks_acked,
+                self.quacks_to_make
+            );
+        }
+    }
 }
 
 /// Represents an HTTP/0.9 formatted request.
@@ -581,18 +766,38 @@ impl HttpConn for Http09Conn {
     }
 }
 
+pub struct Http3DgramSender {
+    dgram_count: u64,
+    pub dgram_content: String,
+    pub flow_id: u64,
+    pub dgrams_sent: u64,
+}
+
+impl Http3DgramSender {
+    pub fn new(dgram_count: u64, dgram_content: String, flow_id: u64) -> Self {
+        Self {
+            dgram_count,
+            dgram_content,
+            flow_id,
+            dgrams_sent: 0,
+        }
+    }
+}
+
 pub struct Http3Conn {
     h3_conn: quiche::h3::Connection,
     reqs_sent: usize,
     reqs_complete: usize,
     reqs: Vec<Http3Request>,
     body: Option<Vec<u8>>,
+    dgram_sender: Option<Http3DgramSender>,
 }
 
 impl Http3Conn {
     pub fn with_urls(
         conn: &mut quiche::Connection, urls: &[url::Url], reqs_cardinal: u64,
         req_headers: &[String], body: &Option<Vec<u8>>, method: &str,
+        dgram_sender: Option<Http3DgramSender>,
     ) -> Box<dyn HttpConn> {
         let mut reqs = Vec::new();
         for url in urls {
@@ -655,12 +860,15 @@ impl Http3Conn {
             reqs_complete: 0,
             reqs,
             body: body.as_ref().map(|b| b.to_vec()),
+            dgram_sender,
         };
 
         Box::new(h_conn)
     }
 
-    pub fn with_conn(conn: &mut quiche::Connection) -> Box<dyn HttpConn> {
+    pub fn with_conn(
+        conn: &mut quiche::Connection, dgram_sender: Option<Http3DgramSender>,
+    ) -> Box<dyn HttpConn> {
         let h_conn = Http3Conn {
             h3_conn: quiche::h3::Connection::with_transport(
                 conn,
@@ -671,6 +879,7 @@ impl Http3Conn {
             reqs_complete: 0,
             reqs: Vec::new(),
             body: None,
+            dgram_sender,
         };
 
         Box::new(h_conn)
@@ -824,6 +1033,35 @@ impl HttpConn for Http3Conn {
         }
 
         self.reqs_sent += reqs_done;
+
+        if let Some(ds) = self.dgram_sender.as_mut() {
+            let mut dgrams_done = 0;
+
+            for _ in ds.dgrams_sent..ds.dgram_count {
+                info!(
+                    "sending HTTP/3 DATAGRAM on flow_id={} with data {:?}",
+                    ds.flow_id,
+                    ds.dgram_content.as_bytes()
+                );
+
+                match self.h3_conn.send_dgram(
+                    conn,
+                    0,
+                    ds.dgram_content.as_bytes(),
+                ) {
+                    Ok(v) => v,
+
+                    Err(e) => {
+                        error!("failed to send dgram {:?}", e);
+                        break;
+                    },
+                }
+
+                dgrams_done += 1;
+            }
+
+            ds.dgrams_sent += dgrams_done;
+        }
     }
 
     fn handle_responses(
@@ -895,6 +1133,18 @@ impl HttpConn for Http3Conn {
                     }
                 },
 
+                Ok((_flow_id, quiche::h3::Event::Datagram)) => {
+                    let (len, flow_id, flow_id_len) =
+                        self.h3_conn.recv_dgram(conn, buf).unwrap();
+
+                    info!(
+                        "Received DATAGRAM flow_id={} len={} data={:?}",
+                        flow_id,
+                        len,
+                        buf[flow_id_len..len].to_vec()
+                    );
+                },
+
                 Err(quiche::h3::Error::Done) => {
                     break;
                 },
@@ -923,7 +1173,7 @@ impl HttpConn for Http3Conn {
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
         _partial_requests: &mut HashMap<u64, PartialRequest>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
-        index: &str, _buf: &mut [u8],
+        index: &str, buf: &mut [u8],
     ) -> quiche::h3::Result<()> {
         // Process HTTP events.
         loop {
@@ -1013,6 +1263,17 @@ impl HttpConn for Http3Conn {
 
                 Ok((_stream_id, quiche::h3::Event::Finished)) => (),
 
+                Ok((_, quiche::h3::Event::Datagram)) => {
+                    let (len, flow_id, flow_id_len) =
+                        self.h3_conn.recv_dgram(conn, buf).unwrap();
+
+                    info!(
+                        "Received DATAGRAM flow_id={} data={:?}",
+                        flow_id,
+                        &buf[flow_id_len..len].to_vec()
+                    );
+                },
+
                 Err(quiche::h3::Error::Done) => {
                     break;
                 },
@@ -1023,6 +1284,35 @@ impl HttpConn for Http3Conn {
                     return Err(e);
                 },
             }
+        }
+
+        if let Some(ds) = self.dgram_sender.as_mut() {
+            let mut dgrams_done = 0;
+
+            for _ in ds.dgrams_sent..ds.dgram_count {
+                info!(
+                    "sending HTTP/3 DATAGRAM on flow_id={} with data {:?}",
+                    ds.flow_id,
+                    ds.dgram_content.as_bytes()
+                );
+
+                match self.h3_conn.send_dgram(
+                    conn,
+                    0,
+                    ds.dgram_content.as_bytes(),
+                ) {
+                    Ok(v) => v,
+
+                    Err(e) => {
+                        error!("failed to send dgram {:?}", e);
+                        break;
+                    },
+                }
+
+                dgrams_done += 1;
+            }
+
+            ds.dgrams_sent += dgrams_done;
         }
 
         Ok(())

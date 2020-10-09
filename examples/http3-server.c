@@ -424,6 +424,9 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
                     case QUICHE_H3_EVENT_FINISHED:
                         break;
+
+                    case QUICHE_H3_EVENT_DATAGRAM:
+                        break;
                 }
 
                 quiche_h3_event_free(ev);

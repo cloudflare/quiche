@@ -50,6 +50,9 @@ Options:
   --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 100].
   --wire-version VERSION   The version number to send to the server [default: babababa].
   --http-version VERSION   HTTP version to use [default: all].
+  --dgram-proto PROTO      DATAGRAM application protocol to use [default: none].
+  --dgram-count COUNT      Number of DATAGRAMs to send [default: 0].
+  --dgram-data DATA        Data to send for certain types of DATAGRAM application protocol [default: quack].
   --dump-packets PATH      Dump the incoming packets as files in the given directory.
   --dump-responses PATH    Dump response payload as files in the given directory.
   --no-verify              Don't verify server's certificate.
@@ -149,7 +152,14 @@ fn main() {
         config.enable_hystart(false);
     }
 
+    if conn_args.dgrams_enabled {
+        config.enable_dgram(true, 1000, 1000);
+    }
+
     let mut http_conn: Option<Box<dyn HttpConn>> = None;
+    let mut siduck_conn: Option<SiDuckConn> = None;
+
+    let mut app_proto_selected = false;
 
     // Generate a random source connection ID for the connection.
     let mut scid = [0; quiche::MAX_CONN_ID_LEN];
@@ -200,7 +210,7 @@ fn main() {
 
     trace!("written {}", write);
 
-    let req_start = std::time::Instant::now();
+    let app_data_start = std::time::Instant::now();
 
     let mut pkt_count = 0;
 
@@ -268,14 +278,19 @@ fn main() {
             info!("connection closed, {:?}", conn.stats());
 
             if let Some(h_conn) = http_conn {
-                h_conn.report_incomplete(&req_start);
+                h_conn.report_incomplete(&app_data_start);
+            }
+
+            if let Some(si_conn) = siduck_conn {
+                si_conn.report_incomplete(&app_data_start);
             }
 
             break;
         }
 
-        // Create a new HTTP connection once the QUIC connection is established.
-        if conn.is_established() && http_conn.is_none() {
+        // Create a new application protocol session once the QUIC connection is
+        // established.
+        if conn.is_established() && !app_proto_selected {
             // At this stage the ALPN negotiation succeeded and selected a
             // single application protocol name. We'll use this to construct
             // the correct type of HttpConn but `application_proto()`
@@ -290,7 +305,19 @@ fn main() {
             if alpns::HTTP_09.contains(app_proto) {
                 http_conn =
                     Some(Http09Conn::with_urls(&args.urls, args.reqs_cardinal));
+
+                app_proto_selected = true;
             } else if alpns::HTTP_3.contains(app_proto) {
+                let dgram_sender = if conn_args.dgrams_enabled {
+                    Some(Http3DgramSender::new(
+                        conn_args.dgram_count,
+                        conn_args.dgram_data.clone(),
+                        0,
+                    ))
+                } else {
+                    None
+                };
+
                 http_conn = Some(Http3Conn::with_urls(
                     &mut conn,
                     &args.urls,
@@ -298,7 +325,17 @@ fn main() {
                     &args.req_headers,
                     &args.body,
                     &args.method,
+                    dgram_sender,
                 ));
+
+                app_proto_selected = true;
+            } else if alpns::SIDUCK.contains(app_proto) {
+                siduck_conn = Some(SiDuckConn::new(
+                    conn_args.dgram_count,
+                    conn_args.dgram_data.clone(),
+                ));
+
+                app_proto_selected = true;
             }
         }
 
@@ -306,7 +343,14 @@ fn main() {
         // process received data.
         if let Some(h_conn) = http_conn.as_mut() {
             h_conn.send_requests(&mut conn, &args.dump_response_path);
-            h_conn.handle_responses(&mut conn, &mut buf, &req_start);
+            h_conn.handle_responses(&mut conn, &mut buf, &app_data_start);
+        }
+
+        // If we have a siduck connection, first issue the quacks then
+        // process received data.
+        if let Some(si_conn) = siduck_conn.as_mut() {
+            si_conn.send_quacks(&mut conn);
+            si_conn.handle_quack_acks(&mut conn, &mut buf, &app_data_start);
         }
 
         // Generate outgoing QUIC packets and send them on the UDP socket, until
@@ -344,7 +388,7 @@ fn main() {
             info!("connection closed, {:?}", conn.stats());
 
             if let Some(h_conn) = http_conn {
-                h_conn.report_incomplete(&req_start);
+                h_conn.report_incomplete(&app_data_start);
             }
 
             break;

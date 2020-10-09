@@ -59,6 +59,9 @@ Options:
   --no-retry                  Disable stateless retry.
   --no-grease                 Don't send GREASE.
   --http-version VERSION      HTTP version to use [default: all].
+  --dgram-proto PROTO         DATAGRAM application protocol to use [default: none].
+  --dgram-count COUNT         Number of DATAGRAMs to send [default: 0].
+  --dgram-data DATA           Data to send for certain types of DATAGRAM application protocol [default: brrr].
   --cc-algorithm NAME         Specify which congestion control algorithm to use [default: cubic].
   --disable-hystart           Disable HyStart++.
   -h --help                   Show this screen.
@@ -139,6 +142,10 @@ fn main() {
 
     if conn_args.disable_hystart {
         config.enable_hystart(false);
+    }
+
+    if conn_args.dgrams_enabled {
+        config.enable_dgram(true, 1000, 1000);
     }
 
     let rng = SystemRandom::new();
@@ -342,6 +349,8 @@ fn main() {
                     http_conn: None,
                     partial_requests: HashMap::new(),
                     partial_responses: HashMap::new(),
+                    siduck_conn: None,
+                    app_proto_selected: false,
                 };
 
                 clients.insert(scid.to_vec(), (src, client));
@@ -367,9 +376,9 @@ fn main() {
 
             trace!("{} processed {} bytes", client.conn.trace_id(), read);
 
-            // Create a new HTTP connection as soon as the QUIC connection
-            // is established.
-            if client.http_conn.is_none() &&
+            // Create a new application protocol session as soon as the QUIC
+            // connection is established.
+            if !client.app_proto_selected &&
                 (client.conn.is_in_early_data() ||
                     client.conn.is_established())
             {
@@ -385,9 +394,32 @@ fn main() {
 
                 if alpns::HTTP_09.contains(app_proto) {
                     client.http_conn = Some(Box::new(Http09Conn::default()));
+
+                    client.app_proto_selected = true;
                 } else if alpns::HTTP_3.contains(app_proto) {
-                    client.http_conn =
-                        Some(Http3Conn::with_conn(&mut client.conn));
+                    let dgram_sender = if conn_args.dgrams_enabled {
+                        Some(Http3DgramSender::new(
+                            conn_args.dgram_count,
+                            conn_args.dgram_data.clone(),
+                            1,
+                        ))
+                    } else {
+                        None
+                    };
+
+                    client.http_conn = Some(Http3Conn::with_conn(
+                        &mut client.conn,
+                        dgram_sender,
+                    ));
+
+                    client.app_proto_selected = true;
+                } else if alpns::SIDUCK.contains(app_proto) {
+                    client.siduck_conn = Some(SiDuckConn::new(
+                        conn_args.dgram_count,
+                        conn_args.dgram_data.clone(),
+                    ));
+
+                    client.app_proto_selected = true;
                 }
             }
 
@@ -412,6 +444,16 @@ fn main() {
                     )
                     .is_err()
                 {
+                    continue 'read;
+                }
+            }
+
+            // If we have a siduck connection, handle the quacks.
+            if client.siduck_conn.is_some() {
+                let conn = &mut client.conn;
+                let si_conn = client.siduck_conn.as_mut().unwrap();
+
+                if si_conn.handle_quacks(conn, &mut buf).is_err() {
                     continue 'read;
                 }
             }

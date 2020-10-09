@@ -1573,7 +1573,7 @@ new file mode 100644
 index 000000000..358a36528
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2228 @@
+@@ -0,0 +1,2231 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -2033,6 +2033,9 @@ index 000000000..358a36528
 +
 +                break;
 +            }
++
++            case QUICHE_H3_EVENT_DATAGRAM:
++                break;
 +        }
 +
 +        quiche_h3_event_free(ev);

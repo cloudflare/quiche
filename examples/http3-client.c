@@ -255,6 +255,9 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                         fprintf(stderr, "failed to close connection\n");
                     }
                     break;
+
+                case QUICHE_H3_EVENT_DATAGRAM:
+                    break;
             }
 
             quiche_h3_event_free(ev);
