@@ -901,8 +901,7 @@ impl Connection {
         Ok(written)
     }
 
-    /// Sends an HTTP/3 DATAGRAM with the specified flow ID, as defined in
-    /// draft-schinazi-quic-h3-datagram-03
+    /// Sends an HTTP/3 DATAGRAM with the specified flow ID.
     pub fn send_dgram(
         &mut self, conn: &mut super::Connection, flow_id: u64, buf: &[u8],
     ) -> Result<()> {

@@ -2343,7 +2343,7 @@ impl Connection {
                             None => continue,
                         };
                     } else if len > max_dgram_payload {
-                        // this dgram frame will never fit. Let's purge it.
+                        // This dgram frame will never fit. Let's purge it.
                         self.dgram_send_queue.discard_front().ok();
                     } else {
                         break;
@@ -2511,7 +2511,7 @@ impl Connection {
         });
 
         // Encode frames into the output packet.
-        for frame in frames.iter_mut() {
+        for frame in &mut frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);
 
             frame.to_bytes(&mut b)?;

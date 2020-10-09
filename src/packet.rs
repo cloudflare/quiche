@@ -47,6 +47,7 @@ const PKT_NUM_MASK: u8 = 0x03;
 pub const MAX_CID_LEN: u8 = 20;
 
 pub const MAX_PKT_NUM_LEN: usize = 4;
+
 const SAMPLE_LEN: usize = 16;
 
 pub const EPOCH_INITIAL: usize = 0;
