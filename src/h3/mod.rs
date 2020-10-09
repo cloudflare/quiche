@@ -512,7 +512,7 @@ pub enum Event {
     /// Stream was closed,
     Finished,
 
-    /// DATAGRAM was received
+    /// DATAGRAM was received.
     Datagram,
 }
 

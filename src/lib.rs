@@ -3127,7 +3127,8 @@ impl Connection {
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`InvalidState`]: enum.Error.html#variant.InvalidState
     /// [`BufferTooShort`]: enum.Error.html#variant.BufferTooShort
-    /// [`dgram_max_writable_len()`]: struct.Connection.html#method.on_timeout
+    /// [`dgram_max_writable_len()`]:
+    /// struct.Connection.html#method.dgram_max_writable_len
     ///
     /// ## Examples:
     ///
