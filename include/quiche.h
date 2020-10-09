@@ -183,7 +183,7 @@ void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algori
 // Configures whether to use HyStart++.
 void quiche_config_enable_hystart(quiche_config *config, bool v);
 
-// Enables support for receiving DATAGRAM frames.
+// Configures whether to enable receiving DATAGRAM frames.
 void quiche_config_enable_dgram(quiche_config *config, bool enabled,
                                 size_t recv_queue_len,
                                 size_t send_queue_len);
@@ -354,19 +354,18 @@ typedef struct {
 // Collects and returns statistics about the connection.
 void quiche_conn_stats(quiche_conn *conn, quiche_stats *out);
 
-// Gets the size of the largest DATAGRAM payload that can be sent, or
-// QUICHE_ERR_DONE if DATAGRAMs cannot be sent on the current connection.
+// Returns the maximum DATAGRAM payload that can be sent.
 ssize_t quiche_conn_dgram_max_writable_len(quiche_conn *conn);
 
-// Reads data from the DATAGRAM receive queue.
+// Reads the first received DATAGRAM.
 ssize_t quiche_conn_dgram_recv(quiche_conn *conn, uint8_t *buf,
                                size_t buf_len);
 
-// Writes data to the DATAGRAM send queue.
+// Sends data in a DATAGRAM frame.
 ssize_t quiche_conn_dgram_send(quiche_conn *conn, const uint8_t *buf,
                                size_t buf_len);
 
-// Iterates over the DATAGRAM send queue and purges items matching the predicate.
+// Purges queued outgoing DATAGRAMs matching the predicate.
 void quiche_conn_dgram_purge_outgoing(quiche_conn *conn,
                                       bool (*f)(uint8_t *, size_t));
 

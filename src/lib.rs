@@ -3117,7 +3117,7 @@ impl Connection {
     /// [`InvalidState`] is returned if the peer does not support DATAGRAM.
     /// [`BufferTooShort`] is returned if the DATAGRAM frame length is larger
     /// than peer's supported DATAGRAM frame length. Use
-    /// `peer_datagram_frame_size` to get the largest supported DATAGRAM
+    /// [`dgram_max_writable_len()`] to get the largest supported DATAGRAM
     /// frame length.
     ///
     /// Note that there is no flow control of DATAGRAM frames, so in order to
@@ -3127,6 +3127,7 @@ impl Connection {
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`InvalidState`]: enum.Error.html#variant.InvalidState
     /// [`BufferTooShort`]: enum.Error.html#variant.BufferTooShort
+    /// [`dgram_max_writable_len()`]: struct.Connection.html#method.on_timeout
     ///
     /// ## Examples:
     ///
