@@ -714,8 +714,7 @@ impl Frame {
 
     pub fn shrink_for_retransmission(&mut self) {
         if let Frame::Datagram { data } = self {
-            data.clear();
-            data.shrink_to_fit();
+            *data = Vec::new();
         }
     }
 
