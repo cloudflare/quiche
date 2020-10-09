@@ -7,7 +7,7 @@ COPY src/ ./src/
 COPY tools/ ./tools/
 COPY Cargo.toml .
 
-RUN apt-get update && apt-get install -y cmake golang-go && \
+RUN apt-get update && apt-get install -y cmake && \
     rm -rf /var/lib/apt/lists/*
 
 RUN cargo build --manifest-path tools/apps/Cargo.toml
