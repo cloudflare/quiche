@@ -158,7 +158,9 @@
 //!
 //!         Ok((stream_id, quiche::h3::Event::Finished)) => {
 //!             // Peer terminated stream, handle it.
-//!         }
+//!         },
+//!
+//!         Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
 //!
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
@@ -205,7 +207,9 @@
 //!
 //!         Ok((stream_id, quiche::h3::Event::Finished)) => {
 //!             // Peer terminated stream, handle it.
-//!         }
+//!         },
+//!
+//!         Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
 //!
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
@@ -507,6 +511,9 @@ pub enum Event {
 
     /// Stream was closed,
     Finished,
+
+    /// DATAGRAM was received.
+    Datagram,
 }
 
 struct ConnectionSettings {
@@ -894,6 +901,59 @@ impl Connection {
         Ok(written)
     }
 
+    /// Sends an HTTP/3 DATAGRAM with the specified flow ID.
+    pub fn send_dgram(
+        &mut self, conn: &mut super::Connection, flow_id: u64, buf: &[u8],
+    ) -> Result<()> {
+        let len = octets::varint_len(flow_id) + buf.len();
+        let mut d = vec![0; len as usize];
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+
+        b.put_varint(flow_id)?;
+        b.put_bytes(buf)?;
+
+        conn.dgram_send(&d)?;
+
+        Ok(())
+    }
+
+    /// Reads a DATAGRAM into the provided buffer.
+    ///
+    /// Applications should call this method whenever the [`poll()`] method
+    /// returns a [`Datagram`] event.
+    ///
+    /// On success the DATAGRAM data is returned, with length and Flow ID and
+    /// length of the Flow ID.
+    ///
+    /// [`Done`] is returned if there is no data to read.
+    ///
+    /// [`BufferTooShort`] is returned if the provided buffer is too small for
+    /// the data.
+    ///
+    /// [`poll()`]: struct.Connection.html#method.poll
+    /// [`Datagram`]: enum.Event.html#variant.Datagram
+    /// [`Done`]: enum.Error.html#variant.Done
+    /// [`BufferTooShort`]: enum.Error.html#variant.BufferTooShort
+    pub fn recv_dgram(
+        &mut self, conn: &mut super::Connection, buf: &mut [u8],
+    ) -> Result<(usize, u64, usize)> {
+        let len = conn.dgram_recv(buf)?;
+        let mut b = octets::Octets::with_slice(buf);
+        let flow_id = b.get_varint()?;
+        Ok((len, flow_id, b.off()))
+    }
+
+    /// Returns the maximum HTTP/3 DATAGRAM payload that can be sent.
+    pub fn dgram_max_writable_len(
+        &self, conn: &super::Connection, flow_id: u64,
+    ) -> Option<usize> {
+        let flow_id_len = octets::varint_len(flow_id);
+        match conn.dgram_max_writable_len() {
+            None => None,
+            Some(len) => len.checked_sub(flow_id_len),
+        }
+    }
+
     /// Reads request or response body data into the provided buffer.
     ///
     /// Applications should call this method whenever the [`poll()`] method
@@ -927,15 +987,26 @@ impl Connection {
 
     /// Processes HTTP/3 data received from the peer.
     ///
-    /// On success it returns an [`Event`] as well as the event's source stream
-    /// ID. The stream ID can be used when calling [`send_response()`] and
-    /// [`send_body()`] when responding to incoming requests. On error the
-    /// connection will be closed by calling [`close()`] with the appropriate
-    /// error code.
+    /// On success it returns an [`Event`] and an ID.
+    ///
+    /// The events [`Headers`], [`Data`] and [`Finished`] return a stream ID,
+    /// which is used in methods [`recv_body()`], [`send_response()`] or
+    /// [`send_body()`].
+    ///
+    /// The event [`Datagram`] returns a flow ID.
+    ///
+    /// If an error occurs while processing data, the connection is closed with
+    /// the appropriate error code, using the transport's [`close()`] method.
     ///
     /// [`Event`]: enum.Event.html
+    /// [`Headers`]: enum.Event.html#variant.Headers
+    /// [`Data`]: enum.Event.html#variant.Data
+    /// [`Finished`]: enum.Event.html#variant.Finished
+    /// [`Datagram`]: enum.Event.html#variant.Datagram
+    /// [`recv_body()`]: struct.Connection.html#method.recv_body
     /// [`send_response()`]: struct.Connection.html#method.send_response
     /// [`send_body()`]: struct.Connection.html#method.send_body
+    /// [`recv_dgram()`]: struct.Connection.html#method.recv_dgram
     /// [`close()`]: ../struct.Connection.html#method.close
     pub fn poll(&mut self, conn: &mut super::Connection) -> Result<(u64, Event)> {
         // When connection close is initiated by the local application (e.g. due
@@ -962,6 +1033,21 @@ impl Connection {
         if let Some(finished) = self.finished_streams.pop_front() {
             return Ok((finished, Event::Finished));
         }
+
+        // Process DATAGRAMs
+        let mut d = [0; 8];
+
+        match conn.dgram_recv_peek(&mut d, 8) {
+            Ok(_) => {
+                let mut b = octets::Octets::with_slice(&d);
+                let flow_id = b.get_varint()?;
+                return Ok((flow_id, Event::Datagram));
+            },
+
+            Err(crate::Error::Done) => (),
+
+            Err(e) => return Err(Error::TransportError(e)),
+        };
 
         // Process HTTP/3 data from readable streams.
         for s in conn.readable() {

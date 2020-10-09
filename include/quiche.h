@@ -183,6 +183,11 @@ void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algori
 // Configures whether to use HyStart++.
 void quiche_config_enable_hystart(quiche_config *config, bool v);
 
+// Configures whether to enable receiving DATAGRAM frames.
+void quiche_config_enable_dgram(quiche_config *config, bool enabled,
+                                size_t recv_queue_len,
+                                size_t send_queue_len);
+
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 
@@ -349,6 +354,21 @@ typedef struct {
 // Collects and returns statistics about the connection.
 void quiche_conn_stats(quiche_conn *conn, quiche_stats *out);
 
+// Returns the maximum DATAGRAM payload that can be sent.
+ssize_t quiche_conn_dgram_max_writable_len(quiche_conn *conn);
+
+// Reads the first received DATAGRAM.
+ssize_t quiche_conn_dgram_recv(quiche_conn *conn, uint8_t *buf,
+                               size_t buf_len);
+
+// Sends data in a DATAGRAM frame.
+ssize_t quiche_conn_dgram_send(quiche_conn *conn, const uint8_t *buf,
+                               size_t buf_len);
+
+// Purges queued outgoing DATAGRAMs matching the predicate.
+void quiche_conn_dgram_purge_outgoing(quiche_conn *conn,
+                                      bool (*f)(uint8_t *, size_t));
+
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
 
@@ -438,6 +458,7 @@ enum quiche_h3_event_type {
     QUICHE_H3_EVENT_HEADERS,
     QUICHE_H3_EVENT_DATA,
     QUICHE_H3_EVENT_FINISHED,
+    QUICHE_H3_EVENT_DATAGRAM,
 };
 
 typedef struct Http3Event quiche_h3_event;
@@ -499,6 +520,14 @@ ssize_t quiche_h3_send_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
 // Reads request or response body data into the provided buffer.
 ssize_t quiche_h3_recv_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t stream_id, uint8_t *out, size_t out_len);
+
+// Writes data to the DATAGRAM send queue.
+ssize_t quiche_h3_send_dgram(quiche_h3_conn *conn, quiche_conn *quic_conn,
+                            uint64_t flow_id, uint8_t *data, size_t data_len);
+
+// Reads data from the DATAGRAM receive queue.
+ssize_t quiche_h3_recv_dgram(quiche_h3_conn *conn, quiche_conn *quic_conn,
+                            uint64_t *flow_id, uint8_t *out, size_t out_len);
 
 // Frees the HTTP/3 connection object.
 void quiche_h3_conn_free(quiche_h3_conn *conn);

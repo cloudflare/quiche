@@ -91,12 +91,12 @@ pub extern fn quiche_h3_conn_poll(
     ev: *mut *const h3::Event,
 ) -> i64 {
     match conn.poll(quic_conn) {
-        Ok((stream_id, v)) => {
+        Ok((id, v)) => {
             unsafe {
                 *ev = Box::into_raw(Box::new(v));
             }
 
-            stream_id as i64
+            id as i64
         },
 
         Err(e) => e.to_c() as i64,
@@ -111,6 +111,8 @@ pub extern fn quiche_h3_event_type(ev: &h3::Event) -> u32 {
         h3::Event::Data { .. } => 1,
 
         h3::Event::Finished { .. } => 2,
+
+        h3::Event::Datagram { .. } => 3,
     }
 }
 
@@ -254,6 +256,46 @@ pub extern fn quiche_h3_recv_body(
 
     match conn.recv_body(quic_conn, stream_id, out) {
         Ok(v) => v as ssize_t,
+
+        Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_h3_send_dgram(
+    conn: &mut h3::Connection, quic_conn: &mut Connection, flow_id: u64,
+    data: *const u8, data_len: size_t,
+) -> c_int {
+    if data_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
+    let data = unsafe { slice::from_raw_parts(data, data_len) };
+
+    match conn.send_dgram(quic_conn, flow_id, data) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_h3_recv_dgram(
+    conn: &mut h3::Connection, quic_conn: &mut Connection, flow_id: *mut u64,
+    flow_id_len: *mut usize, out: *mut u8, out_len: size_t,
+) -> ssize_t {
+    if out_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
+    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+
+    match conn.recv_dgram(quic_conn, out) {
+        Ok((len, id, id_len)) => {
+            unsafe { *flow_id = id };
+            unsafe { *flow_id_len = id_len };
+            len as ssize_t
+        },
 
         Err(e) => e.to_c(),
     }
