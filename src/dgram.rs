@@ -76,13 +76,6 @@ impl DatagramQueue {
         }
     }
 
-    pub fn discard_front(&mut self) -> Result<()> {
-        match self.queue.pop_front() {
-            None => Err(Error::InvalidState),
-            Some(_) => Ok(()),
-        }
-    }
-
     pub fn pop(&mut self) -> Option<Vec<u8>> {
         if let Some(d) = self.queue.pop_front() {
             self.queue_bytes_size = self.queue_bytes_size.saturating_sub(d.len());

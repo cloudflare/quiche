@@ -2344,7 +2344,7 @@ impl Connection {
                         };
                     } else if len > max_dgram_payload {
                         // This dgram frame will never fit. Let's purge it.
-                        self.dgram_send_queue.discard_front().ok();
+                        self.dgram_send_queue.pop();
                     } else {
                         break;
                     }
@@ -3144,16 +3144,11 @@ impl Connection {
         let max_payload_len = match self.dgram_max_writable_len() {
             Some(v) => v as usize,
             None => {
-                trace!(
-                    "attempt to send DATAGRAM to a peer without \
-                        max_datagram_frame_size"
-                );
                 return Err(Error::InvalidState);
             },
         };
 
         if buf.len() > max_payload_len {
-            trace!("attempt to send DATAGRAM larger than dgram_max_writable_len");
             return Err(Error::BufferTooShort);
         }
 
@@ -3901,16 +3896,12 @@ impl Connection {
                 // frames, as recommended by the standard, so we don't need a
                 // size check.
                 if self.dgram_enabled() {
-                    trace!(
-                        "received a DATAGRAM without \
-                            max_datagram_frame_size; closing."
-                    );
                     return Err(Error::InvalidState);
                 }
 
                 // If recv queue is full, discard oldest
                 if self.dgram_recv_queue.is_full() {
-                    self.dgram_recv_queue.discard_front()?;
+                    self.dgram_recv_queue.pop();
                 }
 
                 self.dgram_recv_queue.push(&data)?;
