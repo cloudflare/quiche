@@ -41,6 +41,8 @@ use std::path;
 
 use quiche::h3::NameValue;
 
+const MAX_JSON_DUMP_PAYLOAD: usize = 10000;
+
 /// Returns a String containing a pretty printed version of the `buf` slice.
 pub fn hex_dump(buf: &[u8]) -> String {
     let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
@@ -274,6 +276,62 @@ pub fn make_qlog_writer(
     }
 }
 
+fn dump_json(reqs: &[Http3Request]) {
+    println!("{{");
+    println!("  \"entries\": [");
+    let mut reqs = reqs.iter().peekable();
+
+    while let Some(req) = reqs.next() {
+        println!("  {{");
+        println!("    \"request\":{{");
+        println!("      \"headers\":[");
+
+        let mut req_hdrs = req.hdrs.iter().peekable();
+        while let Some(h) = req_hdrs.next() {
+            println!("        {{");
+            println!("          \"name\": \"{}\",", h.name());
+            println!("          \"value\": \"{}\"", h.value());
+
+            if req_hdrs.peek().is_some() {
+                println!("        }},");
+            } else {
+                println!("        }}");
+            }
+        }
+        println!("      ]}},");
+
+        println!("    \"response\":{{");
+        println!("      \"headers\":[");
+
+        let mut response_hdrs = req.response_hdrs.iter().peekable();
+        while let Some(h) = response_hdrs.next() {
+            println!("        {{");
+            println!("          \"name\": \"{}\",", h.name());
+            println!(
+                "          \"value\": \"{}\"",
+                h.value().replace("\"", "\\\"")
+            );
+
+            if response_hdrs.peek().is_some() {
+                println!("        }},");
+            } else {
+                println!("        }}");
+            }
+        }
+        println!("      ],");
+        println!("      \"body\": {:?}", req.response_body);
+        println!("    }}");
+
+        if reqs.peek().is_some() {
+            println!("}},");
+        } else {
+            println!("}}");
+        }
+    }
+    println!("]");
+    println!("}}");
+}
+
 pub trait HttpConn {
     fn send_requests(
         &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
@@ -465,6 +523,8 @@ struct Http3Request {
     cardinal: u64,
     stream_id: Option<u64>,
     hdrs: Vec<quiche::h3::Header>,
+    response_hdrs: Vec<quiche::h3::Header>,
+    response_body: Vec<u8>,
     response_writer: Option<std::io::BufWriter<std::fs::File>>,
 }
 
@@ -789,14 +849,16 @@ pub struct Http3Conn {
     reqs_complete: usize,
     reqs: Vec<Http3Request>,
     body: Option<Vec<u8>>,
+    dump_json: bool,
     dgram_sender: Option<Http3DgramSender>,
 }
 
 impl Http3Conn {
+    #[allow(clippy::too_many_arguments)]
     pub fn with_urls(
         conn: &mut quiche::Connection, urls: &[url::Url], reqs_cardinal: u64,
         req_headers: &[String], body: &Option<Vec<u8>>, method: &str,
-        dgram_sender: Option<Http3DgramSender>,
+        dump_json: bool, dgram_sender: Option<Http3DgramSender>,
     ) -> Box<dyn HttpConn> {
         let mut reqs = Vec::new();
         for url in urls {
@@ -843,6 +905,8 @@ impl Http3Conn {
                     url: url.clone(),
                     cardinal: i,
                     hdrs,
+                    response_hdrs: Vec::new(),
+                    response_body: Vec::new(),
                     stream_id: None,
                     response_writer: None,
                 });
@@ -859,6 +923,7 @@ impl Http3Conn {
             reqs_complete: 0,
             reqs,
             body: body.as_ref().map(|b| b.to_vec()),
+            dump_json,
             dgram_sender,
         };
 
@@ -878,6 +943,7 @@ impl Http3Conn {
             reqs_complete: 0,
             reqs: Vec::new(),
             body: None,
+            dump_json: false,
             dgram_sender,
         };
 
@@ -1074,6 +1140,14 @@ impl HttpConn for Http3Conn {
                         "got response headers {:?} on stream id {}",
                         list, stream_id
                     );
+
+                    let req = self
+                        .reqs
+                        .iter_mut()
+                        .find(|r| r.stream_id == Some(stream_id))
+                        .unwrap();
+
+                    req.response_hdrs = list;
                 },
 
                 Ok((stream_id, quiche::h3::Event::Data)) => {
@@ -1090,16 +1164,25 @@ impl HttpConn for Http3Conn {
                             .find(|r| r.stream_id == Some(stream_id))
                             .unwrap();
 
+                        let len = std::cmp::min(
+                            read,
+                            MAX_JSON_DUMP_PAYLOAD - req.response_body.len(),
+                        );
+                        req.response_body.extend_from_slice(&buf[..len]);
+
                         match &mut req.response_writer {
                             Some(rw) => {
                                 rw.write_all(&buf[..read]).ok();
                             },
 
-                            None => {
-                                print!("{}", unsafe {
-                                    std::str::from_utf8_unchecked(&buf[..read])
-                                });
-                            },
+                            None =>
+                                if !self.dump_json {
+                                    print!("{}", unsafe {
+                                        std::str::from_utf8_unchecked(
+                                            &buf[..read],
+                                        )
+                                    });
+                                },
                         }
                     }
                 },
@@ -1120,6 +1203,10 @@ impl HttpConn for Http3Conn {
                             reqs_count,
                             req_start.elapsed()
                         );
+
+                        if self.dump_json {
+                            dump_json(&self.reqs);
+                        }
 
                         match conn.close(true, 0x00, b"kthxbye") {
                             // Already closed.
@@ -1165,6 +1252,10 @@ impl HttpConn for Http3Conn {
                 self.reqs_complete,
                 self.reqs.len()
             );
+
+            if self.dump_json {
+                dump_json(&self.reqs);
+            }
         }
     }
 

@@ -55,6 +55,7 @@ Options:
   --dgram-data DATA        Data to send for certain types of DATAGRAM application protocol [default: quack].
   --dump-packets PATH      Dump the incoming packets as files in the given directory.
   --dump-responses PATH    Dump response payload as files in the given directory.
+  --dump-json              Dump response headers and payload to stdout.
   --no-verify              Don't verify server's certificate.
   --no-grease              Don't send GREASE.
   --cc-algorithm NAME      Specify which congestion control algorithm to use [default: cubic].
@@ -325,6 +326,7 @@ fn main() {
                     &args.req_headers,
                     &args.body,
                     &args.method,
+                    args.dump_json,
                     dgram_sender,
                 ));
 
@@ -400,6 +402,7 @@ fn main() {
 struct ClientArgs {
     version: u32,
     dump_response_path: Option<String>,
+    dump_json: bool,
     urls: Vec<url::Url>,
     reqs_cardinal: u64,
     req_headers: Vec<String>,
@@ -420,6 +423,8 @@ impl Args for ClientArgs {
         } else {
             None
         };
+
+        let dump_json = args.get_bool("--dump-json");
 
         // URLs (can be multiple).
         let urls: Vec<url::Url> = args
@@ -451,6 +456,7 @@ impl Args for ClientArgs {
         ClientArgs {
             version,
             dump_response_path,
+            dump_json,
             urls,
             req_headers,
             reqs_cardinal,
