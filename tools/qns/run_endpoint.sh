@@ -29,7 +29,6 @@ check_testcase () {
         ;;
     transfer )
         echo "supported"
-        RUST_LOG="info"
         ;;
     chacha20 )
         if [ "$ROLE" == "client" ]; then
