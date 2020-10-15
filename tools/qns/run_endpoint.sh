@@ -15,7 +15,7 @@ DOWNLOAD_DIR=/downloads
 QUICHE_CLIENT=quiche-client
 QUICHE_SERVER=quiche-server
 QUICHE_CLIENT_OPT="--no-verify --dump-responses ${DOWNLOAD_DIR} --wire-version ff00001d"
-QUICHE_SERVER_OPT_COMMON="--cert /certs/cert.pem --key /certs/priv.key"
+QUICHE_SERVER_OPT_COMMON="--listen [::]:443 --root $WWW_DIR --cert /certs/cert.pem --key /certs/priv.key"
 QUICHE_SERVER_OPT="$QUICHE_SERVER_OPT_COMMON --no-retry "
 LOG_DIR=/logs
 LOG=$LOG_DIR/log.txt
@@ -83,8 +83,7 @@ run_quiche_client_tests () {
 }
 
 run_quiche_server_tests() {
-    $QUICHE_DIR/$QUICHE_SERVER --listen 0.0.0.0:443 --root $WWW_DIR \
-        $SERVER_PARAMS $QUICHE_SERVER_OPT >& $LOG
+    $QUICHE_DIR/$QUICHE_SERVER $SERVER_PARAMS $QUICHE_SERVER_OPT >& $LOG
 }
 
 # Update config based on test case
