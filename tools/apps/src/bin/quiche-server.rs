@@ -87,6 +87,8 @@ fn main() {
     // Create the UDP listening socket, and register it with the event loop.
     let socket = net::UdpSocket::bind(args.listen).unwrap();
 
+    info!("listening on {:}", socket.local_addr().unwrap());
+
     let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
     poll.register(
         &socket,
@@ -315,7 +317,8 @@ fn main() {
                 }
 
                 debug!(
-                    "New connection: dcid={} scid={}",
+                    "New connection: src={} dcid={} scid={}",
+                    src,
                     hex_dump(&hdr.dcid),
                     hex_dump(&scid)
                 );
