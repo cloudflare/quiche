@@ -11,5 +11,5 @@ advanced_triage: false
 cmds:
   - cmd: /home/mayhem/qpack_decode
     libfuzzer: true
-    asan: true
+    sanitizer: true
     timeout: 5

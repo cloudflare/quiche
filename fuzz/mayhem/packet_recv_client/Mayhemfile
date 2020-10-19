@@ -11,5 +11,5 @@ advanced_triage: false
 cmds:
   - cmd: /home/mayhem/packet_recv_client
     libfuzzer: true
-    asan: true
+    sanitizer: true
     timeout: 5
