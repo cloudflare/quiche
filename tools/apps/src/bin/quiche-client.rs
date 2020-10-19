@@ -57,6 +57,7 @@ Options:
   --dump-packets PATH      Dump the incoming packets as files in the given directory.
   --dump-responses PATH    Dump response payload as files in the given directory.
   --dump-json              Dump response headers and payload to stdout.
+  --connect-to ADDRESS     Override ther server's address.
   --no-verify              Don't verify server's certificate.
   --no-grease              Don't send GREASE.
   --cc-algorithm NAME      Specify which congestion control algorithm to use [default: cubic].
@@ -87,7 +88,11 @@ fn main() {
     let connect_url = &args.urls[0];
 
     // Resolve server address.
-    let peer_addr = connect_url.to_socket_addrs().unwrap().next().unwrap();
+    let peer_addr = if let Some(addr) = &args.connect_to {
+        addr.parse().unwrap()
+    } else {
+        connect_url.to_socket_addrs().unwrap().next().unwrap()
+    };
 
     // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
     // server address. This is needed on macOS and BSD variants that don't
@@ -410,6 +415,7 @@ struct ClientArgs {
     no_verify: bool,
     body: Option<Vec<u8>>,
     method: String,
+    connect_to: Option<String>,
 }
 
 impl Args for ClientArgs {
@@ -454,6 +460,12 @@ impl Args for ClientArgs {
 
         let method = args.get_str("--method").to_string();
 
+        let connect_to = if args.get_bool("--connect-to") {
+            Some(args.get_str("--connect-to").to_string())
+        } else {
+            None
+        };
+
         ClientArgs {
             version,
             dump_response_path,
@@ -464,6 +476,7 @@ impl Args for ClientArgs {
             no_verify,
             body,
             method,
+            connect_to,
         }
     }
 }
