@@ -45,6 +45,7 @@ pub static RENO: CongestionControlOps = CongestionControlOps {
     collapse_cwnd,
     checkpoint,
     rollback,
+    has_custom_pacing,
 };
 
 pub fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
@@ -161,6 +162,10 @@ pub fn collapse_cwnd(r: &mut Recovery) {
 fn checkpoint(_r: &mut Recovery) {}
 
 fn rollback(_r: &mut Recovery) {}
+
+fn has_custom_pacing() -> bool {
+    false
+}
 
 #[cfg(test)]
 mod tests {

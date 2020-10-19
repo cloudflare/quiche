@@ -273,8 +273,12 @@ ssize_t quiche_conn_recv(quiche_conn *conn, uint8_t *buf, size_t buf_len,
                          const quiche_recv_info *info);
 
 typedef struct {
+    // The address the packet should be sent to.
     struct sockaddr_storage to;
     socklen_t to_len;
+
+    // The time to send the packet out.
+    struct timespec at;
 } quiche_send_info;
 
 // Writes a single QUIC packet to be sent to the peer.
