@@ -54,6 +54,7 @@ Options:
   --max-stream-data BYTES     Per-stream flow control limit [default: 1000000].
   --max-streams-bidi STREAMS  Number of allowed concurrent streams [default: 100].
   --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 100].
+  --idle-timeout TIMEOUT   Idle timeout in milliseconds [default: 30000].
   --dump-packets PATH         Dump the incoming packets as files in the given directory.
   --early-data                Enables receiving early data.
   --no-retry                  Disable stateless retry.
@@ -106,7 +107,7 @@ fn main() {
 
     config.set_application_protos(&conn_args.alpns).unwrap();
 
-    config.set_max_idle_timeout(30000);
+    config.set_max_idle_timeout(conn_args.idle_timeout);
     config.set_max_udp_payload_size(MAX_DATAGRAM_SIZE as u64);
     config.set_initial_max_data(conn_args.max_data);
     config.set_initial_max_stream_data_bidi_local(conn_args.max_stream_data);

@@ -81,6 +81,7 @@ pub struct CommonArgs {
     pub max_stream_data: u64,
     pub max_streams_bidi: u64,
     pub max_streams_uni: u64,
+    pub idle_timeout: u64,
     pub dump_packet_path: Option<String>,
     pub no_grease: bool,
     pub cc_algorithm: String,
@@ -158,6 +159,9 @@ impl Args for CommonArgs {
         let max_streams_uni = args.get_str("--max-streams-uni");
         let max_streams_uni = u64::from_str_radix(max_streams_uni, 10).unwrap();
 
+        let idle_timeout = args.get_str("--idle-timeout");
+        let idle_timeout = u64::from_str_radix(idle_timeout, 10).unwrap();
+
         let dump_packet_path = if args.get_str("--dump-packets") != "" {
             Some(args.get_str("--dump-packets").to_string())
         } else {
@@ -176,6 +180,7 @@ impl Args for CommonArgs {
             max_stream_data,
             max_streams_bidi,
             max_streams_uni,
+            idle_timeout,
             dump_packet_path,
             no_grease,
             cc_algorithm: cc_algorithm.to_string(),
