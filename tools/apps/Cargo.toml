@@ -16,7 +16,7 @@ default = ["qlog"]
 
 [dependencies]
 docopt = "1"
-env_logger = "0.6"
+env_logger = "0.8"
 mio = "0.6"
 url = "1"
 log = "0.4"
