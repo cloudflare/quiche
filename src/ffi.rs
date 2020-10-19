@@ -40,6 +40,7 @@ use libc::c_void;
 use libc::size_t;
 use libc::sockaddr;
 use libc::ssize_t;
+use libc::timespec;
 
 #[cfg(not(windows))]
 use libc::sockaddr_in;
@@ -634,6 +635,8 @@ pub extern fn quiche_conn_recv(
 pub struct SendInfo {
     to: sockaddr_storage,
     to_len: socklen_t,
+
+    at: timespec,
 }
 
 #[no_mangle]
@@ -649,6 +652,8 @@ pub extern fn quiche_conn_send(
     match conn.send(out) {
         Ok((v, info)) => {
             out_info.to_len = std_addr_to_c(&info.to, &mut out_info.to);
+
+            std_time_to_c(&info.at, &mut out_info.at);
 
             v as ssize_t
         },
@@ -1091,4 +1096,18 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
             },
         }
     }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
+fn std_time_to_c(time: &std::time::Instant, out: &mut timespec) {
+    unsafe {
+        ptr::copy_nonoverlapping(time as *const _ as *const timespec, out, 1)
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
+fn std_time_to_c(_time: &std::time::Instant, out: &mut timespec) {
+    // TODO: implement Instant conversion for systems that don't use timespec.
+    out.tv_sec = 0;
+    out.tv_nsec = 0;
 }

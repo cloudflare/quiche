@@ -51,6 +51,7 @@ pub static CUBIC: CongestionControlOps = CongestionControlOps {
     collapse_cwnd,
     checkpoint,
     rollback,
+    has_custom_pacing,
 };
 
 /// CUBIC Constants.
@@ -402,6 +403,10 @@ fn rollback(r: &mut Recovery) {
     r.cubic_state.w_max = r.cubic_state.prior.w_max;
     r.cubic_state.k = r.cubic_state.prior.k;
     r.congestion_recovery_start_time = r.cubic_state.prior.epoch_start;
+}
+
+fn has_custom_pacing() -> bool {
+    false
 }
 
 #[cfg(test)]

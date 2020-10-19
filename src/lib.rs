@@ -490,6 +490,9 @@ pub struct RecvInfo {
 pub struct SendInfo {
     /// The address the packet should be sent to.
     pub to: SocketAddr,
+
+    /// The time to send the packet out.
+    pub at: time::Instant,
 }
 
 /// Represents information carried by `CONNECTION_CLOSE` frames.
@@ -2390,7 +2393,14 @@ impl Connection {
             done += pad_len;
         }
 
-        let info = SendInfo { to: self.peer_addr };
+        let info = SendInfo {
+            to: self.peer_addr,
+
+            at: self
+                .recovery
+                .get_packet_send_time()
+                .unwrap_or_else(time::Instant::now),
+        };
 
         Ok((done, info))
     }
