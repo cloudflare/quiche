@@ -44,6 +44,7 @@ use libc::sockaddr_in6;
 use libc::sockaddr_storage;
 use libc::socklen_t;
 use libc::ssize_t;
+use libc::timespec;
 
 use crate::*;
 
@@ -608,6 +609,8 @@ pub extern fn quiche_conn_recv(
 pub struct SendInfo {
     to: sockaddr_storage,
     to_len: socklen_t,
+
+    time: timespec,
 }
 
 #[no_mangle]
@@ -623,6 +626,8 @@ pub extern fn quiche_conn_send(
     match conn.send(out) {
         Ok((v, info)) => {
             out_info.to_len = std_addr_to_c(&info.to, &mut out_info.to);
+
+            std_time_to_c(&info.time, &mut out_info.time);
 
             v as ssize_t
         },
@@ -1064,5 +1069,11 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
                 sa_len as socklen_t
             },
         }
+    }
+}
+
+fn std_time_to_c(time: &std::time::Instant, out: &mut timespec) {
+    unsafe {
+        ptr::copy_nonoverlapping(time as *const _ as *const timespec, out, 1)
     }
 }
