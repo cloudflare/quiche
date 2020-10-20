@@ -37,6 +37,9 @@ use quiche_apps::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
+const HANDSHAKE_FAIL_STATUS: i32 = -1;
+const HTTP_FAIL_STATUS: i32 = -2;
+
 const USAGE: &str = "Usage:
   quiche-client [options] URL...
   quiche-client -h | --help
@@ -284,8 +287,19 @@ fn main() {
         if conn.is_closed() {
             info!("connection closed, {:?}", conn.stats());
 
+            if !conn.is_established() {
+                error!(
+                    "connection timed out after {:?}",
+                    app_data_start.elapsed(),
+                );
+
+                std::process::exit(HANDSHAKE_FAIL_STATUS);
+            }
+
             if let Some(h_conn) = http_conn {
-                h_conn.report_incomplete(&app_data_start);
+                if h_conn.report_incomplete(&app_data_start) {
+                    std::process::exit(HTTP_FAIL_STATUS);
+                }
             }
 
             if let Some(si_conn) = siduck_conn {
@@ -395,8 +409,23 @@ fn main() {
         if conn.is_closed() {
             info!("connection closed, {:?}", conn.stats());
 
+            if !conn.is_established() {
+                error!(
+                    "connection timed out after {:?}",
+                    app_data_start.elapsed(),
+                );
+
+                std::process::exit(HANDSHAKE_FAIL_STATUS);
+            }
+
             if let Some(h_conn) = http_conn {
-                h_conn.report_incomplete(&app_data_start);
+                if h_conn.report_incomplete(&app_data_start) {
+                    std::process::exit(HTTP_FAIL_STATUS);
+                }
+            }
+
+            if let Some(si_conn) = siduck_conn {
+                si_conn.report_incomplete(&app_data_start);
             }
 
             break;
