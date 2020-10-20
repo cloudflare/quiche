@@ -347,7 +347,7 @@ pub trait HttpConn {
         req_start: &std::time::Instant,
     );
 
-    fn report_incomplete(&self, start: &std::time::Instant);
+    fn report_incomplete(&self, start: &std::time::Instant) -> bool;
 
     fn handle_requests(
         &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
@@ -501,7 +501,7 @@ impl SiDuckConn {
         }
     }
 
-    pub fn report_incomplete(&self, start: &std::time::Instant) {
+    pub fn report_incomplete(&self, start: &std::time::Instant) -> bool {
         if self.quacks_acked != self.quacks_to_make {
             error!(
                 "connection timed out after {:?} and only received {}/{} quack-acks",
@@ -509,7 +509,11 @@ impl SiDuckConn {
                 self.quacks_acked,
                 self.quacks_to_make
             );
+
+            return true;
         }
+
+        false
     }
 }
 
@@ -679,7 +683,7 @@ impl HttpConn for Http09Conn {
         }
     }
 
-    fn report_incomplete(&self, start: &std::time::Instant) {
+    fn report_incomplete(&self, start: &std::time::Instant) -> bool {
         if self.reqs_complete != self.reqs.len() {
             error!(
                 "connection timed out after {:?} and only completed {}/{} requests",
@@ -687,7 +691,11 @@ impl HttpConn for Http09Conn {
                 self.reqs_complete,
                 self.reqs.len()
             );
+
+            return true;
         }
+
+        false
     }
 
     fn handle_requests(
@@ -1260,7 +1268,7 @@ impl HttpConn for Http3Conn {
         }
     }
 
-    fn report_incomplete(&self, start: &std::time::Instant) {
+    fn report_incomplete(&self, start: &std::time::Instant) -> bool {
         if self.reqs_complete != self.reqs.len() {
             error!(
                 "connection timed out after {:?} and only completed {}/{} requests",
@@ -1272,7 +1280,11 @@ impl HttpConn for Http3Conn {
             if self.dump_json {
                 dump_json(&self.reqs);
             }
+
+            return true;
         }
+
+        false
     }
 
     fn handle_requests(
