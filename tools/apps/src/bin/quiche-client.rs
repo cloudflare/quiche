@@ -65,6 +65,7 @@ Options:
   --no-grease              Don't send GREASE.
   --cc-algorithm NAME      Specify which congestion control algorithm to use [default: cubic].
   --disable-hystart        Disable HyStart++.
+  --cancel-request         Immediately issue STOP_SEnDING after all HTTP/3 requests.
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
   -h --help                Show this screen.
@@ -347,6 +348,7 @@ fn main() {
                     &args.body,
                     &args.method,
                     args.dump_json,
+                    args.cancel_request,
                     dgram_sender,
                 ));
 
@@ -445,6 +447,7 @@ struct ClientArgs {
     body: Option<Vec<u8>>,
     method: String,
     connect_to: Option<String>,
+    cancel_request: bool,
 }
 
 impl Args for ClientArgs {
@@ -495,6 +498,8 @@ impl Args for ClientArgs {
             None
         };
 
+        let cancel_request = args.get_bool("--cancel-request");
+
         ClientArgs {
             version,
             dump_response_path,
@@ -506,6 +511,7 @@ impl Args for ClientArgs {
             body,
             method,
             connect_to,
+            cancel_request,
         }
     }
 }

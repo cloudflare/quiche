@@ -864,6 +864,7 @@ pub struct Http3Conn {
     reqs: Vec<Http3Request>,
     body: Option<Vec<u8>>,
     dump_json: bool,
+    cancel_request: bool,
     dgram_sender: Option<Http3DgramSender>,
 }
 
@@ -872,7 +873,8 @@ impl Http3Conn {
     pub fn with_urls(
         conn: &mut quiche::Connection, urls: &[url::Url], reqs_cardinal: u64,
         req_headers: &[String], body: &Option<Vec<u8>>, method: &str,
-        dump_json: bool, dgram_sender: Option<Http3DgramSender>,
+        dump_json: bool, cancel_request: bool,
+        dgram_sender: Option<Http3DgramSender>,
     ) -> Box<dyn HttpConn> {
         let mut reqs = Vec::new();
         for url in urls {
@@ -939,6 +941,7 @@ impl Http3Conn {
             reqs,
             body: body.as_ref().map(|b| b.to_vec()),
             dump_json,
+            cancel_request,
             dgram_sender,
         };
 
@@ -960,6 +963,7 @@ impl Http3Conn {
             reqs: Vec::new(),
             body: None,
             dump_json: false,
+            cancel_request: false,
             dgram_sender,
         };
 
@@ -1096,6 +1100,11 @@ impl HttpConn for Http3Conn {
                     break;
                 },
             };
+
+            if self.cancel_request {
+                error!("stopping request");
+                conn.stream_shutdown(s, quiche::Shutdown::Read, 0).unwrap();
+            }
 
             debug!("sending HTTP request {:?}", req.hdrs);
 
