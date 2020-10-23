@@ -2663,7 +2663,7 @@ impl Connection {
         }
 
         #[cfg(feature = "qlog")]
-        let offset = stream.recv.off_back();
+        let offset = stream.recv.off_front();
 
         let (read, fin) = stream.recv.pop(out)?;
 

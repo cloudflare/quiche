@@ -825,9 +825,9 @@ impl RecvBuf {
         Ok(())
     }
 
-    /// Returns the largest offset of data buffered.
+    /// Returns the lowest offset of data buffered.
     #[allow(dead_code)]
-    pub fn off_back(&self) -> u64 {
+    pub fn off_front(&self) -> u64 {
         self.off
     }
 
