@@ -840,6 +840,11 @@ impl RecvBuf {
             self.max_data_next / 2 > self.max_data - self.len
     }
 
+    /// Returns the largest offset ever received.
+    pub fn max_off(&self) -> u64 {
+        self.len
+    }
+
     /// Returns true if the receive-side of the stream is complete.
     ///
     /// This happens when the stream's receive final size is known, and the

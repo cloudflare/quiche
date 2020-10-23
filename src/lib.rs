@@ -3752,12 +3752,7 @@ impl Connection {
                     return Err(Error::InvalidStreamState);
                 }
 
-                // Check for flow control limits.
-                let data_len = data.len() as u64;
-
-                if self.rx_data + data_len > self.max_rx_data {
-                    return Err(Error::FlowControl);
-                }
+                let max_rx_data_left = self.max_rx_data - self.rx_data;
 
                 // Get existing stream or create a new one, but if the stream
                 // has already been closed and collected, ignore the frame.
@@ -3777,13 +3772,21 @@ impl Connection {
                     Err(e) => return Err(e),
                 };
 
+                // Check for the connection-level flow control limit.
+                let max_off_delta =
+                    data.max_off().saturating_sub(stream.recv.max_off());
+
+                if max_off_delta > max_rx_data_left {
+                    return Err(Error::FlowControl);
+                }
+
                 stream.recv.push(data)?;
 
                 if stream.is_readable() {
                     self.streams.mark_readable(stream_id, true);
                 }
 
-                self.rx_data += data_len;
+                self.rx_data += max_off_delta;
             },
 
             frame::Frame::MaxData { max } => {
@@ -5161,6 +5164,35 @@ mod tests {
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FlowControl),
         );
+    }
+
+    #[test]
+    fn flow_control_limit_dup() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        let frames = [
+            // One byte less than stream limit.
+            frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaa", 0, false),
+            },
+            // Same stream, but one byte more.
+            frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+            },
+            frame::Frame::Stream {
+                stream_id: 12,
+                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+            },
+        ];
+
+        let pkt_type = packet::Type::Short;
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
     }
 
     #[test]
