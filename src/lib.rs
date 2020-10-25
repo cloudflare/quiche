@@ -2781,7 +2781,7 @@ impl Connection {
 
         let was_flushable = stream.is_flushable();
 
-        let sent = stream.send.push_slice(buf, fin)?;
+        let sent = stream.send.write(buf, fin)?;
 
         let urgency = stream.urgency;
         let incremental = stream.incremental;

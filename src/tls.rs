@@ -676,7 +676,7 @@ extern fn add_handshake_data(
             &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
     };
 
-    if space.crypto_stream.send.push_slice(buf, false).is_err() {
+    if space.crypto_stream.send.write(buf, false).is_err() {
         return 0;
     }
 
