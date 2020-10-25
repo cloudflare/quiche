@@ -634,7 +634,7 @@ impl RecvBuf {
     /// This also takes care of enforcing stream flow control limits, as well
     /// as handling incoming data that overlaps data that is already in the
     /// buffer.
-    pub fn push(&mut self, buf: RangeBuf) -> Result<()> {
+    pub fn write(&mut self, buf: RangeBuf) -> Result<()> {
         if buf.max_off() > self.max_data {
             return Err(Error::FlowControl);
         }
@@ -742,7 +742,7 @@ impl RecvBuf {
     ///
     /// On success the amount of data read, and a flag indicating if there is
     /// no more data in the buffer, are returned as a tuple.
-    pub fn pop(&mut self, out: &mut [u8]) -> Result<(usize, bool)> {
+    pub fn emit(&mut self, out: &mut [u8]) -> Result<(usize, bool)> {
         let mut len = 0;
         let mut cap = out.len();
 
@@ -1253,7 +1253,7 @@ mod tests {
 
         let mut buf = [0; 32];
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -1262,54 +1262,54 @@ mod tests {
         assert_eq!(recv.len, 0);
 
         let buf = RangeBuf::from(b"hello", 0, false);
-        assert!(recv.push(buf).is_ok());
+        assert!(recv.write(buf).is_ok());
         assert_eq!(recv.len, 5);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
         let mut buf = [0; 32];
-        assert_eq!(recv.pop(&mut buf), Ok((5, false)));
+        assert_eq!(recv.emit(&mut buf), Ok((5, false)));
 
         // Don't store non-fin empty buffer.
         let buf = RangeBuf::from(b"", 10, false);
-        assert!(recv.push(buf).is_ok());
+        assert!(recv.write(buf).is_ok());
         assert_eq!(recv.len, 5);
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 0);
 
         // Check flow control for empty buffer.
         let buf = RangeBuf::from(b"", 16, false);
-        assert_eq!(recv.push(buf), Err(Error::FlowControl));
+        assert_eq!(recv.write(buf), Err(Error::FlowControl));
 
         // Store fin empty buffer.
         let buf = RangeBuf::from(b"", 5, true);
-        assert!(recv.push(buf).is_ok());
+        assert!(recv.write(buf).is_ok());
         assert_eq!(recv.len, 5);
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 1);
 
         // Don't store additional fin empty buffers.
         let buf = RangeBuf::from(b"", 5, true);
-        assert!(recv.push(buf).is_ok());
+        assert!(recv.write(buf).is_ok());
         assert_eq!(recv.len, 5);
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 1);
 
         // Don't store additional fin non-empty buffers.
         let buf = RangeBuf::from(b"aa", 3, true);
-        assert!(recv.push(buf).is_ok());
+        assert!(recv.write(buf).is_ok());
         assert_eq!(recv.len, 5);
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 1);
 
         // Validate final size with fin empty buffers.
         let buf = RangeBuf::from(b"", 6, true);
-        assert_eq!(recv.push(buf), Err(Error::FinalSize));
+        assert_eq!(recv.write(buf), Err(Error::FinalSize));
         let buf = RangeBuf::from(b"", 4, true);
-        assert_eq!(recv.push(buf), Err(Error::FinalSize));
+        assert_eq!(recv.write(buf), Err(Error::FinalSize));
 
         let mut buf = [0; 32];
-        assert_eq!(recv.pop(&mut buf), Ok((0, true)));
+        assert_eq!(recv.emit(&mut buf), Ok((0, true)));
     }
 
     #[test]
@@ -1323,30 +1323,30 @@ mod tests {
         let second = RangeBuf::from(b"world", 5, false);
         let third = RangeBuf::from(b"something", 10, true);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 10);
         assert_eq!(recv.off, 0);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
 
-        assert!(recv.push(third).is_ok());
+        assert!(recv.write(third).is_ok());
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 0);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 0);
 
-        let (len, fin) = recv.pop(&mut buf).unwrap();
+        let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 19);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"helloworldsomething");
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 19);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -1359,29 +1359,29 @@ mod tests {
         let first = RangeBuf::from(b"something", 0, false);
         let second = RangeBuf::from(b"helloworld", 9, true);
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 0);
 
-        let (len, fin) = recv.pop(&mut buf[..10]).unwrap();
+        let (len, fin) = recv.emit(&mut buf[..10]).unwrap();
         assert_eq!(len, 10);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"somethingh");
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 10);
 
-        let (len, fin) = recv.pop(&mut buf[..5]).unwrap();
+        let (len, fin) = recv.emit(&mut buf[..5]).unwrap();
         assert_eq!(len, 5);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"ellow");
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 15);
 
-        let (len, fin) = recv.pop(&mut buf[..10]).unwrap();
+        let (len, fin) = recv.emit(&mut buf[..10]).unwrap();
         assert_eq!(len, 4);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"orld");
@@ -1399,17 +1399,17 @@ mod tests {
         let first = RangeBuf::from(b"something", 0, false);
         let second = RangeBuf::from(b"helloworld", 9, true);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 0);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 0);
 
-        let (len, fin) = recv.pop(&mut buf).unwrap();
+        let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 19);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"somethinghelloworld");
@@ -1427,17 +1427,17 @@ mod tests {
         let first = RangeBuf::from(b"something", 0, false);
         let second = RangeBuf::from(b"", 9, true);
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
-        let (len, fin) = recv.pop(&mut buf).unwrap();
+        let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 9);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"something");
@@ -1457,31 +1457,31 @@ mod tests {
         let third = RangeBuf::from(b"ello", 4, true);
         let fourth = RangeBuf::from(b"ello", 5, true);
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
-        let (len, fin) = recv.pop(&mut buf).unwrap();
+        let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 9);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"something");
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
         assert_eq!(recv.data.len(), 0);
 
-        assert_eq!(recv.push(third), Err(Error::FinalSize));
+        assert_eq!(recv.write(third), Err(Error::FinalSize));
 
-        assert!(recv.push(fourth).is_ok());
+        assert!(recv.write(fourth).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
         assert_eq!(recv.data.len(), 0);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -1494,17 +1494,17 @@ mod tests {
         let first = RangeBuf::from(b"something", 0, false);
         let second = RangeBuf::from(b"hello", 4, false);
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
-        let (len, fin) = recv.pop(&mut buf).unwrap();
+        let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 9);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"something");
@@ -1512,7 +1512,7 @@ mod tests {
         assert_eq!(recv.off, 9);
         assert_eq!(recv.data.len(), 0);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -1525,17 +1525,17 @@ mod tests {
         let first = RangeBuf::from(b"something", 0, false);
         let second = RangeBuf::from(b"hello", 4, false);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 2);
 
-        let (len, fin) = recv.pop(&mut buf).unwrap();
+        let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 9);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"somehello");
@@ -1543,7 +1543,7 @@ mod tests {
         assert_eq!(recv.off, 9);
         assert_eq!(recv.data.len(), 0);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -1556,17 +1556,17 @@ mod tests {
         let first = RangeBuf::from(b"something", 0, false);
         let second = RangeBuf::from(b"hello", 3, false);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 8);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 3);
 
-        let (len, fin) = recv.pop(&mut buf).unwrap();
+        let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 9);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"somhellog");
@@ -1574,7 +1574,7 @@ mod tests {
         assert_eq!(recv.off, 9);
         assert_eq!(recv.data.len(), 0);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -1588,22 +1588,22 @@ mod tests {
         let second = RangeBuf::from(b"hello", 3, false);
         let third = RangeBuf::from(b"hello", 12, false);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 8);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
-        assert!(recv.push(third).is_ok());
+        assert!(recv.write(third).is_ok());
         assert_eq!(recv.len, 17);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 2);
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 18);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 5);
 
-        let (len, fin) = recv.pop(&mut buf).unwrap();
+        let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 18);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"somhellogsomhellog");
@@ -1611,7 +1611,7 @@ mod tests {
         assert_eq!(recv.off, 18);
         assert_eq!(recv.data.len(), 0);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -1624,24 +1624,24 @@ mod tests {
         let first = RangeBuf::from(b"something", 0, false);
         let second = RangeBuf::from(b"hello", 8, true);
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 13);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 2);
 
-        let (len, fin) = recv.pop(&mut buf).unwrap();
+        let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 13);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"somethingello");
         assert_eq!(recv.len, 13);
         assert_eq!(recv.off, 13);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -1654,24 +1654,24 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, false);
         let second = RangeBuf::from(b"something", 3, true);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 12);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 12);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 2);
 
-        let (len, fin) = recv.pop(&mut buf).unwrap();
+        let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 12);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"helsomething");
         assert_eq!(recv.len, 12);
         assert_eq!(recv.off, 12);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -1685,22 +1685,22 @@ mod tests {
         let second = RangeBuf::from(b"something", 0, false);
         let third = RangeBuf::from(b"moar", 11, true);
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 13);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 13);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 2);
 
-        assert!(recv.push(third).is_ok());
+        assert!(recv.write(third).is_ok());
         assert_eq!(recv.len, 15);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 3);
 
-        let (len, fin) = recv.pop(&mut buf).unwrap();
+        let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 15);
         assert_eq!(fin, true);
         assert_eq!(&buf[..len], b"somethinhelloar");
@@ -1708,7 +1708,7 @@ mod tests {
         assert_eq!(recv.off, 15);
         assert_eq!(recv.data.len(), 0);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -1725,37 +1725,37 @@ mod tests {
         let fifth = RangeBuf::from(b"eee", 9, false);
         let sixth = RangeBuf::from(b"fff", 11, false);
 
-        assert!(recv.push(second).is_ok());
+        assert!(recv.write(second).is_ok());
         assert_eq!(recv.len, 5);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 1);
 
-        assert!(recv.push(fourth).is_ok());
+        assert!(recv.write(fourth).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 2);
 
-        assert!(recv.push(third).is_ok());
+        assert!(recv.write(third).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 3);
 
-        assert!(recv.push(first).is_ok());
+        assert!(recv.write(first).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 4);
 
-        assert!(recv.push(sixth).is_ok());
+        assert!(recv.write(sixth).is_ok());
         assert_eq!(recv.len, 14);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 5);
 
-        assert!(recv.push(fifth).is_ok());
+        assert!(recv.write(fifth).is_ok());
         assert_eq!(recv.len, 14);
         assert_eq!(recv.off, 0);
         assert_eq!(recv.data.len(), 6);
 
-        let (len, fin) = recv.pop(&mut buf).unwrap();
+        let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 14);
         assert_eq!(fin, false);
         assert_eq!(&buf[..len], b"aabbbcdddeefff");
@@ -1763,7 +1763,7 @@ mod tests {
         assert_eq!(recv.off, 14);
         assert_eq!(recv.data.len(), 0);
 
-        assert_eq!(recv.pop(&mut buf), Err(Error::Done));
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
     }
 
     #[test]
@@ -1993,13 +1993,13 @@ mod tests {
         let second = RangeBuf::from(b"world", 5, false);
         let third = RangeBuf::from(b"something", 10, false);
 
-        assert_eq!(stream.recv.push(second), Ok(()));
-        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.write(second), Ok(()));
+        assert_eq!(stream.recv.write(first), Ok(()));
         assert!(!stream.recv.almost_full());
 
-        assert_eq!(stream.recv.push(third), Err(Error::FlowControl));
+        assert_eq!(stream.recv.write(third), Err(Error::FlowControl));
 
-        let (len, fin) = stream.recv.pop(&mut buf).unwrap();
+        let (len, fin) = stream.recv.emit(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"helloworld");
         assert_eq!(fin, false);
 
@@ -2010,7 +2010,7 @@ mod tests {
         assert!(!stream.recv.almost_full());
 
         let third = RangeBuf::from(b"something", 10, false);
-        assert_eq!(stream.recv.push(third), Ok(()));
+        assert_eq!(stream.recv.write(third), Ok(()));
     }
 
     #[test]
@@ -2021,8 +2021,8 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, true);
         let second = RangeBuf::from(b"world", 5, false);
 
-        assert_eq!(stream.recv.push(first), Ok(()));
-        assert_eq!(stream.recv.push(second), Err(Error::FinalSize));
+        assert_eq!(stream.recv.write(first), Ok(()));
+        assert_eq!(stream.recv.write(second), Err(Error::FinalSize));
     }
 
     #[test]
@@ -2033,12 +2033,12 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, true);
         let second = RangeBuf::from(b"hello", 0, true);
 
-        assert_eq!(stream.recv.push(first), Ok(()));
-        assert_eq!(stream.recv.push(second), Ok(()));
+        assert_eq!(stream.recv.write(first), Ok(()));
+        assert_eq!(stream.recv.write(second), Ok(()));
 
         let mut buf = [0; 32];
 
-        let (len, fin) = stream.recv.pop(&mut buf).unwrap();
+        let (len, fin) = stream.recv.emit(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"hello");
         assert_eq!(fin, true);
     }
@@ -2051,8 +2051,8 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, true);
         let second = RangeBuf::from(b"world", 5, true);
 
-        assert_eq!(stream.recv.push(second), Ok(()));
-        assert_eq!(stream.recv.push(first), Err(Error::FinalSize));
+        assert_eq!(stream.recv.write(second), Ok(()));
+        assert_eq!(stream.recv.write(first), Err(Error::FinalSize));
     }
 
     #[test]
@@ -2063,8 +2063,8 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, true);
         let second = RangeBuf::from(b"world", 5, false);
 
-        assert_eq!(stream.recv.push(second), Ok(()));
-        assert_eq!(stream.recv.push(first), Err(Error::FinalSize));
+        assert_eq!(stream.recv.write(second), Ok(()));
+        assert_eq!(stream.recv.write(first), Err(Error::FinalSize));
     }
 
     #[test]
@@ -2077,10 +2077,10 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, false);
         let second = RangeBuf::from(b"world", 5, true);
 
-        assert_eq!(stream.recv.push(first), Ok(()));
-        assert_eq!(stream.recv.push(second), Ok(()));
+        assert_eq!(stream.recv.write(first), Ok(()));
+        assert_eq!(stream.recv.write(second), Ok(()));
 
-        let (len, fin) = stream.recv.pop(&mut buf).unwrap();
+        let (len, fin) = stream.recv.emit(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"helloworld");
         assert_eq!(fin, true);
 
@@ -2094,7 +2094,7 @@ mod tests {
 
         let first = RangeBuf::from(b"hello", 0, true);
 
-        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.write(first), Ok(()));
         assert_eq!(stream.recv.reset(10), Err(Error::FinalSize));
     }
 
@@ -2105,7 +2105,7 @@ mod tests {
 
         let first = RangeBuf::from(b"hello", 0, false);
 
-        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.write(first), Ok(()));
         assert_eq!(stream.recv.reset(5), Ok(0));
         assert_eq!(stream.recv.reset(5), Ok(0));
     }
@@ -2117,7 +2117,7 @@ mod tests {
 
         let first = RangeBuf::from(b"hello", 0, false);
 
-        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.write(first), Ok(()));
         assert_eq!(stream.recv.reset(5), Ok(0));
         assert_eq!(stream.recv.reset(10), Err(Error::FinalSize));
     }
@@ -2129,7 +2129,7 @@ mod tests {
 
         let first = RangeBuf::from(b"hello", 0, false);
 
-        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.write(first), Ok(()));
         assert_eq!(stream.recv.reset(4), Err(Error::FinalSize));
     }
 
@@ -2309,18 +2309,18 @@ mod tests {
 
         let first = RangeBuf::from(b"hello", 0, false);
 
-        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.write(first), Ok(()));
 
         let mut buf = [0; 10];
 
-        let (len, fin) = stream.recv.pop(&mut buf).unwrap();
+        let (len, fin) = stream.recv.emit(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"hello");
         assert_eq!(fin, false);
 
         let first = RangeBuf::from(b"elloworld", 1, true);
-        assert_eq!(stream.recv.push(first), Ok(()));
+        assert_eq!(stream.recv.write(first), Ok(()));
 
-        let (len, fin) = stream.recv.pop(&mut buf).unwrap();
+        let (len, fin) = stream.recv.emit(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"world");
         assert_eq!(fin, true);
     }
@@ -2341,14 +2341,14 @@ mod tests {
         assert!(stream.send.is_fin());
 
         let buf = RangeBuf::from(b"hello", 0, true);
-        assert!(stream.recv.push(buf).is_ok());
+        assert!(stream.recv.write(buf).is_ok());
         assert!(!stream.recv.is_fin());
 
         stream.send.ack(6, 4);
         assert!(!stream.send.is_complete());
 
         let mut buf = [0; 2];
-        assert_eq!(stream.recv.pop(&mut buf), Ok((2, false)));
+        assert_eq!(stream.recv.emit(&mut buf), Ok((2, false)));
         assert!(!stream.recv.is_fin());
 
         stream.send.ack(1, 5);
@@ -2360,7 +2360,7 @@ mod tests {
         assert!(!stream.is_complete());
 
         let mut buf = [0; 3];
-        assert_eq!(stream.recv.pop(&mut buf), Ok((3, true)));
+        assert_eq!(stream.recv.emit(&mut buf), Ok((3, true)));
         assert!(stream.recv.is_fin());
 
         assert!(stream.is_complete());
