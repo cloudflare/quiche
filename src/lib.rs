@@ -2668,7 +2668,7 @@ impl Connection {
         #[cfg(feature = "qlog")]
         let offset = stream.recv.off_front();
 
-        let (read, fin) = stream.recv.pop(out)?;
+        let (read, fin) = stream.recv.emit(out)?;
 
         self.max_rx_data_next = self.max_rx_data_next.saturating_add(read as u64);
 
@@ -3641,7 +3641,7 @@ impl Connection {
 
             frame::Frame::Crypto { data } => {
                 // Push the data to the stream so it can be re-ordered.
-                self.pkt_num_spaces[epoch].crypto_stream.recv.push(data)?;
+                self.pkt_num_spaces[epoch].crypto_stream.recv.write(data)?;
 
                 // Feed crypto data to the TLS state, if there's data
                 // available at the expected offset.
@@ -3651,7 +3651,7 @@ impl Connection {
 
                 let stream = &mut self.pkt_num_spaces[epoch].crypto_stream;
 
-                while let Ok((read, _)) = stream.recv.pop(&mut crypto_buf) {
+                while let Ok((read, _)) = stream.recv.emit(&mut crypto_buf) {
                     let recv_buf = &crypto_buf[..read];
                     self.handshake.provide_data(level, &recv_buf)?;
                 }
@@ -3783,7 +3783,7 @@ impl Connection {
                     return Err(Error::FlowControl);
                 }
 
-                stream.recv.push(data)?;
+                stream.recv.write(data)?;
 
                 if stream.is_readable() {
                     self.streams.mark_readable(stream_id, true);
