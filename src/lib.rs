@@ -1836,21 +1836,26 @@ impl Connection {
                     }
                 },
 
-                frame::Frame::Crypto { data } => {
+                frame::Frame::CryptoHeader { offset, length } => {
                     self.pkt_num_spaces[epoch]
                         .crypto_stream
                         .send
-                        .ack(data.off(), data.len());
+                        .ack_and_drop(offset, length);
                 },
 
-                frame::Frame::Stream { stream_id, data } => {
+                frame::Frame::StreamHeader {
+                    stream_id,
+                    offset,
+                    length,
+                    ..
+                } => {
                     let stream = match self.streams.get_mut(stream_id) {
                         Some(v) => v,
 
                         None => continue,
                     };
 
-                    stream.send.ack(data.off(), data.len());
+                    stream.send.ack_and_drop(offset, length);
 
                     if stream.is_complete() {
                         let local = stream.local;
@@ -1983,11 +1988,19 @@ impl Connection {
         // Process lost frames.
         for lost in self.recovery.lost[epoch].drain(..) {
             match lost {
-                frame::Frame::Crypto { data } => {
-                    self.pkt_num_spaces[epoch].crypto_stream.send.push(data)?;
+                frame::Frame::CryptoHeader { offset, length } => {
+                    self.pkt_num_spaces[epoch]
+                        .crypto_stream
+                        .send
+                        .retransmit(offset, length);
                 },
 
-                frame::Frame::Stream { stream_id, data } => {
+                frame::Frame::StreamHeader {
+                    stream_id,
+                    offset,
+                    length,
+                    fin,
+                } => {
                     let stream = match self.streams.get_mut(stream_id) {
                         Some(v) => v,
 
@@ -1996,9 +2009,9 @@ impl Connection {
 
                     let was_flushable = stream.is_flushable();
 
-                    let empty_fin = data.is_empty() && data.fin();
+                    let empty_fin = length == 0 && fin;
 
-                    stream.send.push(data)?;
+                    stream.send.retransmit(offset, length);
 
                     // If the stream is now flushable push it to the flushable
                     // queue, but only if it wasn't already queued.
@@ -2327,13 +2340,54 @@ impl Connection {
             left > frame::MAX_CRYPTO_OVERHEAD &&
             !is_closing
         {
-            let crypto_len = left - frame::MAX_CRYPTO_OVERHEAD;
-            let crypto_buf = self.pkt_num_spaces[epoch]
+            let max_len = left - frame::MAX_CRYPTO_OVERHEAD;
+
+            let crypto_off =
+                self.pkt_num_spaces[epoch].crypto_stream.send.off_front();
+
+            // Encode the frame.
+            //
+            // Instead of creating a `frame::Frame` object, encode the frame
+            // directly into the packet buffer.
+            //
+            // First we reserve some space in the output buffer for writing the
+            // frame header (we assume the length field is always a 2-byte
+            // varint as we don't know the value yet).
+            //
+            // Then we emit the data from the crypto stream's send buffer.
+            //
+            // Finally we go back and encode the frame header with the now
+            // available information.
+            let hdr_off = b.off();
+            let hdr_len = 1 + // frame type
+                octets::varint_len(crypto_off) + // offset
+                2; // length, always encode as 2-byte varint
+
+            let (mut crypto_hdr, mut crypto_payload) =
+                b.split_at(hdr_off + hdr_len)?;
+
+            // Write stream data into the packet buffer.
+            let (len, _) = self.pkt_num_spaces[epoch]
                 .crypto_stream
                 .send
-                .pop(crypto_len)?;
+                .emit(&mut crypto_payload.as_mut()[..max_len])?;
 
-            let frame = frame::Frame::Crypto { data: crypto_buf };
+            // Encode the frame's header.
+            //
+            // Due to how `OctetsMut::split_at()` works, `crypto_hdr` starts
+            // from the initial offset of `b` (rather than the current offset),
+            // so it needs to be advanced to the initial frame offset.
+            crypto_hdr.skip(hdr_off)?;
+
+            frame::encode_crypto_header(crypto_off, len as u64, &mut crypto_hdr)?;
+
+            // Advance the packet buffer's offset.
+            b.skip(hdr_len + len)?;
+
+            let frame = frame::Frame::CryptoHeader {
+                offset: crypto_off,
+                length: len,
+            };
 
             if push_frame_to_pkt!(b, frames, frame, left) {
                 ack_eliciting = true;
@@ -2385,31 +2439,65 @@ impl Connection {
                     None => continue,
                 };
 
-                let off = stream.send.off_front();
+                let stream_off = stream.send.off_front();
 
-                // Try to accurately account for the STREAM frame's overhead,
-                // such that we can fill as much of the packet buffer as
-                // possible.
-                let overhead = 1 +
-                    octets::varint_len(stream_id) +
-                    octets::varint_len(off) +
-                    octets::varint_len(left as u64);
+                // Encode the frame.
+                //
+                // Instead of creating a `frame::Frame` object, encode the frame
+                // directly into the packet buffer.
+                //
+                // First we reserve some space in the output buffer for writing
+                // the frame header (we assume the length field is
+                // always a 2-byte varint as we don't know the
+                // value yet).
+                //
+                // Then we emit the data from the stream's send buffer.
+                //
+                // Finally we go back and encode the frame header with the now
+                // available information.
+                let hdr_off = b.off();
+                let hdr_len = 1 + // frame type
+                    octets::varint_len(stream_id) + // stream_id
+                    octets::varint_len(stream_off) + // offset
+                    2; // length, always encode as 2-byte varint
 
-                let max_len = match left.checked_sub(overhead) {
+                let max_len = match left.checked_sub(hdr_len) {
                     Some(v) => v,
 
                     None => continue,
                 };
 
-                let stream_buf = stream.send.pop(max_len)?;
+                let (mut stream_hdr, mut stream_payload) =
+                    b.split_at(hdr_off + hdr_len)?;
 
-                if stream_buf.is_empty() && !stream_buf.fin() {
-                    continue;
-                }
+                // Write stream data into the packet buffer.
+                let (len, fin) =
+                    stream.send.emit(&mut stream_payload.as_mut()[..max_len])?;
 
-                let frame = frame::Frame::Stream {
+                // Encode the frame's header.
+                //
+                // Due to how `OctetsMut::split_at()` works, `stream_hdr` starts
+                // from the initial offset of `b` (rather than the current
+                // offset), so it needs to be advanced to the initial frame
+                // offset.
+                stream_hdr.skip(hdr_off)?;
+
+                frame::encode_stream_header(
                     stream_id,
-                    data: stream_buf,
+                    stream_off,
+                    len as u64,
+                    fin,
+                    &mut stream_hdr,
+                )?;
+
+                // Advance the packet buffer's offset.
+                b.skip(hdr_len + len)?;
+
+                let frame = frame::Frame::StreamHeader {
+                    stream_id,
+                    offset: stream_off,
+                    length: len,
+                    fin,
                 };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
@@ -3771,6 +3859,8 @@ impl Connection {
                 }
             },
 
+            frame::Frame::CryptoHeader { .. } => unreachable!(),
+
             // TODO: implement stateless retry
             frame::Frame::NewToken { .. } => (),
 
@@ -3818,6 +3908,8 @@ impl Connection {
 
                 self.rx_data += max_off_delta;
             },
+
+            frame::Frame::StreamHeader { .. } => unreachable!(),
 
             frame::Frame::MaxData { max } => {
                 self.max_tx_data = cmp::max(self.max_tx_data, max);
