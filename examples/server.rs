@@ -172,7 +172,7 @@ fn main() {
 
             // Lookup a connection based on the packet's connection ID. If there
             // is no connection matching, create a new one.
-            let (_, client) = if !clients.contains_key(&hdr.dcid) &&
+            let (_, client) = if !clients.contains_key(hdr.dcid.as_ref()) &&
                 !clients.contains_key(conn_id)
             {
                 if hdr.ty != quiche::Type::Initial {
@@ -270,7 +270,7 @@ fn main() {
 
                 clients.get_mut(&scid[..]).unwrap()
             } else {
-                match clients.get_mut(&hdr.dcid) {
+                match clients.get_mut(hdr.dcid.as_ref()) {
                     Some(v) => v,
 
                     None => clients.get_mut(conn_id).unwrap(),

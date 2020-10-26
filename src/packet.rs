@@ -129,9 +129,57 @@ impl Type {
     }
 }
 
+/// A QUIC connection ID.
+#[derive(Clone)]
+pub struct ConnectionId<'a>(ConnectionIdInner<'a>);
+
+#[derive(Clone)]
+enum ConnectionIdInner<'a> {
+    Vec(Vec<u8>),
+    Ref(&'a [u8]),
+}
+
+impl<'a> ConnectionId<'a> {
+    /// Creates a new connection ID from the given vector.
+    pub fn from_vec(cid: Vec<u8>) -> Self {
+        Self(ConnectionIdInner::Vec(cid))
+    }
+
+    /// Creates a new connection ID from the given slice.
+    pub fn from_ref(cid: &'a [u8]) -> Self {
+        Self(ConnectionIdInner::Ref(cid))
+    }
+}
+
+impl<'a> PartialEq for ConnectionId<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref() == other.as_ref()
+    }
+}
+
+impl<'a> AsRef<[u8]> for ConnectionId<'a> {
+    fn as_ref(&self) -> &[u8] {
+        match &self.0 {
+            ConnectionIdInner::Vec(v) => v.as_ref(),
+            ConnectionIdInner::Ref(v) => v,
+        }
+    }
+}
+
+impl<'a> std::ops::Deref for ConnectionId<'a> {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match &self.0 {
+            ConnectionIdInner::Vec(v) => v.as_ref(),
+            ConnectionIdInner::Ref(v) => v,
+        }
+    }
+}
+
 /// A QUIC packet's header.
 #[derive(Clone, PartialEq)]
-pub struct Header {
+pub struct Header<'a> {
     /// The type of the packet.
     pub ty: Type,
 
@@ -139,10 +187,10 @@ pub struct Header {
     pub version: u32,
 
     /// The destination connection ID of the packet.
-    pub dcid: Vec<u8>,
+    pub dcid: ConnectionId<'a>,
 
     /// The source connection ID of the packet.
-    pub scid: Vec<u8>,
+    pub scid: ConnectionId<'a>,
 
     /// The packet number. It's only meaningful after the header protection is
     /// removed.
@@ -165,7 +213,7 @@ pub struct Header {
     pub(crate) key_phase: bool,
 }
 
-impl Header {
+impl<'a> Header<'a> {
     /// Parses a QUIC packet header from the given buffer.
     ///
     /// The `dcid_len` parameter is the length of the destination connection ID,
@@ -183,14 +231,16 @@ impl Header {
     /// let hdr = quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN)?;
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn from_slice(buf: &mut [u8], dcid_len: usize) -> Result<Header> {
+    pub fn from_slice<'b>(
+        buf: &'b mut [u8], dcid_len: usize,
+    ) -> Result<Header<'a>> {
         let mut b = octets::OctetsMut::with_slice(buf);
         Header::from_bytes(&mut b, dcid_len)
     }
 
-    pub(crate) fn from_bytes(
-        b: &mut octets::OctetsMut, dcid_len: usize,
-    ) -> Result<Header> {
+    pub(crate) fn from_bytes<'b>(
+        b: &'b mut octets::OctetsMut, dcid_len: usize,
+    ) -> Result<Header<'a>> {
         let first = b.get_u8()?;
 
         if !Header::is_long(first) {
@@ -200,8 +250,8 @@ impl Header {
             return Ok(Header {
                 ty: Type::Short,
                 version: 0,
-                dcid: dcid.to_vec(),
-                scid: Vec::new(),
+                dcid: ConnectionId::from_vec(dcid.to_vec()),
+                scid: ConnectionId::from_vec(Vec::new()),
                 pkt_num: 0,
                 pkt_num_len: 0,
                 token: None,
@@ -274,8 +324,8 @@ impl Header {
         Ok(Header {
             ty,
             version,
-            dcid,
-            scid,
+            dcid: ConnectionId::from_vec(dcid),
+            scid: ConnectionId::from_vec(scid),
             pkt_num: 0,
             pkt_num_len: 0,
             token,
@@ -367,7 +417,7 @@ impl Header {
     }
 }
 
-impl std::fmt::Debug for Header {
+impl<'a> std::fmt::Debug for Header<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", self.ty)?;
 
@@ -376,13 +426,13 @@ impl std::fmt::Debug for Header {
         }
 
         write!(f, " dcid=")?;
-        for b in &self.dcid {
+        for b in self.dcid.as_ref() {
             write!(f, "{:02x}", b)?;
         }
 
         if self.ty != Type::Short {
             write!(f, " scid=")?;
-            for b in &self.scid {
+            for b in self.scid.as_ref() {
                 write!(f, "{:02x}", b)?;
             }
         }
@@ -609,8 +659,8 @@ pub fn retry(
     let hdr = Header {
         ty: Type::Retry,
         version,
-        dcid: scid.to_vec(),
-        scid: new_scid.to_vec(),
+        dcid: ConnectionId::from_ref(scid),
+        scid: ConnectionId::from_ref(new_scid),
         pkt_num: 0,
         pkt_num_len: 0,
         token: Some(token.to_vec()),
@@ -823,8 +873,12 @@ mod tests {
         let hdr = Header {
             ty: Type::Retry,
             version: 0xafafafaf,
-            dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba],
-            scid: vec![0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb],
+            dcid: ConnectionId::from_vec(vec![
+                0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
+            ]),
+            scid: ConnectionId::from_vec(vec![
+                0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
+            ]),
             pkt_num: 0,
             pkt_num_len: 0,
             token: Some(vec![0xba; 24]),
@@ -849,8 +903,12 @@ mod tests {
         let hdr = Header {
             ty: Type::Initial,
             version: 0xafafafaf,
-            dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba],
-            scid: vec![0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb],
+            dcid: ConnectionId::from_vec(vec![
+                0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
+            ]),
+            scid: ConnectionId::from_vec(vec![
+                0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
+            ]),
             pkt_num: 0,
             pkt_num_len: 0,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
@@ -872,11 +930,13 @@ mod tests {
         let hdr = Header {
             ty: Type::Initial,
             version: crate::PROTOCOL_VERSION,
-            dcid: vec![
+            dcid: ConnectionId::from_vec(vec![
                 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
                 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
-            ],
-            scid: vec![0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb],
+            ]),
+            scid: ConnectionId::from_vec(vec![
+                0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
+            ]),
             pkt_num: 0,
             pkt_num_len: 0,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
@@ -898,11 +958,13 @@ mod tests {
         let hdr = Header {
             ty: Type::Initial,
             version: crate::PROTOCOL_VERSION,
-            dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba],
-            scid: vec![
+            dcid: ConnectionId::from_vec(vec![
+                0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
+            ]),
+            scid: ConnectionId::from_vec(vec![
                 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
                 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
-            ],
+            ]),
             pkt_num: 0,
             pkt_num_len: 0,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
@@ -924,11 +986,13 @@ mod tests {
         let hdr = Header {
             ty: Type::Initial,
             version: 0xafafafaf,
-            dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba],
-            scid: vec![
+            dcid: ConnectionId::from_vec(vec![
+                0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
+            ]),
+            scid: ConnectionId::from_vec(vec![
                 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
                 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
-            ],
+            ]),
             pkt_num: 0,
             pkt_num_len: 0,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
@@ -950,8 +1014,12 @@ mod tests {
         let hdr = Header {
             ty: Type::Handshake,
             version: 0xafafafaf,
-            dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba],
-            scid: vec![0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb],
+            dcid: ConnectionId::from_vec(vec![
+                0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
+            ]),
+            scid: ConnectionId::from_vec(vec![
+                0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
+            ]),
             pkt_num: 0,
             pkt_num_len: 0,
             token: None,
@@ -973,8 +1041,10 @@ mod tests {
         let hdr = Header {
             ty: Type::Short,
             version: 0,
-            dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba],
-            scid: vec![],
+            dcid: ConnectionId::from_vec(vec![
+                0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
+            ]),
+            scid: ConnectionId::from_vec(Vec::new()),
             pkt_num: 0,
             pkt_num_len: 0,
             token: None,
@@ -2178,8 +2248,8 @@ mod tests {
         let hdr = Header {
             ty: Type::Initial,
             version: crate::PROTOCOL_VERSION,
-            dcid: Vec::new(),
-            scid: Vec::new(),
+            dcid: ConnectionId::from_vec(Vec::new()),
+            scid: ConnectionId::from_vec(Vec::new()),
             pkt_num: 0,
             pkt_num_len: 0,
             token: None,
