@@ -1476,11 +1476,11 @@ impl Connection {
                 return Err(Error::Done);
             }
 
-            if hdr.dcid != self.scid {
+            if hdr.dcid.as_ref() != self.scid {
                 return Err(Error::Done);
             }
 
-            if hdr.scid != self.dcid {
+            if hdr.scid.as_ref() != self.dcid {
                 return Err(Error::Done);
             }
 
@@ -2044,16 +2044,11 @@ impl Connection {
 
         let hdr = Header {
             ty: pkt_type,
-            version: self.version,
-            dcid: self.dcid.clone(),
 
-            // Don't needlessly clone the source connection ID for 1-RTT packets
-            // as it is not used.
-            scid: if pkt_type != packet::Type::Short {
-                self.scid.clone()
-            } else {
-                Vec::new()
-            },
+            version: self.version,
+
+            dcid: ConnectionId::from_ref(&self.dcid),
+            scid: ConnectionId::from_ref(&self.scid),
 
             pkt_num: 0,
             pkt_num_len: pn_len,
@@ -4672,8 +4667,8 @@ pub mod testing {
         let hdr = Header {
             ty: pkt_type,
             version: conn.version,
-            dcid: conn.dcid.clone(),
-            scid: conn.scid.clone(),
+            dcid: ConnectionId::from_ref(&conn.dcid),
+            scid: ConnectionId::from_ref(&conn.scid),
             pkt_num: 0,
             pkt_num_len: pn_len,
             token: conn.token.clone(),
@@ -6113,8 +6108,8 @@ mod tests {
         let hdr = Header {
             ty: packet::Type::Initial,
             version: pipe.client.version,
-            dcid: pipe.client.dcid.clone(),
-            scid: pipe.client.scid.clone(),
+            dcid: ConnectionId::from_ref(&pipe.client.dcid),
+            scid: ConnectionId::from_ref(&pipe.client.scid),
             pkt_num: 0,
             pkt_num_len: pn_len,
             token: pipe.client.token.clone(),
@@ -7748,9 +7743,12 @@ mod tests {
     }
 }
 
+pub use crate::packet::ConnectionId;
 pub use crate::packet::Header;
 pub use crate::packet::Type;
+
 pub use crate::recovery::CongestionControlAlgorithm;
+
 pub use crate::stream::StreamIter;
 
 mod crypto;
