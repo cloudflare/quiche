@@ -183,18 +183,30 @@ impl<'a> Octets<'a> {
             return Err(BufferTooShortError);
         }
 
-        let mut vec = self.get_bytes(len)?.to_vec();
-
-        // Mask the 2 most significant bits to remove the encoded length.
-        vec[0] &= 0x3f;
-
-        let mut b = OctetsMut::with_slice(&mut vec);
-
         let out = match len {
-            1 => u64::from(b.get_u8()?),
-            2 => u64::from(b.get_u16()?),
-            4 => u64::from(b.get_u32()?),
-            8 => b.get_u64()?,
+            1 => u64::from(self.get_u8()?),
+
+            2 => u64::from(
+                ((self.get_u8()? as u16 & 0x3f) << 8) + (self.get_u8()? as u16),
+            ),
+
+            4 => u64::from(
+                ((self.get_u8()? as u32 & 0x3f) << 24) +
+                    ((self.get_u8()? as u32) << 16) +
+                    ((self.get_u8()? as u32) << 8) +
+                    (self.get_u8()? as u32),
+            ),
+
+            8 =>
+                ((self.get_u8()? as u64 & 0x3f) << 56) +
+                    ((self.get_u8()? as u64) << 48) +
+                    ((self.get_u8()? as u64) << 40) +
+                    ((self.get_u8()? as u64) << 32) +
+                    ((self.get_u8()? as u64) << 24) +
+                    ((self.get_u8()? as u64) << 16) +
+                    ((self.get_u8()? as u64) << 8) +
+                    (self.get_u8()? as u64),
+
             _ => unreachable!(),
         };
 
@@ -402,18 +414,30 @@ impl<'a> OctetsMut<'a> {
             return Err(BufferTooShortError);
         }
 
-        let mut vec = self.get_bytes(len)?.to_vec();
-
-        // Mask the 2 most significant bits to remove the encoded length.
-        vec[0] &= 0x3f;
-
-        let mut b = OctetsMut::with_slice(&mut vec);
-
         let out = match len {
-            1 => u64::from(b.get_u8()?),
-            2 => u64::from(b.get_u16()?),
-            4 => u64::from(b.get_u32()?),
-            8 => b.get_u64()?,
+            1 => u64::from(self.get_u8()?),
+
+            2 => u64::from(
+                ((self.get_u8()? as u16 & 0x3f) << 8) + (self.get_u8()? as u16),
+            ),
+
+            4 => u64::from(
+                ((self.get_u8()? as u32 & 0x3f) << 24) +
+                    ((self.get_u8()? as u32) << 16) +
+                    ((self.get_u8()? as u32) << 8) +
+                    (self.get_u8()? as u32),
+            ),
+
+            8 =>
+                ((self.get_u8()? as u64 & 0x3f) << 56) +
+                    ((self.get_u8()? as u64) << 48) +
+                    ((self.get_u8()? as u64) << 40) +
+                    ((self.get_u8()? as u64) << 32) +
+                    ((self.get_u8()? as u64) << 24) +
+                    ((self.get_u8()? as u64) << 16) +
+                    ((self.get_u8()? as u64) << 8) +
+                    (self.get_u8()? as u64),
+
             _ => unreachable!(),
         };
 
