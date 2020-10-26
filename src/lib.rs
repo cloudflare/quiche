@@ -2258,23 +2258,6 @@ impl Connection {
                 }
             }
 
-            // Create MAX_DATA frame as needed.
-            if self.almost_full {
-                let frame = frame::Frame::MaxData {
-                    max: self.max_rx_data_next,
-                };
-
-                if push_frame_to_pkt!(b, frames, frame, left) {
-                    self.almost_full = false;
-
-                    // Commits the new max_rx_data limit.
-                    self.max_rx_data = self.max_rx_data_next;
-
-                    ack_eliciting = true;
-                    in_flight = true;
-                }
-            }
-
             // Create DATA_BLOCKED frame.
             if let Some(limit) = self.blocked_limit {
                 let frame = frame::Frame::DataBlocked { limit };
@@ -2309,6 +2292,27 @@ impl Connection {
                     stream.recv.update_max_data();
 
                     self.streams.mark_almost_full(stream_id, false);
+
+                    ack_eliciting = true;
+                    in_flight = true;
+
+                    // Also send MAX_DATA when MAX_STREAM_DATA is sent, to avoid a
+                    // potential race condition.
+                    self.almost_full = true;
+                }
+            }
+
+            // Create MAX_DATA frame as needed.
+            if self.almost_full && self.max_rx_data < self.max_rx_data_next {
+                let frame = frame::Frame::MaxData {
+                    max: self.max_rx_data_next,
+                };
+
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    self.almost_full = false;
+
+                    // Commits the new max_rx_data limit.
+                    self.max_rx_data = self.max_rx_data_next;
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -5486,6 +5490,13 @@ mod tests {
         // Ignore ACK.
         iter.next().unwrap();
 
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::MaxStreamData {
+                stream_id: 4,
+                max: 30
+            })
+        );
         assert_eq!(iter.next(), Some(&frame::Frame::MaxData { max: 46 }));
     }
 
