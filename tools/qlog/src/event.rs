@@ -32,6 +32,7 @@
 //! verbosity of using the raw data structures.
 
 use super::*;
+use matches::matches;
 
 /// A representation of qlog events that couple EventCategory, EventType and
 /// EventData.

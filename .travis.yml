@@ -44,6 +44,38 @@ matrix:
       - RUSTFLAGS="-D warnings" cargo build --target=$TARGET_32
       # docker
       - make docker-build
+   - name: "1.39.0 Linux x86_64/x86"
+     language: rust
+     rust: 1.39.0
+     env:
+       DEPLOY_BUILD=yes
+       TARGET_32=i686-unknown-linux-gnu
+     addons:
+       apt:
+         packages:
+         - [*linux_deps, gcc-multilib, g++-multilib]
+     install:
+      - rustup component add clippy
+      - rustup target add $TARGET_32
+     script:
+      - RUSTFLAGS="-D warnings" cargo test --verbose
+      - RUSTFLAGS="-D warnings" cargo package --verbose --allow-dirty
+      - cargo clippy --examples -- -D warnings
+      - cargo doc --no-deps
+      - make -C examples
+      # http3_test
+      - RUSTFLAGS="-D warnings" cargo test --no-run --verbose --manifest-path tools/http3_test/Cargo.toml
+      - cargo clippy --manifest-path tools/http3_test/Cargo.toml -- -D warnings
+      # qlog
+      - RUSTFLAGS="-D warnings" cargo test --verbose --manifest-path tools/qlog/Cargo.toml
+      - cargo clippy --manifest-path tools/qlog/Cargo.toml -- -D warnings
+      # quiche-apps
+      - RUSTFLAGS="-D warnings" cargo build --verbose --manifest-path tools/apps/Cargo.toml
+      - cargo clippy --manifest-path tools/apps/Cargo.toml -- -D warnings
+      # x86 cross build
+      - RUSTFLAGS="-D warnings" cargo build --target=$TARGET_32
+      # docker
+      - make docker-build
    - name: "nightly Linux x86_64"
      language: rust
      rust: nightly-2020-10-25

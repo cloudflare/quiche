@@ -55,6 +55,7 @@ libm = "0.2"
 ring = "0.16"
 lazy_static = "1"
 qlog = { version = "0.3", path = "tools/qlog", optional = true }
+matches = "0.1.8"
 
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = ["wincrypt"] }
