@@ -306,6 +306,9 @@ const MAX_ACK_RANGES: usize = 68;
 // The highest possible stream ID allowed.
 const MAX_STREAM_ID: u64 = 1 << 60;
 
+/// The default max_datagram_size in the congestion control.
+pub const MAX_DATAGRAM_SIZE: usize = 1200;
+
 // The default length of DATAGRAM queues.
 const DEFAULT_MAX_DGRAM_QUEUE_LEN: usize = 0;
 
@@ -443,6 +446,8 @@ pub struct Config {
 
     dgram_recv_max_queue_len: usize,
     dgram_send_max_queue_len: usize,
+
+    max_datagram_size: usize,
 }
 
 impl Config {
@@ -468,6 +473,8 @@ impl Config {
 
             dgram_recv_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
             dgram_send_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
+
+            max_datagram_size: MAX_DATAGRAM_SIZE,
         })
     }
 
@@ -612,7 +619,7 @@ impl Config {
     /// Sets the `max_udp_payload_size transport` parameter.
     ///
     /// The default value is `65527`.
-    pub fn set_max_udp_payload_size(&mut self, v: u64) {
+    pub fn set_max_recv_udp_payload_size(&mut self, v: u64) {
         self.local_transport_params.max_udp_payload_size = v;
     }
 
@@ -771,6 +778,13 @@ impl Config {
         };
         self.dgram_recv_max_queue_len = recv_queue_len;
         self.dgram_send_max_queue_len = send_queue_len;
+    }
+
+    /// Sets the maximum datagram size used by the congestion control.
+    ///
+    /// The default and minimum value is `1200`.
+    pub fn set_max_send_udp_payload_size(&mut self, v: usize) {
+        self.max_datagram_size = cmp::max(v, MAX_DATAGRAM_SIZE);
     }
 }
 
@@ -6795,7 +6809,7 @@ mod tests {
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
         config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_udp_payload_size(1200);
+        config.set_max_recv_udp_payload_size(1200);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -6831,7 +6845,7 @@ mod tests {
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
         config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_udp_payload_size(1200);
+        config.set_max_recv_udp_payload_size(1200);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -6849,7 +6863,7 @@ mod tests {
 
         // Server sends stream data bigger than cwnd.
         let send_buf1 = [0; 20000];
-        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(14085));
+        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(11565));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         // We can't create a new packet header because there is no room by cwnd.
@@ -6868,7 +6882,7 @@ mod tests {
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
         config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_udp_payload_size(1405);
+        config.set_max_recv_udp_payload_size(1405);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -6886,7 +6900,7 @@ mod tests {
 
         // Server sends stream data bigger than cwnd.
         let send_buf1 = [0; 20000];
-        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(14085));
+        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(11565));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         // We can't create a new packet header because there is no room by cwnd.
@@ -6905,7 +6919,7 @@ mod tests {
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
         config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_udp_payload_size(1406);
+        config.set_max_recv_udp_payload_size(1406);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -6923,7 +6937,7 @@ mod tests {
 
         // Server sends stream data bigger than cwnd.
         let send_buf1 = [0; 20000];
-        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(14085));
+        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(11565));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         // We can't create a new frame because there is no room by cwnd.
@@ -7491,7 +7505,7 @@ mod tests {
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
         config.enable_dgram(true, 1000, 1000);
-        config.set_max_udp_payload_size(1200);
+        config.set_max_recv_udp_payload_size(1200);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
@@ -7677,7 +7691,7 @@ mod tests {
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
         config.enable_dgram(true, 2, 10);
-        config.set_max_udp_payload_size(1200);
+        config.set_max_recv_udp_payload_size(1200);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
@@ -7725,7 +7739,7 @@ mod tests {
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
         config.enable_dgram(true, 10, 10);
-        config.set_max_udp_payload_size(1452);
+        config.set_max_recv_udp_payload_size(1452);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();

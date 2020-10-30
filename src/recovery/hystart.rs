@@ -112,7 +112,7 @@ impl Hystart {
     // Returns a new (ssthresh, cwnd) during slow start.
     pub fn on_packet_acked(
         &mut self, packet: &recovery::Acked, rtt: Duration, cwnd: usize,
-        ssthresh: usize, now: Instant,
+        ssthresh: usize, now: Instant, max_datagram_size: usize,
     ) -> (usize, usize) {
         let mut ssthresh = ssthresh;
         let mut cwnd = cwnd;
@@ -130,7 +130,7 @@ impl Hystart {
 
             self.rtt_sample_count += 1;
 
-            if cwnd >= (LOW_CWND * recovery::MAX_DATAGRAM_SIZE) &&
+            if cwnd >= (LOW_CWND * max_datagram_size) &&
                 self.rtt_sample_count >= N_RTT_SAMPLE &&
                 self.current_round_min_rtt.is_some() &&
                 self.last_round_min_rtt.is_some()
@@ -221,6 +221,7 @@ mod tests {
             init_cwnd,
             init_ssthresh,
             now,
+            crate::MAX_DATAGRAM_SIZE,
         );
 
         // Expecting Reno slow start.
@@ -258,8 +259,14 @@ mod tests {
             // We use a fixed rtt for 1st round.
             let rtt = Duration::from_millis(rtt_1st);
 
-            let (new_cwnd, new_ssthresh) =
-                hspp.on_packet_acked(&p, rtt, cwnd, ssthresh, now);
+            let (new_cwnd, new_ssthresh) = hspp.on_packet_acked(
+                &p,
+                rtt,
+                cwnd,
+                ssthresh,
+                now,
+                crate::MAX_DATAGRAM_SIZE,
+            );
 
             cwnd = new_cwnd;
             ssthresh = new_ssthresh;
@@ -283,8 +290,14 @@ mod tests {
             // This is to exit from slow slart to LSS.
             let rtt = Duration::from_millis(rtt_2nd + pkt_num * 4);
 
-            let (new_cwnd, new_ssthresh) =
-                hspp.on_packet_acked(&p, rtt, cwnd, ssthresh, now);
+            let (new_cwnd, new_ssthresh) = hspp.on_packet_acked(
+                &p,
+                rtt,
+                cwnd,
+                ssthresh,
+                now,
+                crate::MAX_DATAGRAM_SIZE,
+            );
 
             cwnd = new_cwnd;
             ssthresh = new_ssthresh;

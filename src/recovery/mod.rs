@@ -60,11 +60,7 @@ const MAX_PTO_PROBES_COUNT: usize = 2;
 // Congestion Control
 const INITIAL_WINDOW_PACKETS: usize = 10;
 
-const INITIAL_WINDOW: usize = INITIAL_WINDOW_PACKETS * MAX_DATAGRAM_SIZE;
-
-const MINIMUM_WINDOW: usize = 2 * MAX_DATAGRAM_SIZE;
-
-const MAX_DATAGRAM_SIZE: usize = 1452;
+const MINIMUM_WINDOW_PACKETS: usize = 2;
 
 const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 
@@ -122,6 +118,8 @@ pub struct Recovery {
 
     congestion_recovery_start_time: Option<Instant>,
 
+    max_datagram_size: usize,
+
     cubic_state: cubic::State,
 
     // HyStart++.
@@ -171,7 +169,7 @@ impl Recovery {
 
             in_flight_count: [0; packet::EPOCH_COUNT],
 
-            congestion_window: INITIAL_WINDOW,
+            congestion_window: config.max_datagram_size * INITIAL_WINDOW_PACKETS,
 
             bytes_in_flight: 0,
 
@@ -180,6 +178,8 @@ impl Recovery {
             bytes_acked: 0,
 
             congestion_recovery_start_time: None,
+
+            max_datagram_size: config.max_datagram_size,
 
             cc_ops: config.cc_algorithm.into(),
 
@@ -751,6 +751,7 @@ impl Recovery {
             self.congestion_window,
             self.ssthresh,
             now,
+            self.max_datagram_size,
         )
     }
 
@@ -994,7 +995,7 @@ mod tests {
 
         // cwnd will be reset.
         r.collapse_cwnd();
-        assert_eq!(r.cwnd(), MINIMUM_WINDOW);
+        assert_eq!(r.cwnd(), r.max_datagram_size * MINIMUM_WINDOW_PACKETS);
     }
 
     #[test]

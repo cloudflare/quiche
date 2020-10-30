@@ -80,7 +80,7 @@ fn on_packet_acked(
 
         if r.bytes_acked >= r.congestion_window {
             r.bytes_acked -= r.congestion_window;
-            reno_cwnd += recovery::MAX_DATAGRAM_SIZE;
+            reno_cwnd += r.max_datagram_size;
         }
 
         // When in Limited Slow Start, take the max of CA cwnd and
@@ -110,8 +110,10 @@ fn congestion_event(
             recovery::LOSS_REDUCTION_FACTOR)
             as usize;
 
-        r.congestion_window =
-            cmp::max(r.congestion_window, recovery::MINIMUM_WINDOW);
+        r.congestion_window = cmp::max(
+            r.congestion_window,
+            r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
+        );
 
         r.bytes_acked = (r.congestion_window as f64 *
             recovery::LOSS_REDUCTION_FACTOR) as usize;
@@ -125,7 +127,7 @@ fn congestion_event(
 }
 
 pub fn collapse_cwnd(r: &mut Recovery) {
-    r.congestion_window = recovery::MINIMUM_WINDOW;
+    r.congestion_window = r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS;
     r.bytes_acked = 0;
 }
 
@@ -258,6 +260,6 @@ mod tests {
         r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now + rtt * 2);
 
         // After acking more than cwnd, expect cwnd increased by MSS
-        assert_eq!(r.cwnd(), cur_cwnd + recovery::MAX_DATAGRAM_SIZE);
+        assert_eq!(r.cwnd(), cur_cwnd + r.max_datagram_size);
     }
 }
