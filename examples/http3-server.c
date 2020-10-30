@@ -92,6 +92,11 @@ static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
     while (1) {
         ssize_t written = quiche_conn_send(conn_io->conn, out, sizeof(out));
 
+        if (written == QUICHE_ERR_AGAIN) {
+            fprintf(stderr, "try again writing\n");
+            continue;
+        }
+
         if (written == QUICHE_ERR_DONE) {
             fprintf(stderr, "done writing\n");
             break;

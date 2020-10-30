@@ -448,6 +448,11 @@ fn main() {
                 let write = match client.conn.send(&mut out) {
                     Ok(v) => v,
 
+                    Err(quiche::Error::Again) => {
+                        trace!("{} need to try again", client.conn.trace_id());
+                        break;
+                    },
+
                     Err(quiche::Error::Done) => {
                         trace!("{} done writing", client.conn.trace_id());
                         break;

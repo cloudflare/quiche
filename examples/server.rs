@@ -329,6 +329,11 @@ fn main() {
                 let write = match client.conn.send(&mut out) {
                     Ok(v) => v,
 
+                    Err(quiche::Error::Again) => {
+                        debug!("{} try again writing", client.conn.trace_id());
+                        continue;
+                    },
+
                     Err(quiche::Error::Done) => {
                         debug!("{} done writing", client.conn.trace_id());
                         break;

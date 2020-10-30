@@ -109,6 +109,11 @@
 //!     let write = match conn.send(&mut out) {
 //!         Ok(v) => v,
 //!
+//!         Err(quiche::Error::Again) => {
+//!             // Send packets into the network and continue.
+//!             continue;
+//!         },
+//!
 //!         Err(quiche::Error::Done) => {
 //!             // Done writing.
 //!             break;
@@ -155,6 +160,11 @@
 //! loop {
 //!     let write = match conn.send(&mut out) {
 //!         Ok(v) => v,
+//!
+//!         Err(quiche::Error::Again) => {
+//!             // Send packets into the network and continue.
+//!             continue;
+//!         },
 //!
 //!         Err(quiche::Error::Done) => {
 //!             // Done writing.
@@ -382,6 +392,9 @@ pub enum Error {
 
     /// Error in congestion control.
     CongestionControl,
+
+    /// There is more work to do, need to call it again.
+    Again,
 }
 
 impl Error {
@@ -415,6 +428,7 @@ impl Error {
             Error::FinalSize => -13,
             Error::CongestionControl => -14,
             Error::StreamStopped { .. } => -15,
+            Error::Again => -16,
         }
     }
 }
@@ -869,6 +883,12 @@ pub struct Connection {
     /// Total number of sent packets.
     sent_count: usize,
 
+    /// Total number of sent bytes without calling recv().
+    sent_bytes_burst: usize,
+
+    /// Max number of sent bytes without calling recv().
+    sent_bytes_max_burst: usize,
+
     /// Total number of bytes received from the peer.
     rx_data: u64,
 
@@ -1231,6 +1251,10 @@ impl Connection {
             recv_count: 0,
             sent_count: 0,
 
+            sent_bytes_burst: 0,
+            sent_bytes_max_burst: config.max_send_udp_payload_size *
+                recovery::INITIAL_WINDOW_PACKETS,
+
             rx_data: 0,
             max_rx_data,
             max_rx_data_next: max_rx_data,
@@ -1496,6 +1520,8 @@ impl Connection {
             done += read;
             left -= read;
         }
+
+        self.sent_bytes_burst = 0;
 
         Ok(done)
     }
@@ -1991,6 +2017,12 @@ impl Connection {
     /// On success the number of bytes written to the output buffer is
     /// returned, or [`Done`] if there was nothing to write.
     ///
+    /// It may return [`Again`] which indicates trying to send too much
+    /// data at once. The application may send those packets to the network
+    /// and continue calling `send()`. There may be still data to write,
+    /// so `send()` should be called again until [`Done`].
+    /// This is to prevent from bursting outgoing packets.
+    ///
     /// The application should call `send()` multiple times until [`Done`] is
     /// returned, indicating that there are no more packets to send. It is
     /// recommended that `send()` be called in the following cases:
@@ -2005,6 +2037,7 @@ impl Connection {
     ///    [`stream_send()`] or [`stream_shutdown()`] are called).
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    /// [`Again`]: enum.Error.html#variant.Again
     /// [`recv()`]: struct.Connection.html#method.recv
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
     /// [`stream_send()`]: struct.Connection.html#method.stream_send
@@ -2022,6 +2055,11 @@ impl Connection {
     ///     let write = match conn.send(&mut out) {
     ///         Ok(v) => v,
     ///
+    ///         Err(quiche::Error::Again) => {
+    ///             // Send packets into the network and continue.
+    ///             continue;
+    ///         },
+    ///
     ///         Err(quiche::Error::Done) => {
     ///             // Done writing.
     ///             break;
@@ -2038,6 +2076,13 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
+        // Burst protection: don't send more than `sent_bytes_max_burst`
+        // bytes when calling send() consecutively.
+        if self.sent_bytes_burst > self.sent_bytes_max_burst {
+            self.sent_bytes_burst = 0;
+            return Err(Error::Again);
+        }
+
         let now = time::Instant::now();
 
         if out.is_empty() {
@@ -2827,6 +2872,8 @@ impl Connection {
         if ack_eliciting {
             self.ack_eliciting_sent = true;
         }
+
+        self.sent_bytes_burst += written;
 
         Ok(written)
     }
@@ -5003,6 +5050,8 @@ pub mod testing {
                 Ok(write) => off += write,
 
                 Err(Error::Done) => break,
+
+                Err(Error::Again) => continue,
 
                 Err(e) => return Err(e),
             }

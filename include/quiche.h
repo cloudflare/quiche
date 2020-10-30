@@ -102,6 +102,9 @@ enum quiche_error {
 
     // Error in congestion control.
     QUICHE_ERR_CONGESTION_CONTROL = -14,
+
+    // There is more work to do. Need to call it again.
+    QUICHE_ERR_AGAIN = -16,
 };
 
 // Returns a human readable string with the quiche version number.

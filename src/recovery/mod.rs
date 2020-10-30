@@ -58,7 +58,7 @@ const RTT_WINDOW: Duration = Duration::from_secs(300);
 const MAX_PTO_PROBES_COUNT: usize = 2;
 
 // Congestion Control
-const INITIAL_WINDOW_PACKETS: usize = 10;
+pub const INITIAL_WINDOW_PACKETS: usize = 10;
 
 const MINIMUM_WINDOW_PACKETS: usize = 2;
 
@@ -341,6 +341,10 @@ impl Recovery {
         self.detect_lost_packets(epoch, now, trace_id);
 
         self.on_packets_acked(newly_acked, epoch, now);
+
+        // Update app_limited. If next incoming packet is also ACK,
+        // this value need to be updated for proper cwnd updates.
+        self.app_limited = self.bytes_in_flight < self.congestion_window;
 
         self.pto_count = 0;
 
