@@ -737,7 +737,7 @@ impl Connection {
             return Err(Error::FrameUnexpected);
         }
 
-        let mut urgency = 3;
+        let mut urgency = 3u8.saturating_add(PRIORITY_URGENCY_OFFSET);
         let mut incremental = false;
 
         for param in priority.split(',') {
