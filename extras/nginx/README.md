@@ -29,6 +29,11 @@ As well as quiche, the underlying implementation of HTTP/3 and QUIC:
  % git clone --recursive https://github.com/cloudflare/quiche
 ```
 
+If you're on a brand new system, you may need to install some build dependencies.
+```
+ % yum install patch gcc pcre-devel zlib-devel
+```
+
 Next you’ll need to apply the patch to NGINX:
 ```
  % cd nginx-1.16.1
