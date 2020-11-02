@@ -1,0 +1,173 @@
+on: [push, pull_request]
+
+name: Nightly
+
+env:
+  RUSTFLAGS: "-D warnings"
+  TOOLCHAIN: "nightly-2020-10-25"
+
+jobs:
+  quiche:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install nightly toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.TOOLCHAIN }}
+          components: rustfmt
+          override: true
+
+      - name: Install dependencies
+        run: sudo apt-get install cmake libev-dev uthash-dev
+
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose
+
+      - name: Run cargo package
+        uses: actions-rs/cargo@v1
+        with:
+          command: package
+          args: --verbose --allow-dirty
+
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: -- --check
+
+      - name: Run cargo doc
+        uses: actions-rs/cargo@v1
+        with:
+          command: doc
+          args: --no-deps
+
+      - name: Build C examples
+        run: make -C examples
+
+  quiche_x86:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install nightly toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.TOOLCHAIN }}
+          components: rustfmt
+          target: i686-unknown-linux-gnu
+          override: true
+
+      - name: Install dependencies
+        run: sudo apt-get install cmake gcc-multilib g++-multilib
+
+      - name: Run cargo build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --verbose --target=i686-unknown-linux-gnu
+
+  apps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install nightly toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.TOOLCHAIN }}
+          components: rustfmt
+          override: true
+
+      - name: Install dependencies
+        run: sudo apt-get install cmake
+
+      - name: Run cargo build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --verbose --manifest-path=tools/apps/Cargo.toml
+
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --manifest-path=tools/apps/Cargo.toml -- --check
+
+  qlog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install nightly toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.TOOLCHAIN }}
+          components: rustfmt
+          override: true
+
+      - name: Install dependencies
+        run: sudo apt-get install cmake
+
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose --manifest-path=tools/qlog/Cargo.toml
+
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --manifest-path=tools/qlog/Cargo.toml -- --check
+
+  http3_test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install nightly toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.TOOLCHAIN }}
+          components: rustfmt
+          override: true
+
+      - name: Install dependencies
+        run: sudo apt-get install cmake
+
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --no-run --verbose --manifest-path=tools/http3_test/Cargo.toml
+
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --manifest-path=tools/http3_test/Cargo.toml -- --check
