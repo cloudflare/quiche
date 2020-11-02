@@ -31,7 +31,8 @@ As well as quiche, the underlying implementation of HTTP/3 and QUIC:
 
 If you're on a brand new system, you may need to install some build dependencies.
 ```
- % yum install patch gcc pcre-devel zlib-devel
+ % yum install patch pcre-devel zlib-devel cargo cmake
+ % yum groupinstall "Development Tools"
 ```
 
 Next you’ll need to apply the patch to NGINX:
