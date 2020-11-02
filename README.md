@@ -246,7 +246,7 @@ be linked directly into C/C++ applications.
 Building
 --------
 
-quiche requires Rust 1.39 or later to build. The latest stable Rust release can
+quiche requires Rust 1.47 or later to build. The latest stable Rust release can
 be installed using [rustup](https://rustup.rs/).
 
 Once the Rust build environment is setup, the quiche source code can be fetched
