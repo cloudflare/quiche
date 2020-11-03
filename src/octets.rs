@@ -287,6 +287,17 @@ impl<'a> Octets<'a> {
         Ok(&self.buf[cap - len..])
     }
 
+    /// Advances the buffer's offset.
+    pub fn skip(&mut self, skip: usize) -> Result<()> {
+        if skip > self.cap() {
+            return Err(BufferTooShortError);
+        }
+
+        self.off += skip;
+
+        Ok(())
+    }
+
     /// Returns the remaining capacity in the buffer.
     pub fn cap(&self) -> usize {
         self.buf.len() - self.off
@@ -625,6 +636,17 @@ impl<'a> OctetsMut<'a> {
 
         let cap = self.cap();
         Ok(&mut self.buf[cap - len..])
+    }
+
+    /// Advances the buffer's offset.
+    pub fn skip(&mut self, skip: usize) -> Result<()> {
+        if skip > self.cap() {
+            return Err(BufferTooShortError);
+        }
+
+        self.off += skip;
+
+        Ok(())
     }
 
     /// Returns the remaining capacity in the buffer.
