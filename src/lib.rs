@@ -2107,7 +2107,7 @@ impl Connection {
         let header_offset = b.off();
 
         // Reserve space for payload length in advance. Since we don't yet know
-        // what the final length will be, we reserver 2 bytes in all cases.
+        // what the final length will be, we reserve 2 bytes in all cases.
         //
         // Only long header packets have an explicit length field.
         if pkt_type != packet::Type::Short {
