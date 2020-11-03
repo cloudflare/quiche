@@ -40,11 +40,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   docker:
-    name: Push Docker images
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
 
       - name: Build Docker images
         run: make docker-build
