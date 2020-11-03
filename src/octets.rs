@@ -186,26 +186,11 @@ impl<'a> Octets<'a> {
         let out = match len {
             1 => u64::from(self.get_u8()?),
 
-            2 => u64::from(
-                ((self.get_u8()? as u16 & 0x3f) << 8) + (self.get_u8()? as u16),
-            ),
+            2 => u64::from(self.get_u16()? & 0x3fff),
 
-            4 => u64::from(
-                ((self.get_u8()? as u32 & 0x3f) << 24) +
-                    ((self.get_u8()? as u32) << 16) +
-                    ((self.get_u8()? as u32) << 8) +
-                    (self.get_u8()? as u32),
-            ),
+            4 => u64::from(self.get_u32()? & 0x3fffffff),
 
-            8 =>
-                ((self.get_u8()? as u64 & 0x3f) << 56) +
-                    ((self.get_u8()? as u64) << 48) +
-                    ((self.get_u8()? as u64) << 40) +
-                    ((self.get_u8()? as u64) << 32) +
-                    ((self.get_u8()? as u64) << 24) +
-                    ((self.get_u8()? as u64) << 16) +
-                    ((self.get_u8()? as u64) << 8) +
-                    (self.get_u8()? as u64),
+            8 => self.get_u64()? & 0x3fffffffffffffff,
 
             _ => unreachable!(),
         };
@@ -428,26 +413,11 @@ impl<'a> OctetsMut<'a> {
         let out = match len {
             1 => u64::from(self.get_u8()?),
 
-            2 => u64::from(
-                ((self.get_u8()? as u16 & 0x3f) << 8) + (self.get_u8()? as u16),
-            ),
+            2 => u64::from(self.get_u16()? & 0x3fff),
 
-            4 => u64::from(
-                ((self.get_u8()? as u32 & 0x3f) << 24) +
-                    ((self.get_u8()? as u32) << 16) +
-                    ((self.get_u8()? as u32) << 8) +
-                    (self.get_u8()? as u32),
-            ),
+            4 => u64::from(self.get_u32()? & 0x3fffffff),
 
-            8 =>
-                ((self.get_u8()? as u64 & 0x3f) << 56) +
-                    ((self.get_u8()? as u64) << 48) +
-                    ((self.get_u8()? as u64) << 40) +
-                    ((self.get_u8()? as u64) << 32) +
-                    ((self.get_u8()? as u64) << 24) +
-                    ((self.get_u8()? as u64) << 16) +
-                    ((self.get_u8()? as u64) << 8) +
-                    (self.get_u8()? as u64),
+            8 => self.get_u64()? & 0x3fffffffffffffff,
 
             _ => unreachable!(),
         };
