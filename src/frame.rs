@@ -382,7 +382,7 @@ impl Frame {
             Frame::Crypto { data } => {
                 encode_crypto_header(data.off() as u64, data.len() as u64, b)?;
 
-                b.put_bytes(&data)?;
+                data.with(|s| b.put_bytes(s))?;
             },
 
             Frame::CryptoHeader { .. } => (),
@@ -403,7 +403,7 @@ impl Frame {
                     b,
                 )?;
 
-                b.put_bytes(data.as_ref())?;
+                data.with(|s| b.put_bytes(s))?;
             },
 
             Frame::StreamHeader { .. } => (),
