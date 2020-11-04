@@ -155,7 +155,7 @@ pub extern fn quiche_config_set_max_idle_timeout(config: &mut Config, v: u64) {
 
 #[no_mangle]
 pub extern fn quiche_config_set_max_recv_udp_payload_size(
-    config: &mut Config, v: u64,
+    config: &mut Config, v: size_t,
 ) {
     config.set_max_recv_udp_payload_size(v);
 }

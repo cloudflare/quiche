@@ -169,7 +169,7 @@ impl Recovery {
 
             in_flight_count: [0; packet::EPOCH_COUNT],
 
-            congestion_window: config.max_datagram_size * INITIAL_WINDOW_PACKETS,
+            congestion_window: config.max_send_udp_payload_size * INITIAL_WINDOW_PACKETS,
 
             bytes_in_flight: 0,
 
@@ -179,7 +179,7 @@ impl Recovery {
 
             congestion_recovery_start_time: None,
 
-            max_datagram_size: config.max_datagram_size,
+            max_datagram_size: config.max_send_udp_payload_size,
 
             cc_ops: config.cc_algorithm.into(),
 

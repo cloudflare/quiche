@@ -306,8 +306,8 @@ const MAX_ACK_RANGES: usize = 68;
 // The highest possible stream ID allowed.
 const MAX_STREAM_ID: u64 = 1 << 60;
 
-/// The default max_datagram_size in the congestion control.
-pub const MAX_DATAGRAM_SIZE: usize = 1200;
+/// The default max_datagram_size used in congestion control.
+const MAX_SEND_UDP_PAYLOAD_SIZE: usize = 1200;
 
 // The default length of DATAGRAM queues.
 const DEFAULT_MAX_DGRAM_QUEUE_LEN: usize = 0;
@@ -447,7 +447,7 @@ pub struct Config {
     dgram_recv_max_queue_len: usize,
     dgram_send_max_queue_len: usize,
 
-    max_datagram_size: usize,
+    max_send_udp_payload_size: usize,
 }
 
 impl Config {
@@ -474,7 +474,7 @@ impl Config {
             dgram_recv_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
             dgram_send_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
 
-            max_datagram_size: MAX_DATAGRAM_SIZE,
+            max_send_udp_payload_size: MAX_SEND_UDP_PAYLOAD_SIZE,
         })
     }
 
@@ -619,8 +619,8 @@ impl Config {
     /// Sets the `max_udp_payload_size transport` parameter.
     ///
     /// The default value is `65527`.
-    pub fn set_max_recv_udp_payload_size(&mut self, v: u64) {
-        self.local_transport_params.max_udp_payload_size = v;
+    pub fn set_max_recv_udp_payload_size(&mut self, v: usize) {
+        self.local_transport_params.max_udp_payload_size = v as u64;
     }
 
     /// Sets the `initial_max_data` transport parameter.
@@ -780,11 +780,11 @@ impl Config {
         self.dgram_send_max_queue_len = send_queue_len;
     }
 
-    /// Sets the maximum datagram size used by the congestion control.
+    /// Sets the maximum outgoing UDP payload size used in congestion control.
     ///
     /// The default and minimum value is `1200`.
     pub fn set_max_send_udp_payload_size(&mut self, v: usize) {
-        self.max_datagram_size = cmp::max(v, MAX_DATAGRAM_SIZE);
+        self.max_send_udp_payload_size = cmp::max(v, MAX_SEND_UDP_PAYLOAD_SIZE);
     }
 }
 
