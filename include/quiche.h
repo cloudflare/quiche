@@ -311,6 +311,9 @@ bool quiche_conn_is_established(quiche_conn *conn);
 // enough to send or receive early data.
 bool quiche_conn_is_in_early_data(quiche_conn *conn);
 
+// Returns whether there is stream or DATAGRAM data available to read.
+bool quiche_conn_is_readable(quiche_conn *conn);
+
 // Returns true if the connection is closed.
 bool quiche_conn_is_closed(quiche_conn *conn);
 

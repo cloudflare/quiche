@@ -622,6 +622,11 @@ pub extern fn quiche_conn_writable(conn: &Connection) -> *mut StreamIter {
     Box::into_raw(Box::new(conn.writable()))
 }
 
+#[no_mangle]
+pub extern fn quiche_conn_is_readable(conn: &Connection) -> bool {
+    conn.is_readable()
+}
+
 struct AppData(*mut c_void);
 unsafe impl Send for AppData {}
 
