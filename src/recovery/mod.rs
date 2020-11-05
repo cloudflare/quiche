@@ -169,7 +169,8 @@ impl Recovery {
 
             in_flight_count: [0; packet::EPOCH_COUNT],
 
-            congestion_window: config.max_send_udp_payload_size * INITIAL_WINDOW_PACKETS,
+            congestion_window: config.max_send_udp_payload_size *
+                INITIAL_WINDOW_PACKETS,
 
             bytes_in_flight: 0,
 
@@ -467,6 +468,10 @@ impl Recovery {
 
     pub fn delivery_rate(&self) -> u64 {
         self.delivery_rate.delivery_rate()
+    }
+
+    pub fn max_datagram_size(&self) -> usize {
+        self.max_datagram_size
     }
 
     fn update_rtt(

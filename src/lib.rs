@@ -623,6 +623,13 @@ impl Config {
         self.local_transport_params.max_udp_payload_size = v as u64;
     }
 
+    /// Sets the maximum outgoing UDP payload size.
+    ///
+    /// The default and minimum value is `1200`.
+    pub fn set_max_send_udp_payload_size(&mut self, v: usize) {
+        self.max_send_udp_payload_size = cmp::max(v, MAX_SEND_UDP_PAYLOAD_SIZE);
+    }
+
     /// Sets the `initial_max_data` transport parameter.
     ///
     /// When set to a non-zero value quiche will only allow at most `v` bytes
@@ -778,13 +785,6 @@ impl Config {
         };
         self.dgram_recv_max_queue_len = recv_queue_len;
         self.dgram_send_max_queue_len = send_queue_len;
-    }
-
-    /// Sets the maximum outgoing UDP payload size used in congestion control.
-    ///
-    /// The default and minimum value is `1200`.
-    pub fn set_max_send_udp_payload_size(&mut self, v: usize) {
-        self.max_send_udp_payload_size = cmp::max(v, MAX_SEND_UDP_PAYLOAD_SIZE);
     }
 }
 
@@ -2040,7 +2040,8 @@ impl Connection {
 
         let mut left = b.cap();
 
-        // Limit output packet size to respect peer's max_packet_size limit.
+        // Limit output packet size to respect the sender and receiver's
+        // maximum UDP payload size limit.
         left = cmp::min(left, self.max_send_udp_payload_len());
 
         // Limit output packet size by congestion window size.
@@ -2620,15 +2621,22 @@ impl Connection {
         Ok(written)
     }
 
-    // Returns the maximum len of a packet to be sent. This is max_packet_size
-    // as sent by the peer, except during the handshake when we haven't parsed
-    // transport parameters yet, so use a default value then.
+    // Returns the maximum size of a packet to be sent.
+    //
+    // This is a minimum of the sender's and the receiver's maximum UDP payload
+    // sizes, except during the handshake when we haven't parsed transport
+    // parameters yet, so use a default value then.
     fn max_send_udp_payload_len(&self) -> usize {
         if self.is_established() {
             // We cap the maximum packet size to 16KB or so, so that it can be
             // always encoded with a 2-byte varint.
-            cmp::min(16383, self.peer_transport_params.max_udp_payload_size)
-                as usize
+            cmp::min(
+                16383,
+                cmp::min(
+                    self.recovery.max_datagram_size(),
+                    self.peer_transport_params.max_udp_payload_size as usize,
+                ),
+            )
         } else {
             // Allow for 1200 bytes (minimum QUIC packet size) during the
             // handshake.

@@ -221,7 +221,7 @@ mod tests {
             init_cwnd,
             init_ssthresh,
             now,
-            crate::MAX_DATAGRAM_SIZE,
+            crate::MAX_SEND_UDP_PAYLOAD_SIZE,
         );
 
         // Expecting Reno slow start.
@@ -265,7 +265,7 @@ mod tests {
                 cwnd,
                 ssthresh,
                 now,
-                crate::MAX_DATAGRAM_SIZE,
+                crate::MAX_SEND_UDP_PAYLOAD_SIZE,
             );
 
             cwnd = new_cwnd;
@@ -296,7 +296,7 @@ mod tests {
                 cwnd,
                 ssthresh,
                 now,
-                crate::MAX_DATAGRAM_SIZE,
+                crate::MAX_SEND_UDP_PAYLOAD_SIZE,
             );
 
             cwnd = new_cwnd;

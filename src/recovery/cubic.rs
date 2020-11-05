@@ -247,7 +247,7 @@ fn on_packet_acked(
 
         // cwnd_inc can be more than 1 MSS in the late stage of max probing.
         // however QUIC recovery draft 7.4 (Congestion Avoidance) limits
-        // the increase of cwnd to 1 max packet size per cwnd acknowledged.
+        // the increase of cwnd to 1 max_datagram_size per cwnd acknowledged.
         if r.cubic_state.cwnd_inc >= r.max_datagram_size {
             r.congestion_window += r.max_datagram_size;
             r.cubic_state.cwnd_inc -= r.max_datagram_size;

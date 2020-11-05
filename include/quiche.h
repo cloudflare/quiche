@@ -145,6 +145,9 @@ void quiche_config_set_max_idle_timeout(quiche_config *config, uint64_t v);
 // Sets the `max_udp_payload_size transport` parameter.
 void quiche_config_set_max_recv_udp_payload_size(quiche_config *config, size_t v);
 
+// Sets the maximum outgoing UDP payload size.
+void quiche_config_set_max_send_udp_payload_size(quiche_config *config, size_t v);
+
 // Sets the `initial_max_data` transport parameter.
 void quiche_config_set_initial_max_data(quiche_config *config, uint64_t v);
 
@@ -187,9 +190,6 @@ void quiche_config_enable_hystart(quiche_config *config, bool v);
 void quiche_config_enable_dgram(quiche_config *config, bool enabled,
                                 size_t recv_queue_len,
                                 size_t send_queue_len);
-
-// Sets the maximum outgoing UDP payload size used in congestion control.
-void quiche_config_set_max_send_udp_payload_size(quiche_config *config, size_t v);
 
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
