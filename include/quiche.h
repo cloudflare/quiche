@@ -480,6 +480,12 @@ void quiche_h3_config_set_qpack_max_table_capacity(quiche_h3_config *config, uin
 // Sets the `SETTINGS_QPACK_BLOCKED_STREAMS` setting.
 void quiche_h3_config_set_qpack_blocked_streams(quiche_h3_config *config, uint64_t v);
 
+// Sets the `quiche_h3_conn_poll()` repetition threshold for DATAGRAM events.
+void quiche_h3_config_set_dgram_poll_threshold(quiche_h3_config *config, uint64_t v);
+
+// Sets the `quiche_h3_conn_poll()` repetition threshold for stream events.
+void quiche_h3_config_set_dgram_poll_threshold(quiche_h3_config *config, uint64_t v);
+
 // Frees the HTTP/3 config object.
 void quiche_h3_config_free(quiche_h3_config *config);
 

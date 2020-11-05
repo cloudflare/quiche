@@ -444,6 +444,8 @@ pub struct Config {
     max_header_list_size: Option<u64>,
     qpack_max_table_capacity: Option<u64>,
     qpack_blocked_streams: Option<u64>,
+    dgram_poll_threshold: u64,
+    stream_poll_threshold: u64,
 }
 
 impl Config {
@@ -453,6 +455,8 @@ impl Config {
             max_header_list_size: None,
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
+            dgram_poll_threshold: std::u64::MAX,
+            stream_poll_threshold: std::u64::MAX,
         })
     }
 
@@ -475,6 +479,46 @@ impl Config {
     /// The default value is `0`.
     pub fn set_qpack_blocked_streams(&mut self, v: u64) {
         self.qpack_blocked_streams = Some(v);
+    }
+
+    /// Sets the [`poll()`] repetition threshold for DATAGRAM events.
+    ///
+    /// When there is at least one pending DATAGRAM, [`poll()`] can return an
+    /// [`Event::Datagram`] and the application should use [`recv_dgram()`] to
+    /// remove it from the pending queue. If all DATAGRAMs are not removed,
+    /// repeat [`poll()`] calls can continue to return events. By default there
+    /// is no threshold to the number of times this can happen.
+    ///
+    /// This parameter adds a threshold for the number of times a DATAGRAM event
+    /// will be returned by [`poll()`]. Once reached, stream events will be
+    /// returned.
+    ///
+    /// [`poll()`]: struct.Connection.html#method.poll
+    /// [`recv_dgram()`]: struct.Connection.html#method.recv_dgram
+    /// [`Event::Datagram`]: enum.Event.html#variant.Datagram
+    pub fn set_dgram_poll_threshold(&mut self, v: u64) {
+        self.dgram_poll_threshold = v;
+    }
+
+    /// Sets the [`poll()`] repetition threshold for stream events.
+    ///
+    /// When there is at least one readable stream, [`poll()`] can return an
+    /// [`Event::Headers`], [`Event::Data`] or [`Event::Finished`]. While the
+    /// stream remains readable repeat [`poll()`] calls can continue to return
+    /// stream events. By default there is no threshold to the number of times
+    /// this can happen.
+    ///
+    /// This parameter adds a threshold for the number of times a stream event
+    /// of any type will be returned by [`poll()`]. Once reached, datagram
+    /// events will be returned.
+    ///
+    /// [`poll()`]: struct.Connection.html#method.poll
+    /// [`recv_body)`]: struct.Connection.html#method.body
+    /// [`Event::Headers`]: enum.Event.html#variant.Headers
+    /// [`Event::Data`]: enum.Event.html#variant.Data
+    /// [`Event::Finished`]: enum.Event.html#variant.Finished
+    pub fn set_stream_poll_threshold(&mut self, v: u64) {
+        self.stream_poll_threshold = v;
     }
 }
 
@@ -550,15 +594,25 @@ pub enum Event {
     /// to retrieve the data from the stream.
     ///
     /// This event will keep being reported until all the available data is
-    /// retrieved by the application.
+    /// retrieved by the application or the event [threshold] is reached.
     ///
     /// [`recv_body()`]: struct.Connection.html#method.recv_body
+    /// [threshold]: struct.Config.html#method.set_stream_poll_threshold
     Data,
 
     /// Stream was closed,
     Finished,
 
     /// DATAGRAM was received.
+    ///
+    /// This indicates that the application can use the [`recv_dgram()`] method
+    /// to retrieve the HTTP/3 DATAGRAM.
+    ///
+    /// This event will keep being reported until all the available data is
+    /// retrieved by the application or the event [threshold] is reached.
+    ///
+    /// [`recv_dgram()`]: struct.Connection.html#method.recv_dgram
+    /// [threshold]: struct.Config.html#method.set_dgram_poll_threshold
     Datagram,
 
     /// GOAWAY was received.
@@ -606,6 +660,11 @@ pub struct Connection {
 
     local_goaway_id: Option<u64>,
     peer_goaway_id: Option<u64>,
+
+    dgram_event_count: u64,
+    dgram_poll_threshold: u64,
+    stream_event_count: u64,
+    stream_poll_threshold: u64,
 }
 
 impl Connection {
@@ -662,6 +721,11 @@ impl Connection {
 
             local_goaway_id: None,
             peer_goaway_id: None,
+
+            dgram_event_count: 0,
+            dgram_poll_threshold: config.dgram_poll_threshold,
+            stream_event_count: 0,
+            stream_poll_threshold: config.stream_poll_threshold,
         })
     }
 
@@ -1022,6 +1086,25 @@ impl Connection {
         }
     }
 
+    // A helper function for determining if there is a DATAGRAM event.
+    fn process_dgrams(
+        &mut self, conn: &mut super::Connection,
+    ) -> Result<(u64, Event)> {
+        let mut d = [0; 8];
+
+        match conn.dgram_recv_peek(&mut d, 8) {
+            Ok(_) => {
+                let mut b = octets::Octets::with_slice(&d);
+                let flow_id = b.get_varint()?;
+                Ok((flow_id, Event::Datagram))
+            },
+
+            Err(crate::Error::Done) => Err(Error::Done),
+
+            Err(e) => Err(Error::TransportError(e)),
+        }
+    }
+
     /// Reads request or response body data into the provided buffer.
     ///
     /// Applications should call this method whenever the [`poll()`] method
@@ -1125,41 +1208,55 @@ impl Connection {
             return Ok((finished, Event::Finished));
         }
 
-        // Process DATAGRAMs
-        let mut d = [0; 8];
+        // Both stream and DATAGRAM event limits have been reached,
+        // so reset and start again.
+        if self.dgram_event_count == self.dgram_poll_threshold &&
+            self.stream_event_count == self.stream_poll_threshold
+        {
+            self.dgram_event_count = 0;
+            self.stream_event_count = 0;
+        }
 
-        match conn.dgram_recv_peek(&mut d, 8) {
-            Ok(_) => {
-                let mut b = octets::Octets::with_slice(&d);
-                let flow_id = b.get_varint()?;
-                return Ok((flow_id, Event::Datagram));
-            },
+        // Process queued DATAGRAMs if the poll threshold allows it.
+        if self.dgram_event_count < self.dgram_poll_threshold &&
+            conn.dgram_recv_front_len().is_some()
+        {
+            match self.process_dgrams(conn) {
+                Ok(v) => {
+                    self.dgram_event_count += 1;
+                    return Ok(v);
+                },
 
-            Err(crate::Error::Done) => (),
-
-            Err(e) => return Err(Error::TransportError(e)),
-        };
-
-        // Process HTTP/3 data from readable streams.
-        for s in conn.readable() {
-            trace!("{} stream id {} is readable", conn.trace_id(), s);
-
-            let ev = match self.process_readable_stream(conn, s) {
-                Ok(v) => Some(v),
-
-                Err(Error::Done) => None,
+                Err(Error::Done) => (),
 
                 Err(e) => return Err(e),
             };
+        }
 
-            if conn.stream_finished(s) {
-                self.finished_streams.push_back(s);
-            }
+        // Process HTTP/3 data from readable streams.
+        for s in conn.readable() {
+            if self.stream_event_count < self.stream_poll_threshold ||
+                conn.dgram_recv_front_len().is_none()
+            {
+                trace!("{} stream id {} is readable", conn.trace_id(), s);
 
-            // TODO: check if stream is completed so it can be freed
+                let ev = match self.process_readable_stream(conn, s) {
+                    Ok(v) => Some(v),
 
-            if let Some(ev) = ev {
-                return Ok(ev);
+                    Err(Error::Done) => None,
+
+                    Err(e) => return Err(e),
+                };
+
+                if conn.stream_finished(s) {
+                    self.finished_streams.push_back(s);
+                }
+
+                // TODO: check if stream is completed so it can be freed
+                if let Some(ev) = ev {
+                    self.stream_event_count += 1;
+                    return Ok(ev);
+                }
             }
         }
 
@@ -1168,6 +1265,20 @@ impl Connection {
         // flag set.
         if let Some(finished) = self.finished_streams.pop_front() {
             return Ok((finished, Event::Finished));
+        }
+
+        // No event generated at this point, so try dgram again.
+        if conn.dgram_recv_front_len().is_some() {
+            match self.process_dgrams(conn) {
+                Ok(v) => {
+                    self.dgram_event_count += 1;
+                    return Ok(v);
+                },
+
+                Err(Error::Done) => (),
+
+                Err(e) => return Err(e),
+            };
         }
 
         Err(Error::Done)
@@ -1899,6 +2010,7 @@ pub mod testing {
             config.set_initial_max_streams_bidi(5);
             config.set_initial_max_streams_uni(5);
             config.verify_peer(false);
+            config.enable_dgram(true, 3, 3);
 
             let h3_config = Config::new()?;
             Session::with_configs(&mut config, &h3_config)
@@ -2093,6 +2205,54 @@ pub mod testing {
             self.advance().ok();
 
             Ok(())
+        }
+
+        /// Send an HTTP/3 DATAGRAM with default data from the client.
+        ///
+        /// On success it returns the data.
+        pub fn send_dgram_client(&mut self, flow_id: u64) -> Result<Vec<u8>> {
+            let bytes = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+            self.client
+                .send_dgram(&mut self.pipe.client, flow_id, &bytes)?;
+
+            self.advance().ok();
+
+            Ok(bytes)
+        }
+
+        /// Receives an HTTP/3 DATAGRAM from the server.
+        ///
+        /// On success it returns the DATAGRAM length, flow ID and flow ID
+        /// length.
+        pub fn recv_dgram_client(
+            &mut self, buf: &mut [u8],
+        ) -> Result<(usize, u64, usize)> {
+            self.client.recv_dgram(&mut self.pipe.client, buf)
+        }
+
+        /// Send an HTTP/3 DATAGRAM with default data from the server
+        ///
+        /// On success it returns the data.
+        pub fn send_dgram_server(&mut self, flow_id: u64) -> Result<Vec<u8>> {
+            let bytes = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+            self.client
+                .send_dgram(&mut self.pipe.server, flow_id, &bytes)?;
+
+            self.advance().ok();
+
+            Ok(bytes)
+        }
+
+        /// Receives an HTTP/3 DATAGRAM from the client.
+        ///
+        /// On success it returns the DATAGRAM length, flow ID and flow ID
+        /// length.
+        pub fn recv_dgram_server(
+            &mut self, buf: &mut [u8],
+        ) -> Result<(usize, u64, usize)> {
+            self.client.recv_dgram(&mut self.pipe.server, buf)
         }
 
         /// Sends a single HTTP/3 frame from the server.
@@ -3355,6 +3515,440 @@ mod tests {
         s.pipe.advance(&mut buf).unwrap();
 
         assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::SettingsError));
+    }
+
+    #[test]
+    /// Send a single DATAGRAM.
+    fn single_dgram() {
+        let mut buf = [0; 65535];
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        // We'll send default data of 10 bytes on flow ID 0.
+        let result = (11, 0, 1);
+
+        s.send_dgram_client(0).unwrap();
+
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(result));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        s.send_dgram_server(0).unwrap();
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(result));
+    }
+
+    #[test]
+    /// Send multiple DATAGRAMs.
+    fn multiple_dgram() {
+        let mut buf = [0; 65535];
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        // We'll send default data of 10 bytes on flow ID 0.
+        let result = (11, 0, 1);
+
+        s.send_dgram_client(0).unwrap();
+        s.send_dgram_client(0).unwrap();
+        s.send_dgram_client(0).unwrap();
+
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(result));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(result));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(result));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        s.send_dgram_server(0).unwrap();
+        s.send_dgram_server(0).unwrap();
+        s.send_dgram_server(0).unwrap();
+
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(result));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(result));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(result));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Send more DATAGRAMs than the send queue allows.
+    fn multiple_dgram_overflow() {
+        let mut buf = [0; 65535];
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        // We'll send default data of 10 bytes on flow ID 0.
+        let result = (11, 0, 1);
+
+        // Five DATAGRAMs
+        s.send_dgram_client(0).unwrap();
+        s.send_dgram_client(0).unwrap();
+        s.send_dgram_client(0).unwrap();
+        s.send_dgram_client(0).unwrap();
+        s.send_dgram_client(0).unwrap();
+
+        // Only 3 independent DATAGRAM events will fire.
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(result));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(result));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(result));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Send a single DATAGRAM and request. Ensure that poll continuously cycles
+    /// between the two types if the data is not read.
+    fn poll_yield_cycling() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_initial_max_data(1500);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+        config.enable_dgram(true, 100, 100);
+
+        let mut h3_config = Config::new().unwrap();
+        h3_config.set_dgram_poll_threshold(5);
+        h3_config.set_stream_poll_threshold(5);
+        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        s.handshake().unwrap();
+
+        // Send request followed by DATAGRAM on client side.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        s.send_body_client(stream, true).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: true,
+        };
+
+        s.send_dgram_client(0).unwrap();
+
+        // Now let's test the poll counts and yielding.
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+
+        // Second cycle.
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+
+        // Third cycle.
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+    }
+
+    #[test]
+    /// Send a single DATAGRAM and request. Ensure that poll
+    /// yield cycles and cleanly exits if data is read.
+    fn poll_yield_single_read() {
+        let mut buf = [0; 65535];
+
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_initial_max_data(1500);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+        config.enable_dgram(true, 100, 100);
+
+        let mut h3_config = Config::new().unwrap();
+        h3_config.set_dgram_poll_threshold(5);
+        h3_config.set_stream_poll_threshold(5);
+        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        s.handshake().unwrap();
+
+        // We'll send default data of 10 bytes on flow ID 0.
+        let result = (11, 0, 1);
+
+        // Send request followed by DATAGRAM on client side.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let body = s.send_body_client(stream, true).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: true,
+        };
+
+        s.send_dgram_client(0).unwrap();
+
+        // Now let's test the poll counts and yielding.
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(result));
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // Send response followed by DATAGRAM on server side
+        let resp = s.send_response(stream, false).unwrap();
+
+        let body = s.send_body_server(stream, true).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            has_body: true,
+        };
+
+        s.send_dgram_server(0).unwrap();
+
+        // Now let's test the poll counts and yielding.
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(result));
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_client(stream, &mut recv_buf), Ok(body.len()));
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Send a multiple DATAGRAMs and requests. Ensure that poll
+    /// yield cycles and cleanly exits if data is read.
+    fn poll_yield_multi_read() {
+        let mut buf = [0; 65535];
+
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_initial_max_data(1500);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+        config.enable_dgram(true, 100, 100);
+
+        let mut h3_config = Config::new().unwrap();
+        h3_config.set_dgram_poll_threshold(5);
+        h3_config.set_stream_poll_threshold(5);
+        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        s.handshake().unwrap();
+
+        // 10 bytes on flow ID 0 and 2.
+        let flow_0_result = (11, 0, 1);
+        let flow_2_result = (11, 2, 1);
+
+        // Send requests followed by DATAGRAMs on client side.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let body = s.send_body_client(stream, true).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: true,
+        };
+
+        s.send_dgram_client(0).unwrap();
+        s.send_dgram_client(0).unwrap();
+        s.send_dgram_client(0).unwrap();
+        s.send_dgram_client(0).unwrap();
+        s.send_dgram_client(0).unwrap();
+        s.send_dgram_client(2).unwrap();
+        s.send_dgram_client(2).unwrap();
+        s.send_dgram_client(2).unwrap();
+        s.send_dgram_client(2).unwrap();
+        s.send_dgram_client(2).unwrap();
+
+        // Now let's test the poll counts and yielding.
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+
+        // Second cycle, start to read
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_0_result));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_0_result));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_0_result));
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        // Third cycle.
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_0_result));
+        assert_eq!(s.poll_server(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_0_result));
+        assert_eq!(s.poll_server(), Ok((2, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_2_result));
+        assert_eq!(s.poll_server(), Ok((2, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_2_result));
+        assert_eq!(s.poll_server(), Ok((2, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_2_result));
+        assert_eq!(s.poll_server(), Ok((2, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_2_result));
+        assert_eq!(s.poll_server(), Ok((2, Event::Datagram)));
+        assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_2_result));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // Send response followed by DATAGRAM on server side
+        let resp = s.send_response(stream, false).unwrap();
+
+        let body = s.send_body_server(stream, true).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            has_body: true,
+        };
+
+        s.send_dgram_server(0).unwrap();
+        s.send_dgram_server(0).unwrap();
+        s.send_dgram_server(0).unwrap();
+        s.send_dgram_server(0).unwrap();
+        s.send_dgram_server(0).unwrap();
+        s.send_dgram_server(2).unwrap();
+        s.send_dgram_server(2).unwrap();
+        s.send_dgram_server(2).unwrap();
+        s.send_dgram_server(2).unwrap();
+        s.send_dgram_server(2).unwrap();
+
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+
+        // Second cycle, start to read
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_0_result));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_0_result));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_0_result));
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_client(stream, &mut recv_buf), Ok(body.len()));
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+
+        // Third cycle.
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_0_result));
+        assert_eq!(s.poll_client(), Ok((0, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_0_result));
+        assert_eq!(s.poll_client(), Ok((2, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_2_result));
+        assert_eq!(s.poll_client(), Ok((2, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_2_result));
+        assert_eq!(s.poll_client(), Ok((2, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_2_result));
+        assert_eq!(s.poll_client(), Ok((2, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_2_result));
+        assert_eq!(s.poll_client(), Ok((2, Event::Datagram)));
+        assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_2_result));
+        assert_eq!(s.poll_client(), Err(Error::Done));
     }
 }
 
