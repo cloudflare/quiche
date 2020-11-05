@@ -432,6 +432,11 @@ impl StreamMap {
         !self.flushable.is_empty()
     }
 
+    /// Returns true if there are any streams that have data to read.
+    pub fn has_readable(&self) -> bool {
+        !self.readable.is_empty()
+    }
+
     /// Returns true if there are any streams that need to update the local
     /// flow control limit.
     pub fn has_almost_full(&self) -> bool {

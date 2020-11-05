@@ -3426,6 +3426,11 @@ impl Connection {
         self.handshake.is_in_early_data()
     }
 
+    /// Returns whether there is stream or DATAGRAM data available to read.
+    pub fn is_readable(&self) -> bool {
+        self.streams.has_readable() || self.dgram_recv_front_len().is_some()
+    }
+
     /// Returns true if the connection is closed.
     ///
     /// If this returns true, the connection object can be dropped.
@@ -7770,6 +7775,92 @@ mod tests {
 
         let result2 = pipe.server.dgram_recv(&mut buf);
         assert_eq!(result2, Err(Error::Done));
+    }
+
+    #[test]
+    /// Tests is_readable check.
+    fn is_readable() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.enable_dgram(true, 10, 10);
+        config.set_max_recv_udp_payload_size(1452);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // No readable data.
+        assert_eq!(pipe.client.is_readable(), false);
+        assert_eq!(pipe.server.is_readable(), false);
+
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server received stream.
+        assert_eq!(pipe.client.is_readable(), false);
+        assert_eq!(pipe.server.is_readable(), true);
+
+        assert_eq!(
+            pipe.server.stream_send(4, b"aaaaaaaaaaaaaaa", false),
+            Ok(15)
+        );
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Client received stream.
+        assert_eq!(pipe.client.is_readable(), true);
+        assert_eq!(pipe.server.is_readable(), true);
+
+        // Client drains stream.
+        let mut b = [0; 15];
+        pipe.client.stream_recv(4, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.is_readable(), false);
+        assert_eq!(pipe.server.is_readable(), true);
+
+        // Server shuts down stream.
+        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 0), Ok(()));
+        assert_eq!(pipe.server.is_readable(), false);
+
+        // Server received dgram.
+        assert_eq!(pipe.client.dgram_send(b"dddddddddddddd"), Ok(()));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.is_readable(), false);
+        assert_eq!(pipe.server.is_readable(), true);
+
+        // Client received dgram.
+        assert_eq!(pipe.server.dgram_send(b"dddddddddddddd"), Ok(()));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.is_readable(), true);
+        assert_eq!(pipe.server.is_readable(), true);
+
+        // Drain the dgram queues.
+        let r = pipe.server.dgram_recv(&mut buf);
+        assert_eq!(r, Ok(14));
+        assert_eq!(pipe.server.is_readable(), false);
+
+        let r = pipe.client.dgram_recv(&mut buf);
+        assert_eq!(r, Ok(14));
+        assert_eq!(pipe.client.is_readable(), false);
     }
 }
 
