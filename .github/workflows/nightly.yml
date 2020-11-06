@@ -110,6 +110,52 @@ jobs:
           command: fmt
           args: --manifest-path=tools/apps/Cargo.toml -- --check
 
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install nightly toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.TOOLCHAIN }}
+          components: rustfmt
+          override: true
+
+      - name: Install dependencies
+        run: sudo apt-get install cmake
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Run cargo fuzz for packet_recv_client
+        uses: actions-rs/cargo@v1
+        with:
+          command: fuzz
+          args: run packet_recv_client -- -runs=1
+
+      - name: Run cargo fuzz for packet_recv_server
+        uses: actions-rs/cargo@v1
+        with:
+          command: fuzz
+          args: run packet_recv_server -- -runs=1
+
+      - name: Run cargo fuzz for qpack_decode
+        uses: actions-rs/cargo@v1
+        with:
+          command: fuzz
+          args: run qpack_decode -- -runs=1
+
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --manifest-path=fuzz/Cargo.toml -- --check
+
   qlog:
     runs-on: ubuntu-latest
     steps:
