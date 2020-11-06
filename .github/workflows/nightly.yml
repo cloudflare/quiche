@@ -24,7 +24,7 @@ jobs:
           override: true
 
       - name: Install dependencies
-        run: sudo apt-get install cmake libev-dev uthash-dev
+        run: sudo apt-get install libev-dev uthash-dev
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
@@ -71,7 +71,7 @@ jobs:
           override: true
 
       - name: Install dependencies
-        run: sudo apt-get install cmake gcc-multilib g++-multilib
+        run: sudo apt-get install gcc-multilib g++-multilib
 
       - name: Run cargo build
         uses: actions-rs/cargo@v1
@@ -94,9 +94,6 @@ jobs:
           toolchain: ${{ env.TOOLCHAIN }}
           components: rustfmt
           override: true
-
-      - name: Install dependencies
-        run: sudo apt-get install cmake
 
       - name: Run cargo build
         uses: actions-rs/cargo@v1
@@ -125,9 +122,6 @@ jobs:
           toolchain: ${{ env.TOOLCHAIN }}
           components: rustfmt
           override: true
-
-      - name: Install dependencies
-        run: sudo apt-get install cmake
 
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz
@@ -172,9 +166,6 @@ jobs:
           components: rustfmt
           override: true
 
-      - name: Install dependencies
-        run: sudo apt-get install cmake
-
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
@@ -202,9 +193,6 @@ jobs:
           toolchain: ${{ env.TOOLCHAIN }}
           components: rustfmt
           override: true
-
-      - name: Install dependencies
-        run: sudo apt-get install cmake
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
