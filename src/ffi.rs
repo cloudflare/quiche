@@ -154,10 +154,10 @@ pub extern fn quiche_config_set_max_idle_timeout(config: &mut Config, v: u64) {
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_max_udp_payload_size(
-    config: &mut Config, v: u64,
+pub extern fn quiche_config_set_max_recv_udp_payload_size(
+    config: &mut Config, v: size_t,
 ) {
-    config.set_max_udp_payload_size(v);
+    config.set_max_recv_udp_payload_size(v);
 }
 
 #[no_mangle]
@@ -247,6 +247,13 @@ pub extern fn quiche_config_enable_dgram(
     send_queue_len: size_t,
 ) {
     config.enable_dgram(enabled, recv_queue_len, send_queue_len);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_max_send_udp_payload_size(
+    config: &mut Config, v: size_t,
+) {
+    config.set_max_send_udp_payload_size(v);
 }
 
 #[no_mangle]

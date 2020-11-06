@@ -306,6 +306,9 @@ const MAX_ACK_RANGES: usize = 68;
 // The highest possible stream ID allowed.
 const MAX_STREAM_ID: u64 = 1 << 60;
 
+/// The default max_datagram_size used in congestion control.
+const MAX_SEND_UDP_PAYLOAD_SIZE: usize = 1200;
+
 // The default length of DATAGRAM queues.
 const DEFAULT_MAX_DGRAM_QUEUE_LEN: usize = 0;
 
@@ -443,6 +446,8 @@ pub struct Config {
 
     dgram_recv_max_queue_len: usize,
     dgram_send_max_queue_len: usize,
+
+    max_send_udp_payload_size: usize,
 }
 
 impl Config {
@@ -468,6 +473,8 @@ impl Config {
 
             dgram_recv_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
             dgram_send_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
+
+            max_send_udp_payload_size: MAX_SEND_UDP_PAYLOAD_SIZE,
         })
     }
 
@@ -612,8 +619,15 @@ impl Config {
     /// Sets the `max_udp_payload_size transport` parameter.
     ///
     /// The default value is `65527`.
-    pub fn set_max_udp_payload_size(&mut self, v: u64) {
-        self.local_transport_params.max_udp_payload_size = v;
+    pub fn set_max_recv_udp_payload_size(&mut self, v: usize) {
+        self.local_transport_params.max_udp_payload_size = v as u64;
+    }
+
+    /// Sets the maximum outgoing UDP payload size.
+    ///
+    /// The default and minimum value is `1200`.
+    pub fn set_max_send_udp_payload_size(&mut self, v: usize) {
+        self.max_send_udp_payload_size = cmp::max(v, MAX_SEND_UDP_PAYLOAD_SIZE);
     }
 
     /// Sets the `initial_max_data` transport parameter.
@@ -2026,7 +2040,8 @@ impl Connection {
 
         let mut left = b.cap();
 
-        // Limit output packet size to respect peer's max_packet_size limit.
+        // Limit output packet size to respect the sender and receiver's
+        // maximum UDP payload size limit.
         left = cmp::min(left, self.max_send_udp_payload_len());
 
         // Limit output packet size by congestion window size.
@@ -2606,15 +2621,22 @@ impl Connection {
         Ok(written)
     }
 
-    // Returns the maximum len of a packet to be sent. This is max_packet_size
-    // as sent by the peer, except during the handshake when we haven't parsed
-    // transport parameters yet, so use a default value then.
+    // Returns the maximum size of a packet to be sent.
+    //
+    // This is a minimum of the sender's and the receiver's maximum UDP payload
+    // sizes, except during the handshake when we haven't parsed transport
+    // parameters yet, so use a default value then.
     fn max_send_udp_payload_len(&self) -> usize {
         if self.is_established() {
             // We cap the maximum packet size to 16KB or so, so that it can be
             // always encoded with a 2-byte varint.
-            cmp::min(16383, self.peer_transport_params.max_udp_payload_size)
-                as usize
+            cmp::min(
+                16383,
+                cmp::min(
+                    self.recovery.max_datagram_size(),
+                    self.peer_transport_params.max_udp_payload_size as usize,
+                ),
+            )
         } else {
             // Allow for 1200 bytes (minimum QUIC packet size) during the
             // handshake.
@@ -6795,7 +6817,7 @@ mod tests {
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
         config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_udp_payload_size(1200);
+        config.set_max_recv_udp_payload_size(1200);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -6831,7 +6853,7 @@ mod tests {
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
         config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_udp_payload_size(1200);
+        config.set_max_recv_udp_payload_size(1200);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -6849,7 +6871,7 @@ mod tests {
 
         // Server sends stream data bigger than cwnd.
         let send_buf1 = [0; 20000];
-        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(14085));
+        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(11565));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         // We can't create a new packet header because there is no room by cwnd.
@@ -6868,7 +6890,7 @@ mod tests {
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
         config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_udp_payload_size(1405);
+        config.set_max_recv_udp_payload_size(1405);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -6886,7 +6908,7 @@ mod tests {
 
         // Server sends stream data bigger than cwnd.
         let send_buf1 = [0; 20000];
-        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(14085));
+        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(11565));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         // We can't create a new packet header because there is no room by cwnd.
@@ -6905,7 +6927,7 @@ mod tests {
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
         config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_udp_payload_size(1406);
+        config.set_max_recv_udp_payload_size(1406);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -6923,7 +6945,7 @@ mod tests {
 
         // Server sends stream data bigger than cwnd.
         let send_buf1 = [0; 20000];
-        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(14085));
+        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(11565));
         assert_eq!(pipe.advance(&mut buf), Ok(()));
 
         // We can't create a new frame because there is no room by cwnd.
@@ -7491,7 +7513,7 @@ mod tests {
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
         config.enable_dgram(true, 1000, 1000);
-        config.set_max_udp_payload_size(1200);
+        config.set_max_recv_udp_payload_size(1200);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
@@ -7677,7 +7699,7 @@ mod tests {
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
         config.enable_dgram(true, 2, 10);
-        config.set_max_udp_payload_size(1200);
+        config.set_max_recv_udp_payload_size(1200);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
@@ -7725,7 +7747,7 @@ mod tests {
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
         config.enable_dgram(true, 10, 10);
-        config.set_max_udp_payload_size(1452);
+        config.set_max_recv_udp_payload_size(1452);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
