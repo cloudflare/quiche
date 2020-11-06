@@ -78,6 +78,60 @@ jobs:
           command: build
           args: --verbose --target=i686-unknown-linux-gnu
 
+  quiche_macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.TOOLCHAIN }}
+          override: true
+
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose
+
+  quiche_ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install stable toolchain x86_64
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.TOOLCHAIN }}
+          target: x86_64-apple-ios
+          override: true
+
+      - name: Install stable toolchain aarch64
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.TOOLCHAIN }}
+          target: aarch64-apple-ios
+          override: true
+
+      - name: Install cargo-lipo
+        run: cargo install cargo-lipo
+
+      - name: Run cargo lipo
+        uses: actions-rs/cargo@v1
+        with:
+          command: lipo
+          args: --verbose
+
   quiche_windows:
     runs-on: windows-latest
     steps:
