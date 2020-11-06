@@ -78,6 +78,58 @@ jobs:
           command: build
           args: --verbose --target=i686-unknown-linux-gnu
 
+  quiche_windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.TOOLCHAIN }}
+          target: x86_64-pc-windows-msvc
+          override: true
+
+      - name: Install dependencies
+        run: choco install nasm cmake
+
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --target=x86_64-pc-windows-msvc --verbose
+
+  quiche_windows_x86:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.TOOLCHAIN }}
+          target: i686-pc-windows-msvc
+          override: true
+
+      - name: Install dependencies
+        uses: crazy-max/ghaction-chocolatey@v1
+        with: 
+          args: install nasm cmake
+
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --target=i686-pc-windows-msvc --verbose
+
   apps:
     runs-on: ubuntu-latest
     steps:
