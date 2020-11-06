@@ -21,9 +21,6 @@ jobs:
           toolchain: stable
           override: true
 
-      - name: Install dependencies
-        run: sudo apt-get install cmake
-
       - name: Run cargo doc
         uses: actions-rs/cargo@v1
         with:

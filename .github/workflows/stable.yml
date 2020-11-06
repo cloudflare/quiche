@@ -24,7 +24,7 @@ jobs:
           override: true
 
       - name: Install dependencies
-        run: sudo apt-get install cmake libev-dev uthash-dev
+        run: sudo apt-get install libev-dev uthash-dev
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
@@ -70,7 +70,7 @@ jobs:
           override: true
 
       - name: Install dependencies
-        run: sudo apt-get install cmake gcc-multilib g++-multilib
+        run: sudo apt-get install gcc-multilib g++-multilib
 
       - name: Run cargo build
         uses: actions-rs/cargo@v1
@@ -95,7 +95,7 @@ jobs:
           override: true
 
       - name: Install dependencies
-        run: choco install nasm cmake
+        run: choco install nasm
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
@@ -122,7 +122,7 @@ jobs:
       - name: Install dependencies
         uses: crazy-max/ghaction-chocolatey@v1
         with: 
-          args: install nasm cmake
+          args: install nasm
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
@@ -144,9 +144,6 @@ jobs:
           profile: minimal
           toolchain: ${{ env.TOOLCHAIN }}
           override: true
-
-      - name: Install dependencies
-        run: sudo apt-get install cmake
 
       - name: Run cargo build
         uses: actions-rs/cargo@v1
@@ -175,9 +172,6 @@ jobs:
           toolchain: ${{ env.TOOLCHAIN }}
           override: true
 
-      - name: Install dependencies
-        run: sudo apt-get install cmake
-
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
@@ -204,9 +198,6 @@ jobs:
           profile: minimal
           toolchain: ${{ env.TOOLCHAIN }}
           override: true
-
-      - name: Install dependencies
-        run: sudo apt-get install cmake
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
@@ -239,7 +230,7 @@ jobs:
           override: true
 
       - name: Install dependencies
-        run: sudo apt-get install cmake libpcre3-dev zlib1g-dev
+        run: sudo apt-get install libpcre3-dev zlib1g-dev
 
       - name: Download NGINX sources
         run: curl -O https://nginx.org/download/nginx-${{ matrix.version }}.tar.gz
