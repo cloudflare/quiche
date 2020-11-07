@@ -33,9 +33,13 @@ use std::io::prelude::*;
 
 use std::collections::HashMap;
 
+use std::rc::Rc;
+
+use std::cell::RefCell;
+
 use ring::rand::*;
 
-use quiche_apps::*;
+use quiche_apps::common::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
@@ -195,7 +199,7 @@ fn main() {
                     }
 
                     panic!("recv() failed: {:?}", e);
-                },
+                }
             };
 
             trace!("got {} bytes", len);
@@ -223,7 +227,7 @@ fn main() {
                 Err(e) => {
                     error!("Parsing packet header failed: {:?}", e);
                     continue 'read;
-                },
+                }
             };
 
             trace!("got packet {:?}", hdr);
@@ -233,8 +237,8 @@ fn main() {
 
             // Lookup a connection based on the packet's connection ID. If there
             // is no connection matching, create a new one.
-            let (_, client) = if !clients.contains_key(hdr.dcid.as_ref()) &&
-                !clients.contains_key(conn_id)
+            let (_, client) = if !clients.contains_key(hdr.dcid.as_ref())
+                && !clients.contains_key(conn_id)
             {
                 if hdr.ty != quiche::Type::Initial {
                     error!("Packet is not Initial");
@@ -376,16 +380,16 @@ fn main() {
                 Err(e) => {
                     error!("{} recv failed: {:?}", client.conn.trace_id(), e);
                     continue 'read;
-                },
+                }
             };
 
             trace!("{} processed {} bytes", client.conn.trace_id(), read);
 
             // Create a new application protocol session as soon as the QUIC
             // connection is established.
-            if !client.app_proto_selected &&
-                (client.conn.is_in_early_data() ||
-                    client.conn.is_established())
+            if !client.app_proto_selected
+                && (client.conn.is_in_early_data()
+                    || client.conn.is_established())
             {
                 // At this stage the ALPN negotiation succeeded and selected a
                 // single application protocol name. We'll use this to construct
@@ -415,6 +419,7 @@ fn main() {
                     client.http_conn = Some(Http3Conn::with_conn(
                         &mut client.conn,
                         dgram_sender,
+                        Rc::new(RefCell::new(stdout_sink))
                     ));
 
                     client.app_proto_selected = true;
@@ -475,14 +480,14 @@ fn main() {
                     Err(quiche::Error::Done) => {
                         trace!("{} done writing", client.conn.trace_id());
                         break;
-                    },
+                    }
 
                     Err(e) => {
                         error!("{} send failed: {:?}", client.conn.trace_id(), e);
 
                         client.conn.close(false, 0x1, b"fail").ok();
                         break;
-                    },
+                    }
                 };
 
                 // TODO: coalesce packets.
