@@ -120,7 +120,8 @@ pub fn request(
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
-    let output_sink = Rc::new(RefCell::new(output_sink)) as Rc<RefCell<dyn FnMut(_)>>;
+    let output_sink =
+        Rc::new(RefCell::new(output_sink)) as Rc<RefCell<dyn FnMut(_)>>;
 
     // Setup the event loop.
     let poll = mio::Poll::new().unwrap();
@@ -296,7 +297,7 @@ pub fn request(
                         "recv() failed: {:?}",
                         e
                     )));
-                }
+                },
             };
 
             trace!("got {} bytes", len);
@@ -319,7 +320,7 @@ pub fn request(
                 Err(e) => {
                     error!("recv failed: {:?}", e);
                     continue 'read;
-                }
+                },
             };
 
             trace!("processed {} bytes", read);
@@ -431,14 +432,14 @@ pub fn request(
                 Err(quiche::Error::Done) => {
                     trace!("done writing");
                     break;
-                }
+                },
 
                 Err(e) => {
                     error!("send failed: {:?}", e);
 
                     conn.close(false, 0x1, b"fail").ok();
                     break;
-                }
+                },
             };
 
             if let Err(e) = socket.send(&out[..write]) {

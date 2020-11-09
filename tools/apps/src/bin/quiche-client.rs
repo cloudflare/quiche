@@ -28,7 +28,6 @@ use quiche_apps::common::*;
 
 use quiche_apps::client::*;
 
-
 const USAGE: &str = "Usage:
   quiche-client [options] URL...
   quiche-client -h | --help
@@ -73,7 +72,6 @@ fn main() {
         Err(RequestError::HandshakeFail) => std::process::exit(-1),
         Err(RequestError::HttpFail) => std::process::exit(-2),
         Err(RequestError::Other(e)) => panic!(e),
-        Ok(_) => ()
+        Ok(_) => (),
     }
 }
-

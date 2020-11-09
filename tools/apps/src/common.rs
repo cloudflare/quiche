@@ -123,19 +123,16 @@ impl Args for CommonArgs {
         let http_version = args.get_str("--http-version");
         let dgram_proto = args.get_str("--dgram-proto");
         let (alpns, dgrams_enabled) = match (http_version, dgram_proto) {
-            ("HTTP/0.9", "none") => {
-                (alpns::length_prefixed(&alpns::HTTP_09), false)
-            }
+            ("HTTP/0.9", "none") =>
+                (alpns::length_prefixed(&alpns::HTTP_09), false),
 
-            ("HTTP/0.9", _) => {
-                panic!("Unsupported HTTP version and DATAGRAM protocol.")
-            }
+            ("HTTP/0.9", _) =>
+                panic!("Unsupported HTTP version and DATAGRAM protocol."),
 
             ("HTTP/3", "none") => (alpns::length_prefixed(&alpns::HTTP_3), false),
 
-            ("HTTP/3", "oneway") => {
-                (alpns::length_prefixed(&alpns::HTTP_3), true)
-            }
+            ("HTTP/3", "oneway") =>
+                (alpns::length_prefixed(&alpns::HTTP_3), true),
 
             ("all", "none") => (
                 [
@@ -348,7 +345,8 @@ fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {
                 out,
                 "          \"value\": \"{}\"",
                 h.value().replace("\"", "\\\"")
-            ).unwrap();
+            )
+            .unwrap();
 
             if response_hdrs.peek().is_some() {
                 writeln!(out, "        }},").unwrap();
@@ -428,7 +426,7 @@ impl SiDuckConn {
                     error!("failed to send dgram {:?}", e);
 
                     break;
-                }
+                },
             }
 
             quacks_done += 1;
@@ -467,9 +465,9 @@ impl SiDuckConn {
                         Err(e) => {
                             error!("failed to send quack ack {:?}", e);
                             return Err(From::from(e));
-                        }
+                        },
                     }
-                }
+                },
 
                 Err(quiche::Error::Done) => break,
 
@@ -477,7 +475,7 @@ impl SiDuckConn {
                     error!("failure receiving DATAGRAM failure {:?}", e);
 
                     return Err(From::from(e));
-                }
+                },
             }
         }
 
@@ -521,17 +519,17 @@ impl SiDuckConn {
 
                         break;
                     }
-                }
+                },
 
                 Err(quiche::Error::Done) => {
                     break;
-                }
+                },
 
                 Err(e) => {
                     error!("failure receiving DATAGRAM failure {:?}", e);
 
                     break;
-                }
+                },
             }
         }
     }
@@ -587,14 +585,15 @@ impl Default for Http09Conn {
             reqs_sent: Default::default(),
             reqs_complete: Default::default(),
             reqs: Default::default(),
-            output_sink: Rc::new(RefCell::new(stdout_sink))
+            output_sink: Rc::new(RefCell::new(stdout_sink)),
         }
     }
 }
 
 impl Http09Conn {
     pub fn with_urls(
-        urls: &[url::Url], reqs_cardinal: u64, output_sink: Rc<RefCell<dyn FnMut(String)>>,
+        urls: &[url::Url], reqs_cardinal: u64,
+        output_sink: Rc<RefCell<dyn FnMut(String)>>,
     ) -> Box<dyn HttpConn> {
         let mut reqs = Vec::new();
         for url in urls {
@@ -615,7 +614,7 @@ impl Http09Conn {
             reqs_sent: 0,
             reqs_complete: 0,
             reqs,
-            output_sink
+            output_sink,
         };
 
         Box::new(h_conn)
@@ -639,12 +638,12 @@ impl HttpConn for Http09Conn {
                 Err(quiche::Error::StreamLimit) => {
                     debug!("not enough stream credits, retry later...");
                     break;
-                }
+                },
 
                 Err(e) => {
                     error!("failed to send request {:?}", e);
                     break;
-                }
+                },
             };
 
             debug!("sending HTTP request {:?}", req.request_line);
@@ -688,13 +687,13 @@ impl HttpConn for Http09Conn {
                 match &mut req.response_writer {
                     Some(rw) => {
                         rw.write_all(&buf[..read]).ok();
-                    }
+                    },
 
                     None => {
                         self.output_sink.borrow_mut()(unsafe {
                             String::from_utf8_unchecked(stream_buf.to_vec())
                         });
-                    }
+                    },
                 }
 
                 // The server reported that it has no more data to send on
@@ -837,7 +836,7 @@ impl HttpConn for Http09Conn {
                                 e
                             );
                             return Err(From::from(e));
-                        }
+                        },
                     };
 
                     if written < body.len() {
@@ -877,7 +876,7 @@ impl HttpConn for Http09Conn {
             Err(e) => {
                 error!("{} stream send failed {:?}", conn.trace_id(), e);
                 return;
-            }
+            },
         };
 
         resp.written += written;
@@ -924,7 +923,7 @@ impl Http3Conn {
         conn: &mut quiche::Connection, urls: &[url::Url], reqs_cardinal: u64,
         req_headers: &[String], body: &Option<Vec<u8>>, method: &str,
         dump_json: bool, dgram_sender: Option<Http3DgramSender>,
-        output_sink: Rc<RefCell<dyn FnMut(String)>>
+        output_sink: Rc<RefCell<dyn FnMut(String)>>,
     ) -> Box<dyn HttpConn> {
         let mut reqs = Vec::new();
         for url in urls {
@@ -992,7 +991,7 @@ impl Http3Conn {
             body: body.as_ref().map(|b| b.to_vec()),
             dump_json,
             dgram_sender,
-            output_sink
+            output_sink,
         };
 
         Box::new(h_conn)
@@ -1000,7 +999,7 @@ impl Http3Conn {
 
     pub fn with_conn(
         conn: &mut quiche::Connection, dgram_sender: Option<Http3DgramSender>,
-        output_sink: Rc<RefCell<dyn FnMut(String)>>
+        output_sink: Rc<RefCell<dyn FnMut(String)>>,
     ) -> Box<dyn HttpConn> {
         let h_conn = Http3Conn {
             h3_conn: quiche::h3::Connection::with_transport(
@@ -1015,7 +1014,7 @@ impl Http3Conn {
             body: None,
             dump_json: false,
             dgram_sender,
-            output_sink
+            output_sink,
         };
 
         Box::new(h_conn)
@@ -1037,23 +1036,23 @@ impl Http3Conn {
             match hdr.name() {
                 ":scheme" => {
                     scheme = hdr.value();
-                }
+                },
 
                 ":authority" | "host" => {
                     host = hdr.value();
-                }
+                },
 
                 ":path" => {
                     path = hdr.value();
-                }
+                },
 
                 ":method" => {
                     method = hdr.value();
-                }
+                },
 
                 "priority" => {
                     priority = hdr.value();
-                }
+                },
 
                 _ => (),
             }
@@ -1104,7 +1103,7 @@ impl Http3Conn {
 
                     Err(_) => (404, b"Not Found!".to_vec()),
                 }
-            }
+            },
 
             _ => (405, Vec::new()),
         };
@@ -1139,17 +1138,17 @@ impl HttpConn for Http3Conn {
                 )) => {
                     debug!("not enough stream credits, retry later...");
                     break;
-                }
+                },
 
                 Err(quiche::h3::Error::StreamBlocked) => {
                     debug!("stream is blocked, retry later...");
                     break;
-                }
+                },
 
                 Err(e) => {
                     error!("failed to send request {:?}", e);
                     break;
-                }
+                },
             };
 
             debug!("sending HTTP request {:?}", req.hdrs);
@@ -1190,7 +1189,7 @@ impl HttpConn for Http3Conn {
                     Err(e) => {
                         error!("failed to send dgram {:?}", e);
                         break;
-                    }
+                    },
                 }
 
                 dgrams_done += 1;
@@ -1219,7 +1218,7 @@ impl HttpConn for Http3Conn {
                         .unwrap();
 
                     req.response_hdrs = list;
-                }
+                },
 
                 Ok((stream_id, quiche::h3::Event::Data)) => {
                     if let Ok(read) = self.h3_conn.recv_body(conn, stream_id, buf)
@@ -1244,20 +1243,19 @@ impl HttpConn for Http3Conn {
                         match &mut req.response_writer {
                             Some(rw) => {
                                 rw.write_all(&buf[..read]).ok();
-                            }
+                            },
 
-                            None => {
+                            None =>
                                 if !self.dump_json {
                                     self.output_sink.borrow_mut()(unsafe {
                                         String::from_utf8_unchecked(
                                             buf[..read].to_vec(),
                                         )
                                     });
-                                }
-                            }
+                                },
                         }
                     }
-                }
+                },
 
                 Ok((_stream_id, quiche::h3::Event::Finished)) => {
                     self.reqs_complete += 1;
@@ -1277,7 +1275,10 @@ impl HttpConn for Http3Conn {
                         );
 
                         if self.dump_json {
-                            dump_json(&self.reqs, &mut *self.output_sink.borrow_mut());
+                            dump_json(
+                                &self.reqs,
+                                &mut *self.output_sink.borrow_mut(),
+                            );
                         }
 
                         match conn.close(true, 0x00, b"kthxbye") {
@@ -1289,7 +1290,7 @@ impl HttpConn for Http3Conn {
 
                         break;
                     }
-                }
+                },
 
                 Ok((_flow_id, quiche::h3::Event::Datagram)) => {
                     let (len, flow_id, flow_id_len) =
@@ -1301,7 +1302,7 @@ impl HttpConn for Http3Conn {
                         len,
                         buf[flow_id_len..len].to_vec()
                     );
-                }
+                },
 
                 Ok((goaway_id, quiche::h3::Event::GoAway)) => {
                     info!(
@@ -1309,17 +1310,17 @@ impl HttpConn for Http3Conn {
                         conn.trace_id(),
                         goaway_id
                     );
-                }
+                },
 
                 Err(quiche::h3::Error::Done) => {
                     break;
-                }
+                },
 
                 Err(e) => {
                     error!("HTTP/3 processing failed: {:?}", e);
 
                     break;
-                }
+                },
             }
         }
     }
@@ -1387,7 +1388,7 @@ impl HttpConn for Http3Conn {
 
                             partial_responses.insert(stream_id, response);
                             continue;
-                        }
+                        },
 
                         Err(e) => {
                             error!(
@@ -1397,7 +1398,7 @@ impl HttpConn for Http3Conn {
                             );
 
                             break;
-                        }
+                        },
                     }
 
                     let written = match self
@@ -1416,7 +1417,7 @@ impl HttpConn for Http3Conn {
                             );
 
                             break;
-                        }
+                        },
                     };
 
                     if written < body.len() {
@@ -1428,7 +1429,7 @@ impl HttpConn for Http3Conn {
 
                         partial_responses.insert(stream_id, response);
                     }
-                }
+                },
 
                 Ok((stream_id, quiche::h3::Event::Data)) => {
                     info!(
@@ -1436,7 +1437,7 @@ impl HttpConn for Http3Conn {
                         conn.trace_id(),
                         stream_id
                     );
-                }
+                },
 
                 Ok((_stream_id, quiche::h3::Event::Finished)) => (),
 
@@ -1449,7 +1450,7 @@ impl HttpConn for Http3Conn {
                         flow_id,
                         &buf[flow_id_len..len].to_vec()
                     );
-                }
+                },
 
                 Ok((goaway_id, quiche::h3::Event::GoAway)) => {
                     trace!(
@@ -1459,17 +1460,17 @@ impl HttpConn for Http3Conn {
                     );
                     self.h3_conn
                         .send_goaway(conn, self.largest_processed_request)?;
-                }
+                },
 
                 Err(quiche::h3::Error::Done) => {
                     break;
-                }
+                },
 
                 Err(e) => {
                     error!("{} HTTP/3 error {:?}", conn.trace_id(), e);
 
                     return Err(e);
-                }
+                },
             }
         }
 
@@ -1493,7 +1494,7 @@ impl HttpConn for Http3Conn {
                     Err(e) => {
                         error!("failed to send dgram {:?}", e);
                         break;
-                    }
+                    },
                 }
 
                 dgrams_done += 1;
@@ -1523,12 +1524,12 @@ impl HttpConn for Http3Conn {
 
                 Err(quiche::h3::Error::StreamBlocked) => {
                     return;
-                }
+                },
 
                 Err(e) => {
                     error!("{} stream send failed {:?}", conn.trace_id(), e);
                     return;
-                }
+                },
             }
         }
 
@@ -1541,12 +1542,12 @@ impl HttpConn for Http3Conn {
 
             Err(quiche::h3::Error::Done) => {
                 return;
-            }
+            },
 
             Err(e) => {
                 error!("{} stream send failed {:?}", conn.trace_id(), e);
                 return;
-            }
+            },
         };
 
         resp.written += written;
