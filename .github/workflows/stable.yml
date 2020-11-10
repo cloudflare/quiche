@@ -101,39 +101,31 @@ jobs:
 
   quiche_ios:
     runs-on: macos-latest
+    strategy:
+      matrix:
+        target: ["x86_64-apple-ios", "aarch64-apple-ios"]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
         with:
           submodules: 'recursive'
 
-      - name: Install stable toolchain x86_64
+      - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: ${{ env.TOOLCHAIN }}
-          target: x86_64-apple-ios
+          target: ${{ matrix.target }}
           override: true
 
-      - name: Install stable toolchain aarch64
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          target: aarch64-apple-ios
-          override: true
-
-      - name: Install cargo-lipo
-        run: cargo install cargo-lipo
-
-      - name: Run cargo lipo
-        uses: actions-rs/cargo@v1
-        with:
-          command: lipo
-          args: --verbose
+      - name: Run cargo build
+        run: cargo build --verbose --target ${{ matrix.target }}
 
   quiche_windows:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        target: ["x86_64-pc-windows-msvc", "i686-pc-windows-msvc"]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -145,44 +137,19 @@ jobs:
         with:
           profile: minimal
           toolchain: ${{ env.TOOLCHAIN }}
-          target: x86_64-pc-windows-msvc
-          override: true
-
-      - name: Install dependencies
-        run: choco install nasm
-
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --target=x86_64-pc-windows-msvc --verbose
-
-  quiche_windows_x86:
-    runs-on: windows-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
-
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          target: i686-pc-windows-msvc
+          target: ${{ matrix.target }}
           override: true
 
       - name: Install dependencies
         uses: crazy-max/ghaction-chocolatey@v1
-        with: 
+        with:
           args: install nasm
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --target=i686-pc-windows-msvc --verbose
+          args: --target=${{ matrix.target }} --verbose
 
   apps:
     runs-on: ubuntu-latest
@@ -269,7 +236,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        version: [ "1.16.1" ]
+        version: ["1.16.1"]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
