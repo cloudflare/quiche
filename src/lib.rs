@@ -271,6 +271,8 @@ use std::time;
 use std::pin::Pin;
 use std::str::FromStr;
 
+use std::sync::Mutex;
+
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_DRAFT29;
 
@@ -434,7 +436,11 @@ pub struct Config {
 
     version: u32,
 
-    tls_ctx: tls::Context,
+    // BoringSSL's SSL_CTX structure is technically safe to share across threads
+    // but once shared, functions that modify it can't be used any more. We can't
+    // encode that in Rust, so just make it Send+Sync with a mutex to fulfill
+    // the Sync constraint.
+    tls_ctx: Mutex<tls::Context>,
 
     application_protos: Vec<Vec<u8>>,
 
@@ -460,7 +466,7 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn new(version: u32) -> Result<Config> {
-        let tls_ctx = tls::Context::new()?;
+        let tls_ctx = Mutex::new(tls::Context::new()?);
 
         Ok(Config {
             local_transport_params: TransportParams::default(),
@@ -491,7 +497,10 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn load_cert_chain_from_pem_file(&mut self, file: &str) -> Result<()> {
-        self.tls_ctx.use_certificate_chain_file(file)
+        self.tls_ctx
+            .lock()
+            .unwrap()
+            .use_certificate_chain_file(file)
     }
 
     /// Configures the given private key.
@@ -506,7 +515,7 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn load_priv_key_from_pem_file(&mut self, file: &str) -> Result<()> {
-        self.tls_ctx.use_privkey_file(file)
+        self.tls_ctx.lock().unwrap().use_privkey_file(file)
     }
 
     /// Specifies a file where trusted CA certificates are stored for the
@@ -522,7 +531,10 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn load_verify_locations_from_file(&mut self, file: &str) -> Result<()> {
-        self.tls_ctx.load_verify_locations_from_file(file)
+        self.tls_ctx
+            .lock()
+            .unwrap()
+            .load_verify_locations_from_file(file)
     }
 
     /// Specifies a directory where trusted CA certificates are stored for the
@@ -540,7 +552,10 @@ impl Config {
     pub fn load_verify_locations_from_directory(
         &mut self, dir: &str,
     ) -> Result<()> {
-        self.tls_ctx.load_verify_locations_from_directory(dir)
+        self.tls_ctx
+            .lock()
+            .unwrap()
+            .load_verify_locations_from_directory(dir)
     }
 
     /// Configures whether to verify the peer's certificate.
@@ -548,7 +563,7 @@ impl Config {
     /// The default value is `true` for client connections, and `false` for
     /// server ones.
     pub fn verify_peer(&mut self, verify: bool) {
-        self.tls_ctx.set_verify(verify);
+        self.tls_ctx.lock().unwrap().set_verify(verify);
     }
 
     /// Configures whether to send GREASE values.
@@ -567,12 +582,12 @@ impl Config {
     /// [`set_keylog()`]: struct.Connection.html#method.set_keylog
     /// [keylog]: https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/Key_Log_Format
     pub fn log_keys(&mut self) {
-        self.tls_ctx.enable_keylog();
+        self.tls_ctx.lock().unwrap().enable_keylog();
     }
 
     /// Enables sending or receiving early data.
     pub fn enable_early_data(&mut self) {
-        self.tls_ctx.set_early_data_enabled(true);
+        self.tls_ctx.lock().unwrap().set_early_data_enabled(true);
     }
 
     /// Configures the list of supported application protocols.
@@ -606,7 +621,10 @@ impl Config {
 
         self.application_protos = protos_list;
 
-        self.tls_ctx.set_alpn(&self.application_protos)
+        self.tls_ctx
+            .lock()
+            .unwrap()
+            .set_alpn(&self.application_protos)
     }
 
     /// Sets the `max_idle_timeout` transport parameter.
@@ -812,7 +830,11 @@ pub struct Connection {
     local_transport_params: TransportParams,
 
     /// TLS handshake state.
-    handshake: tls::Handshake,
+    ///
+    /// Due to the requirement for `Connection` to be Send+Sync, and the fact
+    /// that BoringSSL's SSL structure is not thread safe, we need to wrap the
+    /// handshake object in a mutex.
+    handshake: Mutex<tls::Handshake>,
 
     /// Loss recovery and congestion control state.
     recovery: recovery::Recovery,
@@ -884,6 +906,9 @@ pub struct Connection {
     /// Draining timeout expiration time.
     draining_timer: Option<time::Instant>,
 
+    /// The negotiated ALPN protocol.
+    alpn: Vec<u8>,
+
     /// Whether this is a server-side connection.
     is_server: bool,
 
@@ -909,6 +934,9 @@ pub struct Connection {
     /// Whether the peer's transport parameters were parsed.
     parsed_peer_transport_params: bool,
 
+    /// Whether the connection handshake has been completed.
+    handshake_completed: bool,
+
     /// Whether the HANDSHAKE_DONE has been sent.
     handshake_done_sent: bool,
 
@@ -926,7 +954,7 @@ pub struct Connection {
     grease: bool,
 
     /// TLS keylog writer.
-    keylog: Option<Box<dyn std::io::Write + Send>>,
+    keylog: Option<Box<dyn std::io::Write + Send + Sync>>,
 
     /// Qlog streaming output.
     #[cfg(feature = "qlog")]
@@ -987,7 +1015,7 @@ pub fn connect(
     let conn = Connection::new(scid, None, config, false)?;
 
     if let Some(server_name) = server_name {
-        conn.handshake.set_host_name(server_name)?;
+        conn.handshake.lock().unwrap().set_host_name(server_name)?;
     }
 
     Ok(conn)
@@ -1137,7 +1165,7 @@ impl Connection {
     fn new(
         scid: &[u8], odcid: Option<&[u8]>, config: &mut Config, is_server: bool,
     ) -> Result<Pin<Box<Connection>>> {
-        let tls = config.tls_ctx.new_handshake()?;
+        let tls = config.tls_ctx.lock().unwrap().new_handshake()?;
         Connection::with_tls(scid, odcid, config, tls, is_server)
     }
 
@@ -1168,7 +1196,7 @@ impl Connection {
 
             local_transport_params: config.local_transport_params.clone(),
 
-            handshake: tls,
+            handshake: Mutex::new(tls),
 
             recovery: recovery::Recovery::new(&config),
 
@@ -1211,6 +1239,8 @@ impl Connection {
 
             draining_timer: None,
 
+            alpn: Vec::new(),
+
             is_server,
 
             derived_initial_secrets: false,
@@ -1228,6 +1258,8 @@ impl Connection {
             peer_verified_address: is_server,
 
             parsed_peer_transport_params: false,
+
+            handshake_completed: false,
 
             handshake_done_sent: false,
 
@@ -1269,7 +1301,7 @@ impl Connection {
         conn.local_transport_params.initial_source_connection_id =
             Some(scid.to_vec());
 
-        conn.handshake.init(&conn)?;
+        conn.handshake.lock().unwrap().init(&conn)?;
 
         conn.encode_transport_params()?;
 
@@ -1304,7 +1336,7 @@ impl Connection {
     /// missing some early logs.
     ///
     /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
-    pub fn set_keylog(&mut self, writer: Box<dyn std::io::Write + Send>) {
+    pub fn set_keylog(&mut self, writer: Box<dyn std::io::Write + Send + Sync>) {
         self.keylog = Some(writer);
     }
 
@@ -1316,7 +1348,7 @@ impl Connection {
     /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
     #[cfg(feature = "qlog")]
     pub fn set_qlog(
-        &mut self, writer: Box<dyn std::io::Write + Send>, title: String,
+        &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String,
     ) {
         let vp = if self.is_server {
@@ -1356,8 +1388,8 @@ impl Connection {
         let ev = self.local_transport_params.to_qlog(
             qlog::TransportOwner::Local,
             self.version,
-            self.handshake.alpn_protocol(),
-            self.handshake.cipher(),
+            self.handshake.lock().unwrap().alpn_protocol(),
+            self.handshake.lock().unwrap().cipher(),
         );
 
         streamer.add_event(ev).ok();
@@ -1539,7 +1571,7 @@ impl Connection {
             // Reset connection state to force sending another Initial packet.
             self.drop_epoch_state(packet::EPOCH_INITIAL, now);
             self.got_peer_conn_id = false;
-            self.handshake.clear()?;
+            self.handshake.lock().unwrap().clear()?;
 
             self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
                 Some(aead_open);
@@ -1594,7 +1626,7 @@ impl Connection {
             // Reset connection state to force sending another Initial packet.
             self.drop_epoch_state(packet::EPOCH_INITIAL, now);
             self.got_peer_conn_id = false;
-            self.handshake.clear()?;
+            self.handshake.lock().unwrap().clear()?;
 
             self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
                 Some(aead_open);
@@ -1811,8 +1843,8 @@ impl Connection {
                     let ev = self.peer_transport_params.to_qlog(
                         qlog::TransportOwner::Remote,
                         self.version,
-                        self.handshake.alpn_protocol(),
-                        self.handshake.cipher(),
+                        self.handshake.lock().unwrap().alpn_protocol(),
+                        self.handshake.lock().unwrap().cipher(),
                     );
 
                     q.add_event(ev).ok();
@@ -3066,7 +3098,7 @@ impl Connection {
         &mut self, stream_id: u64, data: T,
     ) -> Result<()>
     where
-        T: std::any::Any + Send,
+        T: std::any::Any + Send + Sync,
     {
         // Get existing stream.
         let stream = self.streams.get_mut(stream_id).ok_or(Error::Done)?;
@@ -3496,28 +3528,28 @@ impl Connection {
     ///
     /// If no protocol has been negotiated, the returned value is empty.
     pub fn application_proto(&self) -> &[u8] {
-        self.handshake.alpn_protocol()
+        self.alpn.as_ref()
     }
 
     /// Returns the peer's leaf certificate (if any) as a DER-encoded buffer.
     pub fn peer_cert(&self) -> Option<Vec<u8>> {
-        self.handshake.peer_cert()
+        self.handshake.lock().unwrap().peer_cert()
     }
 
     /// Returns true if the connection handshake is complete.
     pub fn is_established(&self) -> bool {
-        self.handshake.is_completed()
+        self.handshake_completed
     }
 
     /// Returns true if the connection is resumed.
     pub fn is_resumed(&self) -> bool {
-        self.handshake.is_resumed()
+        self.handshake.lock().unwrap().is_resumed()
     }
 
     /// Returns true if the connection has a pending handshake that has
     /// progressed enough to send or receive early data.
     pub fn is_in_early_data(&self) -> bool {
-        self.handshake.is_in_early_data()
+        self.handshake.lock().unwrap().is_in_early_data()
     }
 
     /// Returns whether there is stream or DATAGRAM data available to read.
@@ -3553,7 +3585,10 @@ impl Connection {
             &mut raw_params,
         )?;
 
-        self.handshake.set_quic_transport_params(raw_params)?;
+        self.handshake
+            .lock()
+            .unwrap()
+            .set_quic_transport_params(raw_params)?;
 
         Ok(())
     }
@@ -3567,7 +3602,7 @@ impl Connection {
             return Ok(());
         }
 
-        match self.handshake.do_handshake() {
+        match self.handshake.lock().unwrap().do_handshake() {
             Ok(_) => (),
 
             Err(Error::Done) => return Ok(()),
@@ -3575,19 +3610,25 @@ impl Connection {
             Err(e) => return Err(e),
         };
 
-        if self.application_proto().is_empty() {
+        let handshake = self.handshake.lock().unwrap();
+
+        if handshake.alpn_protocol().is_empty() {
             // Send no_application_proto TLS alert when no protocol
             // can be negotiated.
             self.error = Some(0x178);
             return Err(Error::TlsFail);
         }
 
+        self.handshake_completed = handshake.is_completed();
+
+        self.alpn = handshake.alpn_protocol().to_vec();
+
         trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
                &self.trace_id,
-               std::str::from_utf8(self.application_proto()),
-               self.handshake.cipher(),
-               self.handshake.curve(),
-               self.handshake.sigalg(),
+               std::str::from_utf8(handshake.alpn_protocol()),
+               handshake.cipher(),
+               handshake.curve(),
+               handshake.sigalg(),
                self.is_resumed(),
                self.peer_transport_params);
 
@@ -3599,7 +3640,7 @@ impl Connection {
         // On error send packet in the latest epoch available, but only send
         // 1-RTT ones when the handshake is completed.
         if self.error.is_some() {
-            let epoch = match self.handshake.write_level() {
+            let epoch = match self.handshake.lock().unwrap().write_level() {
                 crypto::Level::Initial => packet::EPOCH_INITIAL,
                 crypto::Level::ZeroRTT => unreachable!(),
                 crypto::Level::Handshake => packet::EPOCH_HANDSHAKE,
@@ -3775,7 +3816,10 @@ impl Connection {
 
                 while let Ok((read, _)) = stream.recv.emit(&mut crypto_buf) {
                     let recv_buf = &crypto_buf[..read];
-                    self.handshake.provide_data(level, &recv_buf)?;
+                    self.handshake
+                        .lock()
+                        .unwrap()
+                        .provide_data(level, &recv_buf)?;
                 }
 
                 self.do_handshake()?;
@@ -3786,7 +3830,8 @@ impl Connection {
                 // This is potentially dangerous as the handshake hasn't been
                 // completed yet, though it's required to be able to send data
                 // in 0.5 RTT.
-                let raw_params = self.handshake.quic_transport_params();
+                let handshake = self.handshake.lock().unwrap();
+                let raw_params = handshake.quic_transport_params();
 
                 if !self.parsed_peer_transport_params && !raw_params.is_empty() {
                     let peer_params =
@@ -6801,9 +6846,29 @@ mod tests {
     fn check_send(_: &mut impl Send) {}
 
     #[test]
+    fn config_must_be_send() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        check_send(&mut config);
+    }
+
+    #[test]
     fn connection_must_be_send() {
         let mut pipe = testing::Pipe::default().unwrap();
         check_send(&mut pipe.client);
+    }
+
+    fn check_sync(_: &mut impl Sync) {}
+
+    #[test]
+    fn config_must_be_sync() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        check_sync(&mut config);
+    }
+
+    #[test]
+    fn connection_must_be_sync() {
+        let mut pipe = testing::Pipe::default().unwrap();
+        check_sync(&mut pipe.client);
     }
 
     #[test]
