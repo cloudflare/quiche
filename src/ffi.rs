@@ -640,6 +640,7 @@ pub extern fn quiche_conn_is_readable(conn: &Connection) -> bool {
 
 struct AppData(*mut c_void);
 unsafe impl Send for AppData {}
+unsafe impl Sync for AppData {}
 
 #[no_mangle]
 pub extern fn quiche_conn_stream_init_application_data(

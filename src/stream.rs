@@ -496,7 +496,7 @@ pub struct Stream {
     pub local: bool,
 
     /// Application data.
-    pub data: Option<Box<dyn Send + std::any::Any>>,
+    pub data: Option<Box<dyn std::any::Any + Send + Sync>>,
 
     /// The stream's urgency (lower is better). Default is `DEFAULT_URGENCY`.
     pub urgency: u8,
