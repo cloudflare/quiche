@@ -2110,7 +2110,7 @@ impl Connection {
             overhead += 2;
         }
 
-        // Make sure we have enough space left for the packet.
+        // Make sure we have enough space left for the packet overhead.
         match left.checked_sub(overhead) {
             Some(v) => left = v,
 
@@ -2124,6 +2124,12 @@ impl Connection {
                 self.recovery.update_app_limited(false);
                 return Err(Error::Done);
             },
+        }
+
+        // Make sure there is enough space for the minimum payload length.
+        if left < PAYLOAD_MIN_LEN {
+            self.recovery.update_app_limited(false);
+            return Err(Error::Done);
         }
 
         let mut frames: Vec<frame::Frame> = Vec::new();
@@ -5256,6 +5262,32 @@ mod tests {
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FinalSize)
         );
+    }
+
+    #[test]
+    fn min_payload() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Send a non-ack-eliciting packet.
+        let frames = [frame::Frame::Padding { len: 4 }];
+
+        let pkt_type = packet::Type::Initial;
+        let written =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+        assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
+
+        assert_eq!(pipe.server.max_send_bytes, 186);
+
+        // Force server to send a single PING frame.
+        pipe.server.recovery.loss_probes[packet::EPOCH_INITIAL] = 1;
+
+        // Artifically limit the amount of bytes the server can send.
+        pipe.server.max_send_bytes = 60;
+
+        assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
     }
 
     #[test]
