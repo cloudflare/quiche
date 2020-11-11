@@ -31,3 +31,8 @@ path = "src/packet_recv_server.rs"
 [[bin]]
 name = "qpack_decode"
 path = "src/qpack_decode.rs"
+
+[profile.release]
+debug = true
+debug-assertions = true
+overflow-checks = true
