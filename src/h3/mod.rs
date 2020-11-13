@@ -569,6 +569,7 @@ struct ConnectionSettings {
     pub max_header_list_size: Option<u64>,
     pub qpack_max_table_capacity: Option<u64>,
     pub qpack_blocked_streams: Option<u64>,
+    pub h3_datagram: Option<u64>,
 }
 
 struct QpackStreams {
@@ -608,8 +609,11 @@ pub struct Connection {
 }
 
 impl Connection {
-    fn new(config: &Config, is_server: bool) -> Result<Connection> {
+    fn new(
+        config: &Config, is_server: bool, enable_dgram: bool,
+    ) -> Result<Connection> {
         let initial_uni_stream_id = if is_server { 0x3 } else { 0x2 };
+        let h3_datagram = if enable_dgram { Some(1) } else { None };
 
         Ok(Connection {
             is_server,
@@ -624,12 +628,14 @@ impl Connection {
                 max_header_list_size: config.max_header_list_size,
                 qpack_max_table_capacity: config.qpack_max_table_capacity,
                 qpack_blocked_streams: config.qpack_blocked_streams,
+                h3_datagram,
             },
 
             peer_settings: ConnectionSettings {
                 max_header_list_size: None,
                 qpack_max_table_capacity: None,
                 qpack_blocked_streams: None,
+                h3_datagram: None,
             },
 
             control_stream_id: None,
@@ -666,7 +672,8 @@ impl Connection {
     pub fn with_transport(
         conn: &mut super::Connection, config: &Config,
     ) -> Result<Connection> {
-        let mut http3_conn = Connection::new(config, conn.is_server)?;
+        let mut http3_conn =
+            Connection::new(config, conn.is_server, conn.dgram_enabled())?;
 
         http3_conn.send_settings(conn)?;
 
@@ -1354,6 +1361,7 @@ impl Connection {
                 .local_settings
                 .qpack_max_table_capacity,
             qpack_blocked_streams: self.local_settings.qpack_blocked_streams,
+            h3_datagram: self.local_settings.h3_datagram,
             grease,
         };
 
@@ -1647,13 +1655,28 @@ impl Connection {
                 max_header_list_size,
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
+                h3_datagram,
                 ..
             } => {
                 self.peer_settings = ConnectionSettings {
                     max_header_list_size,
                     qpack_max_table_capacity,
                     qpack_blocked_streams,
+                    h3_datagram,
                 };
+
+                if let Some(1) = h3_datagram {
+                    // The peer MUST have also enabled DATAGRAM with a TP
+                    if conn.dgram_max_writable_len().is_none() {
+                        conn.close(
+                            true,
+                            Error::SettingsError.to_wire(),
+                            b"H3_DATAGRAM sent with value 1 but max_datagram_frame_size TP not set.",
+                        )?;
+
+                        return Err(Error::SettingsError);
+                    }
+                }
             },
 
             frame::Frame::Headers { header_block } => {
@@ -1877,10 +1900,13 @@ pub mod testing {
         pub fn with_configs(
             config: &mut crate::Config, h3_config: &Config,
         ) -> Result<Session> {
+            let pipe = testing::Pipe::with_config(config)?;
+            let client_dgram = pipe.client.dgram_enabled();
+            let server_dgram = pipe.server.dgram_enabled();
             Ok(Session {
-                pipe: testing::Pipe::with_config(config)?,
-                client: Connection::new(&h3_config, false)?,
-                server: Connection::new(&h3_config, true)?,
+                pipe,
+                client: Connection::new(&h3_config, false, client_dgram)?,
+                server: Connection::new(&h3_config, true, server_dgram)?,
                 buf: [0; 65535],
             })
         }
@@ -2741,10 +2767,10 @@ mod tests {
     fn uni_stream_local_counting() {
         let config = Config::new().unwrap();
 
-        let h3_cln = Connection::new(&config, false).unwrap();
+        let h3_cln = Connection::new(&config, false, false).unwrap();
         assert_eq!(h3_cln.next_uni_stream_id, 2);
 
-        let h3_srv = Connection::new(&config, true).unwrap();
+        let h3_srv = Connection::new(&config, true, false).unwrap();
         assert_eq!(h3_srv.next_uni_stream_id, 3);
     }
 
@@ -3196,6 +3222,92 @@ mod tests {
 
         // Once the server gives flow control credits back, we can send the body.
         assert_eq!(s.client.send_body(&mut s.pipe.client, 0, b"", true), Ok(0));
+    }
+
+    #[test]
+    /// Tests that receiving a H3_DATAGRAM setting is ok.
+    fn dgram_setting() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.enable_dgram(true, 1000, 1000);
+        config.verify_peer(false);
+
+        let h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        let mut buf = [42; 2000];
+
+        s.pipe.handshake(&mut buf).unwrap();
+
+        s.client.send_settings(&mut s.pipe.client).unwrap();
+        s.pipe.advance(&mut buf).unwrap();
+
+        // When everything is ok, poll returns Done.
+        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::Done));
+    }
+
+    #[test]
+    /// Tests that receiving a H3_DATAGRAM setting when no TP is set generates
+    /// an error.
+    fn dgram_setting_no_tp() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        let mut buf = [42; 2000];
+
+        s.pipe.handshake(&mut buf).unwrap();
+
+        s.client.control_stream_id = Some(
+            s.client
+                .open_uni_stream(
+                    &mut s.pipe.client,
+                    stream::HTTP3_CONTROL_STREAM_TYPE_ID,
+                )
+                .unwrap(),
+        );
+
+        let settings = frame::Frame::Settings {
+            max_header_list_size: None,
+            qpack_max_table_capacity: None,
+            qpack_blocked_streams: None,
+            h3_datagram: Some(1),
+            grease: None,
+        };
+
+        s.send_frame_client(settings, s.client.control_stream_id.unwrap(), false)
+            .unwrap();
+
+        s.pipe.advance(&mut buf).unwrap();
+
+        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::SettingsError));
     }
 }
 

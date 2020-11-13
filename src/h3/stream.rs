@@ -514,6 +514,7 @@ mod tests {
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
+            h3_datagram: None,
             grease: None,
         };
 
@@ -569,6 +570,7 @@ mod tests {
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
+            h3_datagram: None,
             grease: None,
         };
 
@@ -633,6 +635,7 @@ mod tests {
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
+            h3_datagram: None,
             grease: None,
         };
 
@@ -675,6 +678,7 @@ mod tests {
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
+            h3_datagram: None,
             grease: None,
         };
 

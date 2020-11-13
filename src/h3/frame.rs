@@ -39,6 +39,7 @@ pub const MAX_PUSH_FRAME_TYPE_ID: u64 = 0xD;
 const SETTINGS_QPACK_MAX_TABLE_CAPACITY: u64 = 0x1;
 const SETTINGS_MAX_HEADER_LIST_SIZE: u64 = 0x6;
 const SETTINGS_QPACK_BLOCKED_STREAMS: u64 = 0x7;
+const SETTINGS_H3_DATAGRAM: u64 = 0x276;
 
 #[derive(Clone, PartialEq)]
 pub enum Frame {
@@ -58,6 +59,7 @@ pub enum Frame {
         max_header_list_size: Option<u64>,
         qpack_max_table_capacity: Option<u64>,
         qpack_blocked_streams: Option<u64>,
+        h3_datagram: Option<u64>,
         grease: Option<(u64, u64)>,
     },
 
@@ -146,6 +148,7 @@ impl Frame {
                 max_header_list_size,
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
+                h3_datagram,
                 grease,
             } => {
                 let mut len = 0;
@@ -162,6 +165,11 @@ impl Frame {
 
                 if let Some(val) = qpack_blocked_streams {
                     len += octets::varint_len(SETTINGS_QPACK_BLOCKED_STREAMS);
+                    len += octets::varint_len(*val);
+                }
+
+                if let Some(val) = h3_datagram {
+                    len += octets::varint_len(SETTINGS_H3_DATAGRAM);
                     len += octets::varint_len(*val);
                 }
 
@@ -185,6 +193,11 @@ impl Frame {
 
                 if let Some(val) = qpack_blocked_streams {
                     b.put_varint(SETTINGS_QPACK_BLOCKED_STREAMS)?;
+                    b.put_varint(*val as u64)?;
+                }
+
+                if let Some(val) = h3_datagram {
+                    b.put_varint(SETTINGS_H3_DATAGRAM)?;
                     b.put_varint(*val as u64)?;
                 }
 
@@ -286,6 +299,7 @@ fn parse_settings_frame(
     let mut max_header_list_size = None;
     let mut qpack_max_table_capacity = None;
     let mut qpack_blocked_streams = None;
+    let mut h3_datagram = None;
 
     while b.off() < settings_length {
         let setting_ty = b.get_varint()?;
@@ -304,6 +318,14 @@ fn parse_settings_frame(
                 qpack_blocked_streams = Some(settings_val);
             },
 
+            SETTINGS_H3_DATAGRAM => {
+                if settings_val > 1 {
+                    return Err(super::Error::SettingsError);
+                }
+
+                h3_datagram = Some(settings_val);
+            },
+
             // Unknown Settings parameters must be ignored.
             _ => (),
         }
@@ -313,6 +335,7 @@ fn parse_settings_frame(
         max_header_list_size,
         qpack_max_table_capacity,
         qpack_blocked_streams,
+        h3_datagram,
         grease: None,
     })
 }
@@ -425,10 +448,11 @@ mod tests {
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
+            h3_datagram: Some(0),
             grease: None,
         };
 
-        let frame_payload_len = 6;
+        let frame_payload_len = 9;
         let frame_header_len = 2;
 
         let wire_len = {
@@ -457,6 +481,7 @@ mod tests {
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
+            h3_datagram: Some(0),
             grease: Some((33, 33)),
         };
 
@@ -465,10 +490,11 @@ mod tests {
             max_header_list_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
+            h3_datagram: Some(0),
             grease: None,
         };
 
-        let frame_payload_len = 8;
+        let frame_payload_len = 11;
         let frame_header_len = 2;
 
         let wire_len = {
@@ -497,6 +523,7 @@ mod tests {
             max_header_list_size: Some(1024),
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
+            h3_datagram: None,
             grease: None,
         };
 
@@ -522,6 +549,71 @@ mod tests {
     }
 
     #[test]
+    fn settings_h3_dgram_only() {
+        let mut d = [42; 128];
+
+        let frame = Frame::Settings {
+            max_header_list_size: None,
+            qpack_max_table_capacity: None,
+            qpack_blocked_streams: None,
+            h3_datagram: Some(1),
+            grease: None,
+        };
+
+        let frame_payload_len = 3;
+        let frame_header_len = 2;
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, frame_header_len + frame_payload_len);
+
+        assert_eq!(
+            Frame::from_bytes(
+                SETTINGS_FRAME_TYPE_ID,
+                frame_payload_len as u64,
+                &d[frame_header_len..]
+            )
+            .unwrap(),
+            frame
+        );
+    }
+
+    #[test]
+    fn settings_h3_dgram_bad() {
+        let mut d = [42; 128];
+
+        let frame = Frame::Settings {
+            max_header_list_size: None,
+            qpack_max_table_capacity: None,
+            qpack_blocked_streams: None,
+            h3_datagram: Some(5),
+            grease: None,
+        };
+
+        let frame_payload_len = 3;
+        let frame_header_len = 2;
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, frame_header_len + frame_payload_len);
+
+        assert_eq!(
+            Frame::from_bytes(
+                SETTINGS_FRAME_TYPE_ID,
+                frame_payload_len as u64,
+                &d[frame_header_len..]
+            ),
+            Err(crate::h3::Error::SettingsError)
+        );
+    }
+
+    #[test]
     fn settings_qpack_only() {
         let mut d = [42; 128];
 
@@ -529,6 +621,7 @@ mod tests {
             max_header_list_size: None,
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
+            h3_datagram: None,
             grease: None,
         };
 
