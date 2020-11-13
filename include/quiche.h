@@ -436,6 +436,30 @@ enum quiche_h3_error {
     /// The underlying QUIC stream (or connection) doesn't have enough capacity
     /// for the operation to complete. The application should retry later on.
     QUICHE_H3_ERR_STREAM_BLOCKED = -13,
+
+    /// Error in the payload of a SETTINGS frame.
+    QUICHE_H3_ERR_SETTINGS_ERROR = -14,
+
+    /// Server rejected request.
+    QUICHE_H3_ERR_REQUEST_REJECTED = -15,
+    
+    /// Request or its response cancelled.
+    QUICHE_H3_ERR_REQUEST_CANCELLED = -16,
+    
+    /// Client's request stream terminated without containing a full-formed
+    /// request.
+    QUICHE_H3_ERR_REQUEST_INCOMPLETE = -17,
+    
+    /// An HTTP message was malformed and cannot be processed.
+    QUICHE_H3_ERR_MESSAGE_ERROR = -18,
+    
+    // The TCP connection established in response to a CONNECT request was
+    /// reset or abnormally closed.
+    QUICHE_H3_ERR_CONNECT_ERROR = -19,
+    
+    /// The requested operation cannot be served over HTTP/3. Peer should retry
+    /// over HTTP/1.1.
+    QUICHE_H3_ERR_VERSION_FALLBACK = -20,
 };
 
 // Stores configuration shared between multiple connections.
