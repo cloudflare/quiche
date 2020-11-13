@@ -333,6 +333,30 @@ pub enum Error {
     /// The underlying QUIC stream (or connection) doesn't have enough capacity
     /// for the operation to complete. The application should retry later on.
     StreamBlocked,
+
+    /// Error in the payload of a SETTINGS frame.
+    SettingsError,
+
+    /// Server rejected request.
+    RequestRejected,
+
+    /// Request or its response cancelled.
+    RequestCancelled,
+
+    /// Client's request stream terminated without containing a full-formed
+    /// request.
+    RequestIncomplete,
+
+    /// An HTTP message was malformed and cannot be processed.
+    MessageError,
+
+    /// The TCP connection established in response to a CONNECT request was
+    /// reset or abnormally closed.
+    ConnectError,
+
+    /// The requested operation cannot be served over HTTP/3. Peer should retry
+    /// over HTTP/1.1.
+    VersionFallback,
 }
 
 impl Error {
@@ -351,6 +375,13 @@ impl Error {
             Error::BufferTooShort => 0x999,
             Error::TransportError { .. } => 0xFF,
             Error::StreamBlocked => 0xFF,
+            Error::SettingsError => 0x109,
+            Error::RequestRejected => 0x10B,
+            Error::RequestCancelled => 0x10C,
+            Error::RequestIncomplete => 0x10D,
+            Error::MessageError => 0x10E,
+            Error::ConnectError => 0x10F,
+            Error::VersionFallback => 0x110,
         }
     }
 
@@ -369,6 +400,13 @@ impl Error {
             Error::QpackDecompressionFailed => -11,
             Error::TransportError { .. } => -12,
             Error::StreamBlocked => -13,
+            Error::SettingsError => -14,
+            Error::RequestRejected => -15,
+            Error::RequestCancelled => -16,
+            Error::RequestIncomplete => -17,
+            Error::MessageError => -18,
+            Error::ConnectError => -19,
+            Error::VersionFallback => -20,
         }
     }
 }
