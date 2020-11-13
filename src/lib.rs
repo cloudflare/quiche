@@ -3378,7 +3378,7 @@ impl Connection {
     fn dgram_enabled(&self) -> bool {
         self.local_transport_params
             .max_datagram_frame_size
-            .is_none()
+            .is_some()
     }
 
     /// Returns the amount of time until the next timeout event.
@@ -4073,7 +4073,7 @@ impl Connection {
                 // quiche always advertises support for 64K sized DATAGRAM
                 // frames, as recommended by the standard, so we don't need a
                 // size check.
-                if self.dgram_enabled() {
+                if !self.dgram_enabled() {
                     return Err(Error::InvalidState);
                 }
 
