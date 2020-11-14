@@ -68,10 +68,10 @@ fn main() {
     let conn_args = CommonArgs::with_docopt(&docopt);
     let args = ClientArgs::with_docopt(&docopt);
 
-    match request(args, conn_args, stdout_sink) {
-        Err(RequestError::HandshakeFail) => std::process::exit(-1),
-        Err(RequestError::HttpFail) => std::process::exit(-2),
-        Err(RequestError::Other(e)) => panic!(e),
+    match connect(args, conn_args, stdout_sink) {
+        Err(ClientError::HandshakeFail) => std::process::exit(-1),
+        Err(ClientError::HttpFail) => std::process::exit(-2),
+        Err(ClientError::Other(e)) => panic!(e),
         Ok(_) => (),
     }
 }

@@ -39,7 +39,7 @@ use ring::rand::*;
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
 #[derive(Debug)]
-pub enum RequestError {
+pub enum ClientError {
     HandshakeFail,
     HttpFail,
     Other(String),
@@ -139,10 +139,10 @@ impl Default for ClientArgs {
     }
 }
 
-pub fn request(
+pub fn connect(
     args: ClientArgs, conn_args: CommonArgs,
     output_sink: impl FnMut(String) + 'static,
-) -> Result<(), RequestError> {
+) -> Result<(), ClientError> {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
@@ -282,7 +282,7 @@ pub fn request(
             continue;
         }
 
-        return Err(RequestError::Other(format!("send() failed: {:?}", e)));
+        return Err(ClientError::Other(format!("send() failed: {:?}", e)));
     }
 
     trace!("written {}", write);
@@ -319,7 +319,7 @@ pub fn request(
                         break 'read;
                     }
 
-                    return Err(RequestError::Other(format!(
+                    return Err(ClientError::Other(format!(
                         "recv() failed: {:?}",
                         e
                     )));
@@ -363,12 +363,12 @@ pub fn request(
                     app_data_start.elapsed(),
                 );
 
-                return Err(RequestError::HandshakeFail);
+                return Err(ClientError::HandshakeFail);
             }
 
             if let Some(h_conn) = http_conn {
                 if h_conn.report_incomplete(&app_data_start) {
-                    return Err(RequestError::HttpFail);
+                    return Err(ClientError::HttpFail);
                 }
             }
 
@@ -474,7 +474,7 @@ pub fn request(
                     break;
                 }
 
-                return Err(RequestError::Other(format!(
+                return Err(ClientError::Other(format!(
                     "send() failed: {:?}",
                     e
                 )));
@@ -492,12 +492,12 @@ pub fn request(
                     app_data_start.elapsed(),
                 );
 
-                return Err(RequestError::HandshakeFail);
+                return Err(ClientError::HandshakeFail);
             }
 
             if let Some(h_conn) = http_conn {
                 if h_conn.report_incomplete(&app_data_start) {
-                    return Err(RequestError::HttpFail);
+                    return Err(ClientError::HttpFail);
                 }
             }
 
