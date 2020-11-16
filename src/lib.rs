@@ -3643,6 +3643,7 @@ impl Connection {
             (self.almost_full ||
                 self.blocked_limit.is_some() ||
                 self.dgram_send_queue.has_pending() ||
+                self.app_error.is_some() ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
@@ -7986,6 +7987,59 @@ mod tests {
         let r = pipe.client.dgram_recv(&mut buf);
         assert_eq!(r, Ok(14));
         assert_eq!(pipe.client.is_readable(), false);
+    }
+
+    #[test]
+    fn close() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.close(false, 0x1234, b""), Ok(()));
+
+        assert_eq!(pipe.client.close(false, 0x4321, b""), Err(Error::Done));
+
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        let frames =
+            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert_eq!(
+            frames.iter().next(),
+            Some(&frame::Frame::ConnectionClose {
+                error_code: 0x1234,
+                frame_type: 0,
+                reason: Vec::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn app_close() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.close(true, 0x1234, b"hello!"), Ok(()));
+
+        assert_eq!(pipe.client.close(true, 0x4321, b"hello!"), Err(Error::Done));
+
+        let len = pipe.client.send(&mut buf).unwrap();
+
+        let frames =
+            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+
+        assert_eq!(
+            frames.iter().next(),
+            Some(&frame::Frame::ApplicationClose {
+                error_code: 0x1234,
+                reason: b"hello!".to_vec(),
+            })
+        );
     }
 }
 
