@@ -270,7 +270,7 @@ enum quiche_shutdown {
     QUICHE_SHUTDOWN_WRITE = 1,
 };
 
-// Set the priority for a stream.
+// Sets the priority for a stream.
 int quiche_conn_stream_priority(quiche_conn *conn, uint64_t stream_id,
                                 uint8_t urgency, bool incremental);
 
