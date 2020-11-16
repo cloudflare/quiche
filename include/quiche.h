@@ -300,6 +300,9 @@ void quiche_conn_on_timeout(quiche_conn *conn);
 int quiche_conn_close(quiche_conn *conn, bool app, uint64_t err,
                       const uint8_t *reason, size_t reason_len);
 
+// Returns a string uniquely representing the connection.
+void quiche_conn_trace_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
+
 // Returns the negotiated ALPN protocol.
 void quiche_conn_application_proto(quiche_conn *conn, const uint8_t **out,
                                    size_t *out_len);
