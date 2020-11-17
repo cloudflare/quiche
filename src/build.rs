@@ -28,6 +28,7 @@ const CMAKE_PARAMS_ANDROID_NDK: &[(&str, &[(&str, &str)])] = &[
     ("x86_64", &[("ANDROID_ABI", "x86_64")]),
 ];
 
+// iOS.
 const CMAKE_PARAMS_IOS: &[(&str, &[(&str, &str)])] = &[
     ("aarch64", &[
         ("CMAKE_OSX_ARCHITECTURES", "arm64"),
@@ -37,6 +38,12 @@ const CMAKE_PARAMS_IOS: &[(&str, &[(&str, &str)])] = &[
         ("CMAKE_OSX_ARCHITECTURES", "x86_64"),
         ("CMAKE_OSX_SYSROOT", "iphonesimulator"),
     ]),
+];
+
+// ARM Linux.
+const CMAKE_PARAMS_ARM_LINUX: &[(&str, &[(&str, &str)])] = &[
+    ("aarch64", &[("CMAKE_SYSTEM_PROCESSOR", "aarch64")]),
+    ("arm", &[("CMAKE_SYSTEM_PROCESSOR", "arm")]),
 ];
 
 /// Returns the platform-specific output path for lib.
@@ -103,7 +110,6 @@ fn get_boringssl_cmake_config() -> cmake::Config {
             for (android_arch, params) in cmake_params_android {
                 if *android_arch == arch {
                     for (name, value) in *params {
-                        eprintln!("android arch={} add {}={}", arch, name, value);
                         boringssl_cmake.define(name, value);
                     }
                 }
@@ -111,7 +117,6 @@ fn get_boringssl_cmake_config() -> cmake::Config {
             let toolchain_file =
                 android_ndk_home.join("build/cmake/android.toolchain.cmake");
             let toolchain_file = toolchain_file.to_str().unwrap();
-            eprintln!("android toolchain={}", toolchain_file);
             boringssl_cmake.define("CMAKE_TOOLCHAIN_FILE", toolchain_file);
 
             // 21 is the minimum level tested. You can give higher value.
@@ -125,7 +130,6 @@ fn get_boringssl_cmake_config() -> cmake::Config {
             for (ios_arch, params) in CMAKE_PARAMS_IOS {
                 if *ios_arch == arch {
                     for (name, value) in *params {
-                        eprintln!("ios arch={} add {}={}", arch, name, value);
                         boringssl_cmake.define(name, value);
                     }
                 }
@@ -147,6 +151,34 @@ fn get_boringssl_cmake_config() -> cmake::Config {
             boringssl_cmake.cflag(&cflag);
 
             boringssl_cmake
+        },
+
+        "linux" => match arch.as_ref() {
+            "aarch64" | "arm" => {
+                for (arm_arch, params) in CMAKE_PARAMS_ARM_LINUX {
+                    if *arm_arch == arch {
+                        for (name, value) in *params {
+                            boringssl_cmake.define(name, value);
+                        }
+                    }
+                }
+                boringssl_cmake.define("CMAKE_SYSTEM_NAME", "Linux");
+                boringssl_cmake.define("CMAKE_SYSTEM_VERSION", "1");
+
+                boringssl_cmake
+            },
+
+            "x86" => {
+                boringssl_cmake.define(
+                    "CMAKE_TOOLCHAIN_FILE",
+                    pwd.join("deps/boringssl/src/util/32-bit-toolchain.cmake")
+                        .as_os_str(),
+                );
+
+                boringssl_cmake
+            },
+
+            _ => boringssl_cmake,
         },
 
         _ => {

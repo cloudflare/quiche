@@ -53,31 +53,6 @@ jobs:
       - name: Build C examples
         run: make -C examples
 
-  quiche_x86:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
-
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          target: i686-unknown-linux-gnu
-          override: true
-
-      - name: Install dependencies
-        run: sudo apt-get install gcc-multilib g++-multilib
-
-      - name: Run cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --verbose --target=i686-unknown-linux-gnu
-
   quiche_macos:
     runs-on: macos-latest
     steps:
@@ -183,6 +158,32 @@ jobs:
         with:
           command: test
           args: --target=i686-pc-windows-msvc --verbose
+
+  quiche_multiarch:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: ["aarch64-unknown-linux-gnu", "armv7-unknown-linux-gnueabihf","i686-unknown-linux-gnu"]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.TOOLCHAIN }}
+          target: ${{ matrix.target }}
+          override: true
+
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --target=${{ matrix.target }} --verbose
+          use-cross: true
 
   apps:
     runs-on: ubuntu-latest
