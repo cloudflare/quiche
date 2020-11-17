@@ -3629,7 +3629,7 @@ impl Connection {
                handshake.cipher(),
                handshake.curve(),
                handshake.sigalg(),
-               self.is_resumed(),
+               handshake.is_resumed(),
                self.peer_transport_params);
 
         Ok(())
