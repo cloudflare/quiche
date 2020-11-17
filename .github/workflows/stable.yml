@@ -119,7 +119,10 @@ jobs:
           override: true
 
       - name: Run cargo build
-        run: cargo build --verbose --target ${{ matrix.target }}
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --target=${{ matrix.target }} --verbose
 
   quiche_windows:
     runs-on: windows-latest
