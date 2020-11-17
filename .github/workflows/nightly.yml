@@ -53,32 +53,6 @@ jobs:
       - name: Build C examples
         run: make -C examples
 
-  quiche_x86:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
-
-      - name: Install nightly toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          components: rustfmt
-          target: i686-unknown-linux-gnu
-          override: true
-
-      - name: Install dependencies
-        run: sudo apt-get install gcc-multilib g++-multilib
-
-      - name: Run cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --verbose --target=i686-unknown-linux-gnu
-
   apps:
     runs-on: ubuntu-latest
     steps:
