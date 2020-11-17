@@ -3681,7 +3681,8 @@ impl Connection {
         // If there are flushable, almost full or blocked streams, use the
         // Application epoch.
         if (self.is_established() || self.is_in_early_data()) &&
-            (self.almost_full ||
+            (!self.handshake_done_sent ||
+                self.almost_full ||
                 self.blocked_limit.is_some() ||
                 self.dgram_send_queue.has_pending() ||
                 self.app_error.is_some() ||
@@ -5106,6 +5107,25 @@ mod tests {
             pipe.client.application_proto(),
             pipe.server.application_proto()
         );
+    }
+
+    #[test]
+    fn handshake_done() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Disable session tickets on the server (SSL_OP_NO_TICKET) to avoid
+        // triggering 1-RTT packet send with a CRYPTO frame.
+        pipe.server
+            .handshake
+            .lock()
+            .unwrap()
+            .set_options(0x0000_4000);
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert!(pipe.server.handshake_done_sent);
     }
 
     #[test]
