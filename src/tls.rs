@@ -392,6 +392,13 @@ impl Handshake {
         })
     }
 
+    #[cfg(test)]
+    pub fn set_options(&mut self, opts: u32) {
+        unsafe {
+            SSL_set_options(self.as_ptr(), opts);
+        }
+    }
+
     pub fn quic_transport_params(&self) -> &[u8] {
         let mut ptr: *const u8 = ptr::null();
         let mut len: usize = 0;
@@ -943,6 +950,9 @@ extern {
     fn SSL_set_quic_transport_params(
         ssl: *mut SSL, params: *const u8, params_len: usize,
     ) -> c_int;
+
+    #[cfg(test)]
+    fn SSL_set_options(ssl: *mut SSL, opts: u32) -> u32;
 
     fn SSL_set_quic_method(
         ssl: *mut SSL, quic_method: *const SSL_QUIC_METHOD,
