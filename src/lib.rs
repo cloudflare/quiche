@@ -1385,11 +1385,13 @@ impl Connection {
 
         streamer.start_log().ok();
 
+        let handshake = self.handshake.lock().unwrap();
+
         let ev = self.local_transport_params.to_qlog(
             qlog::TransportOwner::Local,
             self.version,
-            self.handshake.lock().unwrap().alpn_protocol(),
-            self.handshake.lock().unwrap().cipher(),
+            handshake.alpn_protocol(),
+            handshake.cipher(),
         );
 
         streamer.add_event(ev).ok();
@@ -1840,11 +1842,13 @@ impl Connection {
         if self.is_established() {
             qlog_with!(self.qlog_streamer, q, {
                 if !self.qlogged_peer_params {
+                    let handshake = self.handshake.lock().unwrap();
+
                     let ev = self.peer_transport_params.to_qlog(
                         qlog::TransportOwner::Remote,
                         self.version,
-                        self.handshake.lock().unwrap().alpn_protocol(),
-                        self.handshake.lock().unwrap().cipher(),
+                        handshake.alpn_protocol(),
+                        handshake.cipher(),
                     );
 
                     q.add_event(ev).ok();
@@ -3597,20 +3601,20 @@ impl Connection {
     ///
     /// If the connection is already established, it does nothing.
     fn do_handshake(&mut self) -> Result<()> {
+        let handshake = self.handshake.lock().unwrap();
+
         // Handshake is already complete, there's nothing to do.
-        if self.is_established() {
+        if handshake.is_completed() {
             return Ok(());
         }
 
-        match self.handshake.lock().unwrap().do_handshake() {
+        match handshake.do_handshake() {
             Ok(_) => (),
 
             Err(Error::Done) => return Ok(()),
 
             Err(e) => return Err(e),
         };
-
-        let handshake = self.handshake.lock().unwrap();
 
         if handshake.alpn_protocol().is_empty() {
             // Send no_application_proto TLS alert when no protocol
