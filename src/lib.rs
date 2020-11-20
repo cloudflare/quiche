@@ -1489,7 +1489,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        if self.is_closed() || self.draining_timer.is_some() {
+        if self.is_closed() || self.is_draining() {
             return Err(Error::Done);
         }
 
@@ -1999,7 +1999,7 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
-        if self.is_closed() || self.draining_timer.is_some() {
+        if self.is_closed() || self.is_draining() {
             return Err(Error::Done);
         }
 
@@ -3396,7 +3396,7 @@ impl Connection {
             return None;
         }
 
-        let timeout = if self.draining_timer.is_some() {
+        let timeout = if self.is_draining() {
             // Draining timer takes precedence over all other timers. If it is
             // set it means the connection is closing so there's no point in
             // processing the other timers.
@@ -3488,16 +3488,18 @@ impl Connection {
     /// Returns [`Done`] if the connection had already been closed.
     ///
     /// Note that the connection will not be closed immediately. An application
-    /// should continue calling [`recv()`], [`send()`] and [`timeout()`] as
-    /// normal, until the [`is_closed()`] method returns `true`.
+    /// should continue calling the [`recv()`], [`send()`], [`timeout()`] and
+    /// [`on_timeout()`] methods as normal, until the [`is_closed()`] method
+    /// returns `true`.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`recv()`]: struct.Connection.html#method.recv
     /// [`send()`]: struct.Connection.html#method.send
     /// [`timeout()`]: struct.Connection.html#method.timeout
+    /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
     /// [`is_closed()`]: struct.Connection.html#method.is_closed
     pub fn close(&mut self, app: bool, err: u64, reason: &[u8]) -> Result<()> {
-        if self.is_closed() || self.draining_timer.is_some() {
+        if self.is_closed() || self.is_draining() {
             return Err(Error::Done);
         }
 
@@ -3559,6 +3561,23 @@ impl Connection {
     /// Returns whether there is stream or DATAGRAM data available to read.
     pub fn is_readable(&self) -> bool {
         self.streams.has_readable() || self.dgram_recv_front_len().is_some()
+    }
+
+    /// Returns true if the connection is draining.
+    ///
+    /// If this returns true, the connection object cannot yet be dropped, but
+    /// no new application data can be sent or received. An application should
+    /// continue calling the [`recv()`], [`send()`], [`timeout()`], and
+    /// [`on_timeout()`] methods as normal, until the [`is_closed()`] method
+    /// returns `true`.
+    ///
+    /// [`recv()`]: struct.Connection.html#method.recv
+    /// [`send()`]: struct.Connection.html#method.send
+    /// [`timeout()`]: struct.Connection.html#method.timeout
+    /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
+    /// [`is_closed()`]: struct.Connection.html#method.is_closed
+    pub fn is_draining(&self) -> bool {
+        self.draining_timer.is_some()
     }
 
     /// Returns true if the connection is closed.
