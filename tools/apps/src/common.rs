@@ -42,16 +42,11 @@ use std::cell::RefCell;
 use std::net;
 use std::path;
 
+use quiche::ConnectionId;
+
 use quiche::h3::NameValue;
 
 const MAX_JSON_DUMP_PAYLOAD: usize = 10000;
-
-/// Returns a String containing a pretty printed version of the `buf` slice.
-pub fn hex_dump(buf: &[u8]) -> String {
-    let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
-
-    vec.join("")
-}
 
 pub fn stdout_sink(out: String) {
     print!("{}", out);
@@ -245,7 +240,7 @@ pub struct Client {
     pub partial_responses: std::collections::HashMap<u64, PartialResponse>,
 }
 
-pub type ClientMap = HashMap<Vec<u8>, (net::SocketAddr, Client)>;
+pub type ClientMap = HashMap<ConnectionId<'static>, (net::SocketAddr, Client)>;
 
 /// Makes a buffered writer for a resource with a target URL.
 ///

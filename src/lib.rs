@@ -812,10 +812,10 @@ pub struct Connection {
     version: u32,
 
     /// Peer's connection ID.
-    dcid: Vec<u8>,
+    dcid: ConnectionId<'static>,
 
     /// Local connection ID.
-    scid: Vec<u8>,
+    scid: ConnectionId<'static>,
 
     /// Unique opaque ID for the connection that can be used for logging.
     trace_id: String,
@@ -876,11 +876,11 @@ pub struct Connection {
 
     /// Peer's original destination connection ID. Used by the client to
     /// validate the server's transport parameter.
-    odcid: Option<Vec<u8>>,
+    odcid: Option<ConnectionId<'static>>,
 
     /// Peer's retry source connection ID. Used by the client during stateless
     /// retry to validate the server's transport parameter.
-    rscid: Option<Vec<u8>>,
+    rscid: Option<ConnectionId<'static>>,
 
     /// Received address verification token.
     token: Option<Vec<u8>>,
@@ -1181,8 +1181,8 @@ impl Connection {
         let mut conn = Box::pin(Connection {
             version: config.version,
 
-            dcid: Vec::new(),
-            scid: scid.to_vec(),
+            dcid: ConnectionId::default(),
+            scid: scid.to_vec().into(),
 
             trace_id: scid_as_hex.join(""),
 
@@ -1290,16 +1290,16 @@ impl Connection {
 
         if let Some(odcid) = odcid {
             conn.local_transport_params
-                .original_destination_connection_id = Some(odcid.to_vec());
+                .original_destination_connection_id = Some(odcid.to_vec().into());
 
             conn.local_transport_params.retry_source_connection_id =
-                Some(scid.to_vec());
+                Some(scid.to_vec().into());
 
             conn.did_retry = true;
         }
 
         conn.local_transport_params.initial_source_connection_id =
-            Some(scid.to_vec());
+            Some(scid.to_vec().into());
 
         conn.handshake.lock().unwrap().init(&conn)?;
 
@@ -1317,7 +1317,7 @@ impl Connection {
                 conn.is_server,
             )?;
 
-            conn.dcid.extend_from_slice(&dcid);
+            conn.dcid = dcid.to_vec().into();
 
             conn.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
                 Some(aead_open);
@@ -1528,11 +1528,11 @@ impl Connection {
                 return Err(Error::Done);
             }
 
-            if hdr.dcid.as_ref() != self.scid {
+            if hdr.dcid != self.scid {
                 return Err(Error::Done);
             }
 
-            if hdr.scid.as_ref() != self.dcid {
+            if hdr.scid != self.dcid {
                 return Err(Error::Done);
             }
 
@@ -1613,8 +1613,7 @@ impl Connection {
             // Remember peer's new connection ID.
             self.odcid = Some(self.dcid.clone());
 
-            self.dcid.resize(hdr.scid.len(), 0);
-            self.dcid.copy_from_slice(&hdr.scid);
+            self.dcid = hdr.scid.clone();
 
             self.rscid = Some(self.dcid.clone());
 
@@ -1780,18 +1779,18 @@ impl Connection {
 
             // Replace the randomly generated destination connection ID with
             // the one supplied by the server.
-            self.dcid.resize(hdr.scid.len(), 0);
-            self.dcid.copy_from_slice(&hdr.scid);
+            self.dcid = hdr.scid.clone();
 
             self.got_peer_conn_id = true;
         }
 
         if self.is_server && !self.got_peer_conn_id {
-            self.dcid.extend_from_slice(&hdr.scid);
+            self.dcid = hdr.scid.clone();
 
             if !self.did_retry && self.version >= PROTOCOL_VERSION_DRAFT28 {
                 self.local_transport_params
-                    .original_destination_connection_id = Some(hdr.dcid.to_vec());
+                    .original_destination_connection_id =
+                    Some(hdr.dcid.to_vec().into());
 
                 self.encode_transport_params()?;
             }
@@ -4277,7 +4276,7 @@ impl std::fmt::Debug for Stats {
 
 #[derive(Clone, Debug, PartialEq)]
 struct TransportParams {
-    pub original_destination_connection_id: Option<Vec<u8>>,
+    pub original_destination_connection_id: Option<ConnectionId<'static>>,
     pub max_idle_timeout: u64,
     pub stateless_reset_token: Option<Vec<u8>>,
     pub max_udp_payload_size: u64,
@@ -4292,8 +4291,8 @@ struct TransportParams {
     pub disable_active_migration: bool,
     // pub preferred_address: ...,
     pub active_conn_id_limit: u64,
-    pub initial_source_connection_id: Option<Vec<u8>>,
-    pub retry_source_connection_id: Option<Vec<u8>>,
+    pub initial_source_connection_id: Option<ConnectionId<'static>>,
+    pub retry_source_connection_id: Option<ConnectionId<'static>>,
     pub max_datagram_frame_size: Option<u64>,
 }
 
@@ -4340,7 +4339,8 @@ impl TransportParams {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    tp.original_destination_connection_id = Some(val.to_vec());
+                    tp.original_destination_connection_id =
+                        Some(val.to_vec().into());
                 },
 
                 0x0001 => {
@@ -4442,7 +4442,7 @@ impl TransportParams {
                 },
 
                 0x000f => {
-                    tp.initial_source_connection_id = Some(val.to_vec());
+                    tp.initial_source_connection_id = Some(val.to_vec().into());
                 },
 
                 0x00010 => {
@@ -4450,7 +4450,7 @@ impl TransportParams {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    tp.retry_source_connection_id = Some(val.to_vec());
+                    tp.retry_source_connection_id = Some(val.to_vec().into());
                 },
 
                 0x0020 => {
@@ -4982,8 +4982,8 @@ mod tests {
             max_ack_delay: 2_u64.pow(14) - 1,
             disable_active_migration: true,
             active_conn_id_limit: 8,
-            initial_source_connection_id: Some(b"woot woot".to_vec()),
-            retry_source_connection_id: Some(b"retry".to_vec()),
+            initial_source_connection_id: Some(b"woot woot".to_vec().into()),
+            retry_source_connection_id: Some(b"retry".to_vec().into()),
             max_datagram_frame_size: Some(32),
         };
 
@@ -5012,7 +5012,7 @@ mod tests {
             max_ack_delay: 2_u64.pow(14) - 1,
             disable_active_migration: true,
             active_conn_id_limit: 8,
-            initial_source_connection_id: Some(b"woot woot".to_vec()),
+            initial_source_connection_id: Some(b"woot woot".to_vec().into()),
             retry_source_connection_id: None,
             max_datagram_frame_size: Some(32),
         };
@@ -5112,7 +5112,7 @@ mod tests {
         // Scramble initial_source_connection_id.
         pipe.client
             .local_transport_params
-            .initial_source_connection_id = Some(b"bogus value".to_vec());
+            .initial_source_connection_id = Some(b"bogus value".to_vec().into());
         assert_eq!(pipe.client.encode_transport_params(), Ok(()));
 
         // Client sends initial flight.

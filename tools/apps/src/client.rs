@@ -256,7 +256,7 @@ pub fn connect(
     #[cfg(feature = "qlog")]
     {
         if let Some(dir) = std::env::var_os("QLOGDIR") {
-            let id = hex_dump(&scid);
+            let id = format!("{:?}", scid);
             let writer = make_qlog_writer(&dir, "client", &id);
 
             conn.set_qlog(
@@ -268,10 +268,10 @@ pub fn connect(
     }
 
     info!(
-        "connecting to {:} from {:} with scid {}",
+        "connecting to {:} from {:} with scid {:?}",
         peer_addr,
         socket.local_addr().unwrap(),
-        hex_dump(&scid)
+        scid,
     );
 
     let write = conn.send(&mut out).expect("initial send failed");
