@@ -53,7 +53,8 @@ struct Client {
     partial_responses: HashMap<u64, PartialResponse>,
 }
 
-type ClientMap = HashMap<Vec<u8>, (net::SocketAddr, Client)>;
+type ClientMap =
+    HashMap<quiche::ConnectionId<'static>, (net::SocketAddr, Client)>;
 
 fn main() {
     let mut buf = [0; 65535];
@@ -178,11 +179,12 @@ fn main() {
 
             let conn_id = ring::hmac::sign(&conn_id_seed, &hdr.dcid);
             let conn_id = &conn_id.as_ref()[..quiche::MAX_CONN_ID_LEN];
+            let conn_id = conn_id.to_vec().into();
 
             // Lookup a connection based on the packet's connection ID. If there
             // is no connection matching, create a new one.
-            let (_, client) = if !clients.contains_key(hdr.dcid.as_ref()) &&
-                !clients.contains_key(conn_id)
+            let (_, client) = if !clients.contains_key(&hdr.dcid) &&
+                !clients.contains_key(&conn_id)
             {
                 if hdr.ty != quiche::Type::Initial {
                     error!("Packet is not Initial");
@@ -258,15 +260,11 @@ fn main() {
                     continue 'read;
                 }
 
-                // Reuse the source connection ID we sent in the Retry
-                // packet, instead of changing it again.
-                scid.copy_from_slice(&hdr.dcid);
+                // Reuse the source connection ID we sent in the Retry packet,
+                // instead of changing it again.
+                let scid = hdr.dcid.clone();
 
-                debug!(
-                    "New connection: dcid={} scid={}",
-                    hex_dump(&hdr.dcid),
-                    hex_dump(&scid)
-                );
+                debug!("New connection: dcid={:?} scid={:?}", hdr.dcid, scid);
 
                 let conn = quiche::accept(&scid, odcid, &mut config).unwrap();
 
@@ -276,14 +274,14 @@ fn main() {
                     partial_responses: HashMap::new(),
                 };
 
-                clients.insert(scid.to_vec(), (src, client));
+                clients.insert(scid.clone(), (src, client));
 
-                clients.get_mut(&scid[..]).unwrap()
+                clients.get_mut(&scid).unwrap()
             } else {
-                match clients.get_mut(hdr.dcid.as_ref()) {
+                match clients.get_mut(&hdr.dcid) {
                     Some(v) => v,
 
-                    None => clients.get_mut(conn_id).unwrap(),
+                    None => clients.get_mut(&conn_id).unwrap(),
                 }
             };
 
@@ -649,10 +647,4 @@ fn handle_writable(client: &mut Client, stream_id: u64) {
     if resp.written == resp.body.len() {
         client.partial_responses.remove(&stream_id);
     }
-}
-
-fn hex_dump(buf: &[u8]) -> String {
-    let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
-
-    vec.join("")
 }

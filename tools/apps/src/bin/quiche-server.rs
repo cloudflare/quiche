@@ -234,11 +234,12 @@ fn main() {
 
             let conn_id = ring::hmac::sign(&conn_id_seed, &hdr.dcid);
             let conn_id = &conn_id.as_ref()[..quiche::MAX_CONN_ID_LEN];
+            let conn_id = conn_id.to_vec().into();
 
             // Lookup a connection based on the packet's connection ID. If there
             // is no connection matching, create a new one.
-            let (_, client) = if !clients.contains_key(hdr.dcid.as_ref()) &&
-                !clients.contains_key(conn_id)
+            let (_, client) = if !clients.contains_key(&hdr.dcid) &&
+                !clients.contains_key(&conn_id)
             {
                 if hdr.ty != quiche::Type::Initial {
                     error!("Packet is not Initial");
@@ -322,12 +323,9 @@ fn main() {
                     scid.copy_from_slice(&hdr.dcid);
                 }
 
-                debug!(
-                    "New connection: src={} dcid={} scid={}",
-                    src,
-                    hex_dump(&hdr.dcid),
-                    hex_dump(&scid)
-                );
+                let scid = quiche::ConnectionId::from_vec(scid.to_vec());
+
+                debug!("New connection: dcid={:?} scid={:?}", hdr.dcid, scid);
 
                 #[allow(unused_mut)]
                 let mut conn = quiche::accept(&scid, odcid, &mut config).unwrap();
@@ -342,7 +340,7 @@ fn main() {
                 #[cfg(feature = "qlog")]
                 {
                     if let Some(dir) = std::env::var_os("QLOGDIR") {
-                        let id = hex_dump(&scid);
+                        let id = format!("{:?}", &scid);
                         let writer = make_qlog_writer(&dir, "server", &id);
 
                         conn.set_qlog(
@@ -362,14 +360,14 @@ fn main() {
                     app_proto_selected: false,
                 };
 
-                clients.insert(scid.to_vec(), (src, client));
+                clients.insert(scid.clone(), (src, client));
 
-                clients.get_mut(&scid[..]).unwrap()
+                clients.get_mut(&scid).unwrap()
             } else {
-                match clients.get_mut(hdr.dcid.as_ref()) {
+                match clients.get_mut(&hdr.dcid) {
                     Some(v) => v,
 
-                    None => clients.get_mut(conn_id).unwrap(),
+                    None => clients.get_mut(&conn_id).unwrap(),
                 }
             };
 

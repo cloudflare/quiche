@@ -130,10 +130,8 @@ impl Type {
 }
 
 /// A QUIC connection ID.
-#[derive(Clone)]
 pub struct ConnectionId<'a>(ConnectionIdInner<'a>);
 
-#[derive(Clone)]
 enum ConnectionIdInner<'a> {
     Vec(Vec<u8>),
     Ref(&'a [u8]),
@@ -151,11 +149,25 @@ impl<'a> ConnectionId<'a> {
     }
 }
 
+impl<'a> Default for ConnectionId<'a> {
+    fn default() -> Self {
+        Self::from_vec(Vec::new())
+    }
+}
+
+impl<'a> From<Vec<u8>> for ConnectionId<'a> {
+    fn from(v: Vec<u8>) -> Self {
+        Self::from_vec(v)
+    }
+}
+
 impl<'a> PartialEq for ConnectionId<'a> {
     fn eq(&self, other: &Self) -> bool {
         self.as_ref() == other.as_ref()
     }
 }
+
+impl<'a> Eq for ConnectionId<'a> {}
 
 impl<'a> AsRef<[u8]> for ConnectionId<'a> {
     fn as_ref(&self) -> &[u8] {
@@ -163,6 +175,12 @@ impl<'a> AsRef<[u8]> for ConnectionId<'a> {
             ConnectionIdInner::Vec(v) => v.as_ref(),
             ConnectionIdInner::Ref(v) => v,
         }
+    }
+}
+
+impl<'a> std::hash::Hash for ConnectionId<'a> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_ref().hash(state);
     }
 }
 
@@ -174,6 +192,22 @@ impl<'a> std::ops::Deref for ConnectionId<'a> {
             ConnectionIdInner::Vec(v) => v.as_ref(),
             ConnectionIdInner::Ref(v) => v,
         }
+    }
+}
+
+impl<'a> Clone for ConnectionId<'a> {
+    fn clone(&self) -> Self {
+        Self::from_vec(self.as_ref().to_vec())
+    }
+}
+
+impl<'a> std::fmt::Debug for ConnectionId<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        for c in self.as_ref() {
+            write!(f, "{:02x}", c)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -250,8 +284,8 @@ impl<'a> Header<'a> {
             return Ok(Header {
                 ty: Type::Short,
                 version: 0,
-                dcid: ConnectionId::from_vec(dcid.to_vec()),
-                scid: ConnectionId::from_vec(Vec::new()),
+                dcid: dcid.to_vec().into(),
+                scid: ConnectionId::default(),
                 pkt_num: 0,
                 pkt_num_len: 0,
                 token: None,
@@ -324,8 +358,8 @@ impl<'a> Header<'a> {
         Ok(Header {
             ty,
             version,
-            dcid: ConnectionId::from_vec(dcid),
-            scid: ConnectionId::from_vec(scid),
+            dcid: dcid.into(),
+            scid: scid.into(),
             pkt_num: 0,
             pkt_num_len: 0,
             token,
@@ -425,16 +459,10 @@ impl<'a> std::fmt::Debug for Header<'a> {
             write!(f, " version={:x}", self.version)?;
         }
 
-        write!(f, " dcid=")?;
-        for b in self.dcid.as_ref() {
-            write!(f, "{:02x}", b)?;
-        }
+        write!(f, " dcid={:?}", self.dcid)?;
 
         if self.ty != Type::Short {
-            write!(f, " scid=")?;
-            for b in self.scid.as_ref() {
-                write!(f, "{:02x}", b)?;
-            }
+            write!(f, " scid={:?}", self.scid)?;
         }
 
         if let Some(ref token) = self.token {
@@ -873,12 +901,9 @@ mod tests {
         let hdr = Header {
             ty: Type::Retry,
             version: 0xafafafaf,
-            dcid: ConnectionId::from_vec(vec![
-                0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
-            ]),
-            scid: ConnectionId::from_vec(vec![
-                0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
-            ]),
+            dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba]
+                .into(),
+            scid: vec![0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb].into(),
             pkt_num: 0,
             pkt_num_len: 0,
             token: Some(vec![0xba; 24]),
@@ -903,12 +928,9 @@ mod tests {
         let hdr = Header {
             ty: Type::Initial,
             version: 0xafafafaf,
-            dcid: ConnectionId::from_vec(vec![
-                0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
-            ]),
-            scid: ConnectionId::from_vec(vec![
-                0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
-            ]),
+            dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba]
+                .into(),
+            scid: vec![0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb].into(),
             pkt_num: 0,
             pkt_num_len: 0,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
@@ -930,13 +952,12 @@ mod tests {
         let hdr = Header {
             ty: Type::Initial,
             version: crate::PROTOCOL_VERSION,
-            dcid: ConnectionId::from_vec(vec![
+            dcid: vec![
                 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
                 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
-            ]),
-            scid: ConnectionId::from_vec(vec![
-                0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
-            ]),
+            ]
+            .into(),
+            scid: vec![0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb].into(),
             pkt_num: 0,
             pkt_num_len: 0,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
@@ -958,13 +979,13 @@ mod tests {
         let hdr = Header {
             ty: Type::Initial,
             version: crate::PROTOCOL_VERSION,
-            dcid: ConnectionId::from_vec(vec![
-                0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
-            ]),
-            scid: ConnectionId::from_vec(vec![
+            dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba]
+                .into(),
+            scid: vec![
                 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
                 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
-            ]),
+            ]
+            .into(),
             pkt_num: 0,
             pkt_num_len: 0,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
@@ -986,13 +1007,13 @@ mod tests {
         let hdr = Header {
             ty: Type::Initial,
             version: 0xafafafaf,
-            dcid: ConnectionId::from_vec(vec![
-                0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
-            ]),
-            scid: ConnectionId::from_vec(vec![
+            dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba]
+                .into(),
+            scid: vec![
                 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
                 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
-            ]),
+            ]
+            .into(),
             pkt_num: 0,
             pkt_num_len: 0,
             token: Some(vec![0x05, 0x06, 0x07, 0x08]),
@@ -1014,12 +1035,9 @@ mod tests {
         let hdr = Header {
             ty: Type::Handshake,
             version: 0xafafafaf,
-            dcid: ConnectionId::from_vec(vec![
-                0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
-            ]),
-            scid: ConnectionId::from_vec(vec![
-                0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
-            ]),
+            dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba]
+                .into(),
+            scid: vec![0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb].into(),
             pkt_num: 0,
             pkt_num_len: 0,
             token: None,
@@ -1041,10 +1059,9 @@ mod tests {
         let hdr = Header {
             ty: Type::Short,
             version: 0,
-            dcid: ConnectionId::from_vec(vec![
-                0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba,
-            ]),
-            scid: ConnectionId::from_vec(Vec::new()),
+            dcid: vec![0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba, 0xba]
+                .into(),
+            scid: ConnectionId::default(),
             pkt_num: 0,
             pkt_num_len: 0,
             token: None,
@@ -2248,8 +2265,8 @@ mod tests {
         let hdr = Header {
             ty: Type::Initial,
             version: crate::PROTOCOL_VERSION,
-            dcid: ConnectionId::from_vec(Vec::new()),
-            scid: ConnectionId::from_vec(Vec::new()),
+            dcid: ConnectionId::default(),
+            scid: ConnectionId::default(),
             pkt_num: 0,
             pkt_num_len: 0,
             token: None,
