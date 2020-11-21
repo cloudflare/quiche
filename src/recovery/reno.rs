@@ -64,14 +64,25 @@ fn on_packet_acked(
 
     if r.congestion_window < r.ssthresh {
         // Slow start.
+        let new_cwnd;
+
         if r.hystart.enabled() && epoch == packet::EPOCH_APPLICATION {
             let (cwnd, ssthresh) = r.hystart_on_packet_acked(packet, now);
 
-            r.congestion_window = cwnd;
+            new_cwnd = cwnd;
             r.ssthresh = ssthresh;
         } else {
-            r.congestion_window += packet.size;
+            new_cwnd = r.congestion_window + packet.size;
         }
+
+        let cwnd_inc = cmp::min(
+            new_cwnd - r.congestion_window,
+            r.max_datagram_size * recovery::ABC_L -
+                cmp::min(r.bytes_acked, r.max_datagram_size * recovery::ABC_L),
+        );
+
+        r.bytes_acked += packet.size;
+        r.congestion_window += cwnd_inc;
     } else {
         // Congestion avoidance.
         let mut reno_cwnd = r.congestion_window;
@@ -177,7 +188,7 @@ mod tests {
             time_sent: now,
             time_acked: None,
             time_lost: None,
-            size: 5000,
+            size: r.max_datagram_size,
             ack_eliciting: true,
             in_flight: true,
             delivered: 0,
@@ -187,12 +198,10 @@ mod tests {
             has_data: false,
         };
 
-        // Send 5k x 4 = 20k, higher than default cwnd(~15k)
-        // to become no longer app limited.
-        r.on_packet_sent_cc(p.size, now);
-        r.on_packet_sent_cc(p.size, now);
-        r.on_packet_sent_cc(p.size, now);
-        r.on_packet_sent_cc(p.size, now);
+        // Send initcwnd full MSS packets to become no longer app limited
+        for _ in 0..recovery::INITIAL_WINDOW_PACKETS {
+            r.on_packet_sent_cc(p.size, now);
+        }
 
         let cwnd_prev = r.cwnd();
 
@@ -206,6 +215,62 @@ mod tests {
 
         // Check if cwnd increased by packet size (slow start).
         assert_eq!(r.cwnd(), cwnd_prev + p.size);
+    }
+
+    #[test]
+    fn reno_slow_start_abc_l() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::Reno);
+
+        let mut r = Recovery::new(&cfg);
+
+        let now = Instant::now();
+
+        let p = recovery::Sent {
+            pkt_num: 0,
+            frames: vec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: r.max_datagram_size,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: std::time::Instant::now(),
+            recent_delivered_packet_sent_time: std::time::Instant::now(),
+            is_app_limited: false,
+            has_data: false,
+        };
+
+        // Send initcwnd full MSS packets to become no longer app limited
+        for _ in 0..recovery::INITIAL_WINDOW_PACKETS {
+            r.on_packet_sent_cc(p.size, now);
+        }
+
+        let cwnd_prev = r.cwnd();
+
+        let acked = vec![
+            Acked {
+                pkt_num: p.pkt_num,
+                time_sent: p.time_sent,
+                size: p.size,
+            },
+            Acked {
+                pkt_num: p.pkt_num,
+                time_sent: p.time_sent,
+                size: p.size,
+            },
+            Acked {
+                pkt_num: p.pkt_num,
+                time_sent: p.time_sent,
+                size: p.size,
+            },
+        ];
+
+        r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
+
+        // Acked 3 packets, but cwnd will increase 2 x mss.
+        assert_eq!(r.cwnd(), cwnd_prev + p.size * recovery::ABC_L);
     }
 
     #[test]
