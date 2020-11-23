@@ -474,6 +474,20 @@ impl Recovery {
         self.max_datagram_size
     }
 
+    pub fn update_max_datagram_size(&mut self, new_max_datagram_size: usize) {
+        let max_datagram_size =
+            cmp::min(self.max_datagram_size, new_max_datagram_size);
+
+        // Congestion Window is updated only when it's not updated already.
+        if self.congestion_window ==
+            self.max_datagram_size * INITIAL_WINDOW_PACKETS
+        {
+            self.congestion_window = max_datagram_size * INITIAL_WINDOW_PACKETS;
+        }
+
+        self.max_datagram_size = max_datagram_size;
+    }
+
     fn update_rtt(
         &mut self, latest_rtt: Duration, ack_delay: Duration, now: Instant,
     ) {
