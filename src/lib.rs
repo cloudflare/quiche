@@ -2772,13 +2772,7 @@ impl Connection {
         if self.is_established() {
             // We cap the maximum packet size to 16KB or so, so that it can be
             // always encoded with a 2-byte varint.
-            cmp::min(
-                16383,
-                cmp::min(
-                    self.recovery.max_datagram_size(),
-                    self.peer_transport_params.max_udp_payload_size as usize,
-                ),
-            )
+            cmp::min(16383, self.recovery.max_datagram_size())
         } else {
             // Allow for 1200 bytes (minimum QUIC packet size) during the
             // handshake.
@@ -3959,6 +3953,10 @@ impl Connection {
 
                     self.recovery.max_ack_delay =
                         time::Duration::from_millis(peer_params.max_ack_delay);
+
+                    self.recovery.update_max_datagram_size(
+                        peer_params.max_udp_payload_size as usize,
+                    );
 
                     self.peer_transport_params = peer_params;
 
@@ -8251,6 +8249,56 @@ mod tests {
                 reason: b"hello!".to_vec(),
             })
         );
+    }
+
+    #[test]
+    fn update_max_datagram_size() {
+        let mut buf = [0; 65535];
+
+        let mut client_scid = [0; 16];
+        rand::rand_bytes(&mut client_scid[..]);
+
+        let mut server_scid = [0; 16];
+        rand::rand_bytes(&mut server_scid[..]);
+
+        let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        client_config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        client_config.set_max_recv_udp_payload_size(1200);
+
+        let mut server_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        server_config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        server_config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        server_config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        server_config.verify_peer(false);
+        server_config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        // Larger than the client
+        server_config.set_max_send_udp_payload_size(1500);
+
+        let mut pipe = testing::Pipe {
+            client: connect(Some("quic.tech"), &client_scid, &mut client_config)
+                .unwrap(),
+            server: accept(&server_scid, None, &mut server_config).unwrap(),
+        };
+
+        // Before handshake
+        assert_eq!(pipe.server.recovery.max_datagram_size(), 1500);
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // After handshake, max_datagram_size should match to client's
+        // max_recv_udp_payload_size which is smaller
+        assert_eq!(pipe.server.recovery.max_datagram_size(), 1200);
+        assert_eq!(pipe.server.recovery.cwnd(), 12000);
     }
 }
 
