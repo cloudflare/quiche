@@ -1893,7 +1893,10 @@ impl Connection {
 
                     stream.send.ack_and_drop(offset, length);
 
-                    if stream.is_complete() {
+                    // Only collect the stream if it is complete and not
+                    // readable. If it is readable, it will get collected when
+                    // stream_recv() is used.
+                    if stream.is_complete() && !stream.is_readable() {
                         let local = stream.local;
                         self.streams.collect(stream_id, local);
                     }
@@ -6631,6 +6634,69 @@ mod tests {
         // Stream should _not_ be readable on the server after receiving empty
         // fin, because it was already finished.
         let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+    }
+
+    #[test]
+    /// Tests that the stream's fin flag is properly flushed even if there's no
+    /// data in the buffer, that the buffer becomes readable on the other
+    /// side and stays readable even if the stream is fin'd locally.
+    fn stream_zero_length_fin_deferred_collection() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(
+            pipe.client.stream_send(0, b"aaaaaaaaaaaaaaa", false),
+            Ok(15)
+        );
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(0));
+        assert!(r.next().is_none());
+
+        let mut b = [0; 15];
+        pipe.server.stream_recv(0, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Client sends zero-length frame.
+        assert_eq!(pipe.client.stream_send(0, b"", true), Ok(0));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server sends zero-length frame.
+        assert_eq!(pipe.server.stream_send(0, b"", true), Ok(0));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Stream should be readable on the server after receiving empty fin.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(0));
+        assert!(r.next().is_none());
+
+        let mut b = [0; 15];
+        pipe.server.stream_recv(0, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Client sends zero-length frame (again).
+        assert_eq!(pipe.client.stream_send(0, b"", true), Ok(0));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Stream should _not_ be readable on the server after receiving empty
+        // fin, because it was already finished.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
+        // Stream _is_readable on the client side.
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), Some(0));
+
+        pipe.client.stream_recv(0, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Stream is completed and _is not_ readable.
+        let mut r = pipe.client.readable();
         assert_eq!(r.next(), None);
     }
 
