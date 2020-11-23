@@ -1163,7 +1163,9 @@ impl Connection {
             }
         }
 
-        // Process finished streams list once again.
+        // Process finished streams list once again, to make sure `Finished`
+        // events are returned when receiving empty stream frames with the fin
+        // flag set.
         if let Some(finished) = self.finished_streams.pop_front() {
             return Ok((finished, Event::Finished));
         }
