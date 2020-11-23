@@ -1163,6 +1163,13 @@ impl Connection {
             }
         }
 
+        // Process finished streams list once again, to make sure `Finished`
+        // events are returned when receiving empty stream frames with the fin
+        // flag set.
+        if let Some(finished) = self.finished_streams.pop_front() {
+            return Ok((finished, Event::Finished));
+        }
+
         Err(Error::Done)
     }
 
@@ -2380,6 +2387,46 @@ mod tests {
             assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
         }
 
+        assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Send a request with no body, get a response with one DATA frame and an
+    /// empty FIN after reception from the client.
+    fn request_no_body_response_one_chunk_empty_fin() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(true).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: false,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        let resp = s.send_response(stream, false).unwrap();
+
+        let body = s.send_body_server(stream, false).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            has_body: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_client(stream, &mut recv_buf), Ok(body.len()));
+
+        assert_eq!(s.pipe.server.stream_send(stream, &[], true), Ok(0));
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
         assert_eq!(s.poll_client(), Err(Error::Done));
     }
 
