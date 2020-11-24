@@ -33,9 +33,13 @@ use std::io::prelude::*;
 
 use std::collections::HashMap;
 
+use std::rc::Rc;
+
+use std::cell::RefCell;
+
 use ring::rand::*;
 
-use quiche_apps::*;
+use quiche_apps::common::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
@@ -415,6 +419,7 @@ fn main() {
                     client.http_conn = Some(Http3Conn::with_conn(
                         &mut client.conn,
                         dgram_sender,
+                        Rc::new(RefCell::new(stdout_sink)),
                     ));
 
                     client.app_proto_selected = true;
