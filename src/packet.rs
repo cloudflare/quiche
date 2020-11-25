@@ -139,29 +139,34 @@ enum ConnectionIdInner<'a> {
 
 impl<'a> ConnectionId<'a> {
     /// Creates a new connection ID from the given vector.
+    #[inline]
     pub fn from_vec(cid: Vec<u8>) -> Self {
         Self(ConnectionIdInner::Vec(cid))
     }
 
     /// Creates a new connection ID from the given slice.
+    #[inline]
     pub fn from_ref(cid: &'a [u8]) -> Self {
         Self(ConnectionIdInner::Ref(cid))
     }
 }
 
 impl<'a> Default for ConnectionId<'a> {
+    #[inline]
     fn default() -> Self {
         Self::from_vec(Vec::new())
     }
 }
 
 impl<'a> From<Vec<u8>> for ConnectionId<'a> {
+    #[inline]
     fn from(v: Vec<u8>) -> Self {
         Self::from_vec(v)
     }
 }
 
 impl<'a> PartialEq for ConnectionId<'a> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.as_ref() == other.as_ref()
     }
@@ -170,6 +175,7 @@ impl<'a> PartialEq for ConnectionId<'a> {
 impl<'a> Eq for ConnectionId<'a> {}
 
 impl<'a> AsRef<[u8]> for ConnectionId<'a> {
+    #[inline]
     fn as_ref(&self) -> &[u8] {
         match &self.0 {
             ConnectionIdInner::Vec(v) => v.as_ref(),
@@ -179,6 +185,7 @@ impl<'a> AsRef<[u8]> for ConnectionId<'a> {
 }
 
 impl<'a> std::hash::Hash for ConnectionId<'a> {
+    #[inline]
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.as_ref().hash(state);
     }
@@ -187,6 +194,7 @@ impl<'a> std::hash::Hash for ConnectionId<'a> {
 impl<'a> std::ops::Deref for ConnectionId<'a> {
     type Target = [u8];
 
+    #[inline]
     fn deref(&self) -> &[u8] {
         match &self.0 {
             ConnectionIdInner::Vec(v) => v.as_ref(),
@@ -196,12 +204,14 @@ impl<'a> std::ops::Deref for ConnectionId<'a> {
 }
 
 impl<'a> Clone for ConnectionId<'a> {
+    #[inline]
     fn clone(&self) -> Self {
         Self::from_vec(self.as_ref().to_vec())
     }
 }
 
 impl<'a> std::fmt::Debug for ConnectionId<'a> {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         for c in self.as_ref() {
             write!(f, "{:02x}", c)?;
@@ -265,6 +275,7 @@ impl<'a> Header<'a> {
     /// let hdr = quiche::Header::from_slice(&mut buf[..len], LOCAL_CONN_ID_LEN)?;
     /// # Ok::<(), quiche::Error>(())
     /// ```
+    #[inline]
     pub fn from_slice<'b>(
         buf: &'b mut [u8], dcid_len: usize,
     ) -> Result<Header<'a>> {
