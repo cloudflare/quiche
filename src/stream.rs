@@ -583,6 +583,7 @@ pub struct StreamIter {
 }
 
 impl StreamIter {
+    #[inline]
     fn from(streams: &HashSet<u64>) -> Self {
         StreamIter {
             streams: streams.iter().copied().collect(),
@@ -593,12 +594,14 @@ impl StreamIter {
 impl Iterator for StreamIter {
     type Item = u64;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.streams.pop()
     }
 }
 
 impl ExactSizeIterator for StreamIter {
+    #[inline]
     fn len(&self) -> usize {
         self.streams.len()
     }

@@ -986,6 +986,7 @@ pub struct Connection {
 /// let conn = quiche::accept(&scid, None, &mut config)?;
 /// # Ok::<(), quiche::Error>(())
 /// ```
+#[inline]
 pub fn accept(
     scid: &[u8], odcid: Option<&[u8]>, config: &mut Config,
 ) -> Result<Pin<Box<Connection>>> {
@@ -1009,6 +1010,7 @@ pub fn accept(
 /// let conn = quiche::connect(Some(&server_name), &scid, &mut config)?;
 /// # Ok::<(), quiche::Error>(())
 /// ```
+#[inline]
 pub fn connect(
     server_name: Option<&str>, scid: &[u8], config: &mut Config,
 ) -> Result<Pin<Box<Connection>>> {
@@ -1044,6 +1046,7 @@ pub fn connect(
 /// }
 /// # Ok::<(), quiche::Error>(())
 /// ```
+#[inline]
 pub fn negotiate_version(
     scid: &[u8], dcid: &[u8], out: &mut [u8],
 ) -> Result<usize> {
@@ -1108,6 +1111,7 @@ pub fn negotiate_version(
 /// let conn = quiche::accept(&scid, odcid, &mut config)?;
 /// # Ok::<(), quiche::Error>(())
 /// ```
+#[inline]
 pub fn retry(
     scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], version: u32,
     out: &mut [u8],
@@ -1116,6 +1120,7 @@ pub fn retry(
 }
 
 /// Returns true if the given protocol version is supported.
+#[inline]
 pub fn version_is_supported(version: u32) -> bool {
     matches!(
         version,
@@ -1336,6 +1341,7 @@ impl Connection {
     /// missing some early logs.
     ///
     /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
+    #[inline]
     pub fn set_keylog(&mut self, writer: Box<dyn std::io::Write + Send + Sync>) {
         self.keylog = Some(writer);
     }
@@ -3068,6 +3074,7 @@ impl Connection {
     }
 
     /// Returns the stream's send capacity in bytes.
+    #[inline]
     pub fn stream_capacity(&self, stream_id: u64) -> Result<usize> {
         if let Some(stream) = self.streams.get(stream_id) {
             let cap = cmp::min(self.send_capacity(), stream.send.cap());
@@ -3085,6 +3092,7 @@ impl Connection {
     ///
     /// Basically this returns true when the peer either set the `fin` flag
     /// for the stream, or sent `RESET_STREAM`.
+    #[inline]
     pub fn stream_finished(&self, stream_id: u64) -> bool {
         let stream = match self.streams.get(stream_id) {
             Some(v) => v,
@@ -3166,6 +3174,7 @@ impl Connection {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
+    #[inline]
     pub fn readable(&self) -> StreamIter {
         self.streams.readable()
     }
@@ -3199,6 +3208,7 @@ impl Connection {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
+    #[inline]
     pub fn writable(&self) -> StreamIter {
         // If there is not enough connection-level send capacity, none of the
         // streams are writable, so return an empty iterator.
@@ -3235,6 +3245,7 @@ impl Connection {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
+    #[inline]
     pub fn dgram_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self.dgram_recv_queue.pop() {
             Some(d) => {
@@ -3263,11 +3274,13 @@ impl Connection {
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`BufferTooShort`]: enum.Error.html#variant.BufferTooShort
+    #[inline]
     pub fn dgram_recv_peek(&self, buf: &mut [u8], len: usize) -> Result<usize> {
         self.dgram_recv_queue.peek_front_bytes(buf, len)
     }
 
     /// Returns the length of the first stored DATAGRAM.
+    #[inline]
     pub fn dgram_recv_front_len(&self) -> Option<usize> {
         self.dgram_recv_queue.peek_front_len()
     }
@@ -3337,6 +3350,7 @@ impl Connection {
     /// conn.dgram_purge_outgoing(&|d: &[u8]| -> bool { d[0] == 0 });
     /// # Ok::<(), quiche::Error>(())
     /// ```
+    #[inline]
     pub fn dgram_purge_outgoing<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
         self.dgram_send_queue.purge(f);
     }
@@ -3361,6 +3375,7 @@ impl Connection {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
+    #[inline]
     pub fn dgram_max_writable_len(&self) -> Option<usize> {
         match self.peer_transport_params.max_datagram_frame_size {
             None => None,
@@ -3532,6 +3547,7 @@ impl Connection {
     ///
     /// This can be used for logging purposes to differentiate between multiple
     /// connections.
+    #[inline]
     pub fn trace_id(&self) -> &str {
         &self.trace_id
     }
@@ -3539,32 +3555,38 @@ impl Connection {
     /// Returns the negotiated ALPN protocol.
     ///
     /// If no protocol has been negotiated, the returned value is empty.
+    #[inline]
     pub fn application_proto(&self) -> &[u8] {
         self.alpn.as_ref()
     }
 
     /// Returns the peer's leaf certificate (if any) as a DER-encoded buffer.
+    #[inline]
     pub fn peer_cert(&self) -> Option<Vec<u8>> {
         self.handshake.lock().unwrap().peer_cert()
     }
 
     /// Returns true if the connection handshake is complete.
+    #[inline]
     pub fn is_established(&self) -> bool {
         self.handshake_completed
     }
 
     /// Returns true if the connection is resumed.
+    #[inline]
     pub fn is_resumed(&self) -> bool {
         self.handshake.lock().unwrap().is_resumed()
     }
 
     /// Returns true if the connection has a pending handshake that has
     /// progressed enough to send or receive early data.
+    #[inline]
     pub fn is_in_early_data(&self) -> bool {
         self.handshake.lock().unwrap().is_in_early_data()
     }
 
     /// Returns whether there is stream or DATAGRAM data available to read.
+    #[inline]
     pub fn is_readable(&self) -> bool {
         self.streams.has_readable() || self.dgram_recv_front_len().is_some()
     }
@@ -3582,6 +3604,7 @@ impl Connection {
     /// [`timeout()`]: struct.Connection.html#method.timeout
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
     /// [`is_closed()`]: struct.Connection.html#method.is_closed
+    #[inline]
     pub fn is_draining(&self) -> bool {
         self.draining_timer.is_some()
     }
@@ -3589,11 +3612,13 @@ impl Connection {
     /// Returns true if the connection is closed.
     ///
     /// If this returns true, the connection object can be dropped.
+    #[inline]
     pub fn is_closed(&self) -> bool {
         self.closed
     }
 
     /// Collects and returns statistics about the connection.
+    #[inline]
     pub fn stats(&self) -> Stats {
         Stats {
             recv: self.recv_count,
@@ -4260,6 +4285,7 @@ pub struct Stats {
 }
 
 impl std::fmt::Debug for Stats {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
