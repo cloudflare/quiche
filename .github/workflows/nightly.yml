@@ -30,7 +30,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose
+          args: --verbose --features qlog
 
       - name: Run cargo package
         uses: actions-rs/cargo@v1
