@@ -1,4 +1,4 @@
-From d736db24826262e2c9887c610818532d3b6e19c1 Mon Sep 17 00:00:00 2001
+From 8b6bc45dd698ec1686fb281481cf16b638c2d6d1 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 22 Oct 2020 12:28:02 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -14,7 +14,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  auto/options                            |    9 +
  src/core/ngx_connection.h               |    7 +
  src/core/ngx_core.h                     |    3 +
- src/event/ngx_event_quic.c              |  575 ++++++
+ src/event/ngx_event_quic.c              |  591 ++++++
  src/event/ngx_event_quic.h              |   49 +
  src/event/ngx_event_udp.c               |    8 +
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
@@ -22,16 +22,16 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http.h                     |    4 +
  src/http/ngx_http_core_module.c         |    7 +
  src/http/ngx_http_core_module.h         |    3 +
- src/http/ngx_http_request.c             |  144 +-
+ src/http/ngx_http_request.c             |  140 +-
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   29 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2234 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2310 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   77 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3700 insertions(+), 11 deletions(-)
+ 27 files changed, 3788 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -338,10 +338,10 @@ index 93ca9174d..d0441f034 100644
  #include <ngx_module.h>
 diff --git a/src/event/ngx_event_quic.c b/src/event/ngx_event_quic.c
 new file mode 100644
-index 000000000..d9fc0b57a
+index 000000000..c7570bc4d
 --- /dev/null
 +++ b/src/event/ngx_event_quic.c
-@@ -0,0 +1,575 @@
+@@ -0,0 +1,591 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -362,6 +362,8 @@ index 000000000..d9fc0b57a
 +
 +static void ngx_quic_read_handler(ngx_event_t *ev);
 +static void ngx_quic_write_handler(ngx_event_t *ev);
++
++static void ngx_quic_set_timer(ngx_connection_t *c);
 +
 +static void ngx_quic_handshake_completed(ngx_connection_t *c);
 +
@@ -523,6 +525,7 @@ index 000000000..d9fc0b57a
 +
 +    qc = ngx_pcalloc(c->pool, sizeof(ngx_quic_connection_t));
 +    if (qc == NULL) {
++        quiche_conn_free(conn);
 +        return NGX_ERROR;
 +    }
 +
@@ -582,7 +585,10 @@ index 000000000..d9fc0b57a
 +        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0,
 +                       "quic connection timed out");
 +
-+        ngx_quic_finalize_connection(c, NGX_QUIC_INTERNAL_ERROR);
++        if (c->quic->handler != NULL) {
++            c->quic->handler(c);
++        }
++
 +        return;
 +    }
 +
@@ -636,7 +642,6 @@ index 000000000..d9fc0b57a
 +ngx_quic_write_handler(ngx_event_t *wev)
 +{
 +    ngx_connection_t   *c;
-+    uint64_t            expiry;
 +    static uint8_t      out[MAX_DATAGRAM_SIZE];
 +
 +    c = wev->data;
@@ -683,6 +688,18 @@ index 000000000..d9fc0b57a
 +            return;
 +        }
 +    }
++
++    ngx_quic_set_timer(c);
++}
++
++
++static void
++ngx_quic_set_timer(ngx_connection_t *c)
++{
++    uint64_t      expiry;
++    ngx_event_t  *wev;
++
++    wev = c->write;
 +
 +    expiry = quiche_conn_timeout_as_millis(c->quic->conn);
 +    expiry = ngx_max(expiry, 1);
@@ -762,36 +779,41 @@ index 000000000..d9fc0b57a
 +ngx_int_t
 +ngx_quic_shutdown(ngx_connection_t *c)
 +{
-+    if (!quiche_conn_is_closed(c->quic->conn)) {
-+        /* We shouldn't free the connection state yet, as we need to wait for
-+         * the draining timeout to expire. Setup event handlers such that we
-+         * will try again when that happens (or when another event is
-+         * triggered). */
-+        c->read->handler = ngx_quic_shutdown_handler;
-+        c->write->handler = ngx_quic_shutdown_handler;
++    ssize_t         written;
++    static uint8_t  out[MAX_DATAGRAM_SIZE];
 +
-+        /* We need to flush any remaining frames to the client (including
-+         * CONNECTION_CLOSE), so invoke the write handler. This also takes
-+         * care of setting up the draining timer. */
-+        ngx_quic_write_handler(c->write);
++    /* Connection is closed, free memory. */
++    if (quiche_conn_is_closed(c->quic->conn)) {
++        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "free quic connection");
 +
-+        /* The QUIC connection might have already been freed inside the write
-+         * handler, in which case we are done. */
-+        if (c->destroyed) {
-+            return NGX_OK;
-+        }
++        quiche_conn_free(c->quic->conn);
 +
-+        return NGX_AGAIN;
++        c->quic = NULL;
++        c->ssl = NULL;
++
++        return NGX_OK;
 +    }
 +
-+    ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "free quic connection");
++    /* We can't free the connection state yet, as we need to wait for the
++     * draining timeout to expire.
++     *
++     * Setup event handlers such that we will try again when that happens (or
++     * when another event is triggered). */
++    c->read->handler = ngx_quic_shutdown_handler;
++    c->write->handler = ngx_quic_shutdown_handler;
 +
-+    quiche_conn_free(c->quic->conn);
++    /* Try sending a packet in order to flush pending frames (CONNECTION_CLOSE
++     * for example), but ignore errors as we are already closing the connection
++     * anyway. */
++    written = quiche_conn_send(c->quic->conn, out, sizeof(out));
 +
-+    c->quic = NULL;
-+    c->ssl = NULL;
++    if (written > 0) {
++        ngx_quic_send_udp_packet(c, out, written);
++    }
 +
-+    return NGX_OK;
++    ngx_quic_set_timer(c);
++
++    return NGX_AGAIN;
 +}
 +
 +
@@ -801,6 +823,8 @@ index 000000000..d9fc0b57a
 +    ngx_connection_t           *c;
 +    ngx_connection_handler_pt   handler;
 +
++    ngx_log_debug0(NGX_LOG_DEBUG_EVENT, ev->log, 0, "quic shutdown handler");
++
 +    c = ev->data;
 +    handler = c->quic->handler;
 +
@@ -808,11 +832,7 @@ index 000000000..d9fc0b57a
 +        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "quic alarm fired");
 +
 +        quiche_conn_on_timeout(c->quic->conn);
-+
-+        ev->timedout = 0;
 +    }
-+
-+    ngx_log_debug0(NGX_LOG_DEBUG_EVENT, ev->log, 0, "quic shutdown handler");
 +
 +    if (ngx_quic_shutdown(c) == NGX_AGAIN) {
 +        return;
@@ -858,10 +878,6 @@ index 000000000..d9fc0b57a
 +    if (c->quic) {
 +        if (ngx_quic_shutdown(c) == NGX_AGAIN) {
 +            c->quic->handler = ngx_quic_close_connection;
-+            return;
-+        }
-+
-+        if (c->destroyed) {
 +            return;
 +        }
 +    }
@@ -1211,7 +1227,7 @@ index 85f6d66dc..fa08e3631 100644
  
  
 diff --git a/src/http/ngx_http_request.c b/src/http/ngx_http_request.c
-index 80c19656f..313e5a88a 100644
+index 80c19656f..a4f396753 100644
 --- a/src/http/ngx_http_request.c
 +++ b/src/http/ngx_http_request.c
 @@ -64,6 +64,10 @@ static void ngx_http_ssl_handshake(ngx_event_t *rev);
@@ -1412,7 +1428,7 @@ index 80c19656f..313e5a88a 100644
      ngx_http_close_connection(c);
  }
  
-@@ -3684,6 +3809,21 @@ ngx_http_close_connection(ngx_connection_t *c)
+@@ -3684,6 +3809,17 @@ ngx_http_close_connection(ngx_connection_t *c)
      ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
                     "close http connection: %d", c->fd);
  
@@ -1421,10 +1437,6 @@ index 80c19656f..313e5a88a 100644
 +    if (c->quic) {
 +        if (ngx_quic_shutdown(c) == NGX_AGAIN) {
 +            c->quic->handler = ngx_http_close_connection;
-+            return;
-+        }
-+
-+        if (c->destroyed) {
 +            return;
 +        }
 +    }
@@ -1556,10 +1568,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..b14af1570
+index 000000000..61e35c96a
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2234 @@
+@@ -0,0 +1,2310 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -1581,11 +1593,16 @@ index 000000000..b14af1570
 +
 +
 +/* errors */
-+#define NGX_HTTP_V3_NO_ERROR                     0x0
-+#define NGX_HTTP_V3_INTERNAL_ERROR               0x3
++#define NGX_HTTP_V3_NO_ERROR                     0x0100
++#define NGX_HTTP_V3_PROTOCOL_ERROR               0x0101
++#define NGX_HTTP_V3_INTERNAL_ERROR               0x0102
 +
 +
 +static void ngx_http_v3_handler(ngx_connection_t *c);
++
++static void ngx_http_v3_idle_handler(ngx_connection_t *c);
++
++static void ngx_http_v3_handle_connection(ngx_http_v3_connection_t *h3c);
 +
 +static ngx_http_v3_stream_t *ngx_http_v3_stream_lookup(
 +    ngx_http_v3_connection_t *h3c, ngx_uint_t stream_id);
@@ -1966,8 +1983,13 @@ index 000000000..b14af1570
 +
 +    h3c = c->data;
 +
++    if (c->read->timedout) {
++        ngx_http_v3_finalize_connection(h3c, NGX_HTTP_V3_PROTOCOL_ERROR);
++        return;
++    }
++
 +    if (c->error) {
-+        ngx_http_v3_finalize_connection(h3c, 0);
++        ngx_http_v3_finalize_connection(h3c, NGX_HTTP_V3_INTERNAL_ERROR);
 +        return;
 +    }
 +
@@ -1994,6 +2016,8 @@ index 000000000..b14af1570
 +            case QUICHE_H3_EVENT_DATA: {
 +                if (ngx_http_v3_process_data(c, stream_id) == NGX_AGAIN) {
 +                    quiche_h3_event_free(ev);
++
++                    ngx_http_v3_handle_connection(h3c);
 +                    return;
 +                }
 +
@@ -2029,6 +2053,68 @@ index 000000000..b14af1570
 +
 +        quiche_h3_event_free(ev);
 +    }
++
++    ngx_http_v3_handle_connection(h3c);
++}
++
++
++static void
++ngx_http_v3_idle_handler(ngx_connection_t *c)
++{
++    ngx_http_v3_connection_t  *h3c;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0, "http3 idle handler");
++
++    h3c = c->data;
++
++    if (c->read->timedout) {
++        ngx_http_v3_finalize_connection(h3c, NGX_HTTP_V3_NO_ERROR);
++        return;
++    }
++
++    if (c->error) {
++        ngx_http_v3_finalize_connection(h3c, NGX_HTTP_V3_INTERNAL_ERROR);
++        return;
++    }
++
++    if (!quiche_conn_is_readable(c->quic->conn)) {
++        return;
++    }
++
++    if (c->read->timer_set) {
++        ngx_del_timer(c->read);
++    }
++
++    c->quic->handler = ngx_http_v3_handler;
++
++    ngx_http_v3_handler(c);
++}
++
++
++static void
++ngx_http_v3_handle_connection(ngx_http_v3_connection_t *h3c)
++{
++    ngx_connection_t        *c;
++    ngx_http_v3_srv_conf_t  *h3scf;
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, h3c->connection->log, 0,
++                   "http3 handle connection");
++
++    c = h3c->connection;
++
++    if (h3c->processing || c->error) {
++        return;
++    }
++
++    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, h3c->connection->log, 0,
++                   "http3 connection is idle");
++
++    h3scf = ngx_http_get_module_srv_conf(h3c->http_connection->conf_ctx,
++                                         ngx_http_v3_module);
++
++    c->quic->handler = ngx_http_v3_idle_handler;
++
++    ngx_add_timer(c->read, h3scf->idle_timeout);
 +}
 +
 +
@@ -3683,6 +3769,8 @@ index 000000000..b14af1570
 +    h3c->free_fake_connections = fc;
 +
 +    h3c->processing--;
++
++    ngx_http_v3_handle_connection(h3c);
 +}
 +
 +
@@ -4284,5 +4372,5 @@ index 000000000..72e189def
 +
 +#endif /* _NGX_HTTP_V3_MODULE_H_INCLUDED_ */
 -- 
-2.28.0
+2.29.2
 
