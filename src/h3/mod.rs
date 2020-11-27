@@ -293,7 +293,7 @@ pub enum Error {
     /// There is no error or no work to do
     Done,
 
-    /// The provided buffer is too short.
+    /// The provided buffer is too short. A quiche-specific internal error.
     BufferTooShort,
 
     /// Internal error in the HTTP/3 stack.
@@ -327,11 +327,13 @@ pub enum Error {
     /// QPACK Header block decompression failure.
     QpackDecompressionFailed,
 
-    /// Error originated from the transport layer.
+    /// Error originated from the transport layer. A quiche-specific internal
+    /// error.
     TransportError(crate::Error),
 
     /// The underlying QUIC stream (or connection) doesn't have enough capacity
-    /// for the operation to complete. The application should retry later on.
+    /// for the operation to complete. The application should retry later on. A
+    /// quiche-specific internal error.
     StreamBlocked,
 
     /// Error in the payload of a SETTINGS frame.

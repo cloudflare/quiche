@@ -335,10 +335,11 @@ pub enum Error {
     /// There is no more work to do.
     Done,
 
-    /// The provided buffer is too short.
+    /// The provided buffer is too short. A quiche-specific internal error.
     BufferTooShort,
 
     /// The provided packet cannot be parsed because its version is unknown.
+    /// A quiche-specific internal error.
     UnknownVersion,
 
     /// The provided packet cannot be parsed because it contains an invalid
@@ -349,7 +350,7 @@ pub enum Error {
     InvalidPacket,
 
     /// The operation cannot be completed because the connection is in an
-    /// invalid state.
+    /// invalid state. A quiche-specific internal error.
     InvalidState,
 
     /// The operation cannot be completed because the stream is in an
@@ -359,10 +360,10 @@ pub enum Error {
     /// The peer's transport params cannot be parsed.
     InvalidTransportParam,
 
-    /// A cryptographic operation failed.
+    /// A cryptographic operation failed. A quiche-specific internal error.
     CryptoFail,
 
-    /// The TLS handshake failed.
+    /// The TLS handshake failed. A quiche-specific internal error.
     TlsFail,
 
     /// The peer violated the local flow control limits.
@@ -380,7 +381,7 @@ pub enum Error {
     /// The received data exceeds the stream's final size.
     FinalSize,
 
-    /// Error in congestion control.
+    /// Error in congestion control. A quiche-specific internal error.
     CongestionControl,
 }
 

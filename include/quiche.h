@@ -58,10 +58,11 @@ enum quiche_error {
     // There is no more work to do.
     QUICHE_ERR_DONE = -1,
 
-    // The provided buffer is too short.
+    // The provided buffer is too short. A quiche-specific internal error.
     QUICHE_ERR_BUFFER_TOO_SHORT = -2,
 
     // The provided packet cannot be parsed because its version is unknown.
+    // A quiche-specific internal error.
     QUICHE_ERR_UNKNOWN_VERSION = -3,
 
     // The provided packet cannot be parsed because it contains an invalid
@@ -72,7 +73,7 @@ enum quiche_error {
     QUICHE_ERR_INVALID_PACKET = -5,
 
     // The operation cannot be completed because the connection is in an
-    // invalid state.
+    // invalid state. A quiche-specific internal error.
     QUICHE_ERR_INVALID_STATE = -6,
 
     // The operation cannot be completed because the stream is in an
@@ -82,10 +83,10 @@ enum quiche_error {
     // The peer's transport params cannot be parsed.
     QUICHE_ERR_INVALID_TRANSPORT_PARAM = -8,
 
-    // A cryptographic operation failed.
+    // A cryptographic operation failed. A quiche-specific internal error.
     QUICHE_ERR_CRYPTO_FAIL = -9,
 
-    // The TLS handshake failed.
+    // The TLS handshake failed. A quiche-specific internal error.
     QUICHE_ERR_TLS_FAIL = -10,
 
     // The peer violated the local flow control limits.
@@ -100,7 +101,7 @@ enum quiche_error {
     // The received data exceeds the stream's final size.
     QUICHE_ERR_FINAL_SIZE = -13,
 
-    // Error in congestion control.
+    // Error in congestion control. A quiche-specific internal error.
     QUICHE_ERR_CONGESTION_CONTROL = -14,
 };
 
@@ -411,7 +412,7 @@ enum quiche_h3_error {
     /// There is no error or no work to do
     QUICHE_H3_ERR_DONE = -1,
 
-    /// The provided buffer is too short.
+    /// The provided buffer is too short. A quiche-specific internal error.
     QUICHE_H3_ERR_BUFFER_TOO_SHORT = -2,
 
     /// Internal error in the HTTP/3 stack.
@@ -445,7 +446,7 @@ enum quiche_h3_error {
     /// QPACK Header block decompression failure.
     QUICHE_H3_ERR_QPACK_DECOMPRESSION_FAILED = -11,
 
-    /// Error originated from the transport layer.
+    /// Error originated from the transport layer. A quiche-specific internal error.
     QUICHE_H3_ERR_TRANSPORT_ERROR = -12,
 
     /// The underlying QUIC stream (or connection) doesn't have enough capacity
