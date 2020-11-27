@@ -9,6 +9,9 @@ env:
 jobs:
   quiche:
     runs-on: ubuntu-latest
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -55,6 +58,9 @@ jobs:
 
   quiche_macos:
     runs-on: macos-latest
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -79,6 +85,9 @@ jobs:
     strategy:
       matrix:
         target: ["x86_64-apple-ios", "aarch64-apple-ios"]
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -104,6 +113,9 @@ jobs:
     strategy:
       matrix:
         target: ["x86_64-pc-windows-msvc", "i686-pc-windows-msvc"]
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -134,6 +146,9 @@ jobs:
     strategy:
       matrix:
         target: ["aarch64-unknown-linux-gnu", "armv7-unknown-linux-gnueabihf","i686-unknown-linux-gnu"]
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -157,6 +172,9 @@ jobs:
 
   apps:
     runs-on: ubuntu-latest
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -184,6 +202,9 @@ jobs:
 
   qlog:
     runs-on: ubuntu-latest
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -211,6 +232,9 @@ jobs:
 
   http3_test:
     runs-on: ubuntu-latest
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -241,6 +265,9 @@ jobs:
     strategy:
       matrix:
         version: ["1.16.1"]
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -273,6 +300,9 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -287,6 +317,9 @@ jobs:
     strategy:
       matrix:
         ndk_version: ["r13b"]
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -346,6 +379,9 @@ jobs:
       matrix:
         ndk_version: ["21"]
         target: ["aarch64-linux-android", "arm-linux-androideabi", "armv7-linux-androideabi", "i686-linux-android"]
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
