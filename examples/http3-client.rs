@@ -102,8 +102,10 @@ fn main() {
     let mut http3_conn = None;
 
     // Generate a random source connection ID for the connection.
-    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
+    let mut scid = vec![0; quiche::MAX_CONN_ID_LEN];
     SystemRandom::new().fill(&mut scid[..]).unwrap();
+
+    let scid = quiche::ConnectionId::from_vec(scid);
 
     // Create a QUIC connection and initiate handshake.
     let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
