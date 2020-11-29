@@ -46,8 +46,6 @@ use quiche::ConnectionId;
 
 use quiche::h3::NameValue;
 
-const MAX_JSON_DUMP_PAYLOAD: usize = 10000;
-
 pub fn stdout_sink(out: String) {
     print!("{}", out);
 }
@@ -562,6 +560,7 @@ struct Http3Request {
     hdrs: Vec<quiche::h3::Header>,
     response_hdrs: Vec<quiche::h3::Header>,
     response_body: Vec<u8>,
+    response_body_max: usize,
     response_writer: Option<std::io::BufWriter<std::fs::File>>,
 }
 
@@ -917,7 +916,7 @@ impl Http3Conn {
     pub fn with_urls(
         conn: &mut quiche::Connection, urls: &[url::Url], reqs_cardinal: u64,
         req_headers: &[String], body: &Option<Vec<u8>>, method: &str,
-        dump_json: bool, dgram_sender: Option<Http3DgramSender>,
+        dump_json: Option<usize>, dgram_sender: Option<Http3DgramSender>,
         output_sink: Rc<RefCell<dyn FnMut(String)>>,
     ) -> Box<dyn HttpConn> {
         let mut reqs = Vec::new();
@@ -967,6 +966,7 @@ impl Http3Conn {
                     hdrs,
                     response_hdrs: Vec::new(),
                     response_body: Vec::new(),
+                    response_body_max: dump_json.unwrap_or_default(),
                     stream_id: None,
                     response_writer: None,
                 });
@@ -984,7 +984,7 @@ impl Http3Conn {
             largest_processed_request: 0,
             reqs,
             body: body.as_ref().map(|b| b.to_vec()),
-            dump_json,
+            dump_json: dump_json.is_some(),
             dgram_sender,
             output_sink,
         };
@@ -1231,7 +1231,7 @@ impl HttpConn for Http3Conn {
 
                         let len = std::cmp::min(
                             read,
-                            MAX_JSON_DUMP_PAYLOAD - req.response_body.len(),
+                            req.response_body_max - req.response_body.len(),
                         );
                         req.response_body.extend_from_slice(&buf[..len]);
 

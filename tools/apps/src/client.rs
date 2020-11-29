@@ -49,7 +49,7 @@ pub enum ClientError {
 pub struct ClientArgs {
     pub version: u32,
     pub dump_response_path: Option<String>,
-    pub dump_json: bool,
+    pub dump_json: Option<usize>,
     pub urls: Vec<url::Url>,
     pub reqs_cardinal: u64,
     pub req_headers: Vec<String>,
@@ -73,6 +73,13 @@ impl Args for ClientArgs {
         };
 
         let dump_json = args.get_bool("--dump-json");
+        let dump_json = if dump_json {
+            let max_payload = args.get_str("--max-json-payload");
+            let max_payload = usize::from_str_radix(max_payload, 10).unwrap();
+            Some(max_payload)
+        } else {
+            None
+        };
 
         // URLs (can be multiple).
         let urls: Vec<url::Url> = args
@@ -127,7 +134,7 @@ impl Default for ClientArgs {
         ClientArgs {
             version: 0xbabababa,
             dump_response_path: None,
-            dump_json: false,
+            dump_json: None,
             urls: vec![],
             req_headers: vec![],
             reqs_cardinal: 1,
