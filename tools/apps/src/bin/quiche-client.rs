@@ -47,7 +47,8 @@ Options:
   --dgram-data DATA        Data to send for certain types of DATAGRAM application protocol [default: quack].
   --dump-packets PATH      Dump the incoming packets as files in the given directory.
   --dump-responses PATH    Dump response payload as files in the given directory.
-  --dump-json              Dump response headers and payload to stdout.
+  --dump-json              Dump response headers and payload to stdout in JSON format.
+  --max-json-payload BYTES  Per-response payload limit when dumping JSON [default: 10000].
   --connect-to ADDRESS     Override ther server's address.
   --no-verify              Don't verify server's certificate.
   --no-grease              Don't send GREASE.
