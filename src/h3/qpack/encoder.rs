@@ -55,7 +55,7 @@ impl Encoder {
     ) -> Result<usize> {
         let mut b = octets::OctetsMut::with_slice(out);
 
-        // Request Insert Count.
+        // Required Insert Count.
         encode_int(0, 0, 8, &mut b)?;
 
         // Base.
