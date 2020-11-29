@@ -901,11 +901,12 @@ impl Http3DgramSender {
 
 pub struct Http3Conn {
     h3_conn: quiche::h3::Connection,
-    reqs_sent: usize,
+    reqs_hdrs_sent: usize,
     reqs_complete: usize,
     largest_processed_request: u64,
     reqs: Vec<Http3Request>,
     body: Option<Vec<u8>>,
+    sent_body_bytes: HashMap<u64, usize>,
     dump_json: bool,
     dgram_sender: Option<Http3DgramSender>,
     output_sink: Rc<RefCell<dyn FnMut(String)>>,
@@ -979,11 +980,12 @@ impl Http3Conn {
                 &quiche::h3::Config::new().unwrap(),
             )
             .unwrap(),
-            reqs_sent: 0,
+            reqs_hdrs_sent: 0,
             reqs_complete: 0,
             largest_processed_request: 0,
             reqs,
             body: body.as_ref().map(|b| b.to_vec()),
+            sent_body_bytes: HashMap::new(),
             dump_json: dump_json.is_some(),
             dgram_sender,
             output_sink,
@@ -1002,11 +1004,12 @@ impl Http3Conn {
                 &quiche::h3::Config::new().unwrap(),
             )
             .unwrap(),
-            reqs_sent: 0,
+            reqs_hdrs_sent: 0,
             reqs_complete: 0,
             largest_processed_request: 0,
             reqs: Vec::new(),
             body: None,
+            sent_body_bytes: HashMap::new(),
             dump_json: false,
             dgram_sender,
             output_sink,
@@ -1120,7 +1123,8 @@ impl HttpConn for Http3Conn {
     ) {
         let mut reqs_done = 0;
 
-        for req in self.reqs.iter_mut().skip(self.reqs_sent) {
+        // First send headers.
+        for req in self.reqs.iter_mut().skip(self.reqs_hdrs_sent) {
             let s = match self.h3_conn.send_request(
                 conn,
                 &req.hdrs,
@@ -1146,24 +1150,47 @@ impl HttpConn for Http3Conn {
                 },
             };
 
-            debug!("sending HTTP request {:?}", req.hdrs);
+            debug!("Sent HTTP request {:?}", req.hdrs);
 
             req.stream_id = Some(s);
             req.response_writer =
                 make_resource_writer(&req.url, target_path, req.cardinal);
-
-            if let Some(body) = &self.body {
-                if let Err(e) = self.h3_conn.send_body(conn, s, body, true) {
-                    error!("failed to send request body {:?}", e);
-                    break;
-                }
-            }
+            self.sent_body_bytes.insert(s, 0);
 
             reqs_done += 1;
         }
+        self.reqs_hdrs_sent += reqs_done;
 
-        self.reqs_sent += reqs_done;
+        // Then send any remaining body.
+        if let Some(body) = &self.body {
+            for (stream_id, sent_bytes) in self.sent_body_bytes.iter_mut() {
+                if *sent_bytes == body.len() {
+                    continue;
+                }
 
+                // Always try to send all remaining bytes, so always set fin to
+                // true.
+                let sent = match self.h3_conn.send_body(
+                    conn,
+                    *stream_id,
+                    &body[*sent_bytes..],
+                    true,
+                ) {
+                    Ok(v) => v,
+
+                    Err(quiche::h3::Error::Done) => 0,
+
+                    Err(e) => {
+                        error!("failed to send request body {:?}", e);
+                        continue;
+                    },
+                };
+
+                *sent_bytes += sent;
+            }
+        }
+
+        // And finally any DATAGRAMS.
         if let Some(ds) = self.dgram_sender.as_mut() {
             let mut dgrams_done = 0;
 
