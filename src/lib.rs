@@ -3920,7 +3920,19 @@ impl Connection {
                     return Err(Error::InvalidStreamState);
                 }
 
-                self.get_or_create_stream(stream_id, false)?;
+                match self.get_or_create_stream(stream_id, false) {
+                    Ok(_) => {},
+
+                    Err(Error::Done) => {
+                        trace!(
+                            "stream {} is closed or collected, ignore STOP_SENDING",
+                            stream_id
+                        );
+                        return Ok(());
+                    },
+
+                    Err(e) => return Err(e),
+                }
 
                 self.streams.mark_stop_sending(stream_id, error_code);
                 self.stream_shutdown(stream_id, Shutdown::Write, error_code)?;
@@ -8525,6 +8537,54 @@ mod tests {
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::InvalidStreamState)
         );
+    }
+
+    #[test]
+    /// Tests STOP_SENDING is ignored properly if received after "fin" already acked.
+    fn ignore_stop_sending_frame_collected_stream() {
+        let mut buf = [0; 65535];
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // Client sends some request
+        assert_eq!(pipe.client.stream_send(4, b"req-foo", true), Ok(7));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server sends some response
+        assert_eq!(pipe.server.stream_send(4, b"resp-foo", true), Ok(8));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Client receives all pending data
+        let mut b = [0; 10];
+        pipe.client.stream_recv(4, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server receives all pending data
+        pipe.server.stream_recv(4, &mut b).unwrap();
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Remember the server sent count before getting STOP_SENDING
+        let server_sent = pipe.server.stats().sent;
+
+        // Send STOP_SENDING to the server when the stream is done (collected).
+        let frames = [
+            frame::Frame::StopSending {
+                stream_id: 4,
+                error_code: 100,
+            },
+        ];
+        let pkt_type = packet::Type::Short;
+        let sent_sz = pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).unwrap();
+        assert!(sent_sz > 0); // send should be successful.
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Verify the server ignored the STOP_SENDING
+        assert_eq!(pipe.server.poll_stop_sending(), None);
+
+        // Verify the server sent out ACK
+        let server_sent_2 = pipe.server.stats().sent;
+        assert_eq!(server_sent_2, server_sent + 1);
     }
 }
 
