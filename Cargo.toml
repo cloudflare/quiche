@@ -54,6 +54,7 @@ libc = "0.2"
 libm = "0.2"
 ring = "0.16"
 lazy_static = "1"
+boring-sys = { version = "1.0.2", optional = true }
 qlog = { version = "0.3", path = "tools/qlog", optional = true }
 
 [target."cfg(windows)".dependencies]
