@@ -238,7 +238,7 @@ fn main() {
                     },
 
                     Ok((stream_id, quiche::h3::Event::Data)) => {
-                        if let Ok(read) =
+                        while let Ok(read) =
                             http3_conn.recv_body(&mut conn, stream_id, &mut buf)
                         {
                             debug!(

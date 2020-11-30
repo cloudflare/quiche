@@ -3263,6 +3263,17 @@ impl Connection {
         Err(Error::InvalidStreamState)
     }
 
+    /// Returns true if the stream has data that can be read.
+    pub fn stream_readable(&self, stream_id: u64) -> bool {
+        let stream = match self.streams.get(stream_id) {
+            Some(v) => v,
+
+            None => return false,
+        };
+
+        stream.is_readable()
+    }
+
     /// Returns true if all the data has been read from the specified stream.
     ///
     /// This instructs the application that all the data received from the

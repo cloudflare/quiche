@@ -70,20 +70,6 @@ pub extern fn quiche_h3_config_set_qpack_blocked_streams(
 }
 
 #[no_mangle]
-pub extern fn quiche_h3_config_set_dgram_poll_threshold(
-    config: &mut h3::Config, v: u64,
-) {
-    config.set_dgram_poll_threshold(v);
-}
-
-#[no_mangle]
-pub extern fn quiche_h3_config_set_stream_poll_threshold(
-    config: &mut h3::Config, v: u64,
-) {
-    config.set_stream_poll_threshold(v);
-}
-
-#[no_mangle]
 pub extern fn quiche_h3_config_free(config: *mut h3::Config) {
     unsafe { Box::from_raw(config) };
 }
