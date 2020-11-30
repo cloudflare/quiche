@@ -634,6 +634,13 @@ pub extern fn quiche_conn_stream_capacity(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_stream_readable(
+    conn: &mut Connection, stream_id: u64,
+) -> bool {
+    conn.stream_readable(stream_id)
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_stream_finished(
     conn: &mut Connection, stream_id: u64,
 ) -> bool {

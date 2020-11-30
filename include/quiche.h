@@ -281,6 +281,8 @@ int quiche_conn_stream_shutdown(quiche_conn *conn, uint64_t stream_id,
 
 ssize_t quiche_conn_stream_capacity(quiche_conn *conn, uint64_t stream_id);
 
+bool quiche_conn_stream_readable(quiche_conn *conn, uint64_t stream_id);
+
 // Returns true if all the data has been read from the specified stream.
 bool quiche_conn_stream_finished(quiche_conn *conn, uint64_t stream_id);
 
@@ -491,12 +493,6 @@ void quiche_h3_config_set_qpack_max_table_capacity(quiche_h3_config *config, uin
 
 // Sets the `SETTINGS_QPACK_BLOCKED_STREAMS` setting.
 void quiche_h3_config_set_qpack_blocked_streams(quiche_h3_config *config, uint64_t v);
-
-// Sets the `quiche_h3_conn_poll()` repetition threshold for DATAGRAM events.
-void quiche_h3_config_set_dgram_poll_threshold(quiche_h3_config *config, uint64_t v);
-
-// Sets the `quiche_h3_conn_poll()` repetition threshold for stream events.
-void quiche_h3_config_set_stream_poll_threshold(quiche_h3_config *config, uint64_t v);
 
 // Frees the HTTP/3 config object.
 void quiche_h3_config_free(quiche_h3_config *config);

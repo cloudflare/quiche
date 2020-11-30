@@ -239,14 +239,18 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 }
 
                 case QUICHE_H3_EVENT_DATA: {
-                    ssize_t len = quiche_h3_recv_body(conn_io->http3,
-                                                      conn_io->conn, s,
-                                                      buf, sizeof(buf));
-                    if (len <= 0) {
-                        break;
+                    for (;;) {
+                        ssize_t len = quiche_h3_recv_body(conn_io->http3,
+                                                          conn_io->conn, s,
+                                                          buf, sizeof(buf));
+
+                        if (len <= 0) {
+                            break;
+                        }
+
+                        printf("%.*s", (int) len, buf);
                     }
 
-                    printf("%.*s", (int) len, buf);
                     break;
                 }
 
@@ -258,7 +262,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
                 case QUICHE_H3_EVENT_DATAGRAM:
                     break;
-                    
+
                 case QUICHE_H3_EVENT_GOAWAY: {
                     fprintf(stderr, "got GOAWAY\n");
                     break;
