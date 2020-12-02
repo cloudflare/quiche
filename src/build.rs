@@ -40,10 +40,12 @@ const CMAKE_PARAMS_IOS: &[(&str, &[(&str, &str)])] = &[
     ]),
 ];
 
-// ARM Linux.
-const CMAKE_PARAMS_ARM_LINUX: &[(&str, &[(&str, &str)])] = &[
+// Processor.
+const CMAKE_PARAMS_PROCESSOR: &[(&str, &[(&str, &str)])] = &[
     ("aarch64", &[("CMAKE_SYSTEM_PROCESSOR", "aarch64")]),
     ("arm", &[("CMAKE_SYSTEM_PROCESSOR", "arm")]),
+    ("x86_64", &[("CMAKE_SYSTEM_PROCESSOR", "x86_64")]),
+    ("x86", &[("CMAKE_SYSTEM_PROCESSOR", "x86")]),
 ];
 
 /// Returns the platform-specific output path for lib.
@@ -155,8 +157,8 @@ fn get_boringssl_cmake_config() -> cmake::Config {
 
         "linux" => match arch.as_ref() {
             "aarch64" | "arm" => {
-                for (arm_arch, params) in CMAKE_PARAMS_ARM_LINUX {
-                    if *arm_arch == arch {
+                for (cpu_arch, params) in CMAKE_PARAMS_PROCESSOR {
+                    if *cpu_arch == arch {
                         for (name, value) in *params {
                             boringssl_cmake.define(name, value);
                         }
@@ -179,6 +181,23 @@ fn get_boringssl_cmake_config() -> cmake::Config {
             },
 
             _ => boringssl_cmake,
+        },
+
+        "freebsd" => {
+            boringssl_cmake.define("CMAKE_SYSTEM_NAME", "FreeBSD");
+            boringssl_cmake.cxxflag("-Wno-cpp");
+            boringssl_cmake.cxxflag("-include sys/cdefs.h");
+            boringssl_cmake.cxxflag("-include sys/syslimits.h");
+
+            for (cpu_arch, params) in CMAKE_PARAMS_PROCESSOR {
+                if *cpu_arch == arch {
+                    for (name, value) in *params {
+                        boringssl_cmake.define(name, value);
+                    }
+                }
+            }
+
+            boringssl_cmake
         },
 
         _ => {
