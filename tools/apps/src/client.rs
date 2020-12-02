@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::args::*;
 use crate::common::*;
 
 use std::net::ToSocketAddrs;
@@ -43,107 +44,6 @@ pub enum ClientError {
     HandshakeFail,
     HttpFail,
     Other(String),
-}
-
-/// Application-specific arguments that compliment the `CommonArgs`.
-pub struct ClientArgs {
-    pub version: u32,
-    pub dump_response_path: Option<String>,
-    pub dump_json: Option<usize>,
-    pub urls: Vec<url::Url>,
-    pub reqs_cardinal: u64,
-    pub req_headers: Vec<String>,
-    pub no_verify: bool,
-    pub body: Option<Vec<u8>>,
-    pub method: String,
-    pub connect_to: Option<String>,
-}
-
-impl Args for ClientArgs {
-    fn with_docopt(docopt: &docopt::Docopt) -> Self {
-        let args = docopt.parse().unwrap_or_else(|e| e.exit());
-
-        let version = args.get_str("--wire-version");
-        let version = u32::from_str_radix(version, 16).unwrap();
-
-        let dump_response_path = if args.get_str("--dump-responses") != "" {
-            Some(args.get_str("--dump-responses").to_string())
-        } else {
-            None
-        };
-
-        let dump_json = args.get_bool("--dump-json");
-        let dump_json = if dump_json {
-            let max_payload = args.get_str("--max-json-payload");
-            let max_payload = usize::from_str_radix(max_payload, 10).unwrap();
-            Some(max_payload)
-        } else {
-            None
-        };
-
-        // URLs (can be multiple).
-        let urls: Vec<url::Url> = args
-            .get_vec("URL")
-            .into_iter()
-            .map(|x| url::Url::parse(x).unwrap())
-            .collect();
-
-        // Request headers (can be multiple).
-        let req_headers = args
-            .get_vec("--header")
-            .into_iter()
-            .map(|x| x.to_string())
-            .collect();
-
-        let reqs_cardinal = args.get_str("--requests");
-        let reqs_cardinal = u64::from_str_radix(reqs_cardinal, 10).unwrap();
-
-        let no_verify = args.get_bool("--no-verify");
-
-        let body = if args.get_bool("--body") {
-            std::fs::read(args.get_str("--body")).ok()
-        } else {
-            None
-        };
-
-        let method = args.get_str("--method").to_string();
-
-        let connect_to = if args.get_bool("--connect-to") {
-            Some(args.get_str("--connect-to").to_string())
-        } else {
-            None
-        };
-
-        ClientArgs {
-            version,
-            dump_response_path,
-            dump_json,
-            urls,
-            req_headers,
-            reqs_cardinal,
-            no_verify,
-            body,
-            method,
-            connect_to,
-        }
-    }
-}
-
-impl Default for ClientArgs {
-    fn default() -> Self {
-        ClientArgs {
-            version: 0xbabababa,
-            dump_response_path: None,
-            dump_json: None,
-            urls: vec![],
-            req_headers: vec![],
-            reqs_cardinal: 1,
-            no_verify: false,
-            body: None,
-            method: "GET".to_string(),
-            connect_to: None,
-        }
-    }
 }
 
 pub fn connect(
