@@ -3779,7 +3779,7 @@ impl Connection {
     fn write_epoch(&self) -> Result<packet::Epoch> {
         // On error send packet in the latest epoch available, but only send
         // 1-RTT ones when the handshake is completed.
-        if self.error.is_some() {
+        if self.error.is_some() || self.app_error.is_some() {
             let epoch = match self.handshake.lock().unwrap().write_level() {
                 crypto::Level::Initial => packet::EPOCH_INITIAL,
                 crypto::Level::ZeroRTT => unreachable!(),
