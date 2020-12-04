@@ -266,6 +266,15 @@ fn main() {
                         conn.close(true, 0x00, b"kthxbye").unwrap();
                     },
 
+                    Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
+                        error!(
+                            "request was reset by peer with {}, closing...",
+                            e
+                        );
+
+                        conn.close(true, 0x00, b"kthxbye").unwrap();
+                    },
+
                     Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
 
                     Ok((goaway_id, quiche::h3::Event::GoAway)) => {

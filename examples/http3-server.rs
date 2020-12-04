@@ -360,6 +360,8 @@ fn main() {
 
                         Ok((_stream_id, quiche::h3::Event::Finished)) => (),
 
+                        Ok((_stream_id, quiche::h3::Event::Reset { .. })) => (),
+
                         Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
 
                         Ok((_goaway_id, quiche::h3::Event::GoAway)) => (),

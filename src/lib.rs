@@ -419,6 +419,12 @@ pub enum Error {
     /// associated data.
     StreamStopped(u64),
 
+    /// The specified stream was reset by the peer.
+    ///
+    /// The error code sent as part of the `RESET_STREAM` frame is provided as
+    /// associated data.
+    StreamReset(u64),
+
     /// The received data exceeds the stream's final size.
     FinalSize,
 
@@ -458,6 +464,7 @@ impl Error {
             Error::FinalSize => -13,
             Error::CongestionControl => -14,
             Error::StreamStopped { .. } => -15,
+            Error::StreamReset { .. } => -16,
         }
     }
 }
@@ -3288,18 +3295,33 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        let local = stream.local;
+
         #[cfg(feature = "qlog")]
         let offset = stream.recv.off_front();
 
-        let (read, fin) = stream.recv.emit(out)?;
+        let (read, fin) = match stream.recv.emit(out) {
+            Ok(v) => v,
+
+            Err(e) => {
+                // Collect the stream if it is now complete. This can happen if
+                // we got a `StreamReset` error which will now be propagated to
+                // the application, so we don't need to keep the stream's state
+                // anymore.
+                if stream.is_complete() {
+                    self.streams.collect(stream_id, local);
+                }
+
+                self.streams.mark_readable(stream_id, false);
+                return Err(e);
+            },
+        };
 
         self.max_rx_data_next = self.max_rx_data_next.saturating_add(read as u64);
 
         let readable = stream.is_readable();
 
         let complete = stream.is_complete();
-
-        let local = stream.local;
 
         if stream.recv.almost_full() {
             self.streams.mark_almost_full(stream_id, true);
@@ -4564,8 +4586,8 @@ impl Connection {
 
             frame::Frame::ResetStream {
                 stream_id,
+                error_code,
                 final_size,
-                ..
             } => {
                 // Peer can't send on our unidirectional streams.
                 if !stream::is_bidi(stream_id) &&
@@ -4573,6 +4595,8 @@ impl Connection {
                 {
                     return Err(Error::InvalidStreamState(stream_id));
                 }
+
+                let max_rx_data_left = self.max_rx_data - self.rx_data;
 
                 // Get existing stream or create a new one, but if the stream
                 // has already been closed and collected, ignore the frame.
@@ -4592,11 +4616,20 @@ impl Connection {
                     Err(e) => return Err(e),
                 };
 
-                self.rx_data += stream.recv.reset(final_size)? as u64;
+                let was_readable = stream.is_readable();
 
-                if self.rx_data > self.max_rx_data {
+                let max_off_delta =
+                    stream.recv.reset(error_code, final_size)? as u64;
+
+                if max_off_delta > max_rx_data_left {
                     return Err(Error::FlowControl);
                 }
+
+                if !was_readable && stream.is_readable() {
+                    self.streams.mark_readable(stream_id, true);
+                }
+
+                self.rx_data += max_off_delta;
             },
 
             frame::Frame::StopSending {
@@ -4709,9 +4742,11 @@ impl Connection {
                     return Err(Error::FlowControl);
                 }
 
+                let was_readable = stream.is_readable();
+
                 stream.recv.write(data)?;
 
-                if stream.is_readable() {
+                if !was_readable && stream.is_readable() {
                     self.streams.mark_readable(stream_id, true);
                 }
 
@@ -7066,6 +7101,136 @@ mod tests {
     }
 
     #[test]
+    /// Tests that receiving a valid RESET_STREAM frame when all data has
+    /// already been read, notifies the application.
+    fn reset_stream_data_recvd() {
+        let mut b = [0; 15];
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client sends some data.
+        assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server gets data and sends data back, closing stream.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, false)));
+        assert!(!pipe.server.stream_finished(4));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.client.stream_recv(4, &mut b), Ok((0, true)));
+        assert!(pipe.client.stream_finished(4));
+
+        // Client sends RESET_STREAM, closing stream.
+        let frames = [frame::Frame::ResetStream {
+            stream_id: 4,
+            error_code: 42,
+            final_size: 5,
+        }];
+
+        let pkt_type = packet::Type::Short;
+        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+
+        // Server is notified of stream readability, due to reset.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(
+            pipe.server.stream_recv(4, &mut b),
+            Err(Error::StreamReset(42))
+        );
+
+        assert!(pipe.server.stream_finished(4));
+
+        // Sending RESET_STREAM again shouldn't make stream readable again.
+        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+    }
+
+    #[test]
+    /// Tests that receiving a valid RESET_STREAM frame when all data has _not_
+    /// been read, discards all buffered data and notifies the application.
+    fn reset_stream_data_not_recvd() {
+        let mut b = [0; 15];
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client sends some data.
+        assert_eq!(pipe.client.stream_send(4, b"h", false), Ok(1));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server gets data and sends data back, closing stream.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((1, false)));
+        assert!(!pipe.server.stream_finished(4));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.client.stream_recv(4, &mut b), Ok((0, true)));
+        assert!(pipe.client.stream_finished(4));
+
+        // Client sends RESET_STREAM, closing stream.
+        let frames = [frame::Frame::ResetStream {
+            stream_id: 4,
+            error_code: 42,
+            final_size: 5,
+        }];
+
+        let pkt_type = packet::Type::Short;
+        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+
+        // Server is notified of stream readability, due to reset.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(
+            pipe.server.stream_recv(4, &mut b),
+            Err(Error::StreamReset(42))
+        );
+
+        assert!(pipe.server.stream_finished(4));
+
+        // Sending RESET_STREAM again shouldn't make stream readable again.
+        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+    }
+
+    #[test]
+    /// Tests that RESET_STREAM frames exceeding the connection-level flow
+    /// control limit cause an error.
     fn reset_stream_flow_control() {
         let mut buf = [0; 65535];
 
@@ -7089,6 +7254,34 @@ mod tests {
             frame::Frame::Stream {
                 stream_id: 12,
                 data: stream::RangeBuf::from(b"a", 0, false),
+            },
+        ];
+
+        let pkt_type = packet::Type::Short;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::FlowControl),
+        );
+    }
+
+    #[test]
+    /// Tests that RESET_STREAM frames exceeding the stream-level flow control
+    /// limit cause an error.
+    fn reset_stream_flow_control_stream() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let frames = [
+            frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(b"a", 0, false),
+            },
+            frame::Frame::ResetStream {
+                stream_id: 4,
+                error_code: 0,
+                final_size: 16, // Past stream's flow control limit.
             },
         ];
 
@@ -7589,8 +7782,18 @@ mod tests {
 
         assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((15, true)));
 
+        // Client processes readable streams.
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(
+            pipe.client.stream_recv(4, &mut buf),
+            Err(Error::StreamReset(42))
+        );
+
         // Stream is collected on both sides.
-        // TODO: assert_eq!(pipe.client.streams.len(), 0);
+        assert_eq!(pipe.client.streams.len(), 0);
         assert_eq!(pipe.server.streams.len(), 0);
 
         assert_eq!(
