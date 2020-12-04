@@ -331,52 +331,51 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// A QUIC error.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[repr(C)]
 pub enum Error {
     /// There is no more work to do.
-    Done               = -1,
+    Done,
 
     /// The provided buffer is too short.
-    BufferTooShort     = -2,
+    BufferTooShort,
 
     /// The provided packet cannot be parsed because its version is unknown.
-    UnknownVersion     = -3,
+    UnknownVersion,
 
     /// The provided packet cannot be parsed because it contains an invalid
     /// frame.
-    InvalidFrame       = -4,
+    InvalidFrame,
 
     /// The provided packet cannot be parsed.
-    InvalidPacket      = -5,
+    InvalidPacket,
 
     /// The operation cannot be completed because the connection is in an
     /// invalid state.
-    InvalidState       = -6,
+    InvalidState,
 
     /// The operation cannot be completed because the stream is in an
     /// invalid state.
-    InvalidStreamState = -7,
+    InvalidStreamState,
 
     /// The peer's transport params cannot be parsed.
-    InvalidTransportParam = -8,
+    InvalidTransportParam,
 
     /// A cryptographic operation failed.
-    CryptoFail         = -9,
+    CryptoFail,
 
     /// The TLS handshake failed.
-    TlsFail            = -10,
+    TlsFail,
 
     /// The peer violated the local flow control limits.
-    FlowControl        = -11,
+    FlowControl,
 
     /// The peer violated the local stream limits.
-    StreamLimit        = -12,
+    StreamLimit,
 
     /// The received data exceeds the stream's final size.
-    FinalSize          = -13,
+    FinalSize,
 
     /// Error in congestion control.
-    CongestionControl  = -14,
+    CongestionControl,
 }
 
 impl Error {
@@ -394,7 +393,22 @@ impl Error {
     }
 
     fn to_c(self) -> libc::ssize_t {
-        self as _
+        match self {
+            Error::Done => -1,
+            Error::BufferTooShort => -2,
+            Error::UnknownVersion => -3,
+            Error::InvalidFrame => -4,
+            Error::InvalidPacket => -5,
+            Error::InvalidState => -6,
+            Error::InvalidStreamState => -7,
+            Error::InvalidTransportParam => -8,
+            Error::CryptoFail => -9,
+            Error::TlsFail => -10,
+            Error::FlowControl => -11,
+            Error::StreamLimit => -12,
+            Error::FinalSize => -13,
+            Error::CongestionControl => -14,
+        }
     }
 }
 
