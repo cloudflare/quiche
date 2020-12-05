@@ -726,6 +726,8 @@ impl HttpConn for Http09Conn {
             Err(quiche::Error::Done) => 0,
 
             Err(e) => {
+                partial_responses.remove(&stream_id);
+
                 error!("{} stream send failed {:?}", conn.trace_id(), e);
                 return;
             },
@@ -1420,11 +1422,11 @@ impl HttpConn for Http3Conn {
         let written = match self.h3_conn.send_body(conn, stream_id, body, true) {
             Ok(v) => v,
 
-            Err(quiche::h3::Error::Done) => {
-                return;
-            },
+            Err(quiche::h3::Error::Done) => 0,
 
             Err(e) => {
+                partial_responses.remove(&stream_id);
+
                 error!("{} stream send failed {:?}", conn.trace_id(), e);
                 return;
             },

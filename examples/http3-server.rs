@@ -534,6 +534,8 @@ fn handle_request(
     let written = match http3_conn.send_body(conn, stream_id, &body, true) {
         Ok(v) => v,
 
+        Err(quiche::h3::Error::Done) => 0,
+
         Err(e) => {
             error!("{} stream send failed {:?}", conn.trace_id(), e);
             return;
@@ -636,7 +638,11 @@ fn handle_writable(client: &mut Client, stream_id: u64) {
     let written = match http3_conn.send_body(conn, stream_id, body, true) {
         Ok(v) => v,
 
+        Err(quiche::h3::Error::Done) => 0,
+
         Err(e) => {
+            client.partial_responses.remove(&stream_id);
+
             error!("{} stream send failed {:?}", conn.trace_id(), e);
             return;
         },
