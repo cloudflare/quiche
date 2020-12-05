@@ -789,7 +789,11 @@ impl Connection {
         // stream_capacity() will fail. By writing a 0-length buffer, we force
         // the creation of the QUIC stream state, without actually writing
         // anything.
-        conn.stream_send(stream_id, b"", false)?;
+        if let Err(e) = conn.stream_send(stream_id, b"", false) {
+            self.streams.remove(&stream_id);
+
+            return Err(e.into());
+        };
 
         self.send_headers(conn, stream_id, headers, fin)?;
 
@@ -915,7 +919,17 @@ impl Connection {
             self.frames_greased = true;
         }
 
-        let stream_cap = conn.stream_capacity(stream_id)?;
+        let stream_cap = match conn.stream_capacity(stream_id) {
+            Ok(v) => v,
+
+            Err(e) => {
+                if conn.stream_finished(stream_id) {
+                    self.streams.remove(&stream_id);
+                }
+
+                return Err(e.into());
+            },
+        };
 
         let header_block = self.encode_header_block(headers)?;
 
@@ -993,7 +1007,17 @@ impl Connection {
         let overhead = octets::varint_len(frame::DATA_FRAME_TYPE_ID) +
             octets::varint_len(body.len() as u64);
 
-        let stream_cap = conn.stream_capacity(stream_id)?;
+        let stream_cap = match conn.stream_capacity(stream_id) {
+            Ok(v) => v,
+
+            Err(e) => {
+                if conn.stream_finished(stream_id) {
+                    self.streams.remove(&stream_id);
+                }
+
+                return Err(e.into());
+            },
+        };
 
         // Make sure there is enough capacity to send the frame header and at
         // least one byte of frame payload (this to avoid sending 0-length DATA
@@ -1400,7 +1424,17 @@ impl Connection {
     ) -> Result<()> {
         let mut d = [0; 8];
 
-        let stream_cap = conn.stream_capacity(stream_id)?;
+        let stream_cap = match conn.stream_capacity(stream_id) {
+            Ok(v) => v,
+
+            Err(e) => {
+                if conn.stream_finished(stream_id) {
+                    self.streams.remove(&stream_id);
+                }
+
+                return Err(e.into());
+            },
+        };
 
         let grease_frame1 = grease_value();
         let grease_frame2 = grease_value();
