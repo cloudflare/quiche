@@ -123,6 +123,11 @@ pub struct StreamMap {
     /// of the map elements represents the offset of the stream at which the
     /// blocking occurred.
     blocked: HashMap<u64, u64>,
+
+    /// Set of stream IDs corresponding to streams that are reset. The value
+    /// of the map elements is a tuple of the error code and final size values
+    /// to include in the RESET_STREAM frame.
+    reset: HashMap<u64, (u64, u64)>,
 }
 
 impl StreamMap {
@@ -365,6 +370,20 @@ impl StreamMap {
         }
     }
 
+    /// Adds or removes the stream ID to/from the reset streams set with the
+    /// given error code and final size values.
+    ///
+    /// If the stream was already in the list, this does nothing.
+    pub fn mark_reset(
+        &mut self, stream_id: u64, reset: bool, error_code: u64, final_size: u64,
+    ) {
+        if reset {
+            self.reset.insert(stream_id, (error_code, final_size));
+        } else {
+            self.reset.remove(&stream_id);
+        }
+    }
+
     /// Updates the peer's maximum bidirectional stream count limit.
     pub fn update_peer_max_streams_bidi(&mut self, v: u64) {
         self.peer_max_streams_bidi = cmp::max(self.peer_max_streams_bidi, v);
@@ -436,6 +455,11 @@ impl StreamMap {
         self.blocked.iter()
     }
 
+    /// Creates an iterator over streams that need to send RESET_STREAM.
+    pub fn reset(&self) -> hash_map::Iter<u64, (u64, u64)> {
+        self.reset.iter()
+    }
+
     /// Returns true if there are any streams that have data to write.
     pub fn has_flushable(&self) -> bool {
         !self.flushable.is_empty()
@@ -455,6 +479,11 @@ impl StreamMap {
     /// Returns true if there are any streams that are blocked.
     pub fn has_blocked(&self) -> bool {
         !self.blocked.is_empty()
+    }
+
+    /// Returns true if there are any streams that are reset.
+    pub fn has_reset(&self) -> bool {
+        !self.reset.is_empty()
     }
 
     /// Returns true if the max bidirectional streams count needs to be updated
@@ -907,7 +936,7 @@ pub struct SendBuf {
     /// The maximum offset of data buffered in the stream.
     off: u64,
 
-    /// The amount of data that was ever written to this stream.
+    /// The amount of data currently buffered.
     len: u64,
 
     /// The maximum offset we are allowed to send to the peer.
@@ -921,6 +950,9 @@ pub struct SendBuf {
 
     /// Ranges of data offsets that have been acked.
     acked: ranges::RangeSet,
+
+    /// The error code received via STOP_SENDING.
+    error: Option<u64>,
 }
 
 impl SendBuf {
@@ -946,9 +978,13 @@ impl SendBuf {
             return Ok(data.len());
         }
 
-        if data.len() > self.cap() {
+        // Get the stream send capacity. This will return an error if the stream
+        // was stopped.
+        let capacity = self.cap()?;
+
+        if data.len() > capacity {
             // Truncate the input buffer according to the stream's capacity.
-            let len = self.cap();
+            let len = capacity;
             data = &data[..len];
 
             // We are not buffering the full input, so clear the fin flag.
@@ -1193,6 +1229,34 @@ impl SendBuf {
         }
     }
 
+    /// Resets the stream at the current offset and clears all buffered data.
+    pub fn reset(&mut self) -> Result<u64> {
+        self.write(b"", true)?;
+
+        // Drop all buffered data.
+        self.data.clear();
+
+        self.pos = 0;
+        self.len = 0;
+
+        Ok(self.fin_off.unwrap())
+    }
+
+    /// Resets the streams and records the received error code.
+    ///
+    /// Calling this again after the first time has no effect.
+    pub fn stop(&mut self, error_code: u64) -> Result<u64> {
+        if self.error.is_some() {
+            return Err(Error::Done);
+        }
+
+        let fin_off = self.reset()?;
+
+        self.error = Some(error_code);
+
+        Ok(fin_off)
+    }
+
     /// Shuts down sending data.
     pub fn shutdown(&mut self) -> Result<()> {
         if self.shutdown {
@@ -1276,8 +1340,13 @@ impl SendBuf {
     }
 
     /// Returns the outgoing flow control capacity.
-    pub fn cap(&self) -> usize {
-        (self.max_data - self.off) as usize
+    pub fn cap(&self) -> Result<usize> {
+        // The stream was stopped, so return the error code instead.
+        if let Some(e) = self.error {
+            return Err(Error::StreamStopped(e));
+        }
+
+        Ok((self.max_data - self.off) as usize)
     }
 }
 

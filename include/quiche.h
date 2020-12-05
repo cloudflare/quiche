@@ -94,6 +94,9 @@ enum quiche_error {
     // The peer violated the local stream limits.
     QUICHE_ERR_STREAM_LIMIT = -12,
 
+    // The specified stream was stopped by the peer.
+    QUICHE_ERR_STREAM_STOPPED = -15,
+
     // The received data exceeds the stream's final size.
     QUICHE_ERR_FINAL_SIZE = -13,
 

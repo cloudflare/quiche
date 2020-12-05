@@ -502,6 +502,8 @@ fn handle_writable(client: &mut Client, stream_id: u64) {
         Err(quiche::Error::Done) => 0,
 
         Err(e) => {
+            client.partial_responses.remove(&stream_id);
+
             error!("{} stream send failed {:?}", conn.trace_id(), e);
             return;
         },

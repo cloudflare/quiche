@@ -371,6 +371,12 @@ pub enum Error {
     /// The peer violated the local stream limits.
     StreamLimit,
 
+    /// The specified stream was stopped by the peer.
+    ///
+    /// The error code sent as part of the `STOP_SENDING` frame is provided as
+    /// associated data.
+    StreamStopped(u64),
+
     /// The received data exceeds the stream's final size.
     FinalSize,
 
@@ -408,6 +414,7 @@ impl Error {
             Error::StreamLimit => -12,
             Error::FinalSize => -13,
             Error::CongestionControl => -14,
+            Error::StreamStopped { .. } => -15,
         }
     }
 }
@@ -1921,6 +1928,22 @@ impl Connection {
                     }
                 },
 
+                frame::Frame::ResetStream { stream_id, .. } => {
+                    let stream = match self.streams.get_mut(stream_id) {
+                        Some(v) => v,
+
+                        None => continue,
+                    };
+
+                    // Only collect the stream if it is complete and not
+                    // readable. If it is readable, it will get collected when
+                    // stream_recv() is used.
+                    if stream.is_complete() && !stream.is_readable() {
+                        let local = stream.local;
+                        self.streams.collect(stream_id, local);
+                    }
+                },
+
                 _ => (),
             }
         }
@@ -2090,6 +2113,16 @@ impl Connection {
                 frame::Frame::ACK { .. } => {
                     self.pkt_num_spaces[epoch].ack_elicited = true;
                 },
+
+                frame::Frame::ResetStream {
+                    stream_id,
+                    error_code,
+                    final_size,
+                } =>
+                    if self.streams.get(stream_id).is_some() {
+                        self.streams
+                            .mark_reset(stream_id, true, error_code, final_size);
+                    },
 
                 frame::Frame::HandshakeDone => {
                     self.handshake_done_sent = false;
@@ -2332,6 +2365,27 @@ impl Connection {
 
                     // Commits the new max_rx_data limit.
                     self.max_rx_data = self.max_rx_data_next;
+
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
+            }
+
+            // Create RESET_STREAM frames as needed.
+            for (stream_id, (error_code, final_size)) in self
+                .streams
+                .reset()
+                .map(|(&k, &v)| (k, v))
+                .collect::<Vec<(u64, (u64, u64))>>()
+            {
+                let frame = frame::Frame::ResetStream {
+                    stream_id,
+                    error_code,
+                    final_size,
+                };
+
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    self.streams.mark_reset(stream_id, false, 0, 0);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -2886,6 +2940,10 @@ impl Connection {
     /// On success the number of bytes written is returned, or [`Done`] if no
     /// data was written (e.g. because the stream has no capacity).
     ///
+    /// In addition, if the peer has signalled that it doesn't want to receive
+    /// any more data from this stream by sending the `STOP_SENDING` frame, the
+    /// [`StreamStopped`] error will be returned instead of any data.
+    ///
     /// Note that in order to avoid buffering an infinite amount of data in the
     /// stream's send buffer, streams are only allowed to buffer outgoing data
     /// up to the amount that the peer allows it to send (that is, up to the
@@ -2901,6 +2959,7 @@ impl Connection {
     /// early data if enabled (whenever [`is_in_early_data()`] returns `true`).
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    /// [`StreamStopped`]: enum.Error.html#variant.StreamStopped
     /// [`is_established()`]: struct.Connection.html#method.is_established
     /// [`is_in_early_data()`]: struct.Connection.html#method.is_in_early_data
     ///
@@ -2953,7 +3012,14 @@ impl Connection {
 
         let was_flushable = stream.is_flushable();
 
-        let sent = stream.send.write(buf, fin)?;
+        let sent = match stream.send.write(buf, fin) {
+            Ok(v) => v,
+
+            Err(e) => {
+                self.streams.mark_writable(stream_id, false);
+                return Err(e);
+            },
+        };
 
         let urgency = stream.urgency;
         let incremental = stream.incremental;
@@ -3082,10 +3148,21 @@ impl Connection {
     }
 
     /// Returns the stream's send capacity in bytes.
+    ///
+    /// If the specified stream doesn't exist (including when it has already
+    /// been completed and closed), the [`InvalidStreamState`] error will be
+    /// returned.
+    ///
+    /// In addition, if the peer has signalled that it doesn't want to receive
+    /// any more data from this stream by sending the `STOP_SENDING` frame, the
+    /// [`StreamStopped`] error will be returned.
+    ///
+    /// [`InvalidStreamState`]: enum.Error.html#variant.InvalidStreamState
+    /// [`StreamStopped`]: enum.Error.html#variant.StreamStopped
     #[inline]
     pub fn stream_capacity(&self, stream_id: u64) -> Result<usize> {
         if let Some(stream) = self.streams.get(stream_id) {
-            let cap = cmp::min(self.send_capacity(), stream.send.cap());
+            let cap = cmp::min(self.send_capacity(), stream.send.cap()?);
             return Ok(cap);
         };
 
@@ -3752,7 +3829,8 @@ impl Connection {
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
                 self.streams.has_almost_full() ||
-                self.streams.has_blocked())
+                self.streams.has_blocked() ||
+                self.streams.has_reset())
         {
             return Ok(packet::EPOCH_APPLICATION);
         }
@@ -3856,12 +3934,45 @@ impl Connection {
                 }
             },
 
-            frame::Frame::StopSending { stream_id, .. } => {
+            frame::Frame::StopSending {
+                stream_id,
+                error_code,
+            } => {
                 // STOP_SENDING on a receive-only stream is a fatal error.
                 if !stream::is_local(stream_id, self.is_server) &&
                     !stream::is_bidi(stream_id)
                 {
                     return Err(Error::InvalidStreamState);
+                }
+
+                // Get existing stream or create a new one, but if the stream
+                // has already been closed and collected, ignore the frame.
+                //
+                // This can happen if e.g. an ACK frame is lost, and the peer
+                // retransmits another frame before it realizes that the stream
+                // is gone.
+                //
+                // Note that it makes it impossible to check if the frame is
+                // illegal, since we have no state, but since we ignore the
+                // frame, it should be fine.
+                let stream = match self.get_or_create_stream(stream_id, false) {
+                    Ok(v) => v,
+
+                    Err(Error::Done) => return Ok(()),
+
+                    Err(e) => return Err(e),
+                };
+
+                let was_writable = stream.is_writable();
+
+                // Try stopping the stream.
+                if let Ok(final_size) = stream.send.stop(error_code) {
+                    self.streams
+                        .mark_reset(stream_id, true, error_code, final_size);
+
+                    if !was_writable {
+                        self.streams.mark_writable(stream_id, true);
+                    }
                 }
             },
 
@@ -6017,6 +6128,126 @@ mod tests {
                 .largest_rx_pkt_num,
             0
         );
+    }
+
+    #[test]
+    fn stop_sending() {
+        let mut b = [0; 15];
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        // Client sends some data, and closes stream.
+        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        // Server gets data.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
+        assert!(pipe.server.stream_finished(4));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
+        // Server sends data, until blocked.
+        let mut r = pipe.server.writable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        loop {
+            if pipe.server.stream_send(4, b"world", false) == Ok(0) {
+                break;
+            }
+
+            assert_eq!(pipe.advance(&mut buf), Ok(()));
+        }
+
+        let mut r = pipe.server.writable();
+        assert_eq!(r.next(), None);
+
+        // Client sends STOP_SENDING.
+        let frames = [frame::Frame::StopSending {
+            stream_id: 4,
+            error_code: 42,
+        }];
+
+        let pkt_type = packet::Type::Short;
+        let len = pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        // Server sent a RESET_STREAM frame in response.
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+
+        let mut iter = frames.iter();
+
+        // Skip ACK frame.
+        iter.next();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::ResetStream {
+                stream_id: 4,
+                error_code: 42,
+                final_size: 15,
+            })
+        );
+
+        // Stream is writable, but writing returns an error.
+        let mut r = pipe.server.writable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(
+            pipe.server.stream_send(4, b"world", true),
+            Err(Error::StreamStopped(42)),
+        );
+
+        assert_eq!(pipe.server.streams.len(), 1);
+
+        // Client acks RESET_STREAM frame.
+        let mut ranges = ranges::RangeSet::default();
+        ranges.insert(0..7);
+
+        let frames = [frame::Frame::ACK {
+            ack_delay: 15,
+            ranges,
+        }];
+
+        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
+
+        // Stream is collected on the server after RESET_STREAM is acked.
+        assert_eq!(pipe.server.streams.len(), 0);
+
+        // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
+        let frames = [frame::Frame::StopSending {
+            stream_id: 4,
+            error_code: 42,
+        }];
+
+        let len = pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+
+        assert_eq!(frames.len(), 1);
+
+        match frames.iter().next() {
+            Some(frame::Frame::ACK { .. }) => (),
+
+            f => panic!("expected ACK frame, got {:?}", f),
+        };
+
+        let mut r = pipe.server.writable();
+        assert_eq!(r.next(), None);
     }
 
     #[test]
