@@ -278,6 +278,13 @@ pub extern fn quiche_h3_recv_body(
 }
 
 #[no_mangle]
+pub extern fn quiche_h3_dgram_enabled_by_peer(
+    conn: &h3::Connection, quic_conn: &Connection,
+) -> bool {
+    conn.dgram_enabled_by_peer(quic_conn)
+}
+
+#[no_mangle]
 pub extern fn quiche_h3_send_dgram(
     conn: &mut h3::Connection, quic_conn: &mut Connection, flow_id: u64,
     data: *const u8, data_len: size_t,
