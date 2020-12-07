@@ -3480,7 +3480,8 @@ impl Connection {
                 // ...clamp to what peer can support...
                 max_len = cmp::min(peer_frame_len as usize, max_len);
                 // ...subtract frame overhead, checked for underflow.
-                max_len.checked_sub(frame::MAX_DGRAM_OVERHEAD)
+                // (1 byte of frame type + len of length )
+                max_len.checked_sub(1 + frame::MAX_DGRAM_OVERHEAD)
             },
         }
     }
@@ -8343,6 +8344,10 @@ mod tests {
         assert_eq!(pipe.handshake(&mut buf), Ok(()));
 
         let max_dgram_size = pipe.client.dgram_max_writable_len().unwrap();
+
+        // Tests use a 16-byte connection ID, so the max datagram frame payload
+        // size is (1200 byte-long packet - 40 bytes overhead)
+        assert_eq!(max_dgram_size, 1160);
 
         let dgram_packet: Vec<u8> = vec![42; max_dgram_size];
 
