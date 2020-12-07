@@ -1480,7 +1480,7 @@ impl Connection {
             Ok(stream_id) => {
                 trace!("{} open GREASE stream {}", conn.trace_id(), stream_id);
 
-                conn.stream_send(stream_id, b"GREASE is the word", false)?;
+                conn.stream_send(stream_id, b"GREASE is the word", true)?;
             },
 
             Err(Error::IdError) => {
