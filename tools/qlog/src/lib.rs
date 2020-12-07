@@ -1652,6 +1652,7 @@ pub enum QuicFrameTypeName {
     ConnectionClose,
     ApplicationClose,
     HandshakeDone,
+    Datagram,
     Unknown,
 }
 
@@ -1966,6 +1967,13 @@ pub enum QuicFrame {
         frame_type: QuicFrameTypeName,
     },
 
+    Datagram {
+        frame_type: QuicFrameTypeName,
+        length: String,
+
+        raw: Option<String>,
+    },
+
     Unknown {
         frame_type: QuicFrameTypeName,
         raw_frame_type: u64,
@@ -2146,6 +2154,14 @@ impl QuicFrame {
     pub fn handshake_done() -> Self {
         QuicFrame::HandshakeDone {
             frame_type: QuicFrameTypeName::HandshakeDone,
+        }
+    }
+
+    pub fn datagram(length: String, raw: Option<String>) -> Self {
+        QuicFrame::Datagram {
+            frame_type: QuicFrameTypeName::Datagram,
+            length,
+            raw,
         }
     }
 

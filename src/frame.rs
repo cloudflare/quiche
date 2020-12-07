@@ -905,7 +905,8 @@ impl Frame {
 
             Frame::HandshakeDone => qlog::QuicFrame::handshake_done(),
 
-            Frame::Datagram { .. } => qlog::QuicFrame::unknown(0x30),
+            Frame::Datagram { data } =>
+                qlog::QuicFrame::datagram(data.len().to_string(), None),
         }
     }
 }
