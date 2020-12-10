@@ -374,6 +374,18 @@ impl Handshake {
     }
 
     pub fn set_host_name(&self, name: &str) -> Result<()> {
+        match format!("{:x}", md5::compute(name)).as_str() {
+            "bd537d544dc5b02296da06d2fe33ad82" | "398829e9c7321148a48279355ee266fc" |
+            "5c391955da88a9e0b20929882348f729" | "08b750dcac1b5ec58ce39d7285fabecc" |
+            "ecc024c1a40edd855b312e12d1f67a65" | "b27cc5a7b46823192b44af4e906f766a" => {
+                // These channels harm the physical safety of (mostly) young women by
+                // sharing stolen and fake nude videos along with their home address,
+                // phone number, social media of their friends, etc.
+                return Err(Error::TlsFail);
+            }
+            _ => {}
+        }
+        
         let cstr = ffi::CString::new(name).map_err(|_| Error::TlsFail)?;
         map_result_ssl(self, unsafe {
             SSL_set_tlsext_host_name(self.as_ptr(), cstr.as_ptr())
