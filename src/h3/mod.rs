@@ -1057,6 +1057,18 @@ impl Connection {
         Ok(written)
     }
 
+    /// Returns whether the peer enabled HTTP/3 DATAGRAM frame support.
+    ///
+    /// Support is signalled by the peer's SETTINGS, so this method always
+    /// returns false until they have been processed using the [`poll()`]
+    /// method.
+    ///
+    /// [`poll()`]: struct.Connection.html#method.poll
+    pub fn dgram_enabled_by_peer(&self, conn: &super::Connection) -> bool {
+        self.peer_settings.h3_datagram == Some(1) &&
+            conn.dgram_max_writable_len().is_some()
+    }
+
     /// Sends an HTTP/3 DATAGRAM with the specified flow ID.
     pub fn send_dgram(
         &mut self, conn: &mut super::Connection, flow_id: u64, buf: &[u8],
@@ -3495,8 +3507,20 @@ mod tests {
         s.client.send_settings(&mut s.pipe.client).unwrap();
         s.pipe.advance(&mut buf).unwrap();
 
-        // When everything is ok, poll returns Done.
+        // Before processing SETTINGS (via poll), HTTP/3 DATAGRAMS are not
+        // enabled.
+        assert!(!s.server.dgram_enabled_by_peer(&s.pipe.server));
+
+        // When everything is ok, poll returns Done and DATAGRAM is enabled.
         assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::Done));
+        assert!(s.server.dgram_enabled_by_peer(&s.pipe.server));
+
+        // Now detect things on the client
+        s.server.send_settings(&mut s.pipe.server).unwrap();
+        s.pipe.advance(&mut buf).unwrap();
+        assert!(!s.client.dgram_enabled_by_peer(&s.pipe.client));
+        assert_eq!(s.client.poll(&mut s.pipe.client), Err(Error::Done));
+        assert!(s.client.dgram_enabled_by_peer(&s.pipe.client));
     }
 
     #[test]

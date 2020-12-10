@@ -448,21 +448,21 @@ enum quiche_h3_error {
 
     /// Server rejected request.
     QUICHE_H3_ERR_REQUEST_REJECTED = -15,
-    
+
     /// Request or its response cancelled.
     QUICHE_H3_ERR_REQUEST_CANCELLED = -16,
-    
+
     /// Client's request stream terminated without containing a full-formed
     /// request.
     QUICHE_H3_ERR_REQUEST_INCOMPLETE = -17,
-    
+
     /// An HTTP message was malformed and cannot be processed.
     QUICHE_H3_ERR_MESSAGE_ERROR = -18,
-    
+
     // The TCP connection established in response to a CONNECT request was
     /// reset or abnormally closed.
     QUICHE_H3_ERR_CONNECT_ERROR = -19,
-    
+
     /// The requested operation cannot be served over HTTP/3. Peer should retry
     /// over HTTP/1.1.
     QUICHE_H3_ERR_VERSION_FALLBACK = -20,
@@ -570,6 +570,10 @@ ssize_t quiche_h3_send_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
 // Reads request or response body data into the provided buffer.
 ssize_t quiche_h3_recv_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t stream_id, uint8_t *out, size_t out_len);
+
+// Returns whether the peer enabled HTTP/3 DATAGRAM frame support.
+bool quiche_h3_dgram_enabled_by_peer(quiche_h3_conn *conn,
+                                     quiche_conn *quic_conn);
 
 // Writes data to the DATAGRAM send queue.
 ssize_t quiche_h3_send_dgram(quiche_h3_conn *conn, quiche_conn *quic_conn,
