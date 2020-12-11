@@ -648,7 +648,7 @@ impl Config {
             .set_alpn(&self.application_protos)
     }
 
-    /// Sets the `max_idle_timeout` transport parameter.
+    /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
     ///
     /// The default value is infinite, that is, no timeout is used.
     pub fn set_max_idle_timeout(&mut self, v: u64) {
