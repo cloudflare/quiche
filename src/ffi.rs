@@ -867,3 +867,13 @@ pub extern fn quiche_conn_dgram_purge_outgoing(
 pub extern fn quiche_conn_free(conn: *mut Connection) {
     unsafe { Box::from_raw(conn) };
 }
+
+#[no_mangle]
+pub extern fn quiche_conn_peer_max_streams_bidi(conn: &mut Connection) -> u64 {
+    conn.peer_max_streams_bidi()
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_peer_max_streams_uni(conn: &mut Connection) -> u64 {
+    conn.peer_max_streams_uni()
+}

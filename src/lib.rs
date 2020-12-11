@@ -3190,6 +3190,24 @@ impl Connection {
         stream.recv.is_fin()
     }
 
+    /// Returns the peer's maximum bidirectional stream count limit.
+    ///
+    /// This can be useful to know if its possible to create a bidirectional
+    /// stream or not without trying it first.
+    #[inline]
+    pub fn peer_max_streams_bidi(&self) -> u64 {
+        self.streams.peer_max_streams_bidi()
+    }
+
+    /// Returns the peer's maximum unidirectional stream count limit.
+    ///
+    /// This can be useful to know if its possible to create a unidirectional
+    /// stream or not without trying it first.
+    #[inline]
+    pub fn peer_max_streams_uni(&self) -> u64 {
+        self.streams.peer_max_streams_uni()
+    }
+
     /// Initializes the stream's application data.
     ///
     /// This can be used by applications to store per-stream information without

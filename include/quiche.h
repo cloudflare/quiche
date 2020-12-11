@@ -328,6 +328,12 @@ bool quiche_conn_is_readable(quiche_conn *conn);
 // Returns true if the connection is draining.
 bool quiche_conn_is_draining(quiche_conn *conn);
 
+// Returns the peer's maximum bidirectional stream count limit.
+uint64_t quiche_conn_peer_max_streams_bidi(quiche_conn *conn);
+
+// Returns the peer's maximum unidirectional stream count limit.
+uint64_t quiche_conn_peer_max_streams_uni(quiche_conn *conn);
+
 // Returns true if the connection is closed.
 bool quiche_conn_is_closed(quiche_conn *conn);
 
