@@ -229,7 +229,7 @@ Cflags: -I${{includedir}}
 }
 
 fn main() {
-    if cfg!(feature = "boringssl-vendored") {
+    if cfg!(feature = "boringssl-vendored") && !cfg!(feature = "boring-sys") {
         let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
             let mut cfg = get_boringssl_cmake_config();
 
