@@ -54,7 +54,7 @@
 //! ```
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 //! # let server_name = "quic.tech";
-//! # let scid = [0xba; 16];
+//! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! // Client connection.
 //! let conn = quiche::connect(Some(&server_name), &scid, &mut config)?;
 //!
@@ -72,7 +72,7 @@
 //! # let mut buf = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-//! # let scid = [0xba; 16];
+//! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! loop {
 //!     let read = socket.recv(&mut buf).unwrap();
@@ -103,7 +103,7 @@
 //! # let mut out = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-//! # let scid = [0xba; 16];
+//! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! loop {
 //!     let write = match conn.send(&mut out) {
@@ -131,7 +131,7 @@
 //!
 //! ```
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-//! # let scid = [0xba; 16];
+//! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! let timeout = conn.timeout();
 //! # Ok::<(), quiche::Error>(())
@@ -146,7 +146,7 @@
 //! # let mut out = [0; 512];
 //! # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-//! # let scid = [0xba; 16];
+//! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! // Timeout expired, handle it.
 //! conn.on_timeout();
@@ -181,7 +181,7 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-//! # let scid = [0xba; 16];
+//! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! if conn.is_established() {
 //!     // Handshake completed, send some data on stream 0.
@@ -200,7 +200,7 @@
 //! ```no_run
 //! # let mut buf = [0; 512];
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-//! # let scid = [0xba; 16];
+//! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let mut conn = quiche::accept(&scid, None, &mut config)?;
 //! if conn.is_established() {
 //!     // Iterate over readable streams.
@@ -1003,13 +1003,13 @@ pub struct Connection {
 ///
 /// ```no_run
 /// # let mut config = quiche::Config::new(0xbabababa)?;
-/// # let scid = [0xba; 16];
+/// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 /// let conn = quiche::accept(&scid, None, &mut config)?;
 /// # Ok::<(), quiche::Error>(())
 /// ```
 #[inline]
 pub fn accept(
-    scid: &[u8], odcid: Option<&[u8]>, config: &mut Config,
+    scid: &ConnectionId, odcid: Option<&ConnectionId>, config: &mut Config,
 ) -> Result<Pin<Box<Connection>>> {
     let conn = Connection::new(scid, odcid, config, true)?;
 
@@ -1027,13 +1027,13 @@ pub fn accept(
 /// ```no_run
 /// # let mut config = quiche::Config::new(0xbabababa)?;
 /// # let server_name = "quic.tech";
-/// # let scid = [0xba; 16];
+/// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 /// let conn = quiche::connect(Some(&server_name), &scid, &mut config)?;
 /// # Ok::<(), quiche::Error>(())
 /// ```
 #[inline]
 pub fn connect(
-    server_name: Option<&str>, scid: &[u8], config: &mut Config,
+    server_name: Option<&str>, scid: &ConnectionId, config: &mut Config,
 ) -> Result<Pin<Box<Connection>>> {
     let conn = Connection::new(scid, None, config, false)?;
 
@@ -1069,7 +1069,7 @@ pub fn connect(
 /// ```
 #[inline]
 pub fn negotiate_version(
-    scid: &[u8], dcid: &[u8], out: &mut [u8],
+    scid: &ConnectionId, dcid: &ConnectionId, out: &mut [u8],
 ) -> Result<usize> {
     packet::negotiate_version(scid, dcid, out)
 }
@@ -1095,12 +1095,12 @@ pub fn negotiate_version(
 /// # let mut config = quiche::Config::new(0xbabababa)?;
 /// # let mut buf = [0; 512];
 /// # let mut out = [0; 512];
-/// # let scid = [0xba; 16];
+/// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
 /// # fn mint_token(hdr: &quiche::Header, src: &std::net::SocketAddr) -> Vec<u8> {
 /// #     vec![]
 /// # }
-/// # fn validate_token<'a>(src: &std::net::SocketAddr, token: &'a [u8]) -> Option<&'a [u8]> {
+/// # fn validate_token<'a>(src: &std::net::SocketAddr, token: &'a [u8]) -> Option<quiche::ConnectionId<'a>> {
 /// #     None
 /// # }
 /// let (len, src) = socket.recv_from(&mut buf).unwrap();
@@ -1124,18 +1124,18 @@ pub fn negotiate_version(
 /// // Client sent token, validate it.
 /// let odcid = validate_token(&src, token);
 ///
-/// if odcid == None {
+/// if odcid.is_none() {
 ///     // Invalid address validation token.
 ///     return Ok(());
 /// }
 ///
-/// let conn = quiche::accept(&scid, odcid, &mut config)?;
+/// let conn = quiche::accept(&scid, odcid.as_ref(), &mut config)?;
 /// # Ok::<(), quiche::Error>(())
 /// ```
 #[inline]
 pub fn retry(
-    scid: &[u8], dcid: &[u8], new_scid: &[u8], token: &[u8], version: u32,
-    out: &mut [u8],
+    scid: &ConnectionId, dcid: &ConnectionId, new_scid: &ConnectionId,
+    token: &[u8], version: u32, out: &mut [u8],
 ) -> Result<usize> {
     packet::retry(scid, dcid, new_scid, token, version, out)
 }
@@ -1189,14 +1189,15 @@ macro_rules! qlog_with {
 
 impl Connection {
     fn new(
-        scid: &[u8], odcid: Option<&[u8]>, config: &mut Config, is_server: bool,
+        scid: &ConnectionId, odcid: Option<&ConnectionId>, config: &mut Config,
+        is_server: bool,
     ) -> Result<Pin<Box<Connection>>> {
         let tls = config.tls_ctx.lock().unwrap().new_handshake()?;
         Connection::with_tls(scid, odcid, config, tls, is_server)
     }
 
     fn with_tls(
-        scid: &[u8], odcid: Option<&[u8]>, config: &mut Config,
+        scid: &ConnectionId, odcid: Option<&ConnectionId>, config: &mut Config,
         tls: tls::Handshake, is_server: bool,
     ) -> Result<Pin<Box<Connection>>> {
         let max_rx_data = config.local_transport_params.initial_max_data;
@@ -1445,7 +1446,7 @@ impl Connection {
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-    /// # let scid = [0xba; 16];
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// loop {
     ///     let read = socket.recv(&mut buf).unwrap();
@@ -2016,7 +2017,7 @@ impl Connection {
     /// # let mut out = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-    /// # let scid = [0xba; 16];
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// loop {
     ///     let write = match conn.send(&mut out) {
@@ -2864,7 +2865,7 @@ impl Connection {
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-    /// # let scid = [0xba; 16];
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// # let stream_id = 0;
     /// while let Ok((read, fin)) = conn.stream_recv(stream_id, &mut buf) {
@@ -2969,7 +2970,7 @@ impl Connection {
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-    /// # let scid = [0xba; 16];
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// # let stream_id = 0;
     /// conn.stream_send(stream_id, b"hello", true)?;
@@ -3248,7 +3249,7 @@ impl Connection {
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-    /// # let scid = [0xba; 16];
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// // Iterate over readable streams.
     /// for stream_id in conn.readable() {
@@ -3282,7 +3283,7 @@ impl Connection {
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-    /// # let scid = [0xba; 16];
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// // Iterate over writable streams.
     /// for stream_id in conn.writable() {
@@ -3322,7 +3323,7 @@ impl Connection {
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-    /// # let scid = [0xba; 16];
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// let mut dgram_buf = [0; 512];
     /// while let Ok((len)) = conn.dgram_recv(&mut dgram_buf) {
@@ -3395,7 +3396,7 @@ impl Connection {
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-    /// # let scid = [0xba; 16];
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// conn.dgram_send(b"hello")?;
     /// # Ok::<(), quiche::Error>(())
@@ -3429,7 +3430,7 @@ impl Connection {
     /// ```no_run
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-    /// # let scid = [0xba; 16];
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// conn.dgram_send(b"hello")?;
     /// conn.dgram_purge_outgoing(&|d: &[u8]| -> bool { d[0] == 0 });
@@ -3451,7 +3452,7 @@ impl Connection {
     /// # let mut buf = [0; 512];
     /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-    /// # let scid = [0xba; 16];
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
     /// # let mut conn = quiche::accept(&scid, None, &mut config)?;
     /// if let Some(payload_size) = conn.dgram_max_writable_len() {
     ///     if payload_size > 5 {
@@ -4843,9 +4844,11 @@ pub mod testing {
         pub fn with_config(config: &mut Config) -> Result<Pipe> {
             let mut client_scid = [0; 16];
             rand::rand_bytes(&mut client_scid[..]);
+            let client_scid = ConnectionId::from_ref(&client_scid);
 
             let mut server_scid = [0; 16];
             rand::rand_bytes(&mut server_scid[..]);
+            let server_scid = ConnectionId::from_ref(&server_scid);
 
             Ok(Pipe {
                 client: connect(Some("quic.tech"), &client_scid, config)?,
@@ -4856,9 +4859,11 @@ pub mod testing {
         pub fn with_client_config(client_config: &mut Config) -> Result<Pipe> {
             let mut client_scid = [0; 16];
             rand::rand_bytes(&mut client_scid[..]);
+            let client_scid = ConnectionId::from_ref(&client_scid);
 
             let mut server_scid = [0; 16];
             rand::rand_bytes(&mut server_scid[..]);
+            let server_scid = ConnectionId::from_ref(&server_scid);
 
             let mut config = Config::new(crate::PROTOCOL_VERSION)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
@@ -4879,9 +4884,11 @@ pub mod testing {
         pub fn with_server_config(server_config: &mut Config) -> Result<Pipe> {
             let mut client_scid = [0; 16];
             rand::rand_bytes(&mut client_scid[..]);
+            let client_scid = ConnectionId::from_ref(&client_scid);
 
             let mut server_scid = [0; 16];
             rand::rand_bytes(&mut server_scid[..]);
+            let server_scid = ConnectionId::from_ref(&server_scid);
 
             let mut config = Config::new(crate::PROTOCOL_VERSION)?;
             config.set_application_protos(b"\x06proto1\x06proto2")?;
@@ -7087,10 +7094,11 @@ mod tests {
         // Server sends Retry packet.
         let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
 
-        let odcid = hdr.dcid.to_vec();
+        let odcid = hdr.dcid.clone();
 
         let mut scid = [0; MAX_CONN_ID_LEN];
         rand::rand_bytes(&mut scid[..]);
+        let scid = ConnectionId::from_ref(&scid);
 
         let token = b"quiche test retry token";
 
@@ -7148,6 +7156,7 @@ mod tests {
 
         let mut scid = [0; MAX_CONN_ID_LEN];
         rand::rand_bytes(&mut scid[..]);
+        let scid = ConnectionId::from_ref(&scid);
 
         let token = b"quiche test retry token";
 
@@ -7203,6 +7212,7 @@ mod tests {
 
         let mut scid = [0; MAX_CONN_ID_LEN];
         rand::rand_bytes(&mut scid[..]);
+        let scid = ConnectionId::from_ref(&scid);
 
         let token = b"quiche test retry token";
 
@@ -7223,7 +7233,8 @@ mod tests {
 
         // Server accepts connection and send first flight. But original
         // destination connection ID is invalid.
-        pipe.server = accept(&scid, Some(b"bogus value"), &mut config).unwrap();
+        let odcid = ConnectionId::from_ref(b"bogus value");
+        pipe.server = accept(&scid, Some(&odcid), &mut config).unwrap();
 
         len = testing::recv_send(&mut pipe.server, &mut buf, len).unwrap();
 
@@ -8507,9 +8518,11 @@ mod tests {
 
         let mut client_scid = [0; 16];
         rand::rand_bytes(&mut client_scid[..]);
+        let client_scid = ConnectionId::from_ref(&client_scid);
 
         let mut server_scid = [0; 16];
         rand::rand_bytes(&mut server_scid[..]);
+        let server_scid = ConnectionId::from_ref(&server_scid);
 
         let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         client_config

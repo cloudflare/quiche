@@ -59,7 +59,7 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-//! # let scid = [0xba; 16];
+//! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
 //! # let h3_config = quiche::h3::Config::new()?;
 //! let h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
@@ -74,7 +74,7 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-//! # let scid = [0xba; 16];
+//! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
 //! # let h3_config = quiche::h3::Config::new()?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
@@ -95,7 +95,7 @@
 //!
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-//! # let scid = [0xba; 16];
+//! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
 //! # let h3_config = quiche::h3::Config::new()?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
@@ -125,7 +125,7 @@
 //! use quiche::h3::NameValue;
 //!
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-//! # let scid = [0xba; 16];
+//! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let mut conn = quiche::accept(&scid, None, &mut config).unwrap();
 //! # let h3_config = quiche::h3::Config::new()?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
@@ -186,7 +186,7 @@
 //! use quiche::h3::NameValue;
 //!
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
-//! # let scid = [0xba; 16];
+//! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let mut conn = quiche::connect(None, &scid, &mut config).unwrap();
 //! # let h3_config = quiche::h3::Config::new()?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;

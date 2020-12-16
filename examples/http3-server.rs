@@ -214,6 +214,8 @@ fn main() {
                 let mut scid = [0; quiche::MAX_CONN_ID_LEN];
                 scid.copy_from_slice(&conn_id);
 
+                let scid = quiche::ConnectionId::from_ref(&scid);
+
                 // Token is always present in Initial packets.
                 let token = hdr.token.as_ref().unwrap();
 
@@ -250,7 +252,7 @@ fn main() {
 
                 // The token was not valid, meaning the retry failed, so
                 // drop the packet.
-                if odcid == None {
+                if odcid.is_none() {
                     error!("Invalid address validation token");
                     continue 'read;
                 }
@@ -266,7 +268,8 @@ fn main() {
 
                 debug!("New connection: dcid={:?} scid={:?}", hdr.dcid, scid);
 
-                let conn = quiche::accept(&scid, odcid, &mut config).unwrap();
+                let conn =
+                    quiche::accept(&scid, odcid.as_ref(), &mut config).unwrap();
 
                 let client = Client {
                     conn,
@@ -463,7 +466,7 @@ fn mint_token(hdr: &quiche::Header, src: &net::SocketAddr) -> Vec<u8> {
 /// authenticate of the token. *It should not be used in production system*.
 fn validate_token<'a>(
     src: &net::SocketAddr, token: &'a [u8],
-) -> Option<&'a [u8]> {
+) -> Option<quiche::ConnectionId<'a>> {
     if token.len() < 6 {
         return None;
     }
@@ -485,7 +488,7 @@ fn validate_token<'a>(
 
     let token = &token[addr.len()..];
 
-    Some(&token[..])
+    Some(quiche::ConnectionId::from_ref(&token[..]))
 }
 
 /// Handles incoming HTTP/3 requests.
