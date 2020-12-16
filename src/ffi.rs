@@ -869,11 +869,15 @@ pub extern fn quiche_conn_free(conn: *mut Connection) {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_peer_streams_remaining_allowed_bidi(conn: &mut Connection) -> u64 {
+pub extern fn quiche_conn_peer_streams_remaining_allowed_bidi(
+    conn: &mut Connection
+) -> u64 {
     conn.peer_streams_remaining_allowed_bidi()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_peer_streams_remaining_allowed_uni(conn: &mut Connection) -> u64 {
+pub extern fn quiche_conn_peer_streams_remaining_allowed_uni(
+    conn: &mut Connection
+) -> u64 {
     conn.peer_streams_remaining_allowed_uni()
 }

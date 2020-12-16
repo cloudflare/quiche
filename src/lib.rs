@@ -3190,8 +3190,8 @@ impl Connection {
         stream.recv.is_fin()
     }
 
-    /// Returns the amount of bidirectional streams that can be created in respect to the limit
-    /// set by the peer before the stream count limit is hit.
+    /// Returns the amount of bidirectional streams that can be created
+    /// before the stream count limit is reached.
     ///
     /// This can be useful to know if its possible to create a bidirectional
     /// stream or not without trying it first.
@@ -3200,8 +3200,8 @@ impl Connection {
         self.streams.peer_streams_remaining_allowed_bidi()
     }
 
-    /// Returns the amount of unidirectional streams that can be created in respect to the limit
-    /// set by the peer before the stream count limit is hit.
+    /// Returns the amount of unidirectional streams that can be created
+    /// before the stream count limit is reached.
     ///
     /// This can be useful to know if its possible to create a unidirectional
     /// stream or not without trying it first.
