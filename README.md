@@ -10,10 +10,6 @@ specified by the [IETF]. It provides a low level API for processing QUIC packets
 and handling connection state. The application is responsible for providing I/O
 (e.g. sockets handling) as well as an event loop with support for timers.
 
-A live QUIC server based on quiche is available at ``https://quic.tech:4433/``,
-and an HTTP/3 one at ``https://quic.tech:8443/``, that can be used for
-experimentation.
-
 For more information on how quiche came about and some insights into its design
 you can read a [post] on Cloudflare's blog that goes into some more detail.
 
@@ -26,7 +22,9 @@ Who uses quiche?
 
 ### Cloudflare
 
-quiche powers Cloudflare edge network's [HTTP/3 support][cloudflare-http3].
+quiche powers Cloudflare edge network's [HTTP/3 support][cloudflare-http3]. The
+[cloudflare-quic.com](https://cloudflare-quic.com) website can be used for
+testing and experimentation.
 
 ### curl
 
@@ -52,7 +50,7 @@ quiche tools provided as part of the [quiche-apps](tools/apps/) crate.
 The client can be run as follows:
 
 ```bash
- $ cargo run --manifest-path=tools/apps/Cargo.toml --bin quiche-client -- https://quic.tech:8443/
+ $ cargo run --manifest-path=tools/apps/Cargo.toml --bin quiche-client -- https://cloudflare-quic.com/
 ```
 
 while the server can be run as follows:
