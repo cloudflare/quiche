@@ -110,8 +110,11 @@ pub fn run(
     let mut scid = [0; quiche::MAX_CONN_ID_LEN];
     SystemRandom::new().fill(&mut scid[..]).unwrap();
 
+    let scid = quiche::ConnectionId::from_ref(&scid);
+
     // Create a QUIC connection and initiate handshake.
     let url = &test.endpoint();
+
     let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
 
     let write = match conn.send(&mut out) {

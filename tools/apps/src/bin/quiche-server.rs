@@ -252,6 +252,7 @@ fn main() {
                     if token.is_empty() {
                         warn!("Doing stateless retry");
 
+                        let scid = quiche::ConnectionId::from_ref(&scid);
                         let new_token = mint_token(&hdr, &src);
 
                         let len = quiche::retry(
@@ -281,7 +282,7 @@ fn main() {
 
                     // The token was not valid, meaning the retry failed, so
                     // drop the packet.
-                    if odcid == None {
+                    if odcid.is_none() {
                         error!("Invalid address validation token");
                         continue;
                     }
@@ -301,7 +302,8 @@ fn main() {
                 debug!("New connection: dcid={:?} scid={:?}", hdr.dcid, scid);
 
                 #[allow(unused_mut)]
-                let mut conn = quiche::accept(&scid, odcid, &mut config).unwrap();
+                let mut conn =
+                    quiche::accept(&scid, odcid.as_ref(), &mut config).unwrap();
 
                 if let Some(keylog) = &mut keylog {
                     if let Ok(keylog) = keylog.try_clone() {
@@ -525,7 +527,7 @@ fn mint_token(hdr: &quiche::Header, src: &net::SocketAddr) -> Vec<u8> {
 /// authenticate of the token. *It should not be used in production system*.
 fn validate_token<'a>(
     src: &net::SocketAddr, token: &'a [u8],
-) -> Option<&'a [u8]> {
+) -> Option<quiche::ConnectionId<'a>> {
     if token.len() < 6 {
         return None;
     }
@@ -547,5 +549,5 @@ fn validate_token<'a>(
 
     let token = &token[addr.len()..];
 
-    Some(&token[..])
+    Some(quiche::ConnectionId::from_ref(&token[..]))
 }

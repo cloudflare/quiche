@@ -101,10 +101,10 @@ fn main() {
     config.set_disable_active_migration(true);
 
     // Generate a random source connection ID for the connection.
-    let mut scid = vec![0; quiche::MAX_CONN_ID_LEN];
+    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
     SystemRandom::new().fill(&mut scid[..]).unwrap();
 
-    let scid = quiche::ConnectionId::from_vec(scid);
+    let scid = quiche::ConnectionId::from_ref(&scid);
 
     // Create a QUIC connection and initiate handshake.
     let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();

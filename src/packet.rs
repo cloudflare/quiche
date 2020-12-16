@@ -140,13 +140,13 @@ enum ConnectionIdInner<'a> {
 impl<'a> ConnectionId<'a> {
     /// Creates a new connection ID from the given vector.
     #[inline]
-    pub fn from_vec(cid: Vec<u8>) -> Self {
+    pub const fn from_vec(cid: Vec<u8>) -> Self {
         Self(ConnectionIdInner::Vec(cid))
     }
 
     /// Creates a new connection ID from the given slice.
     #[inline]
-    pub fn from_ref(cid: &'a [u8]) -> Self {
+    pub const fn from_ref(cid: &'a [u8]) -> Self {
         Self(ConnectionIdInner::Ref(cid))
     }
 }

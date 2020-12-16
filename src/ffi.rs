@@ -332,14 +332,17 @@ pub extern fn quiche_accept(
     config: &mut Config,
 ) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
+    let scid = ConnectionId::from_ref(scid);
 
     let odcid = if !odcid.is_null() && odcid_len > 0 {
-        Some(unsafe { slice::from_raw_parts(odcid, odcid_len) })
+        Some(ConnectionId::from_ref(unsafe {
+            slice::from_raw_parts(odcid, odcid_len)
+        }))
     } else {
         None
     };
 
-    match accept(scid, odcid, config) {
+    match accept(&scid, odcid.as_ref(), config) {
         Ok(c) => Box::into_raw(Pin::into_inner(c)),
 
         Err(_) => ptr::null_mut(),
@@ -358,8 +361,9 @@ pub extern fn quiche_connect(
     };
 
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
+    let scid = ConnectionId::from_ref(scid);
 
-    match connect(server_name, scid, config) {
+    match connect(server_name, &scid, config) {
         Ok(c) => Box::into_raw(Pin::into_inner(c)),
 
         Err(_) => ptr::null_mut(),
@@ -372,10 +376,14 @@ pub extern fn quiche_negotiate_version(
     out: *mut u8, out_len: size_t,
 ) -> ssize_t {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
+    let scid = ConnectionId::from_ref(scid);
+
     let dcid = unsafe { slice::from_raw_parts(dcid, dcid_len) };
+    let dcid = ConnectionId::from_ref(dcid);
+
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
-    match negotiate_version(scid, dcid, out) {
+    match negotiate_version(&scid, &dcid, out) {
         Ok(v) => v as ssize_t,
 
         Err(e) => e.to_c(),
@@ -394,12 +402,18 @@ pub extern fn quiche_retry(
     token_len: size_t, version: u32, out: *mut u8, out_len: size_t,
 ) -> ssize_t {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
+    let scid = ConnectionId::from_ref(scid);
+
     let dcid = unsafe { slice::from_raw_parts(dcid, dcid_len) };
+    let dcid = ConnectionId::from_ref(dcid);
+
     let new_scid = unsafe { slice::from_raw_parts(new_scid, new_scid_len) };
+    let new_scid = ConnectionId::from_ref(new_scid);
+
     let token = unsafe { slice::from_raw_parts(token, token_len) };
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
-    match retry(scid, dcid, new_scid, token, version, out) {
+    match retry(&scid, &dcid, &new_scid, token, version, out) {
         Ok(v) => v as ssize_t,
 
         Err(e) => e.to_c(),
@@ -412,16 +426,19 @@ pub extern fn quiche_conn_new_with_tls(
     config: &mut Config, ssl: *mut c_void, is_server: bool,
 ) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
+    let scid = ConnectionId::from_ref(scid);
 
     let odcid = if !odcid.is_null() && odcid_len > 0 {
-        Some(unsafe { slice::from_raw_parts(odcid, odcid_len) })
+        Some(ConnectionId::from_ref(unsafe {
+            slice::from_raw_parts(odcid, odcid_len)
+        }))
     } else {
         None
     };
 
     let tls = unsafe { tls::Handshake::from_ptr(ssl) };
 
-    match Connection::with_tls(scid, odcid, config, tls, is_server) {
+    match Connection::with_tls(&scid, odcid.as_ref(), config, tls, is_server) {
         Ok(c) => Box::into_raw(Pin::into_inner(c)),
 
         Err(_) => ptr::null_mut(),

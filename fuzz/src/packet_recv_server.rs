@@ -32,7 +32,8 @@ lazy_static! {
     };
 }
 
-static SCID: [u8; quiche::MAX_CONN_ID_LEN] = [0; quiche::MAX_CONN_ID_LEN];
+static SCID: quiche::ConnectionId<'static> =
+    quiche::ConnectionId::from_ref(&[0; quiche::MAX_CONN_ID_LEN]);
 
 fuzz_target!(|data: &[u8]| {
     let mut buf = data.to_vec();
