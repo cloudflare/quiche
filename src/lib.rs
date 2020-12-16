@@ -3190,22 +3190,24 @@ impl Connection {
         stream.recv.is_fin()
     }
 
-    /// Returns the peer's maximum bidirectional stream count limit.
+    /// Returns the amount of bidirectional streams that can be created in respect to the limit
+    /// set by the peer before the stream count limit is hit.
     ///
     /// This can be useful to know if its possible to create a bidirectional
     /// stream or not without trying it first.
     #[inline]
-    pub fn peer_max_streams_bidi(&self) -> u64 {
-        self.streams.peer_max_streams_bidi()
+    pub fn peer_streams_remaining_allowed_bidi(&self) -> u64 {
+        self.streams.peer_streams_remaining_allowed_bidi()
     }
 
-    /// Returns the peer's maximum unidirectional stream count limit.
+    /// Returns the amount of unidirectional streams that can be created in respect to the limit
+    /// set by the peer before the stream count limit is hit.
     ///
     /// This can be useful to know if its possible to create a unidirectional
     /// stream or not without trying it first.
     #[inline]
-    pub fn peer_max_streams_uni(&self) -> u64 {
-        self.streams.peer_max_streams_uni()
+    pub fn peer_streams_remaining_allowed_uni(&self) -> u64 {
+        self.streams.peer_streams_remaining_allowed_uni()
     }
 
     /// Initializes the stream's application data.
