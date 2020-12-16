@@ -377,6 +377,9 @@ void quiche_conn_stats(quiche_conn *conn, quiche_stats *out);
 // Returns the maximum DATAGRAM payload that can be sent.
 ssize_t quiche_conn_dgram_max_writable_len(quiche_conn *conn);
 
+// Returns the length of the first stored DATAGRAM.
+ssize_t quiche_conn_dgram_recv_front_len(quiche_conn *conn);
+
 // Reads the first received DATAGRAM.
 ssize_t quiche_conn_dgram_recv(quiche_conn *conn, uint8_t *buf,
                                size_t buf_len);

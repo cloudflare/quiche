@@ -790,6 +790,15 @@ pub extern fn quiche_conn_dgram_max_writable_len(conn: &Connection) -> ssize_t {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_dgram_recv_front_len(conn: &Connection) -> ssize_t {
+    match conn.dgram_recv_front_len() {
+        None => Error::Done.to_c(),
+
+        Some(v) => v as ssize_t,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_dgram_send(
     conn: &mut Connection, buf: *const u8, buf_len: size_t,
 ) -> ssize_t {
