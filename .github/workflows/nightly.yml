@@ -26,6 +26,12 @@ jobs:
           components: rustfmt
           override: true
 
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: -- --check
+
       - name: Install dependencies
         run: sudo apt-get install libev-dev uthash-dev
 
@@ -40,12 +46,6 @@ jobs:
         with:
           command: package
           args: --verbose --allow-dirty
-
-      - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: -- --check
 
       - name: Run cargo doc
         uses: actions-rs/cargo@v1
