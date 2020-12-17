@@ -94,6 +94,8 @@ pub struct Client {
     pub partial_requests: std::collections::HashMap<u64, PartialRequest>,
 
     pub partial_responses: std::collections::HashMap<u64, PartialResponse>,
+
+    pub bytes_sent: usize,
 }
 
 pub type ClientMap = HashMap<ConnectionId<'static>, Client>;

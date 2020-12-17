@@ -45,6 +45,8 @@ use quiche_apps::common::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
+const MAX_SEND_BURST_LIMIT: usize = MAX_DATAGRAM_SIZE * 10;
+
 fn main() {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
@@ -137,11 +139,17 @@ fn main() {
 
     let mut pkt_count = 0;
 
+    let mut continue_write = false;
+
     loop {
         // Find the shorter timeout from all the active connections.
         //
         // TODO: use event loop that properly supports timers
-        let timeout = clients.values().filter_map(|c| c.conn.timeout()).min();
+        let timeout = match continue_write {
+            true => Some(std::time::Duration::from_secs(0)),
+
+            false => clients.values().filter_map(|c| c.conn.timeout()).min(),
+        };
 
         poll.poll(&mut events, timeout).unwrap();
 
@@ -151,7 +159,7 @@ fn main() {
             // If the event loop reported no events, it means that the timeout
             // has expired, so handle it without attempting to read packets. We
             // will then proceed with the send loop.
-            if events.is_empty() {
+            if events.is_empty() && !continue_write {
                 trace!("timed out");
 
                 clients.values_mut().for_each(|c| c.conn.on_timeout());
@@ -333,6 +341,7 @@ fn main() {
                     partial_responses: HashMap::new(),
                     siduck_conn: None,
                     app_proto_selected: false,
+                    bytes_sent: 0,
                 };
 
                 clients.insert(scid.clone(), client);
@@ -447,6 +456,7 @@ fn main() {
         // Generate outgoing QUIC packets for all active connections and send
         // them on the UDP socket, until quiche reports that there are no more
         // packets to be sent.
+        continue_write = false;
         for client in clients.values_mut() {
             loop {
                 let (write, send_info) = match client.conn.send(&mut out) {
@@ -476,6 +486,20 @@ fn main() {
                 }
 
                 trace!("{} written {} bytes", client.conn.trace_id(), write);
+
+                // limit write bursting
+                client.bytes_sent += write;
+
+                if client.bytes_sent >= MAX_SEND_BURST_LIMIT {
+                    trace!(
+                        "{} pause writing at {}",
+                        client.conn.trace_id(),
+                        client.bytes_sent
+                    );
+                    client.bytes_sent = 0;
+                    continue_write = true;
+                    break;
+                }
             }
         }
 
