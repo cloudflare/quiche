@@ -286,8 +286,8 @@ const PROTOCOL_VERSION_DRAFT29: u32 = 0xff00_001d;
 /// The maximum length of a connection ID.
 pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
 
-/// The minimum length of Initial packets sent by a client.
-pub const MIN_CLIENT_INITIAL_LEN: usize = 1200;
+/// The minimum length of Initial packets sent.
+pub const MIN_INITIAL_LEN: usize = 1200;
 
 #[cfg(not(feature = "fuzzing"))]
 const PAYLOAD_MIN_LEN: usize = 4;
@@ -2673,13 +2673,14 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        // Pad the client's initial packet.
-        if !self.is_server && pkt_type == packet::Type::Initial {
+        // Pad all Initial packets from a client, or ack-eliciting Initial
+        // packets from a server.
+        if pkt_type == packet::Type::Initial && (!is_server || ack_eliciting) {
             let payload_len = b.off() - payload_offset;
             let pkt_len = pn_len + payload_len + crypto_overhead;
 
             let frame = frame::Frame::Padding {
-                len: cmp::min(MIN_CLIENT_INITIAL_LEN - pkt_len, left),
+                len: cmp::min(MIN_INITIAL_LEN - pkt_len, left),
             };
 
             if push_frame_to_pkt!(b, frames, frame, left) {
@@ -2844,7 +2845,7 @@ impl Connection {
         } else {
             // Allow for 1200 bytes (minimum QUIC packet size) during the
             // handshake.
-            MIN_CLIENT_INITIAL_LEN
+            MIN_INITIAL_LEN
         }
     }
 
