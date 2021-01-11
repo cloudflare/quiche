@@ -400,6 +400,7 @@ jobs:
         uses: actions-rs/install@v0.1
         with:
           crate: cargo-ndk
+          version: 1.0.0
 
       - name: Download NDK
         run: curl -O https://dl.google.com/android/repository/android-ndk-r${{ matrix.ndk_version }}-linux-x86_64.zip
