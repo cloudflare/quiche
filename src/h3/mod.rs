@@ -872,7 +872,7 @@ impl Connection {
                     i64::from_str_radix(param.rsplit('=').next().unwrap(), 10)
                         .unwrap_or(7);
 
-                if u < 0 || u > 7 {
+                if !(0..=7).contains(&u) {
                     u = 7;
                 }
 

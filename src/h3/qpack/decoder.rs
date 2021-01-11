@@ -254,7 +254,7 @@ fn decode_int(b: &mut octets::Octets, prefix: usize) -> Result<u64> {
     Err(Error::BufferTooShort)
 }
 
-fn decode_str<'a>(b: &'a mut octets::Octets) -> Result<String> {
+fn decode_str(b: &mut octets::Octets) -> Result<String> {
     let first = b.peek_u8()?;
 
     let huff = first & 0x80 == 0x80;
