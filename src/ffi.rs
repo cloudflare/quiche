@@ -333,7 +333,7 @@ pub extern fn quiche_accept(
 ) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
 
-    let odcid = if !odcid.is_null() || odcid_len == 0 {
+    let odcid = if !odcid.is_null() && odcid_len > 0 {
         Some(unsafe { slice::from_raw_parts(odcid, odcid_len) })
     } else {
         None
@@ -413,7 +413,7 @@ pub extern fn quiche_conn_new_with_tls(
 ) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
 
-    let odcid = if !odcid.is_null() || odcid_len == 0 {
+    let odcid = if !odcid.is_null() && odcid_len > 0 {
         Some(unsafe { slice::from_raw_parts(odcid, odcid_len) })
     } else {
         None
