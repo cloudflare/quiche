@@ -3159,10 +3159,32 @@ mod tests {
     #[test]
     /// Tests limits for the stream state buffer maximum size.
     fn max_state_buf_size() {
-        // DATA frames don't consume the state buffer, so can be of any size.
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
+        let req = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":authority", "quic.tech"),
+            Header::new(":path", "/test"),
+            Header::new("user-agent", "quiche-test"),
+        ];
+
+        assert_eq!(
+            s.client.send_request(&mut s.pipe.client, &req, false),
+            Ok(0)
+        );
+
+        s.advance().ok();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: true,
+        };
+
+        assert_eq!(s.server.poll(&mut s.pipe.server), Ok((0, ev_headers)));
+
+        // DATA frames don't consume the state buffer, so can be of any size.
         let mut d = [42; 128];
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
@@ -3339,9 +3361,8 @@ mod tests {
     }
 
     #[test]
-    /// Tests that calling poll() after an error occured does nothing.
-    fn poll_after_error() {
-        // DATA frames don't consume the state buffer, so can be of any size.
+    /// Tests that sending DATA before HEADERS causes an error.
+    fn data_before_headers() {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
@@ -3351,16 +3372,22 @@ mod tests {
         let frame_type = b.put_varint(frame::DATA_FRAME_TYPE_ID).unwrap();
         s.pipe.client.stream_send(0, frame_type, false).unwrap();
 
-        let frame_len = b.put_varint(1 << 24).unwrap();
+        let frame_len = b.put_varint(5).unwrap();
         s.pipe.client.stream_send(0, frame_len, false).unwrap();
 
-        s.pipe.client.stream_send(0, &d, false).unwrap();
+        s.pipe.client.stream_send(0, b"hello", false).unwrap();
 
         s.advance().ok();
 
-        assert_eq!(s.server.poll(&mut s.pipe.server), Ok((0, Event::Data)));
+        assert_eq!(
+            s.server.poll(&mut s.pipe.server),
+            Err(Error::FrameUnexpected)
+        );
+    }
 
-        // GREASE frames consume the state buffer, so need to be limited.
+    #[test]
+    /// Tests that calling poll() after an error occured does nothing.
+    fn poll_after_error() {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
