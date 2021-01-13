@@ -261,6 +261,9 @@ impl Stream {
                         (frame::HEADERS_FRAME_TYPE_ID, false) =>
                             self.remote_initialized = true,
 
+                        (frame::DATA_FRAME_TYPE_ID, false) =>
+                            return Err(Error::FrameUnexpected),
+
                         (frame::CANCEL_PUSH_FRAME_TYPE_ID, _) =>
                             return Err(Error::FrameUnexpected),
 
@@ -275,9 +278,7 @@ impl Stream {
 
                         // All other frames can be ignored regardless of stream
                         // state.
-                        (_, false) => (),
-
-                        (_, true) => (),
+                        _ => (),
                     }
                 }
             },
@@ -913,5 +914,29 @@ mod tests {
             .set_ty(Type::deserialize(stream_ty).unwrap())
             .unwrap();
         assert_eq!(stream.state, State::Drain);
+    }
+
+    #[test]
+    fn data_before_headers() {
+        let mut stream = Stream::new(0, false);
+
+        let mut d = vec![42; 128];
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+
+        let data = frame::Frame::Data {
+            payload: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        };
+
+        data.to_bytes(&mut b).unwrap();
+
+        let mut cursor = std::io::Cursor::new(d);
+
+        // Parse the DATA frame type.
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+
+        let frame_ty = stream.try_consume_varint().unwrap();
+        assert_eq!(frame_ty, frame::DATA_FRAME_TYPE_ID);
+
+        assert_eq!(stream.set_frame_type(frame_ty), Err(Error::FrameUnexpected));
     }
 }
