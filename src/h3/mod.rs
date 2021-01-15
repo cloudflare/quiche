@@ -462,7 +462,13 @@ impl Config {
 
     /// Sets the `SETTINGS_MAX_HEADER_LIST_SIZE` setting.
     ///
-    /// By default no limit is enforced.
+    /// By default no limit is enforced. When a request whose headers exceed
+    /// the limit set by the application is received, the call to the [`poll()`]
+    /// method will return the [`Error::ExcessiveLoad`] error, and the
+    /// connection will be closed.
+    ///
+    /// [`poll()`]: struct.Connection.html#method.poll
+    /// [`Error::ExcessiveLoad`]: enum.Error.html#variant.ExcessiveLoad
     pub fn set_max_header_list_size(&mut self, v: u64) {
         self.max_header_list_size = Some(v);
     }
@@ -1861,14 +1867,25 @@ impl Connection {
                     .max_header_list_size
                     .unwrap_or(std::u64::MAX);
 
-                let headers = self
+                let headers = match self
                     .qpack_decoder
                     .decode(&header_block[..], max_size)
-                    .map_err(|e| match e {
-                        qpack::Error::HeaderListTooLarge => Error::ExcessiveLoad,
+                {
+                    Ok(v) => v,
 
-                        _ => Error::QpackDecompressionFailed,
-                    })?;
+                    Err(e) => {
+                        let e = match e {
+                            qpack::Error::HeaderListTooLarge =>
+                                Error::ExcessiveLoad,
+
+                            _ => Error::QpackDecompressionFailed,
+                        };
+
+                        conn.close(true, e.to_wire(), b"Error parsing headers.")?;
+
+                        return Err(e);
+                    },
+                };
 
                 let has_body = !conn.stream_finished(stream_id);
 
@@ -3322,6 +3339,11 @@ mod tests {
         assert_eq!(stream, 0);
 
         assert_eq!(s.poll_server(), Err(Error::ExcessiveLoad));
+
+        assert_eq!(
+            s.pipe.server.app_error,
+            Some(Error::to_wire(Error::ExcessiveLoad))
+        );
     }
 
     #[test]
