@@ -241,7 +241,7 @@ pub const USER_AGENT: &str = "quiche-http3-integration-client";
 pub struct Http3Req {
     pub url: url::Url,
     pub hdrs: Vec<Header>,
-    body: Option<Vec<u8>>,
+    pub body: Option<Vec<u8>>,
     pub expect_resp_hdrs: Option<Vec<Header>>,
     pub resp_hdrs: Vec<Header>,
     pub resp_body: Vec<u8>,
@@ -328,6 +328,19 @@ macro_rules! assert_headers {
 /// however they like.
 pub type Http3Assert = fn(&[Http3Req]);
 
+#[derive(Debug, PartialEq)]
+pub enum Http3TestError {
+    HandshakeFail,
+    HttpFail,
+    Other(String),
+}
+
+pub struct ArbitraryStreamData {
+    pub stream_id: u64,
+    pub data: Vec<u8>,
+    pub fin: bool,
+}
+
 /// The main object for getting things done.
 ///
 /// The factory method new() is used to set up a vector of Http3Req objects and
@@ -341,6 +354,7 @@ pub type Http3Assert = fn(&[Http3Req]);
 pub struct Http3Test {
     endpoint: url::Url,
     reqs: Vec<Http3Req>,
+    stream_data: Option<Vec<ArbitraryStreamData>>,
     assert: Http3Assert,
     issued_reqs: HashMap<u64, usize>,
     concurrent: bool,
@@ -355,6 +369,23 @@ impl Http3Test {
         Http3Test {
             endpoint,
             reqs,
+            stream_data: None,
+            assert,
+            issued_reqs: HashMap::new(),
+            concurrent,
+            current_idx: 0,
+        }
+    }
+
+    pub fn with_stream_data(
+        endpoint: url::Url, reqs: Vec<Http3Req>,
+        stream_data: Vec<ArbitraryStreamData>, assert: Http3Assert,
+        concurrent: bool,
+    ) -> Http3Test {
+        Http3Test {
+            endpoint,
+            reqs,
+            stream_data: Some(stream_data),
             assert,
             issued_reqs: HashMap::new(),
             concurrent,
@@ -377,6 +408,22 @@ impl Http3Test {
         &mut self, conn: &mut quiche::Connection,
         h3_conn: &mut quiche::h3::Connection,
     ) -> quiche::h3::Result<()> {
+        if let Some(stream_data) = &self.stream_data {
+            for d in stream_data {
+                match conn.stream_send(d.stream_id, &d.data, d.fin) {
+                    Ok(_) => (),
+
+                    Err(e) => {
+                        error!(
+                            "failed to send data on stream {}: {:?}",
+                            d.stream_id, e
+                        );
+                        return Err(From::from(e));
+                    },
+                }
+            }
+        }
+
         if self.reqs.len() - self.current_idx == 0 {
             return Err(quiche::h3::Error::Done);
         }

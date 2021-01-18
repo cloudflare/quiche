@@ -26,10 +26,12 @@
 
 use ring::rand::*;
 
+use crate::Http3TestError;
+
 pub fn run(
     test: &mut crate::Http3Test, peer_addr: std::net::SocketAddr,
     verify_peer: bool, idle_timeout: u64, max_data: u64,
-) {
+) -> Result<(), Http3TestError> {
     const MAX_DATAGRAM_SIZE: usize = 1350;
 
     let mut buf = [0; 65535];
@@ -117,11 +119,7 @@ pub fn run(
 
     let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
 
-    let write = match conn.send(&mut out) {
-        Ok(v) => v,
-
-        Err(e) => panic!("initial send failed: {:?}", e),
-    };
+    let write = conn.send(&mut out).expect("initial send failed");
 
     while let Err(e) = socket.send(&out[..write]) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
@@ -129,7 +127,7 @@ pub fn run(
             continue;
         }
 
-        panic!("send() failed: {:?}", e);
+        return Err(Http3TestError::Other(format!("send() failed: {:?}", e)));
     }
 
     debug!("written {}", write);
@@ -164,7 +162,10 @@ pub fn run(
                         break 'read;
                     }
 
-                    panic!("recv() failed: {:?}", e);
+                    return Err(Http3TestError::Other(format!(
+                        "recv() failed: {:?}",
+                        e
+                    )));
                 },
             };
 
@@ -191,9 +192,16 @@ pub fn run(
         if conn.is_closed() {
             info!("connection closed, {:?}", conn.stats());
 
+            if !conn.is_established() {
+                error!("connection timed out after {:?}", req_start.elapsed(),);
+
+                return Err(Http3TestError::HandshakeFail);
+            }
+
             if reqs_complete != reqs_count {
-                panic!("Client timed out after {:?} and only completed {}/{} requests",
+                error!("Client timed out after {:?} and only completed {}/{} requests",
                 req_start.elapsed(), reqs_complete, reqs_count);
+                return Err(Http3TestError::HttpFail);
             }
 
             break;
@@ -210,7 +218,18 @@ pub fn run(
 
             reqs_count = test.requests_count();
 
-            test.send_requests(&mut conn, &mut h3_conn).unwrap();
+            match test.send_requests(&mut conn, &mut h3_conn) {
+                Ok(_) => (),
+
+                Err(quiche::h3::Error::Done) => (),
+
+                Err(e) => {
+                    return Err(Http3TestError::Other(format!(
+                        "error sending: {:?}",
+                        e
+                    )));
+                },
+            };
 
             http3_conn = Some(h3_conn);
         }
@@ -261,7 +280,12 @@ pub fn run(
                                 // Already closed.
                                 Ok(_) | Err(quiche::Error::Done) => (),
 
-                                Err(e) => panic!("error closing conn: {:?}", e),
+                                Err(e) => {
+                                    return Err(Http3TestError::Other(format!(
+                                        "error closing conn: {:?}",
+                                        e
+                                    )));
+                                },
                             }
 
                             test.assert();
@@ -272,7 +296,12 @@ pub fn run(
                         match test.send_requests(&mut conn, http3_conn) {
                             Ok(_) => (),
                             Err(quiche::h3::Error::Done) => (),
-                            Err(e) => panic!("error sending request {:?}", e),
+                            Err(e) => {
+                                return Err(Http3TestError::Other(format!(
+                                    "error sending request: {:?}",
+                                    e
+                                )));
+                            },
                         }
                     },
 
@@ -317,7 +346,10 @@ pub fn run(
                     break;
                 }
 
-                panic!("send() failed: {:?}", e);
+                return Err(Http3TestError::Other(format!(
+                    "send() failed: {:?}",
+                    e
+                )));
             }
 
             debug!("written {}", write);
@@ -327,11 +359,14 @@ pub fn run(
             info!("connection closed, {:?}", conn.stats());
 
             if reqs_complete != reqs_count {
-                panic!("Client timed out after {:?} and only completed {}/{} requests",
+                error!("Client timed out after {:?} and only completed {}/{} requests",
                 req_start.elapsed(), reqs_complete, reqs_count);
+                return Err(Http3TestError::HttpFail);
             }
 
             break;
         }
     }
+
+    Ok(())
 }
