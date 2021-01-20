@@ -1,4 +1,4 @@
-From 8b6bc45dd698ec1686fb281481cf16b638c2d6d1 Mon Sep 17 00:00:00 2001
+From 1372db755f3ecda39a4baee7978fa150d7053376 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 22 Oct 2020 12:28:02 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -24,14 +24,14 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_core_module.h         |    3 +
  src/http/ngx_http_request.c             |  140 +-
  src/http/ngx_http_request.h             |    3 +
- src/http/ngx_http_request_body.c        |   29 +
+ src/http/ngx_http_request_body.c        |   33 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2310 +++++++++++++++++++++++
- src/http/v3/ngx_http_v3.h               |   77 +
+ src/http/v3/ngx_http_v3.c               | 2339 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.h               |   78 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3788 insertions(+), 11 deletions(-)
+ 27 files changed, 3822 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -1475,7 +1475,7 @@ index fce70efe6..8ac19658c 100644
      ngx_http_log_handler_pt           log_handler;
  
 diff --git a/src/http/ngx_http_request_body.c b/src/http/ngx_http_request_body.c
-index c4f092e59..2f8514418 100644
+index c4f092e59..d6d85a30f 100644
 --- a/src/http/ngx_http_request_body.c
 +++ b/src/http/ngx_http_request_body.c
 @@ -85,6 +85,13 @@ ngx_http_read_client_request_body(ngx_http_request_t *r,
@@ -1511,13 +1511,17 @@ index c4f092e59..2f8514418 100644
      if (r->connection->read->timedout) {
          r->connection->timedout = 1;
          return NGX_HTTP_REQUEST_TIME_OUT;
-@@ -525,6 +544,13 @@ ngx_http_discard_request_body(ngx_http_request_t *r)
+@@ -525,6 +544,17 @@ ngx_http_discard_request_body(ngx_http_request_t *r)
      }
  #endif
  
 +#if (NGX_HTTP_V3)
 +    if (r->qstream) {
 +        r->qstream->skip_data = 1;
++
++        /* disable stream read to avoid pointless data events */
++        ngx_http_v3_stop_stream_read(r->qstream, 0);
++
 +        return NGX_OK;
 +    }
 +#endif
@@ -1525,7 +1529,7 @@ index c4f092e59..2f8514418 100644
      if (ngx_http_test_expect(r) != NGX_OK) {
          return NGX_HTTP_INTERNAL_SERVER_ERROR;
      }
-@@ -808,6 +834,9 @@ ngx_http_test_expect(ngx_http_request_t *r)
+@@ -808,6 +838,9 @@ ngx_http_test_expect(ngx_http_request_t *r)
          || r->http_version < NGX_HTTP_VERSION_11
  #if (NGX_HTTP_V2)
          || r->stream != NULL
@@ -1568,10 +1572,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..61e35c96a
+index 000000000..896e26af6
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2310 @@
+@@ -0,0 +1,2339 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -2881,6 +2885,9 @@ index 000000000..61e35c96a
 +
 +    if (rb->buf == NULL) {
 +        stream->skip_data = 1;
++
++        /* disable stream read to avoid pointless data events */
++        ngx_http_v3_stop_stream_read(stream, 0);
 +        return NGX_HTTP_INTERNAL_SERVER_ERROR;
 +    }
 +
@@ -3149,6 +3156,9 @@ index 000000000..61e35c96a
 +        stream->skip_data = 1;
 +        fc->timedout = 1;
 +
++        /* disable stream read to avoid pointless data events */
++        ngx_http_v3_stop_stream_read(stream, 0);
++
 +        return NGX_HTTP_REQUEST_TIME_OUT;
 +    }
 +
@@ -3161,6 +3171,10 @@ index 000000000..61e35c96a
 +
 +    if (rc != NGX_OK) {
 +        stream->skip_data = 1;
++
++        /* disable stream read to avoid pointless data events */
++        ngx_http_v3_stop_stream_read(stream, 0);
++
 +        return rc;
 +    }
 +
@@ -3798,6 +3812,25 @@ index 000000000..61e35c96a
 +    ngx_http_v3_close_stream(r->qstream, 0);
 +}
 +
++void
++ngx_http_v3_stop_stream_read(ngx_http_v3_stream_t *stream, ngx_int_t rc)
++{
++    ngx_http_v3_connection_t  *h3c;
++
++    if (!stream) {
++        return;
++    }
++
++    h3c = stream->connection;
++
++    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, h3c->connection->log, 0,
++                   "http3 stream shutdown read %ui", stream->id);
++
++    quiche_conn_stream_shutdown(h3c->connection->quic->conn,
++                                stream->id,
++                                QUICHE_SHUTDOWN_READ, rc);
++}
++
 +
 +static void
 +ngx_http_v3_finalize_connection(ngx_http_v3_connection_t *h3c,
@@ -3884,10 +3917,10 @@ index 000000000..61e35c96a
 +}
 diff --git a/src/http/v3/ngx_http_v3.h b/src/http/v3/ngx_http_v3.h
 new file mode 100644
-index 000000000..45a55b898
+index 000000000..52920b781
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.h
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,78 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -3962,6 +3995,7 @@ index 000000000..45a55b898
 +ngx_int_t ngx_http_v3_send_response(ngx_http_request_t *r);
 +
 +void ngx_http_v3_close_stream(ngx_http_v3_stream_t *stream, ngx_int_t rc);
++void ngx_http_v3_stop_stream_read(ngx_http_v3_stream_t *stream, ngx_int_t rc);
 +
 +
 +#endif /* _NGX_HTTP_V3_H_INCLUDED_ */
@@ -4372,5 +4406,5 @@ index 000000000..72e189def
 +
 +#endif /* _NGX_HTTP_V3_MODULE_H_INCLUDED_ */
 -- 
-2.29.2
+2.30.0
 
