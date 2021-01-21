@@ -385,6 +385,7 @@ impl Error {
         }
     }
 
+    #[cfg(feature = "ffi")]
     fn to_c(self) -> libc::ssize_t {
         match self {
             Error::Done => -1,
@@ -4059,6 +4060,7 @@ mod tests {
     }
 }
 
+#[cfg(feature = "ffi")]
 mod ffi;
 mod frame;
 #[doc(hidden)]
