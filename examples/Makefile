@@ -34,7 +34,7 @@ http3-server: http3-server.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
 
 $(LIB_DIR)/libquiche.a: $(shell find $(SOURCE_DIR) -type f -name '*.rs')
-	cd .. && cargo build --target-dir $(BUILD_DIR)
+	cd .. && cargo build --target-dir $(BUILD_DIR) --features ffi
 
 clean:
 	@$(RM) -rf client server http3-client http3-server build/

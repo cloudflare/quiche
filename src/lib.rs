@@ -398,6 +398,7 @@ impl Error {
         }
     }
 
+    #[cfg(feature = "ffi")]
     fn to_c(self) -> libc::ssize_t {
         match self {
             Error::Done => -1,
@@ -8575,6 +8576,7 @@ pub use crate::stream::StreamIter;
 
 mod crypto;
 mod dgram;
+#[cfg(feature = "ffi")]
 mod ffi;
 mod frame;
 pub mod h3;

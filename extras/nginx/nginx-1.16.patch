@@ -135,11 +135,11 @@ index 000000000..1e8f8a9c0
 +
 +
 +# Default is release build
-+QUICHE_BUILD_FLAGS="--release --no-default-features"
++QUICHE_BUILD_FLAGS="--release --no-default-features --features ffi"
 +QUICHE_BUILD_TARGET="release"
 +
 +if [ $NGX_DEBUG = YES ]; then
-+    QUICHE_BUILD_FLAGS="--no-default-features"
++    QUICHE_BUILD_FLAGS="--no-default-features --features ffi"
 +    QUICHE_BUILD_TARGET="debug"
 +fi
 +

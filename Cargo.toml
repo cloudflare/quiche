@@ -43,6 +43,9 @@ fuzzing = []
 # For building with Android NDK < 18 and GCC.
 ndk-old-gcc = []
 
+# Expose the FFI API.
+ffi = []
+
 [package.metadata.docs.rs]
 no-default-features = true
 
