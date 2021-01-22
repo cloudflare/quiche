@@ -326,6 +326,10 @@ fn parse_settings_frame(
                 h3_datagram = Some(settings_val);
             },
 
+            // Reserved values overlap with HTTP/2 and MUST be rejected
+            0x0 | 0x2 | 0x3 | 0x4 | 0x5 =>
+                return Err(super::Error::SettingsError),
+
             // Unknown Settings parameters must be ignored.
             _ => (),
         }
@@ -643,6 +647,74 @@ mod tests {
             )
             .unwrap(),
             frame
+        );
+    }
+
+    #[test]
+    fn settings_h2_prohibited() {
+        // We need to test the prohibited values (0x0 | 0x2 | 0x3 | 0x4 | 0x5)
+        // but the quiche API doesn't support that, so use a manually created
+        // frame data buffer where d[frame_header_len] is the SETTING type field.
+        let frame_payload_len = 2u64;
+        let frame_header_len = 2;
+        let mut d = [
+            SETTINGS_FRAME_TYPE_ID as u8,
+            frame_payload_len as u8,
+            0x0,
+            1,
+        ];
+
+        assert_eq!(
+            Frame::from_bytes(
+                SETTINGS_FRAME_TYPE_ID,
+                frame_payload_len,
+                &d[frame_header_len..]
+            ),
+            Err(crate::h3::Error::SettingsError)
+        );
+
+        d[frame_header_len] = 0x2;
+
+        assert_eq!(
+            Frame::from_bytes(
+                SETTINGS_FRAME_TYPE_ID,
+                frame_payload_len,
+                &d[frame_header_len..]
+            ),
+            Err(crate::h3::Error::SettingsError)
+        );
+
+        d[frame_header_len] = 0x3;
+
+        assert_eq!(
+            Frame::from_bytes(
+                SETTINGS_FRAME_TYPE_ID,
+                frame_payload_len,
+                &d[frame_header_len..]
+            ),
+            Err(crate::h3::Error::SettingsError)
+        );
+
+        d[frame_header_len] = 0x4;
+
+        assert_eq!(
+            Frame::from_bytes(
+                SETTINGS_FRAME_TYPE_ID,
+                frame_payload_len,
+                &d[frame_header_len..]
+            ),
+            Err(crate::h3::Error::SettingsError)
+        );
+
+        d[frame_header_len] = 0x5;
+
+        assert_eq!(
+            Frame::from_bytes(
+                SETTINGS_FRAME_TYPE_ID,
+                frame_payload_len,
+                &d[frame_header_len..]
+            ),
+            Err(crate::h3::Error::SettingsError)
         );
     }
 

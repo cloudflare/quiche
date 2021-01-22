@@ -2336,6 +2336,28 @@ pub mod testing {
 
             Ok(())
         }
+
+        /// Sends an arbitrary buffer of HTTP/3 stream data from the client.
+        pub fn send_arbitrary_stream_data_client(
+            &mut self, data: &[u8], stream_id: u64, fin: bool,
+        ) -> Result<()> {
+            self.pipe.client.stream_send(stream_id, data, fin)?;
+
+            self.advance().ok();
+
+            Ok(())
+        }
+
+        /// Sends an arbitrary buffer of HTTP/3 stream data from the server.
+        pub fn send_arbitrary_stream_data_server(
+            &mut self, data: &[u8], stream_id: u64, fin: bool,
+        ) -> Result<()> {
+            self.pipe.server.stream_send(stream_id, data, fin)?;
+
+            self.advance().ok();
+
+            Ok(())
+        }
     }
 }
 
@@ -3623,6 +3645,79 @@ mod tests {
         s.pipe.advance(&mut buf).unwrap();
 
         assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::SettingsError));
+    }
+
+    #[test]
+    /// Tests that receiving SETTINGS with prohibited values generates an error.
+    fn settings_h2_prohibited() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        let mut buf = [42; 2000];
+
+        s.pipe.handshake(&mut buf).unwrap();
+
+        s.client.control_stream_id = Some(
+            s.client
+                .open_uni_stream(
+                    &mut s.pipe.client,
+                    stream::HTTP3_CONTROL_STREAM_TYPE_ID,
+                )
+                .unwrap(),
+        );
+
+        s.server.control_stream_id = Some(
+            s.server
+                .open_uni_stream(
+                    &mut s.pipe.server,
+                    stream::HTTP3_CONTROL_STREAM_TYPE_ID,
+                )
+                .unwrap(),
+        );
+
+        let frame_payload_len = 2u64;
+        let settings = [
+            frame::SETTINGS_FRAME_TYPE_ID as u8,
+            frame_payload_len as u8,
+            0x2, // 0x2 is a reserved setting type
+            1,
+        ];
+
+        s.send_arbitrary_stream_data_client(
+            &settings,
+            s.client.control_stream_id.unwrap(),
+            false,
+        )
+        .unwrap();
+
+        s.send_arbitrary_stream_data_server(
+            &settings,
+            s.server.control_stream_id.unwrap(),
+            false,
+        )
+        .unwrap();
+
+        s.pipe.advance(&mut buf).unwrap();
+
+        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::SettingsError));
+
+        assert_eq!(s.client.poll(&mut s.pipe.client), Err(Error::SettingsError));
     }
 
     #[test]
