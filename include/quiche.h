@@ -258,9 +258,6 @@ ssize_t quiche_conn_recv(quiche_conn *conn, uint8_t *buf, size_t buf_len);
 // Writes a single QUIC packet to be sent to the peer.
 ssize_t quiche_conn_send(quiche_conn *conn, uint8_t *out, size_t out_len);
 
-// Buffer holding data at a specific offset.
-typedef struct RangeBuf quiche_rangebuf;
-
 // Reads contiguous data from a stream.
 ssize_t quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
                                 uint8_t *out, size_t buf_len, bool *fin);
