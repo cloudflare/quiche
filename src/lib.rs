@@ -3196,8 +3196,8 @@ impl Connection {
     /// This can be useful to know if its possible to create a bidirectional
     /// stream or not without trying it first.
     #[inline]
-    pub fn peer_streams_remaining_allowed_bidi(&self) -> u64 {
-        self.streams.peer_streams_remaining_allowed_bidi()
+    pub fn peer_streams_left_bidi(&self) -> u64 {
+        self.streams.peer_streams_left_bidi()
     }
 
     /// Returns the amount of unidirectional streams that can be created
@@ -3206,8 +3206,8 @@ impl Connection {
     /// This can be useful to know if its possible to create a unidirectional
     /// stream or not without trying it first.
     #[inline]
-    pub fn peer_streams_remaining_allowed_uni(&self) -> u64 {
-        self.streams.peer_streams_remaining_allowed_uni()
+    pub fn peer_streams_left_uni(&self) -> u64 {
+        self.streams.peer_streams_left_uni()
     }
 
     /// Initializes the stream's application data.

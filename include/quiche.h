@@ -330,11 +330,11 @@ bool quiche_conn_is_draining(quiche_conn *conn);
 
 // Returns the amount of bidirectional streams that can be created
 // before the stream count limit is reached.
-uint64_t quiche_conn_peer_streams_remaining_allowed_bidi(quiche_conn *conn);
+uint64_t quiche_conn_peer_streams_left_bidi(quiche_conn *conn);
 
 // Returns the amount of unidirectional streams that can be created
 // before the stream count limit is reached.
-uint64_t quiche_conn_peer_streams_remaining_allowed_uni(quiche_conn *conn);
+uint64_t quiche_conn_peer_streams_left_uni(quiche_conn *conn);
 
 // Returns true if the connection is closed.
 bool quiche_conn_is_closed(quiche_conn *conn);
