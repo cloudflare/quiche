@@ -3190,6 +3190,26 @@ impl Connection {
         stream.recv.is_fin()
     }
 
+    /// Returns the number of bidirectional streams that can be created
+    /// before the peer's stream count limit is reached.
+    ///
+    /// This can be useful to know if it's possible to create a bidirectional
+    /// stream without trying it first.
+    #[inline]
+    pub fn peer_streams_left_bidi(&self) -> u64 {
+        self.streams.peer_streams_left_bidi()
+    }
+
+    /// Returns the number of unidirectional streams that can be created
+    /// before the peer's stream count limit is reached.
+    ///
+    /// This can be useful to know if it's possible to create a unidirectional
+    /// stream without trying it first.
+    #[inline]
+    pub fn peer_streams_left_uni(&self) -> u64 {
+        self.streams.peer_streams_left_uni()
+    }
+
     /// Initializes the stream's application data.
     ///
     /// This can be used by applications to store per-stream information without
@@ -5742,6 +5762,60 @@ mod tests {
                 max: 22,
             })
         );
+    }
+
+    #[test]
+    fn stream_left_bidi() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(3, pipe.client.peer_streams_left_bidi());
+        assert_eq!(3, pipe.server.peer_streams_left_bidi());
+
+        pipe.server.stream_send(1, b"a", false).ok();
+        assert_eq!(2, pipe.server.peer_streams_left_bidi());
+        pipe.server.stream_send(5, b"a", false).ok();
+        assert_eq!(1, pipe.server.peer_streams_left_bidi());
+
+        pipe.server.stream_send(9, b"a", false).ok();
+        assert_eq!(0, pipe.server.peer_streams_left_bidi());
+
+        let frames = [frame::Frame::MaxStreamsBidi { max: MAX_STREAM_ID }];
+
+        let pkt_type = packet::Type::Short;
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+        assert_eq!(MAX_STREAM_ID - 3, pipe.server.peer_streams_left_bidi());
+    }
+
+    #[test]
+    fn stream_left_uni() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(3, pipe.client.peer_streams_left_uni());
+        assert_eq!(3, pipe.server.peer_streams_left_uni());
+
+        pipe.server.stream_send(3, b"a", false).ok();
+        assert_eq!(2, pipe.server.peer_streams_left_uni());
+        pipe.server.stream_send(7, b"a", false).ok();
+        assert_eq!(1, pipe.server.peer_streams_left_uni());
+
+        pipe.server.stream_send(11, b"a", false).ok();
+        assert_eq!(0, pipe.server.peer_streams_left_uni());
+
+        let frames = [frame::Frame::MaxStreamsUni { max: MAX_STREAM_ID }];
+
+        let pkt_type = packet::Type::Short;
+        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+        assert_eq!(MAX_STREAM_ID - 3, pipe.server.peer_streams_left_uni());
     }
 
     #[test]

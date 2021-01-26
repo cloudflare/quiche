@@ -414,6 +414,18 @@ impl StreamMap {
         self.local_max_streams_uni_next
     }
 
+    /// Returns the number of bidirectional streams that can be created
+    /// before the peer's stream count limit is reached.
+    pub fn peer_streams_left_bidi(&self) -> u64 {
+        self.peer_max_streams_bidi - self.local_opened_streams_bidi
+    }
+
+    /// Returns the number of unidirectional streams that can be created
+    /// before the peer's stream count limit is reached.
+    pub fn peer_streams_left_uni(&self) -> u64 {
+        self.peer_max_streams_uni - self.local_opened_streams_uni
+    }
+
     /// Drops completed stream.
     ///
     /// This should only be called when Stream::is_complete() returns true for
