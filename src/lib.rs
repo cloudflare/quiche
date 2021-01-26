@@ -4435,13 +4435,8 @@ impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "recv={} sent={} lost={} rtt={:?} cwnd={} delivery_rate={}",
-            self.recv,
-            self.sent,
-            self.lost,
-            self.rtt,
-            self.cwnd,
-            self.delivery_rate
+            "recv={} sent={} lost={} rtt={:?} cwnd={}",
+            self.recv, self.sent, self.lost, self.rtt, self.cwnd,
         )
     }
 }
