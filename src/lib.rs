@@ -1351,7 +1351,10 @@ impl Connection {
 
         conn.handshake.lock().unwrap().init(&conn)?;
 
-        conn.handshake.lock().unwrap().use_legacy_codepoint(true);
+        conn.handshake
+            .lock()
+            .unwrap()
+            .use_legacy_codepoint(config.version != PROTOCOL_VERSION_V1);
 
         conn.encode_transport_params()?;
 
@@ -1648,7 +1651,10 @@ impl Connection {
             self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_seal =
                 Some(aead_seal);
 
-            self.handshake.lock().unwrap().use_legacy_codepoint(true);
+            self.handshake
+                .lock()
+                .unwrap()
+                .use_legacy_codepoint(self.version != PROTOCOL_VERSION_V1);
 
             // Encode transport parameters again, as the new version might be
             // using a different format.
