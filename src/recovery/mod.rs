@@ -345,6 +345,8 @@ impl Recovery {
 
         self.on_packets_acked(newly_acked, epoch, now);
 
+        self.app_limited = self.bytes_in_flight < self.congestion_window;
+
         self.pto_count = 0;
 
         self.set_loss_detection_timer(handshake_status, now);
@@ -1560,6 +1562,83 @@ mod tests {
 
         // Spurious loss.
         assert_eq!(r.lost_count, 1);
+    }
+
+    #[test]
+    fn app_limited() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+
+        let mut r = Recovery::new(&cfg);
+
+        let mut now = Instant::now();
+
+        assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 0);
+
+        let pkt_len = r.max_datagram_size();
+
+        // Send a full initcwnd.
+        for pn in 0..INITIAL_WINDOW_PACKETS {
+            let p = Sent {
+                pkt_num: pn as u64,
+                frames: vec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: pkt_len,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                recent_delivered_packet_sent_time: now,
+                is_app_limited: false,
+                has_data: false,
+            };
+
+            r.on_packet_sent(
+                p,
+                packet::EPOCH_APPLICATION,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+
+            assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), pn + 1);
+            assert_eq!(r.bytes_in_flight, pkt_len * (pn + 1));
+
+            // app_limited will be false when full.
+            assert_eq!(r.app_limited, pn < INITIAL_WINDOW_PACKETS - 1);
+        }
+
+        // Wait for 10ms.
+        now += Duration::from_millis(10);
+
+        // Ack 2 packets.
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..2);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::EPOCH_APPLICATION,
+                HandshakeStatus::default(),
+                now,
+                ""
+            ),
+            Ok(())
+        );
+
+        assert_eq!(
+            r.sent[packet::EPOCH_APPLICATION].len(),
+            INITIAL_WINDOW_PACKETS - 2
+        );
+        assert_eq!(
+            r.bytes_in_flight,
+            (INITIAL_WINDOW_PACKETS - 2) * r.max_datagram_size()
+        );
+
+        assert_eq!(r.app_limited, true);
     }
 }
 
