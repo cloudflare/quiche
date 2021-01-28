@@ -338,6 +338,12 @@ impl Handshake {
         Ok(())
     }
 
+    pub fn use_legacy_codepoint(&self, use_legacy: bool) {
+        unsafe {
+            SSL_set_quic_use_legacy_codepoint(self.as_ptr(), use_legacy as c_int);
+        }
+    }
+
     pub fn set_state(&self, is_server: bool) {
         unsafe {
             if is_server {
@@ -966,6 +972,8 @@ extern {
     fn SSL_set_quic_method(
         ssl: *mut SSL, quic_method: *const SSL_QUIC_METHOD,
     ) -> c_int;
+
+    fn SSL_set_quic_use_legacy_codepoint(ssl: *mut SSL, use_legacy: c_int);
 
     fn SSL_set_quic_early_data_context(
         ssl: *mut SSL, context: *const u8, context_len: usize,
