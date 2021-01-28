@@ -513,14 +513,13 @@ impl Handshake {
             }
             let out_len = CRYPTO_BUFFER_len(buffer);
 
-            if out_len <= 0 {
+            if out_len == 0 {
                 return None;
             }
 
             let out = CRYPTO_BUFFER_data(buffer);
             let der = slice::from_raw_parts(out, out_len as usize);
-            let der = der.to_vec();
-            der
+            der.to_vec()
         };
 
         Some(peer_cert)
