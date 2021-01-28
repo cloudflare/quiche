@@ -275,7 +275,7 @@ use crate::octets;
 ///
 /// [`Config::set_application_protos()`]:
 /// ../struct.Config.html#method.set_application_protos
-pub const APPLICATION_PROTOCOL: &[u8] = b"\x05h3-29\x05h3-28\x05h3-27";
+pub const APPLICATION_PROTOCOL: &[u8] = b"\x02h3\x05h3-29\x05h3-28\x05h3-27";
 
 // The offset used when converting HTTP/3 urgency to quiche urgency.
 const PRIORITY_URGENCY_OFFSET: u8 = 124;

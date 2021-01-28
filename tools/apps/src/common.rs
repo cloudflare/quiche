@@ -54,8 +54,9 @@ pub fn stdout_sink(out: String) {
 ///
 /// This module contains constants and functions for working with ALPN.
 pub mod alpns {
-    pub const HTTP_09: [&str; 4] = ["hq-29", "hq-28", "hq-27", "http/0.9"];
-    pub const HTTP_3: [&str; 3] = ["h3-29", "h3-28", "h3-27"];
+    pub const HTTP_09: [&str; 5] =
+        ["hq-interop", "hq-29", "hq-28", "hq-27", "http/0.9"];
+    pub const HTTP_3: [&str; 4] = ["h3", "h3-29", "h3-28", "h3-27"];
     pub const SIDUCK: [&str; 2] = ["siduck", "siduck-00"];
 
     pub fn length_prefixed(alpns: &[&str]) -> Vec<u8> {
