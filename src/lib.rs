@@ -1332,6 +1332,8 @@ impl Connection {
 
         conn.handshake.lock().unwrap().init(&conn)?;
 
+        conn.handshake.lock().unwrap().use_legacy_codepoint(true);
+
         conn.encode_transport_params()?;
 
         // Derive initial secrets for the client. We can do this here because
@@ -1613,6 +1615,8 @@ impl Connection {
                 Some(aead_open);
             self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_seal =
                 Some(aead_seal);
+
+            self.handshake.lock().unwrap().use_legacy_codepoint(true);
 
             // Encode transport parameters again, as the new version might be
             // using a different format.
@@ -3779,13 +3783,6 @@ impl Connection {
             Err(e) => return Err(e),
         };
 
-        if handshake.alpn_protocol().is_empty() {
-            // Send no_application_proto TLS alert when no protocol
-            // can be negotiated.
-            self.error = Some(0x178);
-            return Err(Error::TlsFail);
-        }
-
         self.handshake_completed = handshake.is_completed();
 
         self.alpn = handshake.alpn_protocol().to_vec();
@@ -5210,6 +5207,9 @@ mod tests {
         let mut buf = [0; 65535];
 
         let mut config = Config::new(0xbabababa).unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
