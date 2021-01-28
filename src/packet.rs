@@ -750,29 +750,41 @@ pub fn verify_retry_integrity(
 fn compute_retry_integrity_tag(
     b: &octets::OctetsMut, odcid: &[u8], version: u32,
 ) -> Result<aead::Tag> {
-    const RETRY_INTEGRITY_KEY: [u8; 16] = [
+    const RETRY_INTEGRITY_KEY_V1: [u8; 16] = [
+        0xbe, 0x0c, 0x69, 0x0b, 0x9f, 0x66, 0x57, 0x5a, 0x1d, 0x76, 0x6b, 0x54,
+        0xe3, 0x68, 0xc8, 0x4e,
+    ];
+
+    const RETRY_INTEGRITY_NONCE_V1: [u8; aead::NONCE_LEN] = [
+        0x46, 0x15, 0x99, 0xd3, 0x5d, 0x63, 0x2b, 0xf2, 0x23, 0x98, 0x25, 0xbb,
+    ];
+
+    const RETRY_INTEGRITY_KEY_DRAFT29: [u8; 16] = [
         0xcc, 0xce, 0x18, 0x7e, 0xd0, 0x9a, 0x09, 0xd0, 0x57, 0x28, 0x15, 0x5a,
         0x6c, 0xb9, 0x6b, 0xe1,
     ];
 
-    const RETRY_INTEGRITY_NONCE: [u8; aead::NONCE_LEN] = [
+    const RETRY_INTEGRITY_NONCE_DRAFT29: [u8; aead::NONCE_LEN] = [
         0xe5, 0x49, 0x30, 0xf9, 0x7f, 0x21, 0x36, 0xf0, 0x53, 0x0a, 0x8c, 0x1c,
     ];
 
-    const RETRY_INTEGRITY_KEY_OLD: [u8; 16] = [
+    const RETRY_INTEGRITY_KEY_DRAFT27: [u8; 16] = [
         0x4d, 0x32, 0xec, 0xdb, 0x2a, 0x21, 0x33, 0xc8, 0x41, 0xe4, 0x04, 0x3d,
         0xf2, 0x7d, 0x44, 0x30,
     ];
 
-    const RETRY_INTEGRITY_NONCE_OLD: [u8; aead::NONCE_LEN] = [
+    const RETRY_INTEGRITY_NONCE_DRAFT27: [u8; aead::NONCE_LEN] = [
         0x4d, 0x16, 0x11, 0xd0, 0x55, 0x13, 0xa5, 0x52, 0xc5, 0x87, 0xd5, 0x75,
     ];
 
     let (key, nonce) = match version {
         crate::PROTOCOL_VERSION_DRAFT27 | crate::PROTOCOL_VERSION_DRAFT28 =>
-            (&RETRY_INTEGRITY_KEY_OLD, RETRY_INTEGRITY_NONCE_OLD),
+            (&RETRY_INTEGRITY_KEY_DRAFT27, RETRY_INTEGRITY_NONCE_DRAFT27),
 
-        _ => (&RETRY_INTEGRITY_KEY, RETRY_INTEGRITY_NONCE),
+        crate::PROTOCOL_VERSION_DRAFT29 =>
+            (&RETRY_INTEGRITY_KEY_DRAFT29, RETRY_INTEGRITY_NONCE_DRAFT29),
+
+        _ => (&RETRY_INTEGRITY_KEY_V1, RETRY_INTEGRITY_NONCE_V1),
     };
 
     let hdr_len = b.off();
