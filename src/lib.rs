@@ -276,11 +276,12 @@ use std::str::FromStr;
 use std::sync::Mutex;
 
 /// The current QUIC wire version.
-pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_DRAFT29;
+pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
 
 /// Supported QUIC versions.
 ///
 /// Note that the older ones might not be fully supported.
+const PROTOCOL_VERSION_V1: u32 = 0x0000_0001;
 const PROTOCOL_VERSION_DRAFT27: u32 = 0xff00_001b;
 const PROTOCOL_VERSION_DRAFT28: u32 = 0xff00_001c;
 const PROTOCOL_VERSION_DRAFT29: u32 = 0xff00_001d;
@@ -1163,7 +1164,8 @@ pub fn retry(
 pub fn version_is_supported(version: u32) -> bool {
     matches!(
         version,
-        PROTOCOL_VERSION_DRAFT27 |
+        PROTOCOL_VERSION_V1 |
+            PROTOCOL_VERSION_DRAFT27 |
             PROTOCOL_VERSION_DRAFT28 |
             PROTOCOL_VERSION_DRAFT29
     )
@@ -1599,20 +1601,33 @@ impl Connection {
                 return Err(Error::Done);
             }
 
-            match versions.iter().filter(|&&v| version_is_supported(v)).max() {
-                Some(v) => self.version = *v,
+            let supported_versions =
+                versions.iter().filter(|&&v| version_is_supported(v));
 
-                None => {
-                    // We don't support any of the versions offered.
-                    //
-                    // While a man-in-the-middle attacker might be able to
-                    // inject a version negotiation packet that triggers this
-                    // failure, the window of opportunity is very small and
-                    // this error is quite useful for debugging, so don't just
-                    // ignore the packet.
-                    return Err(Error::UnknownVersion);
-                },
-            };
+            let mut found_version = false;
+
+            for &v in supported_versions {
+                found_version = true;
+
+                // The final version takes precedence over draft ones.
+                if v == PROTOCOL_VERSION_V1 {
+                    self.version = v;
+                    break;
+                }
+
+                self.version = cmp::max(self.version, v);
+            }
+
+            if !found_version {
+                // We don't support any of the versions offered.
+                //
+                // While a man-in-the-middle attacker might be able to
+                // inject a version negotiation packet that triggers this
+                // failure, the window of opportunity is very small and
+                // this error is quite useful for debugging, so don't just
+                // ignore the packet.
+                return Err(Error::UnknownVersion);
+            }
 
             self.did_version_negotiation = true;
 
@@ -1847,7 +1862,10 @@ impl Connection {
         if self.is_server && !self.got_peer_conn_id {
             self.dcid = hdr.scid.clone();
 
-            if !self.did_retry && self.version >= PROTOCOL_VERSION_DRAFT28 {
+            if !self.did_retry &&
+                (self.version >= PROTOCOL_VERSION_DRAFT28 ||
+                    self.version == PROTOCOL_VERSION_V1)
+            {
                 self.local_transport_params
                     .original_destination_connection_id =
                     Some(hdr.dcid.to_vec().into());
@@ -4196,7 +4214,9 @@ impl Connection {
                     let peer_params =
                         TransportParams::decode(&raw_params, self.is_server)?;
 
-                    if self.version >= PROTOCOL_VERSION_DRAFT28 {
+                    if self.version >= PROTOCOL_VERSION_DRAFT28 ||
+                        self.version == PROTOCOL_VERSION_V1
+                    {
                         // Validate initial_source_connection_id.
                         match &peer_params.initial_source_connection_id {
                             Some(v) if v != &self.dcid =>

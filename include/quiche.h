@@ -46,7 +46,7 @@ extern "C" {
 //
 
 // The current QUIC wire version.
-#define QUICHE_PROTOCOL_VERSION 0xff00001d
+#define QUICHE_PROTOCOL_VERSION 0x00000001
 
 // The maximum length of a connection ID.
 #define QUICHE_MAX_CONN_ID_LEN 20
@@ -422,7 +422,7 @@ void quiche_conn_free(quiche_conn *conn);
 //
 
 // List of ALPN tokens of supported HTTP/3 versions.
-#define QUICHE_H3_APPLICATION_PROTOCOL "\x05h3-29\x05h3-28\x05h3-27"
+#define QUICHE_H3_APPLICATION_PROTOCOL "\x02h3\x05h3-29\x05h3-28\x05h3-27"
 
 enum quiche_h3_error {
     /// There is no error or no work to do

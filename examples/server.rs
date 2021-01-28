@@ -91,7 +91,9 @@ fn main() {
         .unwrap();
 
     config
-        .set_application_protos(b"\x05hq-29\x05hq-28\x05hq-27\x08http/0.9")
+        .set_application_protos(
+            b"\x0ahq-interop\x05hq-29\x05hq-28\x05hq-27\x08http/0.9",
+        )
         .unwrap();
 
     config.set_max_idle_timeout(5000);
