@@ -502,12 +502,12 @@ impl Handshake {
             if chain.is_null() {
                 return None;
             }
-            let len = sk_CRYPTO_BUFFER_num(chain);
+            let len = sk_num(chain);
             if len <= 0 {
                 return None;
             }
 
-            let buffer = sk_CRYPTO_BUFFER_value(chain, 0);
+            let buffer = sk_value(chain, 0) as *const CRYPTO_BUFFER;
             if buffer.is_null() {
                 return None;
             }
@@ -1020,10 +1020,10 @@ extern {
     #[cfg(windows)]
     fn d2i_X509(px: *mut X509, input: *const *const u8, len: c_int) -> *mut X509;
 
-    fn sk_CRYPTO_BUFFER_num(stack: *const STACK_OF) -> c_int;
-    fn sk_CRYPTO_BUFFER_value(
-        stack: *const STACK_OF, idx: c_int,
-    ) -> *const CRYPTO_BUFFER;
+    // Seems like its not possible to expose sk_CRYPTO_BUFFER_num and
+    // sk_CRYPTO_BUFFER_value macros directly.
+    fn sk_num(stack: *const STACK_OF) -> c_int;
+    fn sk_value(stack: *const STACK_OF, idx: c_int) -> *mut c_void;
 
     fn CRYPTO_BUFFER_len(buffer: *const CRYPTO_BUFFER) -> usize;
     fn CRYPTO_BUFFER_data(buffer: *const CRYPTO_BUFFER) -> *const u8;
