@@ -1020,11 +1020,11 @@ extern {
     #[cfg(windows)]
     fn d2i_X509(px: *mut X509, input: *const *const u8, len: c_int) -> *mut X509;
 
-    // Seems like its not possible to expose sk_CRYPTO_BUFFER_num and
-    // sk_CRYPTO_BUFFER_value macros directly.
+    // STACK_OF
     fn sk_num(stack: *const STACK_OF) -> c_int;
     fn sk_value(stack: *const STACK_OF, idx: c_int) -> *mut c_void;
 
+    // CRYPTO_BUFFER
     fn CRYPTO_BUFFER_len(buffer: *const CRYPTO_BUFFER) -> usize;
     fn CRYPTO_BUFFER_data(buffer: *const CRYPTO_BUFFER) -> *const u8;
 
