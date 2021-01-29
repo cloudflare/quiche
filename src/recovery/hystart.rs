@@ -28,12 +28,13 @@
 //!
 //! This implementation is based on the following I-D:
 //!
-//! https://tools.ietf.org/html/draft-balasubramanian-tcpm-hystartplusplus-02
+//! https://tools.ietf.org/html/draft-balasubramanian-tcpm-hystartplusplus-03
 
 use std::cmp;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::packet;
 use crate::recovery;
 
 /// Constants from I-D.
@@ -91,6 +92,12 @@ impl Hystart {
         self.lss_start_time
     }
 
+    pub fn in_lss(&self, epoch: packet::Epoch) -> bool {
+        self.enabled &&
+            epoch == packet::EPOCH_APPLICATION &&
+            self.lss_start_time().is_some()
+    }
+
     pub fn start_round(&mut self, pkt_num: u64) {
         if self.window_end.is_none() {
             *self = Hystart {
@@ -109,18 +116,12 @@ impl Hystart {
         }
     }
 
-    // Returns a new (ssthresh, cwnd) during slow start.
-    pub fn on_packet_acked(
+    // Returns true if LSS started.
+    pub fn try_enter_lss(
         &mut self, packet: &recovery::Acked, rtt: Duration, cwnd: usize,
-        ssthresh: usize, now: Instant, max_datagram_size: usize,
-    ) -> (usize, usize) {
-        let mut ssthresh = ssthresh;
-        let mut cwnd = cwnd;
-
+        now: Instant, max_datagram_size: usize,
+    ) -> bool {
         if self.lss_start_time().is_none() {
-            // Reno Slow Start.
-            cwnd += packet.size;
-
             if let Some(current_round_min_rtt) = self.current_round_min_rtt {
                 self.current_round_min_rtt =
                     Some(cmp::min(current_round_min_rtt, rtt));
@@ -147,8 +148,6 @@ impl Hystart {
                 if self.current_round_min_rtt.unwrap() >=
                     (self.last_round_min_rtt.unwrap() + rtt_thresh)
                 {
-                    ssthresh = cwnd;
-
                     self.lss_start_time = Some(now);
                 }
             }
@@ -160,23 +159,29 @@ impl Hystart {
                     self.window_end = None;
                 }
             }
-        } else {
-            // LSS (Limited Slow Start).
-            let k = cwnd as f64 / (LSS_DIVISOR * ssthresh as f64);
-
-            cwnd += (packet.size as f64 / k) as usize;
         }
 
-        (cwnd, ssthresh)
+        self.lss_start_time.is_some()
+    }
+
+    // Return a new cwnd during LSS (Limited Slow Start).
+    pub fn lss_cwnd(
+        &self, pkt_size: usize, bytes_acked: usize, cwnd: usize, ssthresh: usize,
+        max_datagram_size: usize,
+    ) -> usize {
+        let k = cwnd as f64 / (LSS_DIVISOR * ssthresh as f64);
+
+        cwnd + cmp::min(
+            pkt_size,
+            max_datagram_size * recovery::ABC_L -
+                cmp::min(bytes_acked, max_datagram_size * recovery::ABC_L),
+        ) / k as usize
     }
 
     // Exit HyStart++ when entering congestion avoidance.
     pub fn congestion_event(&mut self) {
-        if self.window_end.is_some() {
-            self.window_end = None;
-
-            self.lss_start_time = None;
-        }
+        self.window_end = None;
+        self.lss_start_time = None;
     }
 }
 
@@ -196,124 +201,35 @@ mod tests {
     }
 
     #[test]
-    fn reno_slow_start() {
-        let mut hspp = Hystart::default();
-        let pkt_num = 100;
-        let size = 1000;
-        let now = Instant::now();
+    fn lss_cwnd() {
+        let hspp = Hystart::default();
 
-        hspp.start_round(pkt_num);
+        let datagram_size = 1200;
+        let mut cwnd = 24000;
+        let ssthresh = 24000;
 
-        assert_eq!(hspp.window_end, Some(pkt_num));
+        let lss_cwnd =
+            hspp.lss_cwnd(datagram_size, 0, cwnd, ssthresh, datagram_size);
 
-        let p = recovery::Acked {
-            pkt_num,
-            time_sent: now + Duration::from_millis(10),
-            size,
-        };
-
-        let init_cwnd = 30000;
-        let init_ssthresh = 1000000;
-
-        let (cwnd, ssthresh) = hspp.on_packet_acked(
-            &p,
-            Duration::from_millis(10),
-            init_cwnd,
-            init_ssthresh,
-            now,
-            crate::MAX_SEND_UDP_PAYLOAD_SIZE,
+        assert_eq!(
+            cwnd + (datagram_size as f64 * LSS_DIVISOR) as usize,
+            lss_cwnd
         );
 
-        // Expecting Reno slow start.
-        assert_eq!(hspp.lss_start_time().is_some(), false);
-        assert_eq!((cwnd, ssthresh), (init_cwnd + size, init_ssthresh));
-    }
+        cwnd = lss_cwnd;
 
-    #[test]
-    fn limited_slow_start() {
-        let mut hspp = Hystart::default();
-        let size = 1000;
-        let now = Instant::now();
+        let lss_cwnd = hspp.lss_cwnd(
+            datagram_size,
+            datagram_size,
+            cwnd,
+            ssthresh,
+            datagram_size,
+        );
 
-        // 1st round rtt = 50ms
-        let rtt_1st = 50;
-
-        // end of 1st round
-        let pkt_1st = N_RTT_SAMPLE as u64;
-
-        hspp.start_round(pkt_1st);
-
-        assert_eq!(hspp.window_end, Some(pkt_1st));
-
-        let (mut cwnd, mut ssthresh) = (30000, 1000000);
-        let mut pkt_num = 0;
-
-        // 1st round.
-        for _ in 0..N_RTT_SAMPLE + 1 {
-            let p = recovery::Acked {
-                pkt_num,
-                time_sent: now + Duration::from_millis(pkt_num),
-                size,
-            };
-
-            // We use a fixed rtt for 1st round.
-            let rtt = Duration::from_millis(rtt_1st);
-
-            let (new_cwnd, new_ssthresh) = hspp.on_packet_acked(
-                &p,
-                rtt,
-                cwnd,
-                ssthresh,
-                now,
-                crate::MAX_SEND_UDP_PAYLOAD_SIZE,
-            );
-
-            cwnd = new_cwnd;
-            ssthresh = new_ssthresh;
-
-            pkt_num += 1;
-        }
-
-        // 2nd round. rtt = 100ms to trigger LSS.
-        let rtt_2nd = 100;
-
-        hspp.start_round(pkt_1st * 2 + 1);
-
-        for _ in 0..N_RTT_SAMPLE + 1 {
-            let p = recovery::Acked {
-                pkt_num,
-                time_sent: now + Duration::from_millis(pkt_num),
-                size,
-            };
-
-            // Keep increasing rtt to simulate buffer queueing delay
-            // This is to exit from slow slart to LSS.
-            let rtt = Duration::from_millis(rtt_2nd + pkt_num * 4);
-
-            let (new_cwnd, new_ssthresh) = hspp.on_packet_acked(
-                &p,
-                rtt,
-                cwnd,
-                ssthresh,
-                now,
-                crate::MAX_SEND_UDP_PAYLOAD_SIZE,
-            );
-
-            cwnd = new_cwnd;
-            ssthresh = new_ssthresh;
-
-            pkt_num += 1;
-        }
-
-        // At this point, cwnd exits to LSS mode.
-        assert_eq!(hspp.lss_start_time().is_some(), true);
-
-        // Check if current cwnd is in LSS.
-        let cur_ssthresh = 47000;
-        let k = cur_ssthresh as f64 / (LSS_DIVISOR * cur_ssthresh as f64);
-        let lss_cwnd = cur_ssthresh as f64 + size as f64 / k;
-
-        assert_eq!((cwnd, ssthresh), (lss_cwnd as usize, cur_ssthresh));
+        assert_eq!(
+            cwnd + (datagram_size as f64 * LSS_DIVISOR) as usize,
+            lss_cwnd
+        );
     }
 
     #[test]

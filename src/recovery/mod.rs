@@ -117,7 +117,9 @@ pub struct Recovery {
 
     ssthresh: usize,
 
-    bytes_acked: usize,
+    bytes_acked_sl: usize,
+
+    bytes_acked_ca: usize,
 
     congestion_recovery_start_time: Option<Instant>,
 
@@ -179,7 +181,9 @@ impl Recovery {
 
             ssthresh: std::usize::MAX,
 
-            bytes_acked: 0,
+            bytes_acked_sl: 0,
+
+            bytes_acked_ca: 0,
 
             congestion_recovery_start_time: None,
 
@@ -350,8 +354,6 @@ impl Recovery {
         self.set_loss_detection_timer(handshake_status, now);
 
         self.drain_packets(epoch);
-
-        trace!("{} {:?}", trace_id, self);
 
         Ok(())
     }
@@ -718,9 +720,7 @@ impl Recovery {
             (self.cc_ops.on_packet_acked)(self, &pkt, epoch, now);
         }
 
-        if self.congestion_window < self.ssthresh {
-            self.bytes_acked = 0;
-        }
+        self.bytes_acked_sl = 0;
     }
 
     fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
@@ -766,19 +766,6 @@ impl Recovery {
         if self.app_limited {
             self.delivery_rate.check_app_limited(self.bytes_in_flight)
         }
-    }
-
-    fn hystart_on_packet_acked(
-        &mut self, packet: &Acked, now: Instant,
-    ) -> (usize, usize) {
-        self.hystart.on_packet_acked(
-            packet,
-            self.latest_rtt,
-            self.congestion_window,
-            self.ssthresh,
-            now,
-            self.max_datagram_size,
-        )
     }
 
     pub fn update_app_limited(&mut self, v: bool) {

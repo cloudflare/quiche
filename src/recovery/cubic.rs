@@ -170,35 +170,39 @@ fn on_packet_acked(
 
     if r.congestion_window < r.ssthresh {
         // Slow start.
-        let new_cwnd;
-
-        if r.hystart.enabled() && epoch == packet::EPOCH_APPLICATION {
-            let (cwnd, ssthresh) = r.hystart_on_packet_acked(packet, now);
-
-            new_cwnd = cwnd;
-            r.ssthresh = ssthresh;
-        } else {
-            // Reno Slow Start.
-            new_cwnd = r.congestion_window + packet.size;
-        }
-
         let cwnd_inc = cmp::min(
-            new_cwnd - r.congestion_window,
+            packet.size,
             r.max_datagram_size * recovery::ABC_L -
-                cmp::min(r.bytes_acked, r.max_datagram_size * recovery::ABC_L),
+                cmp::min(
+                    r.bytes_acked_sl,
+                    r.max_datagram_size * recovery::ABC_L,
+                ),
         );
 
-        r.bytes_acked += packet.size;
+        // In Slow slart, bytes_acked_sl is used for counting
+        // acknowledged bytes.
+        r.bytes_acked_sl += packet.size;
+
         r.congestion_window += cwnd_inc;
+
+        if r.hystart.enabled() &&
+            epoch == packet::EPOCH_APPLICATION &&
+            r.hystart.try_enter_lss(
+                packet,
+                r.latest_rtt,
+                r.congestion_window,
+                now,
+                r.max_datagram_size,
+            )
+        {
+            r.ssthresh = r.congestion_window;
+        }
     } else {
         // Congestion avoidance.
         let ca_start_time;
 
         // In LSS, use lss_start_time instead of congestion_recovery_start_time.
-        if r.hystart.enabled() &&
-            epoch == packet::EPOCH_APPLICATION &&
-            r.hystart.lss_start_time().is_some()
-        {
+        if r.hystart.in_lss(epoch) {
             ca_start_time = r.hystart.lss_start_time().unwrap();
 
             // Reset w_max and k when LSS started.
@@ -244,11 +248,16 @@ fn on_packet_acked(
 
         // When in Limited Slow Start, take the max of CA cwnd and
         // LSS cwnd.
-        if r.hystart.enabled() &&
-            epoch == packet::EPOCH_APPLICATION &&
-            r.hystart.lss_start_time().is_some()
-        {
-            let (lss_cwnd, _) = r.hystart_on_packet_acked(packet, now);
+        if r.hystart.in_lss(epoch) {
+            let lss_cwnd = r.hystart.lss_cwnd(
+                packet.size,
+                r.bytes_acked_sl,
+                r.congestion_window,
+                r.ssthresh,
+                r.max_datagram_size,
+            );
+
+            r.bytes_acked_sl += packet.size;
 
             cubic_cwnd = cmp::max(cubic_cwnd, lss_cwnd);
         }
@@ -261,7 +270,7 @@ fn on_packet_acked(
         // the increase of cwnd to 1 max_datagram_size per cwnd acknowledged.
         if r.cubic_state.cwnd_inc >= r.max_datagram_size {
             r.congestion_window += r.max_datagram_size;
-            r.cubic_state.cwnd_inc -= r.max_datagram_size;
+            r.cubic_state.cwnd_inc = 0;
         }
     }
 }
@@ -297,7 +306,7 @@ fn congestion_event(
         r.cubic_state.cwnd_inc =
             (r.cubic_state.cwnd_inc as f64 * BETA_CUBIC) as usize;
 
-        if r.hystart.enabled() && epoch == packet::EPOCH_APPLICATION {
+        if r.hystart.in_lss(epoch) {
             r.hystart.congestion_event();
         }
     }
@@ -581,13 +590,13 @@ mod tests {
         assert_eq!(r.hystart.lss_start_time().is_some(), false);
 
         // 2nd round.
-        r.hystart.start_round(pkts_1st_round * 2 + 1);
+        r.hystart.start_round(pkts_1st_round * 2);
 
         let mut rtt_2nd = 100;
         let now = now + Duration::from_millis(rtt_2nd);
 
         // Send 2nd round packets.
-        for _ in 0..n_rtt_sample + 1 {
+        for _ in 0..n_rtt_sample {
             r.on_packet_sent_cc(p.size, now);
         }
 
@@ -595,7 +604,7 @@ mod tests {
         // Last ack will cause to exit to LSS.
         let mut cwnd_prev = r.cwnd();
 
-        for _ in 0..n_rtt_sample + 1 {
+        for _ in 0..n_rtt_sample {
             cwnd_prev = r.cwnd();
             r.update_rtt(
                 Duration::from_millis(rtt_2nd),
@@ -617,10 +626,14 @@ mod tests {
 
         // Now we are in LSS.
         assert_eq!(r.hystart.lss_start_time().is_some(), true);
-        assert_eq!(r.cwnd(), cwnd_prev);
+        assert_eq!(r.cwnd(), cwnd_prev + r.max_datagram_size);
 
-        // Ack'ing more packet to increase cwnd by 1 MSS
-        for _ in 0..3 {
+        // Send a full cwnd.
+        r.on_packet_sent_cc(r.cwnd(), now);
+
+        // Ack'ing 4 packets to increase cwnd by 1 MSS during LSS
+        cwnd_prev = r.cwnd();
+        for _ in 0..4 {
             let acked = vec![Acked {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
@@ -629,6 +642,7 @@ mod tests {
             r.on_packets_acked(acked, epoch, now);
         }
 
+        // During LSS cwnd will be increased less than usual slow start.
         assert_eq!(r.cwnd(), cwnd_prev + r.max_datagram_size);
     }
 }
