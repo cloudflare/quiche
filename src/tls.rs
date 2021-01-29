@@ -503,7 +503,7 @@ impl Handshake {
                 return None;
             }
             let len = sk_CRYPTO_BUFFER_num(chain);
-            if len == 0 {
+            if len <= 0 {
                 return None;
             }
 
@@ -1020,12 +1020,12 @@ extern {
     #[cfg(windows)]
     fn d2i_X509(px: *mut X509, input: *const *const u8, len: c_int) -> *mut X509;
 
-    fn sk_CRYPTO_BUFFER_num(stack: *const STACK_OF) -> c_uint;
+    fn sk_CRYPTO_BUFFER_num(stack: *const STACK_OF) -> c_int;
     fn sk_CRYPTO_BUFFER_value(
-        stack: *const STACK_OF, idx: c_uint,
+        stack: *const STACK_OF, idx: c_int,
     ) -> *const CRYPTO_BUFFER;
 
-    fn CRYPTO_BUFFER_len(buffer: *const CRYPTO_BUFFER) -> c_uint;
+    fn CRYPTO_BUFFER_len(buffer: *const CRYPTO_BUFFER) -> usize;
     fn CRYPTO_BUFFER_data(buffer: *const CRYPTO_BUFFER) -> *const u8;
 
     // ERR
