@@ -498,21 +498,13 @@ impl Handshake {
 
     pub fn peer_cert(&self) -> Option<Vec<u8>> {
         let peer_cert = unsafe {
-            let chain = SSL_get0_peer_certificates(self.as_ptr());
-            if chain.is_null() {
-                return None;
-            }
-            let len = sk_num(chain);
-            if len <= 0 {
+            let chain = map_result_ptr(SSL_get0_peer_certificates(self.as_ptr())).ok()?;
+            if sk_num(chain) <= 0 {
                 return None;
             }
 
-            let buffer = sk_value(chain, 0) as *const CRYPTO_BUFFER;
-            if buffer.is_null() {
-                return None;
-            }
+            let buffer =  map_result_ptr(sk_value(chain, 0) as *const CRYPTO_BUFFER).ok()?;
             let out_len = CRYPTO_BUFFER_len(buffer);
-
             if out_len == 0 {
                 return None;
             }
