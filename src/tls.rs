@@ -73,7 +73,16 @@ struct X509_STORE(c_void);
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
+#[cfg(windows)]
 struct X509(c_void);
+
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
+struct STACK_OF(c_void);
+
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
+struct CRYPTO_BUFFER(c_void);
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
@@ -489,24 +498,23 @@ impl Handshake {
 
     pub fn peer_cert(&self) -> Option<Vec<u8>> {
         let peer_cert = unsafe {
-            let mut out: *mut libc::c_uchar = ptr::null_mut();
-
-            let x509 = SSL_get_peer_certificate(self.as_ptr());
-            if x509.is_null() {
+            let chain =
+                map_result_ptr(SSL_get0_peer_certificates(self.as_ptr())).ok()?;
+            if sk_num(chain) <= 0 {
                 return None;
             }
 
-            let out_len = i2d_X509(x509, &mut out);
-            if out_len <= 0 {
+            let buffer =
+                map_result_ptr(sk_value(chain, 0) as *const CRYPTO_BUFFER)
+                    .ok()?;
+            let out_len = CRYPTO_BUFFER_len(buffer);
+            if out_len == 0 {
                 return None;
             }
 
+            let out = CRYPTO_BUFFER_data(buffer);
             let der = slice::from_raw_parts(out, out_len as usize);
-            let der = der.to_vec();
-
-            OPENSSL_free(out as *mut c_void);
-
-            der
+            der.to_vec()
         };
 
         Some(peer_cert)
@@ -939,7 +947,7 @@ extern {
         sigalg: u16, include_curve: i32,
     ) -> *const c_char;
 
-    fn SSL_get_peer_certificate(ssl: *mut SSL) -> *const X509;
+    fn SSL_get0_peer_certificates(ssl: *mut SSL) -> *const STACK_OF;
 
     fn SSL_set_min_proto_version(ssl: *mut SSL, version: u16);
     fn SSL_set_max_proto_version(ssl: *mut SSL, version: u16);
@@ -1007,13 +1015,16 @@ extern {
     #[cfg(windows)]
     fn d2i_X509(px: *mut X509, input: *const *const u8, len: c_int) -> *mut X509;
 
-    fn i2d_X509(px: *const X509, out: *mut *mut u8) -> c_int;
+    // STACK_OF
+    fn sk_num(stack: *const STACK_OF) -> c_int;
+    fn sk_value(stack: *const STACK_OF, idx: c_int) -> *mut c_void;
+
+    // CRYPTO_BUFFER
+    fn CRYPTO_BUFFER_len(buffer: *const CRYPTO_BUFFER) -> usize;
+    fn CRYPTO_BUFFER_data(buffer: *const CRYPTO_BUFFER) -> *const u8;
 
     // ERR
     fn ERR_peek_error() -> c_uint;
 
     fn ERR_error_string_n(err: c_uint, buf: *const u8, len: usize);
-
-    // OPENSSL
-    fn OPENSSL_free(ptr: *mut c_void);
 }
