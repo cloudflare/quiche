@@ -1466,6 +1466,10 @@ impl Connection {
     pub fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         let len = buf.len();
 
+        if len == 0 {
+            return Err(Error::BufferTooShort);
+        }
+
         // Keep track of how many bytes we received from the client, so we
         // can limit bytes sent back before address validation, to a multiple
         // of this. The limit needs to be increased early on, so that if there
@@ -6802,6 +6806,15 @@ mod tests {
         buf[0] = 255;
 
         assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
+    }
+
+    #[test]
+    fn recv_empty_buffer() {
+        let mut buf = [0; 65535];
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+        assert_eq!(pipe.server.recv(&mut buf[..0]), Err(Error::BufferTooShort));
     }
 
     #[test]
