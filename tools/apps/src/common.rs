@@ -966,12 +966,15 @@ impl Http3Conn {
             _ => (405, Vec::new()),
         };
 
-        let headers = vec![
+        let mut headers = vec![
             quiche::h3::Header::new(":status", &status.to_string()),
             quiche::h3::Header::new("server", "quiche"),
             quiche::h3::Header::new("content-length", &body.len().to_string()),
-            quiche::h3::Header::new("priority", &priority),
         ];
+
+        if !priority.is_empty() {
+            headers.push(quiche::h3::Header::new("priority", &priority));
+        }
 
         (headers, body, priority.to_string())
     }
