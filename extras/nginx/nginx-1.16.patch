@@ -1,4 +1,4 @@
-From 102fbb143dae085d1ff82c057c0c60b084e97ad6 Mon Sep 17 00:00:00 2001
+From 42efe5eee1df0066effe6a5cbd08f5d0eb523aee Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 22 Oct 2020 12:28:02 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -14,7 +14,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  auto/options                            |    9 +
  src/core/ngx_connection.h               |    7 +
  src/core/ngx_core.h                     |    3 +
- src/event/ngx_event_quic.c              |  591 ++++++
+ src/event/ngx_event_quic.c              |  604 ++++++
  src/event/ngx_event_quic.h              |   49 +
  src/event/ngx_event_udp.c               |    8 +
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
@@ -31,7 +31,8 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
- 27 files changed, 3934 insertions(+), 11 deletions(-)
+ src/os/unix/ngx_udp_sendmsg_chain.c     |    1 +
+ 28 files changed, 3948 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -339,10 +340,10 @@ index 93ca9174d..d0441f034 100644
  #include <ngx_module.h>
 diff --git a/src/event/ngx_event_quic.c b/src/event/ngx_event_quic.c
 new file mode 100644
-index 000000000..c7570bc4d
+index 000000000..aa7e8e697
 --- /dev/null
 +++ b/src/event/ngx_event_quic.c
-@@ -0,0 +1,591 @@
+@@ -0,0 +1,604 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -681,7 +682,13 @@ index 000000000..c7570bc4d
 +            return;
 +        }
 +
-+        if (ngx_quic_send_udp_packet(c, out, written) == NGX_ERROR) {
++        int rc = ngx_quic_send_udp_packet(c, out, written);
++
++        if (rc == NGX_AGAIN) {
++            break;
++        }
++
++        if (rc == NGX_ERROR) {
 +            ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0,
 +                           "failed to send quic packet");
 +
@@ -909,8 +916,9 @@ index 000000000..c7570bc4d
 +static ngx_int_t
 +ngx_quic_send_udp_packet(ngx_connection_t *c, uint8_t *buf, size_t len)
 +{
-+    ngx_buf_t    out_buf = {0};
-+    ngx_chain_t  out_chain = {0};
++    ngx_buf_t     out_buf = {0};
++    ngx_chain_t   out_chain = {0};
++    ngx_chain_t  *cl;
 +
 +    /* The send_chain() API takes an ngx_chain_t parameter instead of a simple
 +     * buffer, so we need to initialize the chain such that it contains only a
@@ -928,7 +936,13 @@ index 000000000..c7570bc4d
 +    out_chain.buf = &out_buf;
 +    out_chain.next = NULL;
 +
-+    if (c->send_chain(c, &out_chain, 0) == NGX_CHAIN_ERROR) {
++    cl = c->send_chain(c, &out_chain, 0);
++
++    if (cl != NULL) {
++        return NGX_AGAIN;
++    }
++
++    if (cl == NGX_CHAIN_ERROR) {
 +        return NGX_ERROR;
 +    }
 +
@@ -4517,6 +4531,18 @@ index 000000000..72e189def
 +
 +
 +#endif /* _NGX_HTTP_V3_MODULE_H_INCLUDED_ */
+diff --git a/src/os/unix/ngx_udp_sendmsg_chain.c b/src/os/unix/ngx_udp_sendmsg_chain.c
+index 5399c7916..9b03ca536 100644
+--- a/src/os/unix/ngx_udp_sendmsg_chain.c
++++ b/src/os/unix/ngx_udp_sendmsg_chain.c
+@@ -315,6 +315,7 @@ eintr:
+
+         switch (err) {
+         case NGX_EAGAIN:
++        case ENOBUFS:
+             ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, err,
+                            "sendmsg() not ready");
+             return NGX_AGAIN;
 -- 
 2.30.0
 
