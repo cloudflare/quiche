@@ -312,17 +312,17 @@ Depending on the NDK version used, you can take one of the following procedures:
 #### NDK version >= 19
 
 For NDK version 19 or higher (21 recommended), you can build in a simpler
-way using [cargo-ndk]. You need to install [cargo-ndk] first.
+way using [cargo-ndk]. You need to install [cargo-ndk] (v2.0 or later) first.
 
 ```bash
  $ cargo install cargo-ndk
 ```
 
 You can build the quiche library using the following procedure. Note that
-`--target` and `--android-platform` are mandatory.
+`-t <architecture>` and `-p <NDK version>` are mandatory.
 
 ```bash
- $ cargo ndk --target aarch64-linux-android --android-platform 21 -- build --features ffi
+ $ cargo ndk -t arm64-v8a -p 21 -- build --features ffi
 ```
 
 See [build_android_ndk19.sh] for more information.
