@@ -421,6 +421,6 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: ndk
-          args: -t ${{ matrix.arch }} -p ${{ env.NDK_LTS_VER }} -- build --verbose
+          args: -t ${{ matrix.arch }} -p ${{ env.NDK_LTS_VER }} -- build --verbose --features ffi
         env:
           ANDROID_NDK_HOME: ${{ github.workspace }}/android-ndk-r${{ env.NDK_LTS_VER  }}

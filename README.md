@@ -239,6 +239,9 @@ When running ``cargo build``, a static library called ``libquiche.a`` will be
 built automatically alongside the Rust one. This is fully stand-alone and can
 be linked directly into C/C++ applications.
 
+Note that in order to enable the FFI API, the ``ffi`` feature must be enabled (it
+is disabled by default), by passing ``--features ffi`` to ``cargo``.
+
 [thin C API]: https://github.com/cloudflare/quiche/blob/master/include/quiche.h
 
 Building
@@ -319,7 +322,7 @@ You can build the quiche library using the following procedure. Note that
 `--target` and `--android-platform` are mandatory.
 
 ```bash
- $ cargo ndk --target aarch64-linux-android --android-platform 21 -- build
+ $ cargo ndk --target aarch64-linux-android --android-platform 21 -- build --features ffi
 ```
 
 See [build_android_ndk19.sh] for more information.
@@ -383,13 +386,13 @@ To build quiche for iOS, you need the following:
 To build libquiche, run the following command:
 
 ```bash
- $ cargo lipo
+ $ cargo lipo --features ffi
 ```
 
 or
 
 ```bash
- $ cargo lipo --release
+ $ cargo lipo --features ffi --release
 ```
 
 iOS build is tested in Xcode 10.1 and Xcode 11.2.
