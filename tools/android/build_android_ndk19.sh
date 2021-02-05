@@ -21,11 +21,9 @@ fi
 
 echo "> building quiche for android API $API_LEVEL..."
 
-for target in \
-    aarch64-linux-android \
-    armv7-linux-androideabi \
-    i686-linux-android
+for arch in arm64-v8a armeabi-v7a x86_64 x86
 do
-    echo "> buliding $target..."
-    cargo ndk --target $target --android-platform $API_LEVEL -- build --features ffi $*
+    echo "> buliding $arch..."
+
+    cargo ndk -t $arch -p $API_LEVEL -- build --features ffi $*
 done
