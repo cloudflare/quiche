@@ -22,5 +22,5 @@ PATH="${TOOLCHAIN_DIR}/arch/arm64/bin":"${TOOLCHAIN_DIR}/arch/arm/bin":"${TOOLCH
 for target in aarch64-linux-android arm-linux-androideabi armv7-linux-androideabi i686-linux-android
 do
     echo "> target $target..."
-    cargo build --target $target $*
+    cargo build --target $target --features ffi $*
 done

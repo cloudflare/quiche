@@ -27,5 +27,5 @@ for target in \
     i686-linux-android
 do
     echo "> buliding $target..."
-    cargo ndk --target $target --android-platform $API_LEVEL -- build $*
+    cargo ndk --target $target --android-platform $API_LEVEL -- build --features ffi $*
 done
