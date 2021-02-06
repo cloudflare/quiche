@@ -50,6 +50,10 @@ quiche tools provided as part of the [quiche-apps](tools/apps/) crate.
 The client can be run as follows:
 
 ```bash
+ $ git clone git@github.com:cloudflare/quiche.git
+ $ cd quiche
+ $ git submodule init
+ $ git submodule update --recursive 
  $ cargo run --manifest-path=tools/apps/Cargo.toml --bin quiche-client -- https://cloudflare-quic.com/
 ```
 
