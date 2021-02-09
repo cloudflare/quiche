@@ -88,9 +88,6 @@ http {
         # Enable all TLS versions (TLSv1.3 is required for QUIC).
         ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
 
-        # Request buffering in not currently supported for HTTP/3.
-        proxy_request_buffering off;
-
         # Add Alt-Svc header to negotiate HTTP/3.
         add_header alt-svc 'h3-29=":443"; ma=86400';
     }
