@@ -1,4 +1,4 @@
-From 42efe5eee1df0066effe6a5cbd08f5d0eb523aee Mon Sep 17 00:00:00 2001
+From 8159b9f5ea2f6f0fbb31f78b629009d615c428d3 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 22 Oct 2020 12:28:02 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -14,7 +14,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  auto/options                            |    9 +
  src/core/ngx_connection.h               |    7 +
  src/core/ngx_core.h                     |    3 +
- src/event/ngx_event_quic.c              |  604 ++++++
+ src/event/ngx_event_quic.c              |  604 +++++++
  src/event/ngx_event_quic.h              |   49 +
  src/event/ngx_event_udp.c               |    8 +
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
@@ -26,13 +26,13 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   33 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2449 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2191 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   79 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
  src/os/unix/ngx_udp_sendmsg_chain.c     |    1 +
- 28 files changed, 3948 insertions(+), 11 deletions(-)
+ 28 files changed, 3690 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -127,7 +127,7 @@ index 000000000..23219d92a
 +fi
 diff --git a/auto/lib/quiche/make b/auto/lib/quiche/make
 new file mode 100644
-index 000000000..2e08b89c0
+index 000000000..6e5ede5bc
 --- /dev/null
 +++ b/auto/lib/quiche/make
 @@ -0,0 +1,23 @@
@@ -1490,43 +1490,36 @@ index fce70efe6..8ac19658c 100644
      ngx_http_log_handler_pt           log_handler;
  
 diff --git a/src/http/ngx_http_request_body.c b/src/http/ngx_http_request_body.c
-index c4f092e59..d6d85a30f 100644
+index c4f092e59..220cd142f 100644
 --- a/src/http/ngx_http_request_body.c
 +++ b/src/http/ngx_http_request_body.c
-@@ -85,6 +85,13 @@ ngx_http_read_client_request_body(ngx_http_request_t *r,
-     }
- #endif
+@@ -312,6 +312,12 @@ ngx_http_do_read_client_request_body(ngx_http_request_t *r)
+                             ngx_del_timer(c->read);
+                         }
  
 +#if (NGX_HTTP_V3)
-+    if (r->qstream) {
-+        rc = ngx_http_v3_read_request_body(r);
-+        goto done;
-+    }
++                        if (r->qstream) {
++                            return NGX_AGAIN;
++                        }
 +#endif
 +
-     preread = r->header_in->last - r->header_in->pos;
- 
-     if (preread) {
-@@ -226,6 +233,18 @@ ngx_http_read_unbuffered_request_body(ngx_http_request_t *r)
-     }
- #endif
+                         if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
+                             return NGX_HTTP_INTERNAL_SERVER_ERROR;
+                         }
+@@ -404,6 +410,12 @@ ngx_http_do_read_client_request_body(ngx_http_request_t *r)
+             clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+             ngx_add_timer(c->read, clcf->client_body_timeout);
  
 +#if (NGX_HTTP_V3)
-+    if (r->qstream) {
-+        rc = ngx_http_v3_read_unbuffered_request_body(r);
-+
-+        if (rc == NGX_OK) {
-+            r->reading_body = 0;
-+        }
-+
-+        return rc;
-+    }
++            if (r->qstream) {
++                return NGX_AGAIN;
++            }
 +#endif
 +
-     if (r->connection->read->timedout) {
-         r->connection->timedout = 1;
-         return NGX_HTTP_REQUEST_TIME_OUT;
-@@ -525,6 +544,17 @@ ngx_http_discard_request_body(ngx_http_request_t *r)
+             if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
+                 return NGX_HTTP_INTERNAL_SERVER_ERROR;
+             }
+@@ -525,6 +537,17 @@ ngx_http_discard_request_body(ngx_http_request_t *r)
      }
  #endif
  
@@ -1544,7 +1537,7 @@ index c4f092e59..d6d85a30f 100644
      if (ngx_http_test_expect(r) != NGX_OK) {
          return NGX_HTTP_INTERNAL_SERVER_ERROR;
      }
-@@ -808,6 +838,9 @@ ngx_http_test_expect(ngx_http_request_t *r)
+@@ -808,6 +831,9 @@ ngx_http_test_expect(ngx_http_request_t *r)
          || r->http_version < NGX_HTTP_VERSION_11
  #if (NGX_HTTP_V2)
          || r->stream != NULL
@@ -1554,6 +1547,20 @@ index c4f092e59..d6d85a30f 100644
  #endif
         )
      {
+@@ -848,6 +874,13 @@ ngx_http_test_expect(ngx_http_request_t *r)
+ static ngx_int_t
+ ngx_http_request_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+ {
++
++#if (NGX_HTTP_V3)
++    if (r->qstream) {
++        return ngx_http_v3_request_body_filter(r, in);
++    }
++#endif
++
+     if (r->headers_in.chunked) {
+         return ngx_http_request_body_chunked_filter(r, in);
+ 
 diff --git a/src/http/ngx_http_upstream.c b/src/http/ngx_http_upstream.c
 index a7391d09a..398af2797 100644
 --- a/src/http/ngx_http_upstream.c
@@ -1587,10 +1594,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..4393cfa24
+index 000000000..2e536f3ff
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2449 @@
+@@ -0,0 +1,2191 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -1649,11 +1656,9 @@ index 000000000..4393cfa24
 +static ngx_int_t ngx_http_v3_construct_request_line(ngx_http_request_t *r);
 +
 +static void ngx_http_v3_run_request(ngx_http_request_t *r);
-+static ngx_int_t ngx_http_v3_process_request_body(ngx_http_request_t *r,
-+    ngx_uint_t do_read, ngx_uint_t last);
-+static ngx_int_t ngx_http_v3_filter_request_body(ngx_http_request_t *r);
-+static void ngx_http_v3_read_client_request_body_handler(ngx_http_request_t *r);
 +
++static ssize_t ngx_http_v3_recv_body(ngx_connection_t *c, u_char *buf,
++    size_t size);
 +static ngx_chain_t *ngx_http_v3_send_chain(ngx_connection_t *fc,
 +    ngx_chain_t *in, off_t limit);
 +
@@ -1901,53 +1906,6 @@ index 000000000..4393cfa24
 +}
 +
 +
-+static ngx_int_t
-+ngx_http_v3_process_data(ngx_connection_t *c, int64_t stream_id)
-+{
-+    int                        rc;
-+    ngx_http_request_t        *r;
-+    ngx_http_v3_stream_t      *stream;
-+    ngx_http_v3_connection_t  *h3c;
-+
-+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0, "http3 process data");
-+
-+    h3c = c->data;
-+
-+    stream = ngx_http_v3_stream_lookup(h3c, stream_id);
-+
-+    if (stream == NULL) {
-+
-+        return NGX_OK;
-+    }
-+
-+    if (stream->skip_data) {
-+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0,
-+                       "skipping http3 DATA frame");
-+
-+        return NGX_OK;
-+    }
-+
-+    r = stream->request;
-+
-+    if (!r->request_body) {
-+        return NGX_AGAIN;
-+    }
-+
-+    rc = ngx_http_v3_process_request_body(r, 1, stream->in_closed);
-+
-+    if (rc == NGX_AGAIN) {
-+        return NGX_AGAIN;
-+    }
-+
-+    if (rc != NGX_OK) {
-+        stream->skip_data = 1;
-+        ngx_http_finalize_request(r, rc);
-+    }
-+
-+    return NGX_OK;
-+}
-+
-+
 +static void
 +ngx_http_v3_process_blocked_streams(ngx_http_v3_connection_t *h3c)
 +{
@@ -1995,6 +1953,7 @@ index 000000000..4393cfa24
 +static void
 +ngx_http_v3_handler(ngx_connection_t *c)
 +{
++    ngx_chain_t                out;
 +    ngx_http_v3_connection_t  *h3c;
 +    ngx_http_v3_stream_t      *stream;
 +
@@ -2038,11 +1997,16 @@ index 000000000..4393cfa24
 +            }
 +
 +            case QUICHE_H3_EVENT_DATA: {
-+                if (ngx_http_v3_process_data(c, stream_id) == NGX_AGAIN) {
-+                    quiche_h3_event_free(ev);
++                /* Lookup stream. If there isn't one, it means it has already
++                 * been closed, so ignore the event. */
++                stream = ngx_http_v3_stream_lookup(h3c, stream_id);
 +
-+                    ngx_http_v3_handle_connection(h3c);
-+                    return;
++                if (stream != NULL && !stream->in_closed) {
++                    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0,
++                                   "http3 data");
++
++                    ngx_post_event(stream->request->connection->read,
++                                   &ngx_posted_events);
 +                }
 +
 +                break;
@@ -2057,12 +2021,18 @@ index 000000000..4393cfa24
 +                    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0,
 +                                   "http3 finished");
 +
-+                    stream->in_closed = 1;
-+
 +                    /* Flush request body that was buffered. */
 +                    if (stream->request->request_body) {
-+                        ngx_http_v3_process_request_body(stream->request, 0, 1);
++                        out.buf = stream->request->request_body->buf;
++                        out.next = NULL;
++
++                        ngx_http_v3_request_body_filter(stream->request, &out);
++
++                        ngx_post_event(stream->request->connection->read,
++                                       &ngx_posted_events);
 +                    }
++
++                    stream->in_closed = 1;
 +                }
 +
 +                break;
@@ -2224,6 +2194,8 @@ index 000000000..4393cfa24
 +    fc->buffered = 0;
 +    fc->sndlowat = 1;
 +    fc->tcp_nodelay = NGX_TCP_NODELAY_DISABLED;
++
++    fc->recv = ngx_http_v3_recv_body;
 +
 +    fc->send_chain = ngx_http_v3_send_chain;
 +    fc->need_last_buf = 1;
@@ -2858,366 +2830,84 @@ index 000000000..4393cfa24
 +}
 +
 +
++/* End of functions copied from HTTP/2 module. */
++
++
 +ngx_int_t
-+ngx_http_v3_read_request_body(ngx_http_request_t *r)
++ngx_http_v3_request_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 +{
-+    off_t                      len;
-+    ngx_http_v3_stream_t      *stream;
++    size_t                     size;
++    ngx_int_t                  rc;
++    ngx_buf_t                 *b;
++    ngx_chain_t               *cl, *tl, *out, **ll;
++    ngx_connection_t          *c;
 +    ngx_http_request_body_t   *rb;
 +    ngx_http_core_loc_conf_t  *clcf;
 +
-+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-+                   "http3 read request body");
++    c = r->qstream->connection->connection;
 +
-+    stream = r->qstream;
 +    rb = r->request_body;
-+
-+    if (stream->skip_data) {
-+        r->request_body_no_buffering = 0;
-+        rb->post_handler(r);
-+        return NGX_OK;
-+    }
 +
 +    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 +
-+    len = r->headers_in.content_length_n;
++    if (rb->rest == -1) {
++        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
++                       "http3 request body filter");
 +
-+    if (r->request_body_no_buffering && !stream->in_closed) {
++        rb->rest = clcf->client_body_buffer_size;
++    }
 +
-+        if (len < 0 || len > (off_t) clcf->client_body_buffer_size) {
-+            len = clcf->client_body_buffer_size;
++    out = NULL;
++    ll = &out;
++
++    for (cl = in; cl; cl = cl->next) {
++
++        if (rb->rest == 0) {
++            break;
 +        }
 +
-+        rb->buf = ngx_create_temp_buf(r->pool, (size_t) len);
-+
-+    } else if (len >= 0 && len <= (off_t) clcf->client_body_buffer_size
-+               && !r->request_body_in_file_only)
-+    {
-+        rb->buf = ngx_create_temp_buf(r->pool, (size_t) len);
-+
-+    } else {
-+        rb->buf = ngx_calloc_buf(r->pool);
-+
-+        if (rb->buf != NULL) {
-+            rb->buf->sync = 1;
-+        }
-+    }
-+
-+    if (rb->buf == NULL) {
-+        stream->skip_data = 1;
-+
-+        /* disable stream read to avoid pointless data events */
-+        ngx_http_v3_stop_stream_read(stream, 0);
-+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
-+    }
-+
-+    rb->rest = 1;
-+
-+    if (stream->in_closed) {
-+        r->request_body_no_buffering = 0;
-+
-+        return ngx_http_v3_process_request_body(r, 0, 1);
-+    }
-+
-+    /* TODO: set timer */
-+    ngx_add_timer(r->connection->read, clcf->client_body_timeout);
-+
-+    r->read_event_handler = ngx_http_v3_read_client_request_body_handler;
-+    r->write_event_handler = ngx_http_request_empty_handler;
-+
-+    return NGX_AGAIN;
-+}
-+
-+
-+static ngx_int_t
-+ngx_http_v3_process_request_body(ngx_http_request_t *r, ngx_uint_t do_read,
-+    ngx_uint_t last)
-+{
-+    ssize_t                    len = 0;
-+    ngx_buf_t                 *buf;
-+    ngx_int_t                  rc;
-+    ngx_connection_t          *c, *fc;
-+    ngx_http_v3_connection_t  *h3c;
-+    ngx_http_request_body_t   *rb;
-+    ngx_http_core_loc_conf_t  *clcf;
-+
-+    fc = r->connection;
-+    h3c = r->qstream->connection;
-+    c = h3c->connection;
-+
-+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0, "http3 process request body");
-+
-+    rb = r->request_body;
-+    buf = rb->buf;
-+
-+    if (buf->sync) {
-+        buf->pos = buf->start;
-+        buf->last = buf->start;
-+
-+        r->request_body_in_file_only = 1;
-+    }
-+
-+    if (do_read) {
-+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-+                       "http3 reading %z bytes of request body",
-+                       buf->end - buf->last);
-+
-+        if (buf->last == buf->end) {
-+            return NGX_AGAIN;
++        tl = ngx_chain_get_free_buf(r->pool, &rb->free);
++        if (tl == NULL) {
++            return NGX_HTTP_INTERNAL_SERVER_ERROR;
 +        }
 +
-+        len = quiche_h3_recv_body(h3c->h3, c->quic->conn, r->qstream->id,
-+                                  buf->last, buf->end - buf->last);
++        b = tl->buf;
 +
-+        if (len == QUICHE_H3_ERR_DONE) {
-+            return NGX_AGAIN;
-+        }
-+
-+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-+                       "http3 read %z bytes of request body", len);
-+
-+        buf->last += len;
-+    }
-+
-+    if (last) {
-+        rb->rest = 0;
-+
-+        if (fc->read->timer_set) {
-+            ngx_del_timer(fc->read);
-+        }
-+
-+        if (r->request_body_no_buffering) {
-+            ngx_post_event(fc->read, &ngx_posted_events);
-+            return NGX_OK;
-+        }
-+
-+        rc = ngx_http_v3_filter_request_body(r);
-+
-+        if (rc != NGX_OK) {
-+            return rc;
-+        }
-+
-+        if (buf->sync) {
-+            /* prevent reusing this buffer in the upstream module */
-+            rb->buf = NULL;
-+        }
-+
-+        if (r->headers_in.chunked) {
-+            r->headers_in.content_length_n = rb->received;
-+        }
-+
-+        r->read_event_handler = ngx_http_block_reading;
-+        rb->post_handler(r);
-+
-+        return NGX_OK;
-+    }
-+
-+    if (len == 0) {
-+        return NGX_OK;
-+    }
-+
-+    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-+    ngx_add_timer(fc->read, clcf->client_body_timeout);
-+
-+    if (r->request_body_no_buffering) {
-+        ngx_post_event(fc->read, &ngx_posted_events);
-+        return NGX_AGAIN;
-+    }
-+
-+    if (buf->sync) {
-+        return ngx_http_v3_filter_request_body(r);
-+    }
-+
-+    return NGX_OK;
-+}
-+
-+
-+static ngx_int_t
-+ngx_http_v3_filter_request_body(ngx_http_request_t *r)
-+{
-+    ngx_buf_t                 *b, *buf;
-+    ngx_int_t                  rc;
-+    ngx_chain_t               *cl;
-+    ngx_http_request_body_t   *rb;
-+    ngx_http_core_loc_conf_t  *clcf;
-+
-+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-+                   "http3 filter request body");
-+
-+    rb = r->request_body;
-+    buf = rb->buf;
-+
-+    if (buf->pos == buf->last && rb->rest) {
-+        cl = NULL;
-+        goto update;
-+    }
-+
-+    cl = ngx_chain_get_free_buf(r->pool, &rb->free);
-+    if (cl == NULL) {
-+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
-+    }
-+
-+    b = cl->buf;
-+
-+    ngx_memzero(b, sizeof(ngx_buf_t));
-+
-+    if (buf->pos != buf->last) {
-+        r->request_length += buf->last - buf->pos;
-+        rb->received += buf->last - buf->pos;
-+
-+        if (r->headers_in.content_length_n != -1) {
-+            if (rb->received > r->headers_in.content_length_n) {
-+                ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
-+                              "client intended to send body data "
-+                              "larger than declared");
-+
-+                return NGX_HTTP_BAD_REQUEST;
-+            }
-+
-+        } else {
-+            clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-+
-+            if (clcf->client_max_body_size
-+                && rb->received > clcf->client_max_body_size)
-+            {
-+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-+                              "client intended to send too large chunked body: "
-+                              "%O bytes", rb->received);
-+
-+                return NGX_HTTP_REQUEST_ENTITY_TOO_LARGE;
-+            }
-+        }
++        ngx_memzero(b, sizeof(ngx_buf_t));
 +
 +        b->temporary = 1;
-+        b->pos = buf->pos;
-+        b->last = buf->last;
-+        b->start = b->pos;
-+        b->end = b->last;
++        b->tag = (ngx_buf_tag_t) &ngx_http_read_client_request_body;
++        b->start = cl->buf->pos;
++        b->pos = cl->buf->pos;
++        b->last = cl->buf->last;
++        b->end = cl->buf->end;
++        b->flush = r->request_body_no_buffering;
 +
-+        buf->pos = buf->last;
-+    }
++        size = cl->buf->last - cl->buf->pos;
 +
-+    if (!rb->rest) {
-+        if (r->headers_in.content_length_n != -1
-+            && r->headers_in.content_length_n != rb->received)
-+        {
-+            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
-+                          "client prematurely closed stream: "
-+                          "only %O out of %O bytes of request body received",
-+                          rb->received, r->headers_in.content_length_n);
++        cl->buf->pos = cl->buf->last;
 +
-+            return NGX_HTTP_BAD_REQUEST;
++        if (r->headers_in.chunked) {
++            r->headers_in.content_length_n += size;
 +        }
 +
-+        b->last_buf = 1;
++        if (quiche_conn_stream_finished(c->quic->conn, r->qstream->id)) {
++            rb->rest = 0;
++            b->last = cl->buf->pos;
++            b->last_buf = 1;
++        }
++
++        *ll = tl;
++        ll = &tl->next;
 +    }
 +
-+    b->tag = (ngx_buf_tag_t) &ngx_http_v3_filter_request_body;
-+    b->flush = r->request_body_no_buffering;
++    rc = ngx_http_top_request_body_filter(r, out);
 +
-+update:
-+
-+    rc = ngx_http_top_request_body_filter(r, cl);
-+
-+    ngx_chain_update_chains(r->pool, &rb->free, &rb->busy, &cl,
-+                            (ngx_buf_tag_t) &ngx_http_v3_filter_request_body);
++    ngx_chain_update_chains(r->pool, &rb->free, &rb->busy, &out,
++                            (ngx_buf_tag_t) &ngx_http_read_client_request_body);
 +
 +    return rc;
 +}
-+
-+
-+static void
-+ngx_http_v3_read_client_request_body_handler(ngx_http_request_t *r)
-+{
-+    ngx_connection_t  *fc;
-+
-+    fc = r->connection;
-+
-+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, fc->log, 0,
-+                   "http3 read client request body handler");
-+
-+    if (fc->read->timedout) {
-+        ngx_log_error(NGX_LOG_INFO, fc->log, NGX_ETIMEDOUT, "client timed out");
-+
-+        fc->timedout = 1;
-+        r->qstream->skip_data = 1;
-+
-+        ngx_http_finalize_request(r, NGX_HTTP_REQUEST_TIME_OUT);
-+        return;
-+    }
-+
-+    if (fc->error) {
-+        ngx_log_error(NGX_LOG_INFO, fc->log, 0,
-+                      "client prematurely closed stream");
-+
-+        r->qstream->skip_data = 1;
-+
-+        ngx_http_finalize_request(r, NGX_HTTP_CLIENT_CLOSED_REQUEST);
-+        return;
-+    }
-+}
-+
-+
-+ngx_int_t
-+ngx_http_v3_read_unbuffered_request_body(ngx_http_request_t *r)
-+{
-+    ngx_buf_t                 *buf;
-+    ngx_int_t                  rc;
-+    ngx_connection_t          *fc;
-+    ngx_http_v3_stream_t      *stream;
-+
-+    stream = r->qstream;
-+    fc = r->connection;
-+
-+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, fc->log, 0,
-+                   "http3 read unbuffered request body");
-+
-+    if (fc->read->timedout) {
-+        stream->skip_data = 1;
-+        fc->timedout = 1;
-+
-+        /* disable stream read to avoid pointless data events */
-+        ngx_http_v3_stop_stream_read(stream, 0);
-+
-+        return NGX_HTTP_REQUEST_TIME_OUT;
-+    }
-+
-+    if (fc->error) {
-+        stream->skip_data = 1;
-+        return NGX_HTTP_BAD_REQUEST;
-+    }
-+
-+    rc = ngx_http_v3_filter_request_body(r);
-+
-+    if (rc != NGX_OK) {
-+        stream->skip_data = 1;
-+
-+        /* disable stream read to avoid pointless data events */
-+        ngx_http_v3_stop_stream_read(stream, 0);
-+
-+        return rc;
-+    }
-+
-+    if (!r->request_body->rest) {
-+        return NGX_OK;
-+    }
-+
-+    if (r->request_body->busy != NULL) {
-+        return NGX_AGAIN;
-+    }
-+
-+    buf = r->request_body->buf;
-+
-+    buf->pos = buf->start;
-+    buf->last = buf->start;
-+
-+    ngx_post_event(stream->connection->connection->read, &ngx_posted_events);
-+
-+    return NGX_AGAIN;
-+}
-+
-+
-+/* End of functions copied from HTTP/2 module. */
 +
 +
 +size_t
@@ -3773,6 +3463,65 @@ index 000000000..4393cfa24
 +}
 +
 +
++static ssize_t
++ngx_http_v3_recv_body(ngx_connection_t *c, u_char *buf, size_t size)
++{
++    ssize_t                    n;
++    ngx_event_t               *rev;
++    ngx_http_request_t        *r;
++    ngx_http_v3_connection_t  *h3c;
++
++    rev = c->read;
++
++    r = c->data;
++    h3c = r->qstream->connection;
++
++    n = quiche_h3_recv_body(h3c->h3, c->quic->conn, r->qstream->id, buf, size);
++
++    ngx_log_debug2(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                   "http3 body recv: %z of %uz", n, size);
++
++    if (quiche_conn_stream_finished(c->quic->conn, r->qstream->id)) {
++        /* Re-schedule connection read event to poll for Finished event. */
++        ngx_post_event(h3c->connection->read, &ngx_posted_events);
++    }
++
++    if (n == 0) {
++        rev->ready = 0;
++
++        return 0;
++    }
++
++    if (n > 0) {
++
++        if ((size_t) n < size) {
++            rev->ready = 0;
++        }
++
++        return n;
++    }
++
++    if (n == QUICHE_H3_ERR_DONE) {
++        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                       "quiche_h3_recv_body() not ready");
++
++        n = NGX_AGAIN;
++
++    } else {
++        /* n = ngx_connection_error(c, err, "recv() failed"); */
++        n = NGX_ERROR;
++    }
++
++    rev->ready = 0;
++
++    if (n == NGX_ERROR) {
++        rev->error = 1;
++    }
++
++    return n;
++}
++
++
 +static ngx_chain_t *
 +ngx_http_v3_send_chain(ngx_connection_t *fc, ngx_chain_t *in, off_t limit)
 +{
@@ -4042,7 +3791,7 @@ index 000000000..4393cfa24
 +}
 diff --git a/src/http/v3/ngx_http_v3.h b/src/http/v3/ngx_http_v3.h
 new file mode 100644
-index 000000000..2ac1f4593
+index 000000000..f8415a999
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.h
 @@ -0,0 +1,79 @@
@@ -4115,13 +3864,13 @@ index 000000000..2ac1f4593
 +
 +void ngx_http_v3_init(ngx_event_t *rev);
 +
-+ngx_int_t ngx_http_v3_read_request_body(ngx_http_request_t *r);
-+ngx_int_t ngx_http_v3_read_unbuffered_request_body(ngx_http_request_t *r);
-+
 +ngx_int_t ngx_http_v3_send_response(ngx_http_request_t *r);
 +
 +void ngx_http_v3_close_stream(ngx_http_v3_stream_t *stream, ngx_int_t rc);
 +void ngx_http_v3_stop_stream_read(ngx_http_v3_stream_t *stream, ngx_int_t rc);
++
++ngx_int_t ngx_http_v3_request_body_filter(ngx_http_request_t *r,
++    ngx_chain_t *in);
 +
 +
 +#endif /* _NGX_HTTP_V3_H_INCLUDED_ */
@@ -4536,7 +4285,7 @@ index 5399c7916..9b03ca536 100644
 --- a/src/os/unix/ngx_udp_sendmsg_chain.c
 +++ b/src/os/unix/ngx_udp_sendmsg_chain.c
 @@ -315,6 +315,7 @@ eintr:
-
+ 
          switch (err) {
          case NGX_EAGAIN:
 +        case ENOBUFS:
@@ -4544,5 +4293,5 @@ index 5399c7916..9b03ca536 100644
                             "sendmsg() not ready");
              return NGX_AGAIN;
 -- 
-2.30.0
+2.30.2
 
