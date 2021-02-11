@@ -39,7 +39,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --examples --verbose --features qlog
+          args: --tests --examples --verbose --features qlog
 
       - name: Run cargo package
         uses: actions-rs/cargo@v1
