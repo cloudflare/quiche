@@ -42,8 +42,11 @@ fn main() {
 
     match connect(args, conn_args, stdout_sink) {
         Err(ClientError::HandshakeFail) => std::process::exit(-1),
+
         Err(ClientError::HttpFail) => std::process::exit(-2),
-        Err(ClientError::Other(e)) => panic!(e),
+
+        Err(ClientError::Other(e)) => panic!("{}", e),
+
         Ok(_) => (),
     }
 }
