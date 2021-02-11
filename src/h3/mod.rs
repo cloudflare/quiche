@@ -656,6 +656,7 @@ pub struct Connection {
     qpack_encoder: qpack::Encoder,
     qpack_decoder: qpack::Decoder,
 
+    #[allow(dead_code)]
     local_qpack_streams: QpackStreams,
     peer_qpack_streams: QpackStreams,
 
