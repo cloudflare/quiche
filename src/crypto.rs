@@ -297,7 +297,7 @@ pub fn derive_initial_key_material(
     let key_len = aead.key_len();
     let nonce_len = aead.nonce_len();
 
-    let initial_secret = derive_initial_secret(&cid, version)?;
+    let initial_secret = derive_initial_secret(&cid, version);
 
     // Client.
     let mut client_key = vec![0; key_len];
@@ -334,7 +334,7 @@ pub fn derive_initial_key_material(
     Ok((open, seal))
 }
 
-fn derive_initial_secret(secret: &[u8], version: u32) -> Result<hkdf::Prk> {
+fn derive_initial_secret(secret: &[u8], version: u32) -> hkdf::Prk {
     const INITIAL_SALT: [u8; 20] = [
         0xaf, 0xbf, 0xec, 0x28, 0x99, 0x93, 0xd2, 0x4c, 0x9e, 0x97, 0x86, 0xf1,
         0x9c, 0x61, 0x11, 0xe0, 0x43, 0x90, 0xa8, 0x99,
@@ -353,7 +353,7 @@ fn derive_initial_secret(secret: &[u8], version: u32) -> Result<hkdf::Prk> {
     };
 
     let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, salt);
-    Ok(salt.extract(secret))
+    salt.extract(secret)
 }
 
 fn derive_client_initial_secret(prk: &hkdf::Prk, out: &mut [u8]) -> Result<()> {
@@ -469,7 +469,7 @@ mod tests {
         let aead = Algorithm::AES128_GCM;
 
         let initial_secret =
-            derive_initial_secret(&dcid, crate::PROTOCOL_VERSION).unwrap();
+            derive_initial_secret(&dcid, crate::PROTOCOL_VERSION);
 
         // Client.
         assert!(
@@ -548,8 +548,7 @@ mod tests {
         let aead = Algorithm::AES128_GCM;
 
         let initial_secret =
-            derive_initial_secret(&dcid, crate::PROTOCOL_VERSION_DRAFT28)
-                .unwrap();
+            derive_initial_secret(&dcid, crate::PROTOCOL_VERSION_DRAFT28);
 
         // Client.
         assert!(
