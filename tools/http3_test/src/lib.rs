@@ -300,7 +300,7 @@ macro_rules! assert_headers {
                     Some(h) => { assert_eq!(hdr.value(), h.value());},
 
                     None => {
-                        panic!(format!("assertion failed: expected response header field {} not present!", hdr.name()));
+                        panic!("assertion failed: expected response header field {} not present!", hdr.name());
                     }
                 }
             }
@@ -314,7 +314,7 @@ macro_rules! assert_headers {
                     Some(h) => { assert_eq!(hdr.value(), h.value(), $($arg)+);},
 
                     None => {
-                        panic!(format!("assertion failed: expected response header field {} not present! {}", hdr.name(), $($arg)+));
+                        panic!("assertion failed: expected response header field {} not present! {}", hdr.name(), $($arg)+);
                     }
                 }
             }
