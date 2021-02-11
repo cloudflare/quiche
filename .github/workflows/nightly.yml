@@ -4,7 +4,7 @@ name: Nightly
 
 env:
   RUSTFLAGS: "-D warnings"
-  TOOLCHAIN: "nightly-2020-10-25"
+  TOOLCHAIN: "nightly"
 
 jobs:
   quiche:
