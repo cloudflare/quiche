@@ -76,7 +76,6 @@ impl Rate {
 
         if pkt.delivered > self.rate_sample.prior_delivered {
             self.rate_sample.prior_delivered = pkt.delivered;
-            self.rate_sample.is_app_limited = pkt.is_app_limited;
 
             self.rate_sample.send_elapsed =
                 pkt.time_sent - pkt.recent_delivered_packet_sent_time;
@@ -148,8 +147,6 @@ impl std::fmt::Debug for Rate {
 #[derive(Default)]
 struct RateSample {
     delivery_rate: u64,
-
-    is_app_limited: bool,
 
     interval: Duration,
 
