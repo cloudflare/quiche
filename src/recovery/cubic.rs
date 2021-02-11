@@ -27,7 +27,7 @@
 //! CUBIC Congestion Control
 //!
 //! This implementation is based on the following RFC:
-//! https://tools.ietf.org/html/rfc8312
+//! <https://tools.ietf.org/html/rfc8312>
 //!
 //! Note that Slow Start can use HyStart++ when enabled.
 

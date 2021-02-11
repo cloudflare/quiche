@@ -27,7 +27,7 @@
 //! Delivery rate estimation.
 //!
 //! This implements the algorithm for estimating delivery rate as described in
-//! https://tools.ietf.org/html/draft-cheng-iccrg-delivery-rate-estimation-00
+//! <https://tools.ietf.org/html/draft-cheng-iccrg-delivery-rate-estimation-00>
 
 use std::cmp;
 
