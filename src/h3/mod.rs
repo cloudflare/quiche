@@ -675,6 +675,7 @@ pub struct Connection {
 }
 
 impl Connection {
+    #[allow(clippy::unnecessary_wraps)]
     fn new(
         config: &Config, is_server: bool, enable_dgram: bool,
     ) -> Result<Connection> {

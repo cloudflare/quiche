@@ -260,6 +260,9 @@
 //! [`CongestionControlAlgorithm`]: enum.CongestionControlAlgorithm.html
 
 #![allow(improper_ctypes)]
+
+#![allow(clippy::suspicious_operation_groupings)]
+
 #![warn(missing_docs)]
 
 #[macro_use]
