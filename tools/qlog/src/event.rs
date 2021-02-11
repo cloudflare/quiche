@@ -919,68 +919,79 @@ impl Event {
             (
                 EventCategory::Connectivity,
                 EventType::ConnectivityEventType(_),
-            ) => matches!(&self.data,
+            ) => matches!(
+                &self.data,
                 EventData::ServerListening { .. } |
-                EventData::ConnectionStarted { .. } |
-                EventData::ConnectionIdUpdated { .. } |
-                EventData::SpinBitUpdated { .. } |
-                EventData::ConnectionStateUpdated { .. }),
+                    EventData::ConnectionStarted { .. } |
+                    EventData::ConnectionIdUpdated { .. } |
+                    EventData::SpinBitUpdated { .. } |
+                    EventData::ConnectionStateUpdated { .. }
+            ),
 
             (EventCategory::Transport, EventType::TransportEventType(_)) =>
-                matches!(&self.data,
+                matches!(
+                    &self.data,
                     EventData::TransportParametersSet { .. } |
-                    EventData::DatagramsReceived { .. } |
-                    EventData::DatagramsSent { .. } |
-                    EventData::DatagramDropped { .. } |
-                    EventData::PacketReceived { .. } |
-                    EventData::PacketSent { .. } |
-                    EventData::PacketDropped { .. } |
-                    EventData::PacketBuffered { .. } |
-                    EventData::StreamStateUpdated { .. } |
-                    EventData::FramesProcessed { .. }),
+                        EventData::DatagramsReceived { .. } |
+                        EventData::DatagramsSent { .. } |
+                        EventData::DatagramDropped { .. } |
+                        EventData::PacketReceived { .. } |
+                        EventData::PacketSent { .. } |
+                        EventData::PacketDropped { .. } |
+                        EventData::PacketBuffered { .. } |
+                        EventData::StreamStateUpdated { .. } |
+                        EventData::FramesProcessed { .. }
+                ),
 
             (EventCategory::Security, EventType::SecurityEventType(_)) =>
-                matches!(&self.data,
-                    EventData::KeyUpdated { .. } |
-                    EventData::KeyRetired { .. }),
+                matches!(
+                    &self.data,
+                    EventData::KeyUpdated { .. } | EventData::KeyRetired { .. }
+                ),
 
             (EventCategory::Recovery, EventType::RecoveryEventType(_)) =>
-                matches!(&self.data,
+                matches!(
+                    &self.data,
                     EventData::RecoveryParametersSet { .. } |
-                    EventData::MetricsUpdated { .. } |
-                    EventData::CongestionStateUpdated { .. } |
-                    EventData::LossTimerSet { .. } |
-                    EventData::PacketLost { .. } |
-                    EventData::MarkedForRetransmit { .. }),
+                        EventData::MetricsUpdated { .. } |
+                        EventData::CongestionStateUpdated { .. } |
+                        EventData::LossTimerSet { .. } |
+                        EventData::PacketLost { .. } |
+                        EventData::MarkedForRetransmit { .. }
+                ),
 
-            (EventCategory::Http, EventType::Http3EventType(_)) =>
-                matches!(&self.data,
-                    EventData::H3ParametersSet { .. } |
+            (EventCategory::Http, EventType::Http3EventType(_)) => matches!(
+                &self.data,
+                EventData::H3ParametersSet { .. } |
                     EventData::H3StreamTypeSet { .. } |
                     EventData::H3FrameCreated { .. } |
                     EventData::H3FrameParsed { .. } |
                     EventData::H3DataMoved { .. } |
-                    EventData::H3PushResolved { .. }),
+                    EventData::H3PushResolved { .. }
+            ),
 
-            (EventCategory::Qpack, EventType::QpackEventType(_)) =>
-                matches!(&self.data,
-                    EventData::QpackStateUpdated { .. } |
+            (EventCategory::Qpack, EventType::QpackEventType(_)) => matches!(
+                &self.data,
+                EventData::QpackStateUpdated { .. } |
                     EventData::QpackStreamStateUpdated { .. } |
                     EventData::QpackDynamicTableUpdated { .. } |
                     EventData::QpackHeadersEncoded { .. } |
                     EventData::QpackHeadersDecoded { .. } |
                     EventData::QpackInstructionSent { .. } |
-                    EventData::QpackInstructionReceived { .. }),
+                    EventData::QpackInstructionReceived { .. }
+            ),
 
             // TODO: in qlog-01 there is no sane default category defined for
             // GenericEventType
-            (_, EventType::GenericEventType(_)) => matches!(&self.data,
+            (_, EventType::GenericEventType(_)) => matches!(
+                &self.data,
                 EventData::ConnectionError { .. } |
-                EventData::ApplicationError { .. } |
-                EventData::InternalError { .. } |
-                EventData::InternalWarning { .. } |
-                EventData::Message { .. } |
-                EventData::Marker { .. }),
+                    EventData::ApplicationError { .. } |
+                    EventData::InternalError { .. } |
+                    EventData::InternalWarning { .. } |
+                    EventData::Message { .. } |
+                    EventData::Marker { .. }
+            ),
 
             _ => false,
         }
