@@ -28,7 +28,7 @@
 //!
 //! This implementation is based on the following I-D:
 //!
-//! https://tools.ietf.org/html/draft-balasubramanian-tcpm-hystartplusplus-03
+//! <https://tools.ietf.org/html/draft-balasubramanian-tcpm-hystartplusplus-03>
 
 use std::cmp;
 use std::time::Duration;
