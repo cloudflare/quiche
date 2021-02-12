@@ -47,7 +47,7 @@ Getting Started
 Before diving into the quiche API, here are a few examples on how to use the
 quiche tools provided as part of the [quiche-apps](tools/apps/) crate.
 
-The client can be run as follows:
+After cloning the project according to the command mentioned in the [building](#building) section, the client can be run as follows:
 
 ```bash
  $ cargo run --manifest-path=tools/apps/Cargo.toml --bin quiche-client -- https://cloudflare-quic.com/
