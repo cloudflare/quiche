@@ -884,6 +884,9 @@ pub struct Connection {
     /// Whether we send MAX_DATA frame.
     almost_full: bool,
 
+    /// Number of stream data bytes that can be buffered.
+    tx_cap: usize,
+
     /// Total number of bytes sent to the peer.
     tx_data: u64,
 
@@ -1238,6 +1241,8 @@ impl Connection {
             max_rx_data,
             max_rx_data_next: max_rx_data,
             almost_full: false,
+
+            tx_cap: 0,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -1978,6 +1983,12 @@ impl Connection {
         if let Some(idle_timeout) = self.idle_timeout() {
             self.idle_timer = Some(now + idle_timeout);
         }
+
+        // Update send capacity.
+        self.tx_cap = cmp::min(
+            self.recovery.cwnd_available() as u64,
+            self.max_tx_data - self.tx_data,
+        ) as usize;
 
         self.recv_count += 1;
 
@@ -3007,7 +3018,7 @@ impl Connection {
 
         // Truncate the input buffer based on the connection's send capacity if
         // necessary.
-        let cap = self.send_capacity();
+        let cap = self.tx_cap;
 
         let (buf, fin) = if cap < buf.len() {
             (&buf[..cap], false)
@@ -3061,6 +3072,8 @@ impl Connection {
         if !writable {
             self.streams.mark_writable(stream_id, false);
         }
+
+        self.tx_cap -= sent;
 
         self.tx_data += sent as u64;
 
@@ -3173,7 +3186,7 @@ impl Connection {
     #[inline]
     pub fn stream_capacity(&self, stream_id: u64) -> Result<usize> {
         if let Some(stream) = self.streams.get(stream_id) {
-            let cap = cmp::min(self.send_capacity(), stream.send.cap()?);
+            let cap = cmp::min(self.tx_cap, stream.send.cap()?);
             return Ok(cap);
         };
 
@@ -3328,7 +3341,7 @@ impl Connection {
     pub fn writable(&self) -> StreamIter {
         // If there is not enough connection-level send capacity, none of the
         // streams are writable, so return an empty iterator.
-        if self.send_capacity() == 0 {
+        if self.tx_cap == 0 {
             return StreamIter::default();
         }
 
@@ -4350,12 +4363,6 @@ impl Connection {
         let idle_timeout = cmp::max(idle_timeout, 3 * self.recovery.pto());
 
         Some(idle_timeout)
-    }
-
-    /// Returns the connection's overall send capacity.
-    fn send_capacity(&self) -> usize {
-        let cap = self.max_tx_data - self.tx_data;
-        cmp::min(cap, self.recovery.cwnd_available() as u64) as usize
     }
 
     /// Returns the connection's handshake status for use in loss recovery.
@@ -8646,6 +8653,68 @@ mod tests {
         // max_recv_udp_payload_size which is smaller
         assert_eq!(pipe.server.recovery.max_datagram_size(), 1200);
         assert_eq!(pipe.server.recovery.cwnd(), 12000);
+    }
+
+    #[test]
+    /// Tests that connection-level send capacity decreases as more stream data
+    /// is buffered.
+    fn send_capacity() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(100000);
+        config.set_initial_max_stream_data_bidi_local(10000);
+        config.set_initial_max_stream_data_bidi_remote(10000);
+        config.set_initial_max_streams_bidi(10);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(0, b"hello!", true), Ok(6));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(4, b"hello!", true), Ok(6));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(8, b"hello!", true), Ok(6));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(12, b"hello!", true), Ok(6));
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
+
+        let mut r = pipe.server.readable().collect::<Vec<u64>>();
+        assert_eq!(r.len(), 4);
+
+        r.sort();
+
+        assert_eq!(r, [0, 4, 8, 12]);
+
+        assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((6, true)));
+        assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((6, true)));
+        assert_eq!(pipe.server.stream_recv(8, &mut buf), Ok((6, true)));
+        assert_eq!(pipe.server.stream_recv(12, &mut buf), Ok((6, true)));
+
+        assert_eq!(pipe.server.tx_cap, 11565);
+
+        assert_eq!(pipe.server.stream_send(0, &buf[..5000], false), Ok(5000));
+        assert_eq!(pipe.server.stream_send(4, &buf[..5000], false), Ok(5000));
+        assert_eq!(pipe.server.stream_send(8, &buf[..5000], false), Ok(1565));
+
+        // No more connection send capacity.
+        assert_eq!(pipe.server.stream_send(12, &buf[..5000], false), Ok(0));
+        assert_eq!(pipe.server.tx_cap, 0);
+
+        assert_eq!(pipe.advance(&mut buf), Ok(()));
     }
 }
 
