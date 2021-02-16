@@ -2059,8 +2059,6 @@ pub mod testing {
         pub pipe: testing::Pipe,
         pub client: Connection,
         pub server: Connection,
-
-        buf: [u8; 65535],
     }
 
     impl Session {
@@ -2092,43 +2090,42 @@ pub mod testing {
                 pipe,
                 client: Connection::new(&h3_config, false, client_dgram)?,
                 server: Connection::new(&h3_config, true, server_dgram)?,
-                buf: [0; 65535],
             })
         }
 
         /// Do the HTTP/3 handshake so both ends are in sane initial state.
         pub fn handshake(&mut self) -> Result<()> {
-            self.pipe.handshake(&mut self.buf)?;
+            self.pipe.handshake()?;
 
             // Client streams.
             self.client.send_settings(&mut self.pipe.client)?;
-            self.pipe.advance(&mut self.buf).ok();
+            self.pipe.advance().ok();
 
             self.client
                 .open_qpack_encoder_stream(&mut self.pipe.client)?;
-            self.pipe.advance(&mut self.buf).ok();
+            self.pipe.advance().ok();
 
             self.client
                 .open_qpack_decoder_stream(&mut self.pipe.client)?;
-            self.pipe.advance(&mut self.buf).ok();
+            self.pipe.advance().ok();
 
             if self.pipe.client.grease {
                 self.client.open_grease_stream(&mut self.pipe.client)?;
             }
 
-            self.pipe.advance(&mut self.buf).ok();
+            self.pipe.advance().ok();
 
             // Server streams.
             self.server.send_settings(&mut self.pipe.server)?;
-            self.pipe.advance(&mut self.buf).ok();
+            self.pipe.advance().ok();
 
             self.server
                 .open_qpack_encoder_stream(&mut self.pipe.server)?;
-            self.pipe.advance(&mut self.buf).ok();
+            self.pipe.advance().ok();
 
             self.server
                 .open_qpack_decoder_stream(&mut self.pipe.server)?;
-            self.pipe.advance(&mut self.buf).ok();
+            self.pipe.advance().ok();
 
             if self.pipe.server.grease {
                 self.server.open_grease_stream(&mut self.pipe.server)?;
@@ -2149,7 +2146,7 @@ pub mod testing {
 
         /// Advances the session pipe over the buffer.
         pub fn advance(&mut self) -> crate::Result<()> {
-            self.pipe.advance(&mut self.buf)
+            self.pipe.advance()
         }
 
         /// Polls the client for events.
@@ -3574,12 +3571,10 @@ mod tests {
         let h3_config = Config::new().unwrap();
 
         let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
-        let mut buf = [42; 2000];
-
-        s.pipe.handshake(&mut buf).unwrap();
+        assert_eq!(s.pipe.handshake(), Ok(()));
 
         s.client.send_settings(&mut s.pipe.client).unwrap();
-        s.pipe.advance(&mut buf).unwrap();
+        assert_eq!(s.pipe.advance(), Ok(()));
 
         // Before processing SETTINGS (via poll), HTTP/3 DATAGRAMS are not
         // enabled.
@@ -3591,7 +3586,7 @@ mod tests {
 
         // Now detect things on the client
         s.server.send_settings(&mut s.pipe.server).unwrap();
-        s.pipe.advance(&mut buf).unwrap();
+        assert_eq!(s.pipe.advance(), Ok(()));
         assert!(!s.client.dgram_enabled_by_peer(&s.pipe.client));
         assert_eq!(s.client.poll(&mut s.pipe.client), Err(Error::Done));
         assert!(s.client.dgram_enabled_by_peer(&s.pipe.client));
@@ -3620,9 +3615,7 @@ mod tests {
         let h3_config = Config::new().unwrap();
 
         let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
-        let mut buf = [42; 2000];
-
-        s.pipe.handshake(&mut buf).unwrap();
+        assert_eq!(s.pipe.handshake(), Ok(()));
 
         s.client.control_stream_id = Some(
             s.client
@@ -3644,7 +3637,7 @@ mod tests {
         s.send_frame_client(settings, s.client.control_stream_id.unwrap(), false)
             .unwrap();
 
-        s.pipe.advance(&mut buf).unwrap();
+        assert_eq!(s.pipe.advance(), Ok(()));
 
         assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::SettingsError));
     }
@@ -3671,9 +3664,7 @@ mod tests {
         let h3_config = Config::new().unwrap();
 
         let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
-        let mut buf = [42; 2000];
-
-        s.pipe.handshake(&mut buf).unwrap();
+        assert_eq!(s.pipe.handshake(), Ok(()));
 
         s.client.control_stream_id = Some(
             s.client
@@ -3715,7 +3706,7 @@ mod tests {
         )
         .unwrap();
 
-        s.pipe.advance(&mut buf).unwrap();
+        assert_eq!(s.pipe.advance(), Ok(()));
 
         assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::SettingsError));
 
