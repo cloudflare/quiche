@@ -309,7 +309,7 @@ const MAX_ACK_RANGES: usize = 68;
 // The highest possible stream ID allowed.
 const MAX_STREAM_ID: u64 = 1 << 60;
 
-/// The default max_datagram_size used in congestion control.
+// The default max_datagram_size used in congestion control.
 const MAX_SEND_UDP_PAYLOAD_SIZE: usize = 1200;
 
 // The default length of DATAGRAM queues.
@@ -2060,6 +2060,67 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn send(&mut self, out: &mut [u8]) -> Result<usize> {
+        if out.is_empty() {
+            return Err(Error::BufferTooShort);
+        }
+
+        let mut has_initial = false;
+
+        let mut done = 0;
+
+        // Limit output packet size to respect the sender and receiver's
+        // maximum UDP payload size limit.
+        let mut left = cmp::min(out.len(), self.max_send_udp_payload_len());
+
+        // Limit data sent by the server based on the amount of data received
+        // from the client before its address is validated.
+        if !self.verified_peer_address && self.is_server {
+            left = cmp::min(left, self.max_send_bytes);
+        }
+
+        // Generate coalesced packets.
+        while left > 0 {
+            let (ty, written) =
+                match self.send_single(&mut out[done..done + left]) {
+                    Ok(v) => v,
+
+                    Err(Error::BufferTooShort) | Err(Error::Done) => break,
+
+                    Err(e) => return Err(e),
+                };
+
+            done += written;
+            left -= written;
+
+            match ty {
+                packet::Type::Initial => has_initial = true,
+
+                // No more packets can be coalesced after a 1-RTT.
+                packet::Type::Short => break,
+
+                _ => (),
+            };
+        }
+
+        if done == 0 {
+            return Err(Error::Done);
+        }
+
+        // Pad UDP datagram if it contains a QUIC Initial packet.
+        if has_initial && left > 0 && done < MIN_CLIENT_INITIAL_LEN {
+            let pad_len = cmp::min(left, MIN_CLIENT_INITIAL_LEN - done);
+
+            // Fill padding area with null bytes, to avoid leaking information
+            // in case the application reuses the packet buffer.
+            out[done..done + pad_len].fill(0);
+
+            done += pad_len;
+        }
+
+        Ok(done)
+    }
+
+    fn send_single(&mut self, out: &mut [u8]) -> Result<(packet::Type, usize)> {
         let now = time::Instant::now();
 
         if out.is_empty() {
@@ -2166,18 +2227,8 @@ impl Connection {
 
         let mut left = b.cap();
 
-        // Limit output packet size to respect the sender and receiver's
-        // maximum UDP payload size limit.
-        left = cmp::min(left, self.max_send_udp_payload_len());
-
         // Limit output packet size by congestion window size.
         left = cmp::min(left, self.recovery.cwnd_available());
-
-        // Limit data sent by the server based on the amount of data received
-        // from the client before its address is validated.
-        if !self.verified_peer_address && self.is_server {
-            left = cmp::min(left, self.max_send_bytes);
-        }
 
         let pn = self.pkt_num_spaces[epoch].next_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
@@ -2695,20 +2746,6 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        // Pad the client's initial packet.
-        if !self.is_server && pkt_type == packet::Type::Initial {
-            let payload_len = b.off() - payload_offset;
-            let pkt_len = pn_len + payload_len + crypto_overhead;
-
-            let frame = frame::Frame::Padding {
-                len: cmp::min(MIN_CLIENT_INITIAL_LEN - pkt_len, left),
-            };
-
-            if push_frame_to_pkt!(b, frames, frame, left) {
-                in_flight = true;
-            }
-        }
-
         // Pad payload so that it's always at least 4 bytes.
         if b.off() - payload_offset < PAYLOAD_MIN_LEN {
             let payload_len = b.off() - payload_offset;
@@ -2850,7 +2887,7 @@ impl Connection {
             self.ack_eliciting_sent = true;
         }
 
-        Ok(written)
+        Ok((pkt_type, written))
     }
 
     // Returns the maximum size of a packet to be sent.
@@ -5413,7 +5450,7 @@ mod tests {
         let flight = testing::emit_flight(&mut pipe.server).unwrap();
         let server_sent = flight.iter().fold(0, |out, p| out + p.len());
 
-        assert_eq!(server_sent, (client_sent - 1) * MAX_AMPLIFICATION_FACTOR);
+        assert_eq!(server_sent, (client_sent - 2) * MAX_AMPLIFICATION_FACTOR);
     }
 
     #[test]
@@ -8066,20 +8103,16 @@ mod tests {
         testing::process_flight(&mut pipe.client, flight).unwrap();
 
         // Client sends Initial packet with ACK.
-        let len = pipe.client.send(&mut buf).unwrap();
-
-        let hdr = Header::from_slice(&mut buf[..len], 0).unwrap();
-        assert_eq!(hdr.ty, Type::Initial);
+        let (ty, len) = pipe.client.send_single(&mut buf).unwrap();
+        assert_eq!(ty, Type::Initial);
 
         assert_eq!(pipe.server.recv(&mut buf[..len]), Ok(len));
 
         // Client sends Handshake packet.
-        let len = pipe.client.send(&mut buf).unwrap();
+        let (ty, len) = pipe.client.send_single(&mut buf).unwrap();
+        assert_eq!(ty, Type::Handshake);
 
-        let hdr = Header::from_slice(&mut buf[..len], 0).unwrap();
-        assert_eq!(hdr.ty, Type::Handshake);
-
-        // Packet type is corrupted to Initial..
+        // Packet type is corrupted to Initial.
         buf[0] &= !(0x20);
 
         let hdr = Header::from_slice(&mut buf[..len], 0).unwrap();
