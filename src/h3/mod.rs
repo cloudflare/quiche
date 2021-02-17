@@ -2300,7 +2300,7 @@ pub mod testing {
         pub fn send_dgram_server(&mut self, flow_id: u64) -> Result<Vec<u8>> {
             let bytes = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
-            self.client
+            self.server
                 .send_dgram(&mut self.pipe.server, flow_id, &bytes)?;
 
             self.advance().ok();
@@ -2315,7 +2315,7 @@ pub mod testing {
         pub fn recv_dgram_server(
             &mut self, buf: &mut [u8],
         ) -> Result<(usize, u64, usize)> {
-            self.client.recv_dgram(&mut self.pipe.server, buf)
+            self.server.recv_dgram(&mut self.pipe.server, buf)
         }
 
         /// Sends a single HTTP/3 frame from the server.
