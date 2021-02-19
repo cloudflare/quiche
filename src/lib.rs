@@ -2444,6 +2444,26 @@ impl Connection {
                 }
             }
 
+            // Create STOP_SENDING frames as needed.
+            for (stream_id, error_code) in self
+                .streams
+                .stopped()
+                .map(|(&k, &v)| (k, v))
+                .collect::<Vec<(u64, u64)>>()
+            {
+                let frame = frame::Frame::StopSending {
+                    stream_id,
+                    error_code,
+                };
+
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    self.streams.mark_stopped(stream_id, false, 0);
+
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
+            }
+
             // Create RESET_STREAM frames as needed.
             for (stream_id, (error_code, final_size)) in self
                 .streams
@@ -3178,7 +3198,8 @@ impl Connection {
     /// data in the stream's receive buffer is dropped, and no additional data
     /// is added to it. Data received after calling this method is still
     /// validated and acked but not stored, and [`stream_recv()`] will not
-    /// return it to the application.
+    /// return it to the application. In addition, a `STOP_SENDING` frame will
+    /// be sent to the peer to signal it to stop sending data.
     ///
     /// When the `direction` argument is set to [`Shutdown::Write`], outstanding
     /// data in the stream's send buffer is dropped, and no additional data
@@ -3190,15 +3211,16 @@ impl Connection {
     /// [`stream_recv()`]: struct.Connection.html#method.stream_recv
     /// [`stream_send()`]: struct.Connection.html#method.stream_send
     pub fn stream_shutdown(
-        &mut self, stream_id: u64, direction: Shutdown, _err: u64,
+        &mut self, stream_id: u64, direction: Shutdown, err: u64,
     ) -> Result<()> {
         // Get existing stream.
         let stream = self.streams.get_mut(stream_id).ok_or(Error::Done)?;
 
         match direction {
-            // TODO: send STOP_SENDING
             Shutdown::Read => {
                 stream.recv.shutdown()?;
+
+                self.streams.mark_stopped(stream_id, true, err);
 
                 // Once shutdown, the stream is guaranteed to be non-readable.
                 self.streams.mark_readable(stream_id, false);
@@ -3913,7 +3935,8 @@ impl Connection {
                 self.streams.has_flushable() ||
                 self.streams.has_almost_full() ||
                 self.streams.has_blocked() ||
-                self.streams.has_reset())
+                self.streams.has_reset() ||
+                self.streams.has_stopped())
         {
             return Ok(packet::EPOCH_APPLICATION);
         }
@@ -6404,6 +6427,8 @@ mod tests {
 
     #[test]
     fn stream_shutdown_read() {
+        let mut buf = [0; 65535];
+
         let mut pipe = testing::Pipe::default().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
@@ -6414,7 +6439,23 @@ mod tests {
         assert_eq!(r.next(), Some(4));
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 0), Ok(()));
+        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+
+        let len = pipe.server.send(&mut buf).unwrap();
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+        let mut iter = frames.iter();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::StopSending {
+                stream_id: 4,
+                error_code: 42,
+            })
+        );
+
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
 
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), None);
