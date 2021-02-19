@@ -628,7 +628,7 @@ pub struct Connection {
     local_goaway_id: Option<u64>,
     peer_goaway_id: Option<u64>,
 
-    last_dgram_flow_id: u64,
+    dgram_event_triggered: bool,
 }
 
 impl Connection {
@@ -687,7 +687,7 @@ impl Connection {
             local_goaway_id: None,
             peer_goaway_id: None,
 
-            last_dgram_flow_id: std::u64::MAX,
+            dgram_event_triggered: false,
         })
     }
 
@@ -1092,22 +1092,19 @@ impl Connection {
 
         match conn.dgram_recv_peek(&mut d, 8) {
             Ok(_) => {
-                let mut b = octets::Octets::with_slice(&d);
-                let flow_id = b.get_varint()?;
-
-                if self.last_dgram_flow_id == flow_id {
+                if self.dgram_event_triggered {
                     return Err(Error::Done);
                 }
 
-                self.last_dgram_flow_id = flow_id;
+                self.dgram_event_triggered = true;
 
-                Ok((flow_id, Event::Datagram))
+                Ok((0, Event::Datagram))
             },
 
             Err(crate::Error::Done) => {
                 // The dgram recv queue is empty, so re-arm the Datagram event
                 // so it is issued next time a DATAGRAM is received.
-                self.last_dgram_flow_id = std::u64::MAX;
+                self.dgram_event_triggered = false;
 
                 Err(Error::Done)
             },
@@ -1200,7 +1197,8 @@ impl Connection {
     /// which is used in methods [`recv_body()`], [`send_response()`] or
     /// [`send_body()`].
     ///
-    /// The event [`Datagram`] returns a flow ID.
+    /// The event [`Datagram`] returns a dummy value of `0`, this should be
+    /// ignored by the application.
     ///
     /// The event [`GoAway`] returns an ID that depends on the connection role.
     /// A client receives the largest processed stream ID. A server receives the
@@ -4033,7 +4031,7 @@ mod tests {
         assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_0_result));
         assert_eq!(s.poll_server(), Err(Error::Done));
         assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_0_result));
-        assert_eq!(s.poll_server(), Ok((2, Event::Datagram)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
         assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_2_result));
         assert_eq!(s.poll_server(), Err(Error::Done));
         assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_2_result));
@@ -4092,7 +4090,7 @@ mod tests {
         assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_0_result));
         assert_eq!(s.poll_client(), Err(Error::Done));
         assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_0_result));
-        assert_eq!(s.poll_client(), Ok((2, Event::Datagram)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
         assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_2_result));
         assert_eq!(s.poll_client(), Err(Error::Done));
         assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_2_result));
@@ -4339,7 +4337,7 @@ mod tests {
         assert_eq!(s.poll_server(), Err(Error::Done));
         assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_0_result));
 
-        assert_eq!(s.poll_server(), Ok((2, Event::Datagram)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
         assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_2_result));
 
         assert_eq!(s.poll_server(), Err(Error::Done));
@@ -4354,12 +4352,9 @@ mod tests {
         assert_eq!(s.poll_server(), Err(Error::Done));
 
         assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_0_result));
-
-        assert_eq!(s.poll_server(), Ok((2, Event::Datagram)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
         assert_eq!(s.recv_dgram_server(&mut buf), Ok(flow_2_result));
-
         assert_eq!(s.poll_server(), Err(Error::Done));
 
         assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
