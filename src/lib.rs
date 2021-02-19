@@ -2634,6 +2634,14 @@ impl Connection {
                     None => continue,
                 };
 
+                // Avoid sending frames for streams that were already stopped.
+                //
+                // This might happen if stream data was buffered but not yet
+                // flushed on the wire when a STOP_SENDING frame is received.
+                if stream.send.is_stopped() {
+                    continue;
+                }
+
                 let stream_off = stream.send.off_front();
 
                 // Encode the frame.
@@ -6328,6 +6336,70 @@ mod tests {
 
         let mut r = pipe.server.writable();
         assert_eq!(r.next(), None);
+    }
+
+    #[test]
+    fn stop_sending_fin() {
+        let mut b = [0; 15];
+
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client sends some data, and closes stream.
+        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server gets data.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
+        assert!(pipe.server.stream_finished(4));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
+        // Server sends data, and closes stream.
+        let mut r = pipe.server.writable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.server.stream_send(4, b"world", true), Ok(5));
+
+        // Client sends STOP_SENDING before server flushes stream.
+        let frames = [frame::Frame::StopSending {
+            stream_id: 4,
+            error_code: 42,
+        }];
+
+        let pkt_type = packet::Type::Short;
+        let len = pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        // Server sent a RESET_STREAM frame in response.
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+
+        let mut iter = frames.iter();
+
+        // Skip ACK frame.
+        iter.next();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::ResetStream {
+                stream_id: 4,
+                error_code: 42,
+                final_size: 5,
+            })
+        );
+
+        // No more frames are sent by the server.
+        assert_eq!(iter.next(), None);
     }
 
     #[test]

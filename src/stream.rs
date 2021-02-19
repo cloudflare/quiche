@@ -1335,6 +1335,11 @@ impl SendBuf {
         false
     }
 
+    /// Returns true if the stream was stopped before completion.
+    pub fn is_stopped(&self) -> bool {
+        self.error.is_some()
+    }
+
     /// Returns true if there is data to be written.
     fn ready(&self) -> bool {
         !self.data.is_empty() && self.off_front() < self.off
