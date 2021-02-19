@@ -128,6 +128,11 @@ pub struct StreamMap {
     /// of the map elements is a tuple of the error code and final size values
     /// to include in the RESET_STREAM frame.
     reset: HashMap<u64, (u64, u64)>,
+
+    /// Set of stream IDs corresponding to streams that are shutdown on the
+    /// receive side, and need to send a STOP_SENDING frame. The value of the
+    /// map elements is the error code to include in the STOP_SENDING frame.
+    stopped: HashMap<u64, u64>,
 }
 
 impl StreamMap {
@@ -384,6 +389,20 @@ impl StreamMap {
         }
     }
 
+    /// Adds or removes the stream ID to/from the stopped streams set with the
+    /// given error code.
+    ///
+    /// If the stream was already in the list, this does nothing.
+    pub fn mark_stopped(
+        &mut self, stream_id: u64, stopped: bool, error_code: u64,
+    ) {
+        if stopped {
+            self.stopped.insert(stream_id, error_code);
+        } else {
+            self.stopped.remove(&stream_id);
+        }
+    }
+
     /// Updates the peer's maximum bidirectional stream count limit.
     pub fn update_peer_max_streams_bidi(&mut self, v: u64) {
         self.peer_max_streams_bidi = cmp::max(self.peer_max_streams_bidi, v);
@@ -472,6 +491,11 @@ impl StreamMap {
         self.reset.iter()
     }
 
+    /// Creates an iterator over streams that need to send STOP_SENDING.
+    pub fn stopped(&self) -> hash_map::Iter<u64, u64> {
+        self.stopped.iter()
+    }
+
     /// Returns true if there are any streams that have data to write.
     pub fn has_flushable(&self) -> bool {
         !self.flushable.is_empty()
@@ -496,6 +520,11 @@ impl StreamMap {
     /// Returns true if there are any streams that are reset.
     pub fn has_reset(&self) -> bool {
         !self.reset.is_empty()
+    }
+
+    /// Returns true if there are any streams that need to send STOP_SENDING.
+    pub fn has_stopped(&self) -> bool {
+        !self.stopped.is_empty()
     }
 
     /// Returns true if the max bidirectional streams count needs to be updated
