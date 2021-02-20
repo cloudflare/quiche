@@ -1802,7 +1802,11 @@ impl Connection {
 
                 stream::State::Drain => {
                     // Discard incoming data on the stream.
-                    conn.stream_shutdown(stream_id, crate::Shutdown::Read, 0)?;
+                    conn.stream_shutdown(
+                        stream_id,
+                        crate::Shutdown::Read,
+                        0x100,
+                    )?;
 
                     break;
                 },
