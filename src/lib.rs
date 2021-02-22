@@ -3220,7 +3220,9 @@ impl Connection {
             Shutdown::Read => {
                 stream.recv.shutdown()?;
 
-                self.streams.mark_stopped(stream_id, true, err);
+                if !stream.recv.is_fin() {
+                    self.streams.mark_stopped(stream_id, true, err);
+                }
 
                 // Once shutdown, the stream is guaranteed to be non-readable.
                 self.streams.mark_readable(stream_id, false);
@@ -6478,6 +6480,57 @@ mod tests {
             pipe.client.stream_send(4, b"bye", false),
             Err(Error::StreamStopped(42))
         );
+
+        // Server sends some data, without reading the incoming data, and closes
+        // the stream.
+        assert_eq!(pipe.server.stream_send(4, b"hello, world", true), Ok(12));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Client reads the data.
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((12, true)));
+
+        // Stream is collected on both sides.
+        assert_eq!(pipe.client.streams.len(), 0);
+        assert_eq!(pipe.server.streams.len(), 0);
+
+        assert_eq!(
+            pipe.server.stream_shutdown(4, Shutdown::Read, 0),
+            Err(Error::Done)
+        );
+    }
+
+    #[test]
+    fn stream_shutdown_read_after_fin() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client sends some data.
+        assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.client.streams.len(), 1);
+        assert_eq!(pipe.server.streams.len(), 1);
+
+        // Server shuts down stream.
+        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
+        // Server has nothing to send.
+        assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
+
+        assert_eq!(pipe.advance(), Ok(()));
 
         // Server sends some data, without reading the incoming data, and closes
         // the stream.
