@@ -6432,6 +6432,7 @@ mod tests {
         let mut pipe = testing::Pipe::default().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
+        // Client sends some data.
         assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
         assert_eq!(pipe.advance(), Ok(()));
 
@@ -6439,12 +6440,21 @@ mod tests {
         assert_eq!(r.next(), Some(4));
         assert_eq!(r.next(), None);
 
+        assert_eq!(pipe.client.streams.len(), 1);
+        assert_eq!(pipe.server.streams.len(), 1);
+
+        // Server shuts down stream.
         assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
 
         let len = pipe.server.send(&mut buf).unwrap();
 
+        let mut dummy = buf[..len].to_vec();
+
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut dummy, len).unwrap();
         let mut iter = frames.iter();
 
         assert_eq!(
@@ -6457,14 +6467,33 @@ mod tests {
 
         assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
 
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.client.stream_send(4, b"bye", false), Ok(3));
         assert_eq!(pipe.advance(), Ok(()));
 
-        let mut r = pipe.server.readable();
+        // Sending more data is forbidden.
+        let mut r = pipe.client.writable();
+        assert_eq!(r.next(), Some(4));
         assert_eq!(r.next(), None);
+
+        assert_eq!(
+            pipe.client.stream_send(4, b"bye", false),
+            Err(Error::StreamStopped(42))
+        );
+
+        // Server sends some data, without reading the incoming data, and closes
+        // the stream.
+        assert_eq!(pipe.server.stream_send(4, b"hello, world", true), Ok(12));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Client reads the data.
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((12, true)));
+
+        // Stream is collected on both sides.
+        assert_eq!(pipe.client.streams.len(), 0);
+        assert_eq!(pipe.server.streams.len(), 0);
 
         assert_eq!(
             pipe.server.stream_shutdown(4, Shutdown::Read, 0),
