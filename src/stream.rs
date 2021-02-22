@@ -910,6 +910,8 @@ impl RecvBuf {
 
         self.data.clear();
 
+        self.off = self.max_off();
+
         Ok(())
     }
 
