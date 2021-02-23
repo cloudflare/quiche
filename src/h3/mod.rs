@@ -1294,7 +1294,7 @@ impl Connection {
                 };
 
                 if conn.stream_finished(s) {
-                    self.finished_streams.push_back(s);
+                    self.process_finished_stream(s);
                 }
 
                 // TODO: check if stream is completed so it can be freed
@@ -1814,6 +1814,21 @@ impl Connection {
         }
 
         Err(Error::Done)
+    }
+
+    fn process_finished_stream(&mut self, stream_id: u64) {
+        let stream = match self.streams.get(&stream_id) {
+            Some(v) => v,
+
+            None => return,
+        };
+
+        match stream.ty() {
+            Some(stream::Type::Request) | Some(stream::Type::Push) =>
+                self.finished_streams.push_back(stream_id),
+
+            _ => (),
+        };
     }
 
     fn process_frame(
@@ -4149,6 +4164,23 @@ mod tests {
         assert_eq!(s.poll_client(), Ok((2, Event::Datagram)));
         assert_eq!(s.recv_dgram_client(&mut buf), Ok(flow_2_result));
         assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Tests that the Finished event is not issued for streams of unknown type
+    /// (e.g. GREASE).
+    fn finished_is_for_requests() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        assert_eq!(s.client.open_grease_stream(&mut s.pipe.client), Ok(()));
+        assert_eq!(s.pipe.advance(), Ok(()));
+
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.poll_server(), Err(Error::Done));
     }
 }
 

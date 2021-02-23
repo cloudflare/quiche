@@ -174,6 +174,10 @@ impl Stream {
         }
     }
 
+    pub fn ty(&self) -> Option<Type> {
+        self.ty
+    }
+
     pub fn state(&self) -> State {
         self.state
     }
