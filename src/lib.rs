@@ -3228,9 +3228,10 @@ impl Connection {
                 self.streams.mark_readable(stream_id, false);
             },
 
-            // TODO: send RESET_STREAM
             Shutdown::Write => {
-                stream.send.shutdown()?;
+                let final_size = stream.send.shutdown()?;
+
+                self.streams.mark_reset(stream_id, true, err, final_size);
 
                 // Once shutdown, the stream is guaranteed to be non-writable.
                 self.streams.mark_writable(stream_id, false);
@@ -6556,9 +6557,12 @@ mod tests {
 
     #[test]
     fn stream_shutdown_write() {
+        let mut buf = [0; 65535];
+
         let mut pipe = testing::Pipe::default().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
+        // Client sends some data.
         assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
         assert_eq!(pipe.advance(), Ok(()));
 
@@ -6566,24 +6570,66 @@ mod tests {
         assert_eq!(r.next(), Some(4));
         assert_eq!(r.next(), None);
 
-        let mut b = [0; 15];
-        pipe.server.stream_recv(4, &mut b).unwrap();
-
-        assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
-        assert_eq!(pipe.client.stream_shutdown(4, Shutdown::Write, 0), Ok(()));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.server.readable();
+        let mut r = pipe.server.writable();
+        assert_eq!(r.next(), Some(4));
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.client.stream_send(4, b"bye", false), Ok(3));
-        assert_eq!(pipe.advance(), Ok(()));
+        assert_eq!(pipe.client.streams.len(), 1);
+        assert_eq!(pipe.server.streams.len(), 1);
 
-        let mut r = pipe.server.readable();
+        // Server sends some data.
+        assert_eq!(pipe.server.stream_send(4, b"goodbye, world", false), Ok(14));
+
+        // Server shuts down stream.
+        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
+
+        let mut r = pipe.server.writable();
         assert_eq!(r.next(), None);
+
+        let len = pipe.server.send(&mut buf).unwrap();
+
+        let mut dummy = buf[..len].to_vec();
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut dummy, len).unwrap();
+        let mut iter = frames.iter();
 
         assert_eq!(
-            pipe.client.stream_shutdown(4, Shutdown::Write, 0),
+            iter.next(),
+            Some(&frame::Frame::ResetStream {
+                stream_id: 4,
+                error_code: 42,
+                final_size: 14,
+            })
+        );
+
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
+
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Sending more data is forbidden.
+        assert_eq!(
+            pipe.server.stream_send(4, b"bye", false),
+            Err(Error::FinalSize)
+        );
+
+        // Client sends some data and closes the stream.
+        assert_eq!(pipe.client.stream_send(4, b"bye", true), Ok(3));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server reads the data.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((15, true)));
+
+        // Stream is collected on both sides.
+        // TODO: assert_eq!(pipe.client.streams.len(), 0);
+        assert_eq!(pipe.server.streams.len(), 0);
+
+        assert_eq!(
+            pipe.server.stream_shutdown(4, Shutdown::Write, 0),
             Err(Error::Done)
         );
     }

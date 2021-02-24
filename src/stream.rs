@@ -1015,12 +1015,6 @@ impl SendBuf {
     pub fn write(&mut self, mut data: &[u8], mut fin: bool) -> Result<usize> {
         let max_off = self.off + data.len() as u64;
 
-        if self.shutdown {
-            // Since we won't write any more data anyway, pretend that we sent
-            // all data that was passed in.
-            return Ok(data.len());
-        }
-
         // Get the stream send capacity. This will return an error if the stream
         // was stopped.
         let capacity = self.cap()?;
@@ -1279,6 +1273,9 @@ impl SendBuf {
         // Drop all buffered data.
         self.data.clear();
 
+        // Mark all data as acked.
+        self.ack(0, self.off as usize);
+
         self.pos = 0;
         self.len = 0;
 
@@ -1301,16 +1298,14 @@ impl SendBuf {
     }
 
     /// Shuts down sending data.
-    pub fn shutdown(&mut self) -> Result<()> {
+    pub fn shutdown(&mut self) -> Result<u64> {
         if self.shutdown {
             return Err(Error::Done);
         }
 
         self.shutdown = true;
 
-        self.data.clear();
-
-        Ok(())
+        self.reset()
     }
 
     /// Returns the largest offset of data buffered.
