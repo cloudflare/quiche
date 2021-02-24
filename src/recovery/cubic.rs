@@ -58,6 +58,10 @@ const BETA_CUBIC: f64 = 0.7;
 
 const C: f64 = 0.4;
 
+/// Default value of alpha_aimd in the beginning of congestion avoidance.
+// const ALPHA_AIMD: f64 = 3.0 * (1.0 - BETA_CUBIC) / (1.0 + BETA_CUBIC);
+const ALPHA_AIMD: f64 = BETA_CUBIC;
+
 /// CUBIC State Variables.
 ///
 /// We need to keep those variables across the connection.
@@ -69,6 +73,10 @@ pub struct State {
     w_max: f64,
 
     w_last_max: f64,
+
+    w_est: f64,
+
+    alpha_aimd: f64,
 
     // Used in CUBIC fix (see on_packet_sent())
     last_sent_time: Option<Instant>,
@@ -99,14 +107,11 @@ impl State {
             max_datagram_size as f64
     }
 
-    // W_est(t) = w_max * beta_cubic + 3 * (1 - beta_cubic) / (1 + beta_cubic) *
-    // (t / RTT) (Eq. 4)
-    fn w_est(&self, t: Duration, rtt: Duration, max_datagram_size: usize) -> f64 {
-        let w_max = self.w_max / max_datagram_size as f64;
-        (w_max * BETA_CUBIC +
-            3.0 * (1.0 - BETA_CUBIC) / (1.0 + BETA_CUBIC) * t.as_secs_f64() /
-                rtt.as_secs_f64()) *
-            max_datagram_size as f64
+    // W_est = W_est + alpha_aimd * (segments_acked / cwnd)  (Eq. 4)
+    fn w_est_inc(
+        &self, acked: usize, cwnd: usize, max_datagram_size: usize,
+    ) -> f64 {
+        self.alpha_aimd * (acked as f64 / cwnd as f64) * max_datagram_size as f64
     }
 }
 
@@ -211,6 +216,9 @@ fn on_packet_acked(
             if r.cubic_state.w_max == 0.0 {
                 r.cubic_state.w_max = r.congestion_window as f64;
                 r.cubic_state.k = 0.0;
+
+                r.cubic_state.w_est = r.congestion_window as f64;
+                r.cubic_state.alpha_aimd = ALPHA_AIMD;
             }
         } else {
             match r.congestion_recovery_start_time {
@@ -223,6 +231,9 @@ fn on_packet_acked(
 
                     r.cubic_state.w_max = r.congestion_window as f64;
                     r.cubic_state.k = 0.0;
+
+                    r.cubic_state.w_est = r.congestion_window as f64;
+                    r.cubic_state.alpha_aimd = ALPHA_AIMD;
                 },
             }
         }
@@ -236,14 +247,23 @@ fn on_packet_acked(
         let target = f64::max(target, r.congestion_window as f64);
         let target = f64::min(target, r.congestion_window as f64 * 1.5);
 
-        // w_est(t)
-        let w_est = r.cubic_state.w_est(t, r.min_rtt, r.max_datagram_size);
+        // Update w_est.
+        let w_est_inc = r.cubic_state.w_est_inc(
+            packet.size,
+            r.congestion_window,
+            r.max_datagram_size,
+        );
+        r.cubic_state.w_est += w_est_inc;
 
         let mut cubic_cwnd = r.congestion_window;
 
-        if r.cubic_state.w_cubic(t, r.max_datagram_size) < w_est {
-            // TCP friendly region.
-            cubic_cwnd = cmp::max(cubic_cwnd, w_est as usize);
+        if r.cubic_state.w_cubic(t, r.max_datagram_size) < r.cubic_state.w_est {
+            // AIMD friendly region (W_cubic(t) < W_est)
+            cubic_cwnd = cmp::max(cubic_cwnd, r.cubic_state.w_est as usize);
+
+            if r.cubic_state.w_est >= r.cubic_state.w_max {
+                r.cubic_state.alpha_aimd = 1.0;
+            }
         } else {
             // Concave region or convex region use same increment.
             let cubic_inc =
@@ -317,6 +337,9 @@ fn congestion_event(
 
         r.cubic_state.cwnd_inc =
             (r.cubic_state.cwnd_inc as f64 * BETA_CUBIC) as usize;
+
+        r.cubic_state.w_est = r.congestion_window as f64;
+        r.cubic_state.alpha_aimd = ALPHA_AIMD;
 
         if r.hystart.in_lss(epoch) {
             r.hystart.congestion_event();
@@ -496,9 +519,7 @@ mod tests {
 
         // During Congestion Avoidance, it will take
         // 5 ACKs to increase cwnd by 1 MSS.
-        // TODO: However, current W_est(t) is using old RFC one,
-        // it grows too fast, so using 3 here.
-        for _ in 0..3 {
+        for _ in 0..5 {
             let acked = vec![Acked {
                 pkt_num: 0,
                 // To exit from recovery
