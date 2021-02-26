@@ -957,6 +957,22 @@ mod httpbin_tests {
                 if let Some(expected_headers) = &expect_req_headers() {
                     for (name, val) in expected_headers {
                         if let Some(expected_value) = val.as_str() {
+                            // Check if the header value is actually a special
+                            // "regex header value" - prefix "htt3_test_regex". If so,
+                            // test it's pattern otherwise just check the value verbatim.
+                            if let Some(pattern) =
+                                expected_value.strip_prefix("http3_test_regex")
+                            {
+                                let re = regex::Regex::new(pattern).unwrap();
+                                if let Some(header_value) = headers.get(name) {
+                                    assert!(re.is_match(header_value),
+                                        "Header value {} doesn't match pattern {}",
+                                        header_value,
+                                        pattern);
+                                }
+                                return;
+                            }
+
                             assert_eq!(
                                 headers.get(name),
                                 Some(&String::from(expected_value)),
