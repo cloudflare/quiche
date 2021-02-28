@@ -250,6 +250,13 @@ pub extern fn quiche_config_enable_dgram(
 }
 
 #[no_mangle]
+pub extern fn quiche_config_enable_stream_flow_control_auto_update(
+    config: &mut Config, enabled: bool,
+) {
+    config.enable_stream_flow_control_auto_update(enabled);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_set_max_send_udp_payload_size(
     config: &mut Config, v: size_t,
 ) {
@@ -580,6 +587,11 @@ pub extern fn quiche_conn_stream_recv(
     *fin = out_fin;
 
     out_len as ssize_t
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_stream_consume(conn: &mut Connection, stream_id: u64, n: size_t) {
+    let _ = conn.stream_consume(stream_id, n);
 }
 
 #[no_mangle]

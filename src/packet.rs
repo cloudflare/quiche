@@ -829,13 +829,14 @@ impl PktNumSpace {
                 std::u64::MAX,
                 true,
                 true,
+                false,
             ),
         }
     }
 
     pub fn clear(&mut self) {
         self.crypto_stream =
-            stream::Stream::new(std::u64::MAX, std::u64::MAX, true, true);
+            stream::Stream::new(std::u64::MAX, std::u64::MAX, true, true, false);
 
         self.ack_elicited = false;
     }

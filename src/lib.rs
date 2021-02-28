@@ -477,6 +477,8 @@ pub struct Config {
     dgram_send_max_queue_len: usize,
 
     max_send_udp_payload_size: usize,
+
+    stream_flow_control_auto_update: bool,
 }
 
 impl Config {
@@ -504,6 +506,8 @@ impl Config {
             dgram_send_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
 
             max_send_udp_payload_size: MAX_SEND_UDP_PAYLOAD_SIZE,
+
+            stream_flow_control_auto_update: true,
         })
     }
 
@@ -827,6 +831,15 @@ impl Config {
         self.dgram_recv_max_queue_len = recv_queue_len;
         self.dgram_send_max_queue_len = send_queue_len;
     }
+
+    /// Configures whether to enable automatic flow control update on streams.
+    ///
+    /// When disabled, an application MUST use `stream_consume` to update flow control limits.
+    ///
+    /// The default value is `true`.
+    pub fn enable_stream_flow_control_auto_update(&mut self, v: bool) {
+        self.stream_flow_control_auto_update = v;
+    }
 }
 
 /// A QUIC connection.
@@ -993,6 +1006,8 @@ pub struct Connection {
     /// DATAGRAM queues.
     dgram_recv_queue: dgram::DatagramQueue,
     dgram_send_queue: dgram::DatagramQueue,
+
+    stream_flow_control_auto_update: bool,
 }
 
 /// Creates a new server-side connection.
@@ -1320,6 +1335,8 @@ impl Connection {
             dgram_send_queue: dgram::DatagramQueue::new(
                 config.dgram_send_max_queue_len,
             ),
+
+            stream_flow_control_auto_update: config.stream_flow_control_auto_update,
         });
 
         if let Some(odcid) = odcid {
@@ -3022,6 +3039,18 @@ impl Connection {
         Ok((read, fin))
     }
 
+    /// Slides the maximum offset the peer is allowed to send for the given stream.
+    pub fn stream_consume(&mut self, stream_id: u64, n: usize) -> Result<()> {
+        let stream = self.streams.get_mut(stream_id).ok_or(Error::InvalidStreamState)?;
+        stream.recv.consume(n);
+
+        if stream.recv.almost_full() {
+            self.streams.mark_almost_full(stream_id, true);
+        }
+
+        Ok(())
+    }
+
     /// Writes data to a stream.
     ///
     /// On success the number of bytes written is returned, or [`Done`] if no
@@ -3958,6 +3987,7 @@ impl Connection {
             &self.peer_transport_params,
             local,
             self.is_server,
+            self.stream_flow_control_auto_update,
         )
     }
 

@@ -173,6 +173,7 @@ impl StreamMap {
     pub(crate) fn get_or_create(
         &mut self, id: u64, local_params: &crate::TransportParams,
         peer_params: &crate::TransportParams, local: bool, is_server: bool,
+        flow_control_auto_update: bool,
     ) -> Result<&mut Stream> {
         let stream = match self.streams.entry(id) {
             hash_map::Entry::Vacant(v) => {
@@ -249,7 +250,8 @@ impl StreamMap {
                     },
                 };
 
-                let s = Stream::new(max_rx_data, max_tx_data, is_bidi(id), local);
+                let s = Stream::new(max_rx_data, max_tx_data,
+                                    is_bidi(id), local, flow_control_auto_update);
                 v.insert(s)
             },
 
@@ -578,10 +580,10 @@ pub struct Stream {
 impl Stream {
     /// Creates a new stream with the given flow control limits.
     pub fn new(
-        max_rx_data: u64, max_tx_data: u64, bidi: bool, local: bool,
+        max_rx_data: u64, max_tx_data: u64, bidi: bool, local: bool, flow_control_auto_update: bool,
     ) -> Stream {
         Stream {
-            recv: RecvBuf::new(max_rx_data),
+            recv: RecvBuf::new(max_rx_data, flow_control_auto_update),
             send: SendBuf::new(max_tx_data),
             bidi,
             local,
@@ -705,14 +707,18 @@ pub struct RecvBuf {
 
     /// Whether incoming data is validated but not buffered.
     drain: bool,
+
+    /// Whether `max_data_next` should be updated automatically on
+    flow_control_auto_update: bool,
 }
 
 impl RecvBuf {
     /// Creates a new receive buffer.
-    fn new(max_data: u64) -> RecvBuf {
+    fn new(max_data: u64, flow_control_auto_update: bool) -> RecvBuf {
         RecvBuf {
             max_data,
             max_data_next: max_data,
+            flow_control_auto_update,
             ..RecvBuf::default()
         }
     }
@@ -864,9 +870,17 @@ impl RecvBuf {
             std::collections::binary_heap::PeekMut::pop(buf);
         }
 
-        self.max_data_next = self.max_data_next.saturating_add(len as u64);
+        if self.flow_control_auto_update {
+            self.max_data_next = self.max_data_next.saturating_add(len as u64);
+        }
 
         Ok((len, self.is_fin()))
+    }
+
+    /// Slides maximum offset the peer is allowed to send.
+    pub fn consume(&mut self, n: usize) {
+        assert!(!self.flow_control_auto_update);
+        self.max_data_next = self.max_data_next.saturating_add(n as u64);
     }
 
     /// Resets the stream at the given offset.
@@ -1585,10 +1599,11 @@ impl Eq for RangeBuf {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Error::FlowControl;
 
     #[test]
     fn empty_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1598,7 +1613,7 @@ mod tests {
 
     #[test]
     fn empty_stream_frame() {
-        let mut recv = RecvBuf::new(15);
+        let mut recv = RecvBuf::new(15, true);
         assert_eq!(recv.len, 0);
 
         let buf = RangeBuf::from(b"hello", 0, false);
@@ -1654,7 +1669,7 @@ mod tests {
 
     #[test]
     fn ordered_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1691,7 +1706,7 @@ mod tests {
 
     #[test]
     fn split_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1731,7 +1746,7 @@ mod tests {
 
     #[test]
     fn incomplete_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1759,7 +1774,7 @@ mod tests {
 
     #[test]
     fn zero_len_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1787,7 +1802,7 @@ mod tests {
 
     #[test]
     fn past_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1826,7 +1841,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1857,7 +1872,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read2() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1888,7 +1903,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read3() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1919,7 +1934,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read_multi() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1956,7 +1971,7 @@ mod tests {
 
     #[test]
     fn overlapping_start_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1986,7 +2001,7 @@ mod tests {
 
     #[test]
     fn overlapping_end_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2016,7 +2031,7 @@ mod tests {
 
     #[test]
     fn partially_multi_overlapping_reordered_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2053,7 +2068,7 @@ mod tests {
 
     #[test]
     fn partially_multi_overlapping_reordered_read2() {
-        let mut recv = RecvBuf::new(std::u64::MAX);
+        let mut recv = RecvBuf::new(std::u64::MAX, true);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2342,8 +2357,8 @@ mod tests {
     }
 
     #[test]
-    fn recv_flow_control() {
-        let mut stream = Stream::new(15, 0, true, true);
+    fn recv_auto_flow_control() {
+        let mut stream = Stream::new(15, 0, true, true, true);
         assert!(!stream.recv.almost_full());
 
         let mut buf = [0; 32];
@@ -2373,8 +2388,46 @@ mod tests {
     }
 
     #[test]
+    fn recv_manual_flow_control() {
+        let mut stream = Stream::new(15, 0, true, true, false);
+        assert!(!stream.recv.almost_full());
+
+        let mut buf = [0; 32];
+
+        let first = RangeBuf::from(b"hello", 0, false);
+        let second = RangeBuf::from(b"world", 5, false);
+        let third = RangeBuf::from(b"something", 10, false);
+
+        assert_eq!(stream.recv.write(second), Ok(()));
+        assert_eq!(stream.recv.write(first), Ok(()));
+        assert!(!stream.recv.almost_full());
+
+        assert_eq!(stream.recv.write(third), Err(Error::FlowControl));
+
+        let (len, fin) = stream.recv.emit(&mut buf).unwrap();
+        assert_eq!(&buf[..len], b"helloworld");
+        assert_eq!(fin, false);
+
+        assert!(!stream.recv.almost_full());
+
+        stream.recv.update_max_data();
+        assert_eq!(stream.recv.max_data_next(), 15);
+        assert!(!stream.recv.almost_full());
+
+        let third = RangeBuf::from(b"something", 10, false);
+        assert_eq!(stream.recv.write(third.clone()), Err(FlowControl));
+
+        stream.recv.consume(10);
+        assert_eq!(stream.recv.max_data_next(), 25);
+        assert!(stream.recv.almost_full());
+
+        stream.recv.update_max_data();
+        assert_eq!(stream.recv.write(third), Ok(()));
+    }
+
+    #[test]
     fn recv_past_fin() {
-        let mut stream = Stream::new(15, 0, true, true);
+        let mut stream = Stream::new(15, 0, true, true, true);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -2386,7 +2439,7 @@ mod tests {
 
     #[test]
     fn recv_fin_dup() {
-        let mut stream = Stream::new(15, 0, true, true);
+        let mut stream = Stream::new(15, 0, true, true, true);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -2404,7 +2457,7 @@ mod tests {
 
     #[test]
     fn recv_fin_change() {
-        let mut stream = Stream::new(15, 0, true, true);
+        let mut stream = Stream::new(15, 0, true, true, true);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -2416,7 +2469,7 @@ mod tests {
 
     #[test]
     fn recv_fin_lower_than_received() {
-        let mut stream = Stream::new(15, 0, true, true);
+        let mut stream = Stream::new(15, 0, true, true, true);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -2428,7 +2481,7 @@ mod tests {
 
     #[test]
     fn recv_fin_flow_control() {
-        let mut stream = Stream::new(15, 0, true, true);
+        let mut stream = Stream::new(15, 0, true, true, true);
         assert!(!stream.recv.almost_full());
 
         let mut buf = [0; 32];
@@ -2448,7 +2501,7 @@ mod tests {
 
     #[test]
     fn recv_fin_reset_mismatch() {
-        let mut stream = Stream::new(15, 0, true, true);
+        let mut stream = Stream::new(15, 0, true, true, true);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -2459,7 +2512,7 @@ mod tests {
 
     #[test]
     fn recv_reset_dup() {
-        let mut stream = Stream::new(15, 0, true, true);
+        let mut stream = Stream::new(15, 0, true, true, true);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, false);
@@ -2471,7 +2524,7 @@ mod tests {
 
     #[test]
     fn recv_reset_change() {
-        let mut stream = Stream::new(15, 0, true, true);
+        let mut stream = Stream::new(15, 0, true, true, true);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, false);
@@ -2483,7 +2536,7 @@ mod tests {
 
     #[test]
     fn recv_reset_lower_than_received() {
-        let mut stream = Stream::new(15, 0, true, true);
+        let mut stream = Stream::new(15, 0, true, true, true);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, false);
@@ -2496,7 +2549,7 @@ mod tests {
     fn send_flow_control() {
         let mut buf = [0; 25];
 
-        let mut stream = Stream::new(0, 15, true, true);
+        let mut stream = Stream::new(0, 15, true, true, true);
 
         let first = b"hello";
         let second = b"world";
@@ -2539,7 +2592,7 @@ mod tests {
 
     #[test]
     fn send_past_fin() {
-        let mut stream = Stream::new(0, 15, true, true);
+        let mut stream = Stream::new(0, 15, true, true, true);
 
         let first = b"hello";
         let second = b"world";
@@ -2555,7 +2608,7 @@ mod tests {
 
     #[test]
     fn send_fin_dup() {
-        let mut stream = Stream::new(0, 15, true, true);
+        let mut stream = Stream::new(0, 15, true, true, true);
 
         assert_eq!(stream.send.write(b"hello", true), Ok(5));
         assert!(stream.send.is_fin());
@@ -2566,7 +2619,7 @@ mod tests {
 
     #[test]
     fn send_undo_fin() {
-        let mut stream = Stream::new(0, 15, true, true);
+        let mut stream = Stream::new(0, 15, true, true, true);
 
         assert_eq!(stream.send.write(b"hello", true), Ok(5));
         assert!(stream.send.is_fin());
@@ -2581,7 +2634,7 @@ mod tests {
     fn send_fin_max_data_match() {
         let mut buf = [0; 15];
 
-        let mut stream = Stream::new(0, 15, true, true);
+        let mut stream = Stream::new(0, 15, true, true, true);
 
         let slice = b"hellohellohello";
 
@@ -2597,7 +2650,7 @@ mod tests {
     fn send_fin_zero_length() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 15, true, true);
+        let mut stream = Stream::new(0, 15, true, true, true);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"", true), Ok(0));
@@ -2613,7 +2666,7 @@ mod tests {
     fn send_ack() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 15, true, true);
+        let mut stream = Stream::new(0, 15, true, true, true);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -2643,7 +2696,7 @@ mod tests {
     fn send_ack_reordering() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 15, true, true);
+        let mut stream = Stream::new(0, 15, true, true, true);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -2680,7 +2733,7 @@ mod tests {
 
     #[test]
     fn recv_data_below_off() {
-        let mut stream = Stream::new(15, 0, true, true);
+        let mut stream = Stream::new(15, 0, true, true, true);
 
         let first = RangeBuf::from(b"hello", 0, false);
 
@@ -2702,7 +2755,7 @@ mod tests {
 
     #[test]
     fn stream_complete() {
-        let mut stream = Stream::new(30, 30, true, true);
+        let mut stream = Stream::new(30, 30, true, true, true);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -2745,7 +2798,7 @@ mod tests {
     fn send_fin_zero_length_output() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 15, true, true);
+        let mut stream = Stream::new(0, 15, true, true, true);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.off_front(), 0);
@@ -2770,7 +2823,7 @@ mod tests {
     fn send_emit() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 20, true, true);
+        let mut stream = Stream::new(0, 20, true, true, true);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -2822,7 +2875,7 @@ mod tests {
     fn send_emit_ack() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 20, true, true);
+        let mut stream = Stream::new(0, 20, true, true, true);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -2889,7 +2942,7 @@ mod tests {
     fn send_emit_retransmit() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 20, true, true);
+        let mut stream = Stream::new(0, 20, true, true, false);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));

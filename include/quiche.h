@@ -195,6 +195,9 @@ void quiche_config_enable_dgram(quiche_config *config, bool enabled,
                                 size_t recv_queue_len,
                                 size_t send_queue_len);
 
+// Configures whether to enable automatic flow control limits update on streams.
+void quiche_config_enable_stream_flow_control_auto_update(quiche_config *config, bool enabled);
+
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 
@@ -261,6 +264,9 @@ ssize_t quiche_conn_send(quiche_conn *conn, uint8_t *out, size_t out_len);
 // Reads contiguous data from a stream.
 ssize_t quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
                                 uint8_t *out, size_t buf_len, bool *fin);
+
+// Slides stream window offset.
+void quiche_conn_stream_consume(quiche_conn *conn, uint64_t stream_id, size_t n);
 
 // Writes data to a stream.
 ssize_t quiche_conn_stream_send(quiche_conn *conn, uint64_t stream_id,
