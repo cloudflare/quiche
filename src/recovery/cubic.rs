@@ -59,8 +59,7 @@ const BETA_CUBIC: f64 = 0.7;
 const C: f64 = 0.4;
 
 /// Default value of alpha_aimd in the beginning of congestion avoidance.
-// const ALPHA_AIMD: f64 = 3.0 * (1.0 - BETA_CUBIC) / (1.0 + BETA_CUBIC);
-const ALPHA_AIMD: f64 = BETA_CUBIC;
+const ALPHA_AIMD: f64 = 3.0 * (1.0 - BETA_CUBIC) / (1.0 + BETA_CUBIC);
 
 /// CUBIC State Variables.
 ///
@@ -255,15 +254,16 @@ fn on_packet_acked(
         );
         r.cubic_state.w_est += w_est_inc;
 
+        if r.cubic_state.w_est >= r.cubic_state.w_max {
+            r.cubic_state.alpha_aimd = 1.0;
+        }
+
         let mut cubic_cwnd = r.congestion_window;
 
         if r.cubic_state.w_cubic(t, r.max_datagram_size) < r.cubic_state.w_est {
             // AIMD friendly region (W_cubic(t) < W_est)
             cubic_cwnd = cmp::max(cubic_cwnd, r.cubic_state.w_est as usize);
 
-            if r.cubic_state.w_est >= r.cubic_state.w_max {
-                r.cubic_state.alpha_aimd = 1.0;
-            }
         } else {
             // Concave region or convex region use same increment.
             let cubic_inc =
@@ -298,6 +298,8 @@ fn on_packet_acked(
             r.congestion_window += r.max_datagram_size;
             r.cubic_state.cwnd_inc = 0;
         }
+
+        eprintln!("t={:?} cubic={:?} target/cubic/cwnd={}/{}/{}", t, r.cubic_state, target, cubic_cwnd, r.congestion_window);
     }
 }
 
@@ -519,7 +521,7 @@ mod tests {
 
         // During Congestion Avoidance, it will take
         // 5 ACKs to increase cwnd by 1 MSS.
-        for _ in 0..5 {
+        for _ in 0..70 {
             let acked = vec![Acked {
                 pkt_num: 0,
                 // To exit from recovery
