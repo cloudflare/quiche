@@ -82,6 +82,9 @@ pub struct State {
 
     // Store cwnd increment during congestion avoidance.
     cwnd_inc: usize,
+
+    // Reno cwnd
+    reno_cwnd: usize,
 }
 
 /// CUBIC Functions.
@@ -218,6 +221,8 @@ fn on_packet_acked(
 
                 r.cubic_state.w_est = r.congestion_window as f64;
                 r.cubic_state.alpha_aimd = ALPHA_AIMD;
+
+                r.cubic_state.reno_cwnd = r.congestion_window;
             }
         } else {
             match r.congestion_recovery_start_time {
@@ -233,6 +238,8 @@ fn on_packet_acked(
 
                     r.cubic_state.w_est = r.congestion_window as f64;
                     r.cubic_state.alpha_aimd = ALPHA_AIMD;
+
+                    r.cubic_state.reno_cwnd = r.congestion_window;
                 },
             }
         }
@@ -256,6 +263,14 @@ fn on_packet_acked(
 
         if r.cubic_state.w_est >= r.cubic_state.w_max {
             r.cubic_state.alpha_aimd = 1.0;
+        }
+
+        // Reno in parallel.
+        r.bytes_acked_ca += packet.size;
+
+        if r.bytes_acked_ca >= r.congestion_window {
+            r.bytes_acked_ca -= r.congestion_window;
+            r.cubic_state.reno_cwnd += r.max_datagram_size;
         }
 
         let mut cubic_cwnd = r.congestion_window;
@@ -299,7 +314,7 @@ fn on_packet_acked(
             r.cubic_state.cwnd_inc = 0;
         }
 
-        eprintln!("t={:?} cubic={:?} target/cubic/cwnd={}/{}/{}", t, r.cubic_state, target, cubic_cwnd, r.congestion_window);
+        eprintln!("t={:?} reno={} w_est={} w_cubic={} cwnd={}", t, r.cubic_state.reno_cwnd, r.cubic_state.w_est, r.cubic_state.w_cubic(t, r.max_datagram_size), r.congestion_window);
     }
 }
 
@@ -342,6 +357,7 @@ fn congestion_event(
 
         r.cubic_state.w_est = r.congestion_window as f64;
         r.cubic_state.alpha_aimd = ALPHA_AIMD;
+        r.cubic_state.reno_cwnd = (r.cubic_state.w_max * recovery::LOSS_REDUCTION_FACTOR) as usize;
 
         if r.hystart.in_lss(epoch) {
             r.hystart.congestion_event();
