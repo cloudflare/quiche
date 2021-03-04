@@ -165,6 +165,16 @@ impl<'a> From<Vec<u8>> for ConnectionId<'a> {
     }
 }
 
+impl<'a> From<ConnectionId<'a>> for Vec<u8> {
+    #[inline]
+    fn from(id: ConnectionId<'a>) -> Self {
+        match id.0 {
+            ConnectionIdInner::Vec(cid) => cid,
+            ConnectionIdInner::Ref(cid) => cid.to_vec(),
+        }
+    }
+}
+
 impl<'a> PartialEq for ConnectionId<'a> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
