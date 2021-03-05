@@ -149,6 +149,12 @@ impl<'a> ConnectionId<'a> {
     pub const fn from_ref(cid: &'a [u8]) -> Self {
         Self(ConnectionIdInner::Ref(cid))
     }
+
+    /// Returns a new owning connection ID from the given existing one.
+    #[inline]
+    pub fn into_owned(self) -> ConnectionId<'static> {
+        ConnectionId::from_vec(self.into())
+    }
 }
 
 impl<'a> Default for ConnectionId<'a> {
