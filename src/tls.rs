@@ -38,6 +38,7 @@ use crate::Error;
 use crate::Result;
 
 use crate::Connection;
+use crate::ConnectionError;
 
 use crate::crypto;
 use crate::octets;
@@ -728,7 +729,11 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int {
     );
 
     let error: u64 = TLS_ALERT_ERROR + u64::from(alert);
-    conn.error = Some(error);
+    conn.local_error = Some(ConnectionError {
+        is_app: false,
+        error_code: error,
+        reason: Vec::new(),
+    });
 
     1
 }

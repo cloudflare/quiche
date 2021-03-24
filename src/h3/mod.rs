@@ -1223,7 +1223,7 @@ impl Connection {
         // When connection close is initiated by the local application (e.g. due
         // to a protocol error), the connection itself might be in a broken
         // state, so return early.
-        if conn.error.is_some() || conn.app_error.is_some() {
+        if conn.local_error.is_some() {
             return Err(Error::Done);
         }
 
@@ -3374,8 +3374,8 @@ mod tests {
         assert_eq!(s.poll_server(), Err(Error::ExcessiveLoad));
 
         assert_eq!(
-            s.pipe.server.app_error,
-            Some(Error::to_wire(Error::ExcessiveLoad))
+            s.pipe.server.local_error.as_ref().unwrap().error_code,
+            Error::to_wire(Error::ExcessiveLoad)
         );
     }
 

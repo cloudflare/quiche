@@ -440,6 +440,19 @@ impl std::convert::From<octets::BufferTooShortError> for Error {
     }
 }
 
+/// Represents information carried by `CONNECTION_CLOSE` frames.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConnectionError {
+    /// Whether the error came from the application or the transport layer.
+    is_app: bool,
+
+    /// The error code carried by the `CONNECTION_CLOSE` frame.
+    error_code: u64,
+
+    /// The reason carried by the `CONNECTION_CLOSE` frame.
+    reason: Vec<u8>,
+}
+
 /// The stream's side to shutdown.
 ///
 /// This should be used when calling [`stream_shutdown()`].
@@ -912,14 +925,13 @@ pub struct Connection {
     /// Received address verification token.
     token: Option<Vec<u8>>,
 
-    /// Error code to be sent to the peer in CONNECTION_CLOSE.
-    error: Option<u64>,
+    /// Error code and reason to be sent to the peer in a CONNECTION_CLOSE
+    /// frame.
+    local_error: Option<ConnectionError>,
 
-    /// Error code to be sent to the peer in APPLICATION_CLOSE.
-    app_error: Option<u64>,
-
-    /// Error reason to be sent to the peer in APPLICATION_CLOSE.
-    app_reason: Vec<u8>,
+    /// Error code and reason received from the peer in a CONNECTION_CLOSE
+    /// frame.
+    peer_error: Option<ConnectionError>,
 
     /// Received path challenge.
     challenge: Option<Vec<u8>>,
@@ -1261,10 +1273,9 @@ impl Connection {
 
             token: None,
 
-            error: None,
+            local_error: None,
 
-            app_error: None,
-            app_reason: Vec::new(),
+            peer_error: None,
 
             challenge: None,
 
@@ -1535,7 +1546,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let is_closing = self.error.is_some() || self.app_error.is_some();
+        let is_closing = self.local_error.is_some();
 
         if is_closing {
             return Err(Error::Done);
@@ -2143,7 +2154,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let is_closing = self.error.is_some() || self.app_error.is_some();
+        let is_closing = self.local_error.is_some();
 
         if !is_closing {
             self.do_handshake()?;
@@ -2510,27 +2521,29 @@ impl Connection {
         }
 
         // Create CONNECTION_CLOSE frame.
-        if let Some(err) = self.error {
-            let frame = frame::Frame::ConnectionClose {
-                error_code: err,
-                frame_type: 0,
-                reason: Vec::new(),
-            };
+        if let Some(conn_err) = self.local_error.as_ref() {
+            if conn_err.is_app {
+                // Create ApplicationClose frame.
+                if pkt_type == packet::Type::Short {
+                    let frame = frame::Frame::ApplicationClose {
+                        error_code: conn_err.error_code,
+                        reason: conn_err.reason.clone(),
+                    };
 
-            if push_frame_to_pkt!(b, frames, frame, left) {
-                self.draining_timer = Some(now + (self.recovery.pto() * 3));
+                    if push_frame_to_pkt!(b, frames, frame, left) {
+                        self.draining_timer =
+                            Some(now + (self.recovery.pto() * 3));
 
-                ack_eliciting = true;
-                in_flight = true;
-            }
-        }
-
-        // Create APPLICATION_CLOSE frame.
-        if let Some(err) = self.app_error {
-            if pkt_type == packet::Type::Short {
-                let frame = frame::Frame::ApplicationClose {
-                    error_code: err,
-                    reason: self.app_reason.clone(),
+                        ack_eliciting = true;
+                        in_flight = true;
+                    }
+                }
+            } else {
+                // Create ConnectionClose frame.
+                let frame = frame::Frame::ConnectionClose {
+                    error_code: conn_err.error_code,
+                    frame_type: 0,
+                    reason: conn_err.reason.clone(),
                 };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
@@ -3749,16 +3762,15 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        if self.error.is_some() || self.app_error.is_some() {
+        if self.local_error.is_some() {
             return Err(Error::Done);
         }
 
-        if app {
-            self.app_error = Some(err);
-            self.app_reason.extend_from_slice(reason);
-        } else {
-            self.error = Some(err);
-        }
+        self.local_error = Some(ConnectionError {
+            is_app: app,
+            error_code: err,
+            reason: reason.to_vec(),
+        });
 
         // When no packet was successfully processed close connection immediately.
         if self.recv_count == 0 {
@@ -3842,6 +3854,21 @@ impl Connection {
         self.closed
     }
 
+    /// Returns the error received from the peer, if any.
+    ///
+    /// The values contained in the tuple are symmetric with the [`close()`]
+    /// method.
+    ///
+    /// Note that a `Some` return value does not necessarily imply
+    /// [`is_closed()`] or any other connection state.
+    ///
+    /// [`close()`]: struct.Connection.html#method.close
+    /// [`is_closed()`]: struct.Connection.html#method.is_closed
+    #[inline]
+    pub fn peer_error(&self) -> Option<&ConnectionError> {
+        self.peer_error.as_ref()
+    }
+
     /// Collects and returns statistics about the connection.
     #[inline]
     pub fn stats(&self) -> Stats {
@@ -3911,7 +3938,11 @@ impl Connection {
     fn write_epoch(&self) -> Result<packet::Epoch> {
         // On error send packet in the latest epoch available, but only send
         // 1-RTT ones when the handshake is completed.
-        if self.error.is_some() {
+        if self
+            .local_error
+            .as_ref()
+            .map_or(false, |conn_err| !conn_err.is_app)
+        {
             let epoch = match self.handshake.lock().unwrap().write_level() {
                 crypto::Level::Initial => packet::EPOCH_INITIAL,
                 crypto::Level::ZeroRTT => unreachable!(),
@@ -3957,7 +3988,9 @@ impl Connection {
                 self.almost_full ||
                 self.blocked_limit.is_some() ||
                 self.dgram_send_queue.has_pending() ||
-                self.app_error.is_some() ||
+                self.local_error
+                    .as_ref()
+                    .map_or(false, |conn_err| conn_err.is_app) ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
@@ -4366,11 +4399,23 @@ impl Connection {
 
             frame::Frame::PathResponse { .. } => (),
 
-            frame::Frame::ConnectionClose { .. } => {
+            frame::Frame::ConnectionClose {
+                error_code, reason, ..
+            } => {
+                self.peer_error = Some(ConnectionError {
+                    is_app: false,
+                    error_code,
+                    reason,
+                });
                 self.draining_timer = Some(now + (self.recovery.pto() * 3));
             },
 
-            frame::Frame::ApplicationClose { .. } => {
+            frame::Frame::ApplicationClose { error_code, reason } => {
+                self.peer_error = Some(ConnectionError {
+                    is_app: true,
+                    error_code,
+                    reason,
+                });
                 self.draining_timer = Some(now + (self.recovery.pto() * 3));
             },
 
@@ -8859,9 +8904,12 @@ mod tests {
         let mut pipe = testing::Pipe::default().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
-        assert_eq!(pipe.client.close(false, 0x1234, b""), Ok(()));
+        assert_eq!(pipe.client.close(false, 0x1234, b"hello?"), Ok(()));
 
-        assert_eq!(pipe.client.close(false, 0x4321, b""), Err(Error::Done));
+        assert_eq!(
+            pipe.client.close(false, 0x4321, b"hello?"),
+            Err(Error::Done)
+        );
 
         let len = pipe.client.send(&mut buf).unwrap();
 
@@ -8873,7 +8921,7 @@ mod tests {
             Some(&frame::Frame::ConnectionClose {
                 error_code: 0x1234,
                 frame_type: 0,
-                reason: Vec::new(),
+                reason: b"hello?".to_vec(),
             })
         );
     }
@@ -8899,6 +8947,42 @@ mod tests {
             Some(&frame::Frame::ApplicationClose {
                 error_code: 0x1234,
                 reason: b"hello!".to_vec(),
+            })
+        );
+    }
+
+    #[test]
+    fn peer_error() {
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(pipe.server.close(false, 0x1234, b"hello?"), Ok(()));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert_eq!(
+            pipe.client.peer_error(),
+            Some(&ConnectionError {
+                is_app: false,
+                error_code: 0x1234u64,
+                reason: b"hello?".to_vec()
+            })
+        );
+    }
+
+    #[test]
+    fn app_peer_error() {
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(pipe.server.close(true, 0x1234, b"hello!"), Ok(()));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert_eq!(
+            pipe.client.peer_error(),
+            Some(&ConnectionError {
+                is_app: true,
+                error_code: 0x1234u64,
+                reason: b"hello!".to_vec()
             })
         );
     }

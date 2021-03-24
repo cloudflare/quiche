@@ -345,6 +345,14 @@ uint64_t quiche_conn_peer_streams_left_uni(quiche_conn *conn);
 // Returns true if the connection is closed.
 bool quiche_conn_is_closed(quiche_conn *conn);
 
+// Returns true if a connection error was received, and updates the provided
+// parameters accordingly.
+bool quiche_conn_peer_error(quiche_conn *conn,
+                            bool *is_app,
+                            uint64_t *error_code,
+                            const uint8_t **reason,
+                            size_t *reason_len);
+
 // Initializes the stream's application data.
 //
 // Stream data can only be initialized once. Additional calls to this method
