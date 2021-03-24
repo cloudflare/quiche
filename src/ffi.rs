@@ -766,6 +766,30 @@ pub extern fn quiche_conn_is_closed(conn: &mut Connection) -> bool {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_received_close_info(
+    conn: &mut Connection, is_app: *mut bool, error_code: *mut u64,
+    reason: *mut u8, reason_len: *mut size_t,
+) -> c_int {
+    if let Some(conn_err) = conn.peer_error.as_ref() {
+        unsafe {
+            *is_app = conn_err.is_app;
+            *error_code = conn_err.error_code;
+
+            if *reason_len < conn_err.reason_phrase.len() {
+                return -1; // Some, but can't fit reason into provided buf
+            }
+            let reason = slice::from_raw_parts_mut(reason, *reason_len);
+            let reason = &mut reason[..conn_err.reason_phrase.len()];
+            reason.copy_from_slice(&conn_err.reason_phrase);
+            *reason_len = conn_err.reason_phrase.len();
+            return 0; // Some
+        }
+    } else {
+        return 1; // None
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_stream_iter_next(
     iter: &mut StreamIter, stream_id: *mut u64,
 ) -> bool {
