@@ -3777,6 +3777,18 @@ impl Connection {
         self.handshake.lock().unwrap().peer_cert()
     }
 
+    /// Returns the source connection ID
+    #[inline]
+    pub fn source_id(&self) -> ConnectionId {
+        ConnectionId::from_ref(self.scid.as_ref())
+    }
+
+    /// Returns the destination connection ID
+    #[inline]
+    pub fn dest_id(&self) -> ConnectionId {
+        ConnectionId::from_ref(self.dcid.as_ref())
+    }
+
     /// Returns true if the connection handshake is complete.
     #[inline]
     pub fn is_established(&self) -> bool {
@@ -8915,6 +8927,13 @@ mod tests {
         assert_eq!(pipe.server.tx_cap, 0);
 
         assert_eq!(pipe.advance(), Ok(()));
+    }
+
+    #[test]
+    fn connection_ids() {
+        let pipe = testing::Pipe::default().unwrap();
+        assert!(pipe.client.source_id().len() > 0);
+        assert!(pipe.client.dest_id().len() > 0);
     }
 }
 
