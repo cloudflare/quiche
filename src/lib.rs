@@ -3803,6 +3803,24 @@ impl Connection {
         self.handshake.lock().unwrap().peer_cert()
     }
 
+    /// Returns the source connection ID.
+    ///
+    /// Note that the value returned can change throughout the connection's
+    /// lifetime.
+    #[inline]
+    pub fn source_id(&self) -> ConnectionId {
+        ConnectionId::from_ref(self.scid.as_ref())
+    }
+
+    /// Returns the destination connection ID.
+    ///
+    /// Note that the value returned can change throughout the connection's
+    /// lifetime.
+    #[inline]
+    pub fn destination_id(&self) -> ConnectionId {
+        ConnectionId::from_ref(self.dcid.as_ref())
+    }
+
     /// Returns true if the connection handshake is complete.
     #[inline]
     pub fn is_established(&self) -> bool {
