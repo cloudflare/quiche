@@ -848,6 +848,9 @@ fn map_result_ssl(ssl: &Handshake, bssl_result: c_int) -> Result<()> {
                 // SSL_ERROR_SYSCALL
                 5 => Err(Error::TlsFail),
 
+                // SSL_ERROR_PENDING_SESSION
+                11 => Err(Error::Done),
+
                 // SSL_ERROR_PENDING_CERTIFICATE
                 12 => Err(Error::Done),
 
@@ -856,6 +859,9 @@ fn map_result_ssl(ssl: &Handshake, bssl_result: c_int) -> Result<()> {
 
                 // SSL_ERROR_PENDING_TICKET
                 14 => Err(Error::Done),
+
+                // SSL_ERROR_WANT_CERTIFICATE_VERIFY
+                16 => Err(Error::Done),
 
                 _ => Err(Error::TlsFail),
             }
