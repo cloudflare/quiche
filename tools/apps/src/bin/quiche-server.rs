@@ -547,7 +547,5 @@ fn validate_token<'a>(
         return None;
     }
 
-    let token = &token[addr.len()..];
-
-    Some(quiche::ConnectionId::from_ref(&token[..]))
+    Some(quiche::ConnectionId::from_ref(&token[addr.len()..]))
 }
