@@ -116,6 +116,19 @@ pub extern fn quiche_config_load_priv_key_from_pem_file(
 }
 
 #[no_mangle]
+pub extern fn quiche_config_load_verify_locations_from_file(
+    config: &mut Config, path: *const c_char,
+) -> c_int {
+    let path = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
+
+    match config.load_verify_locations_from_file(path) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_config_verify_peer(config: &mut Config, v: bool) {
     config.verify_peer(v);
 }
