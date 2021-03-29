@@ -4267,6 +4267,13 @@ impl Connection {
             },
 
             frame::Frame::MaxStreamData { stream_id, max } => {
+                // Peer can't receive on its own unidirectional streams.
+                if !stream::is_bidi(stream_id) &&
+                    !stream::is_local(stream_id, self.is_server)
+                {
+                    return Err(Error::InvalidStreamState);
+                }
+
                 // Get existing stream or create a new one, but if the stream
                 // has already been closed and collected, ignore the frame.
                 //
@@ -5594,6 +5601,32 @@ mod tests {
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FinalSize)
+        );
+    }
+
+    #[test]
+    /// Tests that receiving a MAX_STREAM_DATA frame for a receive-only
+    /// unidirectional stream is forbidden.
+    fn max_stream_data_receive_uni() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client opens unidirectional stream.
+        assert_eq!(pipe.client.stream_send(2, b"hello", false), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Client sends MAX_STREAM_DATA on local unidirectional stream.
+        let frames = [frame::Frame::MaxStreamData {
+            stream_id: 2,
+            max: 1024,
+        }];
+
+        let pkt_type = packet::Type::Short;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Err(Error::InvalidStreamState),
         );
     }
 
