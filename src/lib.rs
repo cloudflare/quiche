@@ -1816,6 +1816,11 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        // Packets with no frames are invalid.
+        if payload.cap() == 0 {
+            return Err(Error::InvalidPacket);
+        }
+
         if !self.is_server && !self.got_peer_conn_id {
             if self.odcid.is_none() {
                 self.odcid = Some(self.dcid.clone());
@@ -5128,7 +5133,7 @@ pub mod testing {
         let space = &mut conn.pkt_num_spaces[epoch];
 
         let pn = space.next_pkt_num;
-        let pn_len = packet::pkt_num_len(pn)?;
+        let pn_len = 4;
 
         let hdr = Header {
             ty: pkt_type,
@@ -5152,7 +5157,9 @@ pub mod testing {
             b.put_varint(len as u64)?;
         }
 
-        packet::encode_pkt_num(pn, &mut b)?;
+        // Always encode packet number in 4 bytes, to allow encoding packets
+        // with empty payloads.
+        b.put_u32(pn as u32)?;
 
         let payload_offset = b.off();
 
@@ -5631,6 +5638,21 @@ mod tests {
     }
 
     #[test]
+    fn empty_payload() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Send a packet with no frames.
+        let pkt_type = packet::Type::Short;
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &[], &mut buf),
+            Err(Error::InvalidPacket)
+        );
+    }
+
+    #[test]
     fn min_payload() {
         let mut buf = [0; 65535];
 
@@ -5645,7 +5667,7 @@ mod tests {
                 .unwrap();
         assert_eq!(pipe.server.recv(&mut buf[..written]), Ok(written));
 
-        assert_eq!(pipe.server.max_send_bytes, 186);
+        assert_eq!(pipe.server.max_send_bytes, 195);
 
         // Force server to send a single PING frame.
         pipe.server.recovery.loss_probes[packet::EPOCH_INITIAL] = 1;
@@ -6969,7 +6991,7 @@ mod tests {
         buf[written - 1] = !buf[written - 1];
 
         // Client will ignore invalid packet.
-        assert_eq!(pipe.client.recv(&mut buf[..written]), Ok(68));
+        assert_eq!(pipe.client.recv(&mut buf[..written]), Ok(71));
 
         // The connection should be alive...
         assert_eq!(pipe.client.is_closed(), false);
