@@ -894,6 +894,10 @@ pub struct Connection {
     /// Peer's flow control limit for the connection.
     max_tx_data: u64,
 
+    /// The highest epoch level that the peer is guaranteed to be able to
+    /// receive.
+    tx_epoch: usize,
+
     /// Total number of bytes the server can send before the peer's address
     /// is verified.
     max_send_bytes: usize,
@@ -1247,6 +1251,8 @@ impl Connection {
 
             tx_data: 0,
             max_tx_data: 0,
+
+            tx_epoch: packet::EPOCH_INITIAL,
 
             max_send_bytes: 0,
 
@@ -1815,6 +1821,10 @@ impl Connection {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
             return Err(Error::Done);
         }
+
+        // Packet was successfully decrypted, so assume peer can read packets
+        // of epochs up to the current packet's.
+        self.tx_epoch = cmp::max(self.tx_epoch, epoch);
 
         if !self.is_server && !self.got_peer_conn_id {
             if self.odcid.is_none() {
@@ -3899,12 +3909,7 @@ impl Connection {
         // On error send packet in the latest epoch available, but only send
         // 1-RTT ones when the handshake is completed.
         if self.error.is_some() {
-            let epoch = match self.handshake.lock().unwrap().write_level() {
-                crypto::Level::Initial => packet::EPOCH_INITIAL,
-                crypto::Level::ZeroRTT => unreachable!(),
-                crypto::Level::Handshake => packet::EPOCH_HANDSHAKE,
-                crypto::Level::OneRTT => packet::EPOCH_APPLICATION,
-            };
+            let epoch = self.tx_epoch;
 
             if epoch == packet::EPOCH_APPLICATION && !self.is_established() {
                 // Downgrade the epoch to handshake as the handshake is not

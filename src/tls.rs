@@ -455,10 +455,6 @@ impl Handshake {
         map_result_ssl(self, unsafe { SSL_do_handshake(self.as_ptr()) })
     }
 
-    pub fn write_level(&self) -> crypto::Level {
-        unsafe { SSL_quic_write_level(self.as_ptr()) }
-    }
-
     pub fn cipher(&self) -> Option<crypto::Algorithm> {
         let cipher =
             map_result_ptr(unsafe { SSL_get_current_cipher(self.as_ptr()) });
@@ -998,8 +994,6 @@ extern {
     ) -> c_int;
 
     fn SSL_do_handshake(ssl: *mut SSL) -> c_int;
-
-    fn SSL_quic_write_level(ssl: *mut SSL) -> crypto::Level;
 
     fn SSL_session_reused(ssl: *mut SSL) -> c_int;
 
