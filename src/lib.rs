@@ -2076,7 +2076,7 @@ impl Connection {
 
         // Limit output packet size to respect the sender and receiver's
         // maximum UDP payload size limit.
-        let mut left = cmp::min(out.len(), self.max_send_udp_payload_len());
+        let mut left = cmp::min(out.len(), self.max_send_udp_payload_size());
 
         // Limit data sent by the server based on the amount of data received
         // from the client before its address is validated.
@@ -2924,23 +2924,6 @@ impl Connection {
         Ok((pkt_type, written))
     }
 
-    // Returns the maximum size of a packet to be sent.
-    //
-    // This is a minimum of the sender's and the receiver's maximum UDP payload
-    // sizes, except during the handshake when we haven't parsed transport
-    // parameters yet, so use a default value then.
-    fn max_send_udp_payload_len(&self) -> usize {
-        if self.is_established() {
-            // We cap the maximum packet size to 16KB or so, so that it can be
-            // always encoded with a 2-byte varint.
-            cmp::min(16383, self.recovery.max_datagram_size())
-        } else {
-            // Allow for 1200 bytes (minimum QUIC packet size) during the
-            // handshake.
-            MIN_CLIENT_INITIAL_LEN
-        }
-    }
-
     /// Reads contiguous data from a stream into the provided slice.
     ///
     /// The slice must be sized by the caller and will be populated up to its
@@ -3435,6 +3418,31 @@ impl Connection {
         self.streams.writable()
     }
 
+    /// Returns the maximum possible size of egress UDP payloads.
+    ///
+    /// This is the maximum size of UDP payloads that can be sent, and depends
+    /// on both the configured maximum send payload size of the local endpoint
+    /// (as configured with [`set_max_send_udp_payload_size()`]), as well as
+    /// the transport parameter advertised by the remote peer.
+    ///
+    /// Note that this value can change during the lifetime of the connection,
+    /// but should remain stable across consecutive calls to [`send()`].
+    ///
+    /// [`set_max_send_udp_payload_size()`]:
+    ///     struct.Config.html#method.set_max_send_udp_payload_size
+    /// [`send()`]: struct.Connection.html#method.send
+    pub fn max_send_udp_payload_size(&self) -> usize {
+        if self.is_established() {
+            // We cap the maximum packet size to 16KB or so, so that it can be
+            // always encoded with a 2-byte varint.
+            cmp::min(16383, self.recovery.max_datagram_size())
+        } else {
+            // Allow for 1200 bytes (minimum QUIC packet size) during the
+            // handshake.
+            MIN_CLIENT_INITIAL_LEN
+        }
+    }
+
     /// Reads the first received DATAGRAM.
     ///
     /// On success the DATAGRAM's data is returned along with its size.
@@ -3597,7 +3605,7 @@ impl Connection {
             None => None,
             Some(peer_frame_len) => {
                 // Start from the maximum packet size...
-                let mut max_len = self.max_send_udp_payload_len();
+                let mut max_len = self.max_send_udp_payload_size();
                 // ...subtract the Short packet header overhead...
                 // (1 byte of pkt_len + len of dcid)
                 max_len = max_len.saturating_sub(1 + self.dcid.len());
