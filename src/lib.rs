@@ -4518,15 +4518,15 @@ fn drop_pkt_on_err(
 
 /// Statistics about the connection.
 ///
-/// A connections's statistics can be collected using the [`stats()`] method.
+/// A connection's statistics can be collected using the [`stats()`] method.
 ///
 /// [`stats()`]: struct.Connection.html#method.stats
 #[derive(Clone)]
 pub struct Stats {
-    /// The number of QUIC packets received on this connection.
+    /// The number of QUIC packets received.
     pub recv: usize,
 
-    /// The number of QUIC packets sent on this connection.
+    /// The number of QUIC packets sent.
     pub sent: usize,
 
     /// The number of QUIC packets that were lost.
@@ -4538,7 +4538,7 @@ pub struct Stats {
     /// The size of the connection's congestion window in bytes.
     pub cwnd: usize,
 
-    /// The estimated data delivery rate in bytes/s.
+    /// The most recent data delivery rate estimate in bytes/s.
     pub delivery_rate: u64,
 }
 
