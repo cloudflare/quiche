@@ -671,6 +671,11 @@ pub extern fn quiche_conn_writable(conn: &Connection) -> *mut StreamIter {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_max_send_udp_payload_size(conn: &Connection) -> usize {
+    conn.max_send_udp_payload_size()
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_is_readable(conn: &Connection) -> bool {
     conn.is_readable()
 }
