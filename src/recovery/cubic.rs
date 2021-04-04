@@ -60,6 +60,10 @@ const BETA_CUBIC: f64 = 0.7;
 
 const C: f64 = 0.4;
 
+/// The packet count threshold to restore to the prior state if the
+/// lost packet count since the last checkpoint is less than the threshold.
+const RESTORE_COUNT_THRESHOLD: usize = 10;
+
 /// CUBIC State Variables.
 ///
 /// We need to keep those variables across the connection.
@@ -191,6 +195,23 @@ fn on_packet_acked(
 
     if r.app_limited {
         return;
+    }
+
+    // Detecting spurious congestion events.
+    // <https://tools.ietf.org/id/draft-ietf-tcpm-rfc8312bis-00.html#section-4.9>
+    //
+    // When the recovery episode ends with recovering
+    // a few packets (less than RESTORE_COUNT_THRESHOLD), it's considered
+    // as spurious and restore to the previous state.
+    if r.congestion_recovery_start_time.is_some() {
+        let new_lost = r.lost_count - r.cubic_state.prior.lost_count;
+
+        if r.congestion_window < r.cubic_state.prior.congestion_window &&
+            new_lost < RESTORE_COUNT_THRESHOLD
+        {
+            rollback(r);
+            return;
+        }
     }
 
     if r.congestion_window < r.ssthresh {
@@ -530,6 +551,10 @@ mod tests {
 
         // Ack more than cwnd bytes with rtt=100ms
         r.update_rtt(rtt, Duration::from_millis(0), now);
+
+        // To avoid rollback
+        r.lost_count += RESTORE_COUNT_THRESHOLD;
+
         r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now + rtt * 3);
 
         // After acking more than cwnd, expect cwnd increased by MSS
@@ -688,5 +713,49 @@ mod tests {
 
         // During LSS cwnd will be increased less than usual slow start.
         assert_eq!(r.cwnd(), cwnd_prev + r.max_datagram_size);
+    }
+
+    #[test]
+    fn cubic_spurious_congestion_event() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::CUBIC);
+
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+        let prev_cwnd = r.cwnd();
+
+        // Send initcwnd full MSS packets to become no longer app limited
+        for _ in 0..recovery::INITIAL_WINDOW_PACKETS {
+            r.on_packet_sent_cc(r.max_datagram_size, now);
+        }
+
+        // Trigger congestion event to update ssthresh
+        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+
+        // After congestion event, cwnd will be reduced.
+        let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
+        assert_eq!(r.cwnd(), cur_cwnd);
+
+        let rtt = Duration::from_millis(100);
+
+        let acked = vec![Acked {
+            pkt_num: 0,
+            // To exit from recovery
+            time_sent: now + rtt,
+            size: r.max_datagram_size,
+        }];
+
+        // Ack more than cwnd bytes with rtt=100ms
+        r.update_rtt(rtt, Duration::from_millis(0), now);
+
+        // Trigger detecting sprurious congestion event
+        r.on_packets_acked(
+            acked,
+            packet::EPOCH_APPLICATION,
+            now + rtt + Duration::from_millis(5),
+        );
+
+        // cwnd is restored to the previous one.
+        assert_eq!(r.cwnd(), prev_cwnd);
     }
 }
