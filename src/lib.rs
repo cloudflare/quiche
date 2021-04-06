@@ -3845,13 +3845,13 @@ impl Connection {
     }
 
     /// Returns the error code and reason phrase from a connection close or
-    /// application close event received from the peer, if any
+    /// application close event received from the peer, if any.
     ///
     /// The values contained in the tuple are symmetric with the [`close()`]
-    /// method
+    /// method.
     ///
     /// Note that a `Some` return value does not necessarily imply
-    /// [`is_closed()`] or any other connection state
+    /// [`is_closed()`] or any other connection state.
     ///
     /// [`close()`]: struct.Connection.html#method.close
     /// [`is_closed()`]: struct.Connection.html#method.is_closed
