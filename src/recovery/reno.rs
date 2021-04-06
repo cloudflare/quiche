@@ -43,6 +43,8 @@ pub static RENO: CongestionControlOps = CongestionControlOps {
     on_packet_acked,
     congestion_event,
     collapse_cwnd,
+    checkpoint,
+    rollback,
 };
 
 pub fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
@@ -342,3 +344,7 @@ mod tests {
         assert_eq!(r.cwnd(), cur_cwnd + r.max_datagram_size);
     }
 }
+
+fn checkpoint(_r: &mut Recovery) {}
+
+fn rollback(_r: &mut Recovery) {}

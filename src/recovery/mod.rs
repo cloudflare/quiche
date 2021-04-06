@@ -755,6 +755,10 @@ impl Recovery {
     fn congestion_event(
         &mut self, time_sent: Instant, epoch: packet::Epoch, now: Instant,
     ) {
+        if !self.in_congestion_recovery(time_sent) {
+            (self.cc_ops.checkpoint)(self);
+        }
+
         (self.cc_ops.congestion_event)(self, time_sent, epoch, now);
     }
 
@@ -839,6 +843,10 @@ pub struct CongestionControlOps {
     ),
 
     pub collapse_cwnd: fn(r: &mut Recovery),
+
+    pub checkpoint: fn(r: &mut Recovery),
+
+    pub rollback: fn(r: &mut Recovery),
 }
 
 impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
