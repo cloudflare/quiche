@@ -49,6 +49,8 @@ pub static CUBIC: CongestionControlOps = CongestionControlOps {
     on_packet_acked,
     congestion_event,
     collapse_cwnd,
+    checkpoint,
+    rollback,
 };
 
 /// CUBIC Constants.
@@ -75,6 +77,29 @@ pub struct State {
 
     // Store cwnd increment during congestion avoidance.
     cwnd_inc: usize,
+
+    // CUBIC state checkpoint preceding the last congestion event.
+    prior: PriorState,
+}
+
+/// Stores the CUBIC state from before the last congestion event.
+///
+/// <https://tools.ietf.org/id/draft-ietf-tcpm-rfc8312bis-00.html#section-4.9>
+#[derive(Debug, Default)]
+struct PriorState {
+    congestion_window: usize,
+
+    ssthresh: usize,
+
+    w_max: f64,
+
+    w_last_max: f64,
+
+    k: f64,
+
+    epoch_start: Option<Instant>,
+
+    lost_count: usize,
 }
 
 /// CUBIC Functions.
@@ -310,6 +335,25 @@ fn congestion_event(
             r.hystart.congestion_event();
         }
     }
+}
+
+fn checkpoint(r: &mut Recovery) {
+    r.cubic_state.prior.congestion_window = r.congestion_window;
+    r.cubic_state.prior.ssthresh = r.ssthresh;
+    r.cubic_state.prior.w_max = r.cubic_state.w_max;
+    r.cubic_state.prior.w_last_max = r.cubic_state.w_last_max;
+    r.cubic_state.prior.k = r.cubic_state.k;
+    r.cubic_state.prior.epoch_start = r.congestion_recovery_start_time;
+    r.cubic_state.prior.lost_count = r.lost_count;
+}
+
+fn rollback(r: &mut Recovery) {
+    r.congestion_window = r.cubic_state.prior.congestion_window;
+    r.ssthresh = r.cubic_state.prior.ssthresh;
+    r.cubic_state.w_max = r.cubic_state.prior.w_max;
+    r.cubic_state.w_last_max = r.cubic_state.prior.w_last_max;
+    r.cubic_state.k = r.cubic_state.prior.k;
+    r.congestion_recovery_start_time = r.cubic_state.prior.epoch_start;
 }
 
 #[cfg(test)]
