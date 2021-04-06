@@ -776,6 +776,7 @@ pub extern fn quiche_conn_received_close_info(
             *error_code = conn_err.error_code;
 
             if *reason_len < conn_err.reason_phrase.len() {
+                *reason_len = conn_err.reason_phrase.len(); // Always provide the length of reason
                 return -1; // Some, but can't fit reason into provided buf
             }
             let reason = slice::from_raw_parts_mut(reason, *reason_len);

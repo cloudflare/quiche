@@ -4389,21 +4389,26 @@ impl Connection {
             frame::Frame::PathResponse { .. } => (),
 
             frame::Frame::ConnectionClose {
-                error_code, reason, ..
+                error_code,
+                reason: reason_phrase,
+                ..
             } => {
                 self.peer_error = Some(ConnectionError {
                     is_app: false,
                     error_code,
-                    reason_phrase: reason,
+                    reason_phrase,
                 });
                 self.draining_timer = Some(now + (self.recovery.pto() * 3));
             },
 
-            frame::Frame::ApplicationClose { error_code, reason } => {
+            frame::Frame::ApplicationClose {
+                error_code,
+                reason: reason_phrase,
+            } => {
                 self.peer_error = Some(ConnectionError {
                     is_app: true,
                     error_code,
-                    reason_phrase: reason,
+                    reason_phrase,
                 });
                 self.draining_timer = Some(now + (self.recovery.pto() * 3));
             },

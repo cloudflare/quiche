@@ -339,6 +339,9 @@ uint64_t quiche_conn_peer_streams_left_uni(quiche_conn *conn);
 bool quiche_conn_is_closed(quiche_conn *conn);
 
 // Returns 0 if Some, 1 if None, -1 if Some but reason_len is too small.
+//
+// Always sets reason_len to the length of reason, so an exact length
+// buffer can be malloc'd and filled with a second call.
 int quiche_conn_received_close_info(quiche_conn *conn,
                                     bool *is_app,
                                     uint64_t *error_code,
