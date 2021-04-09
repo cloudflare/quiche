@@ -5797,6 +5797,40 @@ mod tests {
     }
 
     #[test]
+    /// Tests that flow control is properly updated even when a stream is shut
+    /// down.
+    fn flow_control_drain() {
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client opens a stream and sends some data.
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server receives data, without reading it.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        // In the meantime, client sends more data.
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", true), Ok(5));
+
+        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(8, b"aaaaa", true), Ok(5));
+
+        // Server shuts down one stream.
+        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
+        // Flush connection.
+        assert_eq!(pipe.advance(), Ok(()));
+    }
+
+    #[test]
     fn stream_flow_control_limit_bidi() {
         let mut buf = [0; 65535];
 
