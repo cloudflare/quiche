@@ -778,10 +778,6 @@ impl RecvBuf {
             }
         }
 
-        if self.drain {
-            return Ok(());
-        }
-
         let mut tmp_buf = Some(buf);
 
         while let Some(mut buf) = tmp_buf {
@@ -815,7 +811,9 @@ impl RecvBuf {
 
             self.len = cmp::max(self.len, buf.max_off());
 
-            self.data.push(buf);
+            if !self.drain {
+                self.data.push(buf);
+            }
         }
 
         Ok(())
