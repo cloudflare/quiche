@@ -3777,15 +3777,15 @@ impl Connection {
         self.handshake.lock().unwrap().peer_cert()
     }
 
-    /// Returns the source connection ID
+    /// Returns the source connection ID.
     #[inline]
     pub fn source_id(&self) -> ConnectionId {
         ConnectionId::from_ref(self.scid.as_ref())
     }
 
-    /// Returns the destination connection ID
+    /// Returns the destination connection ID.
     #[inline]
-    pub fn dest_id(&self) -> ConnectionId {
+    pub fn destination_id(&self) -> ConnectionId {
         ConnectionId::from_ref(self.dcid.as_ref())
     }
 
@@ -8933,7 +8933,7 @@ mod tests {
     fn connection_ids() {
         let pipe = testing::Pipe::default().unwrap();
         assert!(pipe.client.source_id().len() > 0);
-        assert!(pipe.client.dest_id().len() > 0);
+        assert!(pipe.client.destination_id().len() > 0);
     }
 }
 
