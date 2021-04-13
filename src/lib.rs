@@ -829,7 +829,8 @@ impl Config {
     }
 }
 /// Represents information carried by `CONNECTION_CLOSE` frames.
-struct ConnectionError {
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConnectionError {
     /// Whether the error came from the application or the transport layer.
     is_app: bool,
 
@@ -837,7 +838,7 @@ struct ConnectionError {
     error_code: u64,
 
     /// The reason carried by the `CONNECTION_CLOSE` frame.
-    reason_phrase: Vec<u8>,
+    reason: Vec<u8>,
 }
 
 /// A QUIC connection.
@@ -1543,7 +1544,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let is_closing = self.is_closing();
+        let is_closing = self.local_error.is_some();
 
         if is_closing {
             return Err(Error::Done);
@@ -2146,7 +2147,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let is_closing = self.is_closing();
+        let is_closing = self.local_error.is_some();
 
         if !is_closing {
             self.do_handshake()?;
@@ -2519,7 +2520,7 @@ impl Connection {
                 if pkt_type == packet::Type::Short {
                     let frame = frame::Frame::ApplicationClose {
                         error_code: conn_err.error_code,
-                        reason: conn_err.reason_phrase.clone(),
+                        reason: conn_err.reason.clone(),
                     };
 
                     if push_frame_to_pkt!(b, frames, frame, left) {
@@ -2535,7 +2536,7 @@ impl Connection {
                 let frame = frame::Frame::ConnectionClose {
                     error_code: conn_err.error_code,
                     frame_type: 0,
-                    reason: conn_err.reason_phrase.clone(),
+                    reason: conn_err.reason.clone(),
                 };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
@@ -3746,14 +3747,14 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        if self.is_closing() {
+        if self.local_error.is_some() {
             return Err(Error::Done);
         }
 
         self.local_error = Some(ConnectionError {
             is_app: app,
             error_code: err,
-            reason_phrase: reason.to_vec(),
+            reason: reason.to_vec(),
         });
 
         // When no packet was successfully processed close connection immediately.
@@ -3838,12 +3839,6 @@ impl Connection {
         self.closed
     }
 
-    /// Returns true if the connection is closing.
-    #[inline]
-    pub fn is_closing(&self) -> bool {
-        self.local_error.is_some()
-    }
-
     /// Returns the error received from the peer, if any.
     ///
     /// The values contained in the tuple are symmetric with the [`close()`]
@@ -3855,13 +3850,8 @@ impl Connection {
     /// [`close()`]: struct.Connection.html#method.close
     /// [`is_closed()`]: struct.Connection.html#method.is_closed
     #[inline]
-    pub fn peer_error(&self) -> Option<(bool, u64, &[u8])> {
-        let peer_error = self.peer_error.as_ref()?;
-        Some((
-            peer_error.is_app,
-            peer_error.error_code,
-            &peer_error.reason_phrase,
-        ))
+    pub fn peer_error(&self) -> Option<&ConnectionError> {
+        self.peer_error.as_ref()
     }
 
     /// Collects and returns statistics about the connection.
@@ -4388,26 +4378,21 @@ impl Connection {
             frame::Frame::PathResponse { .. } => (),
 
             frame::Frame::ConnectionClose {
-                error_code,
-                reason: reason_phrase,
-                ..
+                error_code, reason, ..
             } => {
                 self.peer_error = Some(ConnectionError {
                     is_app: false,
                     error_code,
-                    reason_phrase,
+                    reason,
                 });
                 self.draining_timer = Some(now + (self.recovery.pto() * 3));
             },
 
-            frame::Frame::ApplicationClose {
-                error_code,
-                reason: reason_phrase,
-            } => {
+            frame::Frame::ApplicationClose { error_code, reason } => {
                 self.peer_error = Some(ConnectionError {
                     is_app: true,
                     error_code,
-                    reason_phrase,
+                    reason,
                 });
                 self.draining_timer = Some(now + (self.recovery.pto() * 3));
             },
@@ -8877,7 +8862,11 @@ mod tests {
 
         assert_eq!(
             pipe.client.peer_error(),
-            Some((false, 0x1234u64, &b"hello?"[..]))
+            Some(&ConnectionError {
+                is_app: false,
+                error_code: 0x1234u64,
+                reason: b"hello?".to_vec()
+            })
         );
     }
 
@@ -8891,7 +8880,11 @@ mod tests {
 
         assert_eq!(
             pipe.client.peer_error(),
-            Some((true, 0x1234u64, &b"hello!"[..]))
+            Some(&ConnectionError {
+                is_app: true,
+                error_code: 0x1234u64,
+                reason: b"hello!".to_vec()
+            })
         );
     }
 

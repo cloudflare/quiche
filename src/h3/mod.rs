@@ -1223,7 +1223,7 @@ impl Connection {
         // When connection close is initiated by the local application (e.g. due
         // to a protocol error), the connection itself might be in a broken
         // state, so return early.
-        if conn.is_closing() {
+        if conn.local_error.is_some() {
             return Err(Error::Done);
         }
 

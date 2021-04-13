@@ -732,7 +732,7 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int {
     conn.local_error = Some(ConnectionError {
         is_app: false,
         error_code: error,
-        reason_phrase: Vec::new(),
+        reason: Vec::new(),
     });
 
     1
