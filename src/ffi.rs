@@ -789,7 +789,7 @@ pub extern fn quiche_conn_peer_error(
     reason: &mut *const u8, reason_len: &mut size_t,
 ) -> bool {
     match &conn.peer_error {
-        Some(conn_error) => unsafe {
+        Some(conn_err) => unsafe {
             *is_app = conn_err.is_app;
             *error_code = conn_err.error_code;
             *reason = conn_err.reason.as_ptr();
