@@ -444,13 +444,13 @@ impl std::convert::From<octets::BufferTooShortError> for Error {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConnectionError {
     /// Whether the error came from the application or the transport layer.
-    is_app: bool,
+    pub is_app: bool,
 
     /// The error code carried by the `CONNECTION_CLOSE` frame.
-    error_code: u64,
+    pub error_code: u64,
 
     /// The reason carried by the `CONNECTION_CLOSE` frame.
-    reason: Vec<u8>,
+    pub reason: Vec<u8>,
 }
 
 /// The stream's side to shutdown.
