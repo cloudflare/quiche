@@ -828,13 +828,15 @@ impl Config {
         self.dgram_send_max_queue_len = send_queue_len;
     }
 }
-/// Container for data sent and received with CONNECTION_CLOSE frames
+/// Represents information carried by `CONNECTION_CLOSE` frames.
 struct ConnectionError {
-    /// ApplicationClose or ConnectionClose (both are CONNECTION_CLOSE frames)
+    /// Whether the error came from the application or the transport layer.
     is_app: bool,
-    /// Error Code: A variable-length integer error code
+
+    /// The error code carried by the `CONNECTION_CLOSE` frame.
     error_code: u64,
-    /// Reason Phrase: Additional diagnostic information for the closure
+
+    /// The reason carried by the `CONNECTION_CLOSE` frame.
     reason_phrase: Vec<u8>,
 }
 
@@ -921,13 +923,11 @@ pub struct Connection {
     token: Option<Vec<u8>>,
 
     /// Error code and reason to be sent to the peer in a CONNECTION_CLOSE
-    /// frame. Either ConnectionClose or ApplicationClose depending on
-    /// is_app.
+    /// frame.
     local_error: Option<ConnectionError>,
 
     /// Error code and reason received from the peer in a CONNECTION_CLOSE
-    /// frame. Either ConnectionClose or ApplicationClose depending on
-    /// is_app.
+    /// frame.
     peer_error: Option<ConnectionError>,
 
     /// Received path challenge.
@@ -3844,8 +3844,7 @@ impl Connection {
         self.local_error.is_some()
     }
 
-    /// Returns the error code and reason phrase from a connection close or
-    /// application close event received from the peer, if any.
+    /// Returns the error received from the peer, if any.
     ///
     /// The values contained in the tuple are symmetric with the [`close()`]
     /// method.
@@ -3856,7 +3855,7 @@ impl Connection {
     /// [`close()`]: struct.Connection.html#method.close
     /// [`is_closed()`]: struct.Connection.html#method.is_closed
     #[inline]
-    pub fn received_close_info(&self) -> Option<(bool, u64, &[u8])> {
+    pub fn peer_error(&self) -> Option<(bool, u64, &[u8])> {
         let peer_error = self.peer_error.as_ref()?;
         Some((
             peer_error.is_app,
@@ -8869,31 +8868,29 @@ mod tests {
     }
 
     #[test]
-    fn received_close_info() {
+    fn peer_error() {
         let mut pipe = testing::Pipe::default().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
         assert_eq!(pipe.server.close(false, 0x1234, b"hello?"), Ok(()));
-
         assert_eq!(pipe.advance(), Ok(()));
 
         assert_eq!(
-            pipe.client.received_close_info(),
+            pipe.client.peer_error(),
             Some((false, 0x1234u64, &b"hello?"[..]))
         );
     }
 
     #[test]
-    fn app_received_close_info() {
+    fn app_peer_error() {
         let mut pipe = testing::Pipe::default().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
         assert_eq!(pipe.server.close(true, 0x1234, b"hello!"), Ok(()));
-
         assert_eq!(pipe.advance(), Ok(()));
 
         assert_eq!(
-            pipe.client.received_close_info(),
+            pipe.client.peer_error(),
             Some((true, 0x1234u64, &b"hello!"[..]))
         );
     }
