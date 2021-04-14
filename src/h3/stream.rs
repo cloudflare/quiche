@@ -73,6 +73,9 @@ pub enum State {
 
     /// Reading and discarding data.
     Drain,
+
+    /// All data has been read.
+    Finished,
 }
 
 impl Type {
@@ -485,6 +488,11 @@ impl Stream {
         }
 
         Ok((len, fin))
+    }
+
+    /// Marks the stream as finished.
+    pub fn finished(&mut self) {
+        let _ = self.state_transition(State::Finished, 0, false);
     }
 
     /// Tries to read DATA payload from the given cursor.
