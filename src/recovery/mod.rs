@@ -125,6 +125,8 @@ pub struct Recovery {
 
     max_datagram_size: usize,
 
+    reno_prior_state: reno::PriorState,
+
     cubic_state: cubic::State,
 
     // HyStart++.
@@ -192,6 +194,8 @@ impl Recovery {
             cc_ops: config.cc_algorithm.into(),
 
             delivery_rate: delivery_rate::Rate::default(),
+
+            reno_prior_state: reno::PriorState::default(),
 
             cubic_state: cubic::State::default(),
 

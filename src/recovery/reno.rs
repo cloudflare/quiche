@@ -47,6 +47,22 @@ pub static RENO: CongestionControlOps = CongestionControlOps {
     rollback,
 };
 
+/// The packet count threshold to restore to the prior state if the
+/// lost packet count since the last checkpoint is less than the threshold.
+const RESTORE_COUNT_THRESHOLD: usize = 10;
+
+/// Store the Reno state before the last congestion event.
+#[derive(Debug, Default)]
+pub struct PriorState {
+    congestion_window: usize,
+
+    ssthresh: usize,
+
+    epoch_start: Option<Instant>,
+
+    lost_count: usize,
+}
+
 pub fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
     r.bytes_in_flight += sent_bytes;
 }
@@ -62,6 +78,22 @@ fn on_packet_acked(
 
     if r.app_limited {
         return;
+    }
+
+    // Detecting spurious congestion events.
+    //
+    // When the recovery episode ends with recovering
+    // a few packets (less than RESTORE_COUNT_THRESHOLD), it's considered
+    // as spurious and restore to the previous state.
+    if r.congestion_recovery_start_time.is_some() {
+        let new_lost = r.lost_count - r.reno_prior_state.lost_count;
+
+        if r.congestion_window < r.reno_prior_state.congestion_window &&
+            new_lost < RESTORE_COUNT_THRESHOLD
+        {
+            rollback(r);
+            return;
+        }
     }
 
     if r.congestion_window < r.ssthresh {
@@ -158,9 +190,18 @@ pub fn collapse_cwnd(r: &mut Recovery) {
     r.bytes_acked_ca = 0;
 }
 
-fn checkpoint(_r: &mut Recovery) {}
+fn checkpoint(r: &mut Recovery) {
+    r.reno_prior_state.congestion_window = r.congestion_window;
+    r.reno_prior_state.ssthresh = r.ssthresh;
+    r.reno_prior_state.epoch_start = r.congestion_recovery_start_time;
+    r.reno_prior_state.lost_count = r.lost_count;
+}
 
-fn rollback(_r: &mut Recovery) {}
+fn rollback(r: &mut Recovery) {
+    r.congestion_window = r.reno_prior_state.congestion_window;
+    r.ssthresh = r.reno_prior_state.ssthresh;
+    r.congestion_recovery_start_time = r.reno_prior_state.epoch_start;
+}
 
 #[cfg(test)]
 mod tests {
@@ -342,9 +383,58 @@ mod tests {
 
         // Ack more than cwnd bytes with rtt=100ms
         r.update_rtt(rtt, Duration::from_millis(0), now);
+
+        // To avoid rollback
+        r.lost_count += RESTORE_COUNT_THRESHOLD;
+
         r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now + rtt * 2);
 
         // After acking more than cwnd, expect cwnd increased by MSS
         assert_eq!(r.cwnd(), cur_cwnd + r.max_datagram_size);
+    }
+
+    #[test]
+    fn reno_spurious_congestion_event() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::Reno);
+
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+        let prev_cwnd = r.cwnd();
+
+        // Send initcwnd full MSS packets to become no longer app limited
+        for _ in 0..recovery::INITIAL_WINDOW_PACKETS {
+            r.on_packet_sent_cc(r.max_datagram_size, now);
+        }
+
+        // Trigger congestion event to update ssthresh
+        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+
+        // After congestion event, cwnd will be reduced.
+        let cur_cwnd =
+            (prev_cwnd as f64 * recovery::LOSS_REDUCTION_FACTOR) as usize;
+        assert_eq!(r.cwnd(), cur_cwnd);
+
+        let rtt = Duration::from_millis(100);
+
+        let acked = vec![Acked {
+            pkt_num: 0,
+            // To exit from recovery
+            time_sent: now + rtt,
+            size: r.max_datagram_size,
+        }];
+
+        // Ack more than cwnd bytes with rtt=100ms
+        r.update_rtt(rtt, Duration::from_millis(0), now);
+
+        // Trigger detecting sprurious congestion event
+        r.on_packets_acked(
+            acked,
+            packet::EPOCH_APPLICATION,
+            now + rtt + Duration::from_millis(5),
+        );
+
+        // cwnd is restored to the previous one.
+        assert_eq!(r.cwnd(), prev_cwnd);
     }
 }
