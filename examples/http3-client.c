@@ -65,8 +65,11 @@ static void debug_log(const char *line, void *argp) {
 static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
     static uint8_t out[MAX_DATAGRAM_SIZE];
 
+    quiche_send_info send_info;
+
     while (1) {
-        ssize_t written = quiche_conn_send(conn_io->conn, out, sizeof(out));
+        ssize_t written = quiche_conn_send(conn_io->conn, out, sizeof(out),
+                                           &send_info);
 
         if (written == QUICHE_ERR_DONE) {
             fprintf(stderr, "done writing\n");
@@ -78,7 +81,10 @@ static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
             return;
         }
 
-        ssize_t sent = send(conn_io->sock, out, written, 0);
+        ssize_t sent = sendto(conn_io->sock, out, written, 0,
+                              (struct sockaddr *) &send_info.to,
+                              send_info.to_len);
+
         if (sent != written) {
             perror("failed to send");
             return;
@@ -109,7 +115,13 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
     static uint8_t buf[65535];
 
     while (1) {
-        ssize_t read = recv(conn_io->sock, buf, sizeof(buf), 0);
+        struct sockaddr_storage peer_addr;
+        socklen_t peer_addr_len = sizeof(peer_addr);
+        memset(&peer_addr, 0, peer_addr_len);
+
+        ssize_t read = recvfrom(conn_io->sock, buf, sizeof(buf), 0,
+                                (struct sockaddr *) &peer_addr,
+                                &peer_addr_len);
 
         if (read < 0) {
             if ((errno == EWOULDBLOCK) || (errno == EAGAIN)) {
@@ -121,7 +133,13 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             return;
         }
 
-        ssize_t done = quiche_conn_recv(conn_io->conn, buf, read);
+        quiche_recv_info recv_info = {
+            (struct sockaddr *) &peer_addr,
+
+            peer_addr_len,
+        };
+
+        ssize_t done = quiche_conn_recv(conn_io->conn, buf, read, &recv_info);
 
         if (done < 0) {
             fprintf(stderr, "failed to process packet: %zd\n", done);
@@ -371,8 +389,9 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    quiche_conn *conn = quiche_connect(host, (const uint8_t *) scid,
-                                       sizeof(scid), config);
+    quiche_conn *conn = quiche_connect(host, (const uint8_t*) scid, sizeof(scid),
+                                       peer->ai_addr, peer->ai_addrlen, config);
+
     if (conn == NULL) {
         fprintf(stderr, "failed to create connection\n");
         return -1;

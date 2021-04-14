@@ -39,7 +39,6 @@ use std::rc::Rc;
 
 use std::cell::RefCell;
 
-use std::net;
 use std::path;
 
 use quiche::ConnectionId;
@@ -97,7 +96,7 @@ pub struct Client {
     pub partial_responses: std::collections::HashMap<u64, PartialResponse>,
 }
 
-pub type ClientMap = HashMap<ConnectionId<'static>, (net::SocketAddr, Client)>;
+pub type ClientMap = HashMap<ConnectionId<'static>, Client>;
 
 /// Makes a buffered writer for a resource with a target URL.
 ///

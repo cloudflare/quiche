@@ -123,7 +123,8 @@ pub fn run(
     // Create a QUIC connection and initiate handshake.
     let url = &test.endpoint();
 
-    let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
+    let mut conn =
+        quiche::connect(url.domain(), &scid, peer_addr, &mut config).unwrap();
 
     if let Some(session_file) = &session_file {
         if let Ok(session) = std::fs::read(session_file) {
@@ -131,9 +132,9 @@ pub fn run(
         }
     }
 
-    let write = conn.send(&mut out).expect("initial send failed");
+    let (write, send_info) = conn.send(&mut out).expect("initial send failed");
 
-    while let Err(e) = socket.send(&out[..write]) {
+    while let Err(e) = socket.send_to(&out[..write], &send_info.to) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
             debug!("send() would block");
             continue;
@@ -165,7 +166,7 @@ pub fn run(
                 break 'read;
             }
 
-            let len = match socket.recv(&mut buf) {
+            let (len, from) = match socket.recv_from(&mut buf) {
                 Ok(v) => v,
 
                 Err(e) => {
@@ -185,8 +186,10 @@ pub fn run(
 
             debug!("got {} bytes", len);
 
+            let recv_info = quiche::RecvInfo { from };
+
             // Process potentially coalesced packets.
-            let read = match conn.recv(&mut buf[..len]) {
+            let read = match conn.recv(&mut buf[..len], recv_info) {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
@@ -347,7 +350,7 @@ pub fn run(
         // Generate outgoing QUIC packets and send them on the UDP socket, until
         // quiche reports that there are no more packets to be sent.
         loop {
-            let write = match conn.send(&mut out) {
+            let (write, send_info) = match conn.send(&mut out) {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
@@ -362,7 +365,7 @@ pub fn run(
                 },
             };
 
-            if let Err(e) = socket.send(&out[..write]) {
+            if let Err(e) = socket.send_to(&out[..write], &send_info.to) {
                 if e.kind() == std::io::ErrorKind::WouldBlock {
                     debug!("send() would block");
                     break;
