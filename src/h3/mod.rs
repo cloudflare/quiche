@@ -1174,7 +1174,7 @@ impl Connection {
         // While body is being received, the stream is marked as finished only
         // when all data is read by the application.
         if conn.stream_finished(stream_id) {
-            self.finished_streams.push_back(stream_id);
+            self.process_finished_stream(stream_id);
         }
 
         if total == 0 {
@@ -1799,6 +1799,8 @@ impl Connection {
 
                     break;
                 },
+
+                stream::State::Finished => break,
             }
         }
 
@@ -1806,15 +1808,22 @@ impl Connection {
     }
 
     fn process_finished_stream(&mut self, stream_id: u64) {
-        let stream = match self.streams.get(&stream_id) {
+        let stream = match self.streams.get_mut(&stream_id) {
             Some(v) => v,
 
             None => return,
         };
 
+        if stream.state() == stream::State::Finished {
+            return;
+        }
+
         match stream.ty() {
-            Some(stream::Type::Request) | Some(stream::Type::Push) =>
-                self.finished_streams.push_back(stream_id),
+            Some(stream::Type::Request) | Some(stream::Type::Push) => {
+                stream.finished();
+
+                self.finished_streams.push_back(stream_id);
+            },
 
             _ => (),
         };
@@ -4117,6 +4126,32 @@ mod tests {
         assert_eq!(s.pipe.advance(), Ok(()));
 
         assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Tests that streams are marked as finished only once.
+    fn finished_once() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(false).unwrap();
+        let body = s.send_body_client(stream, true).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: true,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+
+        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Err(Error::Done));
         assert_eq!(s.poll_server(), Err(Error::Done));
     }
 
