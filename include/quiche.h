@@ -216,11 +216,14 @@ typedef struct Connection quiche_conn;
 // Creates a new server-side connection.
 quiche_conn *quiche_accept(const uint8_t *scid, size_t scid_len,
                            const uint8_t *odcid, size_t odcid_len,
+                           const struct sockaddr *from, size_t from_len,
                            quiche_config *config);
 
 // Creates a new client-side connection.
-quiche_conn *quiche_connect(const char *server_name, const uint8_t *scid,
-                            size_t scid_len, quiche_config *config);
+quiche_conn *quiche_connect(const char *server_name,
+                            const uint8_t *scid, size_t scid_len,
+                            const struct sockaddr *to, size_t to_len,
+                            quiche_config *config);
 
 // Writes a version negotiation packet.
 ssize_t quiche_negotiate_version(const uint8_t *scid, size_t scid_len,
@@ -239,6 +242,7 @@ bool quiche_version_is_supported(uint32_t version);
 
 quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
                                       const uint8_t *odcid, size_t odcid_len,
+                                      const struct sockaddr *peer, size_t peer_len,
                                       quiche_config *config, void *ssl,
                                       bool is_server);
 
@@ -259,11 +263,23 @@ void quiche_conn_set_qlog_fd(quiche_conn *conn, int fd, const char *log_title,
 // Configures the given session for resumption.
 int quiche_conn_set_session(quiche_conn *conn, const uint8_t *buf, size_t buf_len);
 
+typedef struct {
+    struct sockaddr *from;
+    socklen_t from_len;
+} quiche_recv_info;
+
 // Processes QUIC packets received from the peer.
-ssize_t quiche_conn_recv(quiche_conn *conn, uint8_t *buf, size_t buf_len);
+ssize_t quiche_conn_recv(quiche_conn *conn, uint8_t *buf, size_t buf_len,
+                         const quiche_recv_info *info);
+
+typedef struct {
+    struct sockaddr_storage to;
+    socklen_t to_len;
+} quiche_send_info;
 
 // Writes a single QUIC packet to be sent to the peer.
-ssize_t quiche_conn_send(quiche_conn *conn, uint8_t *out, size_t out_len);
+ssize_t quiche_conn_send(quiche_conn *conn, uint8_t *out, size_t out_len,
+                         quiche_send_info *out_info);
 
 // Reads contiguous data from a stream.
 ssize_t quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
