@@ -2141,6 +2141,14 @@ impl Connection {
 
                 _ => (),
             };
+
+            // When sending multiple PTO probes, don't coalesce them together,
+            // so they are sent on separate UDP datagrams.
+            if let Ok(epoch) = ty.to_epoch() {
+                if self.recovery.loss_probes[epoch] > 0 {
+                    break;
+                }
+            }
         }
 
         if done == 0 {
@@ -8470,6 +8478,46 @@ mod tests {
                 data: stream::RangeBuf::from(b"b", 0, false),
             })
         );
+    }
+
+    #[test]
+    /// Tests that PTO probe packets are not coalesced together.
+    fn dont_coalesce_probes() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Client send Initial packet.
+        assert_eq!(pipe.client.send(&mut buf), Ok(1200));
+
+        // Wait for PTO to expire.
+        let timer = pipe.client.timeout().unwrap();
+        std::thread::sleep(timer + time::Duration::from_millis(1));
+
+        pipe.client.on_timeout();
+
+        let epoch = packet::EPOCH_INITIAL;
+        assert_eq!(pipe.client.recovery.loss_probes[epoch], 1);
+
+        // Client sends PTO probe.
+        assert_eq!(pipe.client.send(&mut buf), Ok(1200));
+        assert_eq!(pipe.client.recovery.loss_probes[epoch], 0);
+
+        // Wait for PTO to expire.
+        let timer = pipe.client.timeout().unwrap();
+        std::thread::sleep(timer + time::Duration::from_millis(1));
+
+        pipe.client.on_timeout();
+
+        assert_eq!(pipe.client.recovery.loss_probes[epoch], 2);
+
+        // Client sends first PTO probe.
+        assert_eq!(pipe.client.send(&mut buf), Ok(1200));
+        assert_eq!(pipe.client.recovery.loss_probes[epoch], 1);
+
+        // Client sends second PTO probe.
+        assert_eq!(pipe.client.send(&mut buf), Ok(1200));
+        assert_eq!(pipe.client.recovery.loss_probes[epoch], 0);
     }
 
     #[test]
