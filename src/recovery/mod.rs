@@ -84,7 +84,7 @@ pub struct Recovery {
 
     rttvar: Duration,
 
-    minmax_filter: minmax::Minmax<Duration>,
+    minmax_filter: minmax::Minmax<Instant, Duration>,
 
     min_rtt: Duration,
 
@@ -152,7 +152,7 @@ impl Recovery {
             // handled by the `rtt()` method instead.
             smoothed_rtt: None,
 
-            minmax_filter: minmax::Minmax::new(Duration::new(0, 0)),
+            minmax_filter: minmax::Minmax::new(Instant::now(), Duration::new(0, 0)),
 
             min_rtt: Duration::new(0, 0),
 

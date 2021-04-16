@@ -52,31 +52,32 @@
 // every new min and overwrites 2nd & 3rd choices. The same property
 // holds for 2nd & 3rd best.
 
-use std::time::Duration;
-use std::time::Instant;
+use std::ops::{Div, Sub};
 
 #[derive(Copy, Clone)]
-struct MinmaxSample<T> {
-    time: Instant,
-    value: T,
+struct MinmaxSample<I, V> {
+    time: I,
+    value: V,
 }
 
-pub struct Minmax<T> {
-    estimate: [MinmaxSample<T>; 3],
+pub struct Minmax<I, V> {
+    estimate: [MinmaxSample<I, V>; 3],
 }
 
-impl<T: PartialOrd + Copy> Minmax<T> {
-    pub fn new(val: T) -> Self {
+impl<D, I, V> Minmax<I, V>
+where
+    D: Copy + PartialEq + PartialOrd + Div<u32, Output = D>,
+    I: Copy + PartialEq + Sub<I, Output = D>,
+    V: Copy + PartialOrd,
+{
+    pub fn new(time: I, val: V) -> Self {
         Minmax {
-            estimate: [MinmaxSample {
-                time: Instant::now(),
-                value: val,
-            }; 3],
+            estimate: [MinmaxSample { time, value: val }; 3],
         }
     }
 
     /// Resets the estimates to the given value.
-    pub fn reset(&mut self, time: Instant, meas: T) -> T {
+    pub fn reset(&mut self, time: I, meas: V) -> V {
         let val = MinmaxSample { time, value: meas };
 
         for i in self.estimate.iter_mut() {
@@ -87,10 +88,10 @@ impl<T: PartialOrd + Copy> Minmax<T> {
     }
 
     /// Updates the min estimate based on the given measurement, and returns it.
-    pub fn running_min(&mut self, win: Duration, time: Instant, meas: T) -> T {
+    pub fn running_min(&mut self, win: D, time: I, meas: V) -> V {
         let val = MinmaxSample { time, value: meas };
 
-        let delta_time = time.duration_since(self.estimate[2].time);
+        let delta_time = time - self.estimate[2].time;
 
         // Reset if there's nothing in the window or a new min value is found.
         if val.value <= self.estimate[0].value || delta_time > win {
@@ -108,10 +109,10 @@ impl<T: PartialOrd + Copy> Minmax<T> {
     }
 
     /// Updates the max estimate based on the given measurement, and returns it.
-    pub fn _running_max(&mut self, win: Duration, time: Instant, meas: T) -> T {
+    pub fn _running_max(&mut self, win: D, time: I, meas: V) -> V {
         let val = MinmaxSample { time, value: meas };
 
-        let delta_time = time.duration_since(self.estimate[2].time);
+        let delta_time = time - self.estimate[2].time;
 
         // Reset if there's nothing in the window or a new max value is found.
         if val.value >= self.estimate[0].value || delta_time > win {
@@ -129,10 +130,10 @@ impl<T: PartialOrd + Copy> Minmax<T> {
     }
 
     /// As time advances, update the 1st, 2nd and 3rd estimates.
-    fn subwin_update(&mut self, win: Duration, time: Instant, meas: T) -> T {
+    fn subwin_update(&mut self, win: D, time: I, meas: V) -> V {
         let val = MinmaxSample { time, value: meas };
 
-        let delta_time = time.duration_since(self.estimate[0].time);
+        let delta_time = time - self.estimate[0].time;
 
         if delta_time > win {
             // Passed entire window without a new val so make 2nd estimate the
@@ -143,20 +144,20 @@ impl<T: PartialOrd + Copy> Minmax<T> {
             self.estimate[1] = self.estimate[2];
             self.estimate[2] = val;
 
-            if time.duration_since(self.estimate[0].time) > win {
+            if time - self.estimate[0].time > win {
                 self.estimate[0] = self.estimate[1];
                 self.estimate[1] = self.estimate[2];
                 self.estimate[2] = val;
             }
-        } else if self.estimate[1].time == self.estimate[0].time &&
-            delta_time > win.div_f32(4.0)
+        } else if self.estimate[1].time == self.estimate[0].time
+            && delta_time > win / 4
         {
             // We've passed a quarter of the window without a new val so take a
             // 2nd estimate from the 2nd quarter of the window.
             self.estimate[2] = val;
             self.estimate[1] = val;
-        } else if self.estimate[2].time == self.estimate[1].time &&
-            delta_time > win.div_f32(2.0)
+        } else if self.estimate[2].time == self.estimate[1].time
+            && delta_time > win / 2
         {
             // We've passed half the window without finding a new val so take a
             // 3rd estimate from the last half of the window.
@@ -170,10 +171,11 @@ impl<T: PartialOrd + Copy> Minmax<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn reset_filter_rtt() {
-        let mut f = Minmax::new(Duration::new(0, 0));
+        let mut f = Minmax::new(Instant::now(), Duration::new(0, 0));
         let now = Instant::now();
         let rtt = Duration::from_millis(50);
 
@@ -192,7 +194,7 @@ mod tests {
 
     #[test]
     fn reset_filter_bandwidth() {
-        let mut f = Minmax::new(0);
+        let mut f = Minmax::new(Instant::now(), 0);
         let now = Instant::now();
         let bw = 2000;
 
@@ -211,7 +213,7 @@ mod tests {
 
     #[test]
     fn get_windowed_min_rtt() {
-        let mut f = Minmax::new(Duration::new(0, 0));
+        let mut f = Minmax::new(Instant::now(), Duration::new(0, 0));
         let rtt_25 = Duration::from_millis(25);
         let rtt_24 = Duration::from_millis(24);
         let win = Duration::from_millis(500);
@@ -235,7 +237,7 @@ mod tests {
 
     #[test]
     fn get_windowed_min_bandwidth() {
-        let mut f = Minmax::new(0);
+        let mut f = Minmax::new(Instant::now(), 0);
         let bw_200 = 200;
         let bw_500 = 500;
         let win = Duration::from_millis(500);
@@ -259,7 +261,7 @@ mod tests {
 
     #[test]
     fn get_windowed_max_rtt() {
-        let mut f = Minmax::new(Duration::new(0, 0));
+        let mut f = Minmax::new(Instant::now(), Duration::new(0, 0));
         let rtt_25 = Duration::from_millis(25);
         let rtt_24 = Duration::from_millis(24);
         let win = Duration::from_millis(500);
@@ -283,7 +285,7 @@ mod tests {
 
     #[test]
     fn get_windowed_max_bandwidth() {
-        let mut f = Minmax::new(0);
+        let mut f = Minmax::new(Instant::now(), 0);
         let bw_200 = 200;
         let bw_500 = 500;
         let win = Duration::from_millis(500);
@@ -307,7 +309,7 @@ mod tests {
 
     #[test]
     fn get_windowed_min_estimates_rtt() {
-        let mut f = Minmax::new(Duration::new(0, 0));
+        let mut f = Minmax::new(Instant::now(), Duration::new(0, 0));
         let rtt_25 = Duration::from_millis(25);
         let rtt_24 = Duration::from_millis(24);
         let rtt_23 = Duration::from_millis(23);
@@ -339,7 +341,7 @@ mod tests {
 
     #[test]
     fn get_windowed_min_estimates_bandwidth() {
-        let mut f = Minmax::new(0);
+        let mut f = Minmax::new(Instant::now(), 0);
         let bw_500 = 500;
         let bw_400 = 400;
         let bw_300 = 300;
@@ -371,7 +373,7 @@ mod tests {
 
     #[test]
     fn get_windowed_max_estimates_rtt() {
-        let mut f = Minmax::new(Duration::new(0, 0));
+        let mut f = Minmax::new(Instant::now(), Duration::new(0, 0));
         let rtt_25 = Duration::from_millis(25);
         let rtt_24 = Duration::from_millis(24);
         let rtt_23 = Duration::from_millis(23);
@@ -403,7 +405,7 @@ mod tests {
 
     #[test]
     fn get_windowed_max_estimates_bandwidth() {
-        let mut f = Minmax::new(0);
+        let mut f = Minmax::new(Instant::now(), 0);
         let bw_500 = 500;
         let bw_400 = 400;
         let bw_300 = 300;
@@ -431,5 +433,29 @@ mod tests {
         assert_eq!(bw_max, bw_600);
         assert_eq!(f.estimate[1].value, bw_600);
         assert_eq!(f.estimate[2].value, bw_600);
+    }
+
+    #[test]
+    fn get_windowed_min_bandwidth_ints() {
+        let mut f = Minmax::new(0 as u32, 0);
+        let bw_200 = 200;
+        let bw_500 = 500;
+        let win = 2;
+        let mut time = 0;
+
+        let mut bw_min = f.reset(time, bw_500);
+        assert_eq!(bw_min, bw_500);
+
+        time += 1;
+        bw_min = f.running_min(win, time, bw_200);
+        assert_eq!(bw_min, bw_200);
+        assert_eq!(f.estimate[1].value, bw_200);
+        assert_eq!(f.estimate[2].value, bw_200);
+
+        time += 2;
+        bw_min = f.running_min(win, time, bw_500);
+        assert_eq!(bw_min, bw_500);
+        assert_eq!(f.estimate[1].value, bw_500);
+        assert_eq!(f.estimate[2].value, bw_500);
     }
 }
