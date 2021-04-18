@@ -966,6 +966,11 @@ impl Connection {
             },
         };
 
+        // Avoid sending 0-length DATA frames when the fin flag is false.
+        if body.is_empty() && !fin {
+            return Err(Error::Done);
+        }
+
         let overhead = octets::varint_len(frame::DATA_FRAME_TYPE_ID) +
             octets::varint_len(body.len() as u64);
 
@@ -981,10 +986,8 @@ impl Connection {
             },
         };
 
-        // Make sure there is enough capacity to send the frame header and at
-        // least one byte of frame payload (this to avoid sending 0-length DATA
-        // frames).
-        if stream_cap <= overhead {
+        // Make sure there is enough capacity to send the DATA frame header.
+        if stream_cap < overhead {
             return Err(Error::Done);
         }
 
@@ -994,6 +997,11 @@ impl Connection {
         // If we can't send the entire body, set the fin flag to false so the
         // application can try again later.
         let fin = if body_len != body.len() { false } else { fin };
+
+        // Again, avoid sending 0-length DATA frames when the fin flag is false.
+        if body_len == 0 && !fin {
+            return Err(Error::Done);
+        }
 
         trace!(
             "{} tx frm DATA stream={} len={} fin={}",
@@ -3521,6 +3529,61 @@ mod tests {
     }
 
     #[test]
+    /// Test handling of 0-length DATA writes with and without fin.
+    fn zero_length_data() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(false).unwrap();
+
+        assert_eq!(
+            s.client.send_body(&mut s.pipe.client, 0, b"", false),
+            Err(Error::Done)
+        );
+        assert_eq!(s.client.send_body(&mut s.pipe.client, 0, b"", true), Ok(0));
+
+        s.advance().ok();
+
+        let mut recv_buf = vec![0; 100];
+
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: true,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Err(Error::Done));
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let resp = s.send_response(stream, false).unwrap();
+
+        assert_eq!(
+            s.server.send_body(&mut s.pipe.server, 0, b"", false),
+            Err(Error::Done)
+        );
+        assert_eq!(s.server.send_body(&mut s.pipe.server, 0, b"", true), Ok(0));
+
+        s.advance().ok();
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            has_body: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_client(stream, &mut recv_buf), Err(Error::Done));
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
     /// Tests that blocked 0-length DATA writes are reported correctly.
     fn zero_length_data_blocked() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -3531,7 +3594,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config.set_application_protos(b"\x02h3").unwrap();
-        config.set_initial_max_data(70);
+        config.set_initial_max_data(69);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);
         config.set_initial_max_stream_data_uni(150);
