@@ -84,7 +84,7 @@ pub struct Recovery {
 
     rttvar: Duration,
 
-    minmax_filter: minmax::Minmax<Duration>,
+    minmax_filter: minmax::Minmax<Instant, Duration>,
 
     min_rtt: Duration,
 
@@ -136,6 +136,9 @@ pub struct Recovery {
     pacing_rate: u64,
 
     last_packet_scheduled_time: Option<Instant>,
+
+    // BBR
+    bbr_state: bbr::State,
 }
 
 impl Recovery {
@@ -159,7 +162,10 @@ impl Recovery {
             // handled by the `rtt()` method instead.
             smoothed_rtt: None,
 
-            minmax_filter: minmax::Minmax::new(Duration::new(0, 0)),
+            minmax_filter: minmax::Minmax::new(
+                Instant::now(),
+                Duration::new(0, 0),
+            ),
 
             min_rtt: Duration::new(0, 0),
 
@@ -211,6 +217,8 @@ impl Recovery {
             pacing_rate: 0,
 
             last_packet_scheduled_time: None,
+
+            bbr_state: bbr::State::default(),
         }
     }
 
@@ -383,6 +391,10 @@ impl Recovery {
                     time_sent: unacked.time_sent,
 
                     size: unacked.size,
+
+                    is_app_limited: unacked.is_app_limited,
+
+                    delivered: unacked.delivered,
                 });
 
                 trace!("{} packet newly acked {}", trace_id, unacked.pkt_num);
@@ -875,6 +887,8 @@ pub enum CongestionControlAlgorithm {
     Reno  = 0,
     /// CUBIC congestion control algorithm (default). `cubic` in a string form.
     CUBIC = 1,
+    /// BBR congestion control algorithm. `BBR` in a string form.
+    BBR   = 2,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -887,6 +901,7 @@ impl FromStr for CongestionControlAlgorithm {
         match name {
             "reno" => Ok(CongestionControlAlgorithm::Reno),
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
+            "bbr" => Ok(CongestionControlAlgorithm::BBR),
 
             _ => Err(crate::Error::CongestionControl),
         }
@@ -920,6 +935,7 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
         match algo {
             CongestionControlAlgorithm::Reno => &reno::RENO,
             CongestionControlAlgorithm::CUBIC => &cubic::CUBIC,
+            CongestionControlAlgorithm::BBR => &bbr::BBR,
         }
     }
 }
@@ -1029,6 +1045,10 @@ pub struct Acked {
     pub time_sent: Instant,
 
     pub size: usize,
+
+    pub is_app_limited: bool,
+
+    pub delivered: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1766,6 +1786,7 @@ mod tests {
     }
 }
 
+mod bbr;
 mod cubic;
 mod delivery_rate;
 mod hystart;

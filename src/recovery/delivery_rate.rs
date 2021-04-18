@@ -124,6 +124,10 @@ impl Rate {
     pub fn delivery_rate(&self) -> u64 {
         self.rate_sample.delivery_rate
     }
+
+    pub fn delivered(&self) -> usize {
+        self.delivered
+    }
 }
 
 impl std::fmt::Debug for Rate {
