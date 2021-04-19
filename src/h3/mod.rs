@@ -1326,9 +1326,13 @@ impl Connection {
     pub fn send_goaway(
         &mut self, conn: &mut super::Connection, id: u64,
     ) -> Result<()> {
+        let mut id = id;
+
+        // TODO: server push
+        //
+        // In the meantime always send 0 from client.
         if !self.is_server {
-            // TODO: server push
-            return Ok(());
+            id = 0;
         }
 
         if self.is_server && id % 4 != 0 {
@@ -3004,12 +3008,12 @@ mod tests {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
-        s.client.send_goaway(&mut s.pipe.client, 1).unwrap();
+        s.client.send_goaway(&mut s.pipe.client, 100).unwrap();
 
         s.advance().ok();
 
         // TODO: server push
-        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(s.poll_server(), Ok((0, Event::GoAway)));
     }
 
     #[test]
