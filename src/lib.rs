@@ -1721,6 +1721,11 @@ impl Connection {
             self.version = hdr.version;
             self.did_version_negotiation = true;
 
+            self.handshake
+                .lock()
+                .unwrap()
+                .use_legacy_codepoint(self.version != PROTOCOL_VERSION_V1);
+
             // Encode transport parameters again, as the new version might be
             // using a different format.
             self.encode_transport_params()?;
@@ -5591,6 +5596,23 @@ mod tests {
 
         assert_eq!(pipe.client.application_proto(), b"");
         assert_eq!(pipe.server.application_proto(), b"");
+    }
+
+    #[test]
+    /// Tests that a pre-v1 client can connect to a v1-enabled server, by making
+    /// the server downgrade to the pre-v1 version.
+    fn handshake_downgrade_v1() {
+        let mut config = Config::new(PROTOCOL_VERSION_DRAFT29).unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(pipe.client.version, PROTOCOL_VERSION_DRAFT29);
+        assert_eq!(pipe.server.version, PROTOCOL_VERSION_DRAFT29);
     }
 
     #[test]
