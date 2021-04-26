@@ -176,6 +176,12 @@ pub fn connect(
         }
     }
 
+    if let Some(session_file) = &args.session_file {
+        if let Ok(session) = std::fs::read(session_file) {
+            conn.set_session(&session).ok();
+        }
+    }
+
     info!(
         "connecting to {:} from {:} with scid {:?}",
         peer_addr,
@@ -273,6 +279,12 @@ pub fn connect(
                 );
 
                 return Err(ClientError::HandshakeFail);
+            }
+
+            if let Some(session_file) = &args.session_file {
+                if let Some(session) = conn.session() {
+                    std::fs::write(session_file, &session).ok();
+                }
             }
 
             if let Some(h_conn) = http_conn {
@@ -402,6 +414,12 @@ pub fn connect(
                 );
 
                 return Err(ClientError::HandshakeFail);
+            }
+
+            if let Some(session_file) = &args.session_file {
+                if let Some(session) = conn.session() {
+                    std::fs::write(session_file, &session).ok();
+                }
             }
 
             if let Some(h_conn) = http_conn {

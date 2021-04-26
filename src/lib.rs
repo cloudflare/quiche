@@ -623,6 +623,20 @@ impl Config {
         self.tls_ctx.lock().unwrap().enable_keylog();
     }
 
+    /// Configures the session ticket key material.
+    ///
+    /// On the server this key will be used to encrypt and decrypt session
+    /// tickets, used to perform session resumption without server-side state.
+    ///
+    /// By default a key is generated internally, and rotated regularly, so
+    /// applications don't need to call this unless they need to use a
+    /// specific key (e.g. in order to support resumption across multiple
+    /// servers), in which case the application is also responsible for
+    /// rotating the key to provide forward secrecy.
+    pub fn set_ticket_key(&mut self, key: &[u8]) -> Result<()> {
+        self.tls_ctx.lock().unwrap().set_ticket_key(key)
+    }
+
     /// Enables sending or receiving early data.
     pub fn enable_early_data(&mut self) {
         self.tls_ctx.lock().unwrap().set_early_data_enabled(true);
@@ -873,6 +887,12 @@ pub struct Connection {
     /// that BoringSSL's SSL structure is not thread safe, we need to wrap the
     /// handshake object in a mutex.
     handshake: Mutex<tls::Handshake>,
+
+    /// Serialized TLS session buffer.
+    ///
+    /// This field is populated when a new session ticket is processed on the
+    /// client. On the server this is empty.
+    session: Option<Vec<u8>>,
 
     /// Loss recovery and congestion control state.
     recovery: recovery::Recovery,
@@ -1245,6 +1265,8 @@ impl Connection {
 
             handshake: Mutex::new(tls),
 
+            session: None,
+
             recovery: recovery::Recovery::new(&config),
 
             application_protos: config.application_protos.clone(),
@@ -1451,6 +1473,20 @@ impl Connection {
         streamer.add_event(ev).ok();
 
         self.qlog_streamer = Some(streamer);
+    }
+
+    /// Configures the given session for resumption.
+    ///
+    /// On the client, this can be used to offer the given serialized session,
+    /// as returned by [`session()`], for resumption.
+    ///
+    /// This must only be called immediately after creating a connection, that
+    /// is, before any packet is sent or received.
+    ///
+    /// [`session()`]: struct.Connection.html#method.session
+    #[inline]
+    pub fn set_session(&mut self, session: &[u8]) -> Result<()> {
+        self.handshake.lock().unwrap().set_session(session)
     }
 
     /// Processes QUIC packets received from the peer.
@@ -3840,6 +3876,17 @@ impl Connection {
         self.handshake.lock().unwrap().peer_cert()
     }
 
+    /// Returns the serialized cryptographic session for the connection.
+    ///
+    /// This can be used by a client to cache a connection's session, and resume
+    /// it later using the [`set_session()`] method.
+    ///
+    /// [`set_session()`]: struct.Connection.html#method.set_session
+    #[inline]
+    pub fn session(&self) -> Option<Vec<u8>> {
+        self.session.clone()
+    }
+
     /// Returns the source connection ID.
     ///
     /// Note that the value returned can change throughout the connection's
@@ -3960,8 +4007,9 @@ impl Connection {
     fn do_handshake(&mut self) -> Result<()> {
         let handshake = self.handshake.lock().unwrap();
 
-        // Handshake is already complete, there's nothing to do.
+        // Handshake is already complete, try to process post-handshake data.
         if handshake.is_completed() {
+            handshake.process_post_handshake()?;
             return Ok(());
         }
 
@@ -5581,6 +5629,68 @@ mod tests {
 
         assert!(pipe.server.is_established());
         assert!(pipe.server.handshake_confirmed);
+    }
+
+    #[test]
+    fn handshake_resumption() {
+        const SESSION_TICKET_KEY: [u8; 48] = [0xa; 48];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_streams_bidi(3);
+        config.set_ticket_key(&SESSION_TICKET_KEY).unwrap();
+
+        // Perform initial handshake.
+        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(pipe.client.is_established(), true);
+        assert_eq!(pipe.server.is_established(), true);
+
+        assert_eq!(pipe.client.is_resumed(), false);
+        assert_eq!(pipe.server.is_resumed(), false);
+
+        // Extract session,
+        let session = pipe.client.session().unwrap();
+
+        // Configure session on new connection and perform handshake.
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_streams_bidi(3);
+        config.set_ticket_key(&SESSION_TICKET_KEY).unwrap();
+
+        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
+
+        assert_eq!(pipe.client.set_session(&session), Ok(()));
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(pipe.client.is_established(), true);
+        assert_eq!(pipe.server.is_established(), true);
+
+        assert_eq!(pipe.client.is_resumed(), true);
+        assert_eq!(pipe.server.is_resumed(), true);
     }
 
     #[test]

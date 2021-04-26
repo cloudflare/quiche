@@ -39,7 +39,11 @@ check_testcase () {
             echo "supported"
         fi
         ;;
-    resumption | zerortt )
+    resumption )
+        echo "supported"
+        QUICHE_CLIENT_OPT="$QUICHE_CLIENT_OPT --session-file=session.bin"
+        ;;
+    zerortt )
         if [ "$ROLE" == "client" ]; then
             # We don't support session resumption on the client-side yet.
             echo "unsupported"

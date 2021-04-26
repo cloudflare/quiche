@@ -196,6 +196,7 @@ Options:
   --disable-hystart        Disable HyStart++.
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
+  --session-file PATH      File used to cache a TLS session for resumption.
   -h --help                Show this screen.
 ";
 
@@ -211,6 +212,7 @@ pub struct ClientArgs {
     pub body: Option<Vec<u8>>,
     pub method: String,
     pub connect_to: Option<String>,
+    pub session_file: Option<String>,
 }
 
 impl Args for ClientArgs {
@@ -268,6 +270,12 @@ impl Args for ClientArgs {
             None
         };
 
+        let session_file = if args.get_bool("--session-file") {
+            Some(args.get_str("--session-file").to_string())
+        } else {
+            None
+        };
+
         ClientArgs {
             version,
             dump_response_path,
@@ -279,6 +287,7 @@ impl Args for ClientArgs {
             body,
             method,
             connect_to,
+            session_file,
         }
     }
 }
@@ -296,6 +305,7 @@ impl Default for ClientArgs {
             body: None,
             method: "GET".to_string(),
             connect_to: None,
+            session_file: None,
         }
     }
 }
