@@ -275,6 +275,8 @@ use std::str::FromStr;
 
 use std::sync::Mutex;
 
+use std::collections::VecDeque;
+
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
 
@@ -323,6 +325,9 @@ const MAX_DGRAM_FRAME_SIZE: u64 = 65536;
 
 // The length of the payload length field.
 const PAYLOAD_LENGTH_LEN: usize = 2;
+
+// The number of undecryptable that can be buffered.
+const MAX_UNDECRYPTABLE_PACKETS: usize = 10;
 
 /// A specialized [`Result`] type for quiche operations.
 ///
@@ -966,6 +971,9 @@ pub struct Connection {
     /// Draining timeout expiration time.
     draining_timer: Option<time::Instant>,
 
+    /// List of raw packets that were received before they could be decrypted.
+    undecryptable_pkts: VecDeque<Vec<u8>>,
+
     /// The negotiated ALPN protocol.
     alpn: Vec<u8>,
 
@@ -1309,6 +1317,8 @@ impl Connection {
 
             draining_timer: None,
 
+            undecryptable_pkts: VecDeque::new(),
+
             alpn: Vec::new(),
 
             is_server,
@@ -1564,6 +1574,24 @@ impl Connection {
             left -= read;
         }
 
+        // Process previously undecryptable 0-RTT packets if the decryption key
+        // is now available.
+        if self.pkt_num_spaces[packet::EPOCH_APPLICATION]
+            .crypto_0rtt_open
+            .is_some()
+        {
+            while let Some(mut pkt) = self.undecryptable_pkts.pop_front() {
+                if let Err(e) = self.recv(&mut pkt) {
+                    self.undecryptable_pkts.clear();
+
+                    // Even though the packet was previously "accepted", it
+                    // should be safe to forward the error, as it also comes
+                    // from the `recv()` method.
+                    return Err(e);
+                }
+            }
+        }
+
         Ok(done)
     }
 
@@ -1808,24 +1836,45 @@ impl Connection {
         let epoch = hdr.ty.to_epoch()?;
 
         // Select AEAD context used to open incoming packet.
-        #[allow(clippy::or_fun_call)]
-        let aead = (self.pkt_num_spaces[epoch].crypto_0rtt_open.as_ref())
+        let aead = if hdr.ty == packet::Type::ZeroRTT {
             // Only use 0-RTT key if incoming packet is 0-RTT.
-            .filter(|_| hdr.ty == packet::Type::ZeroRTT)
+            self.pkt_num_spaces[epoch].crypto_0rtt_open.as_ref()
+        } else {
             // Otherwise use the packet number space's main key.
-            .or(self.pkt_num_spaces[epoch].crypto_open.as_ref())
-            // Finally, discard packet if no usable key is available.
-            //
-            // TODO: buffer 0-RTT/1-RTT packets instead of discarding when the
-            // required key is not available yet, as an optimization.
-            .ok_or_else(|| {
-                drop_pkt_on_err(
+            self.pkt_num_spaces[epoch].crypto_open.as_ref()
+        };
+
+        // Finally, discard packet if no usable key is available.
+        let aead = match aead {
+            Some(v) => v,
+
+            None => {
+                if hdr.ty == packet::Type::ZeroRTT &&
+                    self.undecryptable_pkts.len() < MAX_UNDECRYPTABLE_PACKETS &&
+                    !self.is_established()
+                {
+                    // Buffer 0-RTT packets when the required read key is not
+                    // available yet, and process them later.
+                    //
+                    // TODO: in the future we might want to buffer other types
+                    // of undecryptable packets as well.
+                    let pkt_len = b.off() + payload_len;
+                    let pkt = (b.buf()[..pkt_len]).to_vec();
+
+                    self.undecryptable_pkts.push_back(pkt);
+                    return Ok(pkt_len);
+                }
+
+                let e = drop_pkt_on_err(
                     Error::CryptoFail,
                     self.recv_count,
                     self.is_server,
                     &self.trace_id,
-                )
-            })?;
+                );
+
+                return Err(e);
+            },
+        };
 
         let aead_tag_len = aead.alg().tag_len();
 
@@ -2146,6 +2195,41 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
+        if self.is_closed() || self.is_draining() {
+            return Err(Error::Done);
+        }
+
+        if self.local_error.is_none() {
+            self.do_handshake()?;
+        }
+
+        // Process previously undecryptable 0-RTT packets if the decryption key
+        // is now available.
+        if self.pkt_num_spaces[packet::EPOCH_APPLICATION]
+            .crypto_0rtt_open
+            .is_some()
+        {
+            while let Some(mut pkt) = self.undecryptable_pkts.pop_front() {
+                if self.recv(&mut pkt).is_err() {
+                    self.undecryptable_pkts.clear();
+
+                    // Forwarding the error value here could confuse
+                    // applications, as they may not expect getting a `recv()`
+                    // error when calling `send()`.
+                    //
+                    // We simply fall-through to sending packets, which should
+                    // take care of terminating the connection as needed.
+                    break;
+                }
+            }
+        }
+
+        // There's no point in trying to send a packet if the Initial secrets
+        // have not been derived yet, so return early.
+        if !self.derived_initial_secrets {
+            return Err(Error::Done);
+        }
+
         let mut has_initial = false;
 
         let mut done = 0;
@@ -2217,21 +2301,7 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
-        if self.is_closed() || self.is_draining() {
-            return Err(Error::Done);
-        }
-
-        // If the Initial secrets have not been derived yet, there's no point
-        // in trying to send a packet, so return early.
-        if !self.derived_initial_secrets {
-            return Err(Error::Done);
-        }
-
         let is_closing = self.local_error.is_some();
-
-        if !is_closing {
-            self.do_handshake()?;
-        }
 
         let mut b = octets::OctetsMut::with_slice(out);
 
@@ -4025,6 +4095,12 @@ impl Connection {
 
         self.alpn = handshake.alpn_protocol().to_vec();
 
+        // Once the handshake is completed there's no point in processing 0-RTT
+        // packets anymore, so clear the buffer now.
+        if self.handshake_completed {
+            self.undecryptable_pkts.clear();
+        }
+
         trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
                &self.trace_id,
                std::str::from_utf8(handshake.alpn_protocol()),
@@ -5706,6 +5782,138 @@ mod tests {
 
         assert_eq!(pipe.client.application_proto(), b"");
         assert_eq!(pipe.server.application_proto(), b"");
+    }
+
+    #[test]
+    fn handshake_0rtt() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_streams_bidi(3);
+        config.enable_early_data();
+        config.verify_peer(false);
+
+        // Perform initial handshake.
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Extract session,
+        let session = pipe.client.session().unwrap();
+
+        // Configure session on new connection.
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.client.set_session(&session), Ok(()));
+
+        // Client sends initial flight.
+        let len = pipe.client.send(&mut buf).unwrap();
+        assert_eq!(pipe.server.recv(&mut buf[..len]), Ok(len));
+
+        // Client sends 0-RTT packet.
+        let pkt_type = packet::Type::ZeroRTT;
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 4,
+            data: stream::RangeBuf::from(b"aaaaa", 0, true),
+        }];
+
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Ok(1200)
+        );
+
+        assert_eq!(pipe.server.undecryptable_pkts.len(), 0);
+
+        // 0-RTT stream data is readable.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        let mut b = [0; 15];
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
+        assert_eq!(&b[..5], b"aaaaa");
+    }
+
+    #[test]
+    fn handshake_0rtt_reordered() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_streams_bidi(3);
+        config.enable_early_data();
+        config.verify_peer(false);
+
+        // Perform initial handshake.
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Extract session,
+        let session = pipe.client.session().unwrap();
+
+        // Configure session on new connection.
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.client.set_session(&session), Ok(()));
+
+        // Client sends initial flight.
+        let len = pipe.client.send(&mut buf).unwrap();
+        let mut initial = (&buf[..len]).to_vec();
+
+        // Client sends 0-RTT packet.
+        let pkt_type = packet::Type::ZeroRTT;
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 4,
+            data: stream::RangeBuf::from(b"aaaaa", 0, true),
+        }];
+
+        let len =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+        let mut zrtt = (&buf[..len]).to_vec();
+
+        // 0-RTT packet is received before the Initial one.
+        assert_eq!(pipe.server.recv(&mut zrtt), Ok(zrtt.len()));
+
+        assert_eq!(pipe.server.undecryptable_pkts.len(), 1);
+        assert_eq!(pipe.server.undecryptable_pkts[0].len(), zrtt.len());
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), None);
+
+        // Initial packet is also received.
+        assert_eq!(pipe.server.recv(&mut initial), Ok(initial.len()));
+
+        // 0-RTT stream data is readable.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        let mut b = [0; 15];
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
+        assert_eq!(&b[..5], b"aaaaa");
     }
 
     #[test]
@@ -8619,7 +8827,7 @@ mod tests {
 
         let mut pipe = testing::Pipe::default().unwrap();
 
-        // Client send Initial packet.
+        // Client sends Initial packet.
         assert_eq!(pipe.client.send(&mut buf), Ok(1200));
 
         // Wait for PTO to expire.
