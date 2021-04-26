@@ -65,6 +65,10 @@ struct SSL_CIPHER(c_void);
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
+struct SSL_SESSION(c_void);
+
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
 struct X509_VERIFY_PARAM(c_void);
 
 #[allow(non_camel_case_types)]
@@ -139,6 +143,8 @@ impl Context {
             let ctx_raw = SSL_CTX_new(TLS_method());
 
             let mut ctx = Context(ctx_raw);
+
+            ctx.set_session_callback();
 
             ctx.load_ca_certs()?;
 
@@ -245,6 +251,19 @@ impl Context {
         Ok(())
     }
 
+    fn set_session_callback(&mut self) {
+        unsafe {
+            // This is needed to enable the session callback on the client. On
+            // the server it doesn't do anything.
+            SSL_CTX_set_session_cache_mode(
+                self.as_ptr(),
+                0x0001, // SSL_SESS_CACHE_CLIENT
+            );
+
+            SSL_CTX_sess_set_new_cb(self.as_ptr(), new_session);
+        };
+    }
+
     pub fn set_verify(&mut self, verify: bool) {
         let mode = if verify {
             0x01 // SSL_VERIFY_PEER
@@ -283,6 +302,12 @@ impl Context {
         // Configure ALPN for clients.
         map_result_zero_is_success(unsafe {
             SSL_CTX_set_alpn_protos(self.as_ptr(), protos.as_ptr(), protos.len())
+        })
+    }
+
+    pub fn set_ticket_key(&mut self, key: &[u8]) -> Result<()> {
+        map_result(unsafe {
+            SSL_CTX_set_tlsext_ticket_keys(self.as_ptr(), key.as_ptr(), key.len())
         })
     }
 
@@ -446,6 +471,28 @@ impl Handshake {
         unsafe { slice::from_raw_parts(ptr, len as usize) }
     }
 
+    pub fn set_session(&self, session: &[u8]) -> Result<()> {
+        unsafe {
+            let ctx = SSL_get_SSL_CTX(self.as_ptr());
+
+            if ctx.is_null() {
+                return Err(Error::TlsFail);
+            }
+
+            let session =
+                SSL_SESSION_from_bytes(session.as_ptr(), session.len(), ctx);
+
+            if session.is_null() {
+                return Err(Error::TlsFail);
+            }
+
+            let rc = SSL_set_session(self.as_ptr(), session);
+            SSL_SESSION_free(session);
+
+            map_result(rc)
+        }
+    }
+
     pub fn provide_data(&self, level: crypto::Level, buf: &[u8]) -> Result<()> {
         map_result_ssl(self, unsafe {
             SSL_provide_quic_data(self.as_ptr(), level, buf.as_ptr(), buf.len())
@@ -454,6 +501,12 @@ impl Handshake {
 
     pub fn do_handshake(&self) -> Result<()> {
         map_result_ssl(self, unsafe { SSL_do_handshake(self.as_ptr()) })
+    }
+
+    pub fn process_post_handshake(&self) -> Result<()> {
+        map_result_ssl(self, unsafe {
+            SSL_process_quic_post_handshake(self.as_ptr())
+        })
     }
 
     pub fn write_level(&self) -> crypto::Level {
@@ -806,6 +859,35 @@ extern fn select_alpn(
     3 // SSL_TLSEXT_ERR_NOACK
 }
 
+#[no_mangle]
+extern fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
+    let conn =
+        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
+            Some(v) => v,
+
+            None => return 0,
+        };
+
+    // Serialize session object into buffer.
+    let session_bytes = unsafe {
+        let mut out: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        if SSL_SESSION_to_bytes(session, &mut out, &mut out_len) == 0 {
+            return 0;
+        }
+
+        let session_bytes = std::slice::from_raw_parts(out, out_len).to_vec();
+        OPENSSL_free(out as *mut c_void);
+
+        session_bytes
+    };
+
+    conn.session = Some(session_bytes);
+
+    0
+}
+
 fn map_result(bssl_result: c_int) -> Result<()> {
     match bssl_result {
         1 => Ok(()),
@@ -917,6 +999,10 @@ extern {
         ctx: *mut SSL_CTX, cb: extern fn(ssl: *mut SSL, line: *const c_char),
     );
 
+    fn SSL_CTX_set_tlsext_ticket_keys(
+        ctx: *mut SSL_CTX, key: *const u8, key_len: usize,
+    ) -> c_int;
+
     fn SSL_CTX_set_alpn_protos(
         ctx: *mut SSL_CTX, protos: *const u8, protos_len: usize,
     ) -> c_int;
@@ -935,6 +1021,13 @@ extern {
     );
 
     fn SSL_CTX_set_early_data_enabled(ctx: *mut SSL_CTX, enabled: i32);
+
+    fn SSL_CTX_set_session_cache_mode(ctx: *mut SSL_CTX, mode: c_int) -> c_int;
+
+    fn SSL_CTX_sess_set_new_cb(
+        ctx: *mut SSL_CTX,
+        cb: extern fn(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int,
+    );
 
     // SSL
     fn SSL_get_ex_new_index(
@@ -963,6 +1056,10 @@ extern {
     fn SSL_get_signature_algorithm_name(
         sigalg: u16, include_curve: i32,
     ) -> *const c_char;
+
+    fn SSL_set_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int;
+
+    fn SSL_get_SSL_CTX(ssl: *mut SSL) -> *mut SSL_CTX;
 
     fn SSL_get0_peer_certificates(ssl: *mut SSL) -> *const STACK_OF;
 
@@ -1002,6 +1099,8 @@ extern {
         ssl: *mut SSL, level: crypto::Level, data: *const u8, len: usize,
     ) -> c_int;
 
+    fn SSL_process_quic_post_handshake(ssl: *mut SSL) -> c_int;
+
     fn SSL_do_handshake(ssl: *mut SSL) -> c_int;
 
     fn SSL_quic_write_level(ssl: *mut SSL) -> crypto::Level;
@@ -1018,6 +1117,17 @@ extern {
 
     // SSL_CIPHER
     fn SSL_CIPHER_get_id(cipher: *const SSL_CIPHER) -> c_uint;
+
+    // SSL_SESSION
+    fn SSL_SESSION_to_bytes(
+        session: *const SSL_SESSION, out: *mut *mut u8, out_len: *mut usize,
+    ) -> c_int;
+
+    fn SSL_SESSION_from_bytes(
+        input: *const u8, input_len: usize, ctx: *const SSL_CTX,
+    ) -> *mut SSL_SESSION;
+
+    fn SSL_SESSION_free(session: *mut SSL_SESSION);
 
     // X509_VERIFY_PARAM
     fn X509_VERIFY_PARAM_set1_host(
@@ -1046,4 +1156,7 @@ extern {
     fn ERR_peek_error() -> c_uint;
 
     fn ERR_error_string_n(err: c_uint, buf: *const u8, len: usize);
+
+    // OPENSSL
+    fn OPENSSL_free(ptr: *mut c_void);
 }
