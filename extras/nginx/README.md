@@ -165,3 +165,25 @@ List of variables
 ### $http3
 
 "h3" if HTTP/3 was negotiated, or an empty string otherwise.
+
+0-RTT
+-----
+
+To support [0-RTT QUIC connection resumption](https://blog.cloudflare.com/even-faster-connection-establishment-with-quic-0-rtt-resumption/)
+from the client, you will need the following configuration:
+
+```
+http {
+    server {
+        ...
+        ssl_early_data on;
+        ssl_session_ticket_key <file>;
+        ...
+    }
+}
+```
+
+Please see
+[ssl_session_ticket_key](https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_session_ticket_key)
+on how to generate the secret file used for TLS session tickets. This is
+required when using multiple worker processes.
