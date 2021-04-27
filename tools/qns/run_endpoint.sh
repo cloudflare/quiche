@@ -21,8 +21,6 @@ LOG_DIR=/logs
 LOG=$LOG_DIR/log.txt
 
 check_testcase () {
-    TESTNAME=$1
-
     case $1 in
         handshake | multiconnect | http3 )
             echo "supported"
@@ -110,7 +108,7 @@ if [ "$ROLE" == "client" ]; then
     echo "## Client params: $CLIENT_PARAMS"
     echo "## Requests: $REQUESTS"
     echo "## Test case: $TESTCASE"
-    run_quiche_client_tests
+    run_quiche_client_tests $TESTCASE
 elif [ "$ROLE" == "server" ]; then
     echo "## Starting quiche server..."
     echo "## Server params: $SERVER_PARAMS"
