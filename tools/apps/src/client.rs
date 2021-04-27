@@ -128,6 +128,10 @@ pub fn connect(
         config.grease(false);
     }
 
+    if conn_args.early_data {
+        config.enable_early_data();
+    }
+
     config
         .set_cc_algorithm_name(&conn_args.cc_algorithm)
         .unwrap();
@@ -207,7 +211,9 @@ pub fn connect(
     let mut pkt_count = 0;
 
     loop {
-        poll.poll(&mut events, conn.timeout()).unwrap();
+        if !conn.is_in_early_data() || app_proto_selected {
+            poll.poll(&mut events, conn.timeout()).unwrap();
+        }
 
         // Read incoming UDP packets from the socket and feed them to quiche,
         // until there are no more packets to read.
@@ -302,7 +308,9 @@ pub fn connect(
 
         // Create a new application protocol session once the QUIC connection is
         // established.
-        if conn.is_established() && !app_proto_selected {
+        if (conn.is_established() || conn.is_in_early_data()) &&
+            !app_proto_selected
+        {
             // At this stage the ALPN negotiation succeeded and selected a
             // single application protocol name. We'll use this to construct
             // the correct type of HttpConn but `application_proto()`

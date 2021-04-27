@@ -109,7 +109,7 @@ fn main() {
         config.log_keys();
     }
 
-    if args.early_data {
+    if conn_args.early_data {
         config.enable_early_data();
     }
 
