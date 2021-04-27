@@ -76,20 +76,21 @@ run_quiche_client_tests () {
     # remove this sleep when the issue above is resolved.
     sleep 3
 
-    if [ "$TESTCASE" == "multiconnect" ]; then
+    case $1 in
+        multiconnect | resumption )
+            for req in $REQUESTS
+            do
+                $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
+                    $CLIENT_PARAMS $req >> $LOG 2>&1
+            done
+            ;;
 
-        for req in $REQUESTS
-        do
+        *)
             $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
-                $CLIENT_PARAMS $req >> $LOG 2>&1
-        done
+                $CLIENT_PARAMS $REQUESTS >& $LOG
+            ;;
 
-    else
-
-        $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
-            $CLIENT_PARAMS $REQUESTS >& $LOG
-
-    fi
+    esac
 }
 
 run_quiche_server_tests() {
