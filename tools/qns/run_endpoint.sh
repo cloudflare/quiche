@@ -47,9 +47,8 @@ check_testcase () {
 
         zerortt )
             if [ "$ROLE" == "client" ]; then
-                # We don't support session resumption on the client-side yet.
-                echo "unsupported"
-                exit 127
+                echo "supported"
+                QUICHE_CLIENT_OPT="$QUICHE_CLIENT_OPT --session-file=session.bin --early-data"
             elif [ "$ROLE" == "server" ]; then
                 echo "supported"
                 QUICHE_SERVER_OPT="$QUICHE_SERVER_OPT --early-data"
@@ -75,7 +74,7 @@ run_quiche_client_tests () {
     sleep 3
 
     case $1 in
-        multiconnect | resumption )
+        multiconnect | resumption | zerortt )
             for req in $REQUESTS
             do
                 $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \

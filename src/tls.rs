@@ -28,6 +28,8 @@ use std::ffi;
 use std::ptr;
 use std::slice;
 
+use std::io::Write;
+
 use libc::c_char;
 use libc::c_int;
 use libc::c_long;
@@ -509,6 +511,10 @@ impl Handshake {
         })
     }
 
+    pub fn reset_early_data_reject(&self) {
+        unsafe { SSL_reset_early_data_reject(self.as_ptr()) };
+    }
+
     pub fn write_level(&self) -> crypto::Level {
         unsafe { SSL_quic_write_level(self.as_ptr()) }
     }
@@ -868,6 +874,9 @@ extern fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
             None => return 0,
         };
 
+    let handshake = Handshake(ssl);
+    let peer_params = handshake.quic_transport_params();
+
     // Serialize session object into buffer.
     let session_bytes = unsafe {
         let mut out: *mut u8 = std::ptr::null_mut();
@@ -883,7 +892,37 @@ extern fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
         session_bytes
     };
 
-    conn.session = Some(session_bytes);
+    let mut buffer =
+        Vec::with_capacity(8 + peer_params.len() + 8 + session_bytes.len());
+
+    let session_bytes_len = session_bytes.len() as u64;
+
+    if buffer.write(&session_bytes_len.to_be_bytes()).is_err() {
+        std::mem::forget(handshake);
+        return 0;
+    }
+
+    if buffer.write(&session_bytes).is_err() {
+        std::mem::forget(handshake);
+        return 0;
+    }
+
+    let peer_params_len = peer_params.len() as u64;
+
+    if buffer.write(&peer_params_len.to_be_bytes()).is_err() {
+        std::mem::forget(handshake);
+        return 0;
+    }
+
+    if buffer.write(&peer_params).is_err() {
+        std::mem::forget(handshake);
+        return 0;
+    }
+
+    conn.session = Some(buffer);
+
+    // Prevent handshake from being freed, as we still need it.
+    std::mem::forget(handshake);
 
     0
 }
@@ -946,6 +985,12 @@ fn map_result_ssl(ssl: &Handshake, bssl_result: c_int) -> Result<()> {
 
                 // SSL_ERROR_PENDING_TICKET
                 14 => Err(Error::Done),
+
+                // SSL_ERROR_EARLY_DATA_REJECTED
+                15 => {
+                    ssl.reset_early_data_reject();
+                    Err(Error::Done)
+                },
 
                 // SSL_ERROR_WANT_CERTIFICATE_VERIFY
                 16 => Err(Error::Done),
@@ -1100,6 +1145,8 @@ extern {
     ) -> c_int;
 
     fn SSL_process_quic_post_handshake(ssl: *mut SSL) -> c_int;
+
+    fn SSL_reset_early_data_reject(ssl: *mut SSL);
 
     fn SSL_do_handshake(ssl: *mut SSL) -> c_int;
 

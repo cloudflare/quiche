@@ -1496,7 +1496,25 @@ impl Connection {
     /// [`session()`]: struct.Connection.html#method.session
     #[inline]
     pub fn set_session(&mut self, session: &[u8]) -> Result<()> {
-        self.handshake.lock().unwrap().set_session(session)
+        let mut b = octets::Octets::with_slice(session);
+
+        let session_len = b.get_u64()? as usize;
+        let session_bytes = b.get_bytes(session_len)?;
+
+        self.handshake
+            .lock()
+            .unwrap()
+            .set_session(session_bytes.as_ref())?;
+
+        let raw_params_len = b.get_u64()? as usize;
+        let raw_params_bytes = b.get_bytes(raw_params_len)?;
+
+        let peer_params =
+            TransportParams::decode(raw_params_bytes.as_ref(), self.is_server)?;
+
+        self.process_peer_transport_params(peer_params);
+
+        Ok(())
     }
 
     /// Processes QUIC packets received from the peer.
@@ -2305,9 +2323,9 @@ impl Connection {
 
         let mut b = octets::OctetsMut::with_slice(out);
 
-        let epoch = self.write_epoch()?;
+        let pkt_type = self.write_pkt_type()?;
 
-        let pkt_type = packet::Type::from_epoch(epoch);
+        let epoch = pkt_type.to_epoch()?;
 
         // Process lost frames.
         for lost in self.recovery.lost[epoch].drain(..) {
@@ -2774,7 +2792,7 @@ impl Connection {
         }
 
         // Create DATAGRAM frame.
-        if pkt_type == packet::Type::Short &&
+        if (pkt_type == packet::Type::Short || pkt_type == packet::Type::ZeroRTT) &&
             left > frame::MAX_DGRAM_OVERHEAD &&
             !is_closing
         {
@@ -2805,7 +2823,7 @@ impl Connection {
         }
 
         // Create a single STREAM frame for the first stream that is flushable.
-        if pkt_type == packet::Type::Short &&
+        if (pkt_type == packet::Type::Short || pkt_type == packet::Type::ZeroRTT) &&
             left > frame::MAX_STREAM_OVERHEAD &&
             !is_closing
         {
@@ -4139,6 +4157,12 @@ impl Connection {
     fn process_peer_transport_params(&mut self, peer_params: TransportParams) {
         self.max_tx_data = peer_params.initial_max_data;
 
+        // Update send capacity.
+        self.tx_cap = cmp::min(
+            self.recovery.cwnd_available() as u64,
+            self.max_tx_data - self.tx_data,
+        ) as usize;
+
         self.streams
             .update_peer_max_streams_bidi(peer_params.initial_max_streams_bidi);
         self.streams
@@ -4227,8 +4251,8 @@ impl Connection {
         Ok(())
     }
 
-    /// Selects the packet number space for outgoing packets.
-    fn write_epoch(&self) -> Result<packet::Epoch> {
+    /// Selects the packet type for the next outgoing packet.
+    fn write_pkt_type(&self) -> Result<packet::Type> {
         // On error send packet in the latest epoch available, but only send
         // 1-RTT ones when the handshake is completed.
         if self
@@ -4246,10 +4270,10 @@ impl Connection {
             if epoch == packet::EPOCH_APPLICATION && !self.is_established() {
                 // Downgrade the epoch to handshake as the handshake is not
                 // completed yet.
-                return Ok(packet::EPOCH_HANDSHAKE);
+                return Ok(packet::Type::Handshake);
             }
 
-            return Ok(epoch);
+            return Ok(packet::Type::from_epoch(epoch));
         }
 
         for epoch in packet::EPOCH_INITIAL..packet::EPOCH_COUNT {
@@ -4260,17 +4284,17 @@ impl Connection {
 
             // We are ready to send data for this packet number space.
             if self.pkt_num_spaces[epoch].ready() {
-                return Ok(epoch);
+                return Ok(packet::Type::from_epoch(epoch));
             }
 
             // There are lost frames in this packet number space.
             if !self.recovery.lost[epoch].is_empty() {
-                return Ok(epoch);
+                return Ok(packet::Type::from_epoch(epoch));
             }
 
             // We need to send PTO probe packets.
             if self.recovery.loss_probes[epoch] > 0 {
-                return Ok(epoch);
+                return Ok(packet::Type::from_epoch(epoch));
             }
         }
 
@@ -4292,7 +4316,11 @@ impl Connection {
                 self.streams.has_reset() ||
                 self.streams.has_stopped())
         {
-            return Ok(packet::EPOCH_APPLICATION);
+            if self.is_in_early_data() && !self.is_server {
+                return Ok(packet::Type::ZeroRTT);
+            }
+
+            return Ok(packet::Type::Short);
         }
 
         Err(Error::Done)
@@ -5999,6 +6027,66 @@ mod tests {
         assert_eq!(&b[..12], b"hello, world");
 
         assert!(pipe.server.stream_finished(4));
+    }
+
+    #[test]
+    fn zero_rtt() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_streams_bidi(3);
+        config.enable_early_data();
+        config.verify_peer(false);
+
+        // Perform initial handshake.
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Extract session,
+        let session = pipe.client.session().unwrap();
+
+        // Configure session on new connection.
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.client.set_session(&session), Ok(()));
+
+        // Client sends initial flight.
+        let len = pipe.client.send(&mut buf).unwrap();
+        let mut initial = (&buf[..len]).to_vec();
+
+        assert_eq!(pipe.client.is_in_early_data(), true);
+
+        // Client sends 0-RTT data.
+        assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
+
+        let len = pipe.client.send(&mut buf).unwrap();
+        let mut zrtt = (&buf[..len]).to_vec();
+
+        // Server receives packets.
+        assert_eq!(pipe.server.recv(&mut initial), Ok(initial.len()));
+        assert_eq!(pipe.server.is_in_early_data(), true);
+
+        assert_eq!(pipe.server.recv(&mut zrtt), Ok(zrtt.len()));
+
+        // 0-RTT stream data is readable.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        let mut b = [0; 15];
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((12, true)));
+        assert_eq!(&b[..12], b"hello, world");
     }
 
     #[test]
