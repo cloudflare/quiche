@@ -24,43 +24,50 @@ check_testcase () {
     TESTNAME=$1
 
     case $1 in
-    handshake | multiconnect | http3 )
-        echo "supported"
-        ;;
-    transfer )
-        echo "supported"
-        ;;
-    chacha20 )
-        if [ "$ROLE" == "client" ]; then
-            # We don't support selecting a cipher on the client-side.
+        handshake | multiconnect | http3 )
+            echo "supported"
+            ;;
+
+        transfer )
+            echo "supported"
+            ;;
+
+        chacha20 )
+            if [ "$ROLE" == "client" ]; then
+                # We don't support selecting a cipher on the client-side.
+                echo "unsupported"
+                exit 127
+            elif [ "$ROLE" == "server" ]; then
+                echo "supported"
+            fi
+            ;;
+
+        resumption )
+            echo "supported"
+            QUICHE_CLIENT_OPT="$QUICHE_CLIENT_OPT --session-file=session.bin"
+            ;;
+
+        zerortt )
+            if [ "$ROLE" == "client" ]; then
+                # We don't support session resumption on the client-side yet.
+                echo "unsupported"
+                exit 127
+            elif [ "$ROLE" == "server" ]; then
+                echo "supported"
+                QUICHE_SERVER_OPT="$QUICHE_SERVER_OPT --early-data"
+            fi
+            ;;
+
+        retry )
+            echo "supported"
+            QUICHE_SERVER_OPT="$QUICHE_SERVER_OPT_COMMON"
+            ;;
+
+        *)
             echo "unsupported"
             exit 127
-        elif [ "$ROLE" == "server" ]; then
-            echo "supported"
-        fi
-        ;;
-    resumption )
-        echo "supported"
-        QUICHE_CLIENT_OPT="$QUICHE_CLIENT_OPT --session-file=session.bin"
-        ;;
-    zerortt )
-        if [ "$ROLE" == "client" ]; then
-            # We don't support session resumption on the client-side yet.
-            echo "unsupported"
-            exit 127
-        elif [ "$ROLE" == "server" ]; then
-            echo "supported"
-            QUICHE_SERVER_OPT="$QUICHE_SERVER_OPT --early-data"
-        fi
-        ;;
-    retry )
-        echo "supported"
-        QUICHE_SERVER_OPT="$QUICHE_SERVER_OPT_COMMON"
-        ;;
-    *)
-        echo "unsupported"
-        exit 127
-        ;;
+            ;;
+
     esac
 }
 
