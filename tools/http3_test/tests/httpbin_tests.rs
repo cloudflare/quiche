@@ -127,6 +127,32 @@ mod httpbin_tests {
         }
     }
 
+    fn early_data() -> bool {
+        match std::env::var_os("EARLY_DATA") {
+            Some(val) => match val.to_str().unwrap() {
+                "true" => {
+                    return true;
+                },
+
+                _ => {
+                    return false;
+                },
+            },
+
+            None => {
+                return false;
+            },
+        };
+    }
+
+    fn session_file() -> Option<String> {
+        if let Some(val) = std::env::var_os("SESSION_FILE") {
+            Some(val.into_string().unwrap())
+        } else {
+            None
+        }
+    }
+
     // A rudimentary structure to hold httpbin response data
     #[derive(Debug, serde::Deserialize)]
     struct HttpBinResponseBody {
@@ -159,7 +185,15 @@ mod httpbin_tests {
         });
 
         let mut test = Http3Test::new(endpoint(None), reqs, assert, concurrent);
-        runner::run(&mut test, host(), verify_peer(), idle_timeout(), max_data())
+        runner::run(
+            &mut test,
+            host(),
+            verify_peer(),
+            idle_timeout(),
+            max_data(),
+            early_data(),
+            session_file(),
+        )
     }
 
     fn do_test_with_stream_data(
@@ -179,7 +213,15 @@ mod httpbin_tests {
             assert,
             concurrent,
         );
-        runner::run(&mut test, host(), verify_peer(), idle_timeout(), max_data())
+        runner::run(
+            &mut test,
+            host(),
+            verify_peer(),
+            idle_timeout(),
+            max_data(),
+            early_data(),
+            session_file(),
+        )
     }
 
     // Build a single request and expected response with status code
