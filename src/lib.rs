@@ -4071,6 +4071,88 @@ impl Connection {
         Ok(())
     }
 
+    fn parse_peer_transport_params(
+        &mut self, peer_params: TransportParams,
+    ) -> Result<()> {
+        if self.version >= PROTOCOL_VERSION_DRAFT28 ||
+            self.version == PROTOCOL_VERSION_V1
+        {
+            // Validate initial_source_connection_id.
+            match &peer_params.initial_source_connection_id {
+                Some(v) if v != &self.dcid =>
+                    return Err(Error::InvalidTransportParam),
+
+                Some(_) => (),
+
+                // initial_source_connection_id must be sent by
+                // both endpoints.
+                None => return Err(Error::InvalidTransportParam),
+            }
+
+            // Validate original_destination_connection_id.
+            if let Some(odcid) = &self.odcid {
+                match &peer_params.original_destination_connection_id {
+                    Some(v) if v != odcid =>
+                        return Err(Error::InvalidTransportParam),
+
+                    Some(_) => (),
+
+                    // original_destination_connection_id must be
+                    // sent by the server.
+                    None if !self.is_server =>
+                        return Err(Error::InvalidTransportParam),
+
+                    None => (),
+                }
+            }
+
+            // Validate retry_source_connection_id.
+            if let Some(rscid) = &self.rscid {
+                match &peer_params.retry_source_connection_id {
+                    Some(v) if v != rscid =>
+                        return Err(Error::InvalidTransportParam),
+
+                    Some(_) => (),
+
+                    // retry_source_connection_id must be sent by
+                    // the server.
+                    None => return Err(Error::InvalidTransportParam),
+                }
+            }
+        } else {
+            // Legacy validation of the original connection ID when
+            // stateless retry is performed, for drafts < 28.
+            if self.did_retry &&
+                peer_params.original_destination_connection_id != self.odcid
+            {
+                return Err(Error::InvalidTransportParam);
+            }
+        }
+
+        self.process_peer_transport_params(peer_params);
+
+        self.parsed_peer_transport_params = true;
+
+        Ok(())
+    }
+
+    fn process_peer_transport_params(&mut self, peer_params: TransportParams) {
+        self.max_tx_data = peer_params.initial_max_data;
+
+        self.streams
+            .update_peer_max_streams_bidi(peer_params.initial_max_streams_bidi);
+        self.streams
+            .update_peer_max_streams_uni(peer_params.initial_max_streams_uni);
+
+        self.recovery.max_ack_delay =
+            time::Duration::from_millis(peer_params.max_ack_delay);
+
+        self.recovery
+            .update_max_datagram_size(peer_params.max_udp_payload_size as usize);
+
+        self.peer_transport_params = peer_params;
+    }
+
     /// Continues the handshake.
     ///
     /// If the connection is already established, it does nothing.
@@ -4086,7 +4168,27 @@ impl Connection {
         match handshake.do_handshake() {
             Ok(_) => (),
 
-            Err(Error::Done) => return Ok(()),
+            Err(Error::Done) => {
+                // Try to parse transport parameters as soon as the first flight
+                // of handshake data is processed.
+                //
+                // This is potentially dangerous as the handshake hasn't been
+                // completed yet, though it's required to be able to send data
+                // in 0.5 RTT.
+                let raw_params = handshake.quic_transport_params();
+
+                if !self.parsed_peer_transport_params && !raw_params.is_empty() {
+                    let peer_params =
+                        TransportParams::decode(&raw_params, self.is_server)?;
+
+                    // Unlock handshake object.
+                    drop(handshake);
+
+                    self.parse_peer_transport_params(peer_params)?;
+                }
+
+                return Ok(());
+            },
 
             Err(e) => return Err(e),
         };
@@ -4095,6 +4197,23 @@ impl Connection {
 
         self.alpn = handshake.alpn_protocol().to_vec();
 
+        let cipher = handshake.cipher();
+        let curve = handshake.curve();
+        let sigalg = handshake.sigalg();
+        let is_resumed = handshake.is_resumed();
+
+        let raw_params = handshake.quic_transport_params();
+
+        if !self.parsed_peer_transport_params && !raw_params.is_empty() {
+            let peer_params =
+                TransportParams::decode(&raw_params, self.is_server)?;
+
+            // Unlock handshake object.
+            drop(handshake);
+
+            self.parse_peer_transport_params(peer_params)?;
+        }
+
         // Once the handshake is completed there's no point in processing 0-RTT
         // packets anymore, so clear the buffer now.
         if self.handshake_completed {
@@ -4102,13 +4221,8 @@ impl Connection {
         }
 
         trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
-               &self.trace_id,
-               std::str::from_utf8(handshake.alpn_protocol()),
-               handshake.cipher(),
-               handshake.curve(),
-               handshake.sigalg(),
-               handshake.is_resumed(),
-               self.peer_transport_params);
+               &self.trace_id, std::str::from_utf8(self.application_proto()),
+               cipher, curve, sigalg, is_resumed, self.peer_transport_params);
 
         Ok(())
     }
@@ -4343,98 +4457,6 @@ impl Connection {
                 }
 
                 self.do_handshake()?;
-
-                // Try to parse transport parameters as soon as the first flight
-                // of handshake data is processed.
-                //
-                // This is potentially dangerous as the handshake hasn't been
-                // completed yet, though it's required to be able to send data
-                // in 0.5 RTT.
-                let handshake = self.handshake.lock().unwrap();
-                let raw_params = handshake.quic_transport_params();
-
-                if !self.parsed_peer_transport_params && !raw_params.is_empty() {
-                    let peer_params =
-                        TransportParams::decode(&raw_params, self.is_server)?;
-
-                    if self.version >= PROTOCOL_VERSION_DRAFT28 ||
-                        self.version == PROTOCOL_VERSION_V1
-                    {
-                        // Validate initial_source_connection_id.
-                        match &peer_params.initial_source_connection_id {
-                            Some(v) if v != &self.dcid =>
-                                return Err(Error::InvalidTransportParam),
-
-                            Some(_) => (),
-
-                            // initial_source_connection_id must be sent by
-                            // both endpoints.
-                            None => return Err(Error::InvalidTransportParam),
-                        }
-
-                        // Validate original_destination_connection_id.
-                        if let Some(odcid) = &self.odcid {
-                            match &peer_params.original_destination_connection_id
-                            {
-                                Some(v) if v != odcid =>
-                                    return Err(Error::InvalidTransportParam),
-
-                                Some(_) => (),
-
-                                // original_destination_connection_id must be
-                                // sent by the server.
-                                None if !self.is_server =>
-                                    return Err(Error::InvalidTransportParam),
-
-                                None => (),
-                            }
-                        }
-
-                        // Validate retry_source_connection_id.
-                        if let Some(rscid) = &self.rscid {
-                            match &peer_params.retry_source_connection_id {
-                                Some(v) if v != rscid =>
-                                    return Err(Error::InvalidTransportParam),
-
-                                Some(_) => (),
-
-                                // retry_source_connection_id must be sent by
-                                // the server.
-                                None => return Err(Error::InvalidTransportParam),
-                            }
-                        }
-                    } else {
-                        // Legacy validation of the original connection ID when
-                        // stateless retry is performed, for drafts < 28.
-                        if self.did_retry &&
-                            peer_params.original_destination_connection_id !=
-                                self.odcid
-                        {
-                            return Err(Error::InvalidTransportParam);
-                        }
-                    }
-
-                    // Update flow control limits.
-                    self.max_tx_data = peer_params.initial_max_data;
-
-                    self.streams.update_peer_max_streams_bidi(
-                        peer_params.initial_max_streams_bidi,
-                    );
-                    self.streams.update_peer_max_streams_uni(
-                        peer_params.initial_max_streams_uni,
-                    );
-
-                    self.recovery.max_ack_delay =
-                        time::Duration::from_millis(peer_params.max_ack_delay);
-
-                    self.recovery.update_max_datagram_size(
-                        peer_params.max_udp_payload_size as usize,
-                    );
-
-                    self.peer_transport_params = peer_params;
-
-                    self.parsed_peer_transport_params = true;
-                }
             },
 
             frame::Frame::CryptoHeader { .. } => unreachable!(),
