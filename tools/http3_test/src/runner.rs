@@ -30,7 +30,8 @@ use crate::Http3TestError;
 
 pub fn run(
     test: &mut crate::Http3Test, peer_addr: std::net::SocketAddr,
-    verify_peer: bool, idle_timeout: u64, max_data: u64,
+    verify_peer: bool, idle_timeout: u64, max_data: u64, early_data: bool,
+    session_file: Option<String>,
 ) -> Result<(), Http3TestError> {
     const MAX_DATAGRAM_SIZE: usize = 1350;
 
@@ -102,6 +103,11 @@ pub fn run(
     config.set_initial_max_streams_uni(100);
     config.set_disable_active_migration(true);
 
+    if early_data {
+        config.enable_early_data();
+        debug!("early data enabled");
+    }
+
     let mut http3_conn = None;
 
     if std::env::var_os("SSLKEYLOGFILE").is_some() {
@@ -119,6 +125,12 @@ pub fn run(
 
     let mut conn = quiche::connect(url.domain(), &scid, &mut config).unwrap();
 
+    if let Some(session_file) = &session_file {
+        if let Ok(session) = std::fs::read(session_file) {
+            conn.set_session(&session).ok();
+        }
+    }
+
     let write = conn.send(&mut out).expect("initial send failed");
 
     while let Err(e) = socket.send(&out[..write]) {
@@ -135,7 +147,9 @@ pub fn run(
     let req_start = std::time::Instant::now();
 
     loop {
-        poll.poll(&mut events, conn.timeout()).unwrap();
+        if !conn.is_in_early_data() || http3_conn.is_some() {
+            poll.poll(&mut events, conn.timeout()).unwrap();
+        }
 
         // Read incoming UDP packets from the socket and feed them to quiche,
         // until there are no more packets to read.
@@ -204,12 +218,20 @@ pub fn run(
                 return Err(Http3TestError::HttpFail);
             }
 
+            if let Some(session_file) = session_file {
+                if let Some(session) = conn.session() {
+                    std::fs::write(session_file, &session).ok();
+                }
+            }
+
             break;
         }
 
         // Create a new HTTP/3 connection and end an HTTP request as soon as
         // the QUIC connection is established.
-        if conn.is_established() && http3_conn.is_none() {
+        if (conn.is_established() || conn.is_in_early_data()) &&
+            http3_conn.is_none()
+        {
             let h3_config = quiche::h3::Config::new().unwrap();
 
             let mut h3_conn =
@@ -362,6 +384,12 @@ pub fn run(
                 error!("Client timed out after {:?} and only completed {}/{} requests",
                 req_start.elapsed(), reqs_complete, reqs_count);
                 return Err(Http3TestError::HttpFail);
+            }
+
+            if let Some(session_file) = session_file {
+                if let Some(session) = conn.session() {
+                    std::fs::write(session_file, &session).ok();
+                }
             }
 
             break;
