@@ -1,0 +1,55 @@
+version: 2
+updates:
+- package-ecosystem: cargo
+  directory: "/"
+  schedule:
+    interval: daily
+    time: "13:00"
+  open-pull-requests-limit: 10
+  ignore:
+  - dependency-name: env_logger
+    versions:
+    - ">= 0.7.a, < 0.8"
+  - dependency-name: mio
+    versions:
+    - ">= 0.7.a, < 0.8"
+  - dependency-name: ring
+    versions:
+    - ">= 0.15.a, < 0.16"
+  - dependency-name: ring
+    versions:
+    - ">= 0.16.a, < 0.17"
+  - dependency-name: url
+    versions:
+    - ">= 2.a, < 3"
+- package-ecosystem: cargo
+  directory: "/tools/apps"
+  schedule:
+    interval: daily
+    time: "13:00"
+  open-pull-requests-limit: 10
+  ignore:
+  - dependency-name: env_logger
+    versions:
+    - ">= 0.7.a, < 0.8"
+  - dependency-name: env_logger
+    versions:
+    - ">= 0.8.a, < 0.9"
+  - dependency-name: mio
+    versions:
+    - ">= 0.7.a, < 0.8"
+  - dependency-name: url
+    versions:
+    - ">= 2.a, < 3"
+- package-ecosystem: cargo
+  directory: "/tools/qlog"
+  schedule:
+    interval: daily
+    time: "13:00"
+  open-pull-requests-limit: 10
+- package-ecosystem: cargo
+  directory: "/fuzz"
+  schedule:
+    interval: daily
+    time: "13:00"
+  open-pull-requests-limit: 10
