@@ -1834,6 +1834,17 @@ impl Connection {
             })? as usize
         };
 
+        // Make sure the buffer is same or larger than an explicit
+        // payload length.
+        if payload_len > b.cap() {
+            return Err(drop_pkt_on_err(
+                Error::InvalidPacket,
+                self.recv_count,
+                self.is_server,
+                &self.trace_id,
+            ));
+        }
+
         // Derive initial secrets on the server.
         if !self.derived_initial_secrets {
             let (aead_open, aead_seal) = crypto::derive_initial_key_material(
@@ -5967,6 +5978,64 @@ mod tests {
     }
 
     #[test]
+    fn handshake_0rtt_truncated() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_streams_bidi(3);
+        config.enable_early_data();
+        config.verify_peer(false);
+
+        // Perform initial handshake.
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Extract session,
+        let session = pipe.client.session().unwrap();
+
+        // Configure session on new connection.
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.client.set_session(&session), Ok(()));
+
+        // Client sends initial flight.
+        pipe.client.send(&mut buf).unwrap();
+
+        // Client sends 0-RTT packet.
+        let pkt_type = packet::Type::ZeroRTT;
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 4,
+            data: stream::RangeBuf::from(b"aaaaa", 0, true),
+        }];
+
+        let len =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+
+        // Simulate a truncated packet by sending one byte less.
+        let mut zrtt = (&buf[..len - 1]).to_vec();
+
+        // 0-RTT packet is received before the Initial one.
+        assert_eq!(pipe.server.recv(&mut zrtt), Err(Error::InvalidPacket));
+
+        assert_eq!(pipe.server.undecryptable_pkts.len(), 0);
+
+        assert!(pipe.server.is_closed());
+    }
+
+    #[test]
     /// Tests that a pre-v1 client can connect to a v1-enabled server, by making
     /// the server downgrade to the pre-v1 version.
     fn handshake_downgrade_v1() {
@@ -7655,7 +7724,7 @@ mod tests {
 
         assert_eq!(
             pipe.server.recv(&mut buf[..written]),
-            Err(Error::BufferTooShort)
+            Err(Error::InvalidPacket)
         );
 
         assert!(pipe.server.is_closed());
