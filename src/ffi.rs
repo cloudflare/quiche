@@ -744,6 +744,32 @@ pub extern fn quiche_conn_on_timeout(conn: &mut Connection) {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_get_session(
+    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+) {
+    match conn.session() {
+        None => *out_len = 0,
+        Some(session) => {
+            *out = session.as_ptr();
+            *out_len = session.len();
+        },
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_set_session(
+    conn: &mut Connection, buf: *const u8, buf_len: size_t,
+) -> c_int {
+    let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
+
+    match conn.set_session(buf) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_trace_id(
     conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {

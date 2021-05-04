@@ -314,6 +314,13 @@ void quiche_conn_on_timeout(quiche_conn *conn);
 int quiche_conn_close(quiche_conn *conn, bool app, uint64_t err,
                       const uint8_t *reason, size_t reason_len);
 
+// Configures the given session for resumption.
+int quiche_conn_set_session(quiche_conn *conn, const uint8_t *buf, size_t buf_len);
+
+// Returns the serialized cryptographic session for the connection..
+void quiche_conn_get_session(quiche_conn *conn, const uint8_t **out,
+                                   size_t *out_len);
+
 // Returns a string uniquely representing the connection.
 void quiche_conn_trace_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
