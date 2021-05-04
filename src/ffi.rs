@@ -540,6 +540,19 @@ pub extern fn quiche_conn_set_qlog_fd(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_set_session(
+    conn: &mut Connection, buf: *const u8, buf_len: size_t,
+) -> c_int {
+    let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
+
+    match conn.set_session(buf) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_recv(
     conn: &mut Connection, buf: *mut u8, buf_len: size_t,
 ) -> ssize_t {
@@ -761,6 +774,20 @@ pub extern fn quiche_conn_application_proto(
 
     *out = proto.as_ptr();
     *out_len = proto.len();
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_session(
+    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+) {
+    match conn.session() {
+        Some(session) => {
+            *out = session.as_ptr();
+            *out_len = session.len();
+        },
+
+        None => *out_len = 0,
+    }
 }
 
 #[no_mangle]

@@ -256,6 +256,9 @@ bool quiche_conn_set_qlog_path(quiche_conn *conn, const char *path,
 void quiche_conn_set_qlog_fd(quiche_conn *conn, int fd, const char *log_title,
                              const char *log_desc);
 
+// Configures the given session for resumption.
+int quiche_conn_set_session(quiche_conn *conn, const uint8_t *buf, size_t buf_len);
+
 // Processes QUIC packets received from the peer.
 ssize_t quiche_conn_recv(quiche_conn *conn, uint8_t *buf, size_t buf_len);
 
@@ -320,6 +323,9 @@ void quiche_conn_trace_id(quiche_conn *conn, const uint8_t **out, size_t *out_le
 // Returns the negotiated ALPN protocol.
 void quiche_conn_application_proto(quiche_conn *conn, const uint8_t **out,
                                    size_t *out_len);
+
+// Returns the serialized cryptographic session for the connection.
+void quiche_conn_session(quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns true if the connection handshake is complete.
 bool quiche_conn_is_established(quiche_conn *conn);
