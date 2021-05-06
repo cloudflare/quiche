@@ -830,9 +830,12 @@ impl Connection {
                 // TODO: this also detects when u is not an sh-integer and
                 // clamps it in the same way. A real structured header parser
                 // would actually fail to parse.
-                let mut u =
-                    i64::from_str_radix(param.rsplit('=').next().unwrap(), 10)
-                        .unwrap_or(7);
+                let mut u = param
+                    .rsplit('=')
+                    .next()
+                    .unwrap()
+                    .parse::<i64>()
+                    .unwrap_or(7);
 
                 if !(0..=7).contains(&u) {
                     u = 7;
