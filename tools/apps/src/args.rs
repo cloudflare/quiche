@@ -100,24 +100,24 @@ impl Args for CommonArgs {
         };
 
         let dgram_count = args.get_str("--dgram-count");
-        let dgram_count = u64::from_str_radix(dgram_count, 10).unwrap();
+        let dgram_count = dgram_count.parse::<u64>().unwrap();
 
         let dgram_data = args.get_str("--dgram-data").to_string();
 
         let max_data = args.get_str("--max-data");
-        let max_data = u64::from_str_radix(max_data, 10).unwrap();
+        let max_data = max_data.parse::<u64>().unwrap();
 
         let max_stream_data = args.get_str("--max-stream-data");
-        let max_stream_data = u64::from_str_radix(max_stream_data, 10).unwrap();
+        let max_stream_data = max_stream_data.parse::<u64>().unwrap();
 
         let max_streams_bidi = args.get_str("--max-streams-bidi");
-        let max_streams_bidi = u64::from_str_radix(max_streams_bidi, 10).unwrap();
+        let max_streams_bidi = max_streams_bidi.parse::<u64>().unwrap();
 
         let max_streams_uni = args.get_str("--max-streams-uni");
-        let max_streams_uni = u64::from_str_radix(max_streams_uni, 10).unwrap();
+        let max_streams_uni = max_streams_uni.parse::<u64>().unwrap();
 
         let idle_timeout = args.get_str("--idle-timeout");
-        let idle_timeout = u64::from_str_radix(idle_timeout, 10).unwrap();
+        let idle_timeout = idle_timeout.parse::<u64>().unwrap();
 
         let early_data = args.get_bool("--early-data");
 
@@ -237,7 +237,7 @@ impl Args for ClientArgs {
         let dump_json = args.get_bool("--dump-json");
         let dump_json = if dump_json {
             let max_payload = args.get_str("--max-json-payload");
-            let max_payload = usize::from_str_radix(max_payload, 10).unwrap();
+            let max_payload = max_payload.parse::<usize>().unwrap();
             Some(max_payload)
         } else {
             None
@@ -258,7 +258,7 @@ impl Args for ClientArgs {
             .collect();
 
         let reqs_cardinal = args.get_str("--requests");
-        let reqs_cardinal = u64::from_str_radix(reqs_cardinal, 10).unwrap();
+        let reqs_cardinal = reqs_cardinal.parse::<u64>().unwrap();
 
         let no_verify = args.get_bool("--no-verify");
 
