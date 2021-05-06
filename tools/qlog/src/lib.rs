@@ -1577,11 +1577,7 @@ impl EventData {
         match self {
             EventData::PacketSent { frames, .. } |
             EventData::PacketReceived { frames, .. } =>
-                if let Some(f) = frames {
-                    Some(f.len())
-                } else {
-                    None
-                },
+                frames.as_ref().map(|f| f.len()),
 
             EventData::PacketLost { frames, .. } |
             EventData::MarkedForRetransmit { frames } |
@@ -1699,11 +1695,7 @@ impl PacketHeader {
             None => (None, None),
         };
 
-        let version = match version {
-            Some(v) => Some(format!("{:x?}", v)),
-
-            None => None,
-        };
+        let version = version.map(|v| format!("{:x?}", v));
 
         PacketHeader {
             packet_number: packet_number.to_string(),
@@ -2471,11 +2463,7 @@ impl<'a> HexSlice<'a> {
     where
         T: ?Sized + AsRef<[u8]> + 'a,
     {
-        match data {
-            Some(d) => Some(format!("{}", HexSlice::new(d))),
-
-            None => None,
-        }
+        data.map(|d| format!("{}", HexSlice::new(d)))
     }
 }
 
