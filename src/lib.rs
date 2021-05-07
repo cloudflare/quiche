@@ -499,6 +499,15 @@ pub struct Config {
     max_send_udp_payload_size: usize,
 }
 
+// See https://quicwg.org/base-drafts/draft-ietf-quic-transport.html#section-15
+fn is_reserved_version(version: u32) -> bool {
+    version == 0x00000000 ||
+        version
+            .to_le_bytes()
+            .iter()
+            .all(|b| (b & 0b0000_1111) == 0b0000_1010)
+}
+
 impl Config {
     /// Creates a config object with the given version.
     ///
@@ -509,6 +518,9 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn new(version: u32) -> Result<Config> {
+        if !is_reserved_version(version) && !version_is_supported(version) {
+            return Err(Error::UnknownVersion);
+        }
         let tls_ctx = Mutex::new(tls::Context::new()?);
 
         Ok(Config {
@@ -5594,6 +5606,20 @@ mod tests {
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Err(Error::UnknownVersion));
+    }
+
+    #[test]
+    fn config_version_reserved() {
+        Config::new(0xbabababa).unwrap();
+        Config::new(0x00000000).unwrap();
+    }
+
+    #[test]
+    fn config_version_invalid() {
+        assert_eq!(
+            Config::new(0xb1bababa).err().unwrap(),
+            Error::UnknownVersion
+        );
     }
 
     #[test]
