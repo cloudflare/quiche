@@ -329,6 +329,8 @@ const PAYLOAD_LENGTH_LEN: usize = 2;
 // The number of undecryptable that can be buffered.
 const MAX_UNDECRYPTABLE_PACKETS: usize = 10;
 
+const RESERVED_VERSION_MASK: u32 = 0xfafafafa;
+
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -499,6 +501,11 @@ pub struct Config {
     max_send_udp_payload_size: usize,
 }
 
+// See https://quicwg.org/base-drafts/rfc9000.html#section-15
+fn is_reserved_version(version: u32) -> bool {
+    version & RESERVED_VERSION_MASK == version
+}
+
 impl Config {
     /// Creates a config object with the given version.
     ///
@@ -509,6 +516,10 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn new(version: u32) -> Result<Config> {
+        if !is_reserved_version(version) && !version_is_supported(version) {
+            return Err(Error::UnknownVersion);
+        }
+
         let tls_ctx = Mutex::new(tls::Context::new()?);
 
         Ok(Config {
@@ -5594,6 +5605,20 @@ mod tests {
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Err(Error::UnknownVersion));
+    }
+
+    #[test]
+    fn config_version_reserved() {
+        Config::new(0xbabababa).unwrap();
+        Config::new(0x1a2a3a4a).unwrap();
+    }
+
+    #[test]
+    fn config_version_invalid() {
+        assert_eq!(
+            Config::new(0xb1bababa).err().unwrap(),
+            Error::UnknownVersion
+        );
     }
 
     #[test]
