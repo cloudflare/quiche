@@ -2286,14 +2286,15 @@ impl Connection {
 
         // Generate coalesced packets.
         while left > 0 {
-            let (ty, written) =
-                match self.send_single(&mut out[done..done + left]) {
-                    Ok(v) => v,
+            let (ty, written) = match self
+                .send_single(&mut out[done..done + left], has_initial)
+            {
+                Ok(v) => v,
 
-                    Err(Error::BufferTooShort) | Err(Error::Done) => break,
+                Err(Error::BufferTooShort) | Err(Error::Done) => break,
 
-                    Err(e) => return Err(e),
-                };
+                Err(e) => return Err(e),
+            };
 
             done += written;
             left -= written;
@@ -2334,7 +2335,9 @@ impl Connection {
         Ok(done)
     }
 
-    fn send_single(&mut self, out: &mut [u8]) -> Result<(packet::Type, usize)> {
+    fn send_single(
+        &mut self, out: &mut [u8], has_initial: bool,
+    ) -> Result<(packet::Type, usize)> {
         let now = time::Instant::now();
 
         if out.is_empty() {
@@ -2974,6 +2977,19 @@ impl Connection {
             // app_limited to false.
             self.recovery.update_app_limited(false);
             return Err(Error::Done);
+        }
+
+        // When coalescing a 1-RTT packet, we can't add padding in the UDP
+        // datagram, so use PADDING frames instead.
+        //
+        // This is only needed if an Initial packet has already been written to
+        // the UDP datagram, as Initial always requires padding.
+        if has_initial && pkt_type == packet::Type::Short && left >= 1 {
+            let frame = frame::Frame::Padding { len: left };
+
+            if push_frame_to_pkt!(b, frames, frame, left) {
+                in_flight = true;
+            }
         }
 
         // Pad payload so that it's always at least 4 bytes.
@@ -9065,6 +9081,39 @@ mod tests {
     }
 
     #[test]
+    fn coalesce_padding_short() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Client sends first flight.
+        let len = pipe.client.send(&mut buf).unwrap();
+        assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
+        assert_eq!(pipe.server.recv(&mut buf[..len]), Ok(len));
+
+        // Server sends first flight.
+        let len = pipe.server.send(&mut buf).unwrap();
+        assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
+
+        let len = pipe.server.send(&mut buf).unwrap();
+        assert_eq!(pipe.client.recv(&mut buf[..len]), Ok(len));
+
+        // Client sends stream data.
+        assert_eq!(pipe.client.is_established(), true);
+        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+
+        // Client sends second flight.
+        let len = pipe.client.send(&mut buf).unwrap();
+        assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
+        assert_eq!(pipe.server.recv(&mut buf[..len]), Ok(len));
+
+        // None of the sent packets should have been dropped.
+        assert_eq!(pipe.client.sent_count, pipe.server.recv_count);
+        assert_eq!(pipe.server.sent_count, pipe.client.recv_count);
+    }
+
+    #[test]
     /// Tests that client avoids handshake deadlock by arming PTO.
     fn handshake_anti_deadlock() {
         let mut buf = [0; 65535];
@@ -9134,13 +9183,13 @@ mod tests {
         testing::process_flight(&mut pipe.client, flight).unwrap();
 
         // Client sends Initial packet with ACK.
-        let (ty, len) = pipe.client.send_single(&mut buf).unwrap();
+        let (ty, len) = pipe.client.send_single(&mut buf, false).unwrap();
         assert_eq!(ty, Type::Initial);
 
         assert_eq!(pipe.server.recv(&mut buf[..len]), Ok(len));
 
         // Client sends Handshake packet.
-        let (ty, len) = pipe.client.send_single(&mut buf).unwrap();
+        let (ty, len) = pipe.client.send_single(&mut buf, false).unwrap();
         assert_eq!(ty, Type::Handshake);
 
         // Packet type is corrupted to Initial.
