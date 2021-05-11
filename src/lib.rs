@@ -2286,6 +2286,13 @@ impl Connection {
 
         // Generate coalesced packets.
         while left > 0 {
+            // Don't coalesce Initial and Short in the same datagram.
+            if has_initial && !self.is_server {
+                if let Ok(packet::Type::Short) = self.write_pkt_type() {
+                    break;
+                }
+            }
+
             let (ty, written) =
                 match self.send_single(&mut out[done..done + left]) {
                     Ok(v) => v,
@@ -9062,6 +9069,35 @@ mod tests {
         // Client sends second PTO probe.
         assert_eq!(pipe.client.send(&mut buf), Ok(1200));
         assert_eq!(pipe.client.recovery.loss_probes[epoch], 0);
+    }
+
+    #[test]
+    /// Tests that packets Initial and Short is not in the same
+    /// datagram.
+    fn dont_coalesce_initial_and_short() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Client sends padded Initial.
+        let len = pipe.client.send(&mut buf).unwrap();
+        assert_eq!(len, 1200);
+
+        // Server receives client's Initial and sends own Initial and Handshake.
+        assert_eq!(pipe.server.recv(&mut buf[..len]), Ok(len));
+
+        let flight = testing::emit_flight(&mut pipe.server).unwrap();
+        testing::process_flight(&mut pipe.client, flight).unwrap();
+
+        // Client send a small application data.
+        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+
+        // Client sends padded Initial.
+        assert_eq!(pipe.client.send(&mut buf), Ok(1200));
+
+        // Client sends a Short packet separately.
+        let (ty, _) = pipe.client.send_single(&mut buf).unwrap();
+        assert_eq!(ty, Type::Short);
     }
 
     #[test]
