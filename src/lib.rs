@@ -2471,7 +2471,7 @@ impl Connection {
         // We assume that the payload length, which is only present in long
         // header packets, can always be encoded with a 2-byte varint.
         if pkt_type != packet::Type::Short {
-            overhead += 2;
+            overhead += PAYLOAD_LENGTH_LEN;
         }
 
         // Make sure we have enough space left for the packet overhead.
