@@ -254,6 +254,19 @@ fn main() {
         println!("cargo:rustc-link-lib=static=ssl");
     }
 
+    #[cfg(feature = "certificate-compression")]
+    {
+        let pkgcfg = pkg_config::Config::new();
+
+        if pkgcfg.probe("libbrotlienc").is_ok() {
+            println!("cargo:rustc-cfg=feature=\"brotlienc\"");
+        }
+
+        if pkgcfg.probe("libbrotlidec").is_ok() {
+            println!("cargo:rustc-cfg=feature=\"brotlidec\"");
+        }
+    }
+
     // MacOS: Allow cdylib to link with undefined symbols
     if cfg!(target_os = "macos") {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-undefined,dynamic_lookup");

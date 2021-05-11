@@ -29,10 +29,13 @@ include = [
 ]
 
 [features]
-default = ["boringssl-vendored"]
+default = ["boringssl-vendored", "certificate-compression"]
 
 # Build vendored BoringSSL library.
 boringssl-vendored = []
+
+# Enable certificate compression.
+certificate-compression = ["pkg-config"]
 
 # Generate pkg-config metadata file for libquiche.
 pkg-config-meta = []
@@ -51,6 +54,7 @@ no-default-features = true
 
 [build-dependencies]
 cmake = "0.1"
+pkg-config = { version = "0.3", optional = true }
 
 [dependencies]
 log = { version = "0.4", features = ["std"] }
