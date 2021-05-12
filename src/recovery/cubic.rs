@@ -331,7 +331,8 @@ fn on_packet_acked(
 }
 
 fn congestion_event(
-    r: &mut Recovery, time_sent: Instant, epoch: packet::Epoch, now: Instant,
+    r: &mut Recovery, _bytes_lost: usize, time_sent: Instant,
+    epoch: packet::Epoch, now: Instant,
 ) {
     let in_congestion_recovery = r.in_congestion_recovery(time_sent);
 

@@ -116,7 +116,8 @@ fn on_packet_acked(
 }
 
 fn congestion_event(
-    r: &mut Recovery, time_sent: Instant, epoch: packet::Epoch, now: Instant,
+    r: &mut Recovery, _bytes_lost: usize, time_sent: Instant,
+    epoch: packet::Epoch, now: Instant,
 ) {
     // Start a new congestion event if packet was sent after the
     // start of the previous congestion recovery period.
