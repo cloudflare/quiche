@@ -27,7 +27,7 @@
 //! CUBIC Congestion Control
 //!
 //! This implementation is based on the following draft:
-//! <https://tools.ietf.org/html/draft-eggert-tcpm-rfc8312bis-02>
+//! <https://tools.ietf.org/html/draft-ietf-tcpm-rfc8312bis-02>
 //!
 //! Note that Slow Start can use HyStart++ when enabled.
 
