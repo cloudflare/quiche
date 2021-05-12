@@ -2344,6 +2344,10 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
+        if self.is_draining() {
+            return Err(Error::Done);
+        }
+
         let is_closing = self.local_error.is_some();
 
         let mut b = octets::OctetsMut::with_slice(out);
@@ -5873,6 +5877,8 @@ mod tests {
 
     #[test]
     fn handshake_alpn_mismatch() {
+        let mut buf = [0; 65535];
+
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         config
             .set_application_protos(b"\x06proto3\x06proto4")
@@ -5884,6 +5890,11 @@ mod tests {
 
         assert_eq!(pipe.client.application_proto(), b"");
         assert_eq!(pipe.server.application_proto(), b"");
+
+        // Server should only send one packet in response to ALPN mismatch.
+        assert_eq!(pipe.server.send(&mut buf), Ok(1200));
+        assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
+        assert_eq!(pipe.server.sent_count, 1);
     }
 
     #[test]
