@@ -58,6 +58,7 @@ pub struct State {
 
     // CWND
     target_cwnd: usize,
+    saved_cwnd: usize,
     cwnd_gain: f64,
 
     // BW Probing
@@ -66,6 +67,15 @@ pub struct State {
 
     // Idle restart
     idle_restart: bool,
+
+    // Loss tracking
+    bytes_lost: usize,
+    bytes_last_lost: usize,
+    bytes_newly_lost: usize,
+
+    // Packet conservation
+    conservation: PacketConservation,
+    end_conservation: usize,
 }
 
 impl Default for State {
@@ -89,10 +99,16 @@ impl Default for State {
             full_bw_count: 0,
             send_quantum: 0,
             target_cwnd: 0,
+            saved_cwnd: 0,
             cwnd_gain: HIGH_GAIN,
             probe_gain_idx: 0,
             cycle_stamp: Instant::now(),
             idle_restart: false,
+            bytes_lost: 0,
+            bytes_last_lost: 0,
+            bytes_newly_lost: 0,
+            conservation: PacketConservation::Normal,
+            end_conservation: 0,
         }
     }
 }
@@ -105,6 +121,13 @@ enum Mode {
     ProbeRtt,
 }
 
+#[derive(PartialEq)]
+enum PacketConservation {
+    Conservation,
+    Growth,
+    Normal,
+}
+
 pub fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
     handle_restart_from_idle(r);
     r.bytes_in_flight += sent_bytes;
@@ -114,6 +137,10 @@ fn on_packet_acked(
     r: &mut Recovery, packet: &Acked, _epoch: packet::Epoch, now: Instant,
 ) {
     r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
+
+    r.bbr_state.bytes_newly_lost =
+        r.bbr_state.bytes_lost - r.bbr_state.bytes_last_lost;
+    r.bbr_state.bytes_last_lost = r.bbr_state.bytes_lost;
 
     update_bw(r, packet);
     check_cycle_phase(r, packet, now);
@@ -128,9 +155,21 @@ fn on_packet_acked(
 }
 
 fn congestion_event(
-    _r: &mut Recovery, _time_sent: Instant, _epoch: packet::Epoch, _now: Instant,
+    r: &mut Recovery, lost_bytes: usize, _time_sent: Instant,
+    _epoch: packet::Epoch, _now: Instant,
 ) {
-    // TODO: Implement loss recovery
+    r.bbr_state.bytes_lost += lost_bytes;
+
+    if lost_bytes > 0 {
+        r.bbr_state.end_conservation = r.delivery_rate.delivered();
+
+        if r.bbr_state.conservation == PacketConservation::Normal {
+            save_cwnd(r);
+            r.bbr_state.conservation = PacketConservation::Conservation;
+            r.congestion_window = r.bytes_in_flight + lost_bytes;
+            r.bbr_state.next_round_delivered = r.delivery_rate.delivered();
+        }
+    }
 }
 
 pub fn collapse_cwnd(_r: &mut Recovery) {
@@ -145,8 +184,24 @@ fn checkpoint(_r: &mut Recovery) {
     // TODO: Implement loss recovery
 }
 
+fn save_cwnd(r: &mut Recovery) {
+    r.bbr_state.saved_cwnd = if r.bbr_state.conservation ==
+        PacketConservation::Normal &&
+        r.bbr_state.mode != Mode::ProbeRtt
+    {
+        r.congestion_window
+    } else {
+        std::cmp::max(r.bbr_state.saved_cwnd, r.congestion_window)
+    }
+}
+
 fn rollback(_r: &mut Recovery) {
     // TODO: Implement loss recovery
+}
+
+fn restore_cwnd(r: &mut Recovery) {
+    r.congestion_window =
+        std::cmp::max(r.congestion_window, r.bbr_state.saved_cwnd);
 }
 
 fn update_bw(r: &mut Recovery, packet: &Acked) {
@@ -167,8 +222,17 @@ fn update_round(r: &mut Recovery, packet: &Acked) {
         r.bbr_state.next_round_delivered = r.delivery_rate.delivered();
         r.bbr_state.round_count += 1;
         r.bbr_state.round_start = true;
+
+        if r.bbr_state.conservation == PacketConservation::Conservation {
+            r.bbr_state.conservation = PacketConservation::Growth;
+        }
     } else {
         r.bbr_state.round_start = false;
+    }
+
+    if packet.delivered >= r.bbr_state.end_conservation {
+        r.bbr_state.conservation = PacketConservation::Normal;
+        restore_cwnd(r);
     }
 }
 
@@ -228,24 +292,39 @@ fn modulate_cwnd_for_probe_rtt(r: &mut Recovery) {
     }
 }
 
+fn modulate_cwnd_for_recovery(r: &mut Recovery) {
+    if r.bbr_state.bytes_newly_lost > 0 {
+        r.congestion_window = std::cmp::max(
+            r.congestion_window - r.bbr_state.bytes_newly_lost,
+            MIN_PIPE_CWND * r.max_datagram_size(),
+        );
+    }
+}
+
 fn set_cwnd(r: &mut Recovery, packet: &Acked) {
     update_target_cwnd(r);
-    // TODO: modulate_cwnd_for_recovery();
 
-    // if not packet conservation
-    if r.bbr_state.filled_pipe {
-        r.congestion_window = std::cmp::min(
-            r.congestion_window + packet.size,
-            r.bbr_state.target_cwnd,
-        );
-    } else if r.congestion_window < r.bbr_state.target_cwnd ||
-        r.delivery_rate.delivered() < MIN_PIPE_CWND * r.max_datagram_size()
-    {
-        r.congestion_window += packet.size;
+    if r.bbr_state.conservation != PacketConservation::Normal {
+        modulate_cwnd_for_recovery(r);
     }
 
-    r.congestion_window =
-        std::cmp::max(r.congestion_window, MIN_PIPE_CWND * r.max_datagram_size());
+    if r.bbr_state.conservation != PacketConservation::Conservation {
+        if r.bbr_state.filled_pipe {
+            r.congestion_window = std::cmp::min(
+                r.congestion_window + packet.size,
+                r.bbr_state.target_cwnd,
+            );
+        } else if r.congestion_window < r.bbr_state.target_cwnd ||
+            r.delivery_rate.delivered() < MIN_PIPE_CWND * r.max_datagram_size()
+        {
+            r.congestion_window += packet.size;
+        }
+
+        r.congestion_window = std::cmp::max(
+            r.congestion_window,
+            MIN_PIPE_CWND * r.max_datagram_size(),
+        );
+    }
 
     modulate_cwnd_for_probe_rtt(r);
 }
@@ -315,8 +394,9 @@ fn is_next_cycle_phase(r: &mut Recovery, packet: &Acked, now: Instant) -> bool {
     if r.bbr_state.pacing_gain == 1.0 {
         is_full_length
     } else if r.bbr_state.pacing_gain > 1.0 {
-        // TODO: Account for packets_lost
-        is_full_length && prior_inflight >= inflight(r, r.bbr_state.pacing_gain)
+        is_full_length &&
+            (r.bbr_state.bytes_newly_lost > 0 ||
+                prior_inflight >= inflight(r, r.bbr_state.pacing_gain))
     } else {
         is_full_length || prior_inflight <= inflight(r, 1.0)
     }
@@ -344,7 +424,7 @@ fn check_probe_rtt(r: &mut Recovery, now: Instant) {
         !r.bbr_state.idle_restart
     {
         enter_probe_rtt(r);
-        checkpoint(r);
+        save_cwnd(r);
         r.bbr_state.probe_rtt_done_stamp = None;
     }
 
@@ -375,7 +455,7 @@ fn handle_probe_rtt(r: &mut Recovery, now: Instant) {
 
         if r.bbr_state.probe_rtt_round_done && now > probe_rtt_done_stamp {
             r.bbr_state.rtt_stamp = now;
-            rollback(r);
+            restore_cwnd(r);
             exit_probe_rtt(r);
         }
     }
