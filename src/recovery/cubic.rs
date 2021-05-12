@@ -26,8 +26,8 @@
 
 //! CUBIC Congestion Control
 //!
-//! This implementation is based on the following RFC:
-//! <https://tools.ietf.org/html/rfc8312>
+//! This implementation is based on the following draft:
+//! <https://tools.ietf.org/html/draft-ietf-tcpm-rfc8312bis-02>
 //!
 //! Note that Slow Start can use HyStart++ when enabled.
 
@@ -112,13 +112,15 @@ struct PriorState {
 /// not packets.
 /// Unit of t (duration) and RTT are based on seconds (f64).
 impl State {
-    // K = cbrt(w_max * (1 - beta_cubic) / C) (Eq. 2)
-    fn cubic_k(&self, max_datagram_size: usize) -> f64 {
+    // K = cubic_root ((w_max - cwnd) / C) (Eq. 2)
+    fn cubic_k(&self, cwnd: usize, max_datagram_size: usize) -> f64 {
         let w_max = self.w_max / max_datagram_size as f64;
-        libm::cbrt(w_max * (1.0 - BETA_CUBIC) / C)
+        let cwnd = cwnd as f64 / max_datagram_size as f64;
+
+        libm::cbrt((w_max - cwnd) / C)
     }
 
-    // W_cubic(t) = C * (t - K)^3 - w_max (Eq. 1)
+    // W_cubic(t) = C * (t - K)^3 + w_max (Eq. 1)
     fn w_cubic(&self, t: Duration, max_datagram_size: usize) -> f64 {
         let w_max = self.w_max / max_datagram_size as f64;
 
@@ -273,23 +275,27 @@ fn on_packet_acked(
 
         let t = now - ca_start_time;
 
-        // w_cubic(t + rtt)
-        let w_cubic = r.cubic_state.w_cubic(t + r.min_rtt, r.max_datagram_size);
+        // target = w_cubic(t + rtt)
+        let target = r.cubic_state.w_cubic(t + r.min_rtt, r.max_datagram_size);
+
+        // Clipping target to [cwnd, 1.5 x cwnd]
+        let target = f64::max(target, r.congestion_window as f64);
+        let target = f64::min(target, r.congestion_window as f64 * 1.5);
 
         // w_est(t)
         let w_est = r.cubic_state.w_est(t, r.min_rtt, r.max_datagram_size);
 
         let mut cubic_cwnd = r.congestion_window;
 
-        if w_cubic < w_est {
+        if r.cubic_state.w_cubic(t, r.max_datagram_size) < w_est {
             // TCP friendly region.
             cubic_cwnd = cmp::max(cubic_cwnd, w_est as usize);
-        } else if cubic_cwnd < w_cubic as usize {
+        } else {
             // Concave region or convex region use same increment.
-            let cubic_inc = (w_cubic - cubic_cwnd as f64) / cubic_cwnd as f64 *
-                r.max_datagram_size as f64;
+            let cubic_inc =
+                r.max_datagram_size * (target as usize - cubic_cwnd) / cubic_cwnd;
 
-            cubic_cwnd += cubic_inc as usize;
+            cubic_cwnd += cubic_inc;
         }
 
         // When in Limited Slow Start, take the max of CA cwnd and
@@ -341,13 +347,19 @@ fn congestion_event(
         }
 
         r.cubic_state.w_max = r.congestion_window as f64;
-        r.ssthresh = (r.cubic_state.w_max * BETA_CUBIC) as usize;
+        r.ssthresh = (r.congestion_window as f64 * BETA_CUBIC) as usize;
         r.ssthresh = cmp::max(
             r.ssthresh,
             r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
         );
         r.congestion_window = r.ssthresh;
-        r.cubic_state.k = r.cubic_state.cubic_k(r.max_datagram_size);
+
+        r.cubic_state.k = if r.cubic_state.w_max < r.congestion_window as f64 {
+            0.0
+        } else {
+            r.cubic_state
+                .cubic_k(r.congestion_window, r.max_datagram_size)
+        };
 
         r.cubic_state.cwnd_inc =
             (r.cubic_state.cwnd_inc as f64 * BETA_CUBIC) as usize;
@@ -525,7 +537,7 @@ mod tests {
         cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::CUBIC);
 
         let mut r = Recovery::new(&cfg);
-        let now = Instant::now();
+        let mut now = Instant::now();
         let prev_cwnd = r.cwnd();
 
         // Send initcwnd full MSS packets to become no longer app limited
@@ -540,6 +552,7 @@ mod tests {
         let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
         assert_eq!(r.cwnd(), cur_cwnd);
 
+        // Shift current time by 1 RTT.
         let rtt = Duration::from_millis(100);
 
         let acked = vec![Acked {
@@ -548,6 +561,11 @@ mod tests {
             time_sent: now + rtt,
             size: r.max_datagram_size,
         }];
+
+        r.update_rtt(rtt, Duration::from_millis(0), now);
+
+        // Exit from the recovery.
+        now += rtt;
 
         // Ack more than cwnd bytes with rtt=100ms
         r.update_rtt(rtt, Duration::from_millis(0), now);
