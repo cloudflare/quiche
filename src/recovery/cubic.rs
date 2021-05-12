@@ -70,7 +70,7 @@ const ALPHA_AIMD: f64 = 3.0 * (1.0 - BETA_CUBIC) / (1.0 + BETA_CUBIC);
 /// CUBIC State Variables.
 ///
 /// We need to keep those variables across the connection.
-/// k, w_max, w_est is described in the RFC.
+/// k, w_max, w_est are described in the RFC.
 #[derive(Debug, Default)]
 pub struct State {
     k: f64,
