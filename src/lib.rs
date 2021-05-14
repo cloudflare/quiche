@@ -2764,8 +2764,6 @@ impl Connection {
             left > frame::MAX_CRYPTO_OVERHEAD &&
             !is_closing
         {
-            let max_len = left - frame::MAX_CRYPTO_OVERHEAD;
-
             let crypto_off =
                 self.pkt_num_spaces[epoch].crypto_stream.send.off_front();
 
@@ -2787,36 +2785,43 @@ impl Connection {
                 octets::varint_len(crypto_off) + // offset
                 2; // length, always encode as 2-byte varint
 
-            let (mut crypto_hdr, mut crypto_payload) =
-                b.split_at(hdr_off + hdr_len)?;
+            if let Some(max_len) = left.checked_sub(hdr_len) {
+                let (mut crypto_hdr, mut crypto_payload) =
+                    b.split_at(hdr_off + hdr_len)?;
 
-            // Write stream data into the packet buffer.
-            let (len, _) = self.pkt_num_spaces[epoch]
-                .crypto_stream
-                .send
-                .emit(&mut crypto_payload.as_mut()[..max_len])?;
+                // Write stream data into the packet buffer.
+                let (len, _) = self.pkt_num_spaces[epoch]
+                    .crypto_stream
+                    .send
+                    .emit(&mut crypto_payload.as_mut()[..max_len])?;
 
-            // Encode the frame's header.
-            //
-            // Due to how `OctetsMut::split_at()` works, `crypto_hdr` starts
-            // from the initial offset of `b` (rather than the current offset),
-            // so it needs to be advanced to the initial frame offset.
-            crypto_hdr.skip(hdr_off)?;
+                // Encode the frame's header.
+                //
+                // Due to how `OctetsMut::split_at()` works, `crypto_hdr` starts
+                // from the initial offset of `b` (rather than the current
+                // offset), so it needs to be advanced to the
+                // initial frame offset.
+                crypto_hdr.skip(hdr_off)?;
 
-            frame::encode_crypto_header(crypto_off, len as u64, &mut crypto_hdr)?;
+                frame::encode_crypto_header(
+                    crypto_off,
+                    len as u64,
+                    &mut crypto_hdr,
+                )?;
 
-            // Advance the packet buffer's offset.
-            b.skip(hdr_len + len)?;
+                // Advance the packet buffer's offset.
+                b.skip(hdr_len + len)?;
 
-            let frame = frame::Frame::CryptoHeader {
-                offset: crypto_off,
-                length: len,
-            };
+                let frame = frame::Frame::CryptoHeader {
+                    offset: crypto_off,
+                    length: len,
+                };
 
-            if push_frame_to_pkt!(b, frames, frame, left) {
-                ack_eliciting = true;
-                in_flight = true;
-                has_data = true;
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    ack_eliciting = true;
+                    in_flight = true;
+                    has_data = true;
+                }
             }
         }
 
@@ -6126,7 +6131,7 @@ mod tests {
         let flight = testing::emit_flight(&mut pipe.server).unwrap();
         let server_sent = flight.iter().fold(0, |out, p| out + p.len());
 
-        assert_eq!(server_sent, (client_sent - 2) * MAX_AMPLIFICATION_FACTOR);
+        assert_eq!(server_sent, client_sent * MAX_AMPLIFICATION_FACTOR);
     }
 
     #[test]
