@@ -163,7 +163,7 @@ fn congestion_event(
     if lost_bytes > 0 {
         r.bbr_state.end_conservation = r.delivery_rate.delivered();
 
-        if r.bbr_state.conservation == PacketConservation::Normal {
+        if r.bbr_state.conservation == PacketConservation::Normal && r.bbr_state.filled_pipe {
             save_cwnd(r);
             r.bbr_state.conservation = PacketConservation::Conservation;
             r.congestion_window = r.bytes_in_flight + lost_bytes;
