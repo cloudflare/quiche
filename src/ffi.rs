@@ -767,6 +767,27 @@ pub extern fn quiche_conn_trace_id(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_source_id(
+    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+) {
+    let conn_id = conn.source_id();
+    let id = conn_id.as_ref();
+    *out = id.as_ptr();
+    *out_len = id.len();
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_destination_id(
+    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+) {
+    let conn_id = conn.destination_id();
+    let id = conn_id.as_ref();
+
+    *out = id.as_ptr();
+    *out_len = id.len();
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_application_proto(
     conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
