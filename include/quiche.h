@@ -323,7 +323,7 @@ void quiche_conn_trace_id(quiche_conn *conn, const uint8_t **out, size_t *out_le
 // Returns the source connection ID.
 void quiche_conn_source_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
-// Returns the destination connection id.
+// Returns the destination connection ID.
 void quiche_conn_destination_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns the negotiated ALPN protocol.
