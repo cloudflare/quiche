@@ -108,7 +108,7 @@ impl<T: PartialOrd + Copy> Minmax<T> {
     }
 
     /// Updates the max estimate based on the given measurement, and returns it.
-    pub fn _running_max(&mut self, win: Duration, time: Instant, meas: T) -> T {
+    pub fn running_max(&mut self, win: Duration, time: Instant, meas: T) -> T {
         let val = MinmaxSample { time, value: meas };
 
         let delta_time = time.duration_since(self.estimate[2].time);
@@ -269,13 +269,13 @@ mod tests {
         assert_eq!(rtt_max, rtt_24);
 
         time += Duration::from_millis(250);
-        rtt_max = f._running_max(win, time, rtt_25);
+        rtt_max = f.running_max(win, time, rtt_25);
         assert_eq!(rtt_max, rtt_25);
         assert_eq!(f.estimate[1].value, rtt_25);
         assert_eq!(f.estimate[2].value, rtt_25);
 
         time += Duration::from_millis(600);
-        rtt_max = f._running_max(win, time, rtt_24);
+        rtt_max = f.running_max(win, time, rtt_24);
         assert_eq!(rtt_max, rtt_24);
         assert_eq!(f.estimate[1].value, rtt_24);
         assert_eq!(f.estimate[2].value, rtt_24);
@@ -293,13 +293,13 @@ mod tests {
         assert_eq!(bw_max, bw_200);
 
         time += Duration::from_millis(5000);
-        bw_max = f._running_max(win, time, bw_500);
+        bw_max = f.running_max(win, time, bw_500);
         assert_eq!(bw_max, bw_500);
         assert_eq!(f.estimate[1].value, bw_500);
         assert_eq!(f.estimate[2].value, bw_500);
 
         time += Duration::from_millis(600);
-        bw_max = f._running_max(win, time, bw_200);
+        bw_max = f.running_max(win, time, bw_200);
         assert_eq!(bw_max, bw_200);
         assert_eq!(f.estimate[1].value, bw_200);
         assert_eq!(f.estimate[2].value, bw_200);
@@ -383,19 +383,19 @@ mod tests {
         assert_eq!(rtt_max, rtt_25);
 
         time += Duration::from_millis(300);
-        rtt_max = f._running_max(win, time, rtt_24);
+        rtt_max = f.running_max(win, time, rtt_24);
         assert_eq!(rtt_max, rtt_25);
         assert_eq!(f.estimate[1].value, rtt_24);
         assert_eq!(f.estimate[2].value, rtt_24);
 
         time += Duration::from_millis(300);
-        rtt_max = f._running_max(win, time, rtt_23);
+        rtt_max = f.running_max(win, time, rtt_23);
         assert_eq!(rtt_max, rtt_25);
         assert_eq!(f.estimate[1].value, rtt_24);
         assert_eq!(f.estimate[2].value, rtt_23);
 
         time += Duration::from_millis(300);
-        rtt_max = f._running_max(win, time, rtt_26);
+        rtt_max = f.running_max(win, time, rtt_26);
         assert_eq!(rtt_max, rtt_26);
         assert_eq!(f.estimate[1].value, rtt_26);
         assert_eq!(f.estimate[2].value, rtt_26);
@@ -415,19 +415,19 @@ mod tests {
         assert_eq!(bw_max, bw_500);
 
         time += Duration::from_millis(300);
-        bw_max = f._running_max(win, time, bw_400);
+        bw_max = f.running_max(win, time, bw_400);
         assert_eq!(bw_max, bw_500);
         assert_eq!(f.estimate[1].value, bw_400);
         assert_eq!(f.estimate[2].value, bw_400);
 
         time += Duration::from_millis(300);
-        bw_max = f._running_max(win, time, bw_300);
+        bw_max = f.running_max(win, time, bw_300);
         assert_eq!(bw_max, bw_500);
         assert_eq!(f.estimate[1].value, bw_400);
         assert_eq!(f.estimate[2].value, bw_300);
 
         time += Duration::from_millis(300);
-        bw_max = f._running_max(win, time, bw_600);
+        bw_max = f.running_max(win, time, bw_600);
         assert_eq!(bw_max, bw_600);
         assert_eq!(f.estimate[1].value, bw_600);
         assert_eq!(f.estimate[2].value, bw_600);
