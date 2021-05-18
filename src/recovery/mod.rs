@@ -243,6 +243,10 @@ impl Recovery {
         }
     }
 
+    pub fn on_init(&mut self) {
+        (self.cc_ops.on_init)(self);
+    }
+
     pub fn on_packet_sent(
         &mut self, mut pkt: Sent, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
@@ -965,6 +969,8 @@ impl FromStr for CongestionControlAlgorithm {
 }
 
 pub struct CongestionControlOps {
+    pub on_init: fn(r: &mut Recovery),
+
     pub on_packet_sent: fn(r: &mut Recovery, sent_bytes: usize, now: Instant),
 
     pub on_packet_acked:
