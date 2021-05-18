@@ -39,6 +39,7 @@ use crate::recovery::CongestionControlOps;
 use crate::recovery::Recovery;
 
 pub static RENO: CongestionControlOps = CongestionControlOps {
+    on_init,
     on_packet_sent,
     on_packet_acked,
     congestion_event,
@@ -47,6 +48,8 @@ pub static RENO: CongestionControlOps = CongestionControlOps {
     rollback,
     has_custom_pacing,
 };
+
+pub fn on_init(_r: &mut Recovery) {}
 
 pub fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
     r.bytes_in_flight += sent_bytes;

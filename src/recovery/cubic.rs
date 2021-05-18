@@ -45,6 +45,7 @@ use crate::recovery::CongestionControlOps;
 use crate::recovery::Recovery;
 
 pub static CUBIC: CongestionControlOps = CongestionControlOps {
+    on_init,
     on_packet_sent,
     on_packet_acked,
     congestion_event,
@@ -145,6 +146,8 @@ impl State {
         self.alpha_aimd * (acked as f64 / cwnd as f64) * max_datagram_size as f64
     }
 }
+
+fn on_init(_r: &mut Recovery) {}
 
 fn collapse_cwnd(r: &mut Recovery) {
     let cubic = &mut r.cubic_state;

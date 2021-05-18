@@ -1605,6 +1605,8 @@ impl Connection {
             conn.derived_initial_secrets = true;
         }
 
+        conn.recovery.on_init();
+
         Ok(conn)
     }
 
