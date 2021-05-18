@@ -155,6 +155,9 @@ pub struct Recovery {
     // The maximum size of a data aggregate scheduled and
     // transmitted together.
     send_quantum: usize,
+
+    // BBR state.
+    bbr_state: bbr::State,
 }
 
 pub struct RecoveryConfig {
@@ -266,6 +269,8 @@ impl Recovery {
 
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
+
+            bbr_state: bbr::State::new(),
         }
     }
 
@@ -1012,6 +1017,8 @@ pub enum CongestionControlAlgorithm {
     Reno  = 0,
     /// CUBIC congestion control algorithm (default). `cubic` in a string form.
     CUBIC = 1,
+    /// BBR congestion control algorithm. `bbr` in a string form.
+    BBR   = 2,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -1024,6 +1031,7 @@ impl FromStr for CongestionControlAlgorithm {
         match name {
             "reno" => Ok(CongestionControlAlgorithm::Reno),
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
+            "bbr" => Ok(CongestionControlAlgorithm::BBR),
 
             _ => Err(crate::Error::CongestionControl),
         }
@@ -1069,6 +1077,7 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
         match algo {
             CongestionControlAlgorithm::Reno => &reno::RENO,
             CongestionControlAlgorithm::CUBIC => &cubic::CUBIC,
+            CongestionControlAlgorithm::BBR => &bbr::BBR,
         }
     }
 }
@@ -2082,6 +2091,7 @@ mod tests {
     }
 }
 
+mod bbr;
 mod cubic;
 mod delivery_rate;
 mod hystart;
