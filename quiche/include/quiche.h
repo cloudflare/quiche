@@ -203,6 +203,7 @@ void quiche_config_set_disable_active_migration(quiche_config *config, bool v);
 enum quiche_cc_algorithm {
     QUICHE_CC_RENO = 0,
     QUICHE_CC_CUBIC = 1,
+    QUICHE_CC_BBR = 2,
 };
 
 // Sets the congestion control algorithm used.
