@@ -610,14 +610,6 @@ pub struct SendInfo {
     to_len: socklen_t,
 }
 
-impl From<crate::SendInfo> for SendInfo {
-    fn from(info: crate::SendInfo) -> SendInfo {
-        let (to, to_len) = std_addr_to_c(&info.to);
-
-        SendInfo { to, to_len }
-    }
-}
-
 #[no_mangle]
 pub extern fn quiche_conn_send(
     conn: &mut Connection, out: *mut u8, out_len: size_t, out_info: &mut SendInfo,
@@ -630,7 +622,7 @@ pub extern fn quiche_conn_send(
 
     match conn.send(out) {
         Ok((v, info)) => {
-            *out_info = info.into();
+            out_info.to_len = std_addr_to_c(&info.to, &mut out_info.to);
 
             v as ssize_t
         },
@@ -1047,31 +1039,29 @@ fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
     }
 }
 
-fn std_addr_to_c(addr: &SocketAddr) -> (sockaddr_storage, socklen_t) {
+fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
     unsafe {
         match addr {
             SocketAddr::V4(addr) => {
-                let mut sa = std::mem::zeroed();
                 let sa_len = std::mem::size_of::<sockaddr_in>();
 
                 let src = addr as *const _ as *const u8;
-                let dst = &mut sa as *mut _ as *mut u8;
+                let dst = out as *mut _ as *mut u8;
 
                 std::ptr::copy_nonoverlapping(src, dst, sa_len);
 
-                (sa, sa_len as socklen_t)
+                sa_len as socklen_t
             },
 
             SocketAddr::V6(addr) => {
-                let mut sa = std::mem::zeroed();
                 let sa_len = std::mem::size_of::<sockaddr_in6>();
 
                 let src = addr as *const _ as *const u8;
-                let dst = &mut sa as *mut _ as *mut u8;
+                let dst = out as *mut _ as *mut u8;
 
                 std::ptr::copy_nonoverlapping(src, dst, sa_len);
 
-                (sa, sa_len as socklen_t)
+                sa_len as socklen_t
             },
         }
     }
