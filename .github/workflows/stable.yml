@@ -33,7 +33,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --tests --examples --verbose --features qlog
+          args: --tests --examples --verbose --features ffi,qlog
 
       - name: Run cargo package
         uses: actions-rs/cargo@v1
@@ -78,7 +78,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose
+          args: --tests --examples --verbose --features ffi,qlog
 
   quiche_ios:
     runs-on: macos-latest
@@ -139,7 +139,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --target=${{ matrix.target }} --verbose
+          args: --target=${{ matrix.target }} --tests --examples --verbose --features ffi,qlog
 
   quiche_multiarch:
     runs-on: ubuntu-latest
@@ -167,7 +167,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --target=${{ matrix.target }} --verbose
+          args: --target=${{ matrix.target }} --tests --examples --verbose --features ffi,qlog
           use-cross: true
 
   apps:
