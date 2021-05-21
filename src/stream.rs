@@ -27,7 +27,6 @@
 use std::cmp;
 
 use std::sync::Arc;
-use std::sync::RwLock;
 
 use std::collections::hash_map;
 
@@ -845,7 +844,7 @@ impl RecvBuf {
 
             let buf_len = cmp::min(buf.len(), cap);
 
-            buf.with(|s| out[len..len + buf_len].copy_from_slice(&s[..buf_len]));
+            out[len..len + buf_len].copy_from_slice(&buf[..buf_len]);
 
             self.off += buf_len as u64;
 
@@ -1055,28 +1054,6 @@ impl SendBuf {
 
         let mut len = 0;
 
-        // Try to fill the last buffer in the queue first, if it has capacity.
-        if let Some(back) = self.data.back_mut() {
-            let spare = back.spare_capacity();
-
-            if spare > 0 {
-                len = cmp::min(spare, data.len());
-
-                back.extend_from_slice(&data[..len])?;
-
-                back.fin = len == data.len() && fin;
-
-                self.off += len as u64;
-                self.len += len as u64;
-
-                data = &data[len..];
-
-                if !back.is_empty() {
-                    self.pos = cmp::min(self.pos, self.data.len() - 1);
-                }
-            }
-        }
-
         // Split the remaining input data into consistently-sized buffers to
         // avoid fragmentation.
         for chunk in data.chunks(SEND_BUFFER_SIZE) {
@@ -1084,12 +1061,7 @@ impl SendBuf {
 
             let fin = len == data.len() && fin;
 
-            let buf = RangeBuf::from_with_capacity(
-                chunk,
-                self.off,
-                fin,
-                SEND_BUFFER_SIZE,
-            )?;
+            let buf = RangeBuf::from(chunk, self.off, fin);
 
             // The new data can simply be appended at the end of the send buffer.
             self.data.push_back(buf);
@@ -1128,10 +1100,8 @@ impl SendBuf {
 
             // Copy data to the output buffer.
             let out_pos = (next_off - out_off) as usize;
-            buf.with(|s| {
-                (&mut out[out_pos..out_pos + buf_len])
-                    .copy_from_slice(&s[..buf_len])
-            });
+            (&mut out[out_pos..out_pos + buf_len])
+                .copy_from_slice(&buf[..buf_len]);
 
             self.len -= buf_len as u64;
 
@@ -1405,19 +1375,14 @@ impl SendBuf {
 ///
 /// Finally, `off` is the starting offset for the specific `RangeBuf` within the
 /// stream the buffer belongs to.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq)]
 pub struct RangeBuf {
     /// The internal buffer holding the data.
     ///
     /// To avoid neeless allocations when a RangeBuf is split, this field is
     /// reference-counted and can be shared between multiple RangeBuf objects,
     /// and sliced using the `start` and `len` values.
-    ///
-    /// In order to allow the inner `Vec` to be mutated, an `RwLock` is used to
-    /// achieve interior mutability (`RefCell` can't be used here because it
-    /// does not implement `Sync`, which is required by `Arc` to make the type
-    /// `Send`-able).
-    data: Arc<RwLock<Vec<u8>>>,
+    data: Arc<Vec<u8>>,
 
     /// The initial offset within the internal buffer.
     start: usize,
@@ -1439,38 +1404,13 @@ impl RangeBuf {
     /// Creates a new `RangeBuf` from the given slice.
     pub fn from(buf: &[u8], off: u64, fin: bool) -> RangeBuf {
         RangeBuf {
-            data: Arc::new(RwLock::new(Vec::from(buf))),
+            data: Arc::new(Vec::from(buf)),
             start: 0,
             pos: 0,
             len: buf.len(),
             off,
             fin,
         }
-    }
-
-    /// Creates a new `RangeBuf` from the given slice and capacity.
-    ///
-    /// `cap` bytes are allocated for the underlying data store, regardless of
-    /// the size of the input data. When the data is smaller than the capacity,
-    /// the remaining space can be filled by calling `extend_from_slice()`.
-    pub fn from_with_capacity(
-        buf: &[u8], off: u64, fin: bool, cap: usize,
-    ) -> Result<RangeBuf> {
-        if cap < buf.len() {
-            return Err(Error::BufferTooShort);
-        }
-
-        let mut vec = Vec::with_capacity(SEND_BUFFER_SIZE);
-        vec.extend_from_slice(buf);
-
-        Ok(RangeBuf {
-            data: Arc::new(RwLock::new(vec)),
-            start: 0,
-            pos: 0,
-            len: buf.len(),
-            off,
-            fin,
-        })
     }
 
     /// Returns whether `self` holds the final offset in the stream.
@@ -1493,12 +1433,6 @@ impl RangeBuf {
         self.len - (self.pos - self.start)
     }
 
-    /// Returns the amount of bytes that can be written to the internal buffer.
-    pub fn spare_capacity(&self) -> usize {
-        let r = self.data.read().unwrap();
-        r.capacity() - r.len()
-    }
-
     /// Returns true if `self` has a length of zero bytes.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -1507,29 +1441,6 @@ impl RangeBuf {
     /// Consumes the starting `count` bytes of `self`.
     pub fn consume(&mut self, count: usize) {
         self.pos += count;
-    }
-
-    /// Applies the given function to the internal buffer.
-    pub fn with<F, T>(&self, f: F) -> T
-    where
-        F: FnOnce(&[u8]) -> T,
-    {
-        let r = self.data.read().unwrap();
-        f(&r[self.pos..self.start + self.len])
-    }
-
-    /// Extends the internal buffer with the given slice.
-    pub fn extend_from_slice(&mut self, other: &[u8]) -> Result<()> {
-        if self.spare_capacity() < other.len() {
-            return Err(Error::BufferTooShort);
-        }
-
-        let mut w = self.data.write().unwrap();
-        w.extend_from_slice(other);
-
-        self.len += other.len();
-
-        Ok(())
     }
 
     /// Splits the buffer into two at the given index.
@@ -1558,6 +1469,14 @@ impl RangeBuf {
     }
 }
 
+impl std::ops::Deref for RangeBuf {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.data[self.pos..self.start + self.len]
+    }
+}
+
 impl Ord for RangeBuf {
     fn cmp(&self, other: &RangeBuf) -> cmp::Ordering {
         // Invert ordering to implement min-heap.
@@ -1576,9 +1495,6 @@ impl PartialEq for RangeBuf {
         self.off == other.off
     }
 }
-
-// Implement Eq explicitly because RwLock prevents it from being derived.
-impl Eq for RangeBuf {}
 
 #[cfg(test)]
 mod tests {
@@ -3008,7 +2924,7 @@ mod tests {
         assert_eq!(buf.off(), 5);
         assert_eq!(buf.fin(), true);
 
-        buf.with(|s| assert_eq!(s, b"helloworld"));
+        assert_eq!(&buf[..], b"helloworld");
 
         // Advance buffer.
         buf.consume(5);
@@ -3023,7 +2939,7 @@ mod tests {
         assert_eq!(buf.off(), 10);
         assert_eq!(buf.fin(), true);
 
-        buf.with(|s| assert_eq!(s, b"world"));
+        assert_eq!(&buf[..], b"world");
 
         // Split buffer before position.
         let mut new_buf = buf.split_off(3);
@@ -3038,7 +2954,7 @@ mod tests {
         assert_eq!(buf.off(), 8);
         assert_eq!(buf.fin(), false);
 
-        buf.with(|s| assert_eq!(s, b""));
+        assert_eq!(&buf[..], b"");
 
         assert_eq!(new_buf.start, 3);
         assert_eq!(new_buf.pos, 5);
@@ -3050,7 +2966,7 @@ mod tests {
         assert_eq!(new_buf.off(), 10);
         assert_eq!(new_buf.fin(), true);
 
-        new_buf.with(|s| assert_eq!(s, b"world"));
+        assert_eq!(&new_buf[..], b"world");
 
         // Advance buffer.
         new_buf.consume(2);
@@ -3065,7 +2981,7 @@ mod tests {
         assert_eq!(new_buf.off(), 12);
         assert_eq!(new_buf.fin(), true);
 
-        new_buf.with(|s| assert_eq!(s, b"rld"));
+        assert_eq!(&new_buf[..], b"rld");
 
         // Split buffer after position.
         let mut new_new_buf = new_buf.split_off(5);
@@ -3080,7 +2996,7 @@ mod tests {
         assert_eq!(new_buf.off(), 12);
         assert_eq!(new_buf.fin(), false);
 
-        new_buf.with(|s| assert_eq!(s, b"r"));
+        assert_eq!(&new_buf[..], b"r");
 
         assert_eq!(new_new_buf.start, 8);
         assert_eq!(new_new_buf.pos, 8);
@@ -3092,7 +3008,7 @@ mod tests {
         assert_eq!(new_new_buf.off(), 13);
         assert_eq!(new_new_buf.fin(), true);
 
-        new_new_buf.with(|s| assert_eq!(s, b"ld"));
+        assert_eq!(&new_new_buf[..], b"ld");
 
         // Advance buffer.
         new_new_buf.consume(2);
@@ -3107,6 +3023,6 @@ mod tests {
         assert_eq!(new_new_buf.off(), 15);
         assert_eq!(new_new_buf.fin(), true);
 
-        new_new_buf.with(|s| assert_eq!(s, b""));
+        assert_eq!(&new_new_buf[..], b"");
     }
 }
