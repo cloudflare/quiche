@@ -39,11 +39,37 @@ use libc::c_int;
 use libc::c_void;
 use libc::size_t;
 use libc::sockaddr;
-use libc::sockaddr_in;
-use libc::sockaddr_in6;
-use libc::sockaddr_storage;
-use libc::socklen_t;
 use libc::ssize_t;
+
+#[cfg(not(windows))]
+use libc::sockaddr_in;
+#[cfg(windows)]
+use winapi::shared::ws2def::SOCKADDR_IN as sockaddr_in;
+
+#[cfg(not(windows))]
+use libc::sockaddr_in6;
+#[cfg(windows)]
+use winapi::shared::ws2ipdef::SOCKADDR_IN6_LH as sockaddr_in6;
+
+#[cfg(not(windows))]
+use libc::sockaddr_storage;
+#[cfg(windows)]
+use winapi::shared::ws2def::SOCKADDR_STORAGE_LH as sockaddr_storage;
+
+#[cfg(windows)]
+use libc::c_int as socklen_t;
+#[cfg(not(windows))]
+use libc::socklen_t;
+
+#[cfg(not(windows))]
+use libc::AF_INET;
+#[cfg(windows)]
+use winapi::shared::ws2def::AF_INET;
+
+#[cfg(not(windows))]
+use libc::AF_INET6;
+#[cfg(windows)]
+use winapi::shared::ws2def::AF_INET6;
 
 use crate::*;
 
@@ -1018,7 +1044,7 @@ pub extern fn quiche_conn_peer_streams_left_uni(conn: &mut Connection) -> u64 {
 fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
     unsafe {
         match addr.sa_family as i32 {
-            libc::AF_INET => {
+            AF_INET => {
                 assert!(addr_len as usize == std::mem::size_of::<sockaddr_in>());
 
                 SocketAddr::V4(
@@ -1026,7 +1052,7 @@ fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
                 )
             },
 
-            libc::AF_INET6 => {
+            AF_INET6 => {
                 assert!(addr_len as usize == std::mem::size_of::<sockaddr_in6>());
 
                 SocketAddr::V6(
