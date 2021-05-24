@@ -6,6 +6,8 @@ extern crate libfuzzer_sys;
 #[macro_use]
 extern crate lazy_static;
 
+use std::net::SocketAddr;
+
 use std::sync::Mutex;
 
 lazy_static! {
@@ -30,10 +32,19 @@ static SCID: quiche::ConnectionId<'static> =
     quiche::ConnectionId::from_ref(&[0; quiche::MAX_CONN_ID_LEN]);
 
 fuzz_target!(|data: &[u8]| {
-    let mut buf = data.to_vec();
-    let mut conn =
-        quiche::connect(Some("quic.tech"), &SCID, &mut CONFIG.lock().unwrap())
-            .unwrap();
+    let from: SocketAddr = "127.0.0.1:1234".parse().unwrap();
 
-    conn.recv(&mut buf).ok();
+    let mut buf = data.to_vec();
+
+    let mut conn = quiche::connect(
+        Some("quic.tech"),
+        &SCID,
+        from.clone(),
+        &mut CONFIG.lock().unwrap(),
+    )
+    .unwrap();
+
+    let info = quiche::RecvInfo { from };
+
+    conn.recv(&mut buf, info).ok();
 });

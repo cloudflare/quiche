@@ -157,7 +157,8 @@ pub fn connect(
 
     // Create a QUIC connection and initiate handshake.
     let mut conn =
-        quiche::connect(connect_url.domain(), &scid, &mut config).unwrap();
+        quiche::connect(connect_url.domain(), &scid, peer_addr, &mut config)
+            .unwrap();
 
     if let Some(keylog) = &mut keylog {
         if let Ok(keylog) = keylog.try_clone() {
@@ -193,9 +194,9 @@ pub fn connect(
         scid,
     );
 
-    let write = conn.send(&mut out).expect("initial send failed");
+    let (write, send_info) = conn.send(&mut out).expect("initial send failed");
 
-    while let Err(e) = socket.send(&out[..write]) {
+    while let Err(e) = socket.send_to(&out[..write], &send_info.to) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
             trace!("send() would block");
             continue;
@@ -229,7 +230,7 @@ pub fn connect(
                 break 'read;
             }
 
-            let len = match socket.recv(&mut buf) {
+            let (len, from) = match socket.recv_from(&mut buf) {
                 Ok(v) => v,
 
                 Err(e) => {
@@ -260,8 +261,10 @@ pub fn connect(
 
             pkt_count += 1;
 
+            let recv_info = quiche::RecvInfo { from };
+
             // Process potentially coalesced packets.
-            let read = match conn.recv(&mut buf[..len]) {
+            let read = match conn.recv(&mut buf[..len], recv_info) {
                 Ok(v) => v,
 
                 Err(e) => {
@@ -381,7 +384,7 @@ pub fn connect(
         // Generate outgoing QUIC packets and send them on the UDP socket, until
         // quiche reports that there are no more packets to be sent.
         loop {
-            let write = match conn.send(&mut out) {
+            let (write, send_info) = match conn.send(&mut out) {
                 Ok(v) => v,
 
                 Err(quiche::Error::Done) => {
@@ -397,7 +400,7 @@ pub fn connect(
                 },
             };
 
-            if let Err(e) = socket.send(&out[..write]) {
+            if let Err(e) = socket.send_to(&out[..write], &send_info.to) {
                 if e.kind() == std::io::ErrorKind::WouldBlock {
                     trace!("send() would block");
                     break;

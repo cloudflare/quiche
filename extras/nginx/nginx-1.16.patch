@@ -1,4 +1,4 @@
-From 8159b9f5ea2f6f0fbb31f78b629009d615c428d3 Mon Sep 17 00:00:00 2001
+From 3f07343d97a8efacc90880d9d42d79c522e4ba34 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 22 Oct 2020 12:28:02 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -14,7 +14,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  auto/options                            |    9 +
  src/core/ngx_connection.h               |    7 +
  src/core/ngx_core.h                     |    3 +
- src/event/ngx_event_quic.c              |  604 +++++++
+ src/event/ngx_event_quic.c              |  618 +++++++
  src/event/ngx_event_quic.h              |   49 +
  src/event/ngx_event_udp.c               |    8 +
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
@@ -32,7 +32,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
  src/os/unix/ngx_udp_sendmsg_chain.c     |    1 +
- 28 files changed, 3690 insertions(+), 11 deletions(-)
+ 28 files changed, 3704 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -340,10 +340,10 @@ index 93ca9174d..d0441f034 100644
  #include <ngx_module.h>
 diff --git a/src/event/ngx_event_quic.c b/src/event/ngx_event_quic.c
 new file mode 100644
-index 000000000..aa7e8e697
+index 000000000..6172e5be3
 --- /dev/null
 +++ b/src/event/ngx_event_quic.c
-@@ -0,0 +1,604 @@
+@@ -0,0 +1,618 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -518,7 +518,8 @@ index 000000000..aa7e8e697
 +    }
 +#endif
 +
-+    conn = quiche_conn_new_with_tls(scid, sizeof(scid), NULL, 0, quic->config,
++    conn = quiche_conn_new_with_tls(scid, sizeof(scid), NULL, 0,
++                                    c->sockaddr, c->socklen, quic->config,
 +                                    c->ssl->connection, true);
 +    if (conn == NULL) {
 +        ngx_log_error(NGX_LOG_ERR, c->log, 0, "failed to create quic connection");
@@ -548,12 +549,17 @@ index 000000000..aa7e8e697
 +    size_t    buf_len;
 +    ssize_t   done;
 +
++    quiche_recv_info recv_info = {
++        c->sockaddr,
++        c->socklen,
++    };
++
 +    /* Process the client's Initial packet, which was saved into c->buffer by
 +     * ngx_event_recvmsg(). */
 +    buf = c->buffer->pos;
 +    buf_len = ngx_buf_size(c->buffer);
 +
-+    done = quiche_conn_recv(c->quic->conn, buf, buf_len);
++    done = quiche_conn_recv(c->quic->conn, buf, buf_len, &recv_info);
 +
 +    if ((done < 0) && (done != QUICHE_ERR_DONE)) {
 +        ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0,
@@ -605,7 +611,12 @@ index 000000000..aa7e8e697
 +            return;
 +        }
 +
-+        ssize_t done = quiche_conn_recv(c->quic->conn, buf, n);
++        quiche_recv_info recv_info = {
++            c->sockaddr,
++            c->socklen,
++        };
++
++        ssize_t done = quiche_conn_recv(c->quic->conn, buf, n, &recv_info);
 +
 +        if (done == QUICHE_ERR_DONE) {
 +            break;
@@ -644,6 +655,7 @@ index 000000000..aa7e8e697
 +ngx_quic_write_handler(ngx_event_t *wev)
 +{
 +    ngx_connection_t   *c;
++    quiche_send_info    send_info;
 +    static uint8_t      out[MAX_DATAGRAM_SIZE];
 +
 +    c = wev->data;
@@ -667,7 +679,8 @@ index 000000000..aa7e8e697
 +    }
 +
 +    for (;;) {
-+        ssize_t written = quiche_conn_send(c->quic->conn, out, sizeof(out));
++        ssize_t written = quiche_conn_send(c->quic->conn, out, sizeof(out),
++                                           &send_info);
 +
 +        if (written == QUICHE_ERR_DONE) {
 +            ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "quic done writing");
@@ -787,8 +800,9 @@ index 000000000..aa7e8e697
 +ngx_int_t
 +ngx_quic_shutdown(ngx_connection_t *c)
 +{
-+    ssize_t         written;
-+    static uint8_t  out[MAX_DATAGRAM_SIZE];
++    ssize_t           written;
++    quiche_send_info  send_info;
++    static uint8_t    out[MAX_DATAGRAM_SIZE];
 +
 +    /* Connection is closed, free memory. */
 +    if (quiche_conn_is_closed(c->quic->conn)) {
@@ -813,7 +827,7 @@ index 000000000..aa7e8e697
 +    /* Try sending a packet in order to flush pending frames (CONNECTION_CLOSE
 +     * for example), but ignore errors as we are already closing the connection
 +     * anyway. */
-+    written = quiche_conn_send(c->quic->conn, out, sizeof(out));
++    written = quiche_conn_send(c->quic->conn, out, sizeof(out), &send_info);
 +
 +    if (written > 0) {
 +        ngx_quic_send_udp_packet(c, out, written);
@@ -4293,5 +4307,5 @@ index 5399c7916..9b03ca536 100644
                             "sendmsg() not ready");
              return NGX_AGAIN;
 -- 
-2.30.2
+2.31.1
 

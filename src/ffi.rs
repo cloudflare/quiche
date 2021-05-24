@@ -29,6 +29,8 @@ use std::ptr;
 use std::slice;
 use std::sync::atomic;
 
+use std::net::SocketAddr;
+
 #[cfg(unix)]
 use std::os::unix::io::FromRawFd;
 
@@ -36,7 +38,38 @@ use libc::c_char;
 use libc::c_int;
 use libc::c_void;
 use libc::size_t;
+use libc::sockaddr;
 use libc::ssize_t;
+
+#[cfg(not(windows))]
+use libc::sockaddr_in;
+#[cfg(windows)]
+use winapi::shared::ws2def::SOCKADDR_IN as sockaddr_in;
+
+#[cfg(not(windows))]
+use libc::sockaddr_in6;
+#[cfg(windows)]
+use winapi::shared::ws2ipdef::SOCKADDR_IN6_LH as sockaddr_in6;
+
+#[cfg(not(windows))]
+use libc::sockaddr_storage;
+#[cfg(windows)]
+use winapi::shared::ws2def::SOCKADDR_STORAGE_LH as sockaddr_storage;
+
+#[cfg(windows)]
+use libc::c_int as socklen_t;
+#[cfg(not(windows))]
+use libc::socklen_t;
+
+#[cfg(not(windows))]
+use libc::AF_INET;
+#[cfg(windows)]
+use winapi::shared::ws2def::AF_INET;
+
+#[cfg(not(windows))]
+use libc::AF_INET6;
+#[cfg(windows)]
+use winapi::shared::ws2def::AF_INET6;
 
 use crate::*;
 
@@ -342,7 +375,7 @@ pub extern fn quiche_header_info(
 #[no_mangle]
 pub extern fn quiche_accept(
     scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
-    config: &mut Config,
+    from: &sockaddr, from_len: socklen_t, config: &mut Config,
 ) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
     let scid = ConnectionId::from_ref(scid);
@@ -355,7 +388,9 @@ pub extern fn quiche_accept(
         None
     };
 
-    match accept(&scid, odcid.as_ref(), config) {
+    let from = std_addr_from_c(from, from_len);
+
+    match accept(&scid, odcid.as_ref(), from, config) {
         Ok(c) => Box::into_raw(Pin::into_inner(c)),
 
         Err(_) => ptr::null_mut(),
@@ -364,8 +399,8 @@ pub extern fn quiche_accept(
 
 #[no_mangle]
 pub extern fn quiche_connect(
-    server_name: *const c_char, scid: *const u8, scid_len: size_t,
-    config: &mut Config,
+    server_name: *const c_char, scid: *const u8, scid_len: size_t, to: &sockaddr,
+    to_len: socklen_t, config: &mut Config,
 ) -> *mut Connection {
     let server_name = if server_name.is_null() {
         None
@@ -376,7 +411,9 @@ pub extern fn quiche_connect(
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
     let scid = ConnectionId::from_ref(scid);
 
-    match connect(server_name, &scid, config) {
+    let to = std_addr_from_c(to, to_len);
+
+    match connect(server_name, &scid, to, config) {
         Ok(c) => Box::into_raw(Pin::into_inner(c)),
 
         Err(_) => ptr::null_mut(),
@@ -436,7 +473,8 @@ pub extern fn quiche_retry(
 #[no_mangle]
 pub extern fn quiche_conn_new_with_tls(
     scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
-    config: &mut Config, ssl: *mut c_void, is_server: bool,
+    peer: &sockaddr, peer_len: socklen_t, config: &mut Config, ssl: *mut c_void,
+    is_server: bool,
 ) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
     let scid = ConnectionId::from_ref(scid);
@@ -449,9 +487,18 @@ pub extern fn quiche_conn_new_with_tls(
         None
     };
 
+    let peer = std_addr_from_c(peer, peer_len);
+
     let tls = unsafe { tls::Handshake::from_ptr(ssl) };
 
-    match Connection::with_tls(&scid, odcid.as_ref(), config, tls, is_server) {
+    match Connection::with_tls(
+        &scid,
+        odcid.as_ref(),
+        peer,
+        config,
+        tls,
+        is_server,
+    ) {
         Ok(c) => Box::into_raw(Pin::into_inner(c)),
 
         Err(_) => ptr::null_mut(),
@@ -552,9 +599,23 @@ pub extern fn quiche_conn_set_session(
     }
 }
 
+#[repr(C)]
+pub struct RecvInfo<'a> {
+    from: &'a sockaddr,
+    from_len: socklen_t,
+}
+
+impl<'a> From<&RecvInfo<'a>> for crate::RecvInfo {
+    fn from(info: &RecvInfo) -> crate::RecvInfo {
+        crate::RecvInfo {
+            from: std_addr_from_c(info.from, info.from_len),
+        }
+    }
+}
+
 #[no_mangle]
 pub extern fn quiche_conn_recv(
-    conn: &mut Connection, buf: *mut u8, buf_len: size_t,
+    conn: &mut Connection, buf: *mut u8, buf_len: size_t, info: &RecvInfo,
 ) -> ssize_t {
     if buf_len > <ssize_t>::max_value() as usize {
         panic!("The provided buffer is too large");
@@ -562,16 +623,22 @@ pub extern fn quiche_conn_recv(
 
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
 
-    match conn.recv(buf) {
+    match conn.recv(buf, info.into()) {
         Ok(v) => v as ssize_t,
 
         Err(e) => e.to_c(),
     }
 }
 
+#[repr(C)]
+pub struct SendInfo {
+    to: sockaddr_storage,
+    to_len: socklen_t,
+}
+
 #[no_mangle]
 pub extern fn quiche_conn_send(
-    conn: &mut Connection, out: *mut u8, out_len: size_t,
+    conn: &mut Connection, out: *mut u8, out_len: size_t, out_info: &mut SendInfo,
 ) -> ssize_t {
     if out_len > <ssize_t>::max_value() as usize {
         panic!("The provided buffer is too large");
@@ -580,7 +647,11 @@ pub extern fn quiche_conn_send(
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
     match conn.send(out) {
-        Ok(v) => v as ssize_t,
+        Ok((v, info)) => {
+            out_info.to_len = std_addr_to_c(&info.to, &mut out_info.to);
+
+            v as ssize_t
+        },
 
         Err(e) => e.to_c(),
     }
@@ -869,12 +940,12 @@ pub extern fn quiche_stream_iter_free(iter: *mut StreamIter) {
 
 #[repr(C)]
 pub struct Stats {
-    pub recv: usize,
-    pub sent: usize,
-    pub lost: usize,
-    pub rtt: u64,
-    pub cwnd: usize,
-    pub delivery_rate: u64,
+    recv: usize,
+    sent: usize,
+    lost: usize,
+    rtt: u64,
+    cwnd: usize,
+    delivery_rate: u64,
 }
 
 #[no_mangle]
@@ -968,4 +1039,56 @@ pub extern fn quiche_conn_peer_streams_left_bidi(conn: &mut Connection) -> u64 {
 #[no_mangle]
 pub extern fn quiche_conn_peer_streams_left_uni(conn: &mut Connection) -> u64 {
     conn.peer_streams_left_uni()
+}
+
+fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
+    unsafe {
+        match addr.sa_family as i32 {
+            AF_INET => {
+                assert!(addr_len as usize == std::mem::size_of::<sockaddr_in>());
+
+                SocketAddr::V4(
+                    *(addr as *const _ as *const sockaddr_in as *const _),
+                )
+            },
+
+            AF_INET6 => {
+                assert!(addr_len as usize == std::mem::size_of::<sockaddr_in6>());
+
+                SocketAddr::V6(
+                    *(addr as *const _ as *const sockaddr_in6 as *const _),
+                )
+            },
+
+            _ => unimplemented!("unsupported address type"),
+        }
+    }
+}
+
+fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
+    unsafe {
+        match addr {
+            SocketAddr::V4(addr) => {
+                let sa_len = std::mem::size_of::<sockaddr_in>();
+
+                let src = addr as *const _ as *const u8;
+                let dst = out as *mut _ as *mut u8;
+
+                std::ptr::copy_nonoverlapping(src, dst, sa_len);
+
+                sa_len as socklen_t
+            },
+
+            SocketAddr::V6(addr) => {
+                let sa_len = std::mem::size_of::<sockaddr_in6>();
+
+                let src = addr as *const _ as *const u8;
+                let dst = out as *mut _ as *mut u8;
+
+                std::ptr::copy_nonoverlapping(src, dst, sa_len);
+
+                sa_len as socklen_t
+            },
+        }
+    }
 }

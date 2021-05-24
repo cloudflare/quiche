@@ -86,8 +86,11 @@ static void debug_log(const char *line, void *argp) {
 static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
     static uint8_t out[MAX_DATAGRAM_SIZE];
 
+    quiche_send_info send_info;
+
     while (1) {
-        ssize_t written = quiche_conn_send(conn_io->conn, out, sizeof(out));
+        ssize_t written = quiche_conn_send(conn_io->conn, out, sizeof(out),
+                                           &send_info);
 
         if (written == QUICHE_ERR_DONE) {
             fprintf(stderr, "done writing\n");
@@ -100,8 +103,9 @@ static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
         }
 
         ssize_t sent = sendto(conn_io->sock, out, written, 0,
-                              (struct sockaddr *) &conn_io->peer_addr,
-                              conn_io->peer_addr_len);
+                              (struct sockaddr *) &send_info.to,
+                              send_info.to_len);
+
         if (sent != written) {
             perror("failed to send");
             return;
@@ -169,18 +173,28 @@ static uint8_t *gen_cid(uint8_t *cid, size_t cid_len) {
     return cid;
 }
 
-static struct conn_io *create_conn(uint8_t *dcid, size_t dcid_len, uint8_t *odcid,
-                                   size_t odcid_len) {
-    struct conn_io *conn_io = malloc(sizeof(*conn_io));
+static struct conn_io *create_conn(uint8_t *scid, size_t scid_len,
+                                   uint8_t *odcid, size_t odcid_len,
+                                   struct sockaddr_storage *peer_addr,
+                                   socklen_t peer_addr_len) {
+    struct conn_io *conn_io = calloc(1, sizeof(*conn_io));
     if (conn_io == NULL) {
         fprintf(stderr, "failed to allocate connection IO\n");
         return NULL;
     }
 
-    memcpy(conn_io->cid, dcid, LOCAL_CONN_ID_LEN);
+    if (scid_len != LOCAL_CONN_ID_LEN) {
+        fprintf(stderr, "failed, scid length too short\n");
+    }
+
+    memcpy(conn_io->cid, scid, LOCAL_CONN_ID_LEN);
 
     quiche_conn *conn = quiche_accept(conn_io->cid, LOCAL_CONN_ID_LEN,
-                                      odcid, odcid_len, config);
+                                      odcid, odcid_len,
+                                      (struct sockaddr *) peer_addr,
+                                      peer_addr_len,
+                                      config);
+
     if (conn == NULL) {
         fprintf(stderr, "failed to create connection\n");
         return NULL;
@@ -188,6 +202,9 @@ static struct conn_io *create_conn(uint8_t *dcid, size_t dcid_len, uint8_t *odci
 
     conn_io->sock = conns->sock;
     conn_io->conn = conn;
+
+    memcpy(&conn_io->peer_addr, &peer_addr, peer_addr_len);
+    conn_io->peer_addr_len = peer_addr_len;
 
     ev_init(&conn_io->timer, timeout_cb);
     conn_io->timer.data = conn_io;
@@ -318,16 +335,21 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 continue;
             }
 
-            conn_io = create_conn(dcid, dcid_len, odcid, odcid_len);
+            conn_io = create_conn(dcid, dcid_len, odcid, odcid_len,
+                                  &peer_addr, peer_addr_len);
+
             if (conn_io == NULL) {
                 continue;
             }
-
-            memcpy(&conn_io->peer_addr, &peer_addr, peer_addr_len);
-            conn_io->peer_addr_len = peer_addr_len;
         }
 
-        ssize_t done = quiche_conn_recv(conn_io->conn, buf, read);
+        quiche_recv_info recv_info = {
+            (struct sockaddr *) &peer_addr,
+
+            peer_addr_len,
+        };
+
+        ssize_t done = quiche_conn_recv(conn_io->conn, buf, read, &recv_info);
 
         if (done < 0) {
             fprintf(stderr, "failed to process packet: %zd\n", done);
