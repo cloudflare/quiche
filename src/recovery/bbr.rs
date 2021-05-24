@@ -14,6 +14,11 @@ const PROBE_RTT_TIME: Duration = Duration::from_millis(200);
 const BW_WINDOW: u32 = 10;
 const MIN_PIPE_CWND: usize = 4;
 const PROBE_GAINS: [f64; 8] = [1.25, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+const LT_MAX_RTTS: u64 = 48;
+const LT_MIN_RTTS: u64 = 4;
+const LT_LOSS_THRESH: usize = 5;
+const LT_BW_RATIO: u64 = 8;
+const LT_BW_DIFF: u64 = 500;
 
 pub static BBR: CongestionControlOps = CongestionControlOps {
     on_packet_sent,
@@ -76,10 +81,21 @@ pub struct State {
     // Packet conservation
     conservation: PacketConservation,
     end_conservation: usize,
+
+    // Long-term sampling
+    lt_sampling: bool,
+    lt_last_stamp: Instant,
+    lt_last_delivered: usize,
+    lt_last_lost: usize,
+    lt_rtt_cnt: u64,
+    lt_use_bw: bool,
+    lt_bw: u64,
 }
 
 impl Default for State {
     fn default() -> Self {
+        let now = Instant::now();
+
         State {
             bw_filter: Minmax::new(0, 0),
             bw_max: 0,
@@ -88,7 +104,7 @@ impl Default for State {
             round_start: false,
             round_count: 0,
             rtt_min: crate::recovery::INITIAL_RTT,
-            rtt_stamp: Instant::now(),
+            rtt_stamp: now,
             rtt_expired: false,
             probe_rtt_done_stamp: None,
             probe_rtt_round_done: false,
@@ -102,13 +118,20 @@ impl Default for State {
             saved_cwnd: 0,
             cwnd_gain: HIGH_GAIN,
             probe_gain_idx: 0,
-            cycle_stamp: Instant::now(),
+            cycle_stamp: now,
             idle_restart: false,
             bytes_lost: 0,
             bytes_last_lost: 0,
             bytes_newly_lost: 0,
             conservation: PacketConservation::Normal,
             end_conservation: 0,
+            lt_sampling: false,
+            lt_last_stamp: now,
+            lt_last_delivered: 0,
+            lt_last_lost: 0,
+            lt_rtt_cnt: 0,
+            lt_use_bw: false,
+            lt_bw: 0,
         }
     }
 }
@@ -142,7 +165,7 @@ fn on_packet_acked(
         r.bbr_state.bytes_lost - r.bbr_state.bytes_last_lost;
     r.bbr_state.bytes_last_lost = r.bbr_state.bytes_lost;
 
-    update_bw(r, packet);
+    update_bw(r, packet, now);
     check_cycle_phase(r, packet, now);
     check_full_pipe(r, packet);
     check_drain(r);
@@ -204,8 +227,9 @@ fn restore_cwnd(r: &mut Recovery) {
         std::cmp::max(r.congestion_window, r.bbr_state.saved_cwnd);
 }
 
-fn update_bw(r: &mut Recovery, packet: &Acked) {
+fn update_bw(r: &mut Recovery, packet: &Acked, now: Instant) {
     update_round(r, packet);
+    lt_bw_sampling(r, packet, now);
 
     let rate = r.delivery_rate();
     if rate >= r.bbr_state.bw_max || !packet.is_app_limited {
@@ -215,6 +239,89 @@ fn update_bw(r: &mut Recovery, packet: &Acked) {
             rate,
         );
     }
+}
+
+fn lt_bw_sampling(r: &mut Recovery, packet: &Acked, now: Instant) {
+    if r.bbr_state.lt_use_bw {
+        if r.bbr_state.mode == Mode::ProbeBw && r.bbr_state.round_start {
+            r.bbr_state.lt_rtt_cnt += 1;
+            if r.bbr_state.lt_rtt_cnt >= LT_MAX_RTTS {
+                lt_reset(r, now);
+                enter_probe_bw(r);
+            }
+        }
+
+        return;
+    }
+
+    if !r.bbr_state.lt_sampling {
+        if r.bbr_state.bytes_newly_lost == 0 {
+            return;
+        }
+
+        lt_reset_interval(r, now);
+        r.bbr_state.lt_sampling = true;
+    }
+
+    if packet.is_app_limited {
+        lt_reset(r, now);
+        return;
+    }
+
+    if r.bbr_state.round_start {
+        r.bbr_state.lt_rtt_cnt += 1;
+    }
+
+    if r.bbr_state.lt_rtt_cnt < LT_MIN_RTTS {
+        return;
+    }
+
+    if r.bbr_state.lt_rtt_cnt > 4 * LT_MIN_RTTS {
+        lt_reset(r, now);
+        return;
+    }
+
+    if r.bbr_state.bytes_newly_lost == 0 {
+        return;
+    }
+
+    let lost = r.bbr_state.bytes_lost - r.bbr_state.lt_last_lost;
+    let delivered = r.bytes_acked - r.bbr_state.lt_last_delivered;
+
+    if delivered == 0 || lost * LT_LOSS_THRESH < delivered {
+        return;
+    }
+
+    let interval = now - r.bbr_state.lt_last_stamp;
+    let rate = (delivered as f64 / interval.as_secs_f64()) as u64;
+
+    if r.bbr_state.lt_bw != 0 {
+        let diff = (rate as i64 - r.bbr_state.lt_bw as i64).abs() as u64;
+        if diff * LT_BW_RATIO <= r.bbr_state.lt_bw || diff <= LT_BW_DIFF {
+            r.bbr_state.lt_bw = (rate + r.bbr_state.lt_bw) / 2;
+            r.bbr_state.lt_use_bw = true;
+            r.bbr_state.pacing_gain = 1.0;
+            r.bbr_state.lt_rtt_cnt = 0;
+            return;
+        }
+    }
+
+    r.bbr_state.lt_bw = rate;
+    lt_reset_interval(r, now);
+}
+
+fn lt_reset_interval(r: &mut Recovery, now: Instant) {
+    r.bbr_state.lt_last_stamp = now;
+    r.bbr_state.lt_last_delivered = r.bytes_acked;
+    r.bbr_state.lt_last_lost = r.bbr_state.bytes_lost;
+    r.bbr_state.lt_rtt_cnt = 0;
+}
+
+fn lt_reset(r: &mut Recovery, now: Instant) {
+    r.bbr_state.lt_use_bw = false;
+    r.bbr_state.lt_bw = 0;
+    r.bbr_state.lt_sampling = false;
+    lt_reset_interval(r, now);
 }
 
 fn update_round(r: &mut Recovery, packet: &Acked) {
@@ -250,7 +357,7 @@ fn set_pacing_rate(r: &mut Recovery) {
 }
 
 fn set_pacing_rate_gain(r: &mut Recovery, gain: f64) {
-    let rate = (gain * r.bbr_state.bw_max as f64) as u64;
+    let rate = (gain * bw(r) as f64) as u64;
 
     if r.bbr_state.filled_pipe || rate > r.bbr_state.pacing_rate {
         r.bbr_state.pacing_rate = rate;
@@ -406,7 +513,11 @@ fn advance_cycle_phase(r: &mut Recovery, now: Instant) {
     r.bbr_state.cycle_stamp = now;
     r.bbr_state.probe_gain_idx =
         (r.bbr_state.probe_gain_idx + 1) % PROBE_GAINS.len();
-    r.bbr_state.pacing_gain = PROBE_GAINS[r.bbr_state.probe_gain_idx];
+    if r.bbr_state.lt_use_bw {
+        r.bbr_state.pacing_gain = 1.0;
+    } else {
+        r.bbr_state.pacing_gain = PROBE_GAINS[r.bbr_state.probe_gain_idx];
+    }
 }
 
 fn handle_restart_from_idle(r: &mut Recovery) {
@@ -466,5 +577,13 @@ fn exit_probe_rtt(r: &mut Recovery) {
         enter_probe_bw(r);
     } else {
         enter_startup(r);
+    }
+}
+
+fn bw(r: &mut Recovery) -> u64 {
+    if r.bbr_state.lt_use_bw {
+        r.bbr_state.lt_bw
+    } else {
+        r.bbr_state.bw_max
     }
 }
