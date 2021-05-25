@@ -459,6 +459,8 @@ mod tests {
             pkt_num: p.pkt_num,
             time_sent: p.time_sent,
             size: p.size,
+            delivered: p.delivered,
+            is_app_limited: p.is_app_limited,
         }];
 
         r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
@@ -503,16 +505,22 @@ mod tests {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: p.delivered,
+                is_app_limited: p.is_app_limited,
             },
             Acked {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: p.delivered,
+                is_app_limited: p.is_app_limited,
             },
             Acked {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: p.delivered,
+                is_app_limited: p.is_app_limited,
             },
         ];
 
@@ -531,7 +539,7 @@ mod tests {
         let now = Instant::now();
         let prev_cwnd = r.cwnd();
 
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(32, now, packet::EPOCH_APPLICATION, now);
 
         // In CUBIC, after congestion event, cwnd will be reduced by (1 -
         // CUBIC_BETA)
@@ -553,7 +561,7 @@ mod tests {
         }
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(32, now, packet::EPOCH_APPLICATION, now);
 
         // After congestion event, cwnd will be reduced.
         let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
@@ -577,6 +585,8 @@ mod tests {
                 pkt_num: 0,
                 time_sent: now,
                 size: r.max_datagram_size,
+                delivered: 0,
+                is_app_limited: false,
             }];
 
             r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
@@ -598,7 +608,7 @@ mod tests {
         r.on_packet_sent_cc(30000, now);
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(32, now, packet::EPOCH_APPLICATION, now);
 
         // After persistent congestion, cwnd should be the minimum window
         r.collapse_cwnd();
@@ -612,6 +622,8 @@ mod tests {
             // To exit from recovery
             time_sent: now + Duration::from_millis(1),
             size: r.max_datagram_size,
+            delivered: 0,
+            is_app_limited: false,
         }];
 
         r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
@@ -675,6 +687,8 @@ mod tests {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: p.delivered,
+                is_app_limited: p.is_app_limited,
             }];
 
             r.on_packets_acked(acked, epoch, now);
@@ -710,6 +724,8 @@ mod tests {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: p.delivered,
+                is_app_limited: p.is_app_limited,
             }];
 
             r.on_packets_acked(acked, epoch, now);
@@ -732,6 +748,8 @@ mod tests {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: p.delivered,
+                is_app_limited: p.is_app_limited,
             }];
             r.on_packets_acked(acked, epoch, now);
         }
@@ -755,7 +773,7 @@ mod tests {
         }
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(32, now, packet::EPOCH_APPLICATION, now);
 
         // After congestion event, cwnd will be reduced.
         let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
@@ -768,6 +786,8 @@ mod tests {
             // To exit from recovery
             time_sent: now + rtt,
             size: r.max_datagram_size,
+            delivered: 0,
+            is_app_limited: false,
         }];
 
         // Ack more than cwnd bytes with rtt=100ms
@@ -799,7 +819,7 @@ mod tests {
         }
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(32, now, packet::EPOCH_APPLICATION, now);
 
         // After 1st congestion event, cwnd will be reduced.
         let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
@@ -822,6 +842,8 @@ mod tests {
                 pkt_num: 0,
                 time_sent: now,
                 size: r.max_datagram_size,
+                delivered: 0,
+                is_app_limited: false,
             }];
 
             r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
@@ -835,7 +857,7 @@ mod tests {
         // Fast convergence: now there is 2nd congestion event and
         // cwnd is not fully recovered to w_max, w_max will be
         // further reduced.
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(32, now, packet::EPOCH_APPLICATION, now);
 
         // After 2nd congestion event, cwnd will be reduced.
         let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;

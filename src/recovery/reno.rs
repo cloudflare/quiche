@@ -225,6 +225,8 @@ mod tests {
             pkt_num: p.pkt_num,
             time_sent: p.time_sent,
             size: p.size,
+            delivered: p.delivered,
+            is_app_limited: p.is_app_limited,
         }];
 
         r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
@@ -270,16 +272,22 @@ mod tests {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: p.delivered,
+                is_app_limited: p.is_app_limited,
             },
             Acked {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: p.delivered,
+                is_app_limited: p.is_app_limited,
             },
             Acked {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: p.delivered,
+                is_app_limited: p.is_app_limited,
             },
         ];
 
@@ -300,7 +308,7 @@ mod tests {
 
         let now = Instant::now();
 
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(32, now, packet::EPOCH_APPLICATION, now);
 
         // In Reno, after congestion event, cwnd will be cut in half.
         assert_eq!(prev_cwnd / 2, r.cwnd());
@@ -319,7 +327,7 @@ mod tests {
         r.on_packet_sent_cc(20000, now);
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(32, now, packet::EPOCH_APPLICATION, now);
 
         // After congestion event, cwnd will be reduced.
         let cur_cwnd =
@@ -334,6 +342,8 @@ mod tests {
             time_sent: now + rtt,
             // More than cur_cwnd to increase cwnd
             size: 8000,
+            delivered: 0,
+            is_app_limited: false,
         }];
 
         // Ack more than cwnd bytes with rtt=100ms
