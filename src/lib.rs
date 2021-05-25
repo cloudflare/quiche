@@ -872,7 +872,7 @@ impl Config {
 
     /// Sets the congestion control algorithm used by string.
     ///
-    /// The default value is `reno`. On error `Error::CongestionControl`
+    /// The default value is `cubic`. On error `Error::CongestionControl`
     /// will be returned.
     ///
     /// ## Examples:
