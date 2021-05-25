@@ -4308,9 +4308,8 @@ impl Connection {
     fn do_handshake(&mut self) -> Result<()> {
         let handshake = self.handshake.lock().unwrap();
 
-        // Handshake is already complete, try to process post-handshake data.
+        // Handshake is already complete, nothing more to do.
         if handshake.is_completed() {
-            handshake.process_post_handshake()?;
             return Ok(());
         }
 
@@ -4609,7 +4608,11 @@ impl Connection {
                         .provide_data(level, &recv_buf)?;
                 }
 
-                self.do_handshake()?;
+                if self.is_established() {
+                    self.handshake.lock().unwrap().process_post_handshake()?;
+                } else {
+                    self.do_handshake()?;
+                }
             },
 
             frame::Frame::CryptoHeader { .. } => unreachable!(),
