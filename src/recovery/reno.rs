@@ -66,21 +66,14 @@ fn on_packet_acked(
     }
 
     if r.congestion_window < r.ssthresh {
-        // Slow start.
-        let cwnd_inc = cmp::min(
-            packet.size,
-            r.max_datagram_size * recovery::ABC_L -
-                cmp::min(
-                    r.bytes_acked_sl,
-                    r.max_datagram_size * recovery::ABC_L,
-                ),
-        );
-
         // In Slow slart, bytes_acked_sl is used for counting
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
 
-        r.congestion_window += cwnd_inc;
+        if r.bytes_acked_sl >= r.max_datagram_size {
+            r.congestion_window += r.max_datagram_size;
+            r.bytes_acked_sl -= r.max_datagram_size;
+        }
 
         if r.hystart.enabled() &&
             epoch == packet::EPOCH_APPLICATION &&
@@ -108,17 +101,14 @@ fn on_packet_acked(
         // When in Limited Slow Start, take the max of CA cwnd and
         // LSS cwnd.
         if r.hystart.in_lss(epoch) {
-            let lss_cwnd = r.hystart.lss_cwnd(
+            let lss_cwnd_inc = r.hystart.lss_cwnd_inc(
                 packet.size,
-                r.bytes_acked_sl,
                 r.congestion_window,
                 r.ssthresh,
-                r.max_datagram_size,
             );
 
-            r.bytes_acked_sl += packet.size;
-
-            r.congestion_window = cmp::max(reno_cwnd, lss_cwnd);
+            r.congestion_window =
+                cmp::max(reno_cwnd, r.congestion_window + lss_cwnd_inc);
         } else {
             r.congestion_window = reno_cwnd;
         }
@@ -243,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn reno_slow_start_abc_l() {
+    fn reno_slow_start_multi_acks() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::Reno);
 
@@ -294,8 +284,8 @@ mod tests {
 
         r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
 
-        // Acked 3 packets, but cwnd will increase 2 x mss.
-        assert_eq!(r.cwnd(), cwnd_prev + p.size * recovery::ABC_L);
+        // Acked 3 packets.
+        assert_eq!(r.cwnd(), cwnd_prev + p.size * 3);
     }
 
     #[test]

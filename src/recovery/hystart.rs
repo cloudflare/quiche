@@ -164,18 +164,11 @@ impl Hystart {
         self.lss_start_time.is_some()
     }
 
-    // Return a new cwnd during LSS (Limited Slow Start).
-    pub fn lss_cwnd(
-        &self, pkt_size: usize, bytes_acked: usize, cwnd: usize, ssthresh: usize,
-        max_datagram_size: usize,
+    // Return a cwnd increment during LSS (Limited Slow Start).
+    pub fn lss_cwnd_inc(
+        &self, pkt_size: usize, cwnd: usize, ssthresh: usize,
     ) -> usize {
-        let k = cwnd as f64 / (LSS_DIVISOR * ssthresh as f64);
-
-        cwnd + cmp::min(
-            pkt_size,
-            max_datagram_size * recovery::ABC_L -
-                cmp::min(bytes_acked, max_datagram_size * recovery::ABC_L),
-        ) / k as usize
+        pkt_size / (cwnd as f64 / (LSS_DIVISOR * ssthresh as f64)) as usize
     }
 
     // Exit HyStart++ when entering congestion avoidance.
@@ -201,35 +194,16 @@ mod tests {
     }
 
     #[test]
-    fn lss_cwnd() {
+    fn lss_cwnd_inc() {
         let hspp = Hystart::default();
 
         let datagram_size = 1200;
-        let mut cwnd = 24000;
+        let cwnd = 24000;
         let ssthresh = 24000;
 
-        let lss_cwnd =
-            hspp.lss_cwnd(datagram_size, 0, cwnd, ssthresh, datagram_size);
+        let lss_cwnd_inc = hspp.lss_cwnd_inc(datagram_size, cwnd, ssthresh);
 
-        assert_eq!(
-            cwnd + (datagram_size as f64 * LSS_DIVISOR) as usize,
-            lss_cwnd
-        );
-
-        cwnd = lss_cwnd;
-
-        let lss_cwnd = hspp.lss_cwnd(
-            datagram_size,
-            datagram_size,
-            cwnd,
-            ssthresh,
-            datagram_size,
-        );
-
-        assert_eq!(
-            cwnd + (datagram_size as f64 * LSS_DIVISOR) as usize,
-            lss_cwnd
-        );
+        assert_eq!((datagram_size as f64 * LSS_DIVISOR) as usize, lss_cwnd_inc);
     }
 
     #[test]

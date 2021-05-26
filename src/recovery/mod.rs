@@ -64,9 +64,6 @@ const MINIMUM_WINDOW_PACKETS: usize = 2;
 
 const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 
-// RFC3465 Slow Start burst limit constant
-const ABC_L: usize = 2;
-
 pub struct Recovery {
     loss_detection_timer: Option<Instant>,
 
@@ -783,8 +780,6 @@ impl Recovery {
         for pkt in acked {
             (self.cc_ops.on_packet_acked)(self, &pkt, epoch, now);
         }
-
-        self.bytes_acked_sl = 0;
     }
 
     fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
