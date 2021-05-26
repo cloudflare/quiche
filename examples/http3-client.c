@@ -344,11 +344,6 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    if (connect(sock, peer->ai_addr, peer->ai_addrlen) < 0) {
-        perror("failed to connect socket");
-        return -1;
-    }
-
     quiche_config *config = quiche_config_new(0xbabababa);
     if (config == NULL) {
         fprintf(stderr, "failed to create config\n");
