@@ -219,21 +219,14 @@ fn on_packet_acked(
     }
 
     if r.congestion_window < r.ssthresh {
-        // Slow start.
-        let cwnd_inc = cmp::min(
-            packet.size,
-            r.max_datagram_size * recovery::ABC_L -
-                cmp::min(
-                    r.bytes_acked_sl,
-                    r.max_datagram_size * recovery::ABC_L,
-                ),
-        );
-
         // In Slow slart, bytes_acked_sl is used for counting
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
 
-        r.congestion_window += cwnd_inc;
+        if r.bytes_acked_sl >= r.max_datagram_size {
+            r.congestion_window += r.max_datagram_size;
+            r.bytes_acked_sl -= r.max_datagram_size;
+        }
 
         if r.hystart.enabled() &&
             epoch == packet::EPOCH_APPLICATION &&
@@ -318,17 +311,13 @@ fn on_packet_acked(
         // When in Limited Slow Start, take the max of CA cwnd and
         // LSS cwnd.
         if r.hystart.in_lss(epoch) {
-            let lss_cwnd = r.hystart.lss_cwnd(
+            let lss_cwnd_inc = r.hystart.lss_cwnd_inc(
                 packet.size,
-                r.bytes_acked_sl,
                 r.congestion_window,
                 r.ssthresh,
-                r.max_datagram_size,
             );
 
-            r.bytes_acked_sl += packet.size;
-
-            cubic_cwnd = cmp::max(cubic_cwnd, lss_cwnd);
+            cubic_cwnd = cmp::max(cubic_cwnd, r.congestion_window + lss_cwnd_inc);
         }
 
         // Update the increment and increase cwnd by MSS.
@@ -481,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn cubic_slow_start_abc_l() {
+    fn cubic_slow_start_multi_acks() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::CUBIC);
 
@@ -515,24 +504,24 @@ mod tests {
             Acked {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
-                size: p.size * 3,
+                size: p.size,
             },
             Acked {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
-                size: p.size * 3,
+                size: p.size,
             },
             Acked {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
-                size: p.size * 3,
+                size: p.size,
             },
         ];
 
         r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
 
-        // Acked 3 packets, but cwnd will increase 2 x mss.
-        assert_eq!(r.cwnd(), cwnd_prev + p.size * recovery::ABC_L);
+        // Acked 3 packets.
+        assert_eq!(r.cwnd(), cwnd_prev + p.size * 3);
     }
 
     #[test]
