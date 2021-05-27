@@ -959,10 +959,10 @@ impl std::fmt::Debug for Recovery {
             self.congestion_recovery_start_time
         )?;
         write!(f, "{:?} ", self.delivery_rate)?;
-        write!(f, "pacing_rate={:?}", self.pacing_rate)?;
+        write!(f, "pacing_rate={:?} ", self.pacing_rate)?;
         write!(
             f,
-            "last_packet_scheduled_time={:?}",
+            "last_packet_scheduled_time={:?} ",
             self.last_packet_scheduled_time
         )?;
 
