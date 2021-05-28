@@ -4425,7 +4425,7 @@ impl Connection {
         // If there are flushable, almost full or blocked streams, use the
         // Application epoch.
         if (self.is_established() || self.is_in_early_data()) &&
-            (!self.handshake_done_sent ||
+            ((self.is_server && !self.handshake_done_sent) ||
                 self.almost_full ||
                 self.blocked_limit.is_some() ||
                 self.dgram_send_queue.has_pending() ||
@@ -8754,6 +8754,41 @@ mod tests {
         // We can't create a new frame because there is no room by cwnd.
         // app_limited should be false because we can't send more by cwnd.
         assert_eq!(pipe.server.recovery.app_limited(), false);
+    }
+
+    #[test]
+    fn app_limited_not_changed_on_no_new_frames() {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(50000);
+        config.set_initial_max_stream_data_bidi_local(50000);
+        config.set_initial_max_stream_data_bidi_remote(50000);
+        config.set_max_recv_udp_payload_size(1200);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client sends stream data.
+        assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server reads stream data.
+        let mut b = [0; 15];
+        pipe.server.stream_recv(0, &mut b).unwrap();
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Client's app_limited is true because its bytes-in-flight
+        // is much smaller than the current cwnd.
+        assert_eq!(pipe.client.recovery.app_limited(), true);
+
+        // Client has no new frames to send - returns Done.
+        assert_eq!(testing::emit_flight(&mut pipe.client), Err(Error::Done));
+
+        // Client's app_limited should remain the same.
+        assert_eq!(pipe.client.recovery.app_limited(), true);
     }
 
     #[test]
