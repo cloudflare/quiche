@@ -434,6 +434,18 @@ ssize_t quiche_conn_dgram_max_writable_len(quiche_conn *conn);
 // Returns the length of the first stored DATAGRAM.
 ssize_t quiche_conn_dgram_recv_front_len(quiche_conn *conn);
 
+// Returns the number of items in the DATAGRAM receive queue.
+ssize_t quiche_conn_dgram_recv_queue_len(quiche_conn *conn);
+
+///Returns the total size of all items in the DATAGRAM receive queue.
+ssize_t quiche_conn_dgram_recv_queue_byte_size(quiche_conn *conn);
+
+// Returns the number of items in the DATAGRAM send queue.
+ssize_t quiche_conn_dgram_send_queue_len(quiche_conn *conn);
+
+// Returns the total size of all items in the DATAGRAM send queue.
+ssize_t quiche_conn_dgram_send_queue_byte_size(quiche_conn *conn);
+
 // Reads the first received DATAGRAM.
 ssize_t quiche_conn_dgram_recv(quiche_conn *conn, uint8_t *buf,
                                size_t buf_len);

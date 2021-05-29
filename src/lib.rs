@@ -3807,6 +3807,30 @@ impl Connection {
         self.dgram_recv_queue.peek_front_len()
     }
 
+    /// Returns the number of items in the DATAGRAM receive queue.
+    #[inline]
+    pub fn dgram_recv_queue_len(&self) -> usize {
+        self.dgram_recv_queue.len()
+    }
+
+    /// Returns the total size of all items in the DATAGRAM receive queue.
+    #[inline]
+    pub fn dgram_recv_queue_byte_size(&self) -> usize {
+        self.dgram_recv_queue.byte_size()
+    }
+
+    /// Returns the number of items in the DATAGRAM send queue.
+    #[inline]
+    pub fn dgram_send_queue_len(&self) -> usize {
+        self.dgram_send_queue.len()
+    }
+
+    /// Returns the total size of all items in the DATAGRAM send queue.
+    #[inline]
+    pub fn dgram_send_queue_byte_size(&self) -> usize {
+        self.dgram_send_queue.byte_size()
+    }
+
     /// Sends data in a DATAGRAM frame.
     ///
     /// [`Done`] is returned if no data was written.
@@ -9527,14 +9551,32 @@ mod tests {
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
+        assert_eq!(pipe.client.dgram_send_queue_len(), 0);
+        assert_eq!(pipe.client.dgram_send_queue_byte_size(), 0);
+
         assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
         assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
         assert_eq!(pipe.client.dgram_send(b"hola, mundo"), Ok(()));
 
+        assert_eq!(pipe.client.dgram_send_queue_byte_size(), 34);
+
         pipe.client
             .dgram_purge_outgoing(|d: &[u8]| -> bool { d[0] == b'c' });
 
+        assert_eq!(pipe.client.dgram_send_queue_len(), 2);
+        assert_eq!(pipe.client.dgram_send_queue_byte_size(), 23);
+
+        // Before packets exchanged, no dgrams on server receive side.
+        assert_eq!(pipe.server.dgram_recv_queue_len(), 0);
+
         assert_eq!(pipe.advance(), Ok(()));
+
+        // After packets exchanged, no dgrams on client send side.
+        assert_eq!(pipe.client.dgram_send_queue_len(), 0);
+        assert_eq!(pipe.client.dgram_send_queue_byte_size(), 0);
+
+        assert_eq!(pipe.server.dgram_recv_queue_len(), 2);
+        assert_eq!(pipe.server.dgram_recv_queue_byte_size(), 23);
 
         let result1 = pipe.server.dgram_recv(&mut buf);
         assert_eq!(result1, Ok(12));
@@ -9548,6 +9590,9 @@ mod tests {
 
         let result3 = pipe.server.dgram_recv(&mut buf);
         assert_eq!(result3, Err(Error::Done));
+
+        assert_eq!(pipe.server.dgram_recv_queue_len(), 0);
+        assert_eq!(pipe.server.dgram_recv_queue_byte_size(), 0);
     }
 
     #[test]
