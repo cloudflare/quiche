@@ -99,6 +99,10 @@ impl DatagramQueue {
         self.queue.len() == self.queue_max_len
     }
 
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
     pub fn byte_size(&self) -> usize {
         self.queue_bytes_size
     }

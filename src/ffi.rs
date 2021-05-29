@@ -984,6 +984,30 @@ pub extern fn quiche_conn_dgram_recv_front_len(conn: &Connection) -> ssize_t {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_dgram_recv_queue_len(conn: &Connection) -> ssize_t {
+    conn.dgram_recv_queue_len() as ssize_t
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_dgram_recv_queue_byte_size(
+    conn: &Connection,
+) -> ssize_t {
+    conn.dgram_recv_queue_byte_size() as ssize_t
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_dgram_send_queue_len(conn: &Connection) -> ssize_t {
+    conn.dgram_send_queue_len() as ssize_t
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_dgram_send_queue_byte_size(
+    conn: &Connection,
+) -> ssize_t {
+    conn.dgram_send_queue_byte_size() as ssize_t
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_dgram_send(
     conn: &mut Connection, buf: *const u8, buf_len: size_t,
 ) -> ssize_t {
