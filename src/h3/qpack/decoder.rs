@@ -149,9 +149,7 @@ impl Decoder {
                         name.to_vec()
                     };
 
-                    let name = String::from_utf8(name)
-                        .map_err(|_| Error::InvalidHeaderValue)?;
-
+                    let name = name.to_vec();
                     let value = decode_str(&mut b)?;
 
                     trace!(
@@ -198,7 +196,7 @@ impl Decoder {
                     // Instead of calling Header::new(), create Header directly
                     // from `value`, which is already String, but clone `name`
                     // as it is just a reference.
-                    let hdr = Header(name.to_string(), value);
+                    let hdr = Header(name.to_vec(), value);
                     out.push(hdr);
                 },
 
@@ -215,7 +213,7 @@ impl Decoder {
     }
 }
 
-fn lookup_static(idx: u64) -> Result<(&'static str, &'static str)> {
+fn lookup_static(idx: u64) -> Result<(&'static [u8], &'static [u8])> {
     if idx >= super::static_table::STATIC_TABLE.len() as u64 {
         return Err(Error::InvalidStaticTableIndex);
     }
@@ -254,7 +252,7 @@ fn decode_int(b: &mut octets::Octets, prefix: usize) -> Result<u64> {
     Err(Error::BufferTooShort)
 }
 
-fn decode_str(b: &mut octets::Octets) -> Result<String> {
+fn decode_str(b: &mut octets::Octets) -> Result<Vec<u8>> {
     let first = b.peek_u8()?;
 
     let huff = first & 0x80 == 0x80;
@@ -269,7 +267,6 @@ fn decode_str(b: &mut octets::Octets) -> Result<String> {
         val.to_vec()
     };
 
-    let val = String::from_utf8(val).map_err(|_| Error::InvalidHeaderValue)?;
     Ok(val)
 }
 

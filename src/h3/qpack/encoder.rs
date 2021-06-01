@@ -80,14 +80,12 @@ impl Encoder {
 
                 None => {
                     // Encode as fully literal.
-                    let name_len = super::huffman::encode_output_length(
-                        h.name().as_bytes(),
-                        true,
-                    )?;
+                    let name_len =
+                        super::huffman::encode_output_length(h.name(), true)?;
 
                     encode_int(name_len as u64, LITERAL | 0x08, 3, &mut b)?;
 
-                    super::huffman::encode(h.name().as_bytes(), &mut b, true)?;
+                    super::huffman::encode(h.name(), &mut b, true)?;
 
                     encode_str(h.value(), 7, &mut b)?;
                 },
@@ -151,12 +149,12 @@ fn encode_int(
     Ok(())
 }
 
-fn encode_str(v: &str, prefix: usize, b: &mut octets::OctetsMut) -> Result<()> {
-    let len = super::huffman::encode_output_length(v.as_bytes(), false)?;
+fn encode_str(v: &[u8], prefix: usize, b: &mut octets::OctetsMut) -> Result<()> {
+    let len = super::huffman::encode_output_length(v, false)?;
 
     encode_int(len as u64, 0x80, prefix, b)?;
 
-    super::huffman::encode(v.as_bytes(), b, false)?;
+    super::huffman::encode(v, b, false)?;
 
     Ok(())
 }

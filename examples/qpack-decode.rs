@@ -77,7 +77,9 @@ fn main() {
         }
 
         for hdr in dec.decode(&data[..len], std::u64::MAX).unwrap() {
-            println!("{}\t{}", hdr.name(), hdr.value());
+            let name = std::str::from_utf8(hdr.name()).unwrap();
+            let value = std::str::from_utf8(hdr.value()).unwrap();
+            println!("{}\t{}", name, value);
         }
 
         println!();
