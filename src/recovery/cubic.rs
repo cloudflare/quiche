@@ -194,6 +194,13 @@ fn on_packet_acked(
     r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
 
     if in_congestion_recovery {
+        r.prr.on_packet_acked(
+            packet.size,
+            r.bytes_in_flight,
+            r.ssthresh,
+            r.max_datagram_size,
+        );
+
         return;
     }
 
@@ -371,6 +378,8 @@ fn congestion_event(
         if r.hystart.in_lss(epoch) {
             r.hystart.congestion_event();
         }
+
+        r.prr.congestion_event(r.bytes_in_flight);
     }
 }
 
