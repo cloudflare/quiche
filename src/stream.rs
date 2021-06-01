@@ -181,7 +181,7 @@ impl StreamMap {
                 }
 
                 if local != is_local(id, is_server) {
-                    return Err(Error::InvalidStreamState);
+                    return Err(Error::InvalidStreamState(id));
                 }
 
                 let (max_rx_data, max_tx_data) = match (local, is_bidi(id)) {

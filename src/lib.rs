@@ -394,7 +394,9 @@ pub enum Error {
 
     /// The operation cannot be completed because the stream is in an
     /// invalid state.
-    InvalidStreamState,
+    ///
+    /// The stream ID is provided as associated data.
+    InvalidStreamState(u64),
 
     /// The peer's transport params cannot be parsed.
     InvalidTransportParam,
@@ -429,7 +431,7 @@ impl Error {
         match self {
             Error::Done => 0x0,
             Error::InvalidFrame => 0x7,
-            Error::InvalidStreamState => 0x5,
+            Error::InvalidStreamState(..) => 0x5,
             Error::InvalidTransportParam => 0x8,
             Error::FlowControl => 0x3,
             Error::StreamLimit => 0x4,
@@ -447,7 +449,7 @@ impl Error {
             Error::InvalidFrame => -4,
             Error::InvalidPacket => -5,
             Error::InvalidState => -6,
-            Error::InvalidStreamState => -7,
+            Error::InvalidStreamState(_) => -7,
             Error::InvalidTransportParam => -8,
             Error::CryptoFail => -9,
             Error::TlsFail => -10,
@@ -3247,13 +3249,13 @@ impl Connection {
         if !stream::is_bidi(stream_id) &&
             stream::is_local(stream_id, self.is_server)
         {
-            return Err(Error::InvalidStreamState);
+            return Err(Error::InvalidStreamState(stream_id));
         }
 
         let stream = self
             .streams
             .get_mut(stream_id)
-            .ok_or(Error::InvalidStreamState)?;
+            .ok_or(Error::InvalidStreamState(stream_id))?;
 
         if !stream.is_readable() {
             return Err(Error::Done);
@@ -3351,7 +3353,7 @@ impl Connection {
         if !stream::is_bidi(stream_id) &&
             !stream::is_local(stream_id, self.is_server)
         {
-            return Err(Error::InvalidStreamState);
+            return Err(Error::InvalidStreamState(stream_id));
         }
 
         // Mark the connection as blocked if the connection-level flow control
@@ -3542,7 +3544,7 @@ impl Connection {
             return Ok(cap);
         };
 
-        Err(Error::InvalidStreamState)
+        Err(Error::InvalidStreamState(stream_id))
     }
 
     /// Returns true if the stream has data that can be read.
@@ -4518,7 +4520,7 @@ impl Connection {
                 if !stream::is_bidi(stream_id) &&
                     stream::is_local(stream_id, self.is_server)
                 {
-                    return Err(Error::InvalidStreamState);
+                    return Err(Error::InvalidStreamState(stream_id));
                 }
 
                 // Get existing stream or create a new one, but if the stream
@@ -4554,7 +4556,7 @@ impl Connection {
                 if !stream::is_local(stream_id, self.is_server) &&
                     !stream::is_bidi(stream_id)
                 {
-                    return Err(Error::InvalidStreamState);
+                    return Err(Error::InvalidStreamState(stream_id));
                 }
 
                 // Get existing stream or create a new one, but if the stream
@@ -4625,7 +4627,7 @@ impl Connection {
                 if !stream::is_bidi(stream_id) &&
                     stream::is_local(stream_id, self.is_server)
                 {
-                    return Err(Error::InvalidStreamState);
+                    return Err(Error::InvalidStreamState(stream_id));
                 }
 
                 let max_rx_data_left = self.max_rx_data - self.rx_data;
@@ -4676,7 +4678,7 @@ impl Connection {
                 if !stream::is_bidi(stream_id) &&
                     !stream::is_local(stream_id, self.is_server)
                 {
-                    return Err(Error::InvalidStreamState);
+                    return Err(Error::InvalidStreamState(stream_id));
                 }
 
                 // Get existing stream or create a new one, but if the stream
@@ -6442,7 +6444,7 @@ mod tests {
         let pkt_type = packet::Type::Short;
         assert_eq!(
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::InvalidStreamState),
+            Err(Error::InvalidStreamState(2)),
         );
     }
 
