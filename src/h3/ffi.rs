@@ -27,7 +27,6 @@
 use std::ffi;
 use std::ptr;
 use std::slice;
-use std::str;
 
 use libc::c_char;
 use libc::c_int;
@@ -324,15 +323,8 @@ fn headers_from_ptr<'a>(
 
     for h in headers {
         out.push({
-            let name = unsafe {
-                let slice = slice::from_raw_parts(h.name, h.name_len);
-                str::from_utf8_unchecked(slice)
-            };
-
-            let value = unsafe {
-                let slice = slice::from_raw_parts(h.value, h.value_len);
-                str::from_utf8_unchecked(slice)
-            };
+            let name = unsafe { slice::from_raw_parts(h.name, h.name_len) };
+            let value = unsafe { slice::from_raw_parts(h.value, h.value_len) };
 
             h3::HeaderRef::new(name, value)
         });

@@ -174,8 +174,20 @@ fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {
         let mut req_hdrs = req.hdrs.iter().peekable();
         while let Some(h) = req_hdrs.next() {
             writeln!(out, "        {{").unwrap();
-            writeln!(out, "          \"name\": \"{}\",", h.name()).unwrap();
-            writeln!(out, "          \"value\": \"{}\"", h.value()).unwrap();
+            writeln!(
+                out,
+                "          \"name\": \"{}\",",
+                std::str::from_utf8(h.name()).unwrap()
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "          \"value\": \"{}\"",
+                std::str::from_utf8(h.value())
+                    .unwrap()
+                    .replace("\"", "\\\"")
+            )
+            .unwrap();
 
             if req_hdrs.peek().is_some() {
                 writeln!(out, "        }},").unwrap();
@@ -191,11 +203,18 @@ fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {
         let mut response_hdrs = req.response_hdrs.iter().peekable();
         while let Some(h) = response_hdrs.next() {
             writeln!(out, "        {{").unwrap();
-            writeln!(out, "          \"name\": \"{}\",", h.name()).unwrap();
+            writeln!(
+                out,
+                "          \"name\": \"{}\",",
+                std::str::from_utf8(h.name()).unwrap()
+            )
+            .unwrap();
             writeln!(
                 out,
                 "          \"value\": \"{}\"",
-                h.value().replace("\"", "\\\"")
+                std::str::from_utf8(h.value())
+                    .unwrap()
+                    .replace("\"", "\\\"")
             )
             .unwrap();
 
@@ -790,34 +809,35 @@ impl Http3Conn {
                 };
 
                 let mut hdrs = vec![
-                    quiche::h3::Header::new(":method", &method),
-                    quiche::h3::Header::new(":scheme", url.scheme()),
-                    quiche::h3::Header::new(":authority", &authority),
+                    quiche::h3::Header::new(b":method", method.as_bytes()),
+                    quiche::h3::Header::new(b":scheme", url.scheme().as_bytes()),
+                    quiche::h3::Header::new(b":authority", authority.as_bytes()),
                     quiche::h3::Header::new(
-                        ":path",
-                        &url[url::Position::BeforePath..],
+                        b":path",
+                        &url[url::Position::BeforePath..].as_bytes(),
                     ),
-                    quiche::h3::Header::new("user-agent", "quiche"),
+                    quiche::h3::Header::new(b"user-agent", b"quiche"),
                 ];
 
                 // Add custom headers to the request.
                 for header in req_headers {
                     let header_split: Vec<&str> =
                         header.splitn(2, ": ").collect();
+
                     if header_split.len() != 2 {
                         panic!("malformed header provided - \"{}\"", header);
                     }
 
                     hdrs.push(quiche::h3::Header::new(
-                        header_split[0],
-                        header_split[1],
+                        header_split[0].as_bytes(),
+                        header_split[1].as_bytes(),
                     ));
                 }
 
                 if body.is_some() {
                     hdrs.push(quiche::h3::Header::new(
-                        "content-length",
-                        &body.as_ref().unwrap().len().to_string(),
+                        b"content-length",
+                        body.as_ref().unwrap().len().to_string().as_bytes(),
                     ));
                 }
 
@@ -892,25 +912,17 @@ impl Http3Conn {
         // Parse some of the request headers.
         for hdr in request {
             match hdr.name() {
-                ":scheme" => {
-                    scheme = hdr.value();
-                },
+                b":scheme" => scheme = std::str::from_utf8(hdr.value()).unwrap(),
 
-                ":authority" | "host" => {
-                    host = hdr.value();
-                },
+                b":authority" | b"host" =>
+                    host = std::str::from_utf8(hdr.value()).unwrap(),
 
-                ":path" => {
-                    path = hdr.value();
-                },
+                b":path" => path = std::str::from_utf8(hdr.value()).unwrap(),
 
-                ":method" => {
-                    method = hdr.value();
-                },
+                b":method" => method = std::str::from_utf8(hdr.value()).unwrap(),
 
-                "priority" => {
-                    priority = hdr.value();
-                },
+                b"priority" =>
+                    priority = std::str::from_utf8(hdr.value()).unwrap(),
 
                 _ => (),
             }
@@ -918,8 +930,8 @@ impl Http3Conn {
 
         if scheme != "http" && scheme != "https" {
             let headers = vec![
-                quiche::h3::Header::new(":status", &"400".to_string()),
-                quiche::h3::Header::new("server", "quiche"),
+                quiche::h3::Header::new(b":status", "400".to_string().as_bytes()),
+                quiche::h3::Header::new(b"server", b"quiche"),
             ];
 
             return (headers, b"Invalid scheme".to_vec(), priority.to_string());
@@ -967,13 +979,17 @@ impl Http3Conn {
         };
 
         let mut headers = vec![
-            quiche::h3::Header::new(":status", &status.to_string()),
-            quiche::h3::Header::new("server", "quiche"),
-            quiche::h3::Header::new("content-length", &body.len().to_string()),
+            quiche::h3::Header::new(b":status", status.to_string().as_bytes()),
+            quiche::h3::Header::new(b"server", b"quiche"),
+            quiche::h3::Header::new(
+                b"content-length",
+                body.len().to_string().as_bytes(),
+            ),
         ];
 
         if !priority.is_empty() {
-            headers.push(quiche::h3::Header::new("priority", &priority));
+            headers
+                .push(quiche::h3::Header::new(b"priority", priority.as_bytes()));
         }
 
         (headers, body, priority.to_string())

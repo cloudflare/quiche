@@ -83,6 +83,6 @@ fn main() {
         let name = line.split('\t').next().unwrap();
         let value = line.split('\t').last().unwrap();
 
-        headers.push(h3::Header::new(name, value));
+        headers.push(h3::Header::new(name.as_bytes(), value.as_bytes()));
     }
 }

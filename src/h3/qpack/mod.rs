@@ -87,15 +87,15 @@ mod tests {
         let mut encoded = [0u8; 240];
 
         let headers = vec![
-            h3::Header::new(":path", "/rsrc.php/v3/yn/r/rIPZ9Qkrdd9.png"),
-            h3::Header::new("accept-encoding", "gzip, deflate, br"),
-            h3::Header::new("accept-language", "en-US,en;q=0.9"),
-            h3::Header::new("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.70 Safari/537.36"),
-            h3::Header::new("accept", "image/webp,image/apng,image/*,*/*;q=0.8"),
-            h3::Header::new("referer", "https://static.xx.fbcdn.net/rsrc.php/v3/yT/l/0,cross/dzXGESIlGQQ.css"),
-            h3::Header::new(":authority", "static.xx.fbcdn.net"),
-            h3::Header::new(":scheme", "https"),
-            h3::Header::new(":method", "GET"),
+            h3::Header::new(b":path", b"/rsrc.php/v3/yn/r/rIPZ9Qkrdd9.png"),
+            h3::Header::new(b"accept-encoding", b"gzip, deflate, br"),
+            h3::Header::new(b"accept-language", b"en-US,en;q=0.9"),
+            h3::Header::new(b"user-agent", b"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.70 Safari/537.36"),
+            h3::Header::new(b"accept", b"image/webp,image/apng,image/*,*/*;q=0.8"),
+            h3::Header::new(b"referer", b"https://static.xx.fbcdn.net/rsrc.php/v3/yT/l/0,cross/dzXGESIlGQQ.css"),
+            h3::Header::new(b":authority", b"static.xx.fbcdn.net"),
+            h3::Header::new(b":scheme", b"https"),
+            h3::Header::new(b":method", b"GET"),
         ];
 
         let mut enc = Encoder::new();
@@ -110,20 +110,20 @@ mod tests {
         let mut encoded = [0u8; 35];
 
         let headers_expected = vec![
-            crate::h3::Header::new(":status", "200"),
-            crate::h3::Header::new(":path", "/HeLlO"),
-            crate::h3::Header::new("woot", "woot"),
-            crate::h3::Header::new("hello", "WorlD"),
-            crate::h3::Header::new("foo", "BaR"),
+            crate::h3::Header::new(b":status", b"200"),
+            crate::h3::Header::new(b":path", b"/HeLlO"),
+            crate::h3::Header::new(b"woot", b"woot"),
+            crate::h3::Header::new(b"hello", b"WorlD"),
+            crate::h3::Header::new(b"foo", b"BaR"),
         ];
 
         // Header.
         let headers_in = vec![
-            crate::h3::Header::new(":StAtUs", "200"),
-            crate::h3::Header::new(":PaTh", "/HeLlO"),
-            crate::h3::Header::new("WooT", "woot"),
-            crate::h3::Header::new("hello", "WorlD"),
-            crate::h3::Header::new("fOo", "BaR"),
+            crate::h3::Header::new(b":StAtUs", b"200"),
+            crate::h3::Header::new(b":PaTh", b"/HeLlO"),
+            crate::h3::Header::new(b"WooT", b"woot"),
+            crate::h3::Header::new(b"hello", b"WorlD"),
+            crate::h3::Header::new(b"fOo", b"BaR"),
         ];
 
         let mut enc = Encoder::new();
@@ -136,11 +136,11 @@ mod tests {
 
         // HeaderRef.
         let headers_in = vec![
-            crate::h3::HeaderRef::new(":StAtUs", "200"),
-            crate::h3::HeaderRef::new(":PaTh", "/HeLlO"),
-            crate::h3::HeaderRef::new("WooT", "woot"),
-            crate::h3::HeaderRef::new("hello", "WorlD"),
-            crate::h3::HeaderRef::new("fOo", "BaR"),
+            crate::h3::HeaderRef::new(b":StAtUs", b"200"),
+            crate::h3::HeaderRef::new(b":PaTh", b"/HeLlO"),
+            crate::h3::HeaderRef::new(b"WooT", b"woot"),
+            crate::h3::HeaderRef::new(b"hello", b"WorlD"),
+            crate::h3::HeaderRef::new(b"fOo", b"BaR"),
         ];
 
         let mut enc = Encoder::new();

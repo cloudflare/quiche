@@ -560,25 +560,24 @@ fn build_response(
 ) -> (Vec<quiche::h3::Header>, Vec<u8>) {
     let mut file_path = std::path::PathBuf::from(root);
     let mut path = std::path::Path::new("");
-    let mut method = "";
+    let mut method = None;
 
     // Look for the request's path and method.
     for hdr in request {
         match hdr.name() {
-            ":path" => {
-                path = std::path::Path::new(hdr.value());
-            },
+            b":path" =>
+                path = std::path::Path::new(
+                    std::str::from_utf8(hdr.value()).unwrap(),
+                ),
 
-            ":method" => {
-                method = hdr.value();
-            },
+            b":method" => method = Some(hdr.value()),
 
             _ => (),
         }
     }
 
     let (status, body) = match method {
-        "GET" => {
+        Some(b"GET") => {
             for c in path.components() {
                 if let std::path::Component::Normal(v) = c {
                     file_path.push(v)
@@ -596,9 +595,12 @@ fn build_response(
     };
 
     let headers = vec![
-        quiche::h3::Header::new(":status", &status.to_string()),
-        quiche::h3::Header::new("server", "quiche"),
-        quiche::h3::Header::new("content-length", &body.len().to_string()),
+        quiche::h3::Header::new(b":status", status.to_string().as_bytes()),
+        quiche::h3::Header::new(b"server", b"quiche"),
+        quiche::h3::Header::new(
+            b"content-length",
+            body.len().to_string().as_bytes(),
+        ),
     ];
 
     (headers, body)

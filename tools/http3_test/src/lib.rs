@@ -43,7 +43,7 @@
 //! let mut url = url::Url::parse("https://cloudflare-quic.com/b/get").unwrap();
 //! let mut reqs = Vec::new();
 //!
-//! reqs.push(http3_test::Http3Req::new("GET", &url, None, None));
+//! reqs.push(http3_test::Http3Req::new(b"GET", &url, None, None));
 //! ```
 //!
 //! Assertions are used to check the received response headers and body
@@ -69,8 +69,8 @@
 //! let mut url = url::Url::parse("https://cloudflare-quic.com/b/get").unwrap();
 //! let mut reqs = Vec::new();
 //!
-//! let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! reqs.push(http3_test::Http3Req::new("GET", &url, None, expect_hdrs));
+//! let expect_hdrs = Some(vec![quiche::h3::Header::new(b":status", "200")]);
+//! reqs.push(http3_test::Http3Req::new(b"GET", &url, None, expect_hdrs));
 //! ```
 //!
 //! The [`assert_headers!`] macro can be used to validate the received headers,
@@ -89,8 +89,8 @@
 //! let mut url = url::Url::parse("https://cloudflare-quic.com/b/get").unwrap();
 //! let mut reqs = Vec::new();
 //!
-//! let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! reqs.push(http3_test::Http3Req::new("GET", &url, None, expect_hdrs));
+//! let expect_hdrs = Some(vec![quiche::h3::Header::new(b":status", "200")]);
+//! reqs.push(http3_test::Http3Req::new(b"GET", &url, None, expect_hdrs));
 //!
 //! // Using a closure...
 //! let assert =
@@ -113,8 +113,8 @@
 //! ```no_run
 //! # let mut url = url::Url::parse("https://cloudflare-quic.com/b/get").unwrap();
 //! # let mut reqs = Vec::new();
-//! # let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! # reqs.push(http3_test::Http3Req::new("GET", &url, None, expect_hdrs));
+//! # let expect_hdrs = Some(vec![quiche::h3::Header::new(b":status", "200")]);
+//! # reqs.push(http3_test::Http3Req::new(b"GET", &url, None, expect_hdrs));
 //! # // Using a closure...
 //! # let assert = |reqs: &[http3_test::Http3Req]| {
 //! #   http3_test::assert_headers!(reqs[0]);
@@ -144,8 +144,8 @@
 //! ```no_run
 //! # let mut url = url::Url::parse("https://cloudflare-quic.com/b/get").unwrap();
 //! # let mut reqs = Vec::new();
-//! # let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! # reqs.push(http3_test::Http3Req::new("GET", &url, None, expect_hdrs));
+//! # let expect_hdrs = Some(vec![quiche::h3::Header::new(b":status", "200")]);
+//! # reqs.push(http3_test::Http3Req::new(b"GET", &url, None, expect_hdrs));
 //! # // Using a closure...
 //! # let assert = |reqs: &[http3_test::Http3Req]| {
 //! #   http3_test::assert_headers!(reqs[0]);
@@ -184,8 +184,8 @@
 //! ```no_run
 //! # let mut url = url::Url::parse("https://cloudflare-quic.com/b/get").unwrap();
 //! # let mut reqs = Vec::new();
-//! # let expect_hdrs = Some(vec![quiche::h3::Header::new(":status", "200")]);
-//! # reqs.push(http3_test::Http3Req::new("GET", &url, None, expect_hdrs));
+//! # let expect_hdrs = Some(vec![quiche::h3::Header::new(b":status", "200")]);
+//! # reqs.push(http3_test::Http3Req::new(b"GET", &url, None, expect_hdrs));
 //! # // Using a closure...
 //! # let assert = |reqs: &[http3_test::Http3Req]| {
 //! #   http3_test::assert_headers!(reqs[0]);
@@ -231,7 +231,7 @@ use std::collections::HashMap;
 
 use quiche::h3::Header;
 
-pub const USER_AGENT: &str = "quiche-http3-integration-client";
+pub const USER_AGENT: &[u8] = b"quiche-http3-integration-client";
 
 /// Stores the request, the expected response headers, and the actual response.
 ///
@@ -259,15 +259,18 @@ impl Http3Req {
         }
 
         let mut hdrs = vec![
-            Header::new(":method", method),
-            Header::new(":scheme", url.scheme()),
-            Header::new(":authority", url.host_str().unwrap()),
-            Header::new(":path", &path),
-            Header::new("user-agent", USER_AGENT),
+            Header::new(b":method", method.as_bytes()),
+            Header::new(b":scheme", url.scheme().as_bytes()),
+            Header::new(b":authority", url.host_str().unwrap().as_bytes()),
+            Header::new(b":path", path.as_bytes()),
+            Header::new(b"user-agent", USER_AGENT),
         ];
 
         if let Some(body) = &body {
-            hdrs.push(Header::new("content-length", &body.len().to_string()));
+            hdrs.push(Header::new(
+                b"content-length",
+                body.len().to_string().as_bytes(),
+            ));
         }
 
         Http3Req {
@@ -297,11 +300,10 @@ macro_rules! assert_headers {
         if let Some(expect_hdrs) = &$req.expect_resp_hdrs {
             for hdr in expect_hdrs {
                 match $req.resp_hdrs.iter().find(|&x| x.name() == hdr.name()) {
-                    Some(h) => { assert_eq!(hdr.value(), h.value());},
+                    Some(h) => assert_eq!(hdr.value(), h.value()),
 
-                    None => {
-                        panic!("assertion failed: expected response header field {} not present!", hdr.name());
-                    }
+                    None =>
+                        panic!("assertion failed: expected response header field {} not present!", std::str::from_utf8(hdr.name()).unwrap()),
                 }
             }
         }

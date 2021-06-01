@@ -141,11 +141,14 @@ fn main() {
     }
 
     let req = vec![
-        quiche::h3::Header::new(":method", "GET"),
-        quiche::h3::Header::new(":scheme", url.scheme()),
-        quiche::h3::Header::new(":authority", url.host_str().unwrap()),
-        quiche::h3::Header::new(":path", &path),
-        quiche::h3::Header::new("user-agent", "quiche"),
+        quiche::h3::Header::new(b":method", b"GET"),
+        quiche::h3::Header::new(b":scheme", url.scheme().as_bytes()),
+        quiche::h3::Header::new(
+            b":authority",
+            url.host_str().unwrap().as_bytes(),
+        ),
+        quiche::h3::Header::new(b":path", path.as_bytes()),
+        quiche::h3::Header::new(b"user-agent", b"quiche"),
     ];
 
     let req_start = std::time::Instant::now();

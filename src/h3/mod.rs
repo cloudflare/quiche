@@ -81,11 +81,11 @@
 //! # let h3_config = quiche::h3::Config::new()?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! let req = vec![
-//!     quiche::h3::Header::new(":method", "GET"),
-//!     quiche::h3::Header::new(":scheme", "https"),
-//!     quiche::h3::Header::new(":authority", "quic.tech"),
-//!     quiche::h3::Header::new(":path", "/"),
-//!     quiche::h3::Header::new("user-agent", "quiche"),
+//!     quiche::h3::Header::new(b":method", b"GET"),
+//!     quiche::h3::Header::new(b":scheme", b"https"),
+//!     quiche::h3::Header::new(b":authority", b"quic.tech"),
+//!     quiche::h3::Header::new(b":path", b"/"),
+//!     quiche::h3::Header::new(b"user-agent", b"quiche"),
 //! ];
 //!
 //! h3_conn.send_request(&mut conn, &req, true)?;
@@ -103,11 +103,11 @@
 //! # let h3_config = quiche::h3::Config::new()?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! let req = vec![
-//!     quiche::h3::Header::new(":method", "GET"),
-//!     quiche::h3::Header::new(":scheme", "https"),
-//!     quiche::h3::Header::new(":authority", "quic.tech"),
-//!     quiche::h3::Header::new(":path", "/"),
-//!     quiche::h3::Header::new("user-agent", "quiche"),
+//!     quiche::h3::Header::new(b":method", b"GET"),
+//!     quiche::h3::Header::new(b":scheme", b"https"),
+//!     quiche::h3::Header::new(b":authority", b"quic.tech"),
+//!     quiche::h3::Header::new(b":path", b"/"),
+//!     quiche::h3::Header::new(b"user-agent", b"quiche"),
 //! ];
 //!
 //! let stream_id = h3_conn.send_request(&mut conn, &req, false)?;
@@ -139,15 +139,15 @@
 //!             let mut headers = list.into_iter();
 //!
 //!             // Look for the request's method.
-//!             let method = headers.find(|h| h.name() == ":method").unwrap();
+//!             let method = headers.find(|h| h.name() == b":method").unwrap();
 //!
 //!             // Look for the request's path.
-//!             let path = headers.find(|h| h.name() == ":path").unwrap();
+//!             let path = headers.find(|h| h.name() == b":path").unwrap();
 //!
-//!             if method.value() == "GET" && path.value() == "/" {
+//!             if method.value() == b"GET" && path.value() == b"/" {
 //!                 let resp = vec![
-//!                     quiche::h3::Header::new(":status", &200.to_string()),
-//!                     quiche::h3::Header::new("server", "quiche"),
+//!                     quiche::h3::Header::new(b":status", 200.to_string().as_bytes()),
+//!                     quiche::h3::Header::new(b"server", b"quiche"),
 //!                 ];
 //!
 //!                 h3_conn.send_response(&mut conn, stream_id, &resp, false)?;
@@ -198,9 +198,10 @@
 //! loop {
 //!     match h3_conn.poll(&mut conn) {
 //!         Ok((stream_id, quiche::h3::Event::Headers{list, has_body})) => {
-//!             let status = list.iter().find(|h| h.name() == ":status").unwrap();
+//!             let status = list.iter().find(|h| h.name() == b":status").unwrap();
 //!             println!("Received {} response on stream {}",
-//!                      status.value(), stream_id);
+//!                      std::str::from_utf8(status.value()).unwrap(),
+//!                      stream_id);
 //!         },
 //!
 //!         Ok((stream_id, quiche::h3::Event::Data)) => {
@@ -494,52 +495,52 @@ impl Config {
 /// A trait for types with associated string name and value.
 pub trait NameValue {
     /// Returns the object's name.
-    fn name(&self) -> &str;
+    fn name(&self) -> &[u8];
 
     /// Returns the object's value.
-    fn value(&self) -> &str;
+    fn value(&self) -> &[u8];
 }
 
 /// An owned name-value pair representing a raw HTTP header.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Header(String, String);
+pub struct Header(Vec<u8>, Vec<u8>);
 
 impl Header {
     /// Creates a new header.
     ///
     /// Both `name` and `value` will be cloned.
-    pub fn new(name: &str, value: &str) -> Self {
-        Self(String::from(name), String::from(value))
+    pub fn new(name: &[u8], value: &[u8]) -> Self {
+        Self(name.to_vec(), value.to_vec())
     }
 }
 
 impl NameValue for Header {
-    fn name(&self) -> &str {
+    fn name(&self) -> &[u8] {
         &self.0
     }
 
-    fn value(&self) -> &str {
+    fn value(&self) -> &[u8] {
         &self.1
     }
 }
 
 /// A non-owned name-value pair representing a raw HTTP header.
 #[derive(Clone, Debug, PartialEq)]
-pub struct HeaderRef<'a>(&'a str, &'a str);
+pub struct HeaderRef<'a>(&'a [u8], &'a [u8]);
 
 impl<'a> HeaderRef<'a> {
     /// Creates a new header.
-    pub fn new(name: &'a str, value: &'a str) -> Self {
+    pub fn new(name: &'a [u8], value: &'a [u8]) -> Self {
         Self(name, value)
     }
 }
 
 impl<'a> NameValue for HeaderRef<'a> {
-    fn name(&self) -> &str {
+    fn name(&self) -> &[u8] {
         self.0
     }
 
-    fn value(&self) -> &str {
+    fn value(&self) -> &[u8] {
         self.1
     }
 }
@@ -2201,11 +2202,11 @@ pub mod testing {
         /// On success it returns the newly allocated stream and the headers.
         pub fn send_request(&mut self, fin: bool) -> Result<(u64, Vec<Header>)> {
             let req = vec![
-                Header::new(":method", "GET"),
-                Header::new(":scheme", "https"),
-                Header::new(":authority", "quic.tech"),
-                Header::new(":path", "/test"),
-                Header::new("user-agent", "quiche-test"),
+                Header::new(b":method", b"GET"),
+                Header::new(b":scheme", b"https"),
+                Header::new(b":authority", b"quic.tech"),
+                Header::new(b":path", b"/test"),
+                Header::new(b"user-agent", b"quiche-test"),
             ];
 
             let stream =
@@ -2223,8 +2224,8 @@ pub mod testing {
             &mut self, stream: u64, fin: bool,
         ) -> Result<Vec<Header>> {
             let resp = vec![
-                Header::new(":status", "200"),
-                Header::new("server", "quiche-test"),
+                Header::new(b":status", b"200"),
+                Header::new(b"server", b"quiche-test"),
             ];
 
             self.server.send_response(
@@ -3242,11 +3243,11 @@ mod tests {
         s.handshake().unwrap();
 
         let req = vec![
-            Header::new(":method", "GET"),
-            Header::new(":scheme", "https"),
-            Header::new(":authority", "quic.tech"),
-            Header::new(":path", "/test"),
-            Header::new("user-agent", "quiche-test"),
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test"),
+            Header::new(b"user-agent", b"quiche-test"),
         ];
 
         assert_eq!(
@@ -3384,11 +3385,11 @@ mod tests {
         s.handshake().unwrap();
 
         let req = vec![
-            Header::new(":method", "GET"),
-            Header::new(":scheme", "https"),
-            Header::new(":authority", "quic.tech"),
-            Header::new(":path", "/test"),
-            Header::new("aaaaaaa", "aaaaaaaa"),
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test"),
+            Header::new(b"aaaaaaa", b"aaaaaaaa"),
         ];
 
         let stream = s
@@ -3415,11 +3416,11 @@ mod tests {
         s.handshake().unwrap();
 
         let req = vec![
-            Header::new(":method", "GET"),
-            Header::new(":scheme", "https"),
-            Header::new(":authority", "quic.tech"),
-            Header::new(":path", "/test"),
-            Header::new("user-agent", "quiche-test"),
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test"),
+            Header::new(b"user-agent", b"quiche-test"),
         ];
 
         // We need to open all streams in the same flight, so we can't use the
@@ -3520,10 +3521,10 @@ mod tests {
         s.handshake().unwrap();
 
         let req = vec![
-            Header::new(":method", "GET"),
-            Header::new(":scheme", "https"),
-            Header::new(":authority", "quic.tech"),
-            Header::new(":path", "/test"),
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test"),
         ];
 
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
@@ -3621,10 +3622,10 @@ mod tests {
         s.handshake().unwrap();
 
         let req = vec![
-            Header::new(":method", "GET"),
-            Header::new(":scheme", "https"),
-            Header::new(":authority", "quic.tech"),
-            Header::new(":path", "/test"),
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test"),
         ];
 
         assert_eq!(
@@ -4295,7 +4296,7 @@ mod tests {
         // Send more data, then HEADERS, then more data.
         let body = s.send_body_client(stream, false).unwrap();
 
-        let trailers = vec![Header::new("hello", "world")];
+        let trailers = vec![Header::new(b"hello", b"world")];
 
         s.client
             .send_headers(&mut s.pipe.client, stream, &trailers, false)
