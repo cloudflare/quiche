@@ -4306,6 +4306,39 @@ impl Connection {
             stream_retrans_bytes: self.stream_retrans_bytes,
             pmtu: self.recovery.max_datagram_size(),
             delivery_rate: self.recovery.delivery_rate(),
+            peer_max_idle_timeout: self.peer_transport_params.max_idle_timeout,
+            peer_max_udp_payload_size: self
+                .peer_transport_params
+                .max_udp_payload_size,
+            peer_initial_max_data: self.peer_transport_params.initial_max_data,
+            peer_initial_max_stream_data_bidi_local: self
+                .peer_transport_params
+                .initial_max_stream_data_bidi_local,
+            peer_initial_max_stream_data_bidi_remote: self
+                .peer_transport_params
+                .initial_max_stream_data_bidi_remote,
+            peer_initial_max_stream_data_uni: self
+                .peer_transport_params
+                .initial_max_stream_data_uni,
+            peer_initial_max_streams_bidi: self
+                .peer_transport_params
+                .initial_max_streams_bidi,
+            peer_initial_max_streams_uni: self
+                .peer_transport_params
+                .initial_max_streams_uni,
+            peer_ack_delay_exponent: self
+                .peer_transport_params
+                .ack_delay_exponent,
+            peer_max_ack_delay: self.peer_transport_params.max_ack_delay,
+            peer_disable_active_migration: self
+                .peer_transport_params
+                .disable_active_migration,
+            peer_active_conn_id_limit: self
+                .peer_transport_params
+                .active_conn_id_limit,
+            peer_max_datagram_frame_size: self
+                .peer_transport_params
+                .max_datagram_frame_size,
         }
     }
 
@@ -5087,6 +5120,45 @@ pub struct Stats {
 
     /// The most recent data delivery rate estimate in bytes/s.
     pub delivery_rate: u64,
+
+    /// The maximum idle timeout.
+    pub peer_max_idle_timeout: u64,
+
+    /// The maximum UDP payload size.
+    pub peer_max_udp_payload_size: u64,
+
+    /// The initial flow control maximum data for the connection.
+    pub peer_initial_max_data: u64,
+
+    /// The initial flow control maximum data for local bidirectional streams.
+    pub peer_initial_max_stream_data_bidi_local: u64,
+
+    /// The initial flow control maximum data for remote bidirectional streams.
+    pub peer_initial_max_stream_data_bidi_remote: u64,
+
+    /// The initial flow control maximum data for unidirectional streams.
+    pub peer_initial_max_stream_data_uni: u64,
+
+    /// The initial maximum bidirectional streams.
+    pub peer_initial_max_streams_bidi: u64,
+
+    /// The initial maximum unidirectional streams.
+    pub peer_initial_max_streams_uni: u64,
+
+    /// The ACK delay exponent.
+    pub peer_ack_delay_exponent: u64,
+
+    /// The max ACK delay.
+    pub peer_max_ack_delay: u64,
+
+    /// Whether active migration is disabled.
+    pub peer_disable_active_migration: bool,
+
+    /// The active connection ID limit.
+    pub peer_active_conn_id_limit: u64,
+
+    /// DATAGRAM frame extension parameter, if any.
+    pub peer_max_datagram_frame_size: Option<u64>,
 }
 
 impl std::fmt::Debug for Stats {
@@ -5096,7 +5168,73 @@ impl std::fmt::Debug for Stats {
             f,
             "recv={} sent={} lost={} rtt={:?} cwnd={}",
             self.recv, self.sent, self.lost, self.rtt, self.cwnd,
-        )
+        )?;
+
+        write!(f, " peer_tps={{")?;
+
+        write!(f, " max_idle_timeout={},", self.peer_max_idle_timeout,)?;
+
+        write!(
+            f,
+            " max_udp_payload_size={},",
+            self.peer_max_udp_payload_size,
+        )?;
+
+        write!(f, " initial_max_data={},", self.peer_initial_max_data,)?;
+
+        write!(
+            f,
+            " initial_max_stream_data_bidi_local={},",
+            self.peer_initial_max_stream_data_bidi_local,
+        )?;
+
+        write!(
+            f,
+            " initial_max_stream_data_bidi_remote={},",
+            self.peer_initial_max_stream_data_bidi_remote,
+        )?;
+
+        write!(
+            f,
+            " initial_max_stream_data_uni={},",
+            self.peer_initial_max_stream_data_uni,
+        )?;
+
+        write!(
+            f,
+            " initial_max_streams_bidi={},",
+            self.peer_initial_max_streams_bidi,
+        )?;
+
+        write!(
+            f,
+            " initial_max_streams_uni={},",
+            self.peer_initial_max_streams_uni,
+        )?;
+
+        write!(f, " ack_delay_exponent={},", self.peer_ack_delay_exponent,)?;
+
+        write!(f, " max_ack_delay={},", self.peer_max_ack_delay,)?;
+
+        write!(
+            f,
+            " disable_active_migration={},",
+            self.peer_disable_active_migration,
+        )?;
+
+        write!(
+            f,
+            " active_conn_id_limit={},",
+            self.peer_active_conn_id_limit,
+        )?;
+
+        write!(
+            f,
+            " max_datagram_frame_size={:?}",
+            self.peer_max_datagram_frame_size,
+        )?;
+
+        write!(f, " }}")
     }
 }
 

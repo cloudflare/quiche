@@ -442,8 +442,47 @@ typedef struct {
     // The current PMTU for the connection.
     size_t pmtu;
 
-    // The estimated data delivery rate in bytes/s.
+    // The most recent data delivery rate estimate in bytes/s.
     uint64_t delivery_rate;
+
+    // The maximum idle timeout.
+    uint64_t peer_max_idle_timeout;
+
+    // The maximum UDP payload size.
+    uint64_t peer_max_udp_payload_size;
+
+    // The initial flow control maximum data for the connection.
+    uint64_t peer_initial_max_data;
+
+    // The initial flow control maximum data for local bidirectional streams.
+    uint64_t peer_initial_max_stream_data_bidi_local;
+
+    // The initial flow control maximum data for remote bidirectional streams.
+    uint64_t peer_initial_max_stream_data_bidi_remote;
+
+    // The initial flow control maximum data for unidirectional streams.
+    uint64_t peer_initial_max_stream_data_uni;
+
+    // The initial maximum bidirectional streams.
+    uint64_t peer_initial_max_streams_bidi;
+
+    // The initial maximum unidirectional streams.
+    uint64_t peer_initial_max_streams_uni;
+
+    // The ACK delay exponent.
+    uint64_t peer_ack_delay_exponent;
+
+    // The max ACK delay.
+    uint64_t peer_max_ack_delay;
+
+    // Whether active migration is disabled.
+    bool peer_disable_active_migration;
+
+    // The active connection ID limit.
+    uint64_t peer_active_conn_id_limit;
+
+    // DATAGRAM frame extension parameter, if any.
+    ssize_t peer_max_datagram_frame_size;
 } quiche_stats;
 
 // Collects and returns statistics about the connection.
