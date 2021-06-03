@@ -488,7 +488,9 @@ fn update_round(r: &mut Recovery, packet: &Acked) {
         r.bbr_state.round_start = false;
     }
 
-    if packet.delivered >= r.bbr_state.end_conservation {
+    if packet.delivered >= r.bbr_state.end_conservation &&
+        r.bbr_state.conservation != PacketConservation::Normal
+    {
         // It's been one RTT since the last loss, assume its been repaired
         r.bbr_state.conservation = PacketConservation::Normal;
         restore_cwnd(r);
