@@ -701,13 +701,27 @@ impl Connection {
     ///
     /// This will also initiate the HTTP/3 handshake with the peer by opening
     /// all control streams (including QPACK) and sending the local settings.
+    ///
+    /// On success the new connection is returned.
+    ///
+    /// The [`StreamLimit`] error is returned when the HTTP/3 control stream
+    /// cannot be created.
+    ///
+    /// [`StreamLimit`]: ../enum.Error.html#variant.InvalidState
     pub fn with_transport(
         conn: &mut super::Connection, config: &Config,
     ) -> Result<Connection> {
         let mut http3_conn =
             Connection::new(config, conn.is_server, conn.dgram_enabled())?;
 
-        http3_conn.send_settings(conn)?;
+        match http3_conn.send_settings(conn) {
+            Ok(_) => (),
+
+            Err(e) => {
+                conn.close(true, e.to_wire(), b"Error opening control stream")?;
+                return Err(e);
+            },
+        };
 
         // Try opening QPACK streams, but ignore errors if it fails since we
         // don't need them right now.
