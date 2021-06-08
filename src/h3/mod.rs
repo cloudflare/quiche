@@ -584,7 +584,7 @@ pub enum Event {
 
     /// Stream was reset.
     ///
-    /// The associated data represents the error code received by the peer.
+    /// The associated data represents the error code sent by the peer.
     Reset(u64),
 
     /// DATAGRAM was received.
@@ -4551,7 +4551,7 @@ mod tests {
         assert_eq!(s.poll_server(), Ok((stream, Event::Reset(42))));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
-        // Sending RESET_STREAM again shouldn't trigger another Finished event.
+        // Sending RESET_STREAM again shouldn't trigger another Reset event.
         assert_eq!(
             s.pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Ok(39)
