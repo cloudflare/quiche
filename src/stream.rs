@@ -702,6 +702,9 @@ pub struct RecvBuf {
     /// The final stream offset received from the peer, if any.
     fin_off: Option<u64>,
 
+    /// The error code received via RESET_STREAM.
+    error: Option<u64>,
+
     /// Whether incoming data is validated but not buffered.
     drain: bool,
 }
@@ -835,6 +838,11 @@ impl RecvBuf {
             return Err(Error::Done);
         }
 
+        // The stream was reset, so return the error code instead.
+        if let Some(e) = self.error {
+            return Err(Error::StreamReset(e));
+        }
+
         while cap > 0 && self.ready() {
             let mut buf = match self.data.peek_mut() {
                 Some(v) => v,
@@ -867,7 +875,7 @@ impl RecvBuf {
     }
 
     /// Resets the stream at the given offset.
-    pub fn reset(&mut self, final_size: u64) -> Result<usize> {
+    pub fn reset(&mut self, error_code: u64, final_size: u64) -> Result<usize> {
         // Stream's size is already known, forbid changing it.
         if let Some(fin_off) = self.fin_off {
             if fin_off != final_size {
@@ -880,11 +888,27 @@ impl RecvBuf {
             return Err(Error::FinalSize);
         }
 
-        self.fin_off = Some(final_size);
-
-        // Return how many bytes need to be removed from the connection flow
+        // Calculate how many bytes need to be removed from the connection flow
         // control.
-        Ok((final_size - self.len) as usize)
+        let max_data_delta = final_size - self.len;
+
+        if self.error.is_some() {
+            return Ok(max_data_delta as usize);
+        }
+
+        self.error = Some(error_code);
+
+        // Clear all data already buffered.
+        self.off = final_size;
+
+        self.data.clear();
+
+        // In order to ensure the application is notified when the stream is
+        // reset, enqueue a zero-length buffer at the final size offset.
+        let buf = RangeBuf::from(b"", final_size, true);
+        self.write(buf)?;
+
+        Ok(max_data_delta as usize)
     }
 
     /// Commits the new max_data limit.
@@ -2368,7 +2392,7 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, true);
 
         assert_eq!(stream.recv.write(first), Ok(()));
-        assert_eq!(stream.recv.reset(10), Err(Error::FinalSize));
+        assert_eq!(stream.recv.reset(0, 10), Err(Error::FinalSize));
     }
 
     #[test]
@@ -2379,8 +2403,8 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, false);
 
         assert_eq!(stream.recv.write(first), Ok(()));
-        assert_eq!(stream.recv.reset(5), Ok(0));
-        assert_eq!(stream.recv.reset(5), Ok(0));
+        assert_eq!(stream.recv.reset(0, 5), Ok(0));
+        assert_eq!(stream.recv.reset(0, 5), Ok(0));
     }
 
     #[test]
@@ -2391,8 +2415,8 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, false);
 
         assert_eq!(stream.recv.write(first), Ok(()));
-        assert_eq!(stream.recv.reset(5), Ok(0));
-        assert_eq!(stream.recv.reset(10), Err(Error::FinalSize));
+        assert_eq!(stream.recv.reset(0, 5), Ok(0));
+        assert_eq!(stream.recv.reset(0, 10), Err(Error::FinalSize));
     }
 
     #[test]
@@ -2403,7 +2427,7 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, false);
 
         assert_eq!(stream.recv.write(first), Ok(()));
-        assert_eq!(stream.recv.reset(4), Err(Error::FinalSize));
+        assert_eq!(stream.recv.reset(0, 4), Err(Error::FinalSize));
     }
 
     #[test]

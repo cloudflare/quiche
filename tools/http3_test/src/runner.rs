@@ -329,6 +329,12 @@ pub fn run(
                         }
                     },
 
+                    Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
+                        error!("request was reset by peer with {}", e);
+
+                        break;
+                    },
+
                     Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
 
                     Ok((_goaway_id, quiche::h3::Event::GoAway)) => (),

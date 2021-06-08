@@ -1194,6 +1194,19 @@ impl HttpConn for Http3Conn {
                     }
                 },
 
+                Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
+                    error!("request was reset by peer with {}, closing...", e);
+
+                    match conn.close(true, 0x00, b"kthxbye") {
+                        // Already closed.
+                        Ok(_) | Err(quiche::Error::Done) => (),
+
+                        Err(e) => panic!("error closing conn: {:?}", e),
+                    }
+
+                    break;
+                },
+
                 Ok((_flow_id, quiche::h3::Event::Datagram)) => {
                     while let Ok((len, flow_id, flow_id_len)) =
                         self.h3_conn.recv_dgram(conn, buf)
@@ -1343,6 +1356,8 @@ impl HttpConn for Http3Conn {
                 },
 
                 Ok((_stream_id, quiche::h3::Event::Finished)) => (),
+
+                Ok((_stream_id, quiche::h3::Event::Reset { .. })) => (),
 
                 Ok((_, quiche::h3::Event::Datagram)) => {
                     while let Ok((len, flow_id, flow_id_len)) =

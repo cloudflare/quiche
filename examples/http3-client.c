@@ -278,6 +278,14 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                     }
                     break;
 
+                case QUICHE_H3_EVENT_RESET:
+                    fprintf(stderr, "request was reset\n");
+
+                    if (quiche_conn_close(conn_io->conn, true, 0, NULL, 0) < 0) {
+                        fprintf(stderr, "failed to close connection\n");
+                    }
+                    break;
+
                 case QUICHE_H3_EVENT_DATAGRAM:
                     break;
 

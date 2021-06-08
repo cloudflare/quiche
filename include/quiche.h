@@ -97,6 +97,9 @@ enum quiche_error {
     // The specified stream was stopped by the peer.
     QUICHE_ERR_STREAM_STOPPED = -15,
 
+    // The specified stream was reset by the peer.
+    QUICHE_ERR_STREAM_RESET = -16,
+
     // The received data exceeds the stream's final size.
     QUICHE_ERR_FINAL_SIZE = -13,
 
@@ -573,6 +576,7 @@ enum quiche_h3_event_type {
     QUICHE_H3_EVENT_FINISHED,
     QUICHE_H3_EVENT_DATAGRAM,
     QUICHE_H3_EVENT_GOAWAY,
+    QUICHE_H3_EVENT_RESET,
 };
 
 typedef struct Http3Event quiche_h3_event;
