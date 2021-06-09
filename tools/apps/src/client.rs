@@ -94,6 +94,8 @@ pub fn connect(
     // Create the configuration for the QUIC connection.
     let mut config = quiche::Config::new(args.version).unwrap();
 
+    config.compress_certificates().unwrap();
+
     config.verify_peer(!args.no_verify);
 
     config.set_application_protos(&conn_args.alpns).unwrap();

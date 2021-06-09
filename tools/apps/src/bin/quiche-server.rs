@@ -82,6 +82,8 @@ fn main() {
     config.load_cert_chain_from_pem_file(&args.cert).unwrap();
     config.load_priv_key_from_pem_file(&args.key).unwrap();
 
+    config.compress_certificates().unwrap();
+
     config.set_application_protos(&conn_args.alpns).unwrap();
 
     config.set_max_idle_timeout(conn_args.idle_timeout);

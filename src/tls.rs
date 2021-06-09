@@ -91,6 +91,10 @@ struct STACK_OF(c_void);
 #[repr(transparent)]
 struct CRYPTO_BUFFER(c_void);
 
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
+struct CBB(c_void);
+
 #[repr(C)]
 #[allow(non_camel_case_types)]
 struct SSL_QUIC_METHOD {
@@ -276,6 +280,26 @@ impl Context {
         unsafe {
             SSL_CTX_set_verify(self.as_ptr(), mode, ptr::null());
         }
+    }
+
+    pub fn enable_certificate_compression(&mut self) -> Result<()> {
+        #[cfg(any(feature = "brotlienc", feature = "brotlidec"))]
+        map_result(unsafe {
+            SSL_CTX_add_cert_compression_alg(
+                self.as_ptr(),
+                2, // TLSEXT_cert_compression_brotli
+                #[cfg(feature = "brotlienc")]
+                Some(compress_brotli_cert),
+                #[cfg(not(feature = "brotlienc"))]
+                None,
+                #[cfg(feature = "brotlidec")]
+                Some(decompress_brotli_cert),
+                #[cfg(not(feature = "brotlidec"))]
+                None,
+            )
+        })?;
+
+        Ok(())
     }
 
     pub fn enable_keylog(&mut self) {
@@ -927,6 +951,65 @@ extern fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
     0
 }
 
+#[cfg(feature = "brotlienc")]
+extern fn compress_brotli_cert(
+    _ssl: *mut SSL, out: *mut CBB, in_buf: *mut u8, in_len: usize,
+) -> c_int {
+    let mut out_buf: *mut u8 = std::ptr::null_mut();
+
+    let mut out_len = unsafe { BrotliEncoderMaxCompressedSize(in_len) };
+
+    if out_len == 0 {
+        return 0;
+    }
+
+    if unsafe { CBB_reserve(out, &mut out_buf, out_len) } == 0 {
+        return 0;
+    }
+
+    let rc = unsafe {
+        BrotliEncoderCompress(5, 17, 0, in_len, in_buf, &mut out_len, out_buf)
+    };
+
+    if rc == 0 {
+        return 0;
+    }
+
+    if unsafe { CBB_did_write(out, out_len) } == 0 {
+        return 0;
+    }
+
+    return 1;
+}
+
+#[cfg(feature = "brotlidec")]
+extern fn decompress_brotli_cert(
+    _ssl: *mut SSL, out: *mut *mut CRYPTO_BUFFER, uncompressed_len: usize,
+    in_buf: *mut u8, in_len: usize,
+) -> c_int {
+    let mut out_buf: *mut u8 = std::ptr::null_mut();
+
+    let decompressed =
+        unsafe { CRYPTO_BUFFER_alloc(&mut out_buf, uncompressed_len) };
+
+    if decompressed.is_null() {
+        return 0;
+    }
+
+    let mut out_len = uncompressed_len;
+
+    let rc =
+        unsafe { BrotliDecoderDecompress(in_len, in_buf, &mut out_len, out_buf) };
+
+    if rc != 1 || out_len != uncompressed_len {
+        return 0;
+    }
+
+    unsafe { *out = decompressed };
+
+    return 1;
+}
+
 fn map_result(bssl_result: c_int) -> Result<()> {
     match bssl_result {
         1 => Ok(()),
@@ -1074,6 +1157,28 @@ extern {
         cb: extern fn(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int,
     );
 
+    #[allow(dead_code)]
+    fn SSL_CTX_add_cert_compression_alg(
+        ctx: *mut SSL_CTX, alg_id: u16,
+        compress: Option<
+            extern fn(
+                ssl: *mut SSL,
+                out: *mut CBB,
+                in_buf: *mut u8,
+                in_len: usize,
+            ) -> c_int,
+        >,
+        decompress: Option<
+            extern fn(
+                ssl: *mut SSL,
+                out: *mut *mut CRYPTO_BUFFER,
+                uncompressed_len: usize,
+                in_buf: *mut u8,
+                in_len: usize,
+            ) -> c_int,
+        >,
+    ) -> c_int;
+
     // SSL
     fn SSL_get_ex_new_index(
         argl: c_long, argp: *const c_void, unused: *const c_void,
@@ -1199,6 +1304,18 @@ extern {
     fn CRYPTO_BUFFER_len(buffer: *const CRYPTO_BUFFER) -> usize;
     fn CRYPTO_BUFFER_data(buffer: *const CRYPTO_BUFFER) -> *const u8;
 
+    #[allow(dead_code)]
+    fn CRYPTO_BUFFER_alloc(
+        out_data: *const *mut u8, len: usize,
+    ) -> *mut CRYPTO_BUFFER;
+
+    // CBB
+    #[allow(dead_code)]
+    fn CBB_reserve(cbb: *mut CBB, out_data: *const *mut u8, len: usize) -> c_int;
+
+    #[allow(dead_code)]
+    fn CBB_did_write(cbb: *mut CBB, len: usize) -> c_int;
+
     // ERR
     fn ERR_peek_error() -> c_uint;
 
@@ -1206,4 +1323,21 @@ extern {
 
     // OPENSSL
     fn OPENSSL_free(ptr: *mut c_void);
+
+    // Brotli
+    #[cfg(feature = "brotlienc")]
+    fn BrotliEncoderMaxCompressedSize(input_size: usize) -> usize;
+
+    #[cfg(feature = "brotlienc")]
+    fn BrotliEncoderCompress(
+        quality: c_int, lgwin: c_int, mode: c_int, input_size: usize,
+        input_buffer: *const u8, encoded_size: *mut usize,
+        encoded_buffer: *mut u8,
+    ) -> c_int;
+
+    #[cfg(feature = "brotlidec")]
+    fn BrotliDecoderDecompress(
+        encoded_size: usize, encoded_buffer: *const u8, decoded_size: *mut usize,
+        decoded_buffer: *mut u8,
+    ) -> c_int;
 }

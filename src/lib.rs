@@ -668,6 +668,16 @@ impl Config {
             .load_verify_locations_from_directory(dir)
     }
 
+    /// Enables support for certificate compression (RFC8879).
+    ///
+    /// Note that if support wasn't enabled at build time, this does nothing.
+    pub fn compress_certificates(&mut self) -> Result<()> {
+        self.tls_ctx
+            .lock()
+            .unwrap()
+            .enable_certificate_compression()
+    }
+
     /// Configures whether to verify the peer's certificate.
     ///
     /// The default value is `true` for client connections, and `false` for
@@ -5457,6 +5467,7 @@ pub mod testing {
             config.set_max_idle_timeout(180_000);
             config.verify_peer(false);
             config.set_ack_delay_exponent(5);
+            config.compress_certificates().unwrap();
 
             Pipe::with_config(&mut config)
         }
