@@ -120,6 +120,8 @@ pub struct Recovery {
 
     bytes_sent: usize,
 
+    pub bytes_lost: u64,
+
     congestion_recovery_start_time: Option<Instant>,
 
     max_datagram_size: usize,
@@ -190,6 +192,8 @@ impl Recovery {
             bytes_acked_ca: 0,
 
             bytes_sent: 0,
+
+            bytes_lost: 0,
 
             congestion_recovery_start_time: None,
 
@@ -742,6 +746,8 @@ impl Recovery {
                 self.loss_time[epoch] = Some(loss_time);
             }
         }
+
+        self.bytes_lost += lost_bytes as u64;
 
         if let Some(pkt) = largest_lost_pkt {
             self.on_packets_lost(lost_bytes, &pkt, epoch, now);
