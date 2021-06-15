@@ -529,6 +529,20 @@ pub enum Shutdown {
     Write = 1,
 }
 
+/// Qlog logging level.
+#[repr(C)]
+#[cfg(feature = "qlog")]
+pub enum QlogLevel {
+    /// Logs any events of Core importance.
+    Core  = 0,
+
+    /// Logs any events of Core and Base importance.
+    Base  = 1,
+
+    /// Logs any events of Core, Base and Extra importance
+    Extra = 2,
+}
+
 /// Stores configuration shared between multiple connections.
 pub struct Config {
     local_transport_params: TransportParams,
@@ -1095,6 +1109,10 @@ pub struct Connection {
     #[cfg(feature = "qlog")]
     qlogged_peer_params: bool,
 
+    /// Qlog logging level.
+    #[cfg(feature = "qlog")]
+    qlog_level: qlog::ImportanceLogLevel,
+
     /// DATAGRAM queues.
     dgram_recv_queue: dgram::DatagramQueue,
     dgram_send_queue: dgram::DatagramQueue,
@@ -1293,7 +1311,7 @@ macro_rules! push_frame_to_pkt {
 /// Conditional qlog action.
 ///
 /// Executes the provided body if the qlog feature is enabled and quiche
-/// has been condifigured with a log writer.
+/// has been configured with a log writer.
 macro_rules! qlog_with {
     ($qlog_streamer:expr, $qlog_streamer_ref:ident, $body:block) => {{
         #[cfg(feature = "qlog")]
@@ -1437,6 +1455,9 @@ impl Connection {
             #[cfg(feature = "qlog")]
             qlogged_peer_params: false,
 
+            #[cfg(feature = "qlog")]
+            qlog_level: qlog::ImportanceLogLevel::Base,
+
             dgram_recv_queue: dgram::DatagramQueue::new(
                 config.dgram_recv_max_queue_len,
             ),
@@ -1544,21 +1565,35 @@ impl Connection {
             None,
             std::time::Instant::now(),
             trace,
+            self.qlog_level,
             writer,
         );
 
         streamer.start_log().ok();
 
-        let ev = self.local_transport_params.to_qlog(
-            qlog::TransportOwner::Local,
-            self.version,
-            self.handshake.alpn_protocol(),
-            self.handshake.cipher(),
-        );
+        let ev_data = self
+            .local_transport_params
+            .to_qlog(qlog::TransportOwner::Local, self.handshake.cipher());
+
+        let ev = qlog::Event::new(ev_data);
 
         streamer.add_event(ev).ok();
 
         self.qlog_streamer = Some(streamer);
+    }
+
+    /// Sets the qlog importance level.
+    #[cfg(feature = "qlog")]
+    pub fn set_qlog_level(&mut self, qlog_level: QlogLevel) {
+        let level = match qlog_level {
+            QlogLevel::Core => qlog::ImportanceLogLevel::Core,
+
+            QlogLevel::Base => qlog::ImportanceLogLevel::Base,
+
+            QlogLevel::Extra => qlog::ImportanceLogLevel::Extra,
+        };
+
+        self.qlog_level = level;
     }
 
     /// Configures the given session for resumption.
@@ -2006,25 +2041,30 @@ impl Connection {
             let qlog_pkt_hdr = qlog::PacketHeader::with_type(
                 hdr.ty.to_qlog(),
                 pn,
-                Some(packet_size as u64),
-                Some(payload_len as u64),
                 Some(hdr.version),
                 Some(&hdr.scid),
                 Some(&hdr.dcid),
             );
 
-            q.add_event_with_instant(
-                qlog::event::Event::packet_received(
-                    hdr.ty.to_qlog(),
-                    qlog_pkt_hdr,
-                    Some(Vec::new()),
-                    None,
-                    None,
-                    None,
-                ),
-                now,
-            )
-            .ok();
+            let qlog_raw_info = qlog::RawInfo {
+                length: Some(packet_size as u64),
+                payload_length: Some(payload_len as u64),
+                data: None,
+            };
+
+            let ev_data = qlog::EventData::PacketReceived {
+                header: qlog_pkt_hdr,
+                frames: Some(vec![]),
+                is_coalesced: None,
+                retry_token: None,
+                stateless_reset_token: None,
+                supported_versions: None,
+                raw: Some(qlog_raw_info),
+                datagram_id: None,
+            };
+
+            q.add_event_with_instant(qlog::Event::new(ev_data), now)
+                .ok();
         });
 
         let mut payload = packet::decrypt_pkt(
@@ -2110,7 +2150,8 @@ impl Connection {
         });
 
         qlog_with!(self.qlog_streamer, q, {
-            if let Some(ev) = self.recovery.maybe_qlog() {
+            if let Some(ev_data) = self.recovery.maybe_qlog() {
+                let ev = qlog::Event::new(ev_data);
                 q.add_event_with_instant(ev, now).ok();
             }
         });
@@ -2121,12 +2162,11 @@ impl Connection {
         if self.is_established() {
             qlog_with!(self.qlog_streamer, q, {
                 if !self.qlogged_peer_params {
-                    let ev = self.peer_transport_params.to_qlog(
+                    let ev_data = self.peer_transport_params.to_qlog(
                         qlog::TransportOwner::Remote,
-                        self.version,
-                        self.handshake.alpn_protocol(),
                         self.handshake.cipher(),
                     );
+                    let ev = qlog::Event::new(ev_data);
 
                     q.add_event_with_instant(ev, now).ok();
 
@@ -3197,20 +3237,31 @@ impl Connection {
             let qlog_pkt_hdr = qlog::PacketHeader::with_type(
                 hdr.ty.to_qlog(),
                 pn,
-                Some(payload_len as u64 + payload_offset as u64),
-                Some(payload_len as u64),
                 Some(hdr.version),
                 Some(&hdr.scid),
                 Some(&hdr.dcid),
             );
+            let length = Some(payload_len as u64 + payload_offset as u64);
+            let payload_length = Some(payload_len as u64);
+            let qlog_raw_info = qlog::RawInfo {
+                length,
+                payload_length,
+                data: None,
+            };
 
-            let packet_sent_ev = qlog::event::Event::packet_sent_min(
-                hdr.ty.to_qlog(),
-                qlog_pkt_hdr,
-                Some(Vec::new()),
-            );
+            let ev_data = qlog::EventData::PacketSent {
+                header: qlog_pkt_hdr,
+                frames: Some(vec![]),
+                is_coalesced: None,
+                retry_token: None,
+                stateless_reset_token: None,
+                supported_versions: None,
+                raw: Some(qlog_raw_info),
+                datagram_id: None,
+            };
 
-            q.add_event_with_instant(packet_sent_ev, now).ok();
+            q.add_event_with_instant(qlog::Event::new(ev_data), now)
+                .ok();
         });
 
         for frame in &mut frames {
@@ -3265,8 +3316,9 @@ impl Connection {
         );
 
         qlog_with!(self.qlog_streamer, q, {
-            if let Some(ev) = self.recovery.maybe_qlog() {
-                q.add_event_with_instant(ev, now).ok();
+            if let Some(ev_data) = self.recovery.maybe_qlog() {
+                q.add_event_with_instant(qlog::Event::new(ev_data), now)
+                    .ok();
             }
         });
 
@@ -3386,15 +3438,16 @@ impl Connection {
         }
 
         qlog_with!(self.qlog_streamer, q, {
-            let ev = qlog::event::Event::h3_data_moved(
-                stream_id,
-                Some(offset),
-                Some(read as u64),
-                Some(qlog::H3DataRecipient::Transport),
-                None,
-                None,
-            );
-            q.add_event(ev).ok();
+            let ev_data = qlog::EventData::TransportDataMoved {
+                stream_id: Some(stream_id),
+                offset: Some(offset),
+                length: Some(read as u64),
+                from: Some(qlog::DataRecipient::Transport),
+                to: Some(qlog::DataRecipient::Application),
+                data: None,
+            };
+
+            q.add_event(qlog::Event::new(ev_data)).ok();
         });
 
         if self.should_update_max_data() {
@@ -3535,15 +3588,16 @@ impl Connection {
         self.recovery.rate_check_app_limited();
 
         qlog_with!(self.qlog_streamer, q, {
-            let ev = qlog::event::Event::h3_data_moved(
-                stream_id,
-                Some(offset),
-                Some(sent as u64),
-                None,
-                Some(qlog::H3DataRecipient::Transport),
-                None,
-            );
-            q.add_event(ev).ok();
+            let ev_data = qlog::EventData::TransportDataMoved {
+                stream_id: Some(stream_id),
+                offset: Some(offset),
+                length: Some(sent as u64),
+                from: Some(qlog::DataRecipient::Application),
+                to: Some(qlog::DataRecipient::Transport),
+                data: None,
+            };
+
+            q.add_event(qlog::Event::new(ev_data)).ok();
         });
 
         Ok(sent)
@@ -4188,8 +4242,9 @@ impl Connection {
                 );
 
                 qlog_with!(self.qlog_streamer, q, {
-                    if let Some(ev) = self.recovery.maybe_qlog() {
-                        q.add_event_with_instant(ev, now).ok();
+                    if let Some(ev_data) = self.recovery.maybe_qlog() {
+                        q.add_event_with_instant(qlog::Event::new(ev_data), now)
+                            .ok();
                     }
                 });
 
@@ -5648,38 +5703,51 @@ impl TransportParams {
     /// Creates a qlog event for connection transport parameters and TLS fields
     #[cfg(feature = "qlog")]
     pub fn to_qlog(
-        &self, owner: qlog::TransportOwner, version: u32, alpn: &[u8],
-        cipher: Option<crypto::Algorithm>,
-    ) -> qlog::event::Event {
-        let ocid = qlog::HexSlice::maybe_string(
+        &self, owner: qlog::TransportOwner, cipher: Option<crypto::Algorithm>,
+    ) -> qlog::EventData {
+        let original_destination_connection_id = qlog::HexSlice::maybe_string(
             self.original_destination_connection_id.as_ref(),
         );
-        let stateless_reset_token =
-            qlog::HexSlice::maybe_string(self.stateless_reset_token.as_ref());
 
-        qlog::event::Event::transport_parameters_set(
-            Some(owner),
-            None, // resumption
-            None, // early data
-            String::from_utf8(alpn.to_vec()).ok(),
-            Some(format!("{:x?}", version)),
-            Some(format!("{:?}", cipher)),
-            ocid,
+        let stateless_reset_token = Some(qlog::Token {
+            ty: Some(qlog::TokenType::StatelessReset),
+            length: None,
+            data: qlog::HexSlice::maybe_string(
+                self.stateless_reset_token.as_ref(),
+            ),
+            details: None,
+        });
+
+        qlog::EventData::TransportParametersSet {
+            owner: Some(owner),
+            resumption_allowed: None,
+            early_data_enabled: None,
+            tls_cipher: Some(format!("{:?}", cipher)),
+            aead_tag_length: None,
+            original_destination_connection_id,
+            initial_source_connection_id: None,
+            retry_source_connection_id: None,
             stateless_reset_token,
-            Some(self.disable_active_migration),
-            Some(self.max_idle_timeout),
-            Some(self.max_udp_payload_size as u32),
-            Some(self.ack_delay_exponent as u16),
-            Some(self.max_ack_delay as u16),
-            Some(self.active_conn_id_limit),
-            Some(self.initial_max_data),
-            Some(self.initial_max_stream_data_bidi_local),
-            Some(self.initial_max_stream_data_bidi_remote),
-            Some(self.initial_max_stream_data_uni),
-            Some(self.initial_max_streams_bidi),
-            Some(self.initial_max_streams_uni),
-            None, // preferred address
-        )
+            disable_active_migration: Some(self.disable_active_migration),
+            max_idle_timeout: Some(self.max_idle_timeout),
+            max_udp_payload_size: Some(self.max_udp_payload_size as u32),
+            ack_delay_exponent: Some(self.ack_delay_exponent as u16),
+            max_ack_delay: Some(self.max_ack_delay as u16),
+            active_connection_id_limit: Some(self.active_conn_id_limit as u32),
+
+            initial_max_data: Some(self.initial_max_data),
+            initial_max_stream_data_bidi_local: Some(
+                self.initial_max_stream_data_bidi_local,
+            ),
+            initial_max_stream_data_bidi_remote: Some(
+                self.initial_max_stream_data_bidi_remote,
+            ),
+            initial_max_stream_data_uni: Some(self.initial_max_stream_data_uni),
+            initial_max_streams_bidi: Some(self.initial_max_streams_bidi),
+            initial_max_streams_uni: Some(self.initial_max_streams_uni),
+
+            preferred_address: None,
+        }
     }
 }
 
