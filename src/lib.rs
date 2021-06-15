@@ -4264,7 +4264,9 @@ impl Connection {
     pub fn stats(&self) -> Stats {
         Stats {
             recv: self.recv_count,
+            bytes_recv: self.rx_data,
             sent: self.sent_count,
+            bytes_sent: self.tx_data,
             lost: self.recovery.lost_count,
             cwnd: self.recovery.cwnd(),
             rtt: self.recovery.rtt(),
@@ -5032,6 +5034,12 @@ pub struct Stats {
 
     /// The most recent data delivery rate estimate in bytes/s.
     pub delivery_rate: u64,
+
+    /// The number of bytes received.
+    pub bytes_recv: u64,
+
+    /// The number of bytes sent.
+    pub bytes_sent: u64,
 }
 
 impl std::fmt::Debug for Stats {

@@ -951,6 +951,8 @@ pub struct Stats {
     rtt: u64,
     cwnd: usize,
     delivery_rate: u64,
+    bytes_recv: u64,
+    bytes_sent: u64,
 }
 
 #[no_mangle]
@@ -963,6 +965,8 @@ pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.rtt = stats.rtt.as_nanos() as u64;
     out.cwnd = stats.cwnd;
     out.delivery_rate = stats.delivery_rate;
+    out.bytes_recv = stats.bytes_recv;
+    out.bytes_sent = stats.bytes_sent;
 }
 
 #[no_mangle]
