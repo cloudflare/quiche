@@ -5456,7 +5456,7 @@ pub mod testing {
             config.set_initial_max_streams_uni(3);
             config.set_max_idle_timeout(180_000);
             config.verify_peer(false);
-            config.set_ack_delay_exponent(5);
+            config.set_ack_delay_exponent(8);
 
             Pipe::with_config(&mut config)
         }
