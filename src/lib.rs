@@ -529,6 +529,20 @@ pub enum Shutdown {
     Write = 1,
 }
 
+/// Qlog logging level.
+#[repr(C)]
+#[cfg(feature = "qlog")]
+pub enum QlogLevel {
+    /// Logs any events of Core importance.
+    Core  = 0,
+
+    /// Logs any events of Core and Base importance.
+    Base  = 1,
+
+    /// Logs any events of Core, Base and Extra importance
+    Extra = 2,
+}
+
 /// Stores configuration shared between multiple connections.
 pub struct Config {
     local_transport_params: TransportParams,
@@ -1095,6 +1109,10 @@ pub struct Connection {
     #[cfg(feature = "qlog")]
     qlogged_peer_params: bool,
 
+    /// Qlog logging level.
+    #[cfg(feature = "qlog")]
+    qlog_level: qlog::ImportanceLogLevel,
+
     /// DATAGRAM queues.
     dgram_recv_queue: dgram::DatagramQueue,
     dgram_send_queue: dgram::DatagramQueue,
@@ -1293,7 +1311,7 @@ macro_rules! push_frame_to_pkt {
 /// Conditional qlog action.
 ///
 /// Executes the provided body if the qlog feature is enabled and quiche
-/// has been condifigured with a log writer.
+/// has been configured with a log writer.
 macro_rules! qlog_with {
     ($qlog_streamer:expr, $qlog_streamer_ref:ident, $body:block) => {{
         #[cfg(feature = "qlog")]
@@ -1437,6 +1455,9 @@ impl Connection {
             #[cfg(feature = "qlog")]
             qlogged_peer_params: false,
 
+            #[cfg(feature = "qlog")]
+            qlog_level: qlog::ImportanceLogLevel::Base,
+
             dgram_recv_queue: dgram::DatagramQueue::new(
                 config.dgram_recv_max_queue_len,
             ),
@@ -1544,6 +1565,7 @@ impl Connection {
             None,
             std::time::Instant::now(),
             trace,
+            self.qlog_level,
             writer,
         );
 
@@ -1559,6 +1581,20 @@ impl Connection {
         streamer.add_event(ev).ok();
 
         self.qlog_streamer = Some(streamer);
+    }
+
+    /// Sets the qlog importance level.
+    #[cfg(feature = "qlog")]
+    pub fn set_qlog_level(&mut self, qlog_level: QlogLevel) {
+        let level = match qlog_level {
+            QlogLevel::Core => qlog::ImportanceLogLevel::Core,
+
+            QlogLevel::Base => qlog::ImportanceLogLevel::Base,
+
+            QlogLevel::Extra => qlog::ImportanceLogLevel::Extra,
+        };
+
+        self.qlog_level = level;
     }
 
     /// Configures the given session for resumption.

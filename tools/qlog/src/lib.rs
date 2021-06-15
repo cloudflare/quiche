@@ -278,6 +278,7 @@
 //!     None,
 //!     std::time::Instant::now(),
 //!     trace,
+//!     qlog::ImportanceLogLevel::Base,
 //!     Box::new(file),
 //! );
 //!
@@ -312,6 +313,7 @@
 //! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
+//! #     qlog::ImportanceLogLevel::Base,
 //! #     Box::new(file),
 //! # );
 //! let event = qlog::event::Event::metrics_updated_min();
@@ -350,6 +352,7 @@
 //! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
+//! #     qlog::ImportanceLogLevel::Base,
 //! #     Box::new(file),
 //! # );
 //! let qlog_pkt_hdr = qlog::PacketHeader::with_type(
@@ -399,6 +402,7 @@
 //! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
+//! #     qlog::ImportanceLogLevel::Base,
 //! #     Box::new(file),
 //! # );
 //!
@@ -437,6 +441,7 @@
 //! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
+//! #     qlog::ImportanceLogLevel::Base,
 //! #     Box::new(file),
 //! # );
 //! streamer.finish_log().ok();
@@ -542,6 +547,13 @@ pub enum StreamerState {
     Finished,
 }
 
+#[derive(Clone, Copy)]
+pub enum ImportanceLogLevel {
+    Core  = 0,
+    Base  = 1,
+    Extra = 2,
+}
+
 /// A helper object specialized for streaming JSON-serialized qlog to a
 /// [`Write`] trait.
 ///
@@ -562,6 +574,7 @@ pub struct QlogStreamer {
     writer: Box<dyn std::io::Write + Send + Sync>,
     qlog: Qlog,
     state: StreamerState,
+    log_level: ImportanceLogLevel,
     first_event: bool,
     first_frame: bool,
 }
@@ -575,9 +588,11 @@ impl QlogStreamer {
     /// ["relative_time", "category", "event".to_string(), "data"]
     ///
     /// All serialization will be written to the provided `Write`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         qlog_version: String, title: Option<String>, description: Option<String>,
         summary: Option<String>, start_time: std::time::Instant, trace: Trace,
+        log_level: ImportanceLogLevel,
         writer: Box<dyn std::io::Write + Send + Sync>,
     ) -> Self {
         let qlog = Qlog {
@@ -593,6 +608,7 @@ impl QlogStreamer {
             writer,
             qlog,
             state: StreamerState::Initial,
+            log_level,
             first_event: true,
             first_frame: false,
         }
@@ -649,6 +665,21 @@ impl QlogStreamer {
         Ok(())
     }
 
+    fn is_event_in_log_level(&self, event_importance: EventImportance) -> bool {
+        match (self.log_level, event_importance) {
+            (ImportanceLogLevel::Core, EventImportance::Core) => true,
+
+            (ImportanceLogLevel::Base, EventImportance::Core) |
+            (ImportanceLogLevel::Base, EventImportance::Base) => true,
+
+            (ImportanceLogLevel::Extra, EventImportance::Core) |
+            (ImportanceLogLevel::Extra, EventImportance::Base) |
+            (ImportanceLogLevel::Extra, EventImportance::Extra) => true,
+
+            (..) => false,
+        }
+    }
+
     /// Writes a JSON-serialized `EventField`s at `std::time::Instant::now()`.
     ///
     /// Some qlog events can contain `QuicFrames`. If this is detected `true` is
@@ -676,6 +707,10 @@ impl QlogStreamer {
     ) -> Result<bool> {
         if self.state != StreamerState::Ready {
             return Err(Error::InvalidState);
+        }
+
+        if !self.is_event_in_log_level(event.importance) {
+            return Err(Error::Done);
         }
 
         let (ev_data, contains_frames) = match serde_json::to_string(&event.data)
@@ -902,7 +937,7 @@ pub struct CommonFields {
      * additionalUserSpecifiedProperty */
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(untagged)]
 pub enum EventType {
     ConnectivityEventType(ConnectivityEventType),
@@ -933,6 +968,113 @@ pub enum EventField {
     Data(EventData),
 }
 
+#[derive(Clone)]
+pub enum EventImportance {
+    Core,
+    Base,
+    Extra,
+}
+
+impl From<EventType> for EventImportance {
+    fn from(ty: EventType) -> Self {
+        match ty {
+            EventType::ConnectivityEventType(
+                ConnectivityEventType::ServerListening,
+            ) => EventImportance::Extra,
+            EventType::ConnectivityEventType(
+                ConnectivityEventType::ConnectionStarted,
+            ) => EventImportance::Base,
+            EventType::ConnectivityEventType(
+                ConnectivityEventType::ConnectionIdUpdated,
+            ) => EventImportance::Base,
+            EventType::ConnectivityEventType(
+                ConnectivityEventType::SpinBitUpdated,
+            ) => EventImportance::Base,
+            EventType::ConnectivityEventType(
+                ConnectivityEventType::ConnectionStateUpdated,
+            ) => EventImportance::Base,
+
+            EventType::SecurityEventType(SecurityEventType::KeyUpdated) =>
+                EventImportance::Base,
+            EventType::SecurityEventType(SecurityEventType::KeyRetired) =>
+                EventImportance::Base,
+
+            EventType::TransportEventType(TransportEventType::ParametersSet) =>
+                EventImportance::Core,
+            EventType::TransportEventType(
+                TransportEventType::DatagramsReceived,
+            ) => EventImportance::Extra,
+            EventType::TransportEventType(TransportEventType::DatagramsSent) =>
+                EventImportance::Extra,
+            EventType::TransportEventType(
+                TransportEventType::DatagramDropped,
+            ) => EventImportance::Extra,
+            EventType::TransportEventType(TransportEventType::PacketReceived) =>
+                EventImportance::Core,
+            EventType::TransportEventType(TransportEventType::PacketSent) =>
+                EventImportance::Core,
+            EventType::TransportEventType(TransportEventType::PacketDropped) =>
+                EventImportance::Base,
+            EventType::TransportEventType(TransportEventType::PacketBuffered) =>
+                EventImportance::Base,
+            EventType::TransportEventType(
+                TransportEventType::StreamStateUpdated,
+            ) => EventImportance::Base,
+            EventType::TransportEventType(
+                TransportEventType::FramesProcessed,
+            ) => EventImportance::Extra,
+
+            EventType::RecoveryEventType(RecoveryEventType::ParametersSet) =>
+                EventImportance::Base,
+            EventType::RecoveryEventType(RecoveryEventType::MetricsUpdated) =>
+                EventImportance::Core,
+            EventType::RecoveryEventType(
+                RecoveryEventType::CongestionStateUpdated,
+            ) => EventImportance::Base,
+            EventType::RecoveryEventType(RecoveryEventType::LossTimerSet) =>
+                EventImportance::Extra,
+            EventType::RecoveryEventType(
+                RecoveryEventType::LossTimerTriggered,
+            ) => EventImportance::Extra,
+            EventType::RecoveryEventType(RecoveryEventType::PacketLost) =>
+                EventImportance::Core,
+            EventType::RecoveryEventType(
+                RecoveryEventType::MarkedForRetransmit,
+            ) => EventImportance::Extra,
+
+            EventType::Http3EventType(Http3EventType::ParametersSet) =>
+                EventImportance::Base,
+            EventType::Http3EventType(Http3EventType::StreamTypeSet) =>
+                EventImportance::Base,
+            EventType::Http3EventType(Http3EventType::FrameCreated) =>
+                EventImportance::Core,
+            EventType::Http3EventType(Http3EventType::FrameParsed) =>
+                EventImportance::Core,
+            EventType::Http3EventType(Http3EventType::DataMoved) =>
+                EventImportance::Base,
+            EventType::Http3EventType(Http3EventType::PushResolved) =>
+                EventImportance::Extra,
+
+            EventType::QpackEventType(QpackEventType::StateUpdated) =>
+                EventImportance::Base,
+            EventType::QpackEventType(QpackEventType::StreamStateUpdated) =>
+                EventImportance::Base,
+            EventType::QpackEventType(QpackEventType::DynamicTableUpdated) =>
+                EventImportance::Extra,
+            EventType::QpackEventType(QpackEventType::HeadersEncoded) =>
+                EventImportance::Base,
+            EventType::QpackEventType(QpackEventType::HeadersDecoded) =>
+                EventImportance::Base,
+            EventType::QpackEventType(QpackEventType::InstructionSent) =>
+                EventImportance::Base,
+            EventType::QpackEventType(QpackEventType::InstructionReceived) =>
+                EventImportance::Base,
+
+            _ => unimplemented!(),
+        }
+    }
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum EventCategory {
@@ -951,7 +1093,22 @@ pub enum EventCategory {
     Simulation,
 }
 
-#[derive(Serialize, Clone)]
+impl From<EventType> for EventCategory {
+    fn from(ty: EventType) -> Self {
+        match ty {
+            EventType::ConnectivityEventType(_) => EventCategory::Connectivity,
+            EventType::SecurityEventType(_) => EventCategory::Security,
+            EventType::TransportEventType(_) => EventCategory::Transport,
+            EventType::RecoveryEventType(_) => EventCategory::Recovery,
+            EventType::Http3EventType(_) => EventCategory::Http,
+            EventType::QpackEventType(_) => EventCategory::Qpack,
+
+            _ => unimplemented!(),
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectivityEventType {
     ServerListening,
@@ -961,7 +1118,7 @@ pub enum ConnectivityEventType {
     ConnectionStateUpdated,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportEventType {
     ParametersSet,
@@ -980,7 +1137,7 @@ pub enum TransportEventType {
     StreamStateUpdated,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportEventTrigger {
     Line,
@@ -988,14 +1145,14 @@ pub enum TransportEventTrigger {
     KeysUnavailable,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityEventType {
     KeyUpdated,
     KeyRetired,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityEventTrigger {
     Tls,
@@ -1004,7 +1161,7 @@ pub enum SecurityEventTrigger {
     LocalUpdate,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum RecoveryEventType {
     ParametersSet,
@@ -1589,7 +1746,7 @@ pub enum PacketType {
     Unknown,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum Http3EventType {
     ParametersSet,
@@ -1600,7 +1757,7 @@ pub enum Http3EventType {
     PushResolved,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackEventType {
     StateUpdated,
@@ -1739,7 +1896,7 @@ pub enum ErrorSpace {
     ApplicationError,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum GenericEventType {
     ConnectionError,
@@ -2730,6 +2887,7 @@ mod tests {
                 code: None,
                 description: None,
             },
+            importance: EventImportance::Core,
         };
 
         assert!(ev.is_valid());
@@ -2763,6 +2921,7 @@ mod tests {
             category: EventCategory::Error,
             ty: EventType::GenericEventType(GenericEventType::ConnectionError),
             data: EventData::FramesProcessed { frames: Vec::new() },
+            importance: EventImportance::Core,
         };
 
         assert!(!ev.is_valid());
@@ -2813,6 +2972,7 @@ mod tests {
             None,
             std::time::Instant::now(),
             trace,
+            ImportanceLogLevel::Base,
             writer,
         );
 
