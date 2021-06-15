@@ -2042,14 +2042,17 @@ impl Connection {
                 Some(&hdr.dcid),
             );
 
-            q.add_event(qlog::event::Event::packet_received(
-                hdr.ty.to_qlog(),
-                qlog_pkt_hdr,
-                Some(Vec::new()),
-                None,
-                None,
-                None,
-            ))
+            q.add_event_with_instant(
+                qlog::event::Event::packet_received(
+                    hdr.ty.to_qlog(),
+                    qlog_pkt_hdr,
+                    Some(Vec::new()),
+                    None,
+                    None,
+                    None,
+                ),
+                now,
+            )
             .ok();
         });
 
@@ -2137,7 +2140,7 @@ impl Connection {
 
         qlog_with!(self.qlog_streamer, q, {
             let ev = self.recovery.to_qlog();
-            q.add_event(ev).ok();
+            q.add_event_with_instant(ev, now).ok();
         });
 
         // Only log the remote transport parameters once the connection is
@@ -2155,7 +2158,7 @@ impl Connection {
                         handshake.cipher(),
                     );
 
-                    q.add_event(ev).ok();
+                    q.add_event_with_instant(ev, now).ok();
 
                     self.qlogged_peer_params = true;
                 }
@@ -3188,7 +3191,7 @@ impl Connection {
                 Some(Vec::new()),
             );
 
-            q.add_event(packet_sent_ev).ok();
+            q.add_event_with_instant(packet_sent_ev, now).ok();
         });
 
         for frame in &mut frames {
@@ -3248,7 +3251,7 @@ impl Connection {
 
         qlog_with!(self.qlog_streamer, q, {
             let ev = self.recovery.to_qlog();
-            q.add_event(ev).ok();
+            q.add_event_with_instant(ev, now).ok();
         });
 
         self.pkt_num_spaces[epoch].next_pkt_num += 1;
@@ -4123,7 +4126,7 @@ impl Connection {
 
                 qlog_with!(self.qlog_streamer, q, {
                     let ev = self.recovery.to_qlog();
-                    q.add_event(ev).ok();
+                    q.add_event_with_instant(ev, now).ok();
                 });
 
                 return;

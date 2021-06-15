@@ -660,7 +660,7 @@ impl QlogStreamer {
         Ok(())
     }
 
-    /// Writes a JSON-serialized `EventField`s.
+    /// Writes a JSON-serialized `EventField`s at `std::time::Instant::now()`.
     ///
     /// Some qlog events can contain `QuicFrames`. If this is detected `true` is
     /// returned and the streamer enters a frame-serialization mode that is only
@@ -669,6 +669,22 @@ impl QlogStreamer {
     ///
     /// If the event contains no array of `QuicFrames` return `false`.
     pub fn add_event(&mut self, event: event::Event) -> Result<bool> {
+        let now = std::time::Instant::now();
+
+        self.add_event_with_instant(event, now)
+    }
+
+    /// Writes a JSON-serialized `EventField`s with the provided instant.
+    ///
+    /// Some qlog events can contain `QuicFrames`. If this is detected `true` is
+    /// returned and the streamer enters a frame-serialization mode that is only
+    /// concluded by `finish_frames()`. In this mode, attempts to log additional
+    /// events are ignored.
+    ///
+    /// If the event contains no array of `QuicFrames` return `false`.
+    pub fn add_event_with_instant(
+        &mut self, event: event::Event, now: std::time::Instant,
+    ) -> Result<bool> {
         if self.state != StreamerState::Ready {
             return Err(Error::InvalidState);
         }
@@ -676,7 +692,7 @@ impl QlogStreamer {
         let event_time = if cfg!(test) {
             std::time::Duration::from_secs(0)
         } else {
-            self.start_time.elapsed()
+            now.duration_since(self.start_time)
         };
 
         let rel = match &self.qlog.traces[0].configuration {
@@ -2939,6 +2955,24 @@ mod tests {
             _ => false,
         });
 
+        // Adding an event with an external time should work too.
+        // For tests, it will resolve to 0 but we care about proving the API
+        // here, not timing specifics.
+        let now = std::time::Instant::now();
+
+        assert!(match s.add_event_with_instant(event3.clone(), now) {
+            Ok(true) => true,
+            _ => false,
+        });
+        assert!(match s.add_frame(frame3.clone(), false) {
+            Ok(()) => true,
+            _ => false,
+        });
+        assert!(match s.finish_frames() {
+            Ok(()) => true,
+            _ => false,
+        });
+
         assert!(match s.finish_log() {
             Ok(()) => true,
             _ => false,
@@ -2947,7 +2981,7 @@ mod tests {
         let r = s.writer();
         let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
 
-        let log_string = r#"{"qlog_version":"version","title":"title","description":"description","traces":[{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_units":"ms","time_offset":"0"},"event_fields":["relative_time","category","event","data"],"events":[["0","transport","packet_sent",{"packet_type":"handshake","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"40","offset":"40","length":"400","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw_encrypted":"encrypted_foo","raw_decrypted":"decrypted_foo","frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}]]}]}"#;
+        let log_string = r#"{"qlog_version":"version","title":"title","description":"description","traces":[{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_units":"ms","time_offset":"0"},"event_fields":["relative_time","category","event","data"],"events":[["0","transport","packet_sent",{"packet_type":"handshake","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"40","offset":"40","length":"400","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw_encrypted":"encrypted_foo","raw_decrypted":"decrypted_foo","frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw_encrypted":"encrypted_foo","raw_decrypted":"decrypted_foo","frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}]]}]}"#;
 
         let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
 
