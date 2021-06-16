@@ -3448,6 +3448,9 @@ impl Connection {
         // Truncate the input buffer based on the connection's send capacity if
         // necessary.
         let cap = self.tx_cap;
+        if cap == 0 {
+            return Err(Error::Done)
+        }
 
         let (buf, fin) = if cap < buf.len() {
             (&buf[..cap], false)
