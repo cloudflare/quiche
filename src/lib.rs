@@ -5061,7 +5061,7 @@ pub struct Stats {
     /// The number of QUIC packets that were lost.
     pub lost: usize,
 
-    /// The number of QUIC packets with retransmitted data.
+    /// The number of sent QUIC packets with retransmitted data.
     pub retrans: usize,
 
     /// The estimated round-trip time of the connection.
@@ -5076,7 +5076,7 @@ pub struct Stats {
     /// The number of received bytes.
     pub recv_bytes: u64,
 
-    /// The number of stream bytes lost.
+    /// The number of bytes lost.
     pub lost_bytes: u64,
 
     /// The number of stream bytes retranmitted.
