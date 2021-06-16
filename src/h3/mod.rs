@@ -2145,6 +2145,7 @@ pub mod testing {
             config.set_initial_max_streams_uni(5);
             config.verify_peer(false);
             config.enable_dgram(true, 3, 3);
+            config.set_ack_delay_exponent(8);
 
             let h3_config = Config::new()?;
             Session::with_configs(&mut config, &h3_config)

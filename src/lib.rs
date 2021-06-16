@@ -5558,6 +5558,7 @@ pub mod testing {
             config.set_initial_max_stream_data_bidi_remote(15);
             config.set_initial_max_streams_bidi(3);
             config.set_initial_max_streams_uni(3);
+            config.set_ack_delay_exponent(8);
 
             Ok(Pipe {
                 client: connect(
@@ -5588,6 +5589,7 @@ pub mod testing {
             config.set_initial_max_stream_data_bidi_remote(15);
             config.set_initial_max_streams_bidi(3);
             config.set_initial_max_streams_uni(3);
+            config.set_ack_delay_exponent(8);
 
             Ok(Pipe {
                 client: connect(
