@@ -418,7 +418,7 @@ typedef struct {
     // The number of QUIC packets that were lost.
     size_t lost;
 
-    // The number of QUIC packets with retranmitted data.
+    // The number of sent QUIC packets with retranmitted data.
     size_t retrans;
 
     // The estimated round-trip time of the connection (in nanoseconds).
@@ -433,7 +433,7 @@ typedef struct {
     // The number of recevied bytes.
     uint64_t recv_bytes;
 
-    // The number of stream bytes lost.
+    // The number of bytes lost.
     uint64_t lost_bytes;
 
     // The number of stream bytes retransmitted.
