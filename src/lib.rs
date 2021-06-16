@@ -980,6 +980,9 @@ pub struct Connection {
     /// Total number of sent packets.
     sent_count: usize,
 
+    /// Total number of packets sent with data retransmitted.
+    retrans_count: usize,
+
     /// Total number of bytes received from the peer.
     rx_data: u64,
 
@@ -1005,6 +1008,16 @@ pub struct Connection {
     /// Total number of bytes the server can send before the peer's address
     /// is verified.
     max_send_bytes: usize,
+
+    /// Total number of bytes retransmitted over the connection.
+    /// This counts only STREAM and CRYPTO data.
+    stream_retrans_bytes: u64,
+
+    /// Total number of bytes sent over the connection.
+    sent_bytes: u64,
+
+    /// Total number of bytes recevied over the connection.
+    recv_bytes: u64,
 
     /// Streams map, indexed by stream ID.
     streams: stream::StreamMap,
@@ -1359,6 +1372,9 @@ impl Connection {
 
             recv_count: 0,
             sent_count: 0,
+            retrans_count: 0,
+            sent_bytes: 0,
+            recv_bytes: 0,
 
             rx_data: 0,
             max_rx_data,
@@ -1369,6 +1385,8 @@ impl Connection {
 
             tx_data: 0,
             max_tx_data: 0,
+
+            stream_retrans_bytes: 0,
 
             max_send_bytes: 0,
 
@@ -2238,6 +2256,8 @@ impl Connection {
 
         let read = b.off() + aead_tag_len;
 
+        self.recv_bytes += read as u64;
+
         // An Handshake packet has been received from the client and has been
         // successfully processed, so we can drop the initial state and consider
         // the client's address to be verified.
@@ -2440,6 +2460,8 @@ impl Connection {
 
         let epoch = pkt_type.to_epoch()?;
 
+        let stream_retrans_bytes = self.stream_retrans_bytes;
+
         // Process lost frames.
         for lost in self.recovery.lost[epoch].drain(..) {
             match lost {
@@ -2448,6 +2470,8 @@ impl Connection {
                         .crypto_stream
                         .send
                         .retransmit(offset, length);
+
+                    self.stream_retrans_bytes += length as u64;
                 },
 
                 frame::Frame::StreamHeader {
@@ -2482,6 +2506,8 @@ impl Connection {
                             incremental,
                         );
                     }
+
+                    self.stream_retrans_bytes += length as u64;
                 },
 
                 frame::Frame::ACK { .. } => {
@@ -2514,6 +2540,10 @@ impl Connection {
 
                 _ => (),
             }
+        }
+
+        if stream_retrans_bytes > self.stream_retrans_bytes {
+            self.retrans_count += 1;
         }
 
         let mut left = b.cap();
@@ -3224,6 +3254,7 @@ impl Connection {
         self.pkt_num_spaces[epoch].next_pkt_num += 1;
 
         self.sent_count += 1;
+        self.sent_bytes += written as u64;
 
         if self.dgram_send_queue.byte_size() > self.recovery.cwnd_available() {
             self.recovery.update_app_limited(false);
@@ -4266,8 +4297,14 @@ impl Connection {
             recv: self.recv_count,
             sent: self.sent_count,
             lost: self.recovery.lost_count,
+            retrans: self.retrans_count,
             cwnd: self.recovery.cwnd(),
             rtt: self.recovery.rtt(),
+            sent_bytes: self.sent_bytes,
+            lost_bytes: self.recovery.bytes_lost,
+            recv_bytes: self.recv_bytes,
+            stream_retrans_bytes: self.stream_retrans_bytes,
+            pmtu: self.recovery.max_datagram_size(),
             delivery_rate: self.recovery.delivery_rate(),
         }
     }
@@ -5024,11 +5061,29 @@ pub struct Stats {
     /// The number of QUIC packets that were lost.
     pub lost: usize,
 
+    /// The number of sent QUIC packets with retransmitted data.
+    pub retrans: usize,
+
     /// The estimated round-trip time of the connection.
     pub rtt: time::Duration,
 
     /// The size of the connection's congestion window in bytes.
     pub cwnd: usize,
+
+    /// The number of sent bytes.
+    pub sent_bytes: u64,
+
+    /// The number of received bytes.
+    pub recv_bytes: u64,
+
+    /// The number of bytes lost.
+    pub lost_bytes: u64,
+
+    /// The number of stream bytes retranmitted.
+    pub stream_retrans_bytes: u64,
+
+    /// The current PMTU for the connection.
+    pub pmtu: usize,
 
     /// The most recent data delivery rate estimate in bytes/s.
     pub delivery_rate: u64,

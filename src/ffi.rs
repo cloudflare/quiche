@@ -948,8 +948,14 @@ pub struct Stats {
     recv: usize,
     sent: usize,
     lost: usize,
+    retrans: usize,
     rtt: u64,
     cwnd: usize,
+    sent_bytes: u64,
+    lost_bytes: u64,
+    recv_bytes: u64,
+    stream_retrans_bytes: u64,
+    pmtu: usize,
     delivery_rate: u64,
 }
 
@@ -960,8 +966,14 @@ pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.recv = stats.recv;
     out.sent = stats.sent;
     out.lost = stats.lost;
+    out.retrans = stats.retrans;
     out.rtt = stats.rtt.as_nanos() as u64;
     out.cwnd = stats.cwnd;
+    out.sent_bytes = stats.sent_bytes;
+    out.lost_bytes = stats.lost_bytes;
+    out.recv_bytes = stats.recv_bytes;
+    out.stream_retrans_bytes = stats.stream_retrans_bytes;
+    out.pmtu = stats.pmtu;
     out.delivery_rate = stats.delivery_rate;
 }
 

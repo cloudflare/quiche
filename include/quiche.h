@@ -418,11 +418,29 @@ typedef struct {
     // The number of QUIC packets that were lost.
     size_t lost;
 
+    // The number of sent QUIC packets with retranmitted data.
+    size_t retrans;
+
     // The estimated round-trip time of the connection (in nanoseconds).
     uint64_t rtt;
 
     // The size of the connection's congestion window in bytes.
     size_t cwnd;
+
+    // The number of sent bytes.
+    uint64_t sent_bytes;
+
+    // The number of recevied bytes.
+    uint64_t recv_bytes;
+
+    // The number of bytes lost.
+    uint64_t lost_bytes;
+
+    // The number of stream bytes retransmitted.
+    uint64_t stream_retrans_bytes;
+
+    // The current PMTU for the connection.
+    size_t pmtu;
 
     // The estimated data delivery rate in bytes/s.
     uint64_t delivery_rate;
