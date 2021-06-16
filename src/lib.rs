@@ -8080,7 +8080,7 @@ mod tests {
             Ok(15)
         );
         assert_eq!(pipe.advance(), Ok(()));
-        assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(0));
+        assert_eq!(pipe.client.stream_send(8, b"a", false), Err(Error::Done));
         assert_eq!(pipe.advance(), Ok(()));
 
         let mut r = pipe.server.readable();
@@ -10450,7 +10450,7 @@ mod tests {
         assert_eq!(pipe.server.stream_send(8, &buf[..5000], false), Ok(2000));
 
         // No more connection send capacity.
-        assert_eq!(pipe.server.stream_send(12, &buf[..5000], false), Ok(0));
+        assert_eq!(pipe.server.stream_send(12, &buf[..5000], false), Err(Error::Done));
         assert_eq!(pipe.server.tx_cap, 0);
 
         assert_eq!(pipe.advance(), Ok(()));
