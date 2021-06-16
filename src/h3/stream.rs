@@ -27,6 +27,7 @@
 use super::Error;
 use super::Result;
 
+use crate::h3::InternalErrorSubType;
 use crate::octets;
 
 use super::frame;
@@ -347,7 +348,7 @@ impl Stream {
             return Ok(());
         }
 
-        Err(Error::InternalError)
+        Err(Error::InternalError(InternalErrorSubType::StreamProcessing))
     }
 
     /// Tries to fill the state buffer by reading data from the corresponding
@@ -556,7 +557,9 @@ impl Stream {
             // payload size of a GREASE frame), so we need to limit the maximum
             // size to avoid DoS.
             if self.state_len > MAX_STATE_BUF_SIZE {
-                return Err(Error::InternalError);
+                return Err(Error::InternalError(
+                    InternalErrorSubType::OversizedFrame,
+                ));
             }
 
             self.state_buf.resize(self.state_len, 0);

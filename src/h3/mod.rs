@@ -302,6 +302,19 @@ const PRIORITY_URGENCY_OFFSET: u8 = 124;
 /// [`Result`]: https://doc.rust-lang.org/std/result/enum.Result.html
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+/// Internal error subtypes used with `Error::InternalError`.
+pub enum InternalErrorSubType {
+    /// Error related to QPACK.
+    Qpack,
+
+    /// Error related to HTTP/3 stream processing.
+    StreamProcessing,
+
+    /// Error caused by an HTTP/3 frame larger than will quiche process.
+    OversizedFrame,
+}
+
 /// An HTTP/3 error.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Error {
@@ -311,8 +324,9 @@ pub enum Error {
     /// The provided buffer is too short.
     BufferTooShort,
 
-    /// Internal error in the HTTP/3 stack.
-    InternalError,
+    /// Internal error in the HTTP/3 stack. The subtype is returned as
+    /// associated data.
+    InternalError(InternalErrorSubType),
 
     /// Endpoint detected that the peer is exhibiting behavior that causes.
     /// excessive load.
@@ -378,7 +392,7 @@ impl Error {
     fn to_wire(self) -> u64 {
         match self {
             Error::Done => 0x100,
-            Error::InternalError => 0x102,
+            Error::InternalError(..) => 0x102,
             Error::StreamCreationError => 0x103,
             Error::ClosedCriticalStream => 0x104,
             Error::FrameUnexpected => 0x105,
@@ -898,7 +912,7 @@ impl Connection {
         let len = self
             .qpack_encoder
             .encode(&headers, &mut header_block)
-            .map_err(|_| Error::InternalError)?;
+            .map_err(|_| Error::InternalError(InternalErrorSubType::Qpack))?;
 
         header_block.truncate(len);
 
@@ -3329,7 +3343,10 @@ mod tests {
 
         s.advance().ok();
 
-        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::InternalError));
+        assert_eq!(
+            s.server.poll(&mut s.pipe.server),
+            Err(Error::InternalError(InternalErrorSubType::OversizedFrame))
+        );
     }
 
     #[test]
@@ -3521,7 +3538,10 @@ mod tests {
 
         s.advance().ok();
 
-        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::InternalError));
+        assert_eq!(
+            s.server.poll(&mut s.pipe.server),
+            Err(Error::InternalError(InternalErrorSubType::OversizedFrame))
+        );
 
         // Try to call poll() again after an error occurred.
         assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::Done));
