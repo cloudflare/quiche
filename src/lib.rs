@@ -3449,7 +3449,7 @@ impl Connection {
         // necessary.
         let cap = self.tx_cap;
         if cap == 0 && !fin {
-            return Err(Error::Done)
+            return Err(Error::Done);
         }
 
         let (buf, fin) = if cap < buf.len() {
