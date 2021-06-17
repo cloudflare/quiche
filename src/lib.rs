@@ -3393,6 +3393,10 @@ impl Connection {
     /// On success the number of bytes written is returned, or [`Done`] if no
     /// data was written (e.g. because the stream has no capacity).
     ///
+    /// Applications can provide a 0-length buffer with the fin flag set to
+    /// true. This will lead to a 0-length FIN STREAM frame being sent at the
+    /// latest offset. This is the only case where [`Ok(0)`] is returned.
+    ///
     /// In addition, if the peer has signalled that it doesn't want to receive
     /// any more data from this stream by sending the `STOP_SENDING` frame, the
     /// [`StreamStopped`] error will be returned instead of any data.
@@ -3451,6 +3455,9 @@ impl Connection {
         // Truncate the input buffer based on the connection's send capacity if
         // necessary.
         let cap = self.tx_cap;
+        if cap == 0 && !fin {
+            return Err(Error::Done);
+        }
 
         let (buf, fin) = if cap < buf.len() {
             (&buf[..cap], false)
@@ -8220,7 +8227,7 @@ mod tests {
             Ok(15)
         );
         assert_eq!(pipe.advance(), Ok(()));
-        assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(0));
+        assert_eq!(pipe.client.stream_send(8, b"a", false), Err(Error::Done));
         assert_eq!(pipe.advance(), Ok(()));
 
         let mut r = pipe.server.readable();
@@ -10590,7 +10597,10 @@ mod tests {
         assert_eq!(pipe.server.stream_send(8, &buf[..5000], false), Ok(2000));
 
         // No more connection send capacity.
-        assert_eq!(pipe.server.stream_send(12, &buf[..5000], false), Ok(0));
+        assert_eq!(
+            pipe.server.stream_send(12, &buf[..5000], false),
+            Err(Error::Done)
+        );
         assert_eq!(pipe.server.tx_cap, 0);
 
         assert_eq!(pipe.advance(), Ok(()));
