@@ -3390,8 +3390,8 @@ impl Connection {
     /// On success the number of bytes written is returned, or [`Done`] if no
     /// data was written (e.g. because the stream has no capacity).
     ///
-    /// Applications can provide a 0-length buffer with the fin flag set to 
-    /// true. This will lead to a 0-length FIN STREAM frame being sent at the 
+    /// Applications can provide a 0-length buffer with the fin flag set to
+    /// true. This will lead to a 0-length FIN STREAM frame being sent at the
     /// latest offset. This is the only case where [`Ok(0)`] is returned.
     ///
     /// In addition, if the peer has signalled that it doesn't want to receive
