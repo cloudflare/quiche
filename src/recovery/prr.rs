@@ -77,9 +77,10 @@ impl PRR {
                 self.prr_out
         } else {
             // PRR-SSRB.
-            let limit =
-                cmp::max(self.prr_delivered - self.prr_out, delivered_data) +
-                    max_datagram_size;
+            let limit = cmp::max(
+                self.prr_delivered.saturating_sub(self.prr_out),
+                delivered_data,
+            ) + max_datagram_size;
 
             // Attempt to catch up, as permitted by limit
             cmp::min(ssthresh - pipe, limit)
