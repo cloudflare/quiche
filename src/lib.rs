@@ -303,8 +303,6 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
 
-use std::sync::Mutex;
-
 use std::collections::VecDeque;
 
 /// The current QUIC wire version.
@@ -537,11 +535,7 @@ pub struct Config {
 
     version: u32,
 
-    // BoringSSL's SSL_CTX structure is technically safe to share across threads
-    // but once shared, functions that modify it can't be used any more. We can't
-    // encode that in Rust, so just make it Send+Sync with a mutex to fulfill
-    // the Sync constraint.
-    tls_ctx: Mutex<tls::Context>,
+    tls_ctx: tls::Context,
 
     application_protos: Vec<Vec<u8>>,
 
@@ -576,7 +570,7 @@ impl Config {
             return Err(Error::UnknownVersion);
         }
 
-        let tls_ctx = Mutex::new(tls::Context::new()?);
+        let tls_ctx = tls::Context::new()?;
 
         Ok(Config {
             local_transport_params: TransportParams::default(),
@@ -607,10 +601,7 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn load_cert_chain_from_pem_file(&mut self, file: &str) -> Result<()> {
-        self.tls_ctx
-            .lock()
-            .unwrap()
-            .use_certificate_chain_file(file)
+        self.tls_ctx.use_certificate_chain_file(file)
     }
 
     /// Configures the given private key.
@@ -625,7 +616,7 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn load_priv_key_from_pem_file(&mut self, file: &str) -> Result<()> {
-        self.tls_ctx.lock().unwrap().use_privkey_file(file)
+        self.tls_ctx.use_privkey_file(file)
     }
 
     /// Specifies a file where trusted CA certificates are stored for the
@@ -641,10 +632,7 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn load_verify_locations_from_file(&mut self, file: &str) -> Result<()> {
-        self.tls_ctx
-            .lock()
-            .unwrap()
-            .load_verify_locations_from_file(file)
+        self.tls_ctx.load_verify_locations_from_file(file)
     }
 
     /// Specifies a directory where trusted CA certificates are stored for the
@@ -662,10 +650,7 @@ impl Config {
     pub fn load_verify_locations_from_directory(
         &mut self, dir: &str,
     ) -> Result<()> {
-        self.tls_ctx
-            .lock()
-            .unwrap()
-            .load_verify_locations_from_directory(dir)
+        self.tls_ctx.load_verify_locations_from_directory(dir)
     }
 
     /// Configures whether to verify the peer's certificate.
@@ -673,7 +658,7 @@ impl Config {
     /// The default value is `true` for client connections, and `false` for
     /// server ones.
     pub fn verify_peer(&mut self, verify: bool) {
-        self.tls_ctx.lock().unwrap().set_verify(verify);
+        self.tls_ctx.set_verify(verify);
     }
 
     /// Configures whether to send GREASE values.
@@ -692,7 +677,7 @@ impl Config {
     /// [`set_keylog()`]: struct.Connection.html#method.set_keylog
     /// [keylog]: https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/Key_Log_Format
     pub fn log_keys(&mut self) {
-        self.tls_ctx.lock().unwrap().enable_keylog();
+        self.tls_ctx.enable_keylog();
     }
 
     /// Configures the session ticket key material.
@@ -706,12 +691,12 @@ impl Config {
     /// servers), in which case the application is also responsible for
     /// rotating the key to provide forward secrecy.
     pub fn set_ticket_key(&mut self, key: &[u8]) -> Result<()> {
-        self.tls_ctx.lock().unwrap().set_ticket_key(key)
+        self.tls_ctx.set_ticket_key(key)
     }
 
     /// Enables sending or receiving early data.
     pub fn enable_early_data(&mut self) {
-        self.tls_ctx.lock().unwrap().set_early_data_enabled(true);
+        self.tls_ctx.set_early_data_enabled(true);
     }
 
     /// Configures the list of supported application protocols.
@@ -745,10 +730,7 @@ impl Config {
 
         self.application_protos = protos_list;
 
-        self.tls_ctx
-            .lock()
-            .unwrap()
-            .set_alpn(&self.application_protos)
+        self.tls_ctx.set_alpn(&self.application_protos)
     }
 
     /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
@@ -954,11 +936,7 @@ pub struct Connection {
     local_transport_params: TransportParams,
 
     /// TLS handshake state.
-    ///
-    /// Due to the requirement for `Connection` to be Send+Sync, and the fact
-    /// that BoringSSL's SSL structure is not thread safe, we need to wrap the
-    /// handshake object in a mutex.
-    handshake: Mutex<tls::Handshake>,
+    handshake: tls::Handshake,
 
     /// Serialized TLS session buffer.
     ///
@@ -1174,10 +1152,10 @@ pub fn connect(
     server_name: Option<&str>, scid: &ConnectionId, to: SocketAddr,
     config: &mut Config,
 ) -> Result<Pin<Box<Connection>>> {
-    let conn = Connection::new(scid, None, to, config, false)?;
+    let mut conn = Connection::new(scid, None, to, config, false)?;
 
     if let Some(server_name) = server_name {
-        conn.handshake.lock().unwrap().set_host_name(server_name)?;
+        conn.handshake.set_host_name(server_name)?;
     }
 
     Ok(conn)
@@ -1332,7 +1310,7 @@ impl Connection {
         scid: &ConnectionId, odcid: Option<&ConnectionId>, peer: SocketAddr,
         config: &mut Config, is_server: bool,
     ) -> Result<Pin<Box<Connection>>> {
-        let tls = config.tls_ctx.lock().unwrap().new_handshake()?;
+        let tls = config.tls_ctx.new_handshake()?;
         Connection::with_tls(scid, odcid, peer, config, tls, is_server)
     }
 
@@ -1363,7 +1341,7 @@ impl Connection {
 
             local_transport_params: config.local_transport_params.clone(),
 
-            handshake: Mutex::new(tls),
+            handshake: tls,
 
             session: None,
 
@@ -1483,11 +1461,10 @@ impl Connection {
         conn.local_transport_params.initial_source_connection_id =
             Some(scid.to_vec().into());
 
-        conn.handshake.lock().unwrap().init(&conn)?;
+        let conn_ptr = &conn as &Connection as *const Connection;
+        conn.handshake.init(conn_ptr, is_server)?;
 
         conn.handshake
-            .lock()
-            .unwrap()
             .use_legacy_codepoint(config.version != PROTOCOL_VERSION_V1);
 
         conn.encode_transport_params()?;
@@ -1572,13 +1549,11 @@ impl Connection {
 
         streamer.start_log().ok();
 
-        let handshake = self.handshake.lock().unwrap();
-
         let ev = self.local_transport_params.to_qlog(
             qlog::TransportOwner::Local,
             self.version,
-            handshake.alpn_protocol(),
-            handshake.cipher(),
+            self.handshake.alpn_protocol(),
+            self.handshake.cipher(),
         );
 
         streamer.add_event(ev).ok();
@@ -1602,10 +1577,7 @@ impl Connection {
         let session_len = b.get_u64()? as usize;
         let session_bytes = b.get_bytes(session_len)?;
 
-        self.handshake
-            .lock()
-            .unwrap()
-            .set_session(session_bytes.as_ref())?;
+        self.handshake.set_session(session_bytes.as_ref())?;
 
         let raw_params_len = b.get_u64()? as usize;
         let raw_params_bytes = b.get_bytes(raw_params_len)?;
@@ -1831,7 +1803,7 @@ impl Connection {
             // Reset connection state to force sending another Initial packet.
             self.drop_epoch_state(packet::EPOCH_INITIAL, now);
             self.got_peer_conn_id = false;
-            self.handshake.lock().unwrap().clear()?;
+            self.handshake.clear()?;
 
             self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
                 Some(aead_open);
@@ -1839,8 +1811,6 @@ impl Connection {
                 Some(aead_seal);
 
             self.handshake
-                .lock()
-                .unwrap()
                 .use_legacy_codepoint(self.version != PROTOCOL_VERSION_V1);
 
             // Encode transport parameters again, as the new version might be
@@ -1890,7 +1860,7 @@ impl Connection {
             // Reset connection state to force sending another Initial packet.
             self.drop_epoch_state(packet::EPOCH_INITIAL, now);
             self.got_peer_conn_id = false;
-            self.handshake.lock().unwrap().clear()?;
+            self.handshake.clear()?;
 
             self.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
                 Some(aead_open);
@@ -1909,8 +1879,6 @@ impl Connection {
             self.did_version_negotiation = true;
 
             self.handshake
-                .lock()
-                .unwrap()
                 .use_legacy_codepoint(self.version != PROTOCOL_VERSION_V1);
 
             // Encode transport parameters again, as the new version might be
@@ -2152,13 +2120,11 @@ impl Connection {
         if self.is_established() {
             qlog_with!(self.qlog_streamer, q, {
                 if !self.qlogged_peer_params {
-                    let handshake = self.handshake.lock().unwrap();
-
                     let ev = self.peer_transport_params.to_qlog(
                         qlog::TransportOwner::Remote,
                         self.version,
-                        handshake.alpn_protocol(),
-                        handshake.cipher(),
+                        self.handshake.alpn_protocol(),
+                        self.handshake.cipher(),
                     );
 
                     q.add_event_with_instant(ev, now).ok();
@@ -4212,7 +4178,7 @@ impl Connection {
     /// Returns the peer's leaf certificate (if any) as a DER-encoded buffer.
     #[inline]
     pub fn peer_cert(&self) -> Option<Vec<u8>> {
-        self.handshake.lock().unwrap().peer_cert()
+        self.handshake.peer_cert()
     }
 
     /// Returns the serialized cryptographic session for the connection.
@@ -4253,14 +4219,14 @@ impl Connection {
     /// Returns true if the connection is resumed.
     #[inline]
     pub fn is_resumed(&self) -> bool {
-        self.handshake.lock().unwrap().is_resumed()
+        self.handshake.is_resumed()
     }
 
     /// Returns true if the connection has a pending handshake that has
     /// progressed enough to send or receive early data.
     #[inline]
     pub fn is_in_early_data(&self) -> bool {
-        self.handshake.lock().unwrap().is_in_early_data()
+        self.handshake.is_in_early_data()
     }
 
     /// Returns whether there is stream or DATAGRAM data available to read.
@@ -4371,10 +4337,7 @@ impl Connection {
             &mut raw_params,
         )?;
 
-        self.handshake
-            .lock()
-            .unwrap()
-            .set_quic_transport_params(raw_params)?;
+        self.handshake.set_quic_transport_params(raw_params)?;
 
         Ok(())
     }
@@ -4471,14 +4434,12 @@ impl Connection {
     ///
     /// If the connection is already established, it does nothing.
     fn do_handshake(&mut self) -> Result<()> {
-        let handshake = self.handshake.lock().unwrap();
-
-        // Handshake is already complete, nothing more to do.
-        if handshake.is_completed() {
+        if self.handshake_completed {
+            // Handshake is already complete, nothing more to do.
             return Ok(());
         }
 
-        match handshake.do_handshake() {
+        match self.handshake.do_handshake() {
             Ok(_) => (),
 
             Err(Error::Done) => {
@@ -4488,14 +4449,11 @@ impl Connection {
                 // This is potentially dangerous as the handshake hasn't been
                 // completed yet, though it's required to be able to send data
                 // in 0.5 RTT.
-                let raw_params = handshake.quic_transport_params();
+                let raw_params = self.handshake.quic_transport_params();
 
                 if !self.parsed_peer_transport_params && !raw_params.is_empty() {
                     let peer_params =
                         TransportParams::decode(&raw_params, self.is_server)?;
-
-                    // Unlock handshake object.
-                    drop(handshake);
 
                     self.parse_peer_transport_params(peer_params)?;
                 }
@@ -4506,23 +4464,15 @@ impl Connection {
             Err(e) => return Err(e),
         };
 
-        self.handshake_completed = handshake.is_completed();
+        self.handshake_completed = self.handshake.is_completed();
 
-        self.alpn = handshake.alpn_protocol().to_vec();
+        self.alpn = self.handshake.alpn_protocol().to_vec();
 
-        let cipher = handshake.cipher();
-        let curve = handshake.curve();
-        let sigalg = handshake.sigalg();
-        let is_resumed = handshake.is_resumed();
-
-        let raw_params = handshake.quic_transport_params();
+        let raw_params = self.handshake.quic_transport_params();
 
         if !self.parsed_peer_transport_params && !raw_params.is_empty() {
             let peer_params =
                 TransportParams::decode(&raw_params, self.is_server)?;
-
-            // Unlock handshake object.
-            drop(handshake);
 
             self.parse_peer_transport_params(peer_params)?;
         }
@@ -4534,8 +4484,13 @@ impl Connection {
         }
 
         trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
-               &self.trace_id, std::str::from_utf8(self.application_proto()),
-               cipher, curve, sigalg, is_resumed, self.peer_transport_params);
+               &self.trace_id,
+               std::str::from_utf8(self.application_proto()),
+               self.handshake.cipher(),
+               self.handshake.curve(),
+               self.handshake.sigalg(),
+               self.handshake.is_resumed(),
+               self.peer_transport_params);
 
         Ok(())
     }
@@ -4549,7 +4504,7 @@ impl Connection {
             .as_ref()
             .map_or(false, |conn_err| !conn_err.is_app)
         {
-            let epoch = match self.handshake.lock().unwrap().write_level() {
+            let epoch = match self.handshake.write_level() {
                 crypto::Level::Initial => packet::EPOCH_INITIAL,
                 crypto::Level::ZeroRTT => unreachable!(),
                 crypto::Level::Handshake => packet::EPOCH_HANDSHAKE,
@@ -4778,14 +4733,11 @@ impl Connection {
 
                 while let Ok((read, _)) = stream.recv.emit(&mut crypto_buf) {
                     let recv_buf = &crypto_buf[..read];
-                    self.handshake
-                        .lock()
-                        .unwrap()
-                        .provide_data(level, &recv_buf)?;
+                    self.handshake.provide_data(level, &recv_buf)?;
                 }
 
                 if self.is_established() {
-                    self.handshake.lock().unwrap().process_post_handshake()?;
+                    self.handshake.process_post_handshake()?;
                 } else {
                     self.do_handshake()?;
                 }
@@ -6181,11 +6133,7 @@ mod tests {
 
         // Disable session tickets on the server (SSL_OP_NO_TICKET) to avoid
         // triggering 1-RTT packet send with a CRYPTO frame.
-        pipe.server
-            .handshake
-            .lock()
-            .unwrap()
-            .set_options(0x0000_4000);
+        pipe.server.handshake.set_options(0x0000_4000);
 
         assert_eq!(pipe.handshake(), Ok(()));
 
