@@ -73,8 +73,8 @@ impl PRR {
         self.snd_cnt = if pipe > ssthresh {
             // Proportional Rate Reduction.
             ((self.prr_delivered * ssthresh + self.recoverfs - 1) /
-                self.recoverfs) -
-                self.prr_out
+                self.recoverfs)
+                .saturating_sub(self.prr_out)
         } else {
             // PRR-SSRB.
             let limit = cmp::max(
