@@ -72,9 +72,13 @@ impl PRR {
 
         self.snd_cnt = if pipe > ssthresh {
             // Proportional Rate Reduction.
-            ((self.prr_delivered * ssthresh + self.recoverfs - 1) /
-                self.recoverfs)
-                .saturating_sub(self.prr_out)
+            if self.recoverfs > 0 {
+                ((self.prr_delivered * ssthresh + self.recoverfs - 1) /
+                    self.recoverfs)
+                    .saturating_sub(self.prr_out)
+            } else {
+                0
+            }
         } else {
             // PRR-SSRB.
             let limit = cmp::max(
@@ -148,6 +152,44 @@ mod tests {
     }
 
     #[test]
+    fn on_packet_acked_prr_overflow() {
+        let mut prr = PRR::default();
+        let max_datagram_size = 1000;
+        let bytes_in_flight = max_datagram_size * 10;
+        let ssthresh = bytes_in_flight / 2;
+        let acked = 1000;
+
+        prr.congestion_event(bytes_in_flight);
+
+        prr.on_packet_sent(max_datagram_size);
+
+        // pipe > ssthresh uses PRR algorithm.
+        let pipe = bytes_in_flight + max_datagram_size;
+
+        prr.on_packet_acked(acked, pipe, ssthresh, max_datagram_size);
+
+        assert_eq!(prr.snd_cnt, 0);
+    }
+
+    #[test]
+    fn on_packet_acked_prr_zero_in_flight() {
+        let mut prr = PRR::default();
+        let max_datagram_size = 1000;
+        let bytes_in_flight = 0;
+        let ssthresh = 3000;
+        let acked = 1000;
+
+        prr.congestion_event(bytes_in_flight);
+
+        // pipe > ssthresh uses PRR algorithm.
+        let pipe = ssthresh + 1000;
+
+        prr.on_packet_acked(acked, pipe, ssthresh, max_datagram_size);
+
+        assert_eq!(prr.snd_cnt, 0);
+    }
+
+    #[test]
     fn on_packet_acked_prr_ssrb() {
         let mut prr = PRR::default();
         let max_datagram_size = 1000;
@@ -172,5 +214,25 @@ mod tests {
         prr.on_packet_acked(acked, pipe, ssthresh, max_datagram_size);
 
         assert_eq!(prr.snd_cnt, 2000);
+    }
+
+    #[test]
+    fn on_packet_acked_prr_ssrb_overflow() {
+        let mut prr = PRR::default();
+        let max_datagram_size = 1000;
+        let bytes_in_flight = max_datagram_size * 10;
+        let ssthresh = bytes_in_flight / 2;
+        let acked = 500;
+
+        prr.congestion_event(bytes_in_flight);
+
+        // pipe <= ssthresh uses PRR-SSRB algorithm.
+        let pipe = max_datagram_size;
+
+        prr.on_packet_sent(max_datagram_size);
+
+        prr.on_packet_acked(acked, pipe, ssthresh, max_datagram_size);
+
+        assert_eq!(prr.snd_cnt, 1500);
     }
 }
