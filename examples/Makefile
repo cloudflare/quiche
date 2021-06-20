@@ -17,7 +17,7 @@ LIBSSL_DIR = $(dir $(shell find ${BUILD_DIR} -name libssl.a))
 
 LDFLAGS = -L$(LIBCRYPTO_DIR) -L$(LIBSSL_DIR) -L$(LIB_DIR)
 
-LIBS = $(LIB_DIR)/libquiche.a -lev -ldl -pthread
+LIBS = $(LIB_DIR)/libquiche.a -lev -ldl -pthread -lm
 
 all: client server http3-client http3-server
 
