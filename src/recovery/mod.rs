@@ -866,7 +866,7 @@ impl Recovery {
             None, // probe_count
             Some(self.cwnd() as u64),
             Some(self.bytes_in_flight as u64),
-            None, // ssthresh
+            Some(self.ssthresh as u64),
             None, // packets_in_flight
             None, // in_recovery
             None, // pacing_rate
