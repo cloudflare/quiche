@@ -1,4 +1,4 @@
-From ddf9ebdb4460bb059b50ef6d7147e7553853f944 Mon Sep 17 00:00:00 2001
+From baa62b92e6446d7c0d79b55e54c18232fca64748 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 22 Oct 2020 12:28:02 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -14,7 +14,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  auto/options                            |    9 +
  src/core/ngx_connection.h               |    7 +
  src/core/ngx_core.h                     |    3 +
- src/event/ngx_event_quic.c              |  618 +++++++
+ src/event/ngx_event_quic.c              |  620 +++++++
  src/event/ngx_event_quic.h              |   49 +
  src/event/ngx_event_udp.c               |    8 +
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
@@ -26,13 +26,13 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   33 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2221 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2225 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   79 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
  src/os/unix/ngx_udp_sendmsg_chain.c     |    1 +
- 28 files changed, 3734 insertions(+), 11 deletions(-)
+ 28 files changed, 3740 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -340,10 +340,10 @@ index 93ca9174d..d0441f034 100644
  #include <ngx_module.h>
 diff --git a/src/event/ngx_event_quic.c b/src/event/ngx_event_quic.c
 new file mode 100644
-index 000000000..6172e5be3
+index 000000000..591a809e0
 --- /dev/null
 +++ b/src/event/ngx_event_quic.c
-@@ -0,0 +1,618 @@
+@@ -0,0 +1,620 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -949,6 +949,8 @@ index 000000000..6172e5be3
 +
 +    out_chain.buf = &out_buf;
 +    out_chain.next = NULL;
++
++    c->write->ready = 1;
 +
 +    cl = c->send_chain(c, &out_chain, 0);
 +
@@ -1608,10 +1610,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..fd0bcfb9c
+index 000000000..9353788a2
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2221 @@
+@@ -0,0 +1,2225 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -2903,6 +2905,10 @@ index 000000000..fd0bcfb9c
 +
 +        if (rb->rest == 0) {
 +            break;
++        }
++
++        if (ngx_buf_size(cl->buf) == 0) {
++            continue;
 +        }
 +
 +        tl = ngx_chain_get_free_buf(r->pool, &rb->free);
@@ -4337,5 +4343,5 @@ index 5399c7916..9b03ca536 100644
                             "sendmsg() not ready");
              return NGX_AGAIN;
 -- 
-2.32.0.rc2
+2.32.0
 
