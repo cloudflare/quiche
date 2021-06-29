@@ -1,4 +1,4 @@
-From baa62b92e6446d7c0d79b55e54c18232fca64748 Mon Sep 17 00:00:00 2001
+From 4a2b813a633e49b83f3444c3a55b6f21b00bc1c0 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 22 Oct 2020 12:28:02 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -26,13 +26,13 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   33 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2225 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2230 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   79 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
  src/os/unix/ngx_udp_sendmsg_chain.c     |    1 +
- 28 files changed, 3740 insertions(+), 11 deletions(-)
+ 28 files changed, 3745 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -1610,10 +1610,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..9353788a2
+index 000000000..ae8264595
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2225 @@
+@@ -0,0 +1,2230 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -2895,7 +2895,12 @@ index 000000000..9353788a2
 +        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
 +                       "http3 request body filter");
 +
-+        rb->rest = clcf->client_body_buffer_size;
++        if (r->headers_in.chunked) {
++            rb->rest = clcf->client_body_buffer_size;
++            r->headers_in.content_length_n = 0;
++        } else {
++            rb->rest = r->headers_in.content_length_n;
++        }
 +    }
 +
 +    out = NULL;
