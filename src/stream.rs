@@ -696,8 +696,8 @@ pub struct RecvBuf {
     /// The maximum offset the peer is allowed to send us.
     max_data: u64,
 
-    /// The updated maximum offset the peer is allowed to send us.
-    max_data_next: u64,
+    /// The maximum offset increment that is used for the stream.
+    max_data_incr: u64,
 
     /// The final stream offset received from the peer, if any.
     fin_off: Option<u64>,
@@ -714,7 +714,8 @@ impl RecvBuf {
     fn new(max_data: u64) -> RecvBuf {
         RecvBuf {
             max_data,
-            max_data_next: max_data,
+            // MAX_DATA increments are set at half the initial max_data
+            max_data_incr: max_data/2,
             ..RecvBuf::default()
         }
     }
@@ -869,8 +870,6 @@ impl RecvBuf {
             std::collections::binary_heap::PeekMut::pop(buf);
         }
 
-        self.max_data_next = self.max_data_next.saturating_add(len as u64);
-
         Ok((len, self.is_fin()))
     }
 
@@ -913,12 +912,12 @@ impl RecvBuf {
 
     /// Commits the new max_data limit.
     pub fn update_max_data(&mut self) {
-        self.max_data = self.max_data_next;
+        self.max_data += self.max_data_incr;
     }
 
     /// Return the new max_data limit.
     pub fn max_data_next(&mut self) -> u64 {
-        self.max_data_next
+        self.max_data + self.max_data_incr
     }
 
     /// Shuts down receiving data.
@@ -944,11 +943,10 @@ impl RecvBuf {
 
     /// Returns true if we need to update the local flow control limit.
     pub fn almost_full(&self) -> bool {
-        // Send MAX_STREAM_DATA when the new limit is at least double the
-        // amount of data that can be received before blocking.
-        self.fin_off.is_none() &&
-            self.max_data_next != self.max_data &&
-            self.max_data_next / 2 > self.max_data - self.len
+        // Send MAX_STREAM_DATA when at least half of the allowed data since last MAX_STREAM_DATA
+        // has been consumed.
+        self.fin_off.is_none() && 
+        self.len > self.max_data - self.max_data_incr
     }
 
     /// Returns the largest offset ever received.
@@ -2281,7 +2279,8 @@ mod tests {
 
     #[test]
     fn recv_flow_control() {
-        let mut stream = Stream::new(15, 0, true, true);
+        let mut stream = Stream::new(16, 0, true, true);
+        assert_eq!(stream.recv.max_data_next(), 24);
         assert!(!stream.recv.almost_full());
 
         let mut buf = [0; 32];
@@ -2292,22 +2291,29 @@ mod tests {
 
         assert_eq!(stream.recv.write(second), Ok(()));
         assert_eq!(stream.recv.write(first), Ok(()));
-        assert!(!stream.recv.almost_full());
+        assert!(stream.recv.almost_full());
 
         assert_eq!(stream.recv.write(third), Err(Error::FlowControl));
+        assert_eq!(stream.recv.max_off(), 10);
+
+        stream.recv.update_max_data();
+        assert_eq!(stream.recv.max_data_next(), 32);
+        assert!(!stream.recv.almost_full());
+
 
         let (len, fin) = stream.recv.emit(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"helloworld");
         assert_eq!(fin, false);
 
-        assert!(stream.recv.almost_full());
-
-        stream.recv.update_max_data();
-        assert_eq!(stream.recv.max_data_next(), 25);
-        assert!(!stream.recv.almost_full());
-
         let third = RangeBuf::from(b"something", 10, false);
         assert_eq!(stream.recv.write(third), Ok(()));
+        assert_eq!(stream.recv.max_off(), 19);
+        assert!(stream.recv.almost_full());
+
+        let fourth = RangeBuf::from(b"!", 19, true);
+        assert_eq!(stream.recv.write(fourth), Ok(()));
+        assert_eq!(stream.recv.max_off(), 20);
+        assert!(!stream.recv.almost_full());
     }
 
     #[test]
