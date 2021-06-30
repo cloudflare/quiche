@@ -1551,7 +1551,6 @@ impl Connection {
             Some(description.to_string()),
             Some(qlog::Configuration {
                 time_offset: Some("0".to_string()),
-                time_units: Some(qlog::TimeUnits::Ms),
                 original_uris: None,
             }),
             None,
