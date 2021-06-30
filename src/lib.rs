@@ -5051,6 +5051,12 @@ impl Connection {
             completed: self.is_established(),
         }
     }
+
+    /// Returns the QLOG streaming object if it was set, otherwise None.
+    #[cfg(feature = "qlog")]
+    fn qlog_streamer(&mut self) -> Option<&mut qlog::QlogStreamer> {
+        self.qlog_streamer.as_mut()
+    }
 }
 
 /// Maps an `Error` to `Error::Done`, or itself.

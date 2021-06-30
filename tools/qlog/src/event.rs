@@ -656,7 +656,7 @@ impl Event {
     /// * `EventType`=`Http3EventType::FrameCreated`
     /// * `EventData`=`H3FrameCreated`.
     pub fn h3_frame_created(
-        stream_id: String, frame: Http3Frame, byte_length: Option<String>,
+        stream_id: String, frame: Http3Frame, length: Option<String>,
         raw: Option<String>,
     ) -> Self {
         Event {
@@ -665,7 +665,7 @@ impl Event {
             data: EventData::H3FrameCreated {
                 stream_id,
                 frame,
-                byte_length,
+                length,
                 raw,
             },
         }
@@ -680,7 +680,7 @@ impl Event {
     /// * `EventType`=`Http3EventType::FrameParsed`
     /// * `EventData`=`H3FrameParsed`.
     pub fn h3_frame_parsed(
-        stream_id: String, frame: Http3Frame, byte_length: Option<String>,
+        stream_id: String, frame: Http3Frame, length: Option<String>,
         raw: Option<String>,
     ) -> Self {
         Event {
@@ -689,7 +689,7 @@ impl Event {
             data: EventData::H3FrameParsed {
                 stream_id,
                 frame,
-                byte_length,
+                length,
                 raw,
             },
         }
@@ -871,7 +871,7 @@ impl Event {
     /// * `EventType`=`QpackEventType::InstructionSent`
     /// * `EventData`=`QpackInstructionSent`.
     pub fn qpack_instruction_sent(
-        instruction: QPackInstruction, byte_length: Option<String>,
+        instruction: QPackInstruction, length: Option<String>,
         raw: Option<String>,
     ) -> Self {
         Event {
@@ -879,7 +879,7 @@ impl Event {
             ty: EventType::QpackEventType(QpackEventType::InstructionSent),
             data: EventData::QpackInstructionSent {
                 instruction,
-                byte_length,
+                length,
                 raw,
             },
         }
@@ -894,7 +894,7 @@ impl Event {
     /// * `EventType`=`QpackEventType::InstructionReceived`
     /// * `EventData`=`QpackInstructionReceived`.
     pub fn qpack_instruction_received(
-        instruction: QPackInstruction, byte_length: Option<String>,
+        instruction: QPackInstruction, length: Option<String>,
         raw: Option<String>,
     ) -> Self {
         Event {
@@ -902,7 +902,7 @@ impl Event {
             ty: EventType::QpackEventType(QpackEventType::InstructionReceived),
             data: EventData::QpackInstructionReceived {
                 instruction,
-                byte_length,
+                length,
                 raw,
             },
         }

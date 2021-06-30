@@ -946,6 +946,25 @@ impl Connection {
             fin
         );
 
+        qlog_with!(conn.qlog_streamer(), q, {
+            let mut hdrs = vec![];
+            for hdr in headers {
+                hdrs.push(qlog::HttpHeader {
+                    name: String::from_utf8_lossy(hdr.name()).to_string(),
+                    value: String::from_utf8_lossy(hdr.value()).to_string(),
+                });
+            }
+            let h3_frame = qlog::Http3Frame::headers(hdrs);
+
+            let ev = qlog::event::Event::h3_frame_created(
+                stream_id.to_string(),
+                h3_frame,
+                Some((header_block.len()).to_string()),
+                None,
+            );
+            q.add_event(ev).ok();
+        });
+
         b.put_varint(frame::HEADERS_FRAME_TYPE_ID)?;
         b.put_varint(header_block.len() as u64)?;
         let off = b.off();
@@ -1046,6 +1065,19 @@ impl Connection {
             body_len,
             fin
         );
+
+        qlog_with!(conn.qlog_streamer(), q, {
+            // Never log DATA frame payload.
+            let h3_frame = qlog::Http3Frame::data(None);
+
+            let ev = qlog::event::Event::h3_frame_created(
+                stream_id.to_string(),
+                h3_frame,
+                Some((body_len).to_string()),
+                None,
+            );
+            q.add_event(ev).ok();
+        });
 
         b.put_varint(frame::DATA_FRAME_TYPE_ID)?;
         b.put_varint(body_len as u64)?;
@@ -1404,6 +1436,18 @@ impl Connection {
             let off = b.off();
             conn.stream_send(stream_id, &d[..off], false)?;
 
+            qlog_with!(conn.qlog_streamer(), q, {
+                let h3_frame = qlog::Http3Frame::goaway(id.to_string());
+
+                let ev = qlog::event::Event::h3_frame_created(
+                    stream_id.to_string(),
+                    h3_frame,
+                    Some(octets::varint_len(id).to_string()),
+                    None,
+                );
+                q.add_event(ev).ok();
+            });
+
             self.local_goaway_id = Some(id);
         }
 
@@ -1510,6 +1554,18 @@ impl Connection {
         let mut b = octets::OctetsMut::with_slice(&mut d);
         conn.stream_send(stream_id, b.put_varint(0)?, false)?;
 
+        qlog_with!(conn.qlog_streamer(), q, {
+            let h3_frame = qlog::Http3Frame::reserved();
+
+            let ev = qlog::event::Event::h3_frame_created(
+                stream_id.to_string(),
+                h3_frame,
+                Some("0".to_string()),
+                None,
+            );
+            q.add_event(ev).ok();
+        });
+
         // GREASE frame with payload.
         let mut b = octets::OctetsMut::with_slice(&mut d);
         conn.stream_send(stream_id, b.put_varint(grease_frame2)?, false)?;
@@ -1518,6 +1574,18 @@ impl Connection {
         conn.stream_send(stream_id, b.put_varint(18)?, false)?;
 
         conn.stream_send(stream_id, grease_payload, false)?;
+
+        qlog_with!(conn.qlog_streamer(), q, {
+            let h3_frame = qlog::Http3Frame::reserved();
+
+            let ev = qlog::event::Event::h3_frame_created(
+                stream_id.to_string(),
+                h3_frame,
+                Some(grease_payload.len().to_string()),
+                None,
+            );
+            q.add_event(ev).ok();
+        });
 
         Ok(())
     }
@@ -1572,6 +1640,50 @@ impl Connection {
         frame.to_bytes(&mut b)?;
 
         let off = b.off();
+
+        qlog_with!(conn.qlog_streamer(), q, {
+            let mut settings = vec![];
+            if let Some(v) = self.local_settings.max_header_list_size {
+                settings.push(qlog::Setting {
+                    name: "max_header_list_size".to_string(),
+                    value: v.to_string(),
+                });
+            }
+            if let Some(v) = self.local_settings.qpack_max_table_capacity {
+                settings.push(qlog::Setting {
+                    name: "qpack_max_table_capacity".to_string(),
+                    value: v.to_string(),
+                });
+            }
+            if let Some(v) = self.local_settings.qpack_blocked_streams {
+                settings.push(qlog::Setting {
+                    name: "qpack_blocked_streams".to_string(),
+                    value: v.to_string(),
+                });
+            }
+            if let Some(v) = self.local_settings.h3_datagram {
+                settings.push(qlog::Setting {
+                    name: "h3_datagram".to_string(),
+                    value: v.to_string(),
+                });
+            }
+            if let Some(v) = grease {
+                settings.push(qlog::Setting {
+                    name: "grease".to_string(),
+                    value: v.1.to_string(),
+                });
+            }
+
+            let h3_frame = qlog::Http3Frame::settings(settings);
+
+            let ev = qlog::event::Event::h3_frame_created(
+                self.control_stream_id.unwrap().to_string(), // can't be None
+                h3_frame,
+                Some((off).to_string()),
+                None,
+            );
+            q.add_event(ev).ok();
+        });
 
         if let Some(id) = self.control_stream_id {
             conn.stream_send(id, &d[..off], false)?;
@@ -1920,6 +2032,44 @@ impl Connection {
                         return Err(Error::SettingsError);
                     }
                 }
+
+                qlog_with!(conn.qlog_streamer(), q, {
+                    let mut settings = vec![];
+                    if let Some(v) = max_header_list_size {
+                        settings.push(qlog::Setting {
+                            name: "max_header_list_size".to_string(),
+                            value: v.to_string(),
+                        });
+                    }
+                    if let Some(v) = qpack_max_table_capacity {
+                        settings.push(qlog::Setting {
+                            name: "qpack_max_table_capacity".to_string(),
+                            value: v.to_string(),
+                        });
+                    }
+                    if let Some(v) = qpack_blocked_streams {
+                        settings.push(qlog::Setting {
+                            name: "qpack_blocked_streams".to_string(),
+                            value: v.to_string(),
+                        });
+                    }
+                    if let Some(v) = h3_datagram {
+                        settings.push(qlog::Setting {
+                            name: "h3_datagram".to_string(),
+                            value: v.to_string(),
+                        });
+                    }
+
+                    let h3_frame = qlog::Http3Frame::settings(settings);
+
+                    let ev = qlog::event::Event::h3_frame_parsed(
+                        stream_id.to_string(),
+                        h3_frame,
+                        None, // No length available here
+                        None,
+                    );
+                    q.add_event(ev).ok();
+                });
             },
 
             frame::Frame::Headers { header_block } => {
@@ -1962,6 +2112,26 @@ impl Connection {
 
                 let has_body = !conn.stream_finished(stream_id);
 
+                qlog_with!(conn.qlog_streamer(), q, {
+                    let mut hdrs = vec![];
+                    for hdr in &headers {
+                        hdrs.push(qlog::HttpHeader {
+                            name: String::from_utf8_lossy(hdr.name()).to_string(),
+                            value: String::from_utf8_lossy(hdr.value())
+                                .to_string(),
+                        });
+                    }
+                    let h3_frame = qlog::Http3Frame::headers(hdrs);
+
+                    let ev = qlog::event::Event::h3_frame_parsed(
+                        stream_id.to_string(),
+                        h3_frame,
+                        Some((header_block.len()).to_string()),
+                        None,
+                    );
+                    q.add_event(ev).ok();
+                });
+
                 return Ok((stream_id, Event::Headers {
                     list: headers,
                     has_body,
@@ -1978,6 +2148,19 @@ impl Connection {
 
                     return Err(Error::FrameUnexpected);
                 }
+
+                qlog_with!(conn.qlog_streamer(), q, {
+                    // Never log DATA frame payload.
+                    let h3_frame = qlog::Http3Frame::data(None);
+
+                    let ev = qlog::event::Event::h3_frame_parsed(
+                        stream_id.to_string(),
+                        h3_frame,
+                        None, // No length available here
+                        None,
+                    );
+                    q.add_event(ev).ok();
+                });
 
                 // Do nothing. The Data event is returned separately.
             },
@@ -2016,6 +2199,18 @@ impl Connection {
                 }
 
                 self.peer_goaway_id = Some(id);
+
+                qlog_with!(conn.qlog_streamer(), q, {
+                    let h3_frame = qlog::Http3Frame::goaway(id.to_string());
+
+                    let ev = qlog::event::Event::h3_frame_parsed(
+                        stream_id.to_string(),
+                        h3_frame,
+                        None, // No length available here
+                        None,
+                    );
+                    q.add_event(ev).ok();
+                });
 
                 return Ok((id, Event::GoAway));
             },

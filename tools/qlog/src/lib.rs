@@ -1462,7 +1462,7 @@ pub enum EventData {
     H3FrameCreated {
         stream_id: String,
         frame: Http3Frame,
-        byte_length: Option<String>,
+        length: Option<String>,
 
         raw: Option<String>,
     },
@@ -1470,7 +1470,7 @@ pub enum EventData {
     H3FrameParsed {
         stream_id: String,
         frame: Http3Frame,
-        byte_length: Option<String>,
+        length: Option<String>,
 
         raw: Option<String>,
     },
@@ -1541,14 +1541,14 @@ pub enum EventData {
 
     QpackInstructionSent {
         instruction: QPackInstruction,
-        byte_length: Option<String>,
+        length: Option<String>,
 
         raw: Option<String>,
     },
 
     QpackInstructionReceived {
         instruction: QPackInstruction,
-        byte_length: Option<String>,
+        length: Option<String>,
 
         raw: Option<String>,
     },
@@ -2213,7 +2213,9 @@ pub struct Setting {
     pub value: String,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Serialize, Clone)]
+#[serde(untagged)]
 pub enum Http3Frame {
     Data {
         frame_type: Http3FrameTypeName,
