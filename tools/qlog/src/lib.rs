@@ -93,7 +93,6 @@
 //!     Some("Example qlog trace description".to_string()),
 //!     Some(qlog::Configuration {
 //!         time_offset: Some("0".to_string()),
-//!         time_units: Some(qlog::TimeUnits::Ms),
 //!         original_uris: None,
 //!     }),
 //!     None,
@@ -124,7 +123,6 @@
 //! #     Some("Example qlog trace description".to_string()),
 //! #     Some(qlog::Configuration {
 //! #         time_offset: Some("0".to_string()),
-//! #         time_units: Some(qlog::TimeUnits::Ms),
 //! #         original_uris: None,
 //! #     }),
 //! #     None
@@ -172,7 +170,6 @@
 //! #     Some("Example qlog trace description".to_string()),
 //! #     Some(qlog::Configuration {
 //! #         time_offset: Some("0".to_string()),
-//! #         time_units: Some(qlog::TimeUnits::Ms),
 //! #         original_uris: None,
 //! #     }),
 //! #     None
@@ -191,7 +188,6 @@
 //!   "title": "Example qlog trace",
 //!   "description": "Example qlog trace description",
 //!   "configuration": {
-//!     "time_units": "ms",
 //!     "time_offset": "0"
 //!   },
 //!   "event_fields": [
@@ -246,7 +242,6 @@
 //!     Some("Example qlog trace description".to_string()),
 //!     Some(qlog::Configuration {
 //!         time_offset: Some("0".to_string()),
-//!         time_units: Some(qlog::TimeUnits::Ms),
 //!         original_uris: None,
 //!     }),
 //!     None,
@@ -272,7 +267,6 @@
 //! #    Some("Example qlog trace description".to_string()),
 //! #    Some(qlog::Configuration {
 //! #        time_offset: Some("0".to_string()),
-//! #        time_units: Some(qlog::TimeUnits::Ms),
 //! #        original_uris: None,
 //! #    }),
 //! #    None,
@@ -307,7 +301,6 @@
 //! #    Some("Example qlog trace description".to_string()),
 //! #    Some(qlog::Configuration {
 //! #        time_offset: Some("0".to_string()),
-//! #        time_units: Some(qlog::TimeUnits::Ms),
 //! #        original_uris: None,
 //! #    }),
 //! #    None,
@@ -346,7 +339,6 @@
 //! #    Some("Example qlog trace description".to_string()),
 //! #    Some(qlog::Configuration {
 //! #        time_offset: Some("0".to_string()),
-//! #        time_units: Some(qlog::TimeUnits::Ms),
 //! #        original_uris: None,
 //! #    }),
 //! #    None,
@@ -396,7 +388,6 @@
 //! #    Some("Example qlog trace description".to_string()),
 //! #    Some(qlog::Configuration {
 //! #        time_offset: Some("0".to_string()),
-//! #        time_units: Some(qlog::TimeUnits::Ms),
 //! #        original_uris: None,
 //! #    }),
 //! #    None,
@@ -435,7 +426,6 @@
 //! #    Some("Example qlog trace description".to_string()),
 //! #    Some(qlog::Configuration {
 //! #        time_offset: Some("0".to_string()),
-//! #        time_units: Some(qlog::TimeUnits::Ms),
 //! #        original_uris: None,
 //! #    }),
 //! #    None,
@@ -689,24 +679,6 @@ impl QlogStreamer {
             return Err(Error::InvalidState);
         }
 
-        let event_time = if cfg!(test) {
-            std::time::Duration::from_secs(0)
-        } else {
-            now.duration_since(self.start_time)
-        };
-
-        let rel = match &self.qlog.traces[0].configuration {
-            Some(conf) => match conf.time_units {
-                Some(TimeUnits::Ms) => event_time.as_millis().to_string(),
-
-                Some(TimeUnits::Us) => event_time.as_micros().to_string(),
-
-                None => String::from(""),
-            },
-
-            None => String::from(""),
-        };
-
         let (ev_data, contains_frames) = match serde_json::to_string(&event.data)
         {
             Ok(mut ev_data_out) =>
@@ -734,7 +706,14 @@ impl QlogStreamer {
 
         let maybe_terminate = if contains_frames { "" } else { "]" };
 
-        let ev_time = serde_json::to_string(&EventField::RelativeTime(rel)).ok();
+        let dur = if cfg!(test) {
+            std::time::Duration::from_secs(0)
+        } else {
+            now.duration_since(self.start_time)
+        };
+        let rel_time = dur.as_micros() as f64 / 1000.0;
+        let rel_ev_time = EventField::RelativeTime(rel_time.to_string());
+        let ev_time = serde_json::to_string(&rel_ev_time).ok();
         let ev_cat =
             serde_json::to_string(&EventField::Category(event.category)).ok();
         let ev_ty = serde_json::to_string(&EventField::Event(event.ty)).ok();
@@ -854,20 +833,10 @@ impl Trace {
     pub fn push_event(
         &mut self, relative_time: std::time::Duration, event: crate::event::Event,
     ) {
-        let rel = match &self.configuration {
-            Some(conf) => match conf.time_units {
-                Some(TimeUnits::Ms) => relative_time.as_millis().to_string(),
-
-                Some(TimeUnits::Us) => relative_time.as_micros().to_string(),
-
-                None => String::from(""),
-            },
-
-            None => String::from(""),
-        };
+        let rel_ev_time = relative_time.as_micros() as f64 / 1000.0;
 
         self.events.push(vec![
-            EventField::RelativeTime(rel),
+            EventField::RelativeTime(rel_ev_time.to_string()),
             EventField::Category(event.category),
             EventField::Event(event.ty),
             EventField::Data(event.data),
@@ -905,7 +874,6 @@ pub enum TimeUnits {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Clone)]
 pub struct Configuration {
-    pub time_units: Option<TimeUnits>,
     pub time_offset: Option<String>,
 
     pub original_uris: Option<Vec<String>>,
@@ -916,7 +884,6 @@ pub struct Configuration {
 impl Default for Configuration {
     fn default() -> Self {
         Configuration {
-            time_units: Some(TimeUnits::Ms),
             time_offset: Some("0".to_string()),
             original_uris: None,
         }
@@ -2521,7 +2488,6 @@ pub mod testing {
             Some("Quiche qlog trace description".to_string()),
             Some(Configuration {
                 time_offset: Some("0".to_string()),
-                time_units: Some(TimeUnits::Ms),
                 original_uris: None,
             }),
             None,
@@ -2664,7 +2630,6 @@ mod tests {
   "title": "Quiche qlog trace",
   "description": "Quiche qlog trace description",
   "configuration": {
-    "time_units": "ms",
     "time_offset": "0"
   },
   "event_fields": [
@@ -2690,7 +2655,6 @@ mod tests {
   "title": "Quiche qlog trace",
   "description": "Quiche qlog trace description",
   "configuration": {
-    "time_units": "ms",
     "time_offset": "0"
   },
   "event_fields": [
@@ -2981,7 +2945,7 @@ mod tests {
         let r = s.writer();
         let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
 
-        let log_string = r#"{"qlog_version":"version","title":"title","description":"description","traces":[{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_units":"ms","time_offset":"0"},"event_fields":["relative_time","category","event","data"],"events":[["0","transport","packet_sent",{"packet_type":"handshake","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"40","offset":"40","length":"400","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw_encrypted":"encrypted_foo","raw_decrypted":"decrypted_foo","frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw_encrypted":"encrypted_foo","raw_decrypted":"decrypted_foo","frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}]]}]}"#;
+        let log_string = r#"{"qlog_version":"version","title":"title","description":"description","traces":[{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":"0"},"event_fields":["relative_time","category","event","data"],"events":[["0","transport","packet_sent",{"packet_type":"handshake","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"40","offset":"40","length":"400","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw_encrypted":"encrypted_foo","raw_decrypted":"decrypted_foo","frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}],["0","transport","packet_sent",{"packet_type":"initial","header":{"packet_number":"0","packet_size":1251,"payload_length":1224,"version":"ff000018","scil":"8","dcil":"8","scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw_encrypted":"encrypted_foo","raw_decrypted":"decrypted_foo","frames":[{"frame_type":"stream","stream_id":"0","offset":"0","length":"100","fin":true}]}]]}]}"#;
 
         let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
 
