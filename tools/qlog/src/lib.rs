@@ -711,7 +711,7 @@ impl QlogStreamer {
         } else {
             now.duration_since(self.start_time)
         };
-        let rel_time = dur.as_micros() as f64 / 1000.0;
+        let rel_time = dur.as_secs_f64() * 1000.0;
         let rel_ev_time = EventField::RelativeTime(rel_time.to_string());
         let ev_time = serde_json::to_string(&rel_ev_time).ok();
         let ev_cat =
