@@ -790,24 +790,33 @@ impl RecvBuf {
             // them again. This is also important to make sure `ready()` doesn't
             // get stuck when a buffer with lower offset than the stream's is
             // buffered.
-            if self.off > buf.off() {
-                buf = buf.split_off((self.off - buf.off()) as usize);
+            if self.off_front() > buf.off() {
+                buf = buf.split_off((self.off_front() - buf.off()) as usize);
             }
 
-            for b in &self.data {
-                // New buffer is fully contained in existing buffer.
-                if buf.off() >= b.off() && buf.max_off() <= b.max_off() {
-                    return Ok(());
-                }
+            // Handle overlapping data. If the incoming data's starting offset
+            // is above the previous maximum received offset, there is clearly
+            // no overlap so this logic can be skipped. However do still try to
+            // merge an empty final buffer (i.e. an empty buffer with the fin
+            // flag set, which is the only kind of empty buffer that should
+            // reach this point).
+            if buf.off() < self.max_off() || buf.is_empty() {
+                for b in &self.data {
+                    // New buffer is fully contained in existing buffer.
+                    if buf.off() >= b.off() && buf.max_off() <= b.max_off() {
+                        return Ok(());
+                    }
 
-                // New buffer's start overlaps existing buffer.
-                if buf.off() >= b.off() && buf.off() < b.max_off() {
-                    buf = buf.split_off((b.max_off() - buf.off()) as usize);
-                }
+                    // New buffer's start overlaps existing buffer.
+                    if buf.off() >= b.off() && buf.off() < b.max_off() {
+                        buf = buf.split_off((b.max_off() - buf.off()) as usize);
+                    }
 
-                // New buffer's end overlaps existing buffer.
-                if buf.off() < b.off() && buf.max_off() > b.off() {
-                    tmp_buf = Some(buf.split_off((b.off() - buf.off()) as usize));
+                    // New buffer's end overlaps existing buffer.
+                    if buf.off() < b.off() && buf.max_off() > b.off() {
+                        tmp_buf =
+                            Some(buf.split_off((b.off() - buf.off()) as usize));
+                    }
                 }
             }
 
@@ -937,7 +946,6 @@ impl RecvBuf {
     }
 
     /// Returns the lowest offset of data buffered.
-    #[allow(dead_code)]
     pub fn off_front(&self) -> u64 {
         self.off
     }
