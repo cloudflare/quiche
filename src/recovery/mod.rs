@@ -909,10 +909,10 @@ impl Recovery {
     pub fn to_qlog(&self) -> qlog::event::Event {
         // QVis can't use all these fields and they can be large.
         qlog::event::Event::metrics_updated(
-            Some(self.min_rtt.as_millis() as u64),
-            Some(self.rtt().as_millis() as u64),
-            Some(self.latest_rtt.as_millis() as u64),
-            Some(self.rttvar.as_millis() as u64),
+            Some(self.min_rtt.as_secs_f32() * 1000.0),
+            Some(self.rtt().as_secs_f32() * 1000.0),
+            Some(self.latest_rtt.as_secs_f32() * 1000.0),
+            Some(self.rttvar.as_secs_f32() * 1000.0),
             None, // delay
             None, // probe_count
             Some(self.cwnd() as u64),

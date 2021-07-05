@@ -56,7 +56,7 @@ impl Event {
     /// * `EventType`=`ConnectivityEventType::ServerListening`
     /// * `EventData`=`ServerListening`.
     pub fn server_listening(
-        ip_v4: Option<String>, ip_v6: Option<String>, port_v4: u64, port_v6: u64,
+        ip_v4: Option<String>, ip_v6: Option<String>, port_v4: u32, port_v6: u32,
         quic_versions: Option<Vec<String>>, alpn_values: Option<Vec<String>>,
         stateless_reset_required: Option<bool>,
     ) -> Self {
@@ -77,7 +77,7 @@ impl Event {
         }
     }
 
-    pub fn server_listening_min(port_v4: u64, port_v6: u64) -> Self {
+    pub fn server_listening_min(port_v4: u32, port_v6: u32) -> Self {
         Event::server_listening(None, None, port_v4, port_v6, None, None, None)
     }
 
@@ -87,7 +87,7 @@ impl Event {
     /// * `EventData`=`ConnectionStarted`.
     pub fn connection_started(
         ip_version: String, src_ip: String, dst_ip: String,
-        protocol: Option<String>, src_port: u64, dst_port: u64,
+        protocol: Option<String>, src_port: u32, dst_port: u32,
         quic_version: Option<String>, src_cid: Option<String>,
         dst_cid: Option<String>,
     ) -> Self {
@@ -111,8 +111,8 @@ impl Event {
     }
 
     pub fn connection_started_min(
-        ip_version: String, src_ip: String, dst_ip: String, src_port: u64,
-        dst_port: u64,
+        ip_version: String, src_ip: String, dst_ip: String, src_port: u32,
+        dst_port: u32,
     ) -> Self {
         Event::connection_started(
             ip_version, src_ip, dst_ip, None, src_port, dst_port, None, None,
@@ -193,14 +193,14 @@ impl Event {
         original_connection_id: Option<String>,
         stateless_reset_token: Option<String>,
         disable_active_migration: Option<bool>, idle_timeout: Option<u64>,
-        max_packet_size: Option<u64>, ack_delay_exponent: Option<u64>,
-        max_ack_delay: Option<u64>, active_connection_id_limit: Option<u64>,
-        initial_max_data: Option<String>,
-        initial_max_stream_data_bidi_local: Option<String>,
-        initial_max_stream_data_bidi_remote: Option<String>,
-        initial_max_stream_data_uni: Option<String>,
-        initial_max_streams_bidi: Option<String>,
-        initial_max_streams_uni: Option<String>,
+        max_udp_payload_size: Option<u32>, ack_delay_exponent: Option<u16>,
+        max_ack_delay: Option<u16>, active_connection_id_limit: Option<u64>,
+        initial_max_data: Option<u64>,
+        initial_max_stream_data_bidi_local: Option<u64>,
+        initial_max_stream_data_bidi_remote: Option<u64>,
+        initial_max_stream_data_uni: Option<u64>,
+        initial_max_streams_bidi: Option<u64>,
+        initial_max_streams_uni: Option<u64>,
         preferred_address: Option<PreferredAddress>,
     ) -> Self {
         Event {
@@ -220,7 +220,7 @@ impl Event {
                 disable_active_migration,
 
                 idle_timeout,
-                max_packet_size,
+                max_udp_payload_size,
                 ack_delay_exponent,
                 max_ack_delay,
                 active_connection_id_limit,
@@ -249,7 +249,7 @@ impl Event {
     /// * `EventType`=`TransportEventType::DatagramsReceived`
     /// * `EventData`=`DatagramsReceived`.
     pub fn datagrams_received(
-        count: Option<u64>, byte_length: Option<u64>,
+        count: Option<u16>, byte_length: Option<u64>,
     ) -> Self {
         Event {
             category: EventCategory::Transport,
@@ -268,7 +268,7 @@ impl Event {
     /// * `EventCategory`=`Transport`
     /// * `EventType`=`TransportEventType::DatagramsSent`
     /// * `EventData`=`DatagramsSent`.
-    pub fn datagrams_sent(count: Option<u64>, byte_length: Option<u64>) -> Self {
+    pub fn datagrams_sent(count: Option<u16>, byte_length: Option<u64>) -> Self {
         Event {
             category: EventCategory::Transport,
             ty: EventType::TransportEventType(TransportEventType::DatagramsSent),
@@ -406,7 +406,7 @@ impl Event {
     /// * `EventType`=`TransportEventType::StreamStateUpdated`
     /// * `EventData`=`StreamStateUpdated`.
     pub fn stream_state_updated(
-        stream_id: String, stream_type: Option<StreamType>,
+        stream_id: u64, stream_type: Option<StreamType>,
         old: Option<StreamState>, new: StreamState,
         stream_side: Option<StreamSide>,
     ) -> Self {
@@ -425,7 +425,7 @@ impl Event {
         }
     }
 
-    pub fn stream_state_updated_min(stream_id: String, new: StreamState) -> Self {
+    pub fn stream_state_updated_min(stream_id: u64, new: StreamState) -> Self {
         Event::stream_state_updated(stream_id, None, None, new, None)
     }
 
@@ -450,12 +450,12 @@ impl Event {
     /// * `EventType`=`RecoveryEventType::ParametersSet`
     /// * `EventData`=`RecoveryParametersSet`.
     pub fn recovery_parameters_set(
-        reordering_threshold: Option<u64>, time_threshold: Option<u64>,
-        timer_granularity: Option<u64>, initial_rtt: Option<u64>,
-        max_datagram_size: Option<u64>, initial_congestion_window: Option<u64>,
-        minimum_congestion_window: Option<u64>,
-        loss_reduction_factor: Option<u64>,
-        persistent_congestion_threshold: Option<u64>,
+        reordering_threshold: Option<u16>, time_threshold: Option<f32>,
+        timer_granularity: Option<u16>, initial_rtt: Option<f32>,
+        max_datagram_size: Option<u32>, initial_congestion_window: Option<u64>,
+        minimum_congestion_window: Option<u32>,
+        loss_reduction_factor: Option<f32>,
+        persistent_congestion_threshold: Option<u16>,
     ) -> Self {
         Event {
             category: EventCategory::Recovery,
@@ -485,9 +485,9 @@ impl Event {
     /// * `EventType`=`RecoveryEventType::MetricsUpdated`
     /// * `EventData`=`MetricsUpdated`.
     pub fn metrics_updated(
-        min_rtt: Option<u64>, smoothed_rtt: Option<u64>, latest_rtt: Option<u64>,
-        rtt_variance: Option<u64>, max_ack_delay: Option<u64>,
-        pto_count: Option<u64>, congestion_window: Option<u64>,
+        min_rtt: Option<f32>, smoothed_rtt: Option<f32>, latest_rtt: Option<f32>,
+        rtt_variance: Option<f32>, max_ack_delay: Option<u64>,
+        pto_count: Option<u16>, congestion_window: Option<u64>,
         bytes_in_flight: Option<u64>, ssthresh: Option<u64>,
         packets_in_flight: Option<u64>, in_recovery: Option<bool>,
         pacing_rate: Option<u64>,
@@ -632,7 +632,7 @@ impl Event {
     /// * `EventType`=`Http3EventType::StreamTypeSet`
     /// * `EventData`=`H3StreamTypeSet`.
     pub fn h3_stream_type_set(
-        stream_id: String, owner: Option<H3Owner>, old: Option<H3StreamType>,
+        stream_id: u64, owner: Option<H3Owner>, old: Option<H3StreamType>,
         new: H3StreamType,
     ) -> Self {
         Event {
@@ -647,7 +647,7 @@ impl Event {
         }
     }
 
-    pub fn h3_stream_type_set_min(stream_id: String, new: H3StreamType) -> Self {
+    pub fn h3_stream_type_set_min(stream_id: u64, new: H3StreamType) -> Self {
         Event::h3_stream_type_set(stream_id, None, None, new)
     }
 
@@ -656,7 +656,7 @@ impl Event {
     /// * `EventType`=`Http3EventType::FrameCreated`
     /// * `EventData`=`H3FrameCreated`.
     pub fn h3_frame_created(
-        stream_id: String, frame: Http3Frame, byte_length: Option<String>,
+        stream_id: u64, frame: Http3Frame, byte_length: Option<u64>,
         raw: Option<String>,
     ) -> Self {
         Event {
@@ -671,7 +671,7 @@ impl Event {
         }
     }
 
-    pub fn h3_frame_created_min(stream_id: String, frame: Http3Frame) -> Self {
+    pub fn h3_frame_created_min(stream_id: u64, frame: Http3Frame) -> Self {
         Event::h3_frame_created(stream_id, frame, None, None)
     }
 
@@ -680,7 +680,7 @@ impl Event {
     /// * `EventType`=`Http3EventType::FrameParsed`
     /// * `EventData`=`H3FrameParsed`.
     pub fn h3_frame_parsed(
-        stream_id: String, frame: Http3Frame, byte_length: Option<String>,
+        stream_id: u64, frame: Http3Frame, byte_length: Option<u64>,
         raw: Option<String>,
     ) -> Self {
         Event {
@@ -695,7 +695,7 @@ impl Event {
         }
     }
 
-    pub fn h3_frame_parsed_min(stream_id: String, frame: Http3Frame) -> Self {
+    pub fn h3_frame_parsed_min(stream_id: u64, frame: Http3Frame) -> Self {
         Event::h3_frame_parsed(stream_id, frame, None, None)
     }
 
@@ -704,7 +704,7 @@ impl Event {
     /// * `EventType`=`Http3EventType::DataMoved`
     /// * `EventData`=`H3DataMoved`.
     pub fn h3_data_moved(
-        stream_id: String, offset: Option<String>, length: Option<u64>,
+        stream_id: u64, offset: Option<u64>, length: Option<u64>,
         from: Option<H3DataRecipient>, to: Option<H3DataRecipient>,
         raw: Option<String>,
     ) -> Self {
@@ -722,7 +722,7 @@ impl Event {
         }
     }
 
-    pub fn h3_data_moved_min(stream_id: String) -> Self {
+    pub fn h3_data_moved_min(stream_id: u64) -> Self {
         Event::h3_data_moved(stream_id, None, None, None, None, None)
     }
 
@@ -731,7 +731,7 @@ impl Event {
     /// * `EventType`=`Http3EventType::PushResolved`
     /// * `EventData`=`H3PushResolved`.
     pub fn h3_push_resolved(
-        push_id: Option<String>, stream_id: Option<String>,
+        push_id: Option<u64>, stream_id: Option<u64>,
         decision: Option<H3PushDecision>,
     ) -> Self {
         Event {
@@ -782,7 +782,7 @@ impl Event {
     /// * `EventType`=`QpackEventType::StreamStateUpdated`
     /// * `EventData`=`QpackStreamStateUpdated`.
     pub fn qpack_stream_state_updated(
-        stream_id: String, state: QpackStreamState,
+        stream_id: u64, state: QpackStreamState,
     ) -> Self {
         Event {
             category: EventCategory::Qpack,
@@ -813,7 +813,7 @@ impl Event {
     /// * `EventType`=`QpackEventType::HeadersEncoded`
     /// * `EventData`=`QpackHeadersEncoded`.
     pub fn qpack_headers_encoded(
-        stream_id: Option<String>, headers: Option<HttpHeader>,
+        stream_id: Option<u64>, headers: Option<HttpHeader>,
         block_prefix: QpackHeaderBlockPrefix,
         header_block: Vec<QpackHeaderBlockRepresentation>, raw: Option<String>,
     ) -> Self {
@@ -842,7 +842,7 @@ impl Event {
     /// * `EventType`=`QpackEventType::HeadersDecoded`
     /// * `EventData`=`QpackHeadersDecoded`.
     pub fn qpack_headers_decoded(
-        stream_id: Option<String>, headers: Option<HttpHeader>,
+        stream_id: Option<u64>, headers: Option<HttpHeader>,
         block_prefix: QpackHeaderBlockPrefix,
         header_block: Vec<QpackHeaderBlockRepresentation>, raw: Option<String>,
     ) -> Self {
@@ -871,7 +871,7 @@ impl Event {
     /// * `EventType`=`QpackEventType::InstructionSent`
     /// * `EventData`=`QpackInstructionSent`.
     pub fn qpack_instruction_sent(
-        instruction: QPackInstruction, byte_length: Option<String>,
+        instruction: QPackInstruction, byte_length: Option<u32>,
         raw: Option<String>,
     ) -> Self {
         Event {
@@ -894,7 +894,7 @@ impl Event {
     /// * `EventType`=`QpackEventType::InstructionReceived`
     /// * `EventData`=`QpackInstructionReceived`.
     pub fn qpack_instruction_received(
-        instruction: QPackInstruction, byte_length: Option<String>,
+        instruction: QPackInstruction, byte_length: Option<u32>,
         raw: Option<String>,
     ) -> Self {
         Event {

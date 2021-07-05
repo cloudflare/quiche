@@ -1531,7 +1531,7 @@ impl Connection {
             Some(title.to_string()),
             Some(description.to_string()),
             Some(qlog::Configuration {
-                time_offset: Some("0".to_string()),
+                time_offset: Some(0.0),
                 original_uris: None,
             }),
             None,
@@ -3347,8 +3347,8 @@ impl Connection {
 
         qlog_with!(self.qlog_streamer, q, {
             let ev = qlog::event::Event::h3_data_moved(
-                stream_id.to_string(),
-                Some(offset.to_string()),
+                stream_id,
+                Some(offset),
                 Some(read as u64),
                 Some(qlog::H3DataRecipient::Transport),
                 None,
@@ -3496,8 +3496,8 @@ impl Connection {
 
         qlog_with!(self.qlog_streamer, q, {
             let ev = qlog::event::Event::h3_data_moved(
-                stream_id.to_string(),
-                Some(offset.to_string()),
+                stream_id,
+                Some(offset),
                 Some(sent as u64),
                 None,
                 Some(qlog::H3DataRecipient::Transport),
@@ -5589,16 +5589,16 @@ impl TransportParams {
             stateless_reset_token,
             Some(self.disable_active_migration),
             Some(self.max_idle_timeout),
-            Some(self.max_udp_payload_size),
-            Some(self.ack_delay_exponent),
-            Some(self.max_ack_delay),
+            Some(self.max_udp_payload_size as u32),
+            Some(self.ack_delay_exponent as u16),
+            Some(self.max_ack_delay as u16),
             Some(self.active_conn_id_limit),
-            Some(self.initial_max_data.to_string()),
-            Some(self.initial_max_stream_data_bidi_local.to_string()),
-            Some(self.initial_max_stream_data_bidi_remote.to_string()),
-            Some(self.initial_max_stream_data_uni.to_string()),
-            Some(self.initial_max_streams_bidi.to_string()),
-            Some(self.initial_max_streams_uni.to_string()),
+            Some(self.initial_max_data),
+            Some(self.initial_max_stream_data_bidi_local),
+            Some(self.initial_max_stream_data_bidi_remote),
+            Some(self.initial_max_stream_data_uni),
+            Some(self.initial_max_streams_bidi),
+            Some(self.initial_max_streams_uni),
             None, // preferred address
         )
     }

@@ -757,7 +757,7 @@ impl Frame {
                 let ack_ranges =
                     ranges.iter().map(|r| (r.start, r.end - 1)).collect();
                 qlog::QuicFrame::ack(
-                    Some(ack_delay.to_string()),
+                    Some(*ack_delay as f32 / 1000.0),
                     Some(ack_ranges),
                     None,
                     None,
@@ -770,35 +770,31 @@ impl Frame {
                 error_code,
                 final_size,
             } => qlog::QuicFrame::reset_stream(
-                stream_id.to_string(),
+                *stream_id,
                 *error_code,
-                final_size.to_string(),
+                *final_size,
             ),
 
             Frame::StopSending {
                 stream_id,
                 error_code,
-            } =>
-                qlog::QuicFrame::stop_sending(stream_id.to_string(), *error_code),
+            } => qlog::QuicFrame::stop_sending(*stream_id, *error_code),
 
-            Frame::Crypto { data } => qlog::QuicFrame::crypto(
-                data.off().to_string(),
-                data.len().to_string(),
-            ),
+            Frame::Crypto { data } =>
+                qlog::QuicFrame::crypto(data.off(), data.len() as u64),
 
             Frame::CryptoHeader { offset, length } =>
-                qlog::QuicFrame::crypto(offset.to_string(), length.to_string()),
+                qlog::QuicFrame::crypto(*offset, *length as u64),
 
             Frame::NewToken { token } => qlog::QuicFrame::new_token(
                 token.len().to_string(),
-                "TODO: https://github.com/quiclog/internet-drafts/issues/36"
-                    .to_string(),
+                "TODO: update to qlog-02 token format".to_string(),
             ),
 
             Frame::Stream { stream_id, data } => qlog::QuicFrame::stream(
-                stream_id.to_string(),
-                data.off().to_string(),
-                data.len().to_string(),
+                *stream_id,
+                data.off() as u64,
+                data.len() as u64,
                 data.fin(),
                 None,
             ),
@@ -809,50 +805,43 @@ impl Frame {
                 length,
                 fin,
             } => qlog::QuicFrame::stream(
-                stream_id.to_string(),
-                offset.to_string(),
-                length.to_string(),
+                *stream_id,
+                *offset,
+                *length as u64,
                 *fin,
                 None,
             ),
 
-            Frame::MaxData { max } => qlog::QuicFrame::max_data(max.to_string()),
+            Frame::MaxData { max } => qlog::QuicFrame::max_data(*max),
 
             Frame::MaxStreamData { stream_id, max } =>
-                qlog::QuicFrame::max_stream_data(
-                    stream_id.to_string(),
-                    max.to_string(),
-                ),
+                qlog::QuicFrame::max_stream_data(*stream_id, *max),
 
             Frame::MaxStreamsBidi { max } => qlog::QuicFrame::max_streams(
                 qlog::StreamType::Bidirectional,
-                max.to_string(),
+                *max,
             ),
 
             Frame::MaxStreamsUni { max } => qlog::QuicFrame::max_streams(
                 qlog::StreamType::Unidirectional,
-                max.to_string(),
+                *max,
             ),
 
-            Frame::DataBlocked { limit } =>
-                qlog::QuicFrame::data_blocked(limit.to_string()),
+            Frame::DataBlocked { limit } => qlog::QuicFrame::data_blocked(*limit),
 
             Frame::StreamDataBlocked { stream_id, limit } =>
-                qlog::QuicFrame::stream_data_blocked(
-                    stream_id.to_string(),
-                    limit.to_string(),
-                ),
+                qlog::QuicFrame::stream_data_blocked(*stream_id, *limit),
 
             Frame::StreamsBlockedBidi { limit } =>
                 qlog::QuicFrame::streams_blocked(
                     qlog::StreamType::Bidirectional,
-                    limit.to_string(),
+                    *limit,
                 ),
 
             Frame::StreamsBlockedUni { limit } =>
                 qlog::QuicFrame::streams_blocked(
                     qlog::StreamType::Unidirectional,
-                    limit.to_string(),
+                    *limit,
                 ),
 
             Frame::NewConnectionId {
@@ -861,55 +850,43 @@ impl Frame {
                 conn_id,
                 ..
             } => qlog::QuicFrame::new_connection_id(
-                seq_num.to_string(),
-                retire_prior_to.to_string(),
+                *seq_num as u32,
+                *retire_prior_to as u32,
                 conn_id.len() as u64,
-                "TODO: https://github.com/quiclog/internet-drafts/issues/36"
-                    .to_string(),
-                "TODO: https://github.com/quiclog/internet-drafts/issues/36"
-                    .to_string(),
+                "TODO: update to qlog-02 token format".to_string(),
+                "TODO: update to qlog-02 token format".to_string(),
             ),
 
             Frame::RetireConnectionId { seq_num } =>
-                qlog::QuicFrame::retire_connection_id(seq_num.to_string()),
+                qlog::QuicFrame::retire_connection_id(*seq_num as u32),
 
-            Frame::PathChallenge { .. } => qlog::QuicFrame::path_challenge(Some(
-                "TODO: https://github.com/quiclog/internet-drafts/issues/36"
-                    .to_string(),
-            )),
+            Frame::PathChallenge { .. } => qlog::QuicFrame::path_challenge(None),
 
-            Frame::PathResponse { .. } => qlog::QuicFrame::path_response(Some(
-                "TODO: https://github.com/quiclog/internet-drafts/issues/36"
-                    .to_string(),
-            )),
+            Frame::PathResponse { .. } => qlog::QuicFrame::path_response(None),
 
             Frame::ConnectionClose {
                 error_code, reason, ..
             } => qlog::QuicFrame::connection_close(
                 qlog::ErrorSpace::TransportError,
                 *error_code,
-                *error_code,
-                String::from_utf8(reason.clone()).unwrap(),
-                Some(
-                    "TODO: https://github.com/quiclog/internet-drafts/issues/36"
-                        .to_string(),
-                ),
+                None, // raw error is no different for us
+                Some(String::from_utf8(reason.clone()).unwrap()),
+                None, // don't know trigger type
             ),
 
             Frame::ApplicationClose { error_code, reason } =>
                 qlog::QuicFrame::connection_close(
                     qlog::ErrorSpace::ApplicationError,
                     *error_code,
-                    *error_code,
-                    String::from_utf8(reason.clone()).unwrap(),
-                    None, /* Application variant of the frame has no trigger
-                           * frame type */
+                    None, // raw error is no different for us
+                    Some(String::from_utf8(reason.clone()).unwrap()),
+                    None, // don't know trigger type
                 ),
 
             Frame::HandshakeDone => qlog::QuicFrame::handshake_done(),
 
             Frame::Datagram { data } =>
-                qlog::QuicFrame::datagram(data.len().to_string(), None),
+                qlog::QuicFrame::datagram(data.len() as u64, None),
         }
     }
 }
