@@ -715,7 +715,7 @@ impl RecvBuf {
         RecvBuf {
             max_data,
             // MAX_DATA increments are set at half the initial max_data
-            max_data_incr: max_data/2,
+            max_data_incr: max_data / 2,
             ..RecvBuf::default()
         }
     }
@@ -943,10 +943,9 @@ impl RecvBuf {
 
     /// Returns true if we need to update the local flow control limit.
     pub fn almost_full(&self) -> bool {
-        // Send MAX_STREAM_DATA when at least half of the allowed data since last MAX_STREAM_DATA
-        // has been consumed.
-        self.fin_off.is_none() && 
-        self.len > self.max_data - self.max_data_incr
+        // Send MAX_STREAM_DATA when at least half of the allowed data since last
+        // MAX_STREAM_DATA has been consumed.
+        self.fin_off.is_none() && self.len > self.max_data - self.max_data_incr
     }
 
     /// Returns the largest offset ever received.
@@ -2299,7 +2298,6 @@ mod tests {
         stream.recv.update_max_data();
         assert_eq!(stream.recv.max_data_next(), 32);
         assert!(!stream.recv.almost_full());
-
 
         let (len, fin) = stream.recv.emit(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"helloworld");
