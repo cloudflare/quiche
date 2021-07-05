@@ -1087,8 +1087,11 @@ pub struct Connection {
     /// Whether the connection handshake has been completed.
     handshake_completed: bool,
 
-    /// Whether the HANDSHAKE_DONE has been sent.
+    /// Whether the HANDSHAKE_DONE frame has been sent.
     handshake_done_sent: bool,
+
+    /// Whether the HANDSHAKE_DONE frame has been acked.
+    handshake_done_acked: bool,
 
     /// Whether the connection handshake has been confirmed.
     handshake_confirmed: bool,
@@ -1438,6 +1441,7 @@ impl Connection {
             handshake_completed: false,
 
             handshake_done_sent: false,
+            handshake_done_acked: false,
 
             handshake_confirmed: false,
 
@@ -2208,6 +2212,14 @@ impl Connection {
                     }
                 },
 
+                frame::Frame::HandshakeDone => {
+                    // Explicitly set this to true, so that if the frame was
+                    // already scheduled for retransmission, it is aborted.
+                    self.handshake_done_sent = true;
+
+                    self.handshake_done_acked = true;
+                },
+
                 frame::Frame::ResetStream { stream_id, .. } => {
                     let stream = match self.streams.get_mut(stream_id) {
                         Some(v) => v,
@@ -2526,7 +2538,9 @@ impl Connection {
                             .mark_reset(stream_id, true, error_code, final_size);
                     },
 
-                frame::Frame::HandshakeDone => {
+                // Retransmit HANDSHAKE_DONE only if it hasn't been acked at
+                // least once already.
+                frame::Frame::HandshakeDone if !self.handshake_done_acked => {
                     self.handshake_done_sent = false;
                 },
 
@@ -2664,10 +2678,7 @@ impl Connection {
 
         if pkt_type == packet::Type::Short && !is_closing {
             // Create HANDSHAKE_DONE frame.
-            if self.is_established() &&
-                !self.handshake_done_sent &&
-                self.is_server
-            {
+            if self.should_send_handshake_done() {
                 let frame = frame::Frame::HandshakeDone;
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
@@ -4579,7 +4590,7 @@ impl Connection {
         // If there are flushable, almost full or blocked streams, use the
         // Application epoch.
         if (self.is_established() || self.is_in_early_data()) &&
-            ((self.is_server && !self.handshake_done_sent) ||
+            (self.should_send_handshake_done() ||
                 self.almost_full ||
                 self.blocked_limit.is_some() ||
                 self.dgram_send_queue.has_pending() ||
@@ -5005,6 +5016,11 @@ impl Connection {
     fn should_update_max_data(&self) -> bool {
         self.max_rx_data_next != self.max_rx_data &&
             self.max_rx_data_next / 2 > self.max_rx_data - self.rx_data
+    }
+
+    /// Returns true if the HANDSHAKE_DONE frame needs to be sent.
+    fn should_send_handshake_done(&self) -> bool {
+        self.is_established() && !self.handshake_done_sent && self.is_server
     }
 
     /// Returns the idle timeout value.
