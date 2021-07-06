@@ -146,6 +146,9 @@ pub struct Recovery {
 
     // RFC6937 PRR.
     prr: prr::PRR,
+
+    #[cfg(feature = "qlog")]
+    qlog_metrics: QlogMetrics,
 }
 
 impl Recovery {
@@ -230,6 +233,9 @@ impl Recovery {
             last_packet_scheduled_time: None,
 
             prr: prr::PRR::default(),
+
+            #[cfg(feature = "qlog")]
+            qlog_metrics: QlogMetrics::default(),
         }
     }
 
@@ -908,22 +914,18 @@ impl Recovery {
     }
 
     #[cfg(feature = "qlog")]
-    pub fn to_qlog(&self) -> qlog::event::Event {
-        // QVis can't use all these fields and they can be large.
-        qlog::event::Event::metrics_updated(
-            Some(self.min_rtt.as_secs_f32() * 1000.0),
-            Some(self.rtt().as_secs_f32() * 1000.0),
-            Some(self.latest_rtt.as_secs_f32() * 1000.0),
-            Some(self.rttvar.as_secs_f32() * 1000.0),
-            None, // delay
-            None, // probe_count
-            Some(self.cwnd() as u64),
-            Some(self.bytes_in_flight as u64),
-            Some(self.ssthresh as u64),
-            None, // packets_in_flight
-            None, // in_recovery
-            None, // pacing_rate
-        )
+    pub fn maybe_qlog(&mut self) -> Option<qlog::event::Event> {
+        let qlog_metrics = QlogMetrics {
+            min_rtt: self.min_rtt,
+            smoothed_rtt: self.rtt(),
+            latest_rtt: self.latest_rtt,
+            rttvar: self.rttvar,
+            cwnd: self.cwnd() as u64,
+            bytes_in_flight: self.bytes_in_flight as u64,
+            ssthresh: self.ssthresh as u64,
+        };
+
+        self.qlog_metrics.maybe_update(qlog_metrics)
     }
 }
 
@@ -1121,6 +1123,111 @@ fn sub_abs(lhs: Duration, rhs: Duration) -> Duration {
         lhs - rhs
     } else {
         rhs - lhs
+    }
+}
+
+// We don't need to log all qlog metrics every time there is a recovery event.
+// Instead, we can log only the MetricsUpdated event data fields that we care
+// about, only when they change. To support this, the QLogMetrics structure
+// keeps a running picture of the fields.
+#[derive(Default)]
+#[cfg(feature = "qlog")]
+struct QlogMetrics {
+    min_rtt: Duration,
+    smoothed_rtt: Duration,
+    latest_rtt: Duration,
+    rttvar: Duration,
+    cwnd: u64,
+    bytes_in_flight: u64,
+    ssthresh: u64,
+}
+
+#[cfg(feature = "qlog")]
+impl QlogMetrics {
+    // Make a qlog event if the latest instance of QlogMetrics is different.
+    //
+    // This function diffs each of the fields. A qlog MetricsUpdated event is
+    // only generated if at least one field is different. Where fields are
+    // different, the qlog event contains the latest value.
+    fn maybe_update(&mut self, latest: Self) -> Option<qlog::event::Event> {
+        let mut emit_event = false;
+
+        let new_min_rtt = if self.min_rtt != latest.min_rtt {
+            self.min_rtt = latest.min_rtt;
+            emit_event = true;
+            Some(latest.min_rtt.as_secs_f32() * 1000.0)
+        } else {
+            None
+        };
+
+        let new_smoothed_rtt = if self.smoothed_rtt != latest.smoothed_rtt {
+            self.smoothed_rtt = latest.smoothed_rtt;
+            emit_event = true;
+            Some(latest.smoothed_rtt.as_secs_f32() * 1000.0)
+        } else {
+            None
+        };
+
+        let new_latest_rtt = if self.latest_rtt != latest.latest_rtt {
+            self.latest_rtt = latest.latest_rtt;
+            emit_event = true;
+            Some(latest.latest_rtt.as_secs_f32() * 1000.0)
+        } else {
+            None
+        };
+
+        let new_rttvar = if self.rttvar != latest.rttvar {
+            self.rttvar = latest.rttvar;
+            emit_event = true;
+            Some(latest.rttvar.as_secs_f32() * 1000.0)
+        } else {
+            None
+        };
+
+        let new_cwnd = if self.cwnd != latest.cwnd {
+            self.cwnd = latest.cwnd;
+            emit_event = true;
+            Some(latest.cwnd)
+        } else {
+            None
+        };
+
+        let new_bytes_in_flight =
+            if self.bytes_in_flight != latest.bytes_in_flight {
+                self.bytes_in_flight = latest.bytes_in_flight;
+                emit_event = true;
+                Some(latest.bytes_in_flight)
+            } else {
+                None
+            };
+
+        let new_ssthresh = if self.ssthresh != latest.ssthresh {
+            self.ssthresh = latest.ssthresh;
+            emit_event = true;
+            Some(latest.ssthresh)
+        } else {
+            None
+        };
+
+        if emit_event {
+            // QVis can't use all these fields and they can be large.
+            return Some(qlog::event::Event::metrics_updated(
+                new_min_rtt,
+                new_smoothed_rtt,
+                new_latest_rtt,
+                new_rttvar,
+                None, // delay
+                None, // probe_count
+                new_cwnd,
+                new_bytes_in_flight,
+                new_ssthresh,
+                None, // packets_in_flight
+                None, // in_recovery
+                None, // pacing_rate
+            ));
+        }
+
+        None
     }
 }
 
