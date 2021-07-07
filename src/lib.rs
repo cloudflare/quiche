@@ -989,9 +989,8 @@ pub struct Connection {
     /// Local flow control limit for the connection.
     max_rx_data: u64,
 
-    /// Updated local flow control limit for the connection. This is used to
-    /// trigger sending MAX_DATA frames after a certain threshold.
-    max_rx_data_next: u64,
+    /// The maximum offset increment that is used for the connection.
+    max_rx_data_incr: u64,
 
     /// Whether we send MAX_DATA frame.
     almost_full: bool,
@@ -1378,7 +1377,7 @@ impl Connection {
 
             rx_data: 0,
             max_rx_data,
-            max_rx_data_next: max_rx_data,
+            max_rx_data_incr: max_rx_data /2,
             almost_full: false,
 
             tx_cap: 0,
@@ -2752,16 +2751,17 @@ impl Connection {
             }
 
             // Create MAX_DATA frame as needed.
-            if self.almost_full && self.max_rx_data < self.max_rx_data_next {
+            if self.almost_full {
+                let max_rx_data_next = self.max_rx_data + self.max_rx_data_incr;
                 let frame = frame::Frame::MaxData {
-                    max: self.max_rx_data_next,
+                    max: max_rx_data_next,
                 };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     self.almost_full = false;
 
                     // Commits the new max_rx_data limit.
-                    self.max_rx_data = self.max_rx_data_next;
+                    self.max_rx_data = max_rx_data_next;
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -3350,8 +3350,6 @@ impl Connection {
                 return Err(e);
             },
         };
-
-        self.max_rx_data_next = self.max_rx_data_next.saturating_add(read as u64);
 
         let readable = stream.is_readable();
 
@@ -5001,11 +4999,11 @@ impl Connection {
 
     /// Returns true if the connection-level flow control needs to be updated.
     ///
-    /// This happens when the new max data limit is at least double the amount
-    /// of data that can be received before blocking.
+    /// This happens when the current offset for the connection is more than half of the
+    /// previously allocated control flow credit since last MAX_DATA frame.
+    /// max_rx_data - max_rx_data_incr < rx_data < max_rx_data < max_rx_data + max_rx_data_incr
     fn should_update_max_data(&self) -> bool {
-        self.max_rx_data_next != self.max_rx_data &&
-            self.max_rx_data_next / 2 > self.max_rx_data - self.rx_data
+        self.rx_data > self.max_rx_data - self.max_rx_data_incr
     }
 
     /// Returns the idle timeout value.
@@ -6884,10 +6882,10 @@ mod tests {
             iter.next(),
             Some(&frame::Frame::MaxStreamData {
                 stream_id: 4,
-                max: 30
+                max: 22
             })
         );
-        assert_eq!(iter.next(), Some(&frame::Frame::MaxData { max: 46 }));
+        assert_eq!(iter.next(), Some(&frame::Frame::MaxData { max: 45 }));
     }
 
     #[test]
@@ -6971,7 +6969,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaaaa", 0, false),
+            data: stream::RangeBuf::from(b"aaaaaaaaa", 0, false),
         }];
 
         let pkt_type = packet::Type::Short;
@@ -6980,9 +6978,11 @@ mod tests {
 
         pipe.server.stream_recv(4, &mut buf).unwrap();
 
+        assert_eq!(pipe.server.streams.get(4).unwrap().recv.max_data_next(), 22);
+
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"a", 7, false),
+            data: stream::RangeBuf::from(b"aa", 7, false),
         }];
 
         let len = pipe

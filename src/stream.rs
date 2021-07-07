@@ -916,7 +916,7 @@ impl RecvBuf {
     }
 
     /// Return the new max_data limit.
-    pub fn max_data_next(&mut self) -> u64 {
+    pub fn max_data_next(&self) -> u64 {
         self.max_data + self.max_data_incr
     }
 
@@ -945,6 +945,7 @@ impl RecvBuf {
     pub fn almost_full(&self) -> bool {
         // Send MAX_STREAM_DATA when at least half of the allowed data since last
         // MAX_STREAM_DATA has been consumed.
+        // max_data - max_data_incr < len < max_data < max_data + max_data_incr
         self.fin_off.is_none() && self.len > self.max_data - self.max_data_incr
     }
 
