@@ -1377,7 +1377,7 @@ impl Connection {
 
             rx_data: 0,
             max_rx_data,
-            max_rx_data_incr: max_rx_data /2,
+            max_rx_data_incr: max_rx_data / 2,
             almost_full: false,
 
             tx_cap: 0,
@@ -4999,9 +4999,10 @@ impl Connection {
 
     /// Returns true if the connection-level flow control needs to be updated.
     ///
-    /// This happens when the current offset for the connection is more than half of the
-    /// previously allocated control flow credit since last MAX_DATA frame.
-    /// max_rx_data - max_rx_data_incr < rx_data < max_rx_data < max_rx_data + max_rx_data_incr
+    /// This happens when the current offset for the connection is more than
+    /// half of the previously allocated control flow credit since last
+    /// MAX_DATA frame. max_rx_data - max_rx_data_incr < rx_data <
+    /// max_rx_data < max_rx_data + max_rx_data_incr
     fn should_update_max_data(&self) -> bool {
         self.rx_data > self.max_rx_data - self.max_rx_data_incr
     }
