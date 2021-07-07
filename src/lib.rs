@@ -4560,7 +4560,8 @@ impl Connection {
                 self.streams.has_reset() ||
                 self.streams.has_stopped())
         {
-            if self.is_in_early_data() && !self.is_server {
+            // Only clients can send 0-RTT packets.
+            if !self.is_server && self.is_in_early_data() {
                 return Ok(packet::Type::ZeroRTT);
             }
 
