@@ -1129,6 +1129,7 @@ impl SendBuf {
             }
 
             let buf_len = cmp::min(buf.len(), out_len);
+            let partial = buf_len < buf.len();
 
             // Copy data to the output buffer.
             let out_pos = (next_off - out_off) as usize;
@@ -1141,14 +1142,12 @@ impl SendBuf {
 
             next_off = buf.off() + buf_len as u64;
 
-            if !buf.is_empty() && buf_len < buf.len() {
-                buf.consume(buf_len);
+            buf.consume(buf_len);
 
+            if partial {
                 // We reached the maximum capacity, so end here.
                 break;
             }
-
-            buf.consume(buf_len);
 
             self.pos += 1;
         }
