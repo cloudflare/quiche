@@ -97,9 +97,11 @@ incoming packets that belong to that connection from the network:
 
 ```rust
 loop {
-    let read = socket.recv(&mut buf).unwrap();
+    let (read, from) = socket.recv_from(&mut buf).unwrap();
 
-    let read = match conn.recv(&mut buf[..read]) {
+    let recv_info = quiche::RecvInfo { from };
+
+    let read = match conn.recv(&mut buf[..read], recv_info) {
         Ok(v) => v,
 
         Err(e) => {
@@ -117,7 +119,7 @@ instead:
 
 ```rust
 loop {
-    let write = match conn.send(&mut out) {
+    let (write, send_info) = match conn.send(&mut out) {
         Ok(v) => v,
 
         Err(quiche::Error::Done) => {
@@ -131,7 +133,7 @@ loop {
         },
     };
 
-    socket.send(&out[..write]).unwrap();
+    socket.send_to(&out[..write], &send_info.to).unwrap();
 }
 ```
 
@@ -154,7 +156,7 @@ conn.on_timeout();
 
 // Send more packets as needed after timeout.
 loop {
-    let write = match conn.send(&mut out) {
+    let (write, send_info) = match conn.send(&mut out) {
         Ok(v) => v,
 
         Err(quiche::Error::Done) => {
@@ -168,7 +170,7 @@ loop {
         },
     };
 
-    socket.send(&out[..write]).unwrap();
+    socket.send_to(&out[..write], &send_info.to).unwrap();
 }
 ```
 
