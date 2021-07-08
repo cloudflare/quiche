@@ -89,7 +89,7 @@ pub struct State {
     cwnd_inc: usize,
 
     // CUBIC state checkpoint preceding the last congestion event.
-    prior: Option<PriorState>,
+    prior: PriorState,
 }
 
 /// Stores the CUBIC state from before the last congestion event.
@@ -213,15 +213,13 @@ fn on_packet_acked(
     // a few packets (less than RESTORE_COUNT_THRESHOLD), it's considered
     // as spurious and restore to the previous state.
     if r.congestion_recovery_start_time.is_some() {
-        if let Some(prior) = &r.cubic_state.prior {
-            let new_lost = r.lost_count - prior.lost_count;
+        let new_lost = r.lost_count - r.cubic_state.prior.lost_count;
 
-            if r.congestion_window < prior.congestion_window &&
-                new_lost < RESTORE_COUNT_THRESHOLD
-            {
-                rollback(r);
-                return;
-            }
+        if r.congestion_window < r.cubic_state.prior.congestion_window &&
+            new_lost < RESTORE_COUNT_THRESHOLD
+        {
+            rollback(r);
+            return;
         }
     }
 
@@ -384,26 +382,20 @@ fn congestion_event(
 }
 
 fn checkpoint(r: &mut Recovery) {
-    let prior = PriorState {
-        congestion_window: r.congestion_window,
-        ssthresh: r.ssthresh,
-        w_max: r.cubic_state.w_max,
-        k: r.cubic_state.k,
-        epoch_start: r.congestion_recovery_start_time,
-        lost_count: r.lost_count,
-    };
-
-    r.cubic_state.prior = Some(prior);
+    r.cubic_state.prior.congestion_window = r.congestion_window;
+    r.cubic_state.prior.ssthresh = r.ssthresh;
+    r.cubic_state.prior.w_max = r.cubic_state.w_max;
+    r.cubic_state.prior.k = r.cubic_state.k;
+    r.cubic_state.prior.epoch_start = r.congestion_recovery_start_time;
+    r.cubic_state.prior.lost_count = r.lost_count;
 }
 
 fn rollback(r: &mut Recovery) {
-    if let Some(prior) = &r.cubic_state.prior {
-        r.congestion_window = prior.congestion_window;
-        r.ssthresh = prior.ssthresh;
-        r.cubic_state.w_max = prior.w_max;
-        r.cubic_state.k = prior.k;
-        r.congestion_recovery_start_time = prior.epoch_start;
-    }
+    r.congestion_window = r.cubic_state.prior.congestion_window;
+    r.ssthresh = r.cubic_state.prior.ssthresh;
+    r.cubic_state.w_max = r.cubic_state.prior.w_max;
+    r.cubic_state.k = r.cubic_state.prior.k;
+    r.congestion_recovery_start_time = r.cubic_state.prior.epoch_start;
 }
 
 fn has_custom_pacing() -> bool {
