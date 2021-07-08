@@ -215,11 +215,12 @@ fn on_packet_acked(
     if r.congestion_recovery_start_time.is_some() {
         let new_lost = r.lost_count - r.cubic_state.prior.lost_count;
 
-        if r.congestion_window < r.cubic_state.prior.congestion_window &&
-            new_lost < RESTORE_COUNT_THRESHOLD
-        {
-            rollback(r);
-            return;
+        if new_lost < RESTORE_COUNT_THRESHOLD {
+            let did_rollback = rollback(r);
+
+            if did_rollback {
+                return;
+            }
         }
     }
 
@@ -390,12 +391,18 @@ fn checkpoint(r: &mut Recovery) {
     r.cubic_state.prior.lost_count = r.lost_count;
 }
 
-fn rollback(r: &mut Recovery) {
+fn rollback(r: &mut Recovery) -> bool {
+    if r.congestion_window >= r.cubic_state.prior.congestion_window {
+        return false;
+    }
+
     r.congestion_window = r.cubic_state.prior.congestion_window;
     r.ssthresh = r.cubic_state.prior.ssthresh;
     r.cubic_state.w_max = r.cubic_state.prior.w_max;
     r.cubic_state.k = r.cubic_state.prior.k;
     r.congestion_recovery_start_time = r.cubic_state.prior.epoch_start;
+
+    true
 }
 
 fn has_custom_pacing() -> bool {

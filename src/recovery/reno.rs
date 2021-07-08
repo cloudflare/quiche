@@ -151,7 +151,9 @@ pub fn collapse_cwnd(r: &mut Recovery) {
 
 fn checkpoint(_r: &mut Recovery) {}
 
-fn rollback(_r: &mut Recovery) {}
+fn rollback(_r: &mut Recovery) -> bool {
+    true
+}
 
 fn has_custom_pacing() -> bool {
     false

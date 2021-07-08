@@ -973,7 +973,7 @@ pub struct CongestionControlOps {
 
     pub checkpoint: fn(r: &mut Recovery),
 
-    pub rollback: fn(r: &mut Recovery),
+    pub rollback: fn(r: &mut Recovery) -> bool,
 
     pub has_custom_pacing: fn() -> bool,
 }
