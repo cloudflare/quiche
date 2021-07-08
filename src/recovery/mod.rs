@@ -402,7 +402,9 @@ impl Recovery {
                         self.time_thresh = 5_f64 / 4_f64;
                     }
 
-                    undo_cwnd = true;
+                    if unacked.in_flight {
+                        undo_cwnd = true;
+                    }
 
                     self.lost_spurious_count += 1;
                     continue;
