@@ -155,6 +155,10 @@ pub enum Frame {
     Datagram {
         data: Vec<u8>,
     },
+
+    DatagramHeader {
+        length: usize,
+    },
 }
 
 impl Frame {
@@ -517,16 +521,12 @@ impl Frame {
             },
 
             Frame::Datagram { data } => {
-                let mut ty: u8 = 0x30;
+                encode_dgram_header(data.len() as u64, b)?;
 
-                // Always encode length
-                ty |= 0x01;
-
-                b.put_varint(u64::from(ty))?;
-
-                b.put_varint(data.len() as u64)?;
                 b.put_bytes(data.as_ref())?;
             },
+
+            Frame::DatagramHeader { .. } => (),
         }
 
         Ok(before - b.cap())
@@ -723,8 +723,14 @@ impl Frame {
 
             Frame::Datagram { data } => {
                 1 + // frame type
-                octets::varint_len(data.len() as u64) + // length
+                2 + // length, always encode as 2-byte varint
                 data.len() // data
+            },
+
+            Frame::DatagramHeader { length } => {
+                1 + // frame type
+                2 + // length, always encode as 2-byte varint
+                *length // data
             },
         }
     }
@@ -738,12 +744,6 @@ impl Frame {
                 Frame::ApplicationClose { .. } |
                 Frame::ConnectionClose { .. }
         )
-    }
-
-    pub fn shrink_for_retransmission(&mut self) {
-        if let Frame::Datagram { data } = self {
-            *data = Vec::new();
-        }
     }
 
     #[cfg(feature = "qlog")]
@@ -887,6 +887,9 @@ impl Frame {
 
             Frame::Datagram { data } =>
                 qlog::QuicFrame::datagram(data.len() as u64, None),
+
+            Frame::DatagramHeader { length } =>
+                qlog::QuicFrame::datagram(*length as u64, None),
         }
     }
 }
@@ -1042,7 +1045,11 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::Datagram { data } => {
-                write!(f, "DATAGRAM len={}", data.len(),)?;
+                write!(f, "DATAGRAM len={}", data.len())?;
+            },
+
+            Frame::DatagramHeader { length } => {
+                write!(f, "DATAGRAM len={}", length)?;
             },
         }
 
@@ -1123,6 +1130,20 @@ pub fn encode_stream_header(
 
     b.put_varint(stream_id)?;
     b.put_varint(offset)?;
+
+    // Always encode length field as 2-byte varint.
+    b.put_varint_with_len(length, 2)?;
+
+    Ok(())
+}
+
+pub fn encode_dgram_header(length: u64, b: &mut octets::OctetsMut) -> Result<()> {
+    let mut ty: u8 = 0x30;
+
+    // Always encode length
+    ty |= 0x01;
+
+    b.put_varint(u64::from(ty))?;
 
     // Always encode length field as 2-byte varint.
     b.put_varint_with_len(length, 2)?;
@@ -1858,14 +1879,14 @@ mod tests {
 
         let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
-        let mut frame = Frame::Datagram { data: data.clone() };
+        let frame = Frame::Datagram { data: data.clone() };
 
         let wire_len = {
             let mut b = octets::OctetsMut::with_slice(&mut d);
             frame.to_bytes(&mut b).unwrap()
         };
 
-        assert_eq!(wire_len, 14);
+        assert_eq!(wire_len, 15);
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert_eq!(
@@ -1889,15 +1910,5 @@ mod tests {
         };
 
         assert_eq!(frame_data, data);
-
-        frame.shrink_for_retransmission();
-
-        let frame_data = match &frame {
-            Frame::Datagram { data } => data.clone(),
-
-            _ => unreachable!(),
-        };
-
-        assert_eq!(frame_data.len(), 0);
     }
 }
