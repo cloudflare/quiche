@@ -2943,11 +2943,55 @@ impl Connection {
         {
             if let Some(max_dgram_payload) = self.dgram_max_writable_len() {
                 while let Some(len) = self.dgram_send_queue.peek_front_len() {
-                    if (len + frame::MAX_DGRAM_OVERHEAD) <= left {
-                        // Front of the queue fits this packet, send it
+                    let hdr_off = b.off();
+                    let hdr_len = 1 + // frame type
+                        2; // length, always encode as 2-byte varint
+
+                    if (hdr_len + len) <= left {
+                        // Front of the queue fits this packet, send it.
                         match self.dgram_send_queue.pop() {
                             Some(data) => {
-                                let frame = frame::Frame::Datagram { data };
+                                // Encode the frame.
+                                //
+                                // Instead of creating a `frame::Frame` object,
+                                // encode the frame directly into the packet
+                                // buffer.
+                                //
+                                // First we reserve some space in the output
+                                // buffer for writing the frame header (we
+                                // assume the length field is always a 2-byte
+                                // varint as we don't know the value yet).
+                                //
+                                // Then we emit the data from the DATAGRAM's
+                                // buffer.
+                                //
+                                // Finally we go back and encode the frame
+                                // header with the now available information.
+                                let (mut dgram_hdr, mut dgram_payload) =
+                                    b.split_at(hdr_off + hdr_len)?;
+
+                                dgram_payload.as_mut()[..len]
+                                    .copy_from_slice(&data);
+
+                                // Encode the frame's header.
+                                //
+                                // Due to how `OctetsMut::split_at()` works,
+                                // `dgram_hdr` starts from the initial offset
+                                // of `b` (rather than the current offset), so
+                                // it needs to be advanced to the initial frame
+                                // offset.
+                                dgram_hdr.skip(hdr_off)?;
+
+                                frame::encode_dgram_header(
+                                    len as u64,
+                                    &mut dgram_hdr,
+                                )?;
+
+                                // Advance the packet buffer's offset.
+                                b.skip(hdr_len + len)?;
+
+                                let frame =
+                                    frame::Frame::DatagramHeader { length: len };
 
                                 if push_frame_to_pkt!(b, frames, frame, left) {
                                     ack_eliciting = true;
@@ -2997,9 +3041,8 @@ impl Connection {
                 // directly into the packet buffer.
                 //
                 // First we reserve some space in the output buffer for writing
-                // the frame header (we assume the length field is
-                // always a 2-byte varint as we don't know the
-                // value yet).
+                // the frame header (we assume the length field is always a
+                // 2-byte varint as we don't know the value yet).
                 //
                 // Then we emit the data from the stream's send buffer.
                 //
@@ -3176,11 +3219,6 @@ impl Connection {
             qlog_with!(self.qlog_streamer, q, {
                 q.add_frame(frame.to_qlog(), false).ok();
             });
-
-            // Once frames have been serialized they are passed to the Recovery
-            // module which manages retransmission. However, some frames do not
-            // contain retransmittable data, so drop it here.
-            frame.shrink_for_retransmission();
         }
 
         qlog_with!(self.qlog_streamer, q, {
@@ -4977,6 +5015,8 @@ impl Connection {
 
                 self.dgram_recv_queue.push(data)?;
             },
+
+            frame::Frame::DatagramHeader { .. } => unreachable!(),
         }
 
         Ok(())
