@@ -1,4 +1,4 @@
-From 4a2b813a633e49b83f3444c3a55b6f21b00bc1c0 Mon Sep 17 00:00:00 2001
+From 17eaf857c2154962616b91c17616959923429cf3 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 22 Oct 2020 12:28:02 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -1610,7 +1610,7 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..ae8264595
+index 000000000..17e93bdee
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
 @@ -0,0 +1,2230 @@
@@ -2072,9 +2072,9 @@ index 000000000..ae8264595
 +
 +                    ngx_post_event(stream->request->connection->read,
 +                                   &ngx_posted_events);
-+                }
 +
-+                stream->in_closed = 1;
++                    stream->in_closed = 1;
++                }
 +
 +                break;
 +            }
