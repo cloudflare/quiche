@@ -1,4 +1,4 @@
-From 17eaf857c2154962616b91c17616959923429cf3 Mon Sep 17 00:00:00 2001
+From c466e7a968a130199adee030873dfd60d38bc664 Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Thu, 22 Oct 2020 12:28:02 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -26,13 +26,13 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   33 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2230 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2231 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   79 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
  src/os/unix/ngx_udp_sendmsg_chain.c     |    1 +
- 28 files changed, 3745 insertions(+), 11 deletions(-)
+ 28 files changed, 3746 insertions(+), 11 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -1610,10 +1610,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..17e93bdee
+index 000000000..1a05d4e01
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2230 @@
+@@ -0,0 +1,2231 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -3787,18 +3787,17 @@ index 000000000..17e93bdee
 +    c->read->handler = ngx_http_empty_handler;
 +    c->write->handler = ngx_http_empty_handler;
 +
++    root = h3c->streams.root;
 +    sentinel = h3c->streams.sentinel;
 +
++    if (root != sentinel) {
++        node = ngx_rbtree_min(h3c->streams.root, sentinel);
++    } else {
++        node = NULL;
++    }
++
 +    /* Close all pending streams / requests. */
-+    for ( ;; ) {
-+        root = h3c->streams.root;
-+
-+        if (root == sentinel) {
-+            break;
-+        }
-+
-+        node = ngx_rbtree_min(root, sentinel);
-+
++    while (node != NULL) {
 +        stream = (ngx_http_v3_stream_t *) node;
 +
 +        r = stream->request;
@@ -3820,6 +3819,8 @@ index 000000000..17e93bdee
 +        } else {
 +            ev = fc->read;
 +        }
++
++        node = ngx_rbtree_next(&h3c->streams, node);
 +
 +        ev->eof = 1;
 +        ev->handler(ev);
