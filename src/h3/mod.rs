@@ -1086,7 +1086,7 @@ impl Connection {
         b.put_varint(flow_id)?;
         b.put_bytes(buf)?;
 
-        conn.dgram_send(&d)?;
+        conn.dgram_send_vec(d)?;
 
         Ok(())
     }

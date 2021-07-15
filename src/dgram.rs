@@ -46,13 +46,14 @@ impl DatagramQueue {
         }
     }
 
-    pub fn push(&mut self, data: &[u8]) -> Result<()> {
+    pub fn push(&mut self, data: Vec<u8>) -> Result<()> {
         if self.is_full() {
             return Err(Error::Done);
         }
 
-        self.queue.push_back(data.to_vec());
         self.queue_bytes_size += data.len();
+        self.queue.push_back(data);
+
         Ok(())
     }
 
