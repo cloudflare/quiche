@@ -3851,6 +3851,21 @@ impl Connection {
         }
     }
 
+    /// Reads the first received DATAGRAM.
+    ///
+    /// This is the same as [`dgram_recv()`] but returns the DATAGRAM as a
+    /// `Vec<u8>` instead of copying into the provided buffer.
+    ///
+    /// [`dgram_recv()`]: struct.Connection.html#method.dgram_recv
+    #[inline]
+    pub fn dgram_recv_vec(&mut self) -> Result<Vec<u8>> {
+        match self.dgram_recv_queue.pop() {
+            Some(d) => Ok(d),
+
+            None => Err(Error::Done),
+        }
+    }
+
     /// Reads the first received DATAGRAM without removing it from the queue.
     ///
     /// On success the DATAGRAM's data is returned along with the actual number
@@ -3932,10 +3947,35 @@ impl Connection {
     /// ```
     pub fn dgram_send(&mut self, buf: &[u8]) -> Result<()> {
         let max_payload_len = match self.dgram_max_writable_len() {
-            Some(v) => v as usize,
-            None => {
-                return Err(Error::InvalidState);
-            },
+            Some(v) => v,
+
+            None => return Err(Error::InvalidState),
+        };
+
+        if buf.len() > max_payload_len {
+            return Err(Error::BufferTooShort);
+        }
+
+        self.dgram_send_queue.push(buf.to_vec())?;
+
+        if self.dgram_send_queue.byte_size() > self.recovery.cwnd_available() {
+            self.recovery.update_app_limited(false);
+        }
+
+        Ok(())
+    }
+
+    /// Sends data in a DATAGRAM frame.
+    ///
+    /// This is the same as [`dgram_send()`] but takes a `Vec<u8>` instead of
+    /// a slice.
+    ///
+    /// [`dgram_send()`]: struct.Connection.html#method.dgram_send
+    pub fn dgram_send_vec(&mut self, buf: Vec<u8>) -> Result<()> {
+        let max_payload_len = match self.dgram_max_writable_len() {
+            Some(v) => v,
+
+            None => return Err(Error::InvalidState),
         };
 
         if buf.len() > max_payload_len {
@@ -4939,7 +4979,7 @@ impl Connection {
                     self.dgram_recv_queue.pop();
                 }
 
-                self.dgram_recv_queue.push(&data)?;
+                self.dgram_recv_queue.push(data)?;
             },
         }
 
