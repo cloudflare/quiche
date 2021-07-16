@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["quiche"] = [{"text":"impl&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/ops/deref/trait.Deref.html\" title=\"trait core::ops::deref::Deref\">Deref</a> for <a class=\"struct\" href=\"quiche/struct.ConnectionId.html\" title=\"struct quiche::ConnectionId\">ConnectionId</a>&lt;'a&gt;","synthetic":false,"types":["quiche::packet::ConnectionId"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

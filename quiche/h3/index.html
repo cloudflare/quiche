@@ -1,0 +1,196 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="HTTP/3 wire protocol and QPACK implementation."><meta name="keywords" content="rust, rustlang, rust-lang, h3"><title>quiche::h3 - Rust</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled ><script id="default-settings"></script><script src="../../storage.js"></script><script src="../../crates.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" type="image/svg+xml" href="../../favicon.svg">
+<link rel="alternate icon" type="image/png" href="../../favicon-16x16.png">
+<link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../quiche/index.html'><div class='logo-container rust-logo'><img src='../../rust-logo.png' alt='logo'></div></a><p class="location">Module h3</p><div class="sidebar-elems"><div class="block items"><ul><li><a href="#structs">Structs</a></li><li><a href="#enums">Enums</a></li><li><a href="#constants">Constants</a></li><li><a href="#traits">Traits</a></li><li><a href="#types">Type Definitions</a></li></ul></div><p class="location"><a href="../index.html">quiche</a></p><div id="sidebar-vars" data-name="h3" data-ty="mod" data-relpath="../"></div><script defer src="../sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu"><img src="../../brush.svg" width="18" height="18" alt="Pick another theme!"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" class="help-button">?</button>
+                <a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" height="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class="fqn"><span class="in-band">Module <a href="../index.html">quiche</a>::<wbr><a class="mod" href="">h3</a><button id="copy-path" onclick="copy_path(this)">⎘</button></span><span class="out-of-band"><span id="render-detail"><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class="inner">&#x2212;</span>]</a></span><a class="srclink" href="../../src/quiche/h3/mod.rs.html#27-4691" title="goto source code">[src]</a></span></h1><div class="docblock"><p>HTTP/3 wire protocol and QPACK implementation.</p>
+<p>This module provides a high level API for sending and receiving HTTP/3
+requests and responses on top of the QUIC transport protocol.</p>
+<h2 id="connection-setup" class="section-header"><a href="#connection-setup">Connection setup</a></h2>
+<p>HTTP/3 connections require a QUIC transport-layer connection, see
+<a href="../index.html#connection-setup">Connection setup</a> for a full description of the setup process.</p>
+<p>To use HTTP/3, the QUIC connection must be configured with a suitable
+Application Layer Protocol Negotiation (ALPN) Protocol ID:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered">
+<span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">config</span> <span class="op">=</span> <span class="ident">quiche::Config::new</span>(<span class="ident">quiche::PROTOCOL_VERSION</span>)<span class="question-mark">?</span>;
+<span class="ident">config</span>.<span class="ident">set_application_protos</span>(<span class="ident">quiche::h3::APPLICATION_PROTOCOL</span>)<span class="question-mark">?</span>;</pre></div>
+<p>The QUIC handshake is driven by <a href="../index.html#generating-outgoing-packets">sending</a> and <a href="../index.html#handling-incoming-packets">receiving</a> QUIC packets.</p>
+<p>Once the handshake has completed, the first step in establishing an HTTP/3
+connection is creating its configuration object:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered">
+<span class="kw">let</span> <span class="ident">h3_config</span> <span class="op">=</span> <span class="ident">quiche::h3::Config::new</span>()<span class="question-mark">?</span>;</pre></div>
+<p>HTTP/3 client and server connections are both created using the
+<a href="struct.Connection.html#method.with_transport"><code>with_transport()</code></a> function, the role is inferred from the type of QUIC
+connection:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered">
+<span class="kw">let</span> <span class="ident">h3_conn</span> <span class="op">=</span> <span class="ident">quiche::h3::Connection::with_transport</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">conn</span>, <span class="kw-2">&amp;</span><span class="ident">h3_config</span>)<span class="question-mark">?</span>;</pre></div>
+<h2 id="sending-a-request" class="section-header"><a href="#sending-a-request">Sending a request</a></h2>
+<p>An HTTP/3 client can send a request by using the connection’s
+<a href="struct.Connection.html#method.send_response"><code>send_request()</code></a> method to queue request headers; <a href="../index.html#generating-outgoing-packets">sending</a> QUIC packets
+causes the requests to get sent to the peer:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered">
+<span class="kw">let</span> <span class="ident">req</span> <span class="op">=</span> <span class="macro">vec!</span>[
+    <span class="ident">quiche::h3::Header::new</span>(<span class="string">b&quot;:method&quot;</span>, <span class="string">b&quot;GET&quot;</span>),
+    <span class="ident">quiche::h3::Header::new</span>(<span class="string">b&quot;:scheme&quot;</span>, <span class="string">b&quot;https&quot;</span>),
+    <span class="ident">quiche::h3::Header::new</span>(<span class="string">b&quot;:authority&quot;</span>, <span class="string">b&quot;quic.tech&quot;</span>),
+    <span class="ident">quiche::h3::Header::new</span>(<span class="string">b&quot;:path&quot;</span>, <span class="string">b&quot;/&quot;</span>),
+    <span class="ident">quiche::h3::Header::new</span>(<span class="string">b&quot;user-agent&quot;</span>, <span class="string">b&quot;quiche&quot;</span>),
+];
+
+<span class="ident">h3_conn</span>.<span class="ident">send_request</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">conn</span>, <span class="kw-2">&amp;</span><span class="ident">req</span>, <span class="bool-val">true</span>)<span class="question-mark">?</span>;</pre></div>
+<p>An HTTP/3 client can send a request with additional body data by using
+the connection’s <a href="struct.Connection.html#method.send_body"><code>send_body()</code></a> method:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered">
+<span class="kw">let</span> <span class="ident">req</span> <span class="op">=</span> <span class="macro">vec!</span>[
+    <span class="ident">quiche::h3::Header::new</span>(<span class="string">b&quot;:method&quot;</span>, <span class="string">b&quot;GET&quot;</span>),
+    <span class="ident">quiche::h3::Header::new</span>(<span class="string">b&quot;:scheme&quot;</span>, <span class="string">b&quot;https&quot;</span>),
+    <span class="ident">quiche::h3::Header::new</span>(<span class="string">b&quot;:authority&quot;</span>, <span class="string">b&quot;quic.tech&quot;</span>),
+    <span class="ident">quiche::h3::Header::new</span>(<span class="string">b&quot;:path&quot;</span>, <span class="string">b&quot;/&quot;</span>),
+    <span class="ident">quiche::h3::Header::new</span>(<span class="string">b&quot;user-agent&quot;</span>, <span class="string">b&quot;quiche&quot;</span>),
+];
+
+<span class="kw">let</span> <span class="ident">stream_id</span> <span class="op">=</span> <span class="ident">h3_conn</span>.<span class="ident">send_request</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">conn</span>, <span class="kw-2">&amp;</span><span class="ident">req</span>, <span class="bool-val">false</span>)<span class="question-mark">?</span>;
+<span class="ident">h3_conn</span>.<span class="ident">send_body</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">conn</span>, <span class="ident">stream_id</span>, <span class="string">b&quot;Hello World!&quot;</span>, <span class="bool-val">true</span>)<span class="question-mark">?</span>;</pre></div>
+<h2 id="handling-requests-and-responses" class="section-header"><a href="#handling-requests-and-responses">Handling requests and responses</a></h2>
+<p>After <a href="../index.html#handling-incoming-packets">receiving</a> QUIC packets, HTTP/3 data is processed using the
+connection’s <a href="struct.Connection.html#method.poll"><code>poll()</code></a> method. On success, this returns an <a href="enum.Event.html"><code>Event</code></a> object
+and an ID corresponding to the stream where the <code>Event</code> originated.</p>
+<p>An HTTP/3 server uses <a href="struct.Connection.html#method.poll"><code>poll()</code></a> to read requests and responds to them using
+<a href="struct.Connection.html#method.send_response"><code>send_response()</code></a> and <a href="struct.Connection.html#method.send_body"><code>send_body()</code></a>:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered">
+<span class="kw">use</span> <span class="ident">quiche::h3::NameValue</span>;
+
+<span class="kw">loop</span> {
+    <span class="kw">match</span> <span class="ident">h3_conn</span>.<span class="ident">poll</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">conn</span>) {
+        <span class="prelude-val">Ok</span>((<span class="ident">stream_id</span>, <span class="ident">quiche::h3::Event::Headers</span>{<span class="ident">list</span>, <span class="ident">has_body</span>})) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">headers</span> <span class="op">=</span> <span class="ident">list</span>.<span class="ident">into_iter</span>();
+
+            <span class="comment">// Look for the request&#39;s method.</span>
+            <span class="kw">let</span> <span class="ident">method</span> <span class="op">=</span> <span class="ident">headers</span>.<span class="ident">find</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">h</span>.<span class="ident">name</span>() <span class="op">=</span><span class="op">=</span> <span class="string">b&quot;:method&quot;</span>).<span class="ident">unwrap</span>();
+
+            <span class="comment">// Look for the request&#39;s path.</span>
+            <span class="kw">let</span> <span class="ident">path</span> <span class="op">=</span> <span class="ident">headers</span>.<span class="ident">find</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">h</span>.<span class="ident">name</span>() <span class="op">=</span><span class="op">=</span> <span class="string">b&quot;:path&quot;</span>).<span class="ident">unwrap</span>();
+
+            <span class="kw">if</span> <span class="ident">method</span>.<span class="ident">value</span>() <span class="op">=</span><span class="op">=</span> <span class="string">b&quot;GET&quot;</span> <span class="op">&amp;&amp;</span> <span class="ident">path</span>.<span class="ident">value</span>() <span class="op">=</span><span class="op">=</span> <span class="string">b&quot;/&quot;</span> {
+                <span class="kw">let</span> <span class="ident">resp</span> <span class="op">=</span> <span class="macro">vec!</span>[
+                    <span class="ident">quiche::h3::Header::new</span>(<span class="string">b&quot;:status&quot;</span>, <span class="number">200</span>.<span class="ident">to_string</span>().<span class="ident">as_bytes</span>()),
+                    <span class="ident">quiche::h3::Header::new</span>(<span class="string">b&quot;server&quot;</span>, <span class="string">b&quot;quiche&quot;</span>),
+                ];
+
+                <span class="ident">h3_conn</span>.<span class="ident">send_response</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">conn</span>, <span class="ident">stream_id</span>, <span class="kw-2">&amp;</span><span class="ident">resp</span>, <span class="bool-val">false</span>)<span class="question-mark">?</span>;
+                <span class="ident">h3_conn</span>.<span class="ident">send_body</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">conn</span>, <span class="ident">stream_id</span>, <span class="string">b&quot;Hello World!&quot;</span>, <span class="bool-val">true</span>)<span class="question-mark">?</span>;
+            }
+        },
+
+        <span class="prelude-val">Ok</span>((<span class="ident">stream_id</span>, <span class="ident">quiche::h3::Event::Data</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="comment">// Request body data, handle it.</span>
+        },
+
+        <span class="prelude-val">Ok</span>((<span class="ident">stream_id</span>, <span class="ident">quiche::h3::Event::Finished</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="comment">// Peer terminated stream, handle it.</span>
+        },
+
+        <span class="prelude-val">Ok</span>((<span class="ident">stream_id</span>, <span class="ident">quiche::h3::Event::Reset</span>(<span class="ident">err</span>))) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="comment">// Peer reset the stream, handle it.</span>
+        },
+
+        <span class="prelude-val">Ok</span>((<span class="ident">_flow_id</span>, <span class="ident">quiche::h3::Event::Datagram</span>)) <span class="op">=</span><span class="op">&gt;</span> (),
+
+        <span class="prelude-val">Ok</span>((<span class="ident">goaway_id</span>, <span class="ident">quiche::h3::Event::GoAway</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+             <span class="comment">// Peer signalled it is going away, handle it.</span>
+        },
+
+        <span class="prelude-val">Err</span>(<span class="ident">quiche::h3::Error::Done</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="comment">// Done reading.</span>
+            <span class="kw">break</span>;
+        },
+
+        <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="comment">// An error occurred, handle it.</span>
+            <span class="kw">break</span>;
+        },
+    }
+}</pre></div>
+<p>An HTTP/3 client uses <a href="struct.Connection.html#method.poll"><code>poll()</code></a> to read responses:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered">
+<span class="kw">use</span> <span class="ident">quiche::h3::NameValue</span>;
+
+<span class="kw">loop</span> {
+    <span class="kw">match</span> <span class="ident">h3_conn</span>.<span class="ident">poll</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">conn</span>) {
+        <span class="prelude-val">Ok</span>((<span class="ident">stream_id</span>, <span class="ident">quiche::h3::Event::Headers</span>{<span class="ident">list</span>, <span class="ident">has_body</span>})) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="kw">let</span> <span class="ident">status</span> <span class="op">=</span> <span class="ident">list</span>.<span class="ident">iter</span>().<span class="ident">find</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">h</span>.<span class="ident">name</span>() <span class="op">=</span><span class="op">=</span> <span class="string">b&quot;:status&quot;</span>).<span class="ident">unwrap</span>();
+            <span class="macro">println!</span>(<span class="string">&quot;Received {} response on stream {}&quot;</span>,
+                     <span class="ident">std::str::from_utf8</span>(<span class="ident">status</span>.<span class="ident">value</span>()).<span class="ident">unwrap</span>(),
+                     <span class="ident">stream_id</span>);
+        },
+
+        <span class="prelude-val">Ok</span>((<span class="ident">stream_id</span>, <span class="ident">quiche::h3::Event::Data</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">body</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="number">0</span>; <span class="number">4096</span>];
+
+            <span class="comment">// Consume all body data received on the stream.</span>
+            <span class="kw">while</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">read</span>) <span class="op">=</span>
+                <span class="ident">h3_conn</span>.<span class="ident">recv_body</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">conn</span>, <span class="ident">stream_id</span>, <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">body</span>)
+            {
+                <span class="macro">println!</span>(<span class="string">&quot;Received {} bytes of payload on stream {}&quot;</span>,
+                         <span class="ident">read</span>, <span class="ident">stream_id</span>);
+            }
+        },
+
+        <span class="prelude-val">Ok</span>((<span class="ident">stream_id</span>, <span class="ident">quiche::h3::Event::Finished</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="comment">// Peer terminated stream, handle it.</span>
+        },
+
+        <span class="prelude-val">Ok</span>((<span class="ident">stream_id</span>, <span class="ident">quiche::h3::Event::Reset</span>(<span class="ident">err</span>))) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="comment">// Peer reset the stream, handle it.</span>
+        },
+
+        <span class="prelude-val">Ok</span>((<span class="ident">_flow_id</span>, <span class="ident">quiche::h3::Event::Datagram</span>)) <span class="op">=</span><span class="op">&gt;</span> (),
+
+        <span class="prelude-val">Ok</span>((<span class="ident">goaway_id</span>, <span class="ident">quiche::h3::Event::GoAway</span>)) <span class="op">=</span><span class="op">&gt;</span> {
+             <span class="comment">// Peer signalled it is going away, handle it.</span>
+        },
+
+        <span class="prelude-val">Err</span>(<span class="ident">quiche::h3::Error::Done</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="comment">// Done reading.</span>
+            <span class="kw">break</span>;
+        },
+
+        <span class="prelude-val">Err</span>(<span class="ident">e</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="comment">// An error occurred, handle it.</span>
+            <span class="kw">break</span>;
+        },
+    }
+}</pre></div>
+<h2 id="detecting-end-of-request-or-response" class="section-header"><a href="#detecting-end-of-request-or-response">Detecting end of request or response</a></h2>
+<p>A single HTTP/3 request or response may consist of several HEADERS and DATA
+frames; it is finished when the QUIC stream is closed. Calling <a href="struct.Connection.html#method.poll"><code>poll()</code></a>
+repeatedly will generate an <a href="enum.Event.html"><code>Event</code></a> for each of these. The application may
+use these event to do additional HTTP semantic validation.</p>
+<h2 id="http3-protocol-errors" class="section-header"><a href="#http3-protocol-errors">HTTP/3 protocol errors</a></h2>
+<p>Quiche is responsible for managing the HTTP/3 connection, ensuring it is in
+a correct state and validating all messages received by a peer. This mainly
+takes place in the <a href="struct.Connection.html#method.poll"><code>poll()</code></a> method. If an HTTP/3 error occurs, quiche will
+close the connection and send an appropriate CONNECTION_CLOSE frame to the
+peer. An <a href="enum.Error.html"><code>Error</code></a> is returned to the application so that it can perform any
+required tidy up such as closing sockets.</p>
+</div><h2 id="structs" class="section-header"><a href="#structs">Structs</a></h2>
+<table><tr class="module-item"><td><a class="struct" href="struct.Config.html" title="quiche::h3::Config struct">Config</a></td><td class="docblock-short"><p>An HTTP/3 configuration.</p>
+</td></tr><tr class="module-item"><td><a class="struct" href="struct.Connection.html" title="quiche::h3::Connection struct">Connection</a></td><td class="docblock-short"><p>An HTTP/3 connection.</p>
+</td></tr><tr class="module-item"><td><a class="struct" href="struct.Header.html" title="quiche::h3::Header struct">Header</a></td><td class="docblock-short"><p>An owned name-value pair representing a raw HTTP header.</p>
+</td></tr><tr class="module-item"><td><a class="struct" href="struct.HeaderRef.html" title="quiche::h3::HeaderRef struct">HeaderRef</a></td><td class="docblock-short"><p>A non-owned name-value pair representing a raw HTTP header.</p>
+</td></tr></table><h2 id="enums" class="section-header"><a href="#enums">Enums</a></h2>
+<table><tr class="module-item"><td><a class="enum" href="enum.Error.html" title="quiche::h3::Error enum">Error</a></td><td class="docblock-short"><p>An HTTP/3 error.</p>
+</td></tr><tr class="module-item"><td><a class="enum" href="enum.Event.html" title="quiche::h3::Event enum">Event</a></td><td class="docblock-short"><p>An HTTP/3 connection event.</p>
+</td></tr></table><h2 id="constants" class="section-header"><a href="#constants">Constants</a></h2>
+<table><tr class="module-item"><td><a class="constant" href="constant.APPLICATION_PROTOCOL.html" title="quiche::h3::APPLICATION_PROTOCOL constant">APPLICATION_PROTOCOL</a></td><td class="docblock-short"><p>List of ALPN tokens of supported HTTP/3 versions.</p>
+</td></tr></table><h2 id="traits" class="section-header"><a href="#traits">Traits</a></h2>
+<table><tr class="module-item"><td><a class="trait" href="trait.NameValue.html" title="quiche::h3::NameValue trait">NameValue</a></td><td class="docblock-short"><p>A trait for types with associated string name and value.</p>
+</td></tr></table><h2 id="types" class="section-header"><a href="#types">Type Definitions</a></h2>
+<table><tr class="module-item"><td><a class="type" href="type.Result.html" title="quiche::h3::Result type">Result</a></td><td class="docblock-short"><p>A specialized <a href="https://doc.rust-lang.org/std/result/enum.Result.html"><code>Result</code></a> type for quiche HTTP/3 operations.</p>
+</td></tr></table></section><section id="search" class="content hidden"></section><div id="rustdoc-vars" data-root-path="../../" data-current-crate="quiche" data-search-index-js="../../search-index.js" data-search-js="../../search.js"></div>
+    <script src="../../main.js"></script></body></html>
