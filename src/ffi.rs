@@ -588,6 +588,14 @@ pub extern fn quiche_conn_set_qlog_fd(
 }
 
 #[no_mangle]
+#[cfg(feature = "qlog")]
+pub extern fn quiche_conn_set_qlog_level(
+    conn: &mut Connection, log_level: QlogLevel,
+) {
+    conn.set_qlog_level(log_level);
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_set_session(
     conn: &mut Connection, buf: *const u8, buf_len: size_t,
 ) -> c_int {

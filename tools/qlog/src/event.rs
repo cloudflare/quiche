@@ -44,12 +44,22 @@ use super::*;
 pub struct Event {
     pub category: EventCategory,
     pub ty: EventType,
+    pub importance: EventImportance,
     pub data: EventData,
 }
 
 #[allow(clippy::too_many_arguments)]
 impl Event {
     // Connectivity events.
+
+    fn new(ty: EventType, data: EventData) -> Self {
+        Event {
+            category: ty.into(),
+            ty,
+            importance: ty.into(),
+            data,
+        }
+    }
 
     /// Returns:
     /// * `EventCategory`=`Connectivity`
@@ -60,21 +70,20 @@ impl Event {
         quic_versions: Option<Vec<String>>, alpn_values: Option<Vec<String>>,
         stateless_reset_required: Option<bool>,
     ) -> Self {
-        Event {
-            category: EventCategory::Connectivity,
-            ty: EventType::ConnectivityEventType(
-                ConnectivityEventType::ServerListening,
-            ),
-            data: EventData::ServerListening {
-                ip_v4,
-                ip_v6,
-                port_v4,
-                port_v6,
-                quic_versions,
-                alpn_values,
-                stateless_reset_required,
-            },
-        }
+        let ty = EventType::ConnectivityEventType(
+            ConnectivityEventType::ServerListening,
+        );
+        let data = EventData::ServerListening {
+            ip_v4,
+            ip_v6,
+            port_v4,
+            port_v6,
+            quic_versions,
+            alpn_values,
+            stateless_reset_required,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn server_listening_min(port_v4: u32, port_v6: u32) -> Self {
@@ -91,23 +100,22 @@ impl Event {
         quic_version: Option<String>, src_cid: Option<String>,
         dst_cid: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Connectivity,
-            ty: EventType::ConnectivityEventType(
-                ConnectivityEventType::ConnectionStarted,
-            ),
-            data: EventData::ConnectionStarted {
-                ip_version,
-                src_ip,
-                dst_ip,
-                protocol,
-                src_port,
-                dst_port,
-                quic_version,
-                src_cid,
-                dst_cid,
-            },
-        }
+        let ty = EventType::ConnectivityEventType(
+            ConnectivityEventType::ConnectionStarted,
+        );
+        let data = EventData::ConnectionStarted {
+            ip_version,
+            src_ip,
+            dst_ip,
+            protocol,
+            src_port,
+            dst_port,
+            quic_version,
+            src_cid,
+            dst_cid,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn connection_started_min(
@@ -128,18 +136,17 @@ impl Event {
         src_old: Option<String>, src_new: Option<String>,
         dst_old: Option<String>, dst_new: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Connectivity,
-            ty: EventType::ConnectivityEventType(
-                ConnectivityEventType::ConnectionIdUpdated,
-            ),
-            data: EventData::ConnectionIdUpdated {
-                src_old,
-                src_new,
-                dst_old,
-                dst_new,
-            },
-        }
+        let ty = EventType::ConnectivityEventType(
+            ConnectivityEventType::ConnectionIdUpdated,
+        );
+        let data = EventData::ConnectionIdUpdated {
+            src_old,
+            src_new,
+            dst_old,
+            dst_new,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn connection_id_updated_min() -> Self {
@@ -151,13 +158,13 @@ impl Event {
     /// * `EventType`=`ConnectivityEventType::SpinBitUpdated`
     /// * `EventData`=`SpinBitUpdated`.
     pub fn spinbit_updated(state: bool) -> Self {
-        Event {
-            category: EventCategory::Connectivity,
-            ty: EventType::ConnectivityEventType(
-                ConnectivityEventType::SpinBitUpdated,
-            ),
-            data: EventData::SpinBitUpdated { state },
-        }
+        let ty = EventType::ConnectivityEventType(
+            ConnectivityEventType::SpinBitUpdated,
+        );
+
+        let data = EventData::SpinBitUpdated { state };
+
+        Event::new(ty, data)
     }
 
     /// Returns:
@@ -167,13 +174,12 @@ impl Event {
     pub fn connection_state_updated(
         old: Option<ConnectionState>, new: ConnectionState,
     ) -> Self {
-        Event {
-            category: EventCategory::Connectivity,
-            ty: EventType::ConnectivityEventType(
-                ConnectivityEventType::ConnectionStateUpdated,
-            ),
-            data: EventData::ConnectionStateUpdated { old, new },
-        }
+        let ty = EventType::ConnectivityEventType(
+            ConnectivityEventType::ConnectionStateUpdated,
+        );
+        let data = EventData::ConnectionStateUpdated { old, new };
+
+        Event::new(ty, data)
     }
 
     pub fn connection_state_updated_min(new: ConnectionState) -> Self {
@@ -203,38 +209,37 @@ impl Event {
         initial_max_streams_uni: Option<u64>,
         preferred_address: Option<PreferredAddress>,
     ) -> Self {
-        Event {
-            category: EventCategory::Transport,
-            ty: EventType::TransportEventType(TransportEventType::ParametersSet),
-            data: EventData::TransportParametersSet {
-                owner,
+        let ty = EventType::TransportEventType(TransportEventType::ParametersSet);
+        let data = EventData::TransportParametersSet {
+            owner,
 
-                resumption_allowed,
-                early_data_enabled,
-                alpn,
-                version,
-                tls_cipher,
+            resumption_allowed,
+            early_data_enabled,
+            alpn,
+            version,
+            tls_cipher,
 
-                original_connection_id,
-                stateless_reset_token,
-                disable_active_migration,
+            original_connection_id,
+            stateless_reset_token,
+            disable_active_migration,
 
-                idle_timeout,
-                max_udp_payload_size,
-                ack_delay_exponent,
-                max_ack_delay,
-                active_connection_id_limit,
+            idle_timeout,
+            max_udp_payload_size,
+            ack_delay_exponent,
+            max_ack_delay,
+            active_connection_id_limit,
 
-                initial_max_data,
-                initial_max_stream_data_bidi_local,
-                initial_max_stream_data_bidi_remote,
-                initial_max_stream_data_uni,
-                initial_max_streams_bidi,
-                initial_max_streams_uni,
+            initial_max_data,
+            initial_max_stream_data_bidi_local,
+            initial_max_stream_data_bidi_remote,
+            initial_max_stream_data_uni,
+            initial_max_streams_bidi,
+            initial_max_streams_uni,
 
-                preferred_address,
-            },
-        }
+            preferred_address,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn transport_parameters_set_min() -> Self {
@@ -251,13 +256,11 @@ impl Event {
     pub fn datagrams_received(
         count: Option<u16>, byte_length: Option<u64>,
     ) -> Self {
-        Event {
-            category: EventCategory::Transport,
-            ty: EventType::TransportEventType(
-                TransportEventType::DatagramsReceived,
-            ),
-            data: EventData::DatagramsReceived { count, byte_length },
-        }
+        let ty =
+            EventType::TransportEventType(TransportEventType::DatagramsReceived);
+        let data = EventData::DatagramsReceived { count, byte_length };
+
+        Event::new(ty, data)
     }
 
     pub fn datagrams_received_min() -> Self {
@@ -269,11 +272,10 @@ impl Event {
     /// * `EventType`=`TransportEventType::DatagramsSent`
     /// * `EventData`=`DatagramsSent`.
     pub fn datagrams_sent(count: Option<u16>, byte_length: Option<u64>) -> Self {
-        Event {
-            category: EventCategory::Transport,
-            ty: EventType::TransportEventType(TransportEventType::DatagramsSent),
-            data: EventData::DatagramsSent { count, byte_length },
-        }
+        let ty = EventType::TransportEventType(TransportEventType::DatagramsSent);
+        let data = EventData::DatagramsReceived { count, byte_length };
+
+        Event::new(ty, data)
     }
 
     pub fn datagrams_sent_min() -> Self {
@@ -285,13 +287,11 @@ impl Event {
     /// * `EventType`=`TransportEventType::DatagramDropped`
     /// * `EventData`=`DatagramDropped`.
     pub fn datagram_dropped(byte_length: Option<u64>) -> Self {
-        Event {
-            category: EventCategory::Transport,
-            ty: EventType::TransportEventType(
-                TransportEventType::DatagramDropped,
-            ),
-            data: EventData::DatagramDropped { byte_length },
-        }
+        let ty =
+            EventType::TransportEventType(TransportEventType::DatagramDropped);
+        let data = EventData::DatagramDropped { byte_length };
+
+        Event::new(ty, data)
     }
 
     pub fn datagram_dropped_min() -> Self {
@@ -307,20 +307,20 @@ impl Event {
         frames: Option<Vec<QuicFrame>>, is_coalesced: Option<bool>,
         raw_encrypted: Option<String>, raw_decrypted: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Transport,
-            ty: EventType::TransportEventType(TransportEventType::PacketReceived),
-            data: EventData::PacketReceived {
-                packet_type,
-                header,
-                frames,
+        let ty =
+            EventType::TransportEventType(TransportEventType::PacketReceived);
+        let data = EventData::PacketReceived {
+            packet_type,
+            header,
+            frames,
 
-                is_coalesced,
+            is_coalesced,
 
-                raw_encrypted,
-                raw_decrypted,
-            },
-        }
+            raw_encrypted,
+            raw_decrypted,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn packet_received_min(
@@ -338,20 +338,19 @@ impl Event {
         frames: Option<Vec<QuicFrame>>, is_coalesced: Option<bool>,
         raw_encrypted: Option<String>, raw_decrypted: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Transport,
-            ty: EventType::TransportEventType(TransportEventType::PacketSent),
-            data: EventData::PacketSent {
-                packet_type,
-                header,
-                frames,
+        let ty = EventType::TransportEventType(TransportEventType::PacketSent);
+        let data = EventData::PacketSent {
+            packet_type,
+            header,
+            frames,
 
-                is_coalesced,
+            is_coalesced,
 
-                raw_encrypted,
-                raw_decrypted,
-            },
-        }
+            raw_encrypted,
+            raw_decrypted,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn packet_sent_min(
@@ -369,15 +368,14 @@ impl Event {
         packet_type: Option<PacketType>, packet_size: Option<u64>,
         raw: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Transport,
-            ty: EventType::TransportEventType(TransportEventType::PacketDropped),
-            data: EventData::PacketDropped {
-                packet_type,
-                packet_size,
-                raw,
-            },
-        }
+        let ty = EventType::TransportEventType(TransportEventType::PacketDropped);
+        let data = EventData::PacketDropped {
+            packet_type,
+            packet_size,
+            raw,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn packet_dropped_min() -> Self {
@@ -391,14 +389,14 @@ impl Event {
     pub fn packet_buffered(
         packet_type: PacketType, packet_number: String,
     ) -> Self {
-        Event {
-            category: EventCategory::Transport,
-            ty: EventType::TransportEventType(TransportEventType::PacketBuffered),
-            data: EventData::PacketBuffered {
-                packet_type,
-                packet_number,
-            },
-        }
+        let ty =
+            EventType::TransportEventType(TransportEventType::PacketBuffered);
+        let data = EventData::PacketBuffered {
+            packet_type,
+            packet_number,
+        };
+
+        Event::new(ty, data)
     }
 
     /// Returns:
@@ -410,19 +408,17 @@ impl Event {
         old: Option<StreamState>, new: StreamState,
         stream_side: Option<StreamSide>,
     ) -> Self {
-        Event {
-            category: EventCategory::Connectivity,
-            ty: EventType::TransportEventType(
-                TransportEventType::StreamStateUpdated,
-            ),
-            data: EventData::StreamStateUpdated {
-                stream_id,
-                stream_type,
-                old,
-                new,
-                stream_side,
-            },
-        }
+        let ty =
+            EventType::TransportEventType(TransportEventType::StreamStateUpdated);
+        let data = EventData::StreamStateUpdated {
+            stream_id,
+            stream_type,
+            old,
+            new,
+            stream_side,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn stream_state_updated_min(stream_id: u64, new: StreamState) -> Self {
@@ -434,13 +430,12 @@ impl Event {
     /// * `EventType`=`TransportEventType::FramesProcessed`
     /// * `EventData`=`FramesProcessed`.
     pub fn frames_processed(frames: Vec<QuicFrame>) -> Self {
-        Event {
-            category: EventCategory::Transport,
-            ty: EventType::TransportEventType(
-                TransportEventType::FramesProcessed,
-            ),
-            data: EventData::FramesProcessed { frames },
-        }
+        let ty =
+            EventType::TransportEventType(TransportEventType::FramesProcessed);
+
+        let data = EventData::FramesProcessed { frames };
+
+        Event::new(ty, data)
     }
 
     // Recovery events.
@@ -457,21 +452,20 @@ impl Event {
         loss_reduction_factor: Option<f32>,
         persistent_congestion_threshold: Option<u16>,
     ) -> Self {
-        Event {
-            category: EventCategory::Recovery,
-            ty: EventType::RecoveryEventType(RecoveryEventType::ParametersSet),
-            data: EventData::RecoveryParametersSet {
-                reordering_threshold,
-                time_threshold,
-                timer_granularity,
-                initial_rtt,
-                max_datagram_size,
-                initial_congestion_window,
-                minimum_congestion_window,
-                loss_reduction_factor,
-                persistent_congestion_threshold,
-            },
-        }
+        let ty = EventType::RecoveryEventType(RecoveryEventType::ParametersSet);
+        let data = EventData::RecoveryParametersSet {
+            reordering_threshold,
+            time_threshold,
+            timer_granularity,
+            initial_rtt,
+            max_datagram_size,
+            initial_congestion_window,
+            minimum_congestion_window,
+            loss_reduction_factor,
+            persistent_congestion_threshold,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn recovery_parameters_set_min() -> Self {
@@ -492,24 +486,23 @@ impl Event {
         packets_in_flight: Option<u64>, in_recovery: Option<bool>,
         pacing_rate: Option<u64>,
     ) -> Self {
-        Event {
-            category: EventCategory::Recovery,
-            ty: EventType::RecoveryEventType(RecoveryEventType::MetricsUpdated),
-            data: EventData::MetricsUpdated {
-                min_rtt,
-                smoothed_rtt,
-                latest_rtt,
-                rtt_variance,
-                max_ack_delay,
-                pto_count,
-                congestion_window,
-                bytes_in_flight,
-                ssthresh,
-                packets_in_flight,
-                in_recovery,
-                pacing_rate,
-            },
-        }
+        let ty = EventType::RecoveryEventType(RecoveryEventType::MetricsUpdated);
+        let data = EventData::MetricsUpdated {
+            min_rtt,
+            smoothed_rtt,
+            latest_rtt,
+            rtt_variance,
+            max_ack_delay,
+            pto_count,
+            congestion_window,
+            bytes_in_flight,
+            ssthresh,
+            packets_in_flight,
+            in_recovery,
+            pacing_rate,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn metrics_updated_min() -> Self {
@@ -524,13 +517,12 @@ impl Event {
     /// * `EventType`=`RecoveryEventType::CongestionStateUpdated`
     /// * `EventData`=`CongestionStateUpdated`.
     pub fn congestion_state_updated(old: Option<String>, new: String) -> Self {
-        Event {
-            category: EventCategory::Recovery,
-            ty: EventType::RecoveryEventType(
-                RecoveryEventType::CongestionStateUpdated,
-            ),
-            data: EventData::CongestionStateUpdated { old, new },
-        }
+        let ty = EventType::RecoveryEventType(
+            RecoveryEventType::CongestionStateUpdated,
+        );
+        let data = EventData::CongestionStateUpdated { old, new };
+
+        Event::new(ty, data)
     }
 
     pub fn congestion_state_updated_min(new: String) -> Self {
@@ -544,14 +536,13 @@ impl Event {
     pub fn loss_timer_set(
         timer_type: Option<TimerType>, timeout: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Recovery,
-            ty: EventType::RecoveryEventType(RecoveryEventType::LossTimerSet),
-            data: EventData::LossTimerSet {
-                timer_type,
-                timeout,
-            },
-        }
+        let ty = EventType::RecoveryEventType(RecoveryEventType::LossTimerSet);
+        let data = EventData::LossTimerSet {
+            timer_type,
+            timeout,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn loss_timer_set_min() -> Self {
@@ -566,16 +557,15 @@ impl Event {
         packet_type: PacketType, packet_number: String,
         header: Option<PacketHeader>, frames: Vec<QuicFrame>,
     ) -> Self {
-        Event {
-            category: EventCategory::Recovery,
-            ty: EventType::RecoveryEventType(RecoveryEventType::PacketLost),
-            data: EventData::PacketLost {
-                packet_type,
-                packet_number,
-                header,
-                frames,
-            },
-        }
+        let ty = EventType::RecoveryEventType(RecoveryEventType::PacketLost);
+        let data = EventData::PacketLost {
+            packet_type,
+            packet_number,
+            header,
+            frames,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn packet_lost_min(
@@ -589,13 +579,11 @@ impl Event {
     /// * `EventType`=`RecoveryEventType::MarkedForRetransmit`
     /// * `EventData`=`MarkedForRetransmit`.
     pub fn marked_for_retransmit(frames: Vec<QuicFrame>) -> Self {
-        Event {
-            category: EventCategory::Recovery,
-            ty: EventType::RecoveryEventType(
-                RecoveryEventType::MarkedForRetransmit,
-            ),
-            data: EventData::MarkedForRetransmit { frames },
-        }
+        let ty =
+            EventType::RecoveryEventType(RecoveryEventType::MarkedForRetransmit);
+        let data = EventData::MarkedForRetransmit { frames };
+
+        Event::new(ty, data)
     }
 
     // HTTP/3 events.
@@ -609,18 +597,17 @@ impl Event {
         max_table_capacity: Option<u64>, blocked_streams_count: Option<u64>,
         push_allowed: Option<bool>, waits_for_settings: Option<bool>,
     ) -> Self {
-        Event {
-            category: EventCategory::Http,
-            ty: EventType::Http3EventType(Http3EventType::ParametersSet),
-            data: EventData::H3ParametersSet {
-                owner,
-                max_header_list_size,
-                max_table_capacity,
-                blocked_streams_count,
-                push_allowed,
-                waits_for_settings,
-            },
-        }
+        let ty = EventType::Http3EventType(Http3EventType::ParametersSet);
+        let data = EventData::H3ParametersSet {
+            owner,
+            max_header_list_size,
+            max_table_capacity,
+            blocked_streams_count,
+            push_allowed,
+            waits_for_settings,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn h3_parameters_set_min() -> Self {
@@ -635,16 +622,15 @@ impl Event {
         stream_id: u64, owner: Option<H3Owner>, old: Option<H3StreamType>,
         new: H3StreamType,
     ) -> Self {
-        Event {
-            category: EventCategory::Http,
-            ty: EventType::Http3EventType(Http3EventType::StreamTypeSet),
-            data: EventData::H3StreamTypeSet {
-                stream_id,
-                owner,
-                old,
-                new,
-            },
-        }
+        let ty = EventType::Http3EventType(Http3EventType::StreamTypeSet);
+        let data = EventData::H3StreamTypeSet {
+            stream_id,
+            owner,
+            old,
+            new,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn h3_stream_type_set_min(stream_id: u64, new: H3StreamType) -> Self {
@@ -659,16 +645,15 @@ impl Event {
         stream_id: u64, frame: Http3Frame, byte_length: Option<u64>,
         raw: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Http,
-            ty: EventType::Http3EventType(Http3EventType::FrameCreated),
-            data: EventData::H3FrameCreated {
-                stream_id,
-                frame,
-                byte_length,
-                raw,
-            },
-        }
+        let ty = EventType::Http3EventType(Http3EventType::FrameCreated);
+        let data = EventData::H3FrameCreated {
+            stream_id,
+            frame,
+            byte_length,
+            raw,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn h3_frame_created_min(stream_id: u64, frame: Http3Frame) -> Self {
@@ -683,16 +668,15 @@ impl Event {
         stream_id: u64, frame: Http3Frame, byte_length: Option<u64>,
         raw: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Http,
-            ty: EventType::Http3EventType(Http3EventType::FrameParsed),
-            data: EventData::H3FrameParsed {
-                stream_id,
-                frame,
-                byte_length,
-                raw,
-            },
-        }
+        let ty = EventType::Http3EventType(Http3EventType::FrameParsed);
+        let data = EventData::H3FrameParsed {
+            stream_id,
+            frame,
+            byte_length,
+            raw,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn h3_frame_parsed_min(stream_id: u64, frame: Http3Frame) -> Self {
@@ -708,18 +692,17 @@ impl Event {
         from: Option<H3DataRecipient>, to: Option<H3DataRecipient>,
         raw: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Http,
-            ty: EventType::Http3EventType(Http3EventType::DataMoved),
-            data: EventData::H3DataMoved {
-                stream_id,
-                offset,
-                length,
-                from,
-                to,
-                raw,
-            },
-        }
+        let ty = EventType::Http3EventType(Http3EventType::DataMoved);
+        let data = EventData::H3DataMoved {
+            stream_id,
+            offset,
+            length,
+            from,
+            to,
+            raw,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn h3_data_moved_min(stream_id: u64) -> Self {
@@ -734,15 +717,14 @@ impl Event {
         push_id: Option<u64>, stream_id: Option<u64>,
         decision: Option<H3PushDecision>,
     ) -> Self {
-        Event {
-            category: EventCategory::Http,
-            ty: EventType::Http3EventType(Http3EventType::PushResolved),
-            data: EventData::H3PushResolved {
-                push_id,
-                stream_id,
-                decision,
-            },
-        }
+        let ty = EventType::Http3EventType(Http3EventType::PushResolved);
+        let data = EventData::H3PushResolved {
+            push_id,
+            stream_id,
+            decision,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn h3_push_resolved_min() -> Self {
@@ -760,17 +742,16 @@ impl Event {
         dynamic_table_size: Option<u64>, known_received_count: Option<u64>,
         current_insert_count: Option<u64>,
     ) -> Self {
-        Event {
-            category: EventCategory::Qpack,
-            ty: EventType::QpackEventType(QpackEventType::StateUpdated),
-            data: EventData::QpackStateUpdated {
-                owner,
-                dynamic_table_capacity,
-                dynamic_table_size,
-                known_received_count,
-                current_insert_count,
-            },
-        }
+        let ty = EventType::QpackEventType(QpackEventType::StateUpdated);
+        let data = EventData::QpackStateUpdated {
+            owner,
+            dynamic_table_capacity,
+            dynamic_table_size,
+            known_received_count,
+            current_insert_count,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn qpack_state_updated_min() -> Self {
@@ -784,11 +765,10 @@ impl Event {
     pub fn qpack_stream_state_updated(
         stream_id: u64, state: QpackStreamState,
     ) -> Self {
-        Event {
-            category: EventCategory::Qpack,
-            ty: EventType::QpackEventType(QpackEventType::StreamStateUpdated),
-            data: EventData::QpackStreamStateUpdated { stream_id, state },
-        }
+        let ty = EventType::QpackEventType(QpackEventType::StreamStateUpdated);
+        let data = EventData::QpackStreamStateUpdated { stream_id, state };
+
+        Event::new(ty, data)
     }
 
     /// Returns:
@@ -798,14 +778,13 @@ impl Event {
     pub fn qpack_dynamic_table_updated(
         update_type: QpackUpdateType, entries: Vec<QpackDynamicTableEntry>,
     ) -> Self {
-        Event {
-            category: EventCategory::Qpack,
-            ty: EventType::QpackEventType(QpackEventType::DynamicTableUpdated),
-            data: EventData::QpackDynamicTableUpdated {
-                update_type,
-                entries,
-            },
-        }
+        let ty = EventType::QpackEventType(QpackEventType::DynamicTableUpdated);
+        let data = EventData::QpackDynamicTableUpdated {
+            update_type,
+            entries,
+        };
+
+        Event::new(ty, data)
     }
 
     /// Returns:
@@ -817,17 +796,16 @@ impl Event {
         block_prefix: QpackHeaderBlockPrefix,
         header_block: Vec<QpackHeaderBlockRepresentation>, raw: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Qpack,
-            ty: EventType::QpackEventType(QpackEventType::HeadersEncoded),
-            data: EventData::QpackHeadersEncoded {
-                stream_id,
-                headers,
-                block_prefix,
-                header_block,
-                raw,
-            },
-        }
+        let ty = EventType::QpackEventType(QpackEventType::HeadersEncoded);
+        let data = EventData::QpackHeadersEncoded {
+            stream_id,
+            headers,
+            block_prefix,
+            header_block,
+            raw,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn qpack_headers_encoded_min(
@@ -846,17 +824,16 @@ impl Event {
         block_prefix: QpackHeaderBlockPrefix,
         header_block: Vec<QpackHeaderBlockRepresentation>, raw: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Qpack,
-            ty: EventType::QpackEventType(QpackEventType::HeadersDecoded),
-            data: EventData::QpackHeadersDecoded {
-                stream_id,
-                headers,
-                block_prefix,
-                header_block,
-                raw,
-            },
-        }
+        let ty = EventType::QpackEventType(QpackEventType::HeadersDecoded);
+        let data = EventData::QpackHeadersDecoded {
+            stream_id,
+            headers,
+            block_prefix,
+            header_block,
+            raw,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn qpack_headers_decoded_min(
@@ -874,15 +851,14 @@ impl Event {
         instruction: QPackInstruction, byte_length: Option<u32>,
         raw: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Qpack,
-            ty: EventType::QpackEventType(QpackEventType::InstructionSent),
-            data: EventData::QpackInstructionSent {
-                instruction,
-                byte_length,
-                raw,
-            },
-        }
+        let ty = EventType::QpackEventType(QpackEventType::InstructionSent);
+        let data = EventData::QpackInstructionSent {
+            instruction,
+            byte_length,
+            raw,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn qpack_instruction_sent_min(instruction: QPackInstruction) -> Self {
@@ -897,15 +873,14 @@ impl Event {
         instruction: QPackInstruction, byte_length: Option<u32>,
         raw: Option<String>,
     ) -> Self {
-        Event {
-            category: EventCategory::Qpack,
-            ty: EventType::QpackEventType(QpackEventType::InstructionReceived),
-            data: EventData::QpackInstructionReceived {
-                instruction,
-                byte_length,
-                raw,
-            },
-        }
+        let ty = EventType::QpackEventType(QpackEventType::InstructionReceived);
+        let data = EventData::QpackInstructionReceived {
+            instruction,
+            byte_length,
+            raw,
+        };
+
+        Event::new(ty, data)
     }
 
     pub fn qpack_instruction_received_min(instruction: QPackInstruction) -> Self {
