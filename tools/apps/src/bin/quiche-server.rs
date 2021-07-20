@@ -86,8 +86,10 @@ fn main() {
 
     let max_datagram_size = MAX_DATAGRAM_SIZE;
     let enable_gso = detect_gso(&socket, max_datagram_size);
+    let enable_sendmmsg = detect_sendmmsg();
 
     trace!("GSO detected: {}", enable_gso);
+    trace!("sendmmsg() detected: {}", enable_sendmmsg);
 
     // Create the configuration for the QUIC connections.
     let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
@@ -519,6 +521,7 @@ fn main() {
                 &dst_info.unwrap().to,
                 client.max_datagram_size,
                 enable_gso,
+                enable_sendmmsg,
             ) {
                 if e.kind() == std::io::ErrorKind::WouldBlock {
                     trace!("send() would block");
