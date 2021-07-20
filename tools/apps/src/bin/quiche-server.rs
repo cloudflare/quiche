@@ -27,6 +27,8 @@
 #[macro_use]
 extern crate log;
 
+use std::cmp;
+
 use std::net;
 
 use std::io::prelude::*;
@@ -43,13 +45,17 @@ use quiche_apps::args::*;
 
 use quiche_apps::common::*;
 
+use quiche_apps::sendto::*;
+
+const MAX_BUF_SIZE: usize = 65536;
+
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
-const MAX_SEND_BURST_LIMIT: usize = MAX_DATAGRAM_SIZE * 10;
+const MAX_SEND_BURST_PACKETS: usize = 10;
 
 fn main() {
-    let mut buf = [0; 65535];
-    let mut out = [0; MAX_DATAGRAM_SIZE];
+    let mut buf = [0; MAX_BUF_SIZE];
+    let mut out = [0; MAX_BUF_SIZE];
 
     env_logger::builder()
         .default_format_timestamp_nanos(true)
@@ -78,6 +84,11 @@ fn main() {
     )
     .unwrap();
 
+    let max_datagram_size = MAX_DATAGRAM_SIZE;
+    let enable_gso = detect_gso(&socket, max_datagram_size);
+
+    trace!("GSO detected: {}", enable_gso);
+
     // Create the configuration for the QUIC connections.
     let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 
@@ -87,8 +98,8 @@ fn main() {
     config.set_application_protos(&conn_args.alpns).unwrap();
 
     config.set_max_idle_timeout(conn_args.idle_timeout);
-    config.set_max_recv_udp_payload_size(MAX_DATAGRAM_SIZE);
-    config.set_max_send_udp_payload_size(MAX_DATAGRAM_SIZE);
+    config.set_max_recv_udp_payload_size(max_datagram_size);
+    config.set_max_send_udp_payload_size(max_datagram_size);
     config.set_initial_max_data(conn_args.max_data);
     config.set_initial_max_stream_data_bidi_local(conn_args.max_stream_data);
     config.set_initial_max_stream_data_bidi_remote(conn_args.max_stream_data);
@@ -341,7 +352,7 @@ fn main() {
                     partial_responses: HashMap::new(),
                     siduck_conn: None,
                     app_proto_selected: false,
-                    bytes_sent: 0,
+                    max_datagram_size,
                 };
 
                 clients.insert(scid.clone(), client);
@@ -415,6 +426,10 @@ fn main() {
 
                     client.app_proto_selected = true;
                 }
+
+                // Update max_datagram_size after connection established.
+                client.max_datagram_size =
+                    client.conn.max_send_udp_payload_size();
             }
 
             if client.http_conn.is_some() {
@@ -458,8 +473,18 @@ fn main() {
         // packets to be sent.
         continue_write = false;
         for client in clients.values_mut() {
-            loop {
-                let (write, send_info) = match client.conn.send(&mut out) {
+            let max_send_burst = cmp::min(
+                MAX_BUF_SIZE,
+                client.max_datagram_size * MAX_SEND_BURST_PACKETS,
+            );
+            let mut total_write = 0;
+            let mut dst_info = None;
+
+            while total_write < max_send_burst {
+                let (write, send_info) = match client
+                    .conn
+                    .send(&mut out[total_write..max_send_burst])
+                {
                     Ok(v) => v,
 
                     Err(quiche::Error::Done) => {
@@ -475,31 +500,40 @@ fn main() {
                     },
                 };
 
-                // TODO: coalesce packets.
-                if let Err(e) = socket.send_to(&out[..write], &send_info.to) {
-                    if e.kind() == std::io::ErrorKind::WouldBlock {
-                        trace!("send() would block");
-                        break;
-                    }
+                total_write += write;
 
-                    panic!("send() failed: {:?}", e);
-                }
+                dst_info = Some(send_info);
 
-                trace!("{} written {} bytes", client.conn.trace_id(), write);
-
-                // limit write bursting
-                client.bytes_sent += write;
-
-                if client.bytes_sent >= MAX_SEND_BURST_LIMIT {
-                    trace!(
-                        "{} pause writing at {}",
-                        client.conn.trace_id(),
-                        client.bytes_sent
-                    );
-                    client.bytes_sent = 0;
-                    continue_write = true;
+                if write < client.max_datagram_size {
                     break;
                 }
+            }
+
+            if total_write == 0 || dst_info.is_none() {
+                break;
+            }
+
+            if let Err(e) = send_to(
+                &socket,
+                &out[..total_write],
+                &dst_info.unwrap().to,
+                client.max_datagram_size,
+                enable_gso,
+            ) {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
+                    trace!("send() would block");
+                    break;
+                }
+
+                panic!("send_to() failed: {:?}", e);
+            }
+
+            trace!("{} written {} bytes", client.conn.trace_id(), total_write);
+
+            if total_write >= max_send_burst {
+                trace!("{} pause writing", client.conn.trace_id(),);
+                continue_write = true;
+                break;
             }
         }
 
