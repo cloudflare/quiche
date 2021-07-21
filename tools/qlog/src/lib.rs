@@ -143,7 +143,7 @@
 //!     datagram_id: None,
 //! };
 //!
-//! trace.push_event(qlog::Event::new(event_data));
+//! trace.push_event(qlog::Event::with_time(0.0, event_data));
 //! ```
 //!
 //! ### Serializing
@@ -269,7 +269,7 @@
 //!     None,
 //!     std::time::Instant::now(),
 //!     trace,
-//!     qlog::ImportanceLogLevel::Base,
+//!     qlog::EventImportance::Base,
 //!     Box::new(file),
 //! );
 //!
@@ -304,7 +304,7 @@
 //! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
-//! #     qlog::ImportanceLogLevel::Base,
+//! #     qlog::EventImportance::Base,
 //! #     Box::new(file),
 //! # );
 //! let event_data = qlog::EventData::MetricsUpdated {
@@ -320,7 +320,7 @@
 //!     pacing_rate: None,
 //! };
 //!
-//! let event = qlog::Event::new(event_data);
+//! let event = qlog::Event::with_time(0.0, event_data);
 //! streamer.add_event(event).ok();
 //! ```
 //!
@@ -356,7 +356,7 @@
 //! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
-//! #     qlog::ImportanceLogLevel::Base,
+//! #     qlog::EventImportance::Base,
 //! #     Box::new(file),
 //! # );
 //! let pkt_hdr = qlog::PacketHeader::with_type(
@@ -378,7 +378,7 @@
 //!     datagram_id: None,
 //! };
 //!
-//! let event = qlog::Event::new(event_data);
+//! let event = qlog::Event::with_time(0.0, event_data);
 //!
 //! streamer.add_event(event).ok();
 //! ```
@@ -411,7 +411,7 @@
 //! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
-//! #     qlog::ImportanceLogLevel::Base,
+//! #     qlog::EventImportance::Base,
 //! #     Box::new(file),
 //! # );
 //!
@@ -450,7 +450,7 @@
 //! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
-//! #     qlog::ImportanceLogLevel::Base,
+//! #     qlog::EventImportance::Base,
 //! #     Box::new(file),
 //! # );
 //! streamer.finish_log().ok();
@@ -581,7 +581,7 @@ pub struct QlogStreamer {
     writer: Box<dyn std::io::Write + Send + Sync>,
     qlog: Qlog,
     state: StreamerState,
-    log_level: ImportanceLogLevel,
+    log_level: EventImportance,
     first_event: bool,
     first_frame: bool,
 }
@@ -597,7 +597,7 @@ impl QlogStreamer {
     pub fn new(
         qlog_version: String, title: Option<String>, description: Option<String>,
         summary: Option<String>, start_time: std::time::Instant, trace: Trace,
-        log_level: ImportanceLogLevel,
+        log_level: EventImportance,
         writer: Box<dyn std::io::Write + Send + Sync>,
     ) -> Self {
         let qlog = Qlog {
@@ -671,22 +671,7 @@ impl QlogStreamer {
         Ok(())
     }
 
-    fn is_event_in_log_level(&self, event_importance: EventImportance) -> bool {
-        match (self.log_level, event_importance) {
-            (ImportanceLogLevel::Core, EventImportance::Core) => true,
-
-            (ImportanceLogLevel::Base, EventImportance::Core) |
-            (ImportanceLogLevel::Base, EventImportance::Base) => true,
-
-            (ImportanceLogLevel::Extra, EventImportance::Core) |
-            (ImportanceLogLevel::Extra, EventImportance::Base) |
-            (ImportanceLogLevel::Extra, EventImportance::Extra) => true,
-
-            (..) => false,
-        }
-    }
-
-    /// Writes a JSON-serialized `Event` at `std::time::Instant::now()`.
+    /// Writes a JSON-serialized `Event` using `std::time::Instant::now()`.
     ///
     /// Some qlog events can contain `QuicFrames`. If this is detected `true` is
     /// returned and the streamer enters a frame-serialization mode that is only
@@ -694,13 +679,14 @@ impl QlogStreamer {
     /// events are ignored.
     ///
     /// If the event contains no array of `QuicFrames` return `false`.
-    pub fn add_event(&mut self, event: Event) -> Result<bool> {
+    pub fn add_event_now(&mut self, event: Event) -> Result<bool> {
         let now = std::time::Instant::now();
 
         self.add_event_with_instant(event, now)
     }
 
-    /// Writes a JSON-serialized `Event` with the provided instant.
+    /// Writes a JSON-serialized `Event` using the provided EventData and
+    /// Instant.
     ///
     /// Some qlog events can contain `QuicFrames`. If this is detected `true` is
     /// returned and the streamer enters a frame-serialization mode that is only
@@ -715,7 +701,7 @@ impl QlogStreamer {
             return Err(Error::InvalidState);
         }
 
-        if !self.is_event_in_log_level(event.importance()) {
+        if !event.importance().is_contained_in(&self.log_level) {
             return Err(Error::Done);
         }
 
@@ -724,8 +710,61 @@ impl QlogStreamer {
         } else {
             now.duration_since(self.start_time)
         };
+
         let rel_time = dur.as_secs_f32() * 1000.0;
         event.time = rel_time;
+
+        self.add_event(event)
+    }
+
+    /// Writes a JSON-serialized `Event` using the provided Instant.
+    ///
+    /// Some qlog events can contain `QuicFrames`. If this is detected `true` is
+    /// returned and the streamer enters a frame-serialization mode that is only
+    /// concluded by `finish_frames()`. In this mode, attempts to log additional
+    /// events are ignored.
+    ///
+    /// If the event contains no array of `QuicFrames` return `false`.
+    pub fn add_event_data_with_instant(
+        &mut self, event_data: EventData, now: std::time::Instant,
+    ) -> Result<bool> {
+        if self.state != StreamerState::Ready {
+            return Err(Error::InvalidState);
+        }
+
+        let ty = EventType::from(&event_data);
+        if !EventImportance::from(ty).is_contained_in(&self.log_level) {
+            return Err(Error::Done);
+        }
+
+        let dur = if cfg!(test) {
+            std::time::Duration::from_secs(0)
+        } else {
+            now.duration_since(self.start_time)
+        };
+
+        let rel_time = dur.as_secs_f32() * 1000.0;
+        let event = Event::with_time(rel_time, event_data);
+
+        self.add_event(event)
+    }
+
+    /// Writes a JSON-serialized `Event` using the provided Event.
+    ///
+    /// Some qlog events can contain `QuicFrames`. If this is detected `true` is
+    /// returned and the streamer enters a frame-serialization mode that is only
+    /// concluded by `finish_frames()`. In this mode, attempts to log additional
+    /// events are ignored.
+    ///
+    /// If the event contains no array of `QuicFrames` return `false`.
+    pub fn add_event(&mut self, event: Event) -> Result<bool> {
+        if self.state != StreamerState::Ready {
+            return Err(Error::InvalidState);
+        }
+
+        if !event.importance().is_contained_in(&self.log_level) {
+            return Err(Error::Done);
+        }
 
         let (ev, contains_frames) = match serde_json::to_string(&event) {
             Ok(mut ev_out) =>
@@ -1046,12 +1085,7 @@ pub struct Event {
 }
 
 impl Event {
-    /// Returns a new `Event` object with the provided data at the default time.
-    pub fn new(data: EventData) -> Self {
-        Self::with_time(0.0, data)
-    }
-
-    /// Returns a new `Event` object with the provided data and time.
+    /// Returns a new `Event` object with the provided time and data.
     pub fn with_time(time: f32, data: EventData) -> Self {
         let ty = EventType::from(&data);
         Event {
@@ -1075,6 +1109,24 @@ pub enum EventImportance {
     Core,
     Base,
     Extra,
+}
+
+impl EventImportance {
+    /// Returns true if this importance level is included by `other`.
+    pub fn is_contained_in(&self, other: &EventImportance) -> bool {
+        match (other, self) {
+            (EventImportance::Core, EventImportance::Core) => true,
+
+            (EventImportance::Base, EventImportance::Core) |
+            (EventImportance::Base, EventImportance::Base) => true,
+
+            (EventImportance::Extra, EventImportance::Core) |
+            (EventImportance::Extra, EventImportance::Base) |
+            (EventImportance::Extra, EventImportance::Extra) => true,
+
+            (..) => false,
+        }
+    }
 }
 
 impl From<EventType> for EventImportance {
@@ -3249,7 +3301,7 @@ mod tests {
             datagram_id: None,
         };
 
-        let ev = Event::new(event_data);
+        let ev = Event::with_time(0.0, event_data);
 
         trace.push_event(ev);
 
@@ -3283,7 +3335,7 @@ mod tests {
             datagram_id: None,
         };
 
-        let event1 = Event::new(event_data1);
+        let event1 = Event::with_time(0.0, event_data1);
 
         trace.push_event(event1);
 
@@ -3302,7 +3354,7 @@ mod tests {
             datagram_id: None,
         };
 
-        let event2 = Event::new(event_data2);
+        let event2 = Event::with_time(0.0, event_data2);
 
         let event_data3 = EventData::PacketSent {
             header: pkt_hdr,
@@ -3315,7 +3367,7 @@ mod tests {
             datagram_id: None,
         };
 
-        let event3 = Event::new(event_data3);
+        let event3 = Event::with_time(0.0, event_data3);
 
         let mut s = QlogStreamer::new(
             "version".to_string(),
@@ -3324,7 +3376,7 @@ mod tests {
             None,
             std::time::Instant::now(),
             trace,
-            ImportanceLogLevel::Base,
+            EventImportance::Base,
             writer,
         );
 

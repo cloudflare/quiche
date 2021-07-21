@@ -1101,17 +1101,8 @@ pub struct Connection {
     /// TLS keylog writer.
     keylog: Option<Box<dyn std::io::Write + Send + Sync>>,
 
-    /// Qlog streaming output.
     #[cfg(feature = "qlog")]
-    qlog_streamer: Option<qlog::QlogStreamer>,
-
-    /// Whether peer transport parameters were qlogged.
-    #[cfg(feature = "qlog")]
-    qlogged_peer_params: bool,
-
-    /// Qlog logging level.
-    #[cfg(feature = "qlog")]
-    qlog_level: qlog::ImportanceLogLevel,
+    qlog: QlogInfo,
 
     /// DATAGRAM queues.
     dgram_recv_queue: dgram::DatagramQueue,
@@ -1308,19 +1299,73 @@ macro_rules! push_frame_to_pkt {
     }};
 }
 
-/// Conditional qlog action.
+/// Conditional qlog actions.
 ///
 /// Executes the provided body if the qlog feature is enabled and quiche
 /// has been configured with a log writer.
 macro_rules! qlog_with {
-    ($qlog_streamer:expr, $qlog_streamer_ref:ident, $body:block) => {{
+    ($qlog:expr, $qlog_streamer_ref:ident, $body:block) => {{
         #[cfg(feature = "qlog")]
         {
-            if let Some($qlog_streamer_ref) = &mut $qlog_streamer {
+            if let Some($qlog_streamer_ref) = &mut $qlog.streamer {
                 $body
             }
         }
     }};
+}
+
+/// Executes the provided body if the qlog feature is enabled, quiche has been
+/// configured with a log writer, the event's importance is within the
+/// confgured level, and the qlog start time is set.
+macro_rules! qlog_with_type {
+    ($ty:expr, $qlog:expr, $qlog_streamer_ref:ident, $body:block) => {{
+        #[cfg(feature = "qlog")]
+        {
+            if qlog::EventImportance::from($ty).is_contained_in(&$qlog.level) {
+                if let Some($qlog_streamer_ref) = &mut $qlog.streamer {
+                    $body
+                }
+            }
+        }
+    }};
+}
+
+#[cfg(feature = "qlog")]
+const QLOG_PARAMS_SET: qlog::EventType =
+    qlog::EventType::TransportEventType(qlog::TransportEventType::ParametersSet);
+
+#[cfg(feature = "qlog")]
+const QLOG_PACKET_RX: qlog::EventType =
+    qlog::EventType::TransportEventType(qlog::TransportEventType::PacketReceived);
+
+#[cfg(feature = "qlog")]
+const QLOG_PACKET_TX: qlog::EventType =
+    qlog::EventType::TransportEventType(qlog::TransportEventType::PacketSent);
+
+#[cfg(feature = "qlog")]
+const QLOG_DATA_MV: qlog::EventType =
+    qlog::EventType::TransportEventType(qlog::TransportEventType::DataMoved);
+
+#[cfg(feature = "qlog")]
+const QLOG_METRICS: qlog::EventType =
+    qlog::EventType::RecoveryEventType(qlog::RecoveryEventType::MetricsUpdated);
+
+#[cfg(feature = "qlog")]
+struct QlogInfo {
+    streamer: Option<qlog::QlogStreamer>,
+    logged_peer_params: bool,
+    level: qlog::EventImportance,
+}
+
+#[cfg(feature = "qlog")]
+impl Default for QlogInfo {
+    fn default() -> Self {
+        QlogInfo {
+            streamer: None,
+            logged_peer_params: false,
+            level: qlog::EventImportance::Base,
+        }
+    }
 }
 
 impl Connection {
@@ -1450,13 +1495,7 @@ impl Connection {
             keylog: None,
 
             #[cfg(feature = "qlog")]
-            qlog_streamer: None,
-
-            #[cfg(feature = "qlog")]
-            qlogged_peer_params: false,
-
-            #[cfg(feature = "qlog")]
-            qlog_level: qlog::ImportanceLogLevel::Base,
+            qlog: Default::default(),
 
             dgram_recv_queue: dgram::DatagramQueue::new(
                 config.dgram_recv_max_queue_len,
@@ -1563,9 +1602,9 @@ impl Connection {
             Some(title),
             Some(description),
             None,
-            std::time::Instant::now(),
+            time::Instant::now(),
             trace,
-            self.qlog_level,
+            self.qlog.level.clone(),
             writer,
         );
 
@@ -1575,25 +1614,26 @@ impl Connection {
             .local_transport_params
             .to_qlog(qlog::TransportOwner::Local, self.handshake.cipher());
 
-        let ev = qlog::Event::new(ev_data);
+        // This event occurs very early, so just mark the relative time as 0.0.
+        streamer
+            .add_event(qlog::Event::with_time(0.0, ev_data))
+            .ok();
 
-        streamer.add_event(ev).ok();
-
-        self.qlog_streamer = Some(streamer);
+        self.qlog.streamer = Some(streamer);
     }
 
     /// Sets the qlog importance level.
     #[cfg(feature = "qlog")]
     pub fn set_qlog_level(&mut self, qlog_level: QlogLevel) {
         let level = match qlog_level {
-            QlogLevel::Core => qlog::ImportanceLogLevel::Core,
+            QlogLevel::Core => qlog::EventImportance::Core,
 
-            QlogLevel::Base => qlog::ImportanceLogLevel::Base,
+            QlogLevel::Base => qlog::EventImportance::Base,
 
-            QlogLevel::Extra => qlog::ImportanceLogLevel::Extra,
+            QlogLevel::Extra => qlog::EventImportance::Extra,
         };
 
-        self.qlog_level = level;
+        self.qlog.level = level;
     }
 
     /// Configures the given session for resumption.
@@ -2035,7 +2075,7 @@ impl Connection {
             pn
         );
 
-        qlog_with!(self.qlog_streamer, q, {
+        qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
             let packet_size = b.len();
 
             let qlog_pkt_hdr = qlog::PacketHeader::with_type(
@@ -2063,8 +2103,7 @@ impl Connection {
                 datagram_id: None,
             };
 
-            q.add_event_with_instant(qlog::Event::new(ev_data), now)
-                .ok();
+            q.add_event_data_with_instant(ev_data, now).ok();
         });
 
         let mut payload = packet::decrypt_pkt(
@@ -2126,7 +2165,7 @@ impl Connection {
         while payload.cap() > 0 {
             let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
 
-            qlog_with!(self.qlog_streamer, q, {
+            qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
                 q.add_frame(frame.to_qlog(), false).ok();
             });
 
@@ -2135,7 +2174,7 @@ impl Connection {
             }
 
             if let Err(e) = self.process_frame(frame, epoch, now) {
-                qlog_with!(self.qlog_streamer, q, {
+                qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
                     // Always conclude frame writing on error.
                     q.finish_frames().ok();
                 });
@@ -2144,15 +2183,14 @@ impl Connection {
             }
         }
 
-        qlog_with!(self.qlog_streamer, q, {
+        qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
             // Always conclude frame writing.
             q.finish_frames().ok();
         });
 
-        qlog_with!(self.qlog_streamer, q, {
+        qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
             if let Some(ev_data) = self.recovery.maybe_qlog() {
-                let ev = qlog::Event::new(ev_data);
-                q.add_event_with_instant(ev, now).ok();
+                q.add_event_data_with_instant(ev_data, now).ok();
             }
         });
 
@@ -2160,17 +2198,16 @@ impl Connection {
         // established (i.e. after frames have been fully parsed) and only
         // once per connection.
         if self.is_established() {
-            qlog_with!(self.qlog_streamer, q, {
-                if !self.qlogged_peer_params {
+            qlog_with_type!(QLOG_PARAMS_SET, self.qlog, q, {
+                if !self.qlog.logged_peer_params {
                     let ev_data = self.peer_transport_params.to_qlog(
                         qlog::TransportOwner::Remote,
                         self.handshake.cipher(),
                     );
-                    let ev = qlog::Event::new(ev_data);
 
-                    q.add_event_with_instant(ev, now).ok();
+                    q.add_event_data_with_instant(ev_data, now).ok();
 
-                    self.qlogged_peer_params = true;
+                    self.qlog.logged_peer_params = true;
                 }
             });
         }
@@ -3233,7 +3270,7 @@ impl Connection {
             pn
         );
 
-        qlog_with!(self.qlog_streamer, q, {
+        qlog_with_type!(QLOG_PACKET_TX, self.qlog, q, {
             let qlog_pkt_hdr = qlog::PacketHeader::with_type(
                 hdr.ty.to_qlog(),
                 pn,
@@ -3260,19 +3297,18 @@ impl Connection {
                 datagram_id: None,
             };
 
-            q.add_event_with_instant(qlog::Event::new(ev_data), now)
-                .ok();
+            q.add_event_data_with_instant(ev_data, now).ok();
         });
 
         for frame in &mut frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);
 
-            qlog_with!(self.qlog_streamer, q, {
+            qlog_with_type!(QLOG_PACKET_TX, self.qlog, q, {
                 q.add_frame(frame.to_qlog(), false).ok();
             });
         }
 
-        qlog_with!(self.qlog_streamer, q, {
+        qlog_with_type!(QLOG_PACKET_TX, self.qlog, q, {
             q.finish_frames().ok();
         });
 
@@ -3315,10 +3351,9 @@ impl Connection {
             &self.trace_id,
         );
 
-        qlog_with!(self.qlog_streamer, q, {
+        qlog_with_type!(QLOG_METRICS, self.qlog, q, {
             if let Some(ev_data) = self.recovery.maybe_qlog() {
-                q.add_event_with_instant(qlog::Event::new(ev_data), now)
-                    .ok();
+                q.add_event_data_with_instant(ev_data, now).ok();
             }
         });
 
@@ -3437,8 +3472,8 @@ impl Connection {
             self.streams.collect(stream_id, local);
         }
 
-        qlog_with!(self.qlog_streamer, q, {
-            let ev_data = qlog::EventData::TransportDataMoved {
+        qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
+            let ev_data = qlog::EventData::DataMoved {
                 stream_id: Some(stream_id),
                 offset: Some(offset),
                 length: Some(read as u64),
@@ -3447,7 +3482,8 @@ impl Connection {
                 data: None,
             };
 
-            q.add_event(qlog::Event::new(ev_data)).ok();
+            let now = time::Instant::now();
+            q.add_event_data_with_instant(ev_data, now).ok();
         });
 
         if self.should_update_max_data() {
@@ -3587,8 +3623,8 @@ impl Connection {
 
         self.recovery.rate_check_app_limited();
 
-        qlog_with!(self.qlog_streamer, q, {
-            let ev_data = qlog::EventData::TransportDataMoved {
+        qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
+            let ev_data = qlog::EventData::DataMoved {
                 stream_id: Some(stream_id),
                 offset: Some(offset),
                 length: Some(sent as u64),
@@ -3597,7 +3633,8 @@ impl Connection {
                 data: None,
             };
 
-            q.add_event(qlog::Event::new(ev_data)).ok();
+            let now = time::Instant::now();
+            q.add_event_data_with_instant(ev_data, now).ok();
         });
 
         Ok(sent)
@@ -4205,7 +4242,7 @@ impl Connection {
             if draining_timer <= now {
                 trace!("{} draining timeout expired", self.trace_id);
 
-                qlog_with!(self.qlog_streamer, q, {
+                qlog_with!(self.qlog, q, {
                     q.finish_log().ok();
                 });
 
@@ -4222,7 +4259,7 @@ impl Connection {
             if timer <= now {
                 trace!("{} idle timeout expired", self.trace_id);
 
-                qlog_with!(self.qlog_streamer, q, {
+                qlog_with!(self.qlog, q, {
                     q.finish_log().ok();
                 });
 
@@ -4241,10 +4278,9 @@ impl Connection {
                     &self.trace_id,
                 );
 
-                qlog_with!(self.qlog_streamer, q, {
+                qlog_with_type!(QLOG_METRICS, self.qlog, q, {
                     if let Some(ev_data) = self.recovery.maybe_qlog() {
-                        q.add_event_with_instant(qlog::Event::new(ev_data), now)
-                            .ok();
+                        q.add_event_data_with_instant(ev_data, now).ok();
                     }
                 });
 
