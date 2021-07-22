@@ -649,17 +649,21 @@ pub fn encrypt_hdr(
 
 pub fn encrypt_pkt(
     b: &mut octets::OctetsMut, pn: u64, pn_len: usize, payload_len: usize,
-    payload_offset: usize, aead: &crypto::Seal,
+    payload_offset: usize, extra_in: Option<&[u8]>, aead: &crypto::Seal,
 ) -> Result<usize> {
     let (mut header, mut payload) = b.split_at(payload_offset)?;
 
-    // Encrypt + authenticate payload.
-    let ciphertext = payload.slice(payload_len)?;
-    aead.seal_with_u64_counter(pn, header.as_ref(), ciphertext)?;
+    let ciphertext_len = aead.seal_with_u64_counter(
+        pn,
+        header.as_ref(),
+        payload.as_mut(),
+        payload_len,
+        extra_in,
+    )?;
 
-    encrypt_hdr(&mut header, pn_len, ciphertext, aead)?;
+    encrypt_hdr(&mut header, pn_len, payload.as_ref(), aead)?;
 
-    Ok(payload_offset + payload_len)
+    Ok(payload_offset + ciphertext_len)
 }
 
 pub fn encode_pkt_num(pn: u64, b: &mut octets::OctetsMut) -> Result<()> {
@@ -1848,17 +1852,22 @@ mod tests {
             crypto::derive_initial_key_material(dcid, hdr.version, is_server)
                 .unwrap();
 
-        let overhead = aead.alg().tag_len();
-
-        let payload_len = frames.len() + overhead;
+        let payload_len = frames.len();
 
         let payload_offset = b.off();
 
         b.put_bytes(frames).unwrap();
 
-        let written =
-            encrypt_pkt(&mut b, pn, pn_len, payload_len, payload_offset, &aead)
-                .unwrap();
+        let written = encrypt_pkt(
+            &mut b,
+            pn,
+            pn_len,
+            payload_len,
+            payload_offset,
+            None,
+            &aead,
+        )
+        .unwrap();
 
         assert_eq!(written, expected_pkt.len());
         assert_eq!(&out[..written], &expected_pkt[..]);
@@ -2744,17 +2753,22 @@ mod tests {
 
         let frames = [01];
 
-        let overhead = aead.alg().tag_len();
-
-        let payload_len = frames.len() + overhead;
+        let payload_len = frames.len();
 
         let payload_offset = b.off();
 
         b.put_bytes(&frames).unwrap();
 
-        let written =
-            encrypt_pkt(&mut b, pn, pn_len, payload_len, payload_offset, &aead)
-                .unwrap();
+        let written = encrypt_pkt(
+            &mut b,
+            pn,
+            pn_len,
+            payload_len,
+            payload_offset,
+            None,
+            &aead,
+        )
+        .unwrap();
 
         assert_eq!(written, expected_pkt.len());
         assert_eq!(&out[..written], &expected_pkt[..]);
