@@ -914,7 +914,7 @@ impl Recovery {
     }
 
     #[cfg(feature = "qlog")]
-    pub fn maybe_qlog(&mut self) -> Option<qlog::event::Event> {
+    pub fn maybe_qlog(&mut self) -> Option<qlog::EventData> {
         let qlog_metrics = QlogMetrics {
             min_rtt: self.min_rtt,
             smoothed_rtt: self.rtt(),
@@ -1149,7 +1149,7 @@ impl QlogMetrics {
     // This function diffs each of the fields. A qlog MetricsUpdated event is
     // only generated if at least one field is different. Where fields are
     // different, the qlog event contains the latest value.
-    fn maybe_update(&mut self, latest: Self) -> Option<qlog::event::Event> {
+    fn maybe_update(&mut self, latest: Self) -> Option<qlog::EventData> {
         let mut emit_event = false;
 
         let new_min_rtt = if self.min_rtt != latest.min_rtt {
@@ -1211,20 +1211,18 @@ impl QlogMetrics {
 
         if emit_event {
             // QVis can't use all these fields and they can be large.
-            return Some(qlog::event::Event::metrics_updated(
-                new_min_rtt,
-                new_smoothed_rtt,
-                new_latest_rtt,
-                new_rttvar,
-                None, // delay
-                None, // probe_count
-                new_cwnd,
-                new_bytes_in_flight,
-                new_ssthresh,
-                None, // packets_in_flight
-                None, // in_recovery
-                None, // pacing_rate
-            ));
+            return Some(qlog::EventData::MetricsUpdated {
+                min_rtt: new_min_rtt,
+                smoothed_rtt: new_smoothed_rtt,
+                latest_rtt: new_latest_rtt,
+                rtt_variance: new_rttvar,
+                pto_count: None,
+                congestion_window: new_cwnd,
+                bytes_in_flight: new_bytes_in_flight,
+                ssthresh: new_ssthresh,
+                packets_in_flight: None,
+                pacing_rate: None,
+            });
         }
 
         None

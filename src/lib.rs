@@ -529,6 +529,20 @@ pub enum Shutdown {
     Write = 1,
 }
 
+/// Qlog logging level.
+#[repr(C)]
+#[cfg(feature = "qlog")]
+pub enum QlogLevel {
+    /// Logs any events of Core importance.
+    Core  = 0,
+
+    /// Logs any events of Core and Base importance.
+    Base  = 1,
+
+    /// Logs any events of Core, Base and Extra importance
+    Extra = 2,
+}
+
 /// Stores configuration shared between multiple connections.
 pub struct Config {
     local_transport_params: TransportParams,
@@ -1087,13 +1101,8 @@ pub struct Connection {
     /// TLS keylog writer.
     keylog: Option<Box<dyn std::io::Write + Send + Sync>>,
 
-    /// Qlog streaming output.
     #[cfg(feature = "qlog")]
-    qlog_streamer: Option<qlog::QlogStreamer>,
-
-    /// Whether peer transport parameters were qlogged.
-    #[cfg(feature = "qlog")]
-    qlogged_peer_params: bool,
+    qlog: QlogInfo,
 
     /// DATAGRAM queues.
     dgram_recv_queue: dgram::DatagramQueue,
@@ -1290,19 +1299,87 @@ macro_rules! push_frame_to_pkt {
     }};
 }
 
-/// Conditional qlog action.
+/// Conditional qlog actions.
 ///
 /// Executes the provided body if the qlog feature is enabled and quiche
-/// has been condifigured with a log writer.
+/// has been configured with a log writer.
 macro_rules! qlog_with {
-    ($qlog_streamer:expr, $qlog_streamer_ref:ident, $body:block) => {{
+    ($qlog:expr, $qlog_streamer_ref:ident, $body:block) => {{
         #[cfg(feature = "qlog")]
         {
-            if let Some($qlog_streamer_ref) = &mut $qlog_streamer {
+            if let Some($qlog_streamer_ref) = &mut $qlog.streamer {
                 $body
             }
         }
     }};
+}
+
+/// Executes the provided body if the qlog feature is enabled, quiche has been
+/// configured with a log writer, the event's importance is within the
+/// confgured level, and the qlog start time is set.
+macro_rules! qlog_with_type_and_start {
+    ($ty:expr, $qlog:expr, $qlog_streamer_ref:ident, $start:ident, $body:block) => {{
+        #[cfg(feature = "qlog")]
+        {
+            if qlog::EventImportance::from($ty).is_contained_in(&$qlog.level) {
+                if let Some($start) = $qlog.start_time {
+                    if let Some($qlog_streamer_ref) = &mut $qlog.streamer {
+                        $body
+                    }
+                }
+            }
+        }
+    }};
+}
+
+#[cfg(feature = "qlog")]
+const QLOG_PARAMS_SET: qlog::EventType =
+    qlog::EventType::TransportEventType(qlog::TransportEventType::ParametersSet);
+
+#[cfg(feature = "qlog")]
+const QLOG_PACKET_RX: qlog::EventType =
+    qlog::EventType::TransportEventType(qlog::TransportEventType::PacketReceived);
+
+#[cfg(feature = "qlog")]
+const QLOG_PACKET_TX: qlog::EventType =
+    qlog::EventType::TransportEventType(qlog::TransportEventType::PacketSent);
+
+#[cfg(feature = "qlog")]
+const QLOG_DATA_MV: qlog::EventType =
+    qlog::EventType::TransportEventType(qlog::TransportEventType::DataMoved);
+
+#[cfg(feature = "qlog")]
+const QLOG_METRICS: qlog::EventType =
+    qlog::EventType::RecoveryEventType(qlog::RecoveryEventType::MetricsUpdated);
+
+#[cfg(feature = "qlog")]
+struct QlogInfo {
+    streamer: Option<qlog::QlogStreamer>,
+    start_time: Option<time::Instant>,
+    logged_peer_params: bool,
+    level: qlog::EventImportance,
+}
+
+#[cfg(feature = "qlog")]
+impl QlogInfo {
+    // Returns the milliseconds elapsed between two instants, represented as a
+    // float.
+    fn elapsed_ms(start: &time::Instant, end: &time::Instant) -> f32 {
+        let dur = end.duration_since(*start);
+        dur.as_secs_f32() * 1000.0
+    }
+}
+
+#[cfg(feature = "qlog")]
+impl Default for QlogInfo {
+    fn default() -> Self {
+        QlogInfo {
+            streamer: None,
+            start_time: None,
+            logged_peer_params: false,
+            level: qlog::EventImportance::Base,
+        }
+    }
 }
 
 impl Connection {
@@ -1432,10 +1509,7 @@ impl Connection {
             keylog: None,
 
             #[cfg(feature = "qlog")]
-            qlog_streamer: None,
-
-            #[cfg(feature = "qlog")]
-            qlogged_peer_params: false,
+            qlog: Default::default(),
 
             dgram_recv_queue: dgram::DatagramQueue::new(
                 config.dgram_recv_max_queue_len,
@@ -1516,6 +1590,8 @@ impl Connection {
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String,
     ) {
+        let start_time = time::Instant::now();
+
         let vp = if self.is_server {
             qlog::VantagePointType::Server
         } else {
@@ -1542,23 +1618,39 @@ impl Connection {
             Some(title),
             Some(description),
             None,
-            std::time::Instant::now(),
+            start_time,
             trace,
+            self.qlog.level.clone(),
             writer,
         );
 
         streamer.start_log().ok();
 
-        let ev = self.local_transport_params.to_qlog(
-            qlog::TransportOwner::Local,
-            self.version,
-            self.handshake.alpn_protocol(),
-            self.handshake.cipher(),
-        );
+        let ev_data = self
+            .local_transport_params
+            .to_qlog(qlog::TransportOwner::Local, self.handshake.cipher());
 
-        streamer.add_event(ev).ok();
+        // This event occurs very early, so just mark the relative time as 0.0.
+        streamer
+            .add_event(qlog::Event::with_time(0.0, ev_data))
+            .ok();
 
-        self.qlog_streamer = Some(streamer);
+        self.qlog.streamer = Some(streamer);
+        self.qlog.start_time = Some(start_time);
+    }
+
+    /// Sets the qlog importance level.
+    #[cfg(feature = "qlog")]
+    pub fn set_qlog_level(&mut self, qlog_level: QlogLevel) {
+        let level = match qlog_level {
+            QlogLevel::Core => qlog::EventImportance::Core,
+
+            QlogLevel::Base => qlog::EventImportance::Base,
+
+            QlogLevel::Extra => qlog::EventImportance::Extra,
+        };
+
+        self.qlog.level = level;
     }
 
     /// Configures the given session for resumption.
@@ -2000,31 +2092,36 @@ impl Connection {
             pn
         );
 
-        qlog_with!(self.qlog_streamer, q, {
+        qlog_with_type_and_start!(QLOG_PACKET_RX, self.qlog, q, start, {
             let packet_size = b.len();
 
             let qlog_pkt_hdr = qlog::PacketHeader::with_type(
                 hdr.ty.to_qlog(),
                 pn,
-                Some(packet_size as u64),
-                Some(payload_len as u64),
                 Some(hdr.version),
                 Some(&hdr.scid),
                 Some(&hdr.dcid),
             );
 
-            q.add_event_with_instant(
-                qlog::event::Event::packet_received(
-                    hdr.ty.to_qlog(),
-                    qlog_pkt_hdr,
-                    Some(Vec::new()),
-                    None,
-                    None,
-                    None,
-                ),
-                now,
-            )
-            .ok();
+            let qlog_raw_info = qlog::RawInfo {
+                length: Some(packet_size as u64),
+                payload_length: Some(payload_len as u64),
+                data: None,
+            };
+
+            let ev_data = qlog::EventData::PacketReceived {
+                header: qlog_pkt_hdr,
+                frames: Some(vec![]),
+                is_coalesced: None,
+                retry_token: None,
+                stateless_reset_token: None,
+                supported_versions: None,
+                raw: Some(qlog_raw_info),
+                datagram_id: None,
+            };
+
+            let ev_time = QlogInfo::elapsed_ms(&start, &now);
+            q.add_event(qlog::Event::with_time(ev_time, ev_data)).ok();
         });
 
         let mut payload = packet::decrypt_pkt(
@@ -2086,7 +2183,7 @@ impl Connection {
         while payload.cap() > 0 {
             let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
 
-            qlog_with!(self.qlog_streamer, q, {
+            qlog_with_type_and_start!(QLOG_PACKET_RX, self.qlog, q, _start, {
                 q.add_frame(frame.to_qlog(), false).ok();
             });
 
@@ -2095,23 +2192,30 @@ impl Connection {
             }
 
             if let Err(e) = self.process_frame(frame, epoch, now) {
-                qlog_with!(self.qlog_streamer, q, {
-                    // Always conclude frame writing on error.
-                    q.finish_frames().ok();
-                });
+                qlog_with_type_and_start!(
+                    QLOG_PACKET_RX,
+                    self.qlog,
+                    q,
+                    _start,
+                    {
+                        // Always conclude frame writing on error.
+                        q.finish_frames().ok();
+                    }
+                );
 
                 return Err(e);
             }
         }
 
-        qlog_with!(self.qlog_streamer, q, {
+        qlog_with_type_and_start!(QLOG_PACKET_RX, self.qlog, q, _start, {
             // Always conclude frame writing.
             q.finish_frames().ok();
         });
 
-        qlog_with!(self.qlog_streamer, q, {
-            if let Some(ev) = self.recovery.maybe_qlog() {
-                q.add_event_with_instant(ev, now).ok();
+        qlog_with_type_and_start!(QLOG_PACKET_RX, self.qlog, q, start, {
+            if let Some(ev_data) = self.recovery.maybe_qlog() {
+                let ev_time = QlogInfo::elapsed_ms(&start, &now);
+                q.add_event(qlog::Event::with_time(ev_time, ev_data)).ok();
             }
         });
 
@@ -2119,18 +2223,17 @@ impl Connection {
         // established (i.e. after frames have been fully parsed) and only
         // once per connection.
         if self.is_established() {
-            qlog_with!(self.qlog_streamer, q, {
-                if !self.qlogged_peer_params {
-                    let ev = self.peer_transport_params.to_qlog(
+            qlog_with_type_and_start!(QLOG_PARAMS_SET, self.qlog, q, start, {
+                if !self.qlog.logged_peer_params {
+                    let ev_data = self.peer_transport_params.to_qlog(
                         qlog::TransportOwner::Remote,
-                        self.version,
-                        self.handshake.alpn_protocol(),
                         self.handshake.cipher(),
                     );
 
-                    q.add_event_with_instant(ev, now).ok();
+                    let ev_time = QlogInfo::elapsed_ms(&start, &now);
+                    q.add_event(qlog::Event::with_time(ev_time, ev_data)).ok();
 
-                    self.qlogged_peer_params = true;
+                    self.qlog.logged_peer_params = true;
                 }
             });
         }
@@ -3151,30 +3254,41 @@ impl Connection {
             pn
         );
 
-        qlog_with!(self.qlog_streamer, q, {
+        qlog_with_type_and_start!(QLOG_PACKET_TX, self.qlog, q, start, {
             let qlog_pkt_hdr = qlog::PacketHeader::with_type(
                 hdr.ty.to_qlog(),
                 pn,
-                Some(payload_len as u64 + payload_offset as u64),
-                Some(payload_len as u64),
                 Some(hdr.version),
                 Some(&hdr.scid),
                 Some(&hdr.dcid),
             );
+            let length = Some(payload_len as u64 + payload_offset as u64);
+            let payload_length = Some(payload_len as u64);
+            let qlog_raw_info = qlog::RawInfo {
+                length,
+                payload_length,
+                data: None,
+            };
 
-            let packet_sent_ev = qlog::event::Event::packet_sent_min(
-                hdr.ty.to_qlog(),
-                qlog_pkt_hdr,
-                Some(Vec::new()),
-            );
+            let ev_data = qlog::EventData::PacketSent {
+                header: qlog_pkt_hdr,
+                frames: Some(vec![]),
+                is_coalesced: None,
+                retry_token: None,
+                stateless_reset_token: None,
+                supported_versions: None,
+                raw: Some(qlog_raw_info),
+                datagram_id: None,
+            };
 
-            q.add_event_with_instant(packet_sent_ev, now).ok();
+            let ev_time = QlogInfo::elapsed_ms(&start, &now);
+            q.add_event(qlog::Event::with_time(ev_time, ev_data)).ok();
         });
 
         for frame in &mut frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);
 
-            qlog_with!(self.qlog_streamer, q, {
+            qlog_with_type_and_start!(QLOG_PACKET_TX, self.qlog, q, _start, {
                 q.add_frame(frame.to_qlog(), false).ok();
             });
 
@@ -3184,7 +3298,7 @@ impl Connection {
             frame.shrink_for_retransmission();
         }
 
-        qlog_with!(self.qlog_streamer, q, {
+        qlog_with_type_and_start!(QLOG_PACKET_TX, self.qlog, q, _start, {
             q.finish_frames().ok();
         });
 
@@ -3226,9 +3340,10 @@ impl Connection {
             &self.trace_id,
         );
 
-        qlog_with!(self.qlog_streamer, q, {
-            if let Some(ev) = self.recovery.maybe_qlog() {
-                q.add_event_with_instant(ev, now).ok();
+        qlog_with_type_and_start!(QLOG_METRICS, self.qlog, q, start, {
+            if let Some(ev_data) = self.recovery.maybe_qlog() {
+                let ev_time = QlogInfo::elapsed_ms(&start, &now);
+                q.add_event(qlog::Event::with_time(ev_time, ev_data)).ok();
             }
         });
 
@@ -3347,16 +3462,18 @@ impl Connection {
             self.streams.collect(stream_id, local);
         }
 
-        qlog_with!(self.qlog_streamer, q, {
-            let ev = qlog::event::Event::h3_data_moved(
-                stream_id,
-                Some(offset),
-                Some(read as u64),
-                Some(qlog::H3DataRecipient::Transport),
-                None,
-                None,
-            );
-            q.add_event(ev).ok();
+        qlog_with_type_and_start!(QLOG_DATA_MV, self.qlog, q, start, {
+            let ev_data = qlog::EventData::DataMoved {
+                stream_id: Some(stream_id),
+                offset: Some(offset),
+                length: Some(read as u64),
+                from: Some(qlog::DataRecipient::Transport),
+                to: Some(qlog::DataRecipient::Application),
+                data: None,
+            };
+
+            let ev_time = QlogInfo::elapsed_ms(&start, &time::Instant::now());
+            q.add_event(qlog::Event::with_time(ev_time, ev_data)).ok();
         });
 
         if self.should_update_max_data() {
@@ -3496,16 +3613,18 @@ impl Connection {
 
         self.recovery.rate_check_app_limited();
 
-        qlog_with!(self.qlog_streamer, q, {
-            let ev = qlog::event::Event::h3_data_moved(
-                stream_id,
-                Some(offset),
-                Some(sent as u64),
-                None,
-                Some(qlog::H3DataRecipient::Transport),
-                None,
-            );
-            q.add_event(ev).ok();
+        qlog_with_type_and_start!(QLOG_DATA_MV, self.qlog, q, start, {
+            let ev_data = qlog::EventData::DataMoved {
+                stream_id: Some(stream_id),
+                offset: Some(offset),
+                length: Some(sent as u64),
+                from: Some(qlog::DataRecipient::Application),
+                to: Some(qlog::DataRecipient::Transport),
+                data: None,
+            };
+
+            let ev_time = QlogInfo::elapsed_ms(&start, &time::Instant::now());
+            q.add_event(qlog::Event::with_time(ev_time, ev_data)).ok();
         });
 
         Ok(sent)
@@ -4113,7 +4232,7 @@ impl Connection {
             if draining_timer <= now {
                 trace!("{} draining timeout expired", self.trace_id);
 
-                qlog_with!(self.qlog_streamer, q, {
+                qlog_with!(self.qlog, q, {
                     q.finish_log().ok();
                 });
 
@@ -4130,7 +4249,7 @@ impl Connection {
             if timer <= now {
                 trace!("{} idle timeout expired", self.trace_id);
 
-                qlog_with!(self.qlog_streamer, q, {
+                qlog_with!(self.qlog, q, {
                     q.finish_log().ok();
                 });
 
@@ -4149,9 +4268,11 @@ impl Connection {
                     &self.trace_id,
                 );
 
-                qlog_with!(self.qlog_streamer, q, {
-                    if let Some(ev) = self.recovery.maybe_qlog() {
-                        q.add_event_with_instant(ev, now).ok();
+                qlog_with_type_and_start!(QLOG_METRICS, self.qlog, q, start, {
+                    if let Some(ev_data) = self.recovery.maybe_qlog() {
+                        let ev_time = QlogInfo::elapsed_ms(&start, &now);
+                        q.add_event(qlog::Event::with_time(ev_time, ev_data))
+                            .ok();
                     }
                 });
 
@@ -5612,38 +5733,51 @@ impl TransportParams {
     /// Creates a qlog event for connection transport parameters and TLS fields
     #[cfg(feature = "qlog")]
     pub fn to_qlog(
-        &self, owner: qlog::TransportOwner, version: u32, alpn: &[u8],
-        cipher: Option<crypto::Algorithm>,
-    ) -> qlog::event::Event {
-        let ocid = qlog::HexSlice::maybe_string(
+        &self, owner: qlog::TransportOwner, cipher: Option<crypto::Algorithm>,
+    ) -> qlog::EventData {
+        let original_destination_connection_id = qlog::HexSlice::maybe_string(
             self.original_destination_connection_id.as_ref(),
         );
-        let stateless_reset_token =
-            qlog::HexSlice::maybe_string(self.stateless_reset_token.as_ref());
 
-        qlog::event::Event::transport_parameters_set(
-            Some(owner),
-            None, // resumption
-            None, // early data
-            String::from_utf8(alpn.to_vec()).ok(),
-            Some(format!("{:x?}", version)),
-            Some(format!("{:?}", cipher)),
-            ocid,
+        let stateless_reset_token = Some(qlog::Token {
+            ty: Some(qlog::TokenType::StatelessReset),
+            length: None,
+            data: qlog::HexSlice::maybe_string(
+                self.stateless_reset_token.as_ref(),
+            ),
+            details: None,
+        });
+
+        qlog::EventData::TransportParametersSet {
+            owner: Some(owner),
+            resumption_allowed: None,
+            early_data_enabled: None,
+            tls_cipher: Some(format!("{:?}", cipher)),
+            aead_tag_length: None,
+            original_destination_connection_id,
+            initial_source_connection_id: None,
+            retry_source_connection_id: None,
             stateless_reset_token,
-            Some(self.disable_active_migration),
-            Some(self.max_idle_timeout),
-            Some(self.max_udp_payload_size as u32),
-            Some(self.ack_delay_exponent as u16),
-            Some(self.max_ack_delay as u16),
-            Some(self.active_conn_id_limit),
-            Some(self.initial_max_data),
-            Some(self.initial_max_stream_data_bidi_local),
-            Some(self.initial_max_stream_data_bidi_remote),
-            Some(self.initial_max_stream_data_uni),
-            Some(self.initial_max_streams_bidi),
-            Some(self.initial_max_streams_uni),
-            None, // preferred address
-        )
+            disable_active_migration: Some(self.disable_active_migration),
+            max_idle_timeout: Some(self.max_idle_timeout),
+            max_udp_payload_size: Some(self.max_udp_payload_size as u32),
+            ack_delay_exponent: Some(self.ack_delay_exponent as u16),
+            max_ack_delay: Some(self.max_ack_delay as u16),
+            active_connection_id_limit: Some(self.active_conn_id_limit as u32),
+
+            initial_max_data: Some(self.initial_max_data),
+            initial_max_stream_data_bidi_local: Some(
+                self.initial_max_stream_data_bidi_local,
+            ),
+            initial_max_stream_data_bidi_remote: Some(
+                self.initial_max_stream_data_bidi_remote,
+            ),
+            initial_max_stream_data_uni: Some(self.initial_max_stream_data_uni),
+            initial_max_streams_bidi: Some(self.initial_max_streams_bidi),
+            initial_max_streams_uni: Some(self.initial_max_streams_uni),
+
+            preferred_address: None,
+        }
     }
 }
 

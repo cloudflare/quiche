@@ -255,6 +255,12 @@ bool quiche_conn_set_keylog_path(quiche_conn *conn, const char *path);
 // Enables keylog to the specified file descriptor. Unix only.
 void quiche_conn_set_keylog_fd(quiche_conn *conn, int fd);
 
+enum quiche_qlog_level {
+    QUICHE_QLOG_CORE = 0,
+    QUICHE_QLOG_BASE = 1,
+    QUICHE_QLOG_EXTRA = 2,
+};
+
 // Enables qlog to the specified file path. Returns true on success.
 bool quiche_conn_set_qlog_path(quiche_conn *conn, const char *path,
                           const char *log_title, const char *log_desc);
@@ -262,6 +268,9 @@ bool quiche_conn_set_qlog_path(quiche_conn *conn, const char *path,
 // Enables qlog to the specified file descriptor. Unix only.
 void quiche_conn_set_qlog_fd(quiche_conn *conn, int fd, const char *log_title,
                              const char *log_desc);
+
+void quiche_conn_set_qlog_level(quiche_conn *conn,
+                                enum quiche_qlog_level log_level);
 
 // Configures the given session for resumption.
 int quiche_conn_set_session(quiche_conn *conn, const uint8_t *buf, size_t buf_len);
