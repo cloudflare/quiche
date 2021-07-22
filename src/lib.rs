@@ -3463,7 +3463,7 @@ impl Connection {
         }
 
         qlog_with_type_and_start!(QLOG_DATA_MV, self.qlog, q, start, {
-            let ev_data = qlog::EventData::TransportDataMoved {
+            let ev_data = qlog::EventData::DataMoved {
                 stream_id: Some(stream_id),
                 offset: Some(offset),
                 length: Some(read as u64),
@@ -3614,7 +3614,7 @@ impl Connection {
         self.recovery.rate_check_app_limited();
 
         qlog_with_type_and_start!(QLOG_DATA_MV, self.qlog, q, start, {
-            let ev_data = qlog::EventData::TransportDataMoved {
+            let ev_data = qlog::EventData::DataMoved {
                 stream_id: Some(stream_id),
                 offset: Some(offset),
                 length: Some(sent as u64),
