@@ -4361,6 +4361,12 @@ impl Connection {
         self.alpn.as_ref()
     }
 
+    /// Returns the server name requested by the client.
+    #[inline]
+    pub fn server_name(&self) -> Option<&str> {
+        self.handshake.server_name()
+    }
+
     /// Returns the peer's leaf certificate (if any) as a DER-encoded buffer.
     #[inline]
     pub fn peer_cert(&self) -> Option<Vec<u8>> {
@@ -6323,6 +6329,8 @@ mod tests {
             pipe.client.application_proto(),
             pipe.server.application_proto()
         );
+
+        assert_eq!(pipe.server.server_name(), Some("quic.tech"));
     }
 
     #[test]
