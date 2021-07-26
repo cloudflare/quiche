@@ -499,6 +499,19 @@ impl Handshake {
         unsafe { slice::from_raw_parts(ptr, len as usize) }
     }
 
+    pub fn server_name(&self) -> Option<&str> {
+        let s = unsafe {
+            let ptr = SSL_get_servername(
+                self.as_ptr(),
+                0, // TLSEXT_NAMETYPE_host_name
+            );
+
+            ffi::CStr::from_ptr(ptr)
+        };
+
+        s.to_str().ok()
+    }
+
     pub fn set_session(&mut self, session: &[u8]) -> Result<()> {
         unsafe {
             let ctx = SSL_get_SSL_CTX(self.as_ptr());
@@ -568,7 +581,7 @@ impl Handshake {
             }
 
             let curve_name = SSL_get_curve_name(curve_id);
-            match std::ffi::CStr::from_ptr(curve_name).to_str() {
+            match ffi::CStr::from_ptr(curve_name).to_str() {
                 Ok(v) => v,
 
                 Err(_) => return None,
@@ -586,7 +599,7 @@ impl Handshake {
             }
 
             let sigalg_name = SSL_get_signature_algorithm_name(sigalg_id, 1);
-            match std::ffi::CStr::from_ptr(sigalg_name).to_str() {
+            match ffi::CStr::from_ptr(sigalg_name).to_str() {
                 Ok(v) => v,
 
                 Err(_) => return None,
@@ -1184,6 +1197,8 @@ extern {
     fn SSL_get0_alpn_selected(
         ssl: *const SSL, out: *mut *const u8, out_len: *mut u32,
     );
+
+    fn SSL_get_servername(ssl: *const SSL, ty: c_int) -> *const c_char;
 
     fn SSL_provide_quic_data(
         ssl: *mut SSL, level: crypto::Level, data: *const u8, len: usize,
