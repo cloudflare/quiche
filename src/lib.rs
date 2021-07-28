@@ -4306,13 +4306,9 @@ impl Connection {
 
     /// Returns the error received from the peer, if any.
     ///
-    /// The values contained in the tuple are symmetric with the [`close()`]
-    /// method.
-    ///
     /// Note that a `Some` return value does not necessarily imply
     /// [`is_closed()`] or any other connection state.
     ///
-    /// [`close()`]: struct.Connection.html#method.close
     /// [`is_closed()`]: struct.Connection.html#method.is_closed
     #[inline]
     pub fn peer_error(&self) -> Option<&ConnectionError> {
