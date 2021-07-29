@@ -216,7 +216,7 @@ fn main() {
                 );
 
                 print!("{}", unsafe {
-                    std::str::from_utf8_unchecked(&stream_buf)
+                    std::str::from_utf8_unchecked(stream_buf)
                 });
 
                 // The server reported that it has no more data to send, which

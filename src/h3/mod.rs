@@ -897,7 +897,7 @@ impl Connection {
         let mut header_block = vec![0; headers_len];
         let len = self
             .qpack_encoder
-            .encode(&headers, &mut header_block)
+            .encode(headers, &mut header_block)
             .map_err(|_| Error::InternalError)?;
 
         header_block.truncate(len);
@@ -2159,8 +2159,8 @@ pub mod testing {
             let server_dgram = pipe.server.dgram_enabled();
             Ok(Session {
                 pipe,
-                client: Connection::new(&h3_config, false, client_dgram)?,
-                server: Connection::new(&h3_config, true, server_dgram)?,
+                client: Connection::new(h3_config, false, client_dgram)?,
+                server: Connection::new(h3_config, true, server_dgram)?,
             })
         }
 

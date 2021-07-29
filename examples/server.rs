@@ -499,7 +499,7 @@ fn handle_writable(client: &mut Client, stream_id: u64) {
     let resp = client.partial_responses.get_mut(&stream_id).unwrap();
     let body = &resp.body[resp.written..];
 
-    let written = match conn.stream_send(stream_id, &body, true) {
+    let written = match conn.stream_send(stream_id, body, true) {
         Ok(v) => v,
 
         Err(quiche::Error::Done) => 0,

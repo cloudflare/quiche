@@ -741,7 +741,7 @@ impl HttpConn for Http09Conn {
         let resp = partial_responses.get_mut(&stream_id).unwrap();
         let body = &resp.body[resp.written..];
 
-        let written = match conn.stream_send(stream_id, &body, true) {
+        let written = match conn.stream_send(stream_id, body, true) {
             Ok(v) => v,
 
             Err(quiche::Error::Done) => 0,
@@ -816,7 +816,7 @@ impl Http3Conn {
                     quiche::h3::Header::new(b":authority", authority.as_bytes()),
                     quiche::h3::Header::new(
                         b":path",
-                        &url[url::Position::BeforePath..].as_bytes(),
+                        url[url::Position::BeforePath..].as_bytes(),
                     ),
                     quiche::h3::Header::new(b"user-agent", b"quiche"),
                 ];
@@ -1441,7 +1441,7 @@ impl HttpConn for Http3Conn {
         let resp = partial_responses.get_mut(&stream_id).unwrap();
 
         if let Some(ref headers) = resp.headers {
-            match self.h3_conn.send_response(conn, stream_id, &headers, false) {
+            match self.h3_conn.send_response(conn, stream_id, headers, false) {
                 Ok(_) => (),
 
                 Err(quiche::h3::Error::StreamBlocked) => {
