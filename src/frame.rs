@@ -386,7 +386,7 @@ impl Frame {
             Frame::Crypto { data } => {
                 encode_crypto_header(data.off() as u64, data.len() as u64, b)?;
 
-                b.put_bytes(&data)?;
+                b.put_bytes(data)?;
             },
 
             Frame::CryptoHeader { .. } => (),
@@ -395,7 +395,7 @@ impl Frame {
                 b.put_varint(0x07)?;
 
                 b.put_varint(token.len() as u64)?;
-                b.put_bytes(&token)?;
+                b.put_bytes(token)?;
             },
 
             Frame::Stream { stream_id, data } => {
@@ -407,7 +407,7 @@ impl Frame {
                     b,
                 )?;
 
-                b.put_bytes(&data)?;
+                b.put_bytes(data)?;
             },
 
             Frame::StreamHeader { .. } => (),

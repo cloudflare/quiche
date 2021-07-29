@@ -429,7 +429,7 @@ impl Recovery {
                     self.in_flight_count[epoch] =
                         self.in_flight_count[epoch].saturating_sub(1);
 
-                    self.delivery_rate.on_packet_acked(&unacked, now);
+                    self.delivery_rate.on_packet_acked(unacked, now);
                 }
 
                 newly_acked.push(Acked {

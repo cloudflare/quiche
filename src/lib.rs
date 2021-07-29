@@ -720,7 +720,7 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn set_application_protos(&mut self, protos: &[u8]) -> Result<()> {
-        let mut b = octets::Octets::with_slice(&protos);
+        let mut b = octets::Octets::with_slice(protos);
 
         let mut protos_list = Vec::new();
 
@@ -1345,7 +1345,7 @@ impl Connection {
 
             session: None,
 
-            recovery: recovery::Recovery::new(&config),
+            recovery: recovery::Recovery::new(config),
 
             peer_addr: peer,
 
@@ -1980,7 +1980,7 @@ impl Connection {
 
         let aead_tag_len = aead.alg().tag_len();
 
-        packet::decrypt_hdr(&mut b, &mut hdr, &aead).map_err(|e| {
+        packet::decrypt_hdr(&mut b, &mut hdr, aead).map_err(|e| {
             drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
         })?;
 
@@ -2032,7 +2032,7 @@ impl Connection {
             pn,
             pn_len,
             payload_len,
-            &aead,
+            aead,
         )
         .map_err(|e| {
             drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
@@ -4530,7 +4530,7 @@ impl Connection {
 
                 if !self.parsed_peer_transport_params && !raw_params.is_empty() {
                     let peer_params =
-                        TransportParams::decode(&raw_params, self.is_server)?;
+                        TransportParams::decode(raw_params, self.is_server)?;
 
                     self.parse_peer_transport_params(peer_params)?;
                 }
@@ -4549,7 +4549,7 @@ impl Connection {
 
         if !self.parsed_peer_transport_params && !raw_params.is_empty() {
             let peer_params =
-                TransportParams::decode(&raw_params, self.is_server)?;
+                TransportParams::decode(raw_params, self.is_server)?;
 
             self.parse_peer_transport_params(peer_params)?;
         }
@@ -4811,7 +4811,7 @@ impl Connection {
 
                 while let Ok((read, _)) = stream.recv.emit(&mut crypto_buf) {
                     let recv_buf = &crypto_buf[..read];
-                    self.handshake.provide_data(level, &recv_buf)?;
+                    self.handshake.provide_data(level, recv_buf)?;
                 }
 
                 if self.is_established() {
@@ -5503,7 +5503,7 @@ impl TransportParams {
         if is_server {
             if let Some(ref odcid) = tp.original_destination_connection_id {
                 TransportParams::encode_param(&mut b, 0x0000, odcid.len())?;
-                b.put_bytes(&odcid)?;
+                b.put_bytes(odcid)?;
             }
         };
 
@@ -5519,7 +5519,7 @@ impl TransportParams {
         if is_server {
             if let Some(ref token) = tp.stateless_reset_token {
                 TransportParams::encode_param(&mut b, 0x0002, token.len())?;
-                b.put_bytes(&token)?;
+                b.put_bytes(token)?;
             }
         }
 
@@ -5621,13 +5621,13 @@ impl TransportParams {
 
         if let Some(scid) = &tp.initial_source_connection_id {
             TransportParams::encode_param(&mut b, 0x000f, scid.len())?;
-            b.put_bytes(&scid)?;
+            b.put_bytes(scid)?;
         }
 
         if is_server {
             if let Some(scid) = &tp.retry_source_connection_id {
                 TransportParams::encode_param(&mut b, 0x0010, scid.len())?;
-                b.put_bytes(&scid)?;
+                b.put_bytes(scid)?;
             }
         }
 
@@ -5996,7 +5996,7 @@ pub mod testing {
 
         let payload_len = b.cap();
 
-        packet::decrypt_hdr(&mut b, &mut hdr, &aead).unwrap();
+        packet::decrypt_hdr(&mut b, &mut hdr, aead).unwrap();
 
         let pn = packet::decode_pkt_num(
             conn.pkt_num_spaces[epoch].largest_rx_pkt_num,

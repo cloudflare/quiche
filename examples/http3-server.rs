@@ -622,7 +622,7 @@ fn handle_writable(client: &mut Client, stream_id: u64) {
     let resp = client.partial_responses.get_mut(&stream_id).unwrap();
 
     if let Some(ref headers) = resp.headers {
-        match http3_conn.send_response(conn, stream_id, &headers, false) {
+        match http3_conn.send_response(conn, stream_id, headers, false) {
             Ok(_) => (),
 
             Err(quiche::h3::Error::StreamBlocked) => {

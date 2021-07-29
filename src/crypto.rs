@@ -165,9 +165,9 @@ impl Open {
         let mut iv = vec![0; nonce_len];
         let mut pn_key = vec![0; key_len];
 
-        derive_pkt_key(aead, &secret, &mut key)?;
-        derive_pkt_iv(aead, &secret, &mut iv)?;
-        derive_hdr_key(aead, &secret, &mut pn_key)?;
+        derive_pkt_key(aead, secret, &mut key)?;
+        derive_pkt_iv(aead, secret, &mut iv)?;
+        derive_hdr_key(aead, secret, &mut pn_key)?;
 
         Open::new(aead, &key, &iv, &pn_key)
     }
@@ -264,9 +264,9 @@ impl Seal {
         let mut iv = vec![0; nonce_len];
         let mut pn_key = vec![0; key_len];
 
-        derive_pkt_key(aead, &secret, &mut key)?;
-        derive_pkt_iv(aead, &secret, &mut iv)?;
-        derive_hdr_key(aead, &secret, &mut pn_key)?;
+        derive_pkt_key(aead, secret, &mut key)?;
+        derive_pkt_iv(aead, secret, &mut iv)?;
+        derive_hdr_key(aead, secret, &mut pn_key)?;
 
         Seal::new(aead, &key, &iv, &pn_key)
     }
@@ -354,7 +354,7 @@ pub fn derive_initial_key_material(
     let key_len = aead.key_len();
     let nonce_len = aead.nonce_len();
 
-    let initial_secret = derive_initial_secret(&cid, version);
+    let initial_secret = derive_initial_secret(cid, version);
 
     // Client.
     let mut client_key = vec![0; key_len];
@@ -520,7 +520,7 @@ fn hkdf_expand_label(
 
 fn make_nonce(iv: &[u8], counter: u64) -> [u8; aead::NONCE_LEN] {
     let mut nonce = [0; aead::NONCE_LEN];
-    nonce.copy_from_slice(&iv);
+    nonce.copy_from_slice(iv);
 
     // XOR the last bytes of the IV with the counter. This is equivalent to
     // left-padding the counter with zero bytes.

@@ -383,7 +383,7 @@ fn main() {
                 // we need the value and if something fails at this stage, there
                 // is not much anyone can do to recover.
                 let app_proto = client.conn.application_proto();
-                let app_proto = &std::str::from_utf8(&app_proto).unwrap();
+                let app_proto = &std::str::from_utf8(app_proto).unwrap();
 
                 if alpns::HTTP_09.contains(app_proto) {
                     client.http_conn = Some(Box::new(Http09Conn::default()));
