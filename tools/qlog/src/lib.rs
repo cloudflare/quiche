@@ -52,7 +52,7 @@
 //!
 //! ## Traces
 //!
-//! A [`Trace`] contains metadata,such as the [`VantagePoint`] of capture and
+//! A [`Trace`] contains metadata such as the [`VantagePoint`] of capture and
 //! the [`Configuration`], and protocol event data in the [`Event`] array.
 //!
 //! ## Writing out logs
@@ -90,9 +90,7 @@
 //!
 //! The following example demonstrates how to log a qlog QUIC `packet_sent`
 //! event containing a single Crypto frame. It constructs the necessary elements
-//! of the [`Event`], the then appends it to the trace with [`push_event()`].
-//! [`QuicFrame`] objects can be constructed manually, or using a helper method.
-//! In this case we use [`QuicFrame::crypto()`].
+//! of the [`Event`], then appends it to the trace with [`push_event()`].
 //!
 //! ```
 //! # let mut trace = qlog::Trace::new (

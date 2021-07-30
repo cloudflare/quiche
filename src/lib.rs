@@ -1316,7 +1316,7 @@ macro_rules! qlog_with {
 
 /// Executes the provided body if the qlog feature is enabled, quiche has been
 /// configured with a log writer, the event's importance is within the
-/// confgured level, and the qlog start time is set.
+/// confgured level.
 macro_rules! qlog_with_type {
     ($ty:expr, $qlog:expr, $qlog_streamer_ref:ident, $body:block) => {{
         #[cfg(feature = "qlog")]
