@@ -1567,6 +1567,8 @@ impl Connection {
 
     /// Sets qlog output to the designated [`Writer`].
     ///
+    /// Only events included in `QlogLevel::Base` are written.
+    ///
     /// This needs to be called as soon as the connection is created, to avoid
     /// missing some early logs.
     ///
@@ -1576,11 +1578,37 @@ impl Connection {
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String,
     ) {
+        self.set_qlog_with_level(writer, title, description, QlogLevel::Base)
+    }
+
+    /// Sets qlog output to the designated [`Writer`].
+    ///
+    /// Only qlog events included in the specified `QlogLevel` are written
+    ///
+    /// This needs to be called as soon as the connection is created, to avoid
+    /// missing some early logs.
+    ///
+    /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
+    #[cfg(feature = "qlog")]
+    pub fn set_qlog_with_level(
+        &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
+        description: String, qlog_level: QlogLevel,
+    ) {
         let vp = if self.is_server {
             qlog::VantagePointType::Server
         } else {
             qlog::VantagePointType::Client
         };
+
+        let level = match qlog_level {
+            QlogLevel::Core => qlog::EventImportance::Core,
+
+            QlogLevel::Base => qlog::EventImportance::Base,
+
+            QlogLevel::Extra => qlog::EventImportance::Extra,
+        };
+
+        self.qlog.level = level;
 
         let trace = qlog::Trace::new(
             qlog::VantagePoint {
@@ -1620,20 +1648,6 @@ impl Connection {
             .ok();
 
         self.qlog.streamer = Some(streamer);
-    }
-
-    /// Sets the qlog importance level.
-    #[cfg(feature = "qlog")]
-    pub fn set_qlog_level(&mut self, qlog_level: QlogLevel) {
-        let level = match qlog_level {
-            QlogLevel::Core => qlog::EventImportance::Core,
-
-            QlogLevel::Base => qlog::EventImportance::Base,
-
-            QlogLevel::Extra => qlog::EventImportance::Extra,
-        };
-
-        self.qlog.level = level;
     }
 
     /// Configures the given session for resumption.
