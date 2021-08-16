@@ -358,7 +358,11 @@ impl Stream {
     pub fn try_fill_buffer(
         &mut self, conn: &mut crate::Connection,
     ) -> Result<()> {
-        let buf = &mut self.state_buf[self.state_off..self.state_len];
+        let buf = match self.state_buf.get_mut(self.state_off..self.state_len) {
+            Some(v) => v,
+
+            None => return Err(Error::InternalError),
+        };
 
         let read = match conn.stream_recv(self.id, buf) {
             Ok((len, _)) => len,
@@ -409,7 +413,11 @@ impl Stream {
     fn try_fill_buffer_for_tests(
         &mut self, stream: &mut std::io::Cursor<Vec<u8>>,
     ) -> Result<()> {
-        let buf = &mut self.state_buf[self.state_off..self.state_len];
+        let buf = match self.state_buf.get_mut(self.state_off..self.state_len) {
+            Some(v) => v,
+
+            None => return Err(Error::InternalError),
+        };
 
         let read = std::io::Read::read(stream, buf).unwrap();
 
