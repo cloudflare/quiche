@@ -85,6 +85,31 @@ pub extern fn quiche_h3_conn_new_with_transport(
 }
 
 #[no_mangle]
+pub extern fn quiche_h3_for_each_setting(
+    conn: &h3::Connection,
+    cb: extern fn(identifier: u64, value: u64, argp: *mut c_void) -> c_int,
+    argp: *mut c_void,
+) -> c_int {
+    let rc = match conn.peer_settings_raw() {
+        Some(raw) => {
+            for setting in raw {
+                let rc = cb(setting.identifier, setting.value, argp);
+
+                if rc != 0 {
+                    return rc;
+                }
+            }
+
+            0
+        },
+
+        None => -1,
+    };
+
+    rc
+}
+
+#[no_mangle]
 pub extern fn quiche_h3_conn_poll(
     conn: &mut h3::Connection, quic_conn: &mut Connection,
     ev: *mut *const h3::Event,

@@ -98,6 +98,14 @@ static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
     ev_timer_again(loop, &conn_io->timer);
 }
 
+static int for_each_setting(uint64_t identifier, uint64_t value,
+                           void *argp) {
+    fprintf(stderr, "got HTTP/3 SETTING: %lu=%lu\n",
+            identifier, value);
+
+    return 0;
+}
+
 static int for_each_header(uint8_t *name, size_t name_len,
                            uint8_t *value, size_t value_len,
                            void *argp) {
@@ -109,6 +117,7 @@ static int for_each_header(uint8_t *name, size_t name_len,
 
 static void recv_cb(EV_P_ ev_io *w, int revents) {
     static bool req_sent = false;
+    static bool settings_received = false;
 
     struct conn_io *conn_io = w->data;
 
@@ -242,6 +251,16 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
             if (s < 0) {
                 break;
+            }
+
+            if (!settings_received) {
+                int rc = quiche_h3_for_each_setting(conn_io->http3,
+                                                    for_each_setting,
+                                                    NULL);
+
+                if (rc == 0) {
+                    settings_received = true;
+                }
             }
 
             switch (quiche_h3_event_type(ev)) {

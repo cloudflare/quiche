@@ -568,6 +568,9 @@ impl Stream {
 
 #[cfg(test)]
 mod tests {
+    use crate::h3::frame::*;
+    use crate::h3::RawSetting;
+
     use super::*;
 
     #[test]
@@ -579,12 +582,28 @@ mod tests {
         let mut d = vec![42; 40];
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
-        let frame = frame::Frame::Settings {
+        let raw_settings = vec![
+            RawSetting {
+                identifier: SETTINGS_MAX_FIELD_SECTION_SIZE,
+                value: 0,
+            },
+            RawSetting {
+                identifier: SETTINGS_QPACK_MAX_TABLE_CAPACITY,
+                value: 0,
+            },
+            RawSetting {
+                identifier: SETTINGS_QPACK_BLOCKED_STREAMS,
+                value: 0,
+            },
+        ];
+
+        let frame = Frame::Settings {
             max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: None,
             grease: None,
+            raw: Some(raw_settings),
         };
 
         b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
@@ -635,12 +654,28 @@ mod tests {
         let mut d = vec![42; 40];
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
+        let raw_settings = vec![
+            RawSetting {
+                identifier: SETTINGS_MAX_FIELD_SECTION_SIZE,
+                value: 0,
+            },
+            RawSetting {
+                identifier: SETTINGS_QPACK_MAX_TABLE_CAPACITY,
+                value: 0,
+            },
+            RawSetting {
+                identifier: SETTINGS_QPACK_BLOCKED_STREAMS,
+                value: 0,
+            },
+        ];
+
         let frame = frame::Frame::Settings {
             max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: None,
             grease: None,
+            raw: Some(raw_settings),
         };
 
         b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
@@ -700,12 +735,28 @@ mod tests {
 
         let goaway = frame::Frame::GoAway { id: 0 };
 
+        let raw_settings = vec![
+            RawSetting {
+                identifier: SETTINGS_MAX_FIELD_SECTION_SIZE,
+                value: 0,
+            },
+            RawSetting {
+                identifier: SETTINGS_QPACK_MAX_TABLE_CAPACITY,
+                value: 0,
+            },
+            RawSetting {
+                identifier: SETTINGS_QPACK_BLOCKED_STREAMS,
+                value: 0,
+            },
+        ];
+
         let settings = frame::Frame::Settings {
             max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: None,
             grease: None,
+            raw: Some(raw_settings),
         };
 
         b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
@@ -743,12 +794,32 @@ mod tests {
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let hdrs = frame::Frame::Headers { header_block };
 
+        let raw_settings = vec![
+            RawSetting {
+                identifier: SETTINGS_MAX_FIELD_SECTION_SIZE,
+                value: 0,
+            },
+            RawSetting {
+                identifier: SETTINGS_QPACK_MAX_TABLE_CAPACITY,
+                value: 0,
+            },
+            RawSetting {
+                identifier: SETTINGS_QPACK_BLOCKED_STREAMS,
+                value: 0,
+            },
+            RawSetting {
+                identifier: 33,
+                value: 33,
+            },
+        ];
+
         let settings = frame::Frame::Settings {
             max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: None,
             grease: None,
+            raw: Some(raw_settings),
         };
 
         b.put_varint(HTTP3_CONTROL_STREAM_TYPE_ID).unwrap();
