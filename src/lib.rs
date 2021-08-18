@@ -4464,6 +4464,21 @@ impl Connection {
         self.peer_error.as_ref()
     }
 
+    /// Returns the error [`close()`] was called with, or internally
+    /// created quiche errors, if any.
+    ///
+    /// Note that a `Some` return value does not necessarily imply
+    /// [`is_closed()`] or any other connection state.
+    /// `Some` also does not guarantee that the error has been sent to
+    /// or recieved by the peer.
+    ///
+    /// [`close()`]: struct.Connection.html#method.close
+    /// [`is_closed()`]: struct.Connection.html#method.is_closed
+    #[inline]
+    pub fn local_error(&self) -> Option<&ConnectionError> {
+        self.local_error.as_ref()
+    }
+
     /// Collects and returns statistics about the connection.
     #[inline]
     pub fn stats(&self) -> Stats {
@@ -10644,6 +10659,25 @@ mod tests {
 
         assert_eq!(
             pipe.client.peer_error(),
+            Some(&ConnectionError {
+                is_app: true,
+                error_code: 0x1234u64,
+                reason: b"hello!".to_vec()
+            })
+        );
+    }
+
+    #[test]
+    fn local_error() {
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(pipe.server.local_error(), None);
+
+        assert_eq!(pipe.server.close(true, 0x1234, b"hello!"), Ok(()));
+
+        assert_eq!(
+            pipe.server.local_error(),
             Some(&ConnectionError {
                 is_app: true,
                 error_code: 0x1234u64,
