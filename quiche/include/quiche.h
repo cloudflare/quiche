@@ -1060,8 +1060,8 @@ int quiche_h3_for_each_setting(quiche_h3_conn *conn,
                                          uint64_t value, void *argp),
                                void *argp);
 
-// Check whether data will follow the headers on the stream.
-bool quiche_h3_event_headers_has_body(quiche_h3_event *ev);
+// Check whether more frames will follow the headers on the stream.
+bool quiche_h3_event_headers_has_more_frames(quiche_h3_event *ev);
 
 // Check whether or not extended connection is enabled by the peer
 bool quiche_h3_extended_connect_enabled_by_peer(quiche_h3_conn *conn);
@@ -1098,6 +1098,12 @@ int quiche_h3_send_response_with_priority(quiche_h3_conn *conn,
                             quiche_conn *quic_conn, uint64_t stream_id,
                             const quiche_h3_header *headers, size_t headers_len,
                             quiche_h3_priority *priority, bool fin);
+
+// Sends additional HTTP/3 headers on the specified stream.
+int quiche_h3_send_additional_headers(quiche_h3_conn *conn,
+                            quiche_conn *quic_conn, uint64_t stream_id,
+                            quiche_h3_header *headers, size_t headers_len,
+                            bool is_trailer_section, bool fin);
 
 // Sends an HTTP/3 body chunk on the given stream.
 ssize_t quiche_h3_send_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
