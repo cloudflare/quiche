@@ -4483,7 +4483,7 @@ impl Connection {
     /// was used.
     #[inline]
     pub fn is_timed_out(&self) -> bool {
-        return match self.idle_timer {
+        match self.idle_timer {
             Some(timer) => timer <= time::Instant::now(),
             None => false
         }
