@@ -4479,6 +4479,16 @@ impl Connection {
         self.local_error.as_ref()
     }
 
+    /// Returns true if the connection was timed out because of the idle timeout that
+    /// was used.
+    #[inline]
+    pub fn is_timed_out(&self) -> bool {
+        return match self.idle_timer {
+            Some(timer) => timer <= time::Instant::now(),
+            None => false
+        }
+    }
+
     /// Collects and returns statistics about the connection.
     #[inline]
     pub fn stats(&self) -> Stats {

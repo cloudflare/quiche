@@ -946,6 +946,11 @@ pub extern fn quiche_conn_local_error(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_is_timed_out(conn: &mut Connection) -> bool {
+    conn.is_timed_out()
+}
+
+#[no_mangle]
 pub extern fn quiche_stream_iter_next(
     iter: &mut StreamIter, stream_id: *mut u64,
 ) -> bool {

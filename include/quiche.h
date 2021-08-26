@@ -396,6 +396,10 @@ bool quiche_conn_local_error(quiche_conn *conn,
                             const uint8_t **reason,
                             size_t *reason_len);
 
+// Returns true if the connection was timed out because of the idle timeout that
+// was used.
+bool quiche_conn_is_timed_out(quiche_conn *conn);
+
 // Initializes the stream's application data.
 //
 // Stream data can only be initialized once. Additional calls to this method
