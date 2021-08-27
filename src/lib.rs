@@ -1095,6 +1095,9 @@ pub struct Connection {
     /// Whether the connection is closed.
     closed: bool,
 
+    // Whether the connection was timed out
+    timed_out: bool,
+
     /// Whether to send GREASE.
     grease: bool,
 
@@ -1489,6 +1492,8 @@ impl Connection {
             ack_eliciting_sent: false,
 
             closed: false,
+
+            timed_out: false,
 
             grease: config.grease,
 
@@ -4278,6 +4283,7 @@ impl Connection {
                 });
 
                 self.closed = true;
+                self.timed_out = true;
                 return;
             }
         }
@@ -4453,6 +4459,12 @@ impl Connection {
         self.closed
     }
 
+    /// Returns true if the connection was closed due to the idle timeout.
+    #[inline]
+    pub fn is_timed_out(&self) -> bool {
+        self.timed_out
+    }
+
     /// Returns the error received from the peer, if any.
     ///
     /// Note that a `Some` return value does not necessarily imply
@@ -4477,16 +4489,6 @@ impl Connection {
     #[inline]
     pub fn local_error(&self) -> Option<&ConnectionError> {
         self.local_error.as_ref()
-    }
-
-    /// Returns true if the connection was timed out because of the idle timeout
-    /// that was used.
-    #[inline]
-    pub fn is_timed_out(&self) -> bool {
-        match self.idle_timer {
-            Some(timer) => timer <= time::Instant::now(),
-            None => false,
-        }
     }
 
     /// Collects and returns statistics about the connection.

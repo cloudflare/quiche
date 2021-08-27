@@ -380,6 +380,9 @@ uint64_t quiche_conn_peer_streams_left_uni(quiche_conn *conn);
 // Returns true if the connection is closed.
 bool quiche_conn_is_closed(quiche_conn *conn);
 
+// Returns true if the connection was closed due to the idle timeout.
+bool quiche_conn_is_timed_out(quiche_conn *conn);
+
 // Returns true if a connection error was received, and updates the provided
 // parameters accordingly.
 bool quiche_conn_peer_error(quiche_conn *conn,
@@ -395,10 +398,6 @@ bool quiche_conn_local_error(quiche_conn *conn,
                             uint64_t *error_code,
                             const uint8_t **reason,
                             size_t *reason_len);
-
-// Returns true if the connection was timed out because of the idle timeout
-// that was used.
-bool quiche_conn_is_timed_out(quiche_conn *conn);
 
 // Initializes the stream's application data.
 //
