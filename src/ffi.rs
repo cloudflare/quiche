@@ -908,6 +908,11 @@ pub extern fn quiche_conn_is_closed(conn: &mut Connection) -> bool {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_is_timed_out(conn: &mut Connection) -> bool {
+    conn.is_timed_out()
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_peer_error(
     conn: &mut Connection, is_app: *mut bool, error_code: *mut u64,
     reason: &mut *const u8, reason_len: &mut size_t,
