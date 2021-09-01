@@ -4236,8 +4236,8 @@ index 000000000..30955c4cd
 +        return NGX_CONF_ERROR;
 +    }
 +
-+    quiche_h3_config_set_max_header_list_size(conf->http3,
-+                                              conf->max_header_size);
++    quiche_h3_config_set_max_field_section_size(conf->http3,
++                                                conf->max_header_size);
 +
 +    cln = ngx_pool_cleanup_add(cf->pool, 0);
 +    if (cln == NULL) {

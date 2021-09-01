@@ -615,8 +615,8 @@ typedef struct Http3Config quiche_h3_config;
 // Creates an HTTP/3 config object with default settings values.
 quiche_h3_config *quiche_h3_config_new(void);
 
-// Sets the `SETTINGS_MAX_HEADER_LIST_SIZE` setting.
-void quiche_h3_config_set_max_header_list_size(quiche_h3_config *config, uint64_t v);
+// Sets the `SETTINGS_MAX_FIELD_SECTION_SIZE` setting.
+void quiche_h3_config_set_max_field_section_size(quiche_h3_config *config, uint64_t v);
 
 // Sets the `SETTINGS_QPACK_MAX_TABLE_CAPACITY` setting.
 void quiche_h3_config_set_qpack_max_table_capacity(quiche_h3_config *config, uint64_t v);

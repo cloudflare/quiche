@@ -37,7 +37,7 @@ pub const GOAWAY_FRAME_TYPE_ID: u64 = 0x6;
 pub const MAX_PUSH_FRAME_TYPE_ID: u64 = 0xD;
 
 const SETTINGS_QPACK_MAX_TABLE_CAPACITY: u64 = 0x1;
-const SETTINGS_MAX_HEADER_LIST_SIZE: u64 = 0x6;
+const SETTINGS_MAX_FIELD_SECTION_SIZE: u64 = 0x6;
 const SETTINGS_QPACK_BLOCKED_STREAMS: u64 = 0x7;
 const SETTINGS_H3_DATAGRAM: u64 = 0x276;
 
@@ -59,7 +59,7 @@ pub enum Frame {
     },
 
     Settings {
-        max_header_list_size: Option<u64>,
+        max_field_section_size: Option<u64>,
         qpack_max_table_capacity: Option<u64>,
         qpack_blocked_streams: Option<u64>,
         h3_datagram: Option<u64>,
@@ -148,7 +148,7 @@ impl Frame {
             },
 
             Frame::Settings {
-                max_header_list_size,
+                max_field_section_size,
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
                 h3_datagram,
@@ -156,8 +156,8 @@ impl Frame {
             } => {
                 let mut len = 0;
 
-                if let Some(val) = max_header_list_size {
-                    len += octets::varint_len(SETTINGS_MAX_HEADER_LIST_SIZE);
+                if let Some(val) = max_field_section_size {
+                    len += octets::varint_len(SETTINGS_MAX_FIELD_SECTION_SIZE);
                     len += octets::varint_len(*val);
                 }
 
@@ -184,8 +184,8 @@ impl Frame {
                 b.put_varint(SETTINGS_FRAME_TYPE_ID)?;
                 b.put_varint(len as u64)?;
 
-                if let Some(val) = max_header_list_size {
-                    b.put_varint(SETTINGS_MAX_HEADER_LIST_SIZE)?;
+                if let Some(val) = max_field_section_size {
+                    b.put_varint(SETTINGS_MAX_FIELD_SECTION_SIZE)?;
                     b.put_varint(*val as u64)?;
                 }
 
@@ -259,12 +259,12 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::Settings {
-                max_header_list_size,
+                max_field_section_size,
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
                 ..
             } => {
-                write!(f, "SETTINGS max_headers={:?}, qpack_max_table={:?}, qpack_blocked={:?} ", max_header_list_size, qpack_max_table_capacity, qpack_blocked_streams)?;
+                write!(f, "SETTINGS max_field_section={:?}, qpack_max_table={:?}, qpack_blocked={:?} ", max_field_section_size, qpack_max_table_capacity, qpack_blocked_streams)?;
             },
 
             Frame::PushPromise {
@@ -299,7 +299,7 @@ impl std::fmt::Debug for Frame {
 fn parse_settings_frame(
     b: &mut octets::Octets, settings_length: usize,
 ) -> Result<Frame> {
-    let mut max_header_list_size = None;
+    let mut max_field_section_size = None;
     let mut qpack_max_table_capacity = None;
     let mut qpack_blocked_streams = None;
     let mut h3_datagram = None;
@@ -318,8 +318,8 @@ fn parse_settings_frame(
                 qpack_max_table_capacity = Some(settings_val);
             },
 
-            SETTINGS_MAX_HEADER_LIST_SIZE => {
-                max_header_list_size = Some(settings_val);
+            SETTINGS_MAX_FIELD_SECTION_SIZE => {
+                max_field_section_size = Some(settings_val);
             },
 
             SETTINGS_QPACK_BLOCKED_STREAMS => {
@@ -344,7 +344,7 @@ fn parse_settings_frame(
     }
 
     Ok(Frame::Settings {
-        max_header_list_size,
+        max_field_section_size,
         qpack_max_table_capacity,
         qpack_blocked_streams,
         h3_datagram,
@@ -457,7 +457,7 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::Settings {
-            max_header_list_size: Some(0),
+            max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: Some(0),
@@ -490,7 +490,7 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::Settings {
-            max_header_list_size: Some(0),
+            max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: Some(0),
@@ -499,7 +499,7 @@ mod tests {
 
         // Frame parsing will always ignore GREASE values.
         let frame_parsed = Frame::Settings {
-            max_header_list_size: Some(0),
+            max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: Some(0),
@@ -532,7 +532,7 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::Settings {
-            max_header_list_size: Some(1024),
+            max_field_section_size: Some(1024),
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             h3_datagram: None,
@@ -565,7 +565,7 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::Settings {
-            max_header_list_size: None,
+            max_field_section_size: None,
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             h3_datagram: Some(1),
@@ -598,7 +598,7 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::Settings {
-            max_header_list_size: None,
+            max_field_section_size: None,
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             h3_datagram: Some(5),
@@ -630,7 +630,7 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::Settings {
-            max_header_list_size: None,
+            max_field_section_size: None,
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: None,
