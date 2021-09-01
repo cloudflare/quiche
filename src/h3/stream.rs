@@ -580,7 +580,7 @@ mod tests {
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let frame = frame::Frame::Settings {
-            max_header_list_size: Some(0),
+            max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: None,
@@ -636,7 +636,7 @@ mod tests {
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let frame = frame::Frame::Settings {
-            max_header_list_size: Some(0),
+            max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: None,
@@ -701,7 +701,7 @@ mod tests {
         let goaway = frame::Frame::GoAway { id: 0 };
 
         let settings = frame::Frame::Settings {
-            max_header_list_size: Some(0),
+            max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: None,
@@ -744,7 +744,7 @@ mod tests {
         let hdrs = frame::Frame::Headers { header_block };
 
         let settings = frame::Frame::Settings {
-            max_header_list_size: Some(0),
+            max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: None,

@@ -48,10 +48,10 @@ pub extern fn quiche_h3_config_new() -> *mut h3::Config {
 }
 
 #[no_mangle]
-pub extern fn quiche_h3_config_set_max_header_list_size(
+pub extern fn quiche_h3_config_set_max_field_section_size(
     config: &mut h3::Config, v: u64,
 ) {
-    config.set_max_header_list_size(v);
+    config.set_max_field_section_size(v);
 }
 
 #[no_mangle]

@@ -457,7 +457,7 @@ impl std::convert::From<octets::BufferTooShortError> for Error {
 
 /// An HTTP/3 configuration.
 pub struct Config {
-    max_header_list_size: Option<u64>,
+    max_field_section_size: Option<u64>,
     qpack_max_table_capacity: Option<u64>,
     qpack_blocked_streams: Option<u64>,
 }
@@ -466,13 +466,13 @@ impl Config {
     /// Creates a new configuration object with default settings.
     pub fn new() -> Result<Config> {
         Ok(Config {
-            max_header_list_size: None,
+            max_field_section_size: None,
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
         })
     }
 
-    /// Sets the `SETTINGS_MAX_HEADER_LIST_SIZE` setting.
+    /// Sets the `SETTINGS_MAX_FIELD_SECTION_SIZE` setting.
     ///
     /// By default no limit is enforced. When a request whose headers exceed
     /// the limit set by the application is received, the call to the [`poll()`]
@@ -481,8 +481,8 @@ impl Config {
     ///
     /// [`poll()`]: struct.Connection.html#method.poll
     /// [`Error::ExcessiveLoad`]: enum.Error.html#variant.ExcessiveLoad
-    pub fn set_max_header_list_size(&mut self, v: u64) {
-        self.max_header_list_size = Some(v);
+    pub fn set_max_field_section_size(&mut self, v: u64) {
+        self.max_field_section_size = Some(v);
     }
 
     /// Sets the `SETTINGS_QPACK_MAX_TABLE_CAPACITY` setting.
@@ -605,7 +605,7 @@ pub enum Event {
 }
 
 struct ConnectionSettings {
-    pub max_header_list_size: Option<u64>,
+    pub max_field_section_size: Option<u64>,
     pub qpack_max_table_capacity: Option<u64>,
     pub qpack_blocked_streams: Option<u64>,
     pub h3_datagram: Option<u64>,
@@ -668,14 +668,14 @@ impl Connection {
             streams: HashMap::new(),
 
             local_settings: ConnectionSettings {
-                max_header_list_size: config.max_header_list_size,
+                max_field_section_size: config.max_field_section_size,
                 qpack_max_table_capacity: config.qpack_max_table_capacity,
                 qpack_blocked_streams: config.qpack_blocked_streams,
                 h3_datagram,
             },
 
             peer_settings: ConnectionSettings {
-                max_header_list_size: None,
+                max_field_section_size: None,
                 qpack_max_table_capacity: None,
                 qpack_blocked_streams: None,
                 h3_datagram: None,
@@ -1557,7 +1557,7 @@ impl Connection {
         };
 
         let frame = frame::Frame::Settings {
-            max_header_list_size: self.local_settings.max_header_list_size,
+            max_field_section_size: self.local_settings.max_field_section_size,
             qpack_max_table_capacity: self
                 .local_settings
                 .qpack_max_table_capacity,
@@ -1895,14 +1895,14 @@ impl Connection {
 
         match frame {
             frame::Frame::Settings {
-                max_header_list_size,
+                max_field_section_size,
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
                 h3_datagram,
                 ..
             } => {
                 self.peer_settings = ConnectionSettings {
-                    max_header_list_size,
+                    max_field_section_size,
                     qpack_max_table_capacity,
                     qpack_blocked_streams,
                     h3_datagram,
@@ -1933,11 +1933,11 @@ impl Connection {
                     return Err(Error::FrameUnexpected);
                 }
 
-                // Use "infinite" as default value for max_header_list_size if
+                // Use "infinite" as default value for max_field_section_size if
                 // it is not configured by the application.
                 let max_size = self
                     .local_settings
-                    .max_header_list_size
+                    .max_field_section_size
                     .unwrap_or(std::u64::MAX);
 
                 let headers = match self
@@ -3411,7 +3411,7 @@ mod tests {
         config.verify_peer(false);
 
         let mut h3_config = Config::new().unwrap();
-        h3_config.set_max_header_list_size(65);
+        h3_config.set_max_field_section_size(65);
 
         let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
 
@@ -3756,7 +3756,7 @@ mod tests {
         );
 
         let settings = frame::Frame::Settings {
-            max_header_list_size: None,
+            max_field_section_size: None,
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             h3_datagram: Some(1),
