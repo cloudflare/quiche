@@ -70,47 +70,30 @@ fn on_packet_acked(
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
 
-        if r.bytes_acked_sl >= r.max_datagram_size {
+        if r.hystart.in_css(epoch) {
+            r.congestion_window += r.hystart.css_cwnd_inc(r.max_datagram_size);
+        } else {
             r.congestion_window += r.max_datagram_size;
-            r.bytes_acked_sl -= r.max_datagram_size;
         }
 
-        if r.hystart.enabled() &&
-            epoch == packet::EPOCH_APPLICATION &&
-            r.hystart.try_enter_lss(
-                packet,
-                r.latest_rtt,
-                r.congestion_window,
-                now,
-                r.max_datagram_size,
-            )
-        {
+        if r.hystart.on_packet_acked(
+            epoch,
+            packet,
+            r.latest_rtt,
+            r.congestion_window,
+            now,
+            r.max_datagram_size,
+        ) {
+            // Exit to congestion avoidance if CSS ends.
             r.ssthresh = r.congestion_window;
         }
     } else {
         // Congestion avoidance.
-        let mut reno_cwnd = r.congestion_window;
-
         r.bytes_acked_ca += packet.size;
 
         if r.bytes_acked_ca >= r.congestion_window {
+            r.congestion_window += r.max_datagram_size;
             r.bytes_acked_ca -= r.congestion_window;
-            reno_cwnd += r.max_datagram_size;
-        }
-
-        // When in Limited Slow Start, take the max of CA cwnd and
-        // LSS cwnd.
-        if r.hystart.in_lss(epoch) {
-            let lss_cwnd_inc = r.hystart.lss_cwnd_inc(
-                packet.size,
-                r.congestion_window,
-                r.ssthresh,
-            );
-
-            r.congestion_window =
-                cmp::max(reno_cwnd, r.congestion_window + lss_cwnd_inc);
-        } else {
-            r.congestion_window = reno_cwnd;
         }
     }
 }
@@ -137,7 +120,7 @@ fn congestion_event(
 
         r.ssthresh = r.congestion_window;
 
-        if r.hystart.in_lss(epoch) {
+        if r.hystart.in_css(epoch) {
             r.hystart.congestion_event();
         }
     }
@@ -147,6 +130,10 @@ pub fn collapse_cwnd(r: &mut Recovery) {
     r.congestion_window = r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS;
     r.bytes_acked_sl = 0;
     r.bytes_acked_ca = 0;
+
+    if r.hystart.enabled() {
+        r.hystart.reset();
+    }
 }
 
 fn checkpoint(_r: &mut Recovery) {}
