@@ -1,26 +1,6 @@
 // Additional parameters for Android build of BoringSSL.
 //
-// Android NDK < 18 with GCC.
-const CMAKE_PARAMS_ANDROID_NDK_OLD_GCC: &[(&str, &[(&str, &str)])] = &[
-    ("aarch64", &[(
-        "ANDROID_TOOLCHAIN_NAME",
-        "aarch64-linux-android-4.9",
-    )]),
-    ("arm", &[(
-        "ANDROID_TOOLCHAIN_NAME",
-        "arm-linux-androideabi-4.9",
-    )]),
-    ("x86", &[(
-        "ANDROID_TOOLCHAIN_NAME",
-        "x86-linux-android-4.9",
-    )]),
-    ("x86_64", &[(
-        "ANDROID_TOOLCHAIN_NAME",
-        "x86_64-linux-android-4.9",
-    )]),
-];
-
-// Android NDK >= 19.
+// Requires Android NDK >= 19.
 const CMAKE_PARAMS_ANDROID_NDK: &[(&str, &[(&str, &str)])] = &[
     ("aarch64", &[("ANDROID_ABI", "arm64-v8a")]),
     ("arm", &[("ANDROID_ABI", "armeabi-v7a")]),
@@ -97,17 +77,11 @@ fn get_boringssl_cmake_config() -> cmake::Config {
     // Add platform-specific parameters.
     match os.as_ref() {
         "android" => {
-            let cmake_params_android = if cfg!(feature = "ndk-old-gcc") {
-                CMAKE_PARAMS_ANDROID_NDK_OLD_GCC
-            } else {
-                CMAKE_PARAMS_ANDROID_NDK
-            };
-
             // We need ANDROID_NDK_HOME to be set properly.
             let android_ndk_home = std::env::var("ANDROID_NDK_HOME")
                 .expect("Please set ANDROID_NDK_HOME for Android build");
             let android_ndk_home = std::path::Path::new(&android_ndk_home);
-            for (android_arch, params) in cmake_params_android {
+            for (android_arch, params) in CMAKE_PARAMS_ANDROID_NDK {
                 if *android_arch == arch {
                     for (name, value) in *params {
                         boringssl_cmake.define(name, value);
