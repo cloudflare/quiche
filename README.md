@@ -305,7 +305,7 @@ Then the Rust toolchain for the Android architectures needed can be installed as
 follows:
 
 ```bash
- $ rustup target add aarch64-linux-android arm-linux-androideabi armv7-linux-androideabi i686-linux-android x86_64-linux-android
+ $ rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
 ```
 
 Note that the minimum API level is 21 for all target architectures.
