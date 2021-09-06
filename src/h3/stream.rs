@@ -556,7 +556,7 @@ impl Stream {
             // payload size of a GREASE frame), so we need to limit the maximum
             // size to avoid DoS.
             if self.state_len > MAX_STATE_BUF_SIZE {
-                return Err(Error::InternalError);
+                return Err(Error::ExcessiveLoad);
             }
 
             self.state_buf.resize(self.state_len, 0);

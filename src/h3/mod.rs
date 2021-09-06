@@ -3330,7 +3330,7 @@ mod tests {
 
         s.advance().ok();
 
-        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::InternalError));
+        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::ExcessiveLoad));
     }
 
     #[test]
@@ -3522,7 +3522,7 @@ mod tests {
 
         s.advance().ok();
 
-        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::InternalError));
+        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::ExcessiveLoad));
 
         // Try to call poll() again after an error occurred.
         assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::Done));
