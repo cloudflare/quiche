@@ -1815,6 +1815,16 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        // Check if the peer has sent the stateless reset token. If yes, then
+        // move the connection to the draining state immediately.
+        // https://www.rfc-editor.org/rfc/rfc9000.html#section-10.3.1-5
+        if let Some(ref token) = self.local_transport_params.stateless_reset_token {
+            if buf.ends_with(token) {
+                self.draining_timer = Some(now + (self.recovery.pto() * 3));
+                return Err(Error::Done);
+            }
+        }
+
         let mut b = octets::OctetsMut::with_slice(buf);
 
         let mut hdr =
