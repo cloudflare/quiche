@@ -118,7 +118,7 @@ index 000000000..23219d92a
 +
 +    CORE_INCS="$CORE_INCS $QUICHE/include"
 +    CORE_DEPS="$CORE_DEPS $QUICHE/target/$QUICHE_BUILD_TARGET/libquiche.a"
-+    CORE_LIBS="$CORE_LIBS $QUICHE/target/$QUICHE_BUILD_TARGET/libquiche.a $NGX_LIBPTHREAD"
++    CORE_LIBS="$CORE_LIBS $QUICHE/target/$QUICHE_BUILD_TARGET/libquiche.a $NGX_LIBPTHREAD -lm"
 +
 +    if [ "$NGX_SYSTEM" = "Darwin" ]; then
 +        CORE_LIBS+=" -framework Security"
