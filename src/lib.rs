@@ -433,6 +433,9 @@ pub enum Error {
 
     /// Error in congestion control.
     CongestionControl,
+
+    /// Error when the peer sends the stateless reset token
+    StatelessReset
 }
 
 impl Error {
@@ -1756,8 +1759,22 @@ impl Connection {
                 Err(Error::Done) => left,
 
                 Err(e) => {
-                    // In case of error processing the incoming packet, close
-                    // the connection.
+                    if e == Error::StatelessReset {
+                        return Err(e);
+                    }
+
+                    // In case of error processing the incoming packet
+                    // 1. check for stateless reset
+                    // 2. if not, then close the connection as an error
+                    if done == 0 {
+                        // Check if the peer has sent the stateless reset token. If yes, then
+                        // move the connection to the draining state immediately.
+                        if self.is_stateless_reset(buf) {
+                            let now = time::Instant::now();
+                            self.draining_timer = Some(now + (self.recovery.pto() * 3));
+                            return Err(Error::StatelessReset);
+                        }
+                    }
                     self.close(false, e.to_wire(), b"").ok();
                     return Err(e);
                 },
@@ -1789,6 +1806,13 @@ impl Connection {
         Ok(done)
     }
 
+    fn is_stateless_reset(&self, buf: &[u8]) -> bool {
+        if let Some(ref token) = self.local_transport_params.stateless_reset_token {
+            return buf.ends_with(token);
+        }
+        return false;
+    }
+
     /// Processes a single QUIC packet received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
@@ -1815,26 +1839,21 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        // Check if the peer has sent the stateless reset token. If yes, then
-        // move the connection to the draining state immediately.
-        // https://www.rfc-editor.org/rfc/rfc9000.html#section-10.3.1-5
-        if let Some(ref token) = self.local_transport_params.stateless_reset_token {
-            if buf.ends_with(token) {
-                self.draining_timer = Some(now + (self.recovery.pto() * 3));
-                return Err(Error::Done);
-            }
-        }
-
         let mut b = octets::OctetsMut::with_slice(buf);
 
         let mut hdr =
             Header::from_bytes(&mut b, self.scid.len()).map_err(|e| {
-                drop_pkt_on_err(
-                    e,
-                    self.recv_count,
-                    self.is_server,
-                    &self.trace_id,
-                )
+                if self.is_stateless_reset(b.buf()) {
+                    self.draining_timer = Some(now + (self.recovery.pto() * 3));
+                    Error::StatelessReset
+                } else {
+                    drop_pkt_on_err(
+                        e,
+                        self.recv_count,
+                        self.is_server,
+                        &self.trace_id,
+                    )
+                }
             })?;
 
         if hdr.ty == packet::Type::VersionNegotiation {
