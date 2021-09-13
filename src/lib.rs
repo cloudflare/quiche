@@ -295,6 +295,8 @@
 #[macro_use]
 extern crate log;
 
+use ring::constant_time::{verify_slices_are_equal};
+
 use std::cmp;
 use std::time;
 
@@ -1806,11 +1808,22 @@ impl Connection {
         Ok(done)
     }
 
+    #[inline(never)]
     fn is_stateless_reset(&self, buf: &[u8]) -> bool {
-        if let Some(ref token) = self.local_transport_params.stateless_reset_token {
-            return buf.ends_with(token);
+        // If the packet is too small, then we just throw it away
+        if buf.len() < 21 {
+            return false;
         }
-        return false;
+        // When stateless reset token is not present compare some random junk
+        // so that it would be hard to determine if stateless reset token is
+        // issued/comparison is done just by analyzing timing
+        // TODO: How to disable this function from being optimized?
+        let token = match self.local_transport_params.stateless_reset_token {
+            Some(ref token) => token,
+            None => &buf[0..16],
+        };
+        return verify_slices_are_equal(token, &buf[buf.len()-16..buf.len()]).is_ok() &&
+                self.local_transport_params.stateless_reset_token.is_some();
     }
 
     /// Processes a single QUIC packet received from the peer.
