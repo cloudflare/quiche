@@ -157,7 +157,9 @@ mod httpbin_tests {
     #[derive(Debug, serde::Deserialize)]
     struct HttpBinResponseBody {
         args: Option<HashMap<String, String>>,
+        #[allow(dead_code)]
         data: Option<String>,
+        #[allow(dead_code)]
         files: Option<HashMap<String, String>>,
         form: Option<HashMap<String, String>>,
         headers: Option<HashMap<String, String>>,
@@ -168,6 +170,7 @@ mod httpbin_tests {
         #[serde(rename = "content-type")]
         content_type: Option<Vec<String>>,
         origin: Option<String>,
+        #[allow(dead_code)]
         url: Option<String>,
     }
 
