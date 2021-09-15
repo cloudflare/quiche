@@ -917,8 +917,17 @@ impl Connection {
             self.frames_greased = true;
         }
 
-        let stream_cap = match conn.stream_capacity(stream_id) {
-            Ok(v) => v,
+        let header_block = self.encode_header_block(headers)?;
+
+        let overhead = octets::varint_len(frame::HEADERS_FRAME_TYPE_ID) +
+            octets::varint_len(header_block.len() as u64);
+
+        // Headers need to be sent atomically, so make sure the stream has
+        // enough capacity.
+        match conn.stream_writable(stream_id, overhead + header_block.len()) {
+            Ok(true) => (),
+
+            Ok(false) => return Err(Error::StreamBlocked),
 
             Err(e) => {
                 if conn.stream_finished(stream_id) {
@@ -928,15 +937,6 @@ impl Connection {
                 return Err(e.into());
             },
         };
-
-        let header_block = self.encode_header_block(headers)?;
-
-        let overhead = octets::varint_len(frame::HEADERS_FRAME_TYPE_ID) +
-            octets::varint_len(header_block.len() as u64);
-
-        if stream_cap < overhead + header_block.len() {
-            return Err(Error::StreamBlocked);
-        }
 
         trace!(
             "{} tx frm HEADERS stream={} len={} fin={}",
@@ -1021,6 +1021,12 @@ impl Connection {
                 return Err(e.into());
             },
         };
+
+        if stream_cap < overhead + body.len() {
+            // Ensure the peer is notified that the connection or stream is
+            // blocked when the stream's capacity is limited by flow control.
+            let _ = conn.stream_writable(stream_id, overhead + body.len());
+        }
 
         // Make sure there is enough capacity to send the DATA frame header.
         if stream_cap < overhead {

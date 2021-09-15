@@ -3848,6 +3848,50 @@ impl Connection {
         stream.is_readable()
     }
 
+    /// Returns true if the stream has enough send capacity.
+    ///
+    /// When `len` more bytes can be buffered into the given stream's send
+    /// buffer, `true` will be returned, `false` otherwise.
+    ///
+    /// In the latter case, if the additional data can't be buffered due to
+    /// flow control limits, the peer will also be notified.
+    ///
+    /// If the specified stream doesn't exist (including when it has already
+    /// been completed and closed), the [`InvalidStreamState`] error will be
+    /// returned.
+    ///
+    /// In addition, if the peer has signalled that it doesn't want to receive
+    /// any more data from this stream by sending the `STOP_SENDING` frame, the
+    /// [`StreamStopped`] error will be returned.
+    ///
+    /// [`InvalidStreamState`]: enum.Error.html#variant.InvalidStreamState
+    /// [`StreamStopped`]: enum.Error.html#variant.StreamStopped
+    #[inline]
+    pub fn stream_writable(
+        &mut self, stream_id: u64, len: usize,
+    ) -> Result<bool> {
+        if self.stream_capacity(stream_id)? >= len {
+            return Ok(true);
+        }
+
+        let stream = match self.streams.get(stream_id) {
+            Some(v) => v,
+
+            None => return Err(Error::InvalidStreamState(stream_id)),
+        };
+
+        if self.max_tx_data - self.tx_data < len as u64 {
+            self.blocked_limit = Some(self.max_tx_data);
+        }
+
+        if stream.send.cap()? < len {
+            let max_off = stream.send.max_off();
+            self.streams.mark_blocked(stream_id, true, max_off);
+        }
+
+        Ok(false)
+    }
+
     /// Returns true if all the data has been read from the specified stream.
     ///
     /// This instructs the application that all the data received from the
