@@ -1310,8 +1310,11 @@ impl SendBuf {
     }
 
     /// Resets the stream at the current offset and clears all buffered data.
-    pub fn reset(&mut self) -> Result<u64> {
-        self.write(b"", true)?;
+    pub fn reset(&mut self) -> Result<(u64, u64)> {
+        let unsent_off = self.off_front();
+        let unsent_len = self.off_back() - unsent_off;
+
+        self.fin_off = Some(unsent_off);
 
         // Drop all buffered data.
         self.data.clear();
@@ -1321,27 +1324,28 @@ impl SendBuf {
 
         self.pos = 0;
         self.len = 0;
+        self.off = unsent_off;
 
-        Ok(self.fin_off.unwrap())
+        Ok((self.fin_off.unwrap(), unsent_len))
     }
 
     /// Resets the streams and records the received error code.
     ///
     /// Calling this again after the first time has no effect.
-    pub fn stop(&mut self, error_code: u64) -> Result<u64> {
+    pub fn stop(&mut self, error_code: u64) -> Result<(u64, u64)> {
         if self.error.is_some() {
             return Err(Error::Done);
         }
 
-        let fin_off = self.reset()?;
+        let (fin_off, unsent) = self.reset()?;
 
         self.error = Some(error_code);
 
-        Ok(fin_off)
+        Ok((fin_off, unsent))
     }
 
     /// Shuts down sending data.
-    pub fn shutdown(&mut self) -> Result<u64> {
+    pub fn shutdown(&mut self) -> Result<(u64, u64)> {
         if self.shutdown {
             return Err(Error::Done);
         }
@@ -1352,7 +1356,6 @@ impl SendBuf {
     }
 
     /// Returns the largest offset of data buffered.
-    #[allow(dead_code)]
     pub fn off_back(&self) -> u64 {
         self.off
     }
