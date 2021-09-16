@@ -2329,10 +2329,7 @@ impl Connection {
         }
 
         // Update send capacity.
-        self.tx_cap = cmp::min(
-            self.recovery.cwnd_available() as u64,
-            self.max_tx_data - self.tx_data,
-        ) as usize;
+        self.update_tx_cap();
 
         self.recv_count += 1;
 
@@ -3803,7 +3800,14 @@ impl Connection {
             },
 
             Shutdown::Write => {
-                let final_size = stream.send.shutdown()?;
+                let (final_size, unsent) = stream.send.shutdown()?;
+
+                // Claw back some flow control allowance from data that was
+                // buffered but not actually sent before the stream was reset.
+                self.tx_data = self.tx_data.saturating_sub(unsent);
+
+                // Update send capacity.
+                self.update_tx_cap();
 
                 self.streams.mark_reset(stream_id, true, err, final_size);
 
@@ -4744,10 +4748,7 @@ impl Connection {
         self.max_tx_data = peer_params.initial_max_data;
 
         // Update send capacity.
-        self.tx_cap = cmp::min(
-            self.recovery.cwnd_available() as u64,
-            self.max_tx_data - self.tx_data,
-        ) as usize;
+        self.update_tx_cap();
 
         self.streams
             .update_peer_max_streams_bidi(peer_params.initial_max_streams_bidi);
@@ -5043,7 +5044,15 @@ impl Connection {
                 let was_writable = stream.is_writable();
 
                 // Try stopping the stream.
-                if let Ok(final_size) = stream.send.stop(error_code) {
+                if let Ok((final_size, unsent)) = stream.send.stop(error_code) {
+                    // Claw back some flow control allowance from data that was
+                    // buffered but not actually sent before the stream was
+                    // reset.
+                    //
+                    // Note that `tx_cap` will be updated later on, so no need
+                    // to touch it here.
+                    self.tx_data = self.tx_data.saturating_sub(unsent);
+
                     self.streams
                         .mark_reset(stream_id, true, error_code, final_size);
 
@@ -5353,6 +5362,14 @@ impl Connection {
 
             completed: self.is_established(),
         }
+    }
+
+    /// Updates send capacity.
+    fn update_tx_cap(&mut self) {
+        self.tx_cap = cmp::min(
+            self.recovery.cwnd_available() as u64,
+            self.max_tx_data - self.tx_data,
+        ) as usize;
     }
 }
 
@@ -8111,11 +8128,15 @@ mod tests {
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), None);
 
-        // Server sends data, and closes stream.
+        // Server sends data...
         let mut r = pipe.server.writable();
         assert_eq!(r.next(), Some(4));
         assert_eq!(r.next(), None);
 
+        assert_eq!(pipe.server.stream_send(4, b"world", false), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // ...and buffers more, and closes stream.
         assert_eq!(pipe.server.stream_send(4, b"world", true), Ok(5));
 
         // Client sends STOP_SENDING before server flushes stream.
@@ -8149,6 +8170,82 @@ mod tests {
 
         // No more frames are sent by the server.
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    /// Tests that resetting a stream restores flow control for unsent data.
+    fn stop_sending_unsent_tx_cap() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(15);
+        config.set_initial_max_stream_data_bidi_local(30);
+        config.set_initial_max_stream_data_bidi_remote(30);
+        config.set_initial_max_stream_data_uni(30);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(0);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client sends some data.
+        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        let mut b = [0; 15];
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
+
+        // Server sends some data.
+        assert_eq!(pipe.server.stream_send(4, b"hello", false), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server buffers some data, until send capacity limit reached.
+        assert_eq!(pipe.server.stream_send(4, b"hello", false), Ok(5));
+        assert_eq!(pipe.server.stream_send(4, b"hello", false), Ok(5));
+        assert_eq!(
+            pipe.server.stream_send(4, b"hello", false),
+            Err(Error::Done)
+        );
+        assert_eq!(
+            pipe.server.stream_send(8, b"hello", false),
+            Err(Error::Done)
+        );
+
+        // Client sends STOP_SENDING.
+        let frames = [frame::Frame::StopSending {
+            stream_id: 4,
+            error_code: 42,
+        }];
+
+        let pkt_type = packet::Type::Short;
+        pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        // Server can now send more data (on a different stream).
+        assert_eq!(pipe.client.stream_send(8, b"hello", true), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert_eq!(pipe.server.stream_send(8, b"hello", false), Ok(5));
+        assert_eq!(pipe.server.stream_send(8, b"hello", false), Ok(5));
+        assert_eq!(
+            pipe.server.stream_send(8, b"hello", false),
+            Err(Error::Done)
+        );
+        assert_eq!(pipe.advance(), Ok(()));
     }
 
     #[test]
@@ -8302,6 +8399,7 @@ mod tests {
 
         // Server sends some data.
         assert_eq!(pipe.server.stream_send(4, b"goodbye, world", false), Ok(14));
+        assert_eq!(pipe.advance(), Ok(()));
 
         // Server shuts down stream.
         assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
@@ -8365,6 +8463,77 @@ mod tests {
             pipe.server.stream_shutdown(4, Shutdown::Write, 0),
             Err(Error::Done)
         );
+    }
+
+    #[test]
+    /// Tests that shutting down a stream restores flow control for unsent data.
+    fn stream_shutdown_write_unsent_tx_cap() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(15);
+        config.set_initial_max_stream_data_bidi_local(30);
+        config.set_initial_max_stream_data_bidi_remote(30);
+        config.set_initial_max_stream_data_uni(30);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(0);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client sends some data.
+        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+        let mut b = [0; 15];
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
+
+        // Server sends some data.
+        assert_eq!(pipe.server.stream_send(4, b"hello", false), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server buffers some data, until send capacity limit reached.
+        assert_eq!(pipe.server.stream_send(4, b"hello", false), Ok(5));
+        assert_eq!(pipe.server.stream_send(4, b"hello", false), Ok(5));
+        assert_eq!(
+            pipe.server.stream_send(4, b"hello", false),
+            Err(Error::Done)
+        );
+        assert_eq!(
+            pipe.server.stream_send(8, b"hello", false),
+            Err(Error::Done)
+        );
+
+        // Client shouldn't update flow control.
+        assert_eq!(pipe.client.should_update_max_data(), false);
+
+        // Server shuts down stream.
+        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server can now send more data (on a different stream).
+        assert_eq!(pipe.client.stream_send(8, b"hello", true), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert_eq!(pipe.server.stream_send(8, b"hello", false), Ok(5));
+        assert_eq!(pipe.server.stream_send(8, b"hello", false), Ok(5));
+        assert_eq!(
+            pipe.server.stream_send(8, b"hello", false),
+            Err(Error::Done)
+        );
+        assert_eq!(pipe.advance(), Ok(()));
     }
 
     #[test]
