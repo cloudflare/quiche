@@ -3833,21 +3833,6 @@ impl Connection {
                     None => continue,
                 };
 
-                // Calculate the minimum viable buffer length for AEAD scatter
-                // operation.
-                //
-                // Note that due to the fact that scattering requires the extra
-                // payload to be at the end of the plaintext, no frame can be
-                // encoded afterwards (including PADDING).
-                let min_len = if has_initial {
-                    // When coalescing with Initial packets, make sure we won't
-                    // need to add PADDING frames at the end, by requiring the
-                    // STREAM frame to fill the packet buffer completely.
-                    max_len
-                } else {
-                    MIN_SCATTER_BUFFER_SIZE
-                };
-
                 let (mut stream_hdr, mut stream_payload) =
                     b.split_at(hdr_off + hdr_len)?;
 
@@ -3859,7 +3844,7 @@ impl Connection {
                 // But if that is not available (e.g. the front send buffer is
                 // too small), fallback to writing the stream data directly into
                 // the output buffer.
-                let (len, fin) = match stream.send.emit_owned(min_len, max_len) {
+                let (len, fin) = match stream.send.emit_owned(max_len) {
                     Some((buf, fin)) => {
                         payload_extra_len = buf.len();
                         payload_extra = Some(buf);

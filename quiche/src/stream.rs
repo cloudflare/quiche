@@ -1267,23 +1267,20 @@ impl SendBuf {
 
     /// Returns the first contiguous chunk of data from the send buffer.
     ///
-    /// The returned buffer will be between `min_len` and `max_len` bytes. If no
-    /// buffer is available, or if an available buffer is smaller, `None` is
-    /// returned.
-    pub fn emit_owned(
-        &mut self, min_len: usize, max_len: usize,
-    ) -> Option<(RangeBuf, bool)> {
+    /// The returned buffer will be `out_len` bytes. If no buffer is available,
+    /// or if an available buffer is smaller, `None` is returned.
+    pub fn emit_owned(&mut self, out_len: usize) -> Option<(RangeBuf, bool)> {
         if !self.ready() {
             return None;
         }
 
         let buf = self.data.get_mut(self.pos)?;
 
-        if buf.len() < min_len {
+        if buf.len() < out_len {
             return None;
         }
 
-        let buf_len = cmp::min(buf.len(), max_len);
+        let buf_len = cmp::min(buf.len(), out_len);
         let partial = buf_len < buf.len();
 
         let out_buf = buf.clone_count(buf_len);
