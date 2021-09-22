@@ -351,11 +351,6 @@ const DEFAULT_MAX_DGRAM_QUEUE_LEN: usize = 0;
 // frames size. We enforce the recommendation for forward compatibility.
 const MAX_DGRAM_FRAME_SIZE: u64 = 65536;
 
-// The minimum payload size that should be emitted when using AEAD scatter
-// seal. For smaller amounts of data, scattering doesn't provide much benefit
-// and would prevent smaller buffers from being merged together.
-const MIN_SCATTER_BUFFER_SIZE: usize = 512;
-
 // The length of the payload length field.
 const PAYLOAD_LENGTH_LEN: usize = 2;
 
@@ -3017,9 +3012,6 @@ impl Connection {
             }
         }
 
-        let mut payload_extra = None;
-        let mut payload_extra_len = 0;
-
         // The preference of data-bearing frame to include in a packet
         // is managed by `self.emit_dgram`. However, whether any frames
         // can be sent depends on the state of their buffers. In the case
@@ -3071,17 +3063,8 @@ impl Connection {
                                 let (mut dgram_hdr, mut dgram_payload) =
                                     b.split_at(hdr_off + hdr_len)?;
 
-                                if data.len() > MIN_SCATTER_BUFFER_SIZE {
-                                    let buf = stream::RangeBuf::from_vec(
-                                        data, 0, false,
-                                    );
-
-                                    payload_extra_len = buf.len();
-                                    payload_extra = Some(buf);
-                                } else {
-                                    dgram_payload.as_mut()[..len]
-                                        .copy_from_slice(&data);
-                                }
+                                dgram_payload.as_mut()[..len]
+                                    .copy_from_slice(&data);
 
                                 // Encode the frame's header.
                                 //
@@ -3098,11 +3081,7 @@ impl Connection {
                                 )?;
 
                                 // Advance the packet buffer's offset.
-                                b.skip(hdr_len)?;
-
-                                if payload_extra.is_none() {
-                                    b.skip(len)?;
-                                }
+                                b.skip(hdr_len + len)?;
 
                                 let frame =
                                     frame::Frame::DatagramHeader { length: len };
@@ -3111,12 +3090,6 @@ impl Connection {
                                     ack_eliciting = true;
                                     in_flight = true;
                                     dgram_emitted = true;
-                                }
-
-                                // The scattered frame must be the last in the
-                                // packet, so avoid pushing more DATAGRAMs.
-                                if payload_extra.is_some() {
-                                    break;
                                 }
                             },
 
@@ -3180,47 +3153,12 @@ impl Connection {
                     None => continue,
                 };
 
-                // Calculate the minimum viable buffer length for AEAD scatter
-                // operation.
-                //
-                // Note that due to the fact that scattering requires the extra
-                // payload to be at the end of the plaintext, no frame can be
-                // encoded afterwards (including PADDING).
-                let min_len = if has_initial {
-                    // When coalescing with Initial packets, make sure we won't
-                    // need to add PADDING frames at the end, by requiring the
-                    // STREAM frame to fill the packet buffer completely.
-                    max_len
-                } else {
-                    MIN_SCATTER_BUFFER_SIZE
-                };
-
                 let (mut stream_hdr, mut stream_payload) =
                     b.split_at(hdr_off + hdr_len)?;
 
-                // Try to get a buffer with the required min and max sizes that
-                // can later be used with the AEAD scatter seal API. This avoids
-                // having to copy the plaintext data into the output buffer
-                // before encryption.
-                //
-                // But if that is not available (e.g. the front send buffer is
-                // too small), fallback to writing the stream data directly into
-                // the output buffer.
-                let (len, fin) = match stream.send.emit_owned(min_len, max_len) {
-                    Some((buf, fin)) => {
-                        payload_extra_len = buf.len();
-                        payload_extra = Some(buf);
-
-                        (payload_extra_len, fin)
-                    },
-
-                    None => {
-                        // Write stream data directly into the packet buffer.
-                        stream
-                            .send
-                            .emit(&mut stream_payload.as_mut()[..max_len])?
-                    },
-                };
+                // Write stream data into the packet buffer.
+                let (len, fin) =
+                    stream.send.emit(&mut stream_payload.as_mut()[..max_len])?;
 
                 // Encode the frame's header.
                 //
@@ -3239,11 +3177,7 @@ impl Connection {
                 )?;
 
                 // Advance the packet buffer's offset.
-                b.skip(hdr_len)?;
-
-                if payload_extra.is_none() {
-                    b.skip(len)?;
-                }
+                b.skip(hdr_len + len)?;
 
                 let frame = frame::Frame::StreamHeader {
                     stream_id,
@@ -3268,9 +3202,7 @@ impl Connection {
 
                 // When fuzzing, try to coalesce multiple STREAM frames in the
                 // same packet, so it's easier to generate fuzz corpora.
-                if cfg!(feature = "fuzzing") &&
-                    left > frame::MAX_STREAM_OVERHEAD &&
-                    payload_extra.is_none()
+                if cfg!(feature = "fuzzing") && left > frame::MAX_STREAM_OVERHEAD
                 {
                     continue;
                 }
@@ -3322,13 +3254,8 @@ impl Connection {
         }
 
         // Pad payload so that it's always at least 4 bytes.
-        if (b.off() - payload_offset) + payload_extra_len < PAYLOAD_MIN_LEN {
+        if b.off() - payload_offset < PAYLOAD_MIN_LEN {
             let payload_len = b.off() - payload_offset;
-
-            // When the extra payload is filled (i.e. `payload_extra_len > 0`)
-            // this point shouldn't be reachable, but account for the extra
-            // length anyway for completeness.
-            let payload_len = payload_len + payload_extra_len;
 
             let frame = frame::Frame::Padding {
                 len: PAYLOAD_MIN_LEN - payload_len,
@@ -3344,7 +3271,7 @@ impl Connection {
 
         // Fill in payload length.
         if pkt_type != packet::Type::Short {
-            let len = pn_len + payload_len + payload_extra_len + crypto_overhead;
+            let len = pn_len + payload_len + crypto_overhead;
 
             let (_, mut payload_with_len) = b.split_at(header_offset)?;
             payload_with_len
@@ -3355,7 +3282,7 @@ impl Connection {
             "{} tx pkt {:?} len={} pn={}",
             self.trace_id,
             hdr,
-            payload_len + payload_extra_len,
+            payload_len,
             pn
         );
 
@@ -3367,8 +3294,7 @@ impl Connection {
                 Some(&hdr.scid),
                 Some(&hdr.dcid),
             );
-            let length =
-                Some((payload_len + payload_extra_len + payload_offset) as u64);
+            let length = Some(payload_len as u64 + payload_offset as u64);
             let payload_length = Some(payload_len as u64);
             let qlog_raw_info = qlog::RawInfo {
                 length,
@@ -3413,7 +3339,7 @@ impl Connection {
             pn_len,
             payload_len,
             payload_offset,
-            payload_extra.as_deref(),
+            None,
             aead,
         )?;
 
@@ -6905,52 +6831,6 @@ mod tests {
         assert_eq!(&b[..12], b"hello, world");
 
         assert!(pipe.server.stream_finished(4));
-    }
-
-    #[test]
-    fn mega_stream() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(b"\x06proto1\x06proto2")
-            .unwrap();
-        config.set_initial_max_data(1000000);
-        config.set_initial_max_stream_data_bidi_local(1000000);
-        config.set_initial_max_stream_data_bidi_remote(1000000);
-        config.set_initial_max_stream_data_uni(1000000);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.set_max_idle_timeout(180_000);
-        config.verify_peer(false);
-        config.set_ack_delay_exponent(8);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        const STREAM_DATA_LEN: usize = 12000;
-
-        let stream_data = [0xa; STREAM_DATA_LEN];
-        assert_eq!(
-            pipe.client.stream_send(4, &stream_data, true),
-            Ok(STREAM_DATA_LEN)
-        );
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        let mut recv_data = [0; STREAM_DATA_LEN];
-        assert_eq!(
-            pipe.server.stream_recv(4, &mut recv_data),
-            Ok((STREAM_DATA_LEN, true))
-        );
-        assert_eq!(&recv_data[..], &stream_data[..]);
     }
 
     #[test]

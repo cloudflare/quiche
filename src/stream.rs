@@ -1163,50 +1163,6 @@ impl SendBuf {
         Ok((out.len() - out_len, fin))
     }
 
-    /// Returns the first contiguous chunk of data from the send buffer.
-    ///
-    /// The returned buffer will be between `min_len` and `max_len` bytes. If no
-    /// buffer is available, or if an available buffer is smaller, `None` is
-    /// returned.
-    pub fn emit_owned(
-        &mut self, min_len: usize, max_len: usize,
-    ) -> Option<(RangeBuf, bool)> {
-        if !self.ready() {
-            return None;
-        }
-
-        let buf = self.data.get_mut(self.pos)?;
-
-        if buf.len() < min_len {
-            return None;
-        }
-
-        let buf_len = cmp::min(buf.len(), max_len);
-        let partial = buf_len < buf.len();
-
-        let out_buf = buf.clone_count(buf_len);
-
-        let next_off = out_buf.off() + buf_len as u64;
-
-        self.len -= buf_len as u64;
-
-        buf.consume(buf_len);
-
-        if !partial {
-            self.pos += 1;
-        }
-
-        // Override the `fin` flag set for the output buffer by matching the
-        // buffer's maximum offset against the stream's final offset (if known).
-        //
-        // This is more efficient than tracking `fin` using the range buffers
-        // themselves, and lets us avoid queueing empty buffers just so we can
-        // propagate the final size.
-        let fin = self.fin_off == Some(next_off);
-
-        Some((out_buf, fin))
-    }
-
     /// Updates the max_data limit to the given value.
     pub fn update_max_data(&mut self, max_data: u64) {
         self.max_data = cmp::max(self.max_data, max_data);
@@ -1491,18 +1447,6 @@ impl RangeBuf {
         }
     }
 
-    /// Creates a new `RangeBuf` from the given Vec.
-    pub fn from_vec(buf: Vec<u8>, off: u64, fin: bool) -> RangeBuf {
-        RangeBuf {
-            len: buf.len(),
-            data: Arc::new(buf),
-            start: 0,
-            pos: 0,
-            off,
-            fin,
-        }
-    }
-
     /// Returns whether `self` holds the final offset in the stream.
     pub fn fin(&self) -> bool {
         self.fin
@@ -1543,7 +1487,7 @@ impl RangeBuf {
         }
 
         let buf = RangeBuf {
-            data: Arc::clone(&self.data),
+            data: self.data.clone(),
             start: self.start + at,
             pos: cmp::max(self.pos, self.start + at),
             len: self.len - at,
@@ -1556,28 +1500,6 @@ impl RangeBuf {
         self.fin = false;
 
         buf
-    }
-
-    /// Clones the given number of bytes in the buffer.
-    ///
-    /// Note that no data is actually cloned, instead the underlying buffer's
-    /// reference count is increased.
-    pub fn clone_count(&self, count: usize) -> RangeBuf {
-        if count > self.len {
-            panic!(
-                "`count` clone index (is {}) should be <= len (is {})",
-                count, self.len
-            );
-        }
-
-        RangeBuf {
-            data: Arc::clone(&self.data),
-            start: self.start,
-            pos: self.pos,
-            len: cmp::min(self.len, (self.pos - self.start) + count),
-            off: self.off,
-            fin: self.fin && self.len <= (self.pos - self.start) + count,
-        }
     }
 }
 
@@ -3136,66 +3058,5 @@ mod tests {
         assert_eq!(new_new_buf.fin(), true);
 
         assert_eq!(&new_new_buf[..], b"");
-    }
-
-    #[test]
-    fn rangebuf_clone_count() {
-        let mut buf = RangeBuf::from(b"helloworld", 5, true);
-        assert_eq!(buf.start, 0);
-        assert_eq!(buf.pos, 0);
-        assert_eq!(buf.len, 10);
-        assert_eq!(buf.off, 5);
-        assert_eq!(buf.fin, true);
-
-        assert_eq!(buf.len(), 10);
-        assert_eq!(buf.off(), 5);
-        assert_eq!(buf.fin(), true);
-
-        assert_eq!(&buf[..], b"helloworld");
-
-        // Clone from start.
-        let new_buf = buf.clone_count(5);
-        assert_eq!(new_buf.start, 0);
-        assert_eq!(new_buf.pos, 0);
-        assert_eq!(new_buf.len, 5);
-        assert_eq!(new_buf.off, 5);
-        assert_eq!(new_buf.fin, false);
-
-        assert_eq!(new_buf.len(), 5);
-        assert_eq!(new_buf.off(), 5);
-        assert_eq!(new_buf.fin(), false);
-
-        assert_eq!(&new_buf[..], b"hello");
-
-        // Advance buffer.
-        buf.consume(3);
-
-        // Clone again.
-        let new_buf = buf.clone_count(5);
-        assert_eq!(new_buf.start, 0);
-        assert_eq!(new_buf.pos, 3);
-        assert_eq!(new_buf.len, 8);
-        assert_eq!(new_buf.off, 5);
-        assert_eq!(new_buf.fin, false);
-
-        assert_eq!(new_buf.len(), 5);
-        assert_eq!(new_buf.off(), 8);
-        assert_eq!(new_buf.fin(), false);
-
-        assert_eq!(&new_buf[..], b"lowor");
-
-        // Clone past the end.
-        let new_buf = buf.clone_count(10);
-        assert_eq!(new_buf.start, 0);
-        assert_eq!(new_buf.pos, 3);
-        assert_eq!(new_buf.len, 10);
-        assert_eq!(new_buf.off, 5);
-        assert_eq!(new_buf.fin, true);
-
-        assert_eq!(new_buf.len(), 7);
-        assert_eq!(new_buf.off(), 8);
-        assert_eq!(new_buf.fin(), true);
-
-        assert_eq!(&new_buf[..], b"loworld");
     }
 }
