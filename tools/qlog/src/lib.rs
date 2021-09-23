@@ -24,19 +24,19 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//! The qlog crate is an implementation of the [qlog main schema] and [qlog QUIC
-//! and HTTP/3 events] that attempts to closely follow the format of the qlog
-//! [TypeScript schema]. This is just a data model and no support is provided
-//! for logging IO, applications can decide themselves the most appropriate
-//! method.
+//! The qlog crate is an implementation of the qlog [main logging schema],
+//! [QUIC event definitions], and [HTTP/3 and QPACK event definitions].
+//! The crate provides a qlog data model that can be used for traces with
+//! events. It supports serialization and deserialization but defers logging IO
+//! choices to applications.
 //!
 //! The crate uses Serde for conversion between Rust and JSON.
 //!
-//! [qlog main schema]: https://tools.ietf.org/html/draft-marx-qlog-main-schema
-//! [qlog QUIC and HTTP/3 events]:
-//! https://quiclog.github.io/internet-drafts/draft-marx-qlog-event-definitions-quic-h3
-//! [TypeScript schema]:
-//! https://github.com/quiclog/qlog/blob/master/TypeScript/draft-01/QLog.ts
+//! [main logging schema]: https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema
+//! [QUIC event definitions]:
+//! https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-quic-events.html
+//! [HTTP/3 and QPACK event definitions]:
+//! https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-h3-events.html
 //!
 //! Overview
 //! ---------------
@@ -117,7 +117,7 @@
 //!     None,                      // flags
 //!     None,                      // token
 //!     None,                      // length
-//!     Some(0xff00001d),          // version
+//!     Some(0x00000001),          // version
 //!     Some(b"7e37e4dcc6682da8"), // scid
 //!     Some(&dcid),
 //! );
@@ -194,7 +194,7 @@
 //!         "header": {
 //!           "packet_type": "initial",
 //!           "packet_number": 0,
-//!           "version": "ff00001d",
+//!           "version": "1",
 //!           "scil": 8,
 //!           "dcil": 8,
 //!           "scid": "7e37e4dcc6682da8",
@@ -363,7 +363,7 @@
 //! let pkt_hdr = qlog::PacketHeader::with_type(
 //!     qlog::PacketType::OneRtt,
 //!     0,
-//!     Some(0xff00001d),
+//!     Some(0x00000001),
 //!     Some(b"7e37e4dcc6682da8"),
 //!     Some(b"36ce104eee50101c"),
 //! );
@@ -2831,7 +2831,7 @@ pub mod testing {
             None,
             None,
             None,
-            Some(0xff00_001d),
+            Some(0x0000_0001),
             Some(&scid),
             Some(&dcid),
         )
@@ -2867,7 +2867,7 @@ mod tests {
         let log_string = r#"{
   "packet_type": "initial",
   "packet_number": 0,
-  "version": "ff00001d",
+  "version": "1",
   "scil": 8,
   "dcil": 8,
   "scid": "7e37e4dcc6682da8",
@@ -2886,7 +2886,7 @@ mod tests {
     "header": {
       "packet_type": "initial",
       "packet_number": 0,
-      "version": "ff00001d",
+      "version": "1",
       "scil": 8,
       "dcil": 8,
       "scid": "7e37e4dcc6682da8",
@@ -2929,7 +2929,7 @@ mod tests {
     "header": {
       "packet_type": "initial",
       "packet_number": 0,
-      "version": "ff00001d",
+      "version": "1",
       "scil": 8,
       "dcil": 8,
       "scid": "7e37e4dcc6682da8",
@@ -3031,7 +3031,7 @@ mod tests {
         "header": {
           "packet_type": "initial",
           "packet_number": 0,
-          "version": "ff00001d",
+          "version": "1",
           "scil": 8,
           "dcil": 8,
           "scid": "7e37e4dcc6682da8",
@@ -3281,7 +3281,7 @@ mod tests {
         let r = s.writer();
         let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
 
-        let log_string = r#"{"qlog_version":"version","qlog_format":"JSON","title":"title","description":"description","traces":[{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0},"events":[{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"ff00001d","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":40,"offset":40,"length":400,"fin":true}]}},{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"ff00001d","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}},{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"ff00001d","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}},{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"ff00001d","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}}]}]}"#;
+        let log_string = r#"{"qlog_version":"version","qlog_format":"JSON","title":"title","description":"description","traces":[{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0},"events":[{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":40,"offset":40,"length":400,"fin":true}]}},{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}},{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}},{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}}]}]}"#;
 
         let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
 
