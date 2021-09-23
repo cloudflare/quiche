@@ -66,6 +66,8 @@ const MINIMUM_WINDOW_PACKETS: usize = 2;
 
 const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 
+const MICROS_PER_SEC: u64 = 1_000_000;
+
 pub struct Recovery {
     loss_detection_timer: Option<Instant>,
 
@@ -283,7 +285,7 @@ impl Recovery {
         // Pacing: Set the pacing rate if CC doesn't do its own.
         if !(self.cc_ops.has_custom_pacing)() {
             if let Some(srtt) = self.smoothed_rtt {
-                let rate = (self.congestion_window as u64 * 1000000) /
+                let rate = (self.congestion_window as u64 * MICROS_PER_SEC) /
                     srtt.as_micros() as u64;
                 self.set_pacing_rate(rate);
             }
@@ -328,7 +330,7 @@ impl Recovery {
         self.last_packet_scheduled_time = match self.last_packet_scheduled_time {
             Some(last_scheduled_time) => {
                 let interval: u64 =
-                    (packet_size as u64 * 1000000) / self.pacing_rate;
+                    (packet_size as u64 * MICROS_PER_SEC) / self.pacing_rate;
                 let interval = Duration::from_micros(interval);
                 let next_schedule_time = last_scheduled_time + interval;
                 Some(cmp::max(now, next_schedule_time))
