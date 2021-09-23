@@ -66,6 +66,8 @@ const MINIMUM_WINDOW_PACKETS: usize = 2;
 
 const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 
+const PACING_MULTIPLIER: f64 = 1.25;
+
 const MICROS_PER_SEC: u64 = 1_000_000;
 
 pub struct Recovery {
@@ -285,8 +287,10 @@ impl Recovery {
         // Pacing: Set the pacing rate if CC doesn't do its own.
         if !(self.cc_ops.has_custom_pacing)() {
             if let Some(srtt) = self.smoothed_rtt {
-                let rate = (self.congestion_window as u64 * MICROS_PER_SEC) /
-                    srtt.as_micros() as u64;
+                let cwnd = self.congestion_window as u64;
+                let rate =
+                    (cwnd * MICROS_PER_SEC) as f64 / srtt.as_micros() as f64;
+                let rate = (rate * PACING_MULTIPLIER) as u64;
                 self.set_pacing_rate(rate);
             }
         }
@@ -1953,11 +1957,11 @@ mod tests {
 
         // We pace this outgoing packet. as all conditions for pacing
         // are passed.
-        assert_eq!(r.pacing_rate, (12000.0 / 0.05) as u64);
+        assert_eq!(r.pacing_rate, (12000.0 * PACING_MULTIPLIER / 0.05) as u64);
         assert_eq!(
             r.get_packet_send_time().unwrap(),
             now + Duration::from_micros(
-                (6500 * 1000000) / (12000.0 / 0.05) as u64
+                (6500 * 1000000) / (12000.0 * PACING_MULTIPLIER / 0.05) as u64
             )
         );
     }
