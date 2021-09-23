@@ -37,6 +37,13 @@ pub const MAX_DGRAM_OVERHEAD: usize = 2;
 pub const MAX_STREAM_OVERHEAD: usize = 12;
 pub const MAX_STREAM_SIZE: u64 = 1 << 62;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct EcnCounts {
+    ect0_count: u64,
+    ect1_count: u64,
+    ecn_ce_count: u64,
+}
+
 #[derive(Clone, PartialEq)]
 pub enum Frame {
     Padding {
@@ -48,6 +55,7 @@ pub enum Frame {
     ACK {
         ack_delay: u64,
         ranges: ranges::RangeSet,
+        ecn_counts: Option<EcnCounts>,
     },
 
     ResetStream {
@@ -184,7 +192,7 @@ impl Frame {
 
             0x01 => Frame::Ping,
 
-            0x02 => parse_ack_frame(frame_type, b)?,
+            0x02..=0x03 => parse_ack_frame(frame_type, b)?,
 
             0x04 => Frame::ResetStream {
                 stream_id: b.get_varint()?,
@@ -335,8 +343,16 @@ impl Frame {
                 b.put_varint(0x01)?;
             },
 
-            Frame::ACK { ack_delay, ranges } => {
-                b.put_varint(0x02)?;
+            Frame::ACK {
+                ack_delay,
+                ranges,
+                ecn_counts,
+            } => {
+                if ecn_counts.is_none() {
+                    b.put_varint(0x02)?;
+                } else {
+                    b.put_varint(0x03)?;
+                }
 
                 let mut it = ranges.iter().rev();
 
@@ -358,6 +374,12 @@ impl Frame {
                     b.put_varint(ack_block)?;
 
                     smallest_ack = block.start;
+                }
+
+                if let Some(ecn) = ecn_counts {
+                    b.put_varint(ecn.ect0_count)?;
+                    b.put_varint(ecn.ect1_count)?;
+                    b.put_varint(ecn.ecn_ce_count)?;
                 }
             },
 
@@ -538,7 +560,11 @@ impl Frame {
 
             Frame::Ping => 1,
 
-            Frame::ACK { ack_delay, ranges } => {
+            Frame::ACK {
+                ack_delay,
+                ranges,
+                ecn_counts,
+            } => {
                 let mut it = ranges.iter().rev();
 
                 let first = it.next().unwrap();
@@ -560,6 +586,12 @@ impl Frame {
                            octets::varint_len(ack_block); // ack_block
 
                     smallest_ack = block.start;
+                }
+
+                if let Some(ecn) = ecn_counts {
+                    len += octets::varint_len(ecn.ect0_count) +
+                        octets::varint_len(ecn.ect1_count) +
+                        octets::varint_len(ecn.ecn_ce_count);
                 }
 
                 len
@@ -753,15 +785,30 @@ impl Frame {
 
             Frame::Ping { .. } => qlog::QuicFrame::Ping,
 
-            Frame::ACK { ack_delay, ranges } => {
+            Frame::ACK {
+                ack_delay,
+                ranges,
+                ecn_counts,
+            } => {
                 let ack_ranges =
                     ranges.iter().map(|r| (r.start, r.end - 1)).collect();
+
+                let (ect0, ect1, ce) = match ecn_counts {
+                    Some(ecn) => (
+                        Some(ecn.ect0_count),
+                        Some(ecn.ect1_count),
+                        Some(ecn.ecn_ce_count),
+                    ),
+
+                    None => (None, None, None),
+                };
+
                 qlog::QuicFrame::Ack {
                     ack_delay: Some(*ack_delay as f32 / 1000.0),
                     acked_ranges: Some(ack_ranges),
-                    ect1: None,
-                    ect0: None,
-                    ce: None,
+                    ect1,
+                    ect0,
+                    ce,
                 }
             },
 
@@ -927,8 +974,16 @@ impl std::fmt::Debug for Frame {
                 write!(f, "PING")?;
             },
 
-            Frame::ACK { ack_delay, ranges } => {
-                write!(f, "ACK delay={} blocks={:?}", ack_delay, ranges)?;
+            Frame::ACK {
+                ack_delay,
+                ranges,
+                ecn_counts,
+            } => {
+                write!(
+                    f,
+                    "ACK delay={} blocks={:?} ecn_counts={:?}",
+                    ack_delay, ranges, ecn_counts
+                )?;
             },
 
             Frame::ResetStream {
@@ -1079,7 +1134,9 @@ impl std::fmt::Debug for Frame {
     }
 }
 
-fn parse_ack_frame(_ty: u64, b: &mut octets::Octets) -> Result<Frame> {
+fn parse_ack_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
+    let first = ty as u8;
+
     let largest_ack = b.get_varint()?;
     let ack_delay = b.get_varint()?;
     let block_count = b.get_varint()?;
@@ -1116,7 +1173,23 @@ fn parse_ack_frame(_ty: u64, b: &mut octets::Octets) -> Result<Frame> {
         ranges.insert(smallest_ack..largest_ack + 1);
     }
 
-    Ok(Frame::ACK { ack_delay, ranges })
+    let ecn_counts = if first & 0x01 != 0 {
+        let ecn = EcnCounts {
+            ect0_count: b.get_varint()?,
+            ect1_count: b.get_varint()?,
+            ecn_ce_count: b.get_varint()?,
+        };
+
+        Some(ecn)
+    } else {
+        None
+    };
+
+    Ok(Frame::ACK {
+        ack_delay,
+        ranges,
+        ecn_counts,
+    })
 }
 
 pub fn encode_crypto_header(
@@ -1288,6 +1361,7 @@ mod tests {
         let frame = Frame::ACK {
             ack_delay: 874_656_534,
             ranges,
+            ecn_counts: None,
         };
 
         let wire_len = {
@@ -1296,6 +1370,48 @@ mod tests {
         };
 
         assert_eq!(wire_len, 17);
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_ok());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_ok());
+    }
+
+    #[test]
+    fn ack_ecn() {
+        let mut d = [42; 128];
+
+        let mut ranges = ranges::RangeSet::default();
+        ranges.insert(4..7);
+        ranges.insert(9..12);
+        ranges.insert(15..19);
+        ranges.insert(3000..5000);
+
+        let ecn_counts = Some(EcnCounts {
+            ect0_count: 100,
+            ect1_count: 200,
+            ecn_ce_count: 300,
+        });
+
+        let frame = Frame::ACK {
+            ack_delay: 874_656_534,
+            ranges,
+            ecn_counts,
+        };
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 23);
 
         let mut b = octets::Octets::with_slice(&d);
         assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));

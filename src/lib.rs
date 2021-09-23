@@ -2729,6 +2729,7 @@ impl Connection {
             let frame = frame::Frame::ACK {
                 ack_delay,
                 ranges: self.pkt_num_spaces[epoch].recv_pkt_need_ack.clone(),
+                ecn_counts: None, // sending ECN is not supported at this time
             };
 
             if push_frame_to_pkt!(b, frames, frame, left) {
@@ -4856,7 +4857,9 @@ impl Connection {
 
             frame::Frame::Ping => (),
 
-            frame::Frame::ACK { ranges, ack_delay } => {
+            frame::Frame::ACK {
+                ranges, ack_delay, ..
+            } => {
                 let ack_delay = ack_delay
                     .checked_mul(2_u64.pow(
                         self.peer_transport_params.ack_delay_exponent as u32,
@@ -7952,6 +7955,7 @@ mod tests {
         let frames = [frame::Frame::ACK {
             ack_delay: 15,
             ranges,
+            ecn_counts: None,
         }];
 
         assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
