@@ -61,9 +61,12 @@ const BETA_CUBIC: f64 = 0.7;
 
 const C: f64 = 0.4;
 
-/// The packet count threshold to restore to the prior state if the
-/// lost packet count since the last checkpoint is less than the threshold.
-const RESTORE_COUNT_THRESHOLD: usize = 10;
+/// Threshold for rolling back state, as percentage of lost packets relative to
+/// cwnd.
+const ROLLBACK_THRESHOLD_PERCENT: usize = 20;
+
+/// Minimum threshold for rolling back state, as number of packets.
+const MIN_ROLLBACK_THRESHOLD: usize = 2;
 
 /// Default value of alpha_aimd in the beginning of congestion avoidance.
 const ALPHA_AIMD: f64 = 3.0 * (1.0 - BETA_CUBIC) / (1.0 + BETA_CUBIC);
@@ -210,12 +213,16 @@ fn on_packet_acked(
     // <https://tools.ietf.org/id/draft-ietf-tcpm-rfc8312bis-00.html#section-4.9>
     //
     // When the recovery episode ends with recovering
-    // a few packets (less than RESTORE_COUNT_THRESHOLD), it's considered
-    // as spurious and restore to the previous state.
+    // a few packets (less than cwnd / mss * ROLLBACK_THRESHOLD_PERCENT(%)), it's
+    // considered as spurious and restore to the previous state.
     if r.congestion_recovery_start_time.is_some() {
         let new_lost = r.lost_count - r.cubic_state.prior.lost_count;
+        let rollback_threshold = (r.congestion_window / r.max_datagram_size) *
+            ROLLBACK_THRESHOLD_PERCENT /
+            100;
+        let rollback_threshold = rollback_threshold.max(MIN_ROLLBACK_THRESHOLD);
 
-        if new_lost < RESTORE_COUNT_THRESHOLD {
+        if new_lost < rollback_threshold {
             let did_rollback = rollback(r);
 
             if did_rollback {
@@ -579,7 +586,7 @@ mod tests {
         now += rtt;
 
         // To avoid rollback
-        r.lost_count += RESTORE_COUNT_THRESHOLD;
+        r.lost_count += MIN_ROLLBACK_THRESHOLD;
 
         // During Congestion Avoidance, it will take
         // 5 ACKs to increase cwnd by 1 MSS.
@@ -998,7 +1005,7 @@ mod tests {
         now += rtt;
 
         // To avoid rollback
-        r.lost_count += RESTORE_COUNT_THRESHOLD;
+        r.lost_count += MIN_ROLLBACK_THRESHOLD;
 
         // During Congestion Avoidance, it will take
         // 5 ACKs to increase cwnd by 1 MSS.
