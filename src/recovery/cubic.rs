@@ -385,6 +385,11 @@ fn checkpoint(r: &mut Recovery) {
 }
 
 fn rollback(r: &mut Recovery) -> bool {
+    // Don't go back to slow start.
+    if r.cubic_state.prior.congestion_window < r.cubic_state.prior.ssthresh {
+        return false;
+    }
+
     if r.congestion_window >= r.cubic_state.prior.congestion_window {
         return false;
     }
@@ -928,7 +933,39 @@ mod tests {
             now + rtt + Duration::from_millis(5),
         );
 
-        // cwnd is restored to the previous one.
+        // This is from slow start, no rollback.
+        assert_eq!(r.cwnd(), cur_cwnd);
+
+        let now = now + rtt;
+
+        // Trigger another congestion event.
+        let prev_cwnd = r.cwnd();
+        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+
+        // After congestion event, cwnd will be reduced.
+        let cur_cwnd = (cur_cwnd as f64 * BETA_CUBIC) as usize;
+        assert_eq!(r.cwnd(), cur_cwnd);
+
+        let rtt = Duration::from_millis(100);
+
+        let acked = vec![Acked {
+            pkt_num: 0,
+            // To exit from recovery
+            time_sent: now + rtt,
+            size: r.max_datagram_size,
+        }];
+
+        // Ack more than cwnd bytes with rtt=100ms.
+        r.update_rtt(rtt, Duration::from_millis(0), now);
+
+        // Trigger detecting sprurious congestion event.
+        r.on_packets_acked(
+            acked,
+            packet::EPOCH_APPLICATION,
+            now + rtt + Duration::from_millis(5),
+        );
+
+        // cwnd is rolled back to the previous one.
         assert_eq!(r.cwnd(), prev_cwnd);
     }
 
