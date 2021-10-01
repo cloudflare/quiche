@@ -3299,7 +3299,7 @@ impl Connection {
             // Qlog packet raw info described at
             // https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema-00#section-5.1
             //
-            // length includes packet headers and trailers (AEAD tag)
+            // `length` includes packet headers and trailers (AEAD tag).
             let length = payload_len + payload_offset + crypto_overhead;
             let qlog_raw_info = qlog::RawInfo {
                 length: Some(length as u64),
