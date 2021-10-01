@@ -862,13 +862,19 @@ impl PktNumSpace {
                 std::u64::MAX,
                 true,
                 true,
+                stream::MAX_STREAM_WINDOW,
             ),
         }
     }
 
     pub fn clear(&mut self) {
-        self.crypto_stream =
-            stream::Stream::new(std::u64::MAX, std::u64::MAX, true, true);
+        self.crypto_stream = stream::Stream::new(
+            std::u64::MAX,
+            std::u64::MAX,
+            true,
+            true,
+            stream::MAX_STREAM_WINDOW,
+        );
 
         self.ack_elicited = false;
     }

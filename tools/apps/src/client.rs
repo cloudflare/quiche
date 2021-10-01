@@ -109,6 +109,9 @@ pub fn connect(
     config.set_initial_max_streams_uni(conn_args.max_streams_uni);
     config.set_disable_active_migration(true);
 
+    config.set_max_connection_window(conn_args.max_window);
+    config.set_max_stream_window(conn_args.max_stream_window);
+
     let mut keylog = None;
 
     if let Some(keylog_path) = std::env::var_os("SSLKEYLOGFILE") {

@@ -203,6 +203,12 @@ void quiche_config_enable_dgram(quiche_config *config, bool enabled,
                                 size_t recv_queue_len,
                                 size_t send_queue_len);
 
+// Sets the maximum connection window.
+void quiche_config_set_max_connection_window(quiche_config *config, uint64_t v);
+
+// Sets the maximum stream window.
+void quiche_config_set_max_stream_window(quiche_config *config, uint64_t v);
+
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 

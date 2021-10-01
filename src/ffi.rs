@@ -304,6 +304,18 @@ pub extern fn quiche_config_set_max_send_udp_payload_size(
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_max_connection_window(
+    config: &mut Config, v: u64,
+) {
+    config.set_max_connection_window(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_max_stream_window(config: &mut Config, v: u64) {
+    config.set_max_stream_window(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_free(config: *mut Config) {
     unsafe { Box::from_raw(config) };
 }

@@ -34,7 +34,9 @@ pub trait Args {
 pub struct CommonArgs {
     pub alpns: Vec<u8>,
     pub max_data: u64,
+    pub max_window: u64,
     pub max_stream_data: u64,
+    pub max_stream_window: u64,
     pub max_streams_bidi: u64,
     pub max_streams_uni: u64,
     pub idle_timeout: u64,
@@ -54,7 +56,9 @@ pub struct CommonArgs {
 ///
 /// --http-version VERSION      HTTP version to use.
 /// --max-data BYTES            Connection-wide flow control limit.
+/// --max-window BYTES          Connection-wide max receiver window.
 /// --max-stream-data BYTES     Per-stream flow control limit.
+/// --max-stream-window BYTES   Per-stream max receiver window.
 /// --max-streams-bidi STREAMS  Number of allowed concurrent streams.
 /// --max-streams-uni STREAMS   Number of allowed concurrent streams.
 /// --dump-packets PATH         Dump the incoming packets in PATH.
@@ -63,7 +67,7 @@ pub struct CommonArgs {
 /// --disable-hystart           Disable HyStart++.
 /// --dgram-proto PROTO         DATAGRAM application protocol.
 /// --dgram-count COUNT         Number of DATAGRAMs to send.
-///  --dgram-data DATA          DATAGRAM data to send.
+/// --dgram-data DATA           DATAGRAM data to send.
 ///
 /// [`Docopt`]: https://docs.rs/docopt/1.1.0/docopt/
 impl Args for CommonArgs {
@@ -107,8 +111,14 @@ impl Args for CommonArgs {
         let max_data = args.get_str("--max-data");
         let max_data = max_data.parse::<u64>().unwrap();
 
+        let max_window = args.get_str("--max-window");
+        let max_window = max_window.parse::<u64>().unwrap();
+
         let max_stream_data = args.get_str("--max-stream-data");
         let max_stream_data = max_stream_data.parse::<u64>().unwrap();
+
+        let max_stream_window = args.get_str("--max-stream-window");
+        let max_stream_window = max_stream_window.parse::<u64>().unwrap();
 
         let max_streams_bidi = args.get_str("--max-streams-bidi");
         let max_streams_bidi = max_streams_bidi.parse::<u64>().unwrap();
@@ -136,7 +146,9 @@ impl Args for CommonArgs {
         CommonArgs {
             alpns,
             max_data,
+            max_window,
             max_stream_data,
+            max_stream_window,
             max_streams_bidi,
             max_streams_uni,
             idle_timeout,
@@ -157,7 +169,9 @@ impl Default for CommonArgs {
         CommonArgs {
             alpns: alpns::length_prefixed(&alpns::HTTP_3),
             max_data: 10000000,
+            max_window: 25165824,
             max_stream_data: 1000000,
+            max_stream_window: 16777216,
             max_streams_bidi: 100,
             max_streams_uni: 100,
             idle_timeout: 30000,
@@ -181,7 +195,9 @@ Options:
   --method METHOD          Use the given HTTP request method [default: GET].
   --body FILE              Send the given file as request body.
   --max-data BYTES         Connection-wide flow control limit [default: 10000000].
+  --max-window BYTES       Connection-wide max receiver window [default: 25165824].
   --max-stream-data BYTES  Per-stream flow control limit [default: 1000000].
+  --max-stream-window BYTES   Per-stream max receiver window [default: 16777216].
   --max-streams-bidi STREAMS  Number of allowed concurrent streams [default: 100].
   --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 100].
   --idle-timeout TIMEOUT   Idle timeout in milliseconds [default: 30000].
@@ -328,10 +344,12 @@ Options:
   --index <name>              The file that will be used as index [default: index.html].
   --name <str>                Name of the server [default: quic.tech]
   --max-data BYTES            Connection-wide flow control limit [default: 10000000].
+  --max-window BYTES          Connection-wide max receiver window [default: 25165824].
   --max-stream-data BYTES     Per-stream flow control limit [default: 1000000].
+  --max-stream-window BYTES   Per-stream max receiver window [default: 16777216].
   --max-streams-bidi STREAMS  Number of allowed concurrent streams [default: 100].
   --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 100].
-  --idle-timeout TIMEOUT   Idle timeout in milliseconds [default: 30000].
+  --idle-timeout TIMEOUT      Idle timeout in milliseconds [default: 30000].
   --dump-packets PATH         Dump the incoming packets as files in the given directory.
   --early-data                Enable receiving early data.
   --no-retry                  Disable stateless retry.
