@@ -3295,11 +3295,15 @@ impl Connection {
                 Some(&hdr.scid),
                 Some(&hdr.dcid),
             );
-            let length = Some(payload_len as u64 + payload_offset as u64);
-            let payload_length = Some(payload_len as u64);
+
+            // Qlog packet raw info described at
+            // https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema-00#section-5.1
+            //
+            // `length` includes packet headers and trailers (AEAD tag).
+            let length = payload_len + payload_offset + crypto_overhead;
             let qlog_raw_info = qlog::RawInfo {
-                length,
-                payload_length,
+                length: Some(length as u64),
+                payload_length: Some(payload_len as u64),
                 data: None,
             };
 
