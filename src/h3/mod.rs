@@ -609,6 +609,7 @@ struct ConnectionSettings {
     pub qpack_max_table_capacity: Option<u64>,
     pub qpack_blocked_streams: Option<u64>,
     pub h3_datagram: Option<u64>,
+    pub raw: Option<Vec<(u64, u64)>>,
 }
 
 struct QpackStreams {
@@ -672,6 +673,7 @@ impl Connection {
                 qpack_max_table_capacity: config.qpack_max_table_capacity,
                 qpack_blocked_streams: config.qpack_blocked_streams,
                 h3_datagram,
+                raw: Default::default(),
             },
 
             peer_settings: ConnectionSettings {
@@ -679,6 +681,7 @@ impl Connection {
                 qpack_max_table_capacity: None,
                 qpack_blocked_streams: None,
                 h3_datagram: None,
+                raw: Default::default(),
             },
 
             control_stream_id: None,
@@ -1416,6 +1419,13 @@ impl Connection {
         Ok(())
     }
 
+    /// Gets the raw settings from peer including unknown and reserved types.
+    ///
+    /// The order of settings is the same as received in the SETTINGS frame.
+    pub fn peer_settings_raw(&self) -> Option<&[(u64, u64)]> {
+        self.peer_settings.raw.as_deref()
+    }
+
     fn open_uni_stream(
         &mut self, conn: &mut super::Connection, ty: u64,
     ) -> Result<u64> {
@@ -1570,6 +1580,7 @@ impl Connection {
             qpack_blocked_streams: self.local_settings.qpack_blocked_streams,
             h3_datagram: self.local_settings.h3_datagram,
             grease,
+            raw: Default::default(),
         };
 
         let mut d = [42; 128];
@@ -1905,6 +1916,7 @@ impl Connection {
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
                 h3_datagram,
+                raw,
                 ..
             } => {
                 self.peer_settings = ConnectionSettings {
@@ -1912,6 +1924,7 @@ impl Connection {
                     qpack_max_table_capacity,
                     qpack_blocked_streams,
                     h3_datagram,
+                    raw,
                 };
 
                 if let Some(1) = h3_datagram {
@@ -3767,6 +3780,7 @@ mod tests {
             qpack_blocked_streams: None,
             h3_datagram: Some(1),
             grease: None,
+            raw: Default::default(),
         };
 
         s.send_frame_client(settings, s.client.control_stream_id.unwrap(), false)

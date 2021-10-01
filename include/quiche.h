@@ -675,6 +675,16 @@ int quiche_h3_event_for_each_header(quiche_h3_event *ev,
                                               void *argp),
                                     void *argp);
 
+// Iterates over the peer's HTTP/3 settings.
+//
+// The `cb` callback will be called for each setting in `conn`.
+// If `cb` returns any value other than `0`, processing will be interrupted and
+// the value is returned to the caller.
+int quiche_h3_for_each_setting(quiche_h3_conn *conn,
+                               int (*cb)(uint64_t identifier,
+                                         uint64_t value, void *argp),
+                               void *argp);
+
 // Check whether data will follow the headers on the stream.
 bool quiche_h3_event_headers_has_body(quiche_h3_event *ev);
 

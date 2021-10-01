@@ -36,10 +36,10 @@ pub const PUSH_PROMISE_FRAME_TYPE_ID: u64 = 0x5;
 pub const GOAWAY_FRAME_TYPE_ID: u64 = 0x6;
 pub const MAX_PUSH_FRAME_TYPE_ID: u64 = 0xD;
 
-const SETTINGS_QPACK_MAX_TABLE_CAPACITY: u64 = 0x1;
-const SETTINGS_MAX_FIELD_SECTION_SIZE: u64 = 0x6;
-const SETTINGS_QPACK_BLOCKED_STREAMS: u64 = 0x7;
-const SETTINGS_H3_DATAGRAM: u64 = 0x276;
+pub const SETTINGS_QPACK_MAX_TABLE_CAPACITY: u64 = 0x1;
+pub const SETTINGS_MAX_FIELD_SECTION_SIZE: u64 = 0x6;
+pub const SETTINGS_QPACK_BLOCKED_STREAMS: u64 = 0x7;
+pub const SETTINGS_H3_DATAGRAM: u64 = 0x276;
 
 // Permit between 16 maximally-encoded and 128 minimally-encoded SETTINGS.
 const MAX_SETTINGS_PAYLOAD_SIZE: usize = 256;
@@ -64,6 +64,7 @@ pub enum Frame {
         qpack_blocked_streams: Option<u64>,
         h3_datagram: Option<u64>,
         grease: Option<(u64, u64)>,
+        raw: Option<Vec<(u64, u64)>>,
     },
 
     PushPromise {
@@ -153,6 +154,7 @@ impl Frame {
                 qpack_blocked_streams,
                 h3_datagram,
                 grease,
+                ..
             } => {
                 let mut len = 0;
 
@@ -262,9 +264,10 @@ impl std::fmt::Debug for Frame {
                 max_field_section_size,
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
+                raw,
                 ..
             } => {
-                write!(f, "SETTINGS max_field_section={:?}, qpack_max_table={:?}, qpack_blocked={:?} ", max_field_section_size, qpack_max_table_capacity, qpack_blocked_streams)?;
+                write!(f, "SETTINGS max_field_section={:?}, qpack_max_table={:?}, qpack_blocked={:?} raw={:?}", max_field_section_size, qpack_max_table_capacity, qpack_blocked_streams, raw)?;
             },
 
             Frame::PushPromise {
@@ -303,6 +306,7 @@ fn parse_settings_frame(
     let mut qpack_max_table_capacity = None;
     let mut qpack_blocked_streams = None;
     let mut h3_datagram = None;
+    let mut raw = Vec::new();
 
     // Reject SETTINGS frames that are too long.
     if settings_length > MAX_SETTINGS_PAYLOAD_SIZE {
@@ -310,28 +314,32 @@ fn parse_settings_frame(
     }
 
     while b.off() < settings_length {
-        let setting_ty = b.get_varint()?;
-        let settings_val = b.get_varint()?;
+        let identifier = b.get_varint()?;
+        let value = b.get_varint()?;
 
-        match setting_ty {
+        // MAX_SETTINGS_PAYLOAD_SIZE protects us from storing too many raw
+        // settings.
+        raw.push((identifier, value));
+
+        match identifier {
             SETTINGS_QPACK_MAX_TABLE_CAPACITY => {
-                qpack_max_table_capacity = Some(settings_val);
+                qpack_max_table_capacity = Some(value);
             },
 
             SETTINGS_MAX_FIELD_SECTION_SIZE => {
-                max_field_section_size = Some(settings_val);
+                max_field_section_size = Some(value);
             },
 
             SETTINGS_QPACK_BLOCKED_STREAMS => {
-                qpack_blocked_streams = Some(settings_val);
+                qpack_blocked_streams = Some(value);
             },
 
             SETTINGS_H3_DATAGRAM => {
-                if settings_val > 1 {
+                if value > 1 {
                     return Err(super::Error::SettingsError);
                 }
 
-                h3_datagram = Some(settings_val);
+                h3_datagram = Some(value);
             },
 
             // Reserved values overlap with HTTP/2 and MUST be rejected
@@ -349,6 +357,7 @@ fn parse_settings_frame(
         qpack_blocked_streams,
         h3_datagram,
         grease: None,
+        raw: Some(raw),
     })
 }
 
@@ -456,12 +465,20 @@ mod tests {
     fn settings_all_no_grease() {
         let mut d = [42; 128];
 
+        let raw_settings = vec![
+            (SETTINGS_MAX_FIELD_SECTION_SIZE, 0),
+            (SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0),
+            (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
+            (SETTINGS_H3_DATAGRAM, 0),
+        ];
+
         let frame = Frame::Settings {
             max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: Some(0),
             grease: None,
+            raw: Some(raw_settings),
         };
 
         let frame_payload_len = 9;
@@ -495,15 +512,26 @@ mod tests {
             qpack_blocked_streams: Some(0),
             h3_datagram: Some(0),
             grease: Some((33, 33)),
+            raw: Default::default(),
         };
 
-        // Frame parsing will always ignore GREASE values.
+        let raw_settings = vec![
+            (SETTINGS_MAX_FIELD_SECTION_SIZE, 0),
+            (SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0),
+            (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
+            (SETTINGS_H3_DATAGRAM, 0),
+            (33, 33),
+        ];
+
+        // Frame parsing will not populate GREASE property but will be in the
+        // raw info.
         let frame_parsed = Frame::Settings {
             max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: Some(0),
             grease: None,
+            raw: Some(raw_settings),
         };
 
         let frame_payload_len = 11;
@@ -531,12 +559,15 @@ mod tests {
     fn settings_h3_only() {
         let mut d = [42; 128];
 
+        let raw_settings = vec![(SETTINGS_MAX_FIELD_SECTION_SIZE, 1024)];
+
         let frame = Frame::Settings {
             max_field_section_size: Some(1024),
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             h3_datagram: None,
             grease: None,
+            raw: Some(raw_settings),
         };
 
         let frame_payload_len = 3;
@@ -564,12 +595,15 @@ mod tests {
     fn settings_h3_dgram_only() {
         let mut d = [42; 128];
 
+        let raw_settings = vec![(SETTINGS_H3_DATAGRAM, 1)];
+
         let frame = Frame::Settings {
             max_field_section_size: None,
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             h3_datagram: Some(1),
             grease: None,
+            raw: Some(raw_settings),
         };
 
         let frame_payload_len = 3;
@@ -603,6 +637,7 @@ mod tests {
             qpack_blocked_streams: None,
             h3_datagram: Some(5),
             grease: None,
+            raw: Default::default(),
         };
 
         let frame_payload_len = 3;
@@ -629,12 +664,18 @@ mod tests {
     fn settings_qpack_only() {
         let mut d = [42; 128];
 
+        let raw_settings = vec![
+            (SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0),
+            (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
+        ];
+
         let frame = Frame::Settings {
             max_field_section_size: None,
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: None,
             grease: None,
+            raw: Some(raw_settings),
         };
 
         let frame_payload_len = 4;
