@@ -604,22 +604,12 @@ pub enum Event {
     GoAway,
 }
 
-/// An HTTP/3 setting.
-#[derive(Clone, Debug, PartialEq)]
-pub struct RawSetting {
-    /// Setting identifier.
-    pub identifier: u64,
-
-    /// Setting value.
-    pub value: u64,
-}
-
 struct ConnectionSettings {
     pub max_field_section_size: Option<u64>,
     pub qpack_max_table_capacity: Option<u64>,
     pub qpack_blocked_streams: Option<u64>,
     pub h3_datagram: Option<u64>,
-    pub raw: Option<Vec<RawSetting>>,
+    pub raw: Option<Vec<(u64, u64)>>,
 }
 
 struct QpackStreams {
@@ -1432,8 +1422,8 @@ impl Connection {
     /// Gets the raw settings from peer including unknown and reserved types.
     ///
     /// The order of settings is the same as received in the SETTINGS frame.
-    pub fn peer_settings_raw(&self) -> Option<Vec<RawSetting>> {
-        self.peer_settings.raw.clone()
+    pub fn peer_settings_raw(&self) -> Option<&[(u64, u64)]> {
+        self.peer_settings.raw.as_deref()
     }
 
     fn open_uni_stream(

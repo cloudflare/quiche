@@ -24,7 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use super::RawSetting;
 use super::Result;
 
 use crate::octets;
@@ -65,7 +64,7 @@ pub enum Frame {
         qpack_blocked_streams: Option<u64>,
         h3_datagram: Option<u64>,
         grease: Option<(u64, u64)>,
-        raw: Option<Vec<RawSetting>>,
+        raw: Option<Vec<(u64, u64)>>,
     },
 
     PushPromise {
@@ -320,7 +319,7 @@ fn parse_settings_frame(
 
         // MAX_SETTINGS_PAYLOAD_SIZE protects us from storing too many raw
         // settings.
-        raw.push(RawSetting { identifier, value });
+        raw.push((identifier, value));
 
         match identifier {
             SETTINGS_QPACK_MAX_TABLE_CAPACITY => {
@@ -467,22 +466,10 @@ mod tests {
         let mut d = [42; 128];
 
         let raw_settings = vec![
-            RawSetting {
-                identifier: SETTINGS_MAX_FIELD_SECTION_SIZE,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_MAX_TABLE_CAPACITY,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_BLOCKED_STREAMS,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_H3_DATAGRAM,
-                value: 0,
-            },
+            (SETTINGS_MAX_FIELD_SECTION_SIZE, 0),
+            (SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0),
+            (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
+            (SETTINGS_H3_DATAGRAM, 0),
         ];
 
         let frame = Frame::Settings {
@@ -529,26 +516,11 @@ mod tests {
         };
 
         let raw_settings = vec![
-            RawSetting {
-                identifier: SETTINGS_MAX_FIELD_SECTION_SIZE,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_MAX_TABLE_CAPACITY,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_BLOCKED_STREAMS,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_H3_DATAGRAM,
-                value: 0,
-            },
-            RawSetting {
-                identifier: 33,
-                value: 33,
-            },
+            (SETTINGS_MAX_FIELD_SECTION_SIZE, 0),
+            (SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0),
+            (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
+            (SETTINGS_H3_DATAGRAM, 0),
+            (33, 33),
         ];
 
         // Frame parsing will not populate GREASE property but will be in the
@@ -587,10 +559,7 @@ mod tests {
     fn settings_h3_only() {
         let mut d = [42; 128];
 
-        let raw_settings = vec![RawSetting {
-            identifier: SETTINGS_MAX_FIELD_SECTION_SIZE,
-            value: 1024,
-        }];
+        let raw_settings = vec![(SETTINGS_MAX_FIELD_SECTION_SIZE, 1024)];
 
         let frame = Frame::Settings {
             max_field_section_size: Some(1024),
@@ -626,10 +595,7 @@ mod tests {
     fn settings_h3_dgram_only() {
         let mut d = [42; 128];
 
-        let raw_settings = vec![RawSetting {
-            identifier: SETTINGS_H3_DATAGRAM,
-            value: 1,
-        }];
+        let raw_settings = vec![(SETTINGS_H3_DATAGRAM, 1)];
 
         let frame = Frame::Settings {
             max_field_section_size: None,
@@ -699,14 +665,8 @@ mod tests {
         let mut d = [42; 128];
 
         let raw_settings = vec![
-            RawSetting {
-                identifier: SETTINGS_QPACK_MAX_TABLE_CAPACITY,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_BLOCKED_STREAMS,
-                value: 0,
-            },
+            (SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0),
+            (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
         ];
 
         let frame = Frame::Settings {

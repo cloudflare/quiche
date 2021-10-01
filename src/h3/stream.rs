@@ -569,7 +569,6 @@ impl Stream {
 #[cfg(test)]
 mod tests {
     use crate::h3::frame::*;
-    use crate::h3::RawSetting;
 
     use super::*;
 
@@ -583,18 +582,9 @@ mod tests {
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let raw_settings = vec![
-            RawSetting {
-                identifier: SETTINGS_MAX_FIELD_SECTION_SIZE,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_MAX_TABLE_CAPACITY,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_BLOCKED_STREAMS,
-                value: 0,
-            },
+            (SETTINGS_MAX_FIELD_SECTION_SIZE, 0),
+            (SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0),
+            (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
         ];
 
         let frame = Frame::Settings {
@@ -655,18 +645,9 @@ mod tests {
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let raw_settings = vec![
-            RawSetting {
-                identifier: SETTINGS_MAX_FIELD_SECTION_SIZE,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_MAX_TABLE_CAPACITY,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_BLOCKED_STREAMS,
-                value: 0,
-            },
+            (SETTINGS_MAX_FIELD_SECTION_SIZE, 0),
+            (SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0),
+            (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
         ];
 
         let frame = frame::Frame::Settings {
@@ -736,18 +717,9 @@ mod tests {
         let goaway = frame::Frame::GoAway { id: 0 };
 
         let raw_settings = vec![
-            RawSetting {
-                identifier: SETTINGS_MAX_FIELD_SECTION_SIZE,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_MAX_TABLE_CAPACITY,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_BLOCKED_STREAMS,
-                value: 0,
-            },
+            (SETTINGS_MAX_FIELD_SECTION_SIZE, 0),
+            (SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0),
+            (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
         ];
 
         let settings = frame::Frame::Settings {
@@ -795,22 +767,10 @@ mod tests {
         let hdrs = frame::Frame::Headers { header_block };
 
         let raw_settings = vec![
-            RawSetting {
-                identifier: SETTINGS_MAX_FIELD_SECTION_SIZE,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_MAX_TABLE_CAPACITY,
-                value: 0,
-            },
-            RawSetting {
-                identifier: SETTINGS_QPACK_BLOCKED_STREAMS,
-                value: 0,
-            },
-            RawSetting {
-                identifier: 33,
-                value: 33,
-            },
+            (SETTINGS_MAX_FIELD_SECTION_SIZE, 0),
+            (SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0),
+            (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
+            (33, 33),
         ];
 
         let settings = frame::Frame::Settings {

@@ -90,10 +90,10 @@ pub extern fn quiche_h3_for_each_setting(
     cb: extern fn(identifier: u64, value: u64, argp: *mut c_void) -> c_int,
     argp: *mut c_void,
 ) -> c_int {
-    let rc = match conn.peer_settings_raw() {
+    match conn.peer_settings_raw() {
         Some(raw) => {
             for setting in raw {
-                let rc = cb(setting.identifier, setting.value, argp);
+                let rc = cb(setting.0, setting.1, argp);
 
                 if rc != 0 {
                     return rc;
@@ -104,9 +104,7 @@ pub extern fn quiche_h3_for_each_setting(
         },
 
         None => -1,
-    };
-
-    rc
+    }
 }
 
 #[no_mangle]
