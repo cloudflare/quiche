@@ -1381,7 +1381,7 @@ const QLOG_METRICS: qlog::EventType =
 
 #[cfg(feature = "qlog")]
 struct QlogInfo {
-    streamer: Option<qlog::QlogStreamer>,
+    streamer: Option<qlog::streamer::QlogStreamer>,
     logged_peer_params: bool,
     level: qlog::EventImportance,
 }
@@ -1660,7 +1660,7 @@ impl Connection {
             None,
         );
 
-        let mut streamer = qlog::QlogStreamer::new(
+        let mut streamer = qlog::streamer::QlogStreamer::new(
             qlog::QLOG_VERSION.to_string(),
             Some(title),
             Some(description),
