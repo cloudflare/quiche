@@ -24,6 +24,11 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::events::quic::QuicFrame;
+use crate::events::EventData;
+use crate::events::EventImportance;
+use crate::events::EventType;
+
 /// A helper object specialized for streaming JSON-serialized qlog to a
 /// [`Write`] trait.
 ///
@@ -329,6 +334,8 @@ impl QlogStreamer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::quic;
+    use crate::events::RawInfo;
     use testing::*;
 
     #[test]
@@ -338,7 +345,7 @@ mod tests {
         let writer = Box::new(buff);
 
         let mut trace = make_trace();
-        let pkt_hdr = make_pkt_hdr(PacketType::Handshake);
+        let pkt_hdr = make_pkt_hdr(quic::PacketType::Handshake);
         let raw = Some(RawInfo {
             length: Some(1251),
             payload_length: Some(1224),
@@ -353,7 +360,7 @@ mod tests {
             raw: None,
         };
 
-        let event_data1 = EventData::PacketSent {
+        let event_data1 = EventData::PacketSent(quic::PacketSent {
             header: pkt_hdr.clone(),
             frames: Some(vec![frame1]),
             is_coalesced: None,
@@ -362,7 +369,7 @@ mod tests {
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
-        };
+        });
 
         let event1 = Event::with_time(0.0, event_data1);
 
@@ -384,7 +391,7 @@ mod tests {
             raw: None,
         };
 
-        let event_data2 = EventData::PacketSent {
+        let event_data2 = EventData::PacketSent(quic::PacketSent {
             header: pkt_hdr.clone(),
             frames: Some(vec![]),
             is_coalesced: None,
@@ -393,11 +400,11 @@ mod tests {
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
-        };
+        });
 
         let event2 = Event::with_time(0.0, event_data2);
 
-        let event_data3 = EventData::PacketSent {
+        let event_data3 = EventData::PacketSent(quic::PacketSent {
             header: pkt_hdr,
             frames: Some(vec![]),
             is_coalesced: None,
@@ -406,7 +413,7 @@ mod tests {
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
-        };
+        });
 
         let event3 = Event::with_time(0.0, event_data3);
 

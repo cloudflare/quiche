@@ -32,6 +32,13 @@ use crate::packet;
 use crate::ranges;
 use crate::stream;
 
+#[cfg(feature = "qlog")]
+use qlog::events::quic::ErrorSpace;
+#[cfg(feature = "qlog")]
+use qlog::events::quic::QuicFrame;
+#[cfg(feature = "qlog")]
+use qlog::events::quic::StreamType;
+
 pub const MAX_CRYPTO_OVERHEAD: usize = 8;
 pub const MAX_DGRAM_OVERHEAD: usize = 2;
 pub const MAX_STREAM_OVERHEAD: usize = 12;
@@ -779,11 +786,11 @@ impl Frame {
     }
 
     #[cfg(feature = "qlog")]
-    pub fn to_qlog(&self) -> qlog::QuicFrame {
+    pub fn to_qlog(&self) -> QuicFrame {
         match self {
-            Frame::Padding { .. } => qlog::QuicFrame::Padding,
+            Frame::Padding { .. } => QuicFrame::Padding,
 
-            Frame::Ping { .. } => qlog::QuicFrame::Ping,
+            Frame::Ping { .. } => QuicFrame::Ping,
 
             Frame::ACK {
                 ack_delay,
@@ -803,7 +810,7 @@ impl Frame {
                     None => (None, None, None),
                 };
 
-                qlog::QuicFrame::Ack {
+                QuicFrame::Ack {
                     ack_delay: Some(*ack_delay as f32 / 1000.0),
                     acked_ranges: Some(ack_ranges),
                     ect1,
@@ -816,7 +823,7 @@ impl Frame {
                 stream_id,
                 error_code,
                 final_size,
-            } => qlog::QuicFrame::ResetStream {
+            } => QuicFrame::ResetStream {
                 stream_id: *stream_id,
                 error_code: *error_code,
                 final_size: *final_size,
@@ -825,27 +832,27 @@ impl Frame {
             Frame::StopSending {
                 stream_id,
                 error_code,
-            } => qlog::QuicFrame::StopSending {
+            } => QuicFrame::StopSending {
                 stream_id: *stream_id,
                 error_code: *error_code,
             },
 
-            Frame::Crypto { data } => qlog::QuicFrame::Crypto {
+            Frame::Crypto { data } => QuicFrame::Crypto {
                 offset: data.off(),
                 length: data.len() as u64,
             },
 
-            Frame::CryptoHeader { offset, length } => qlog::QuicFrame::Crypto {
+            Frame::CryptoHeader { offset, length } => QuicFrame::Crypto {
                 offset: *offset,
                 length: *length as u64,
             },
 
-            Frame::NewToken { token } => qlog::QuicFrame::NewToken {
+            Frame::NewToken { token } => QuicFrame::NewToken {
                 length: token.len().to_string(),
                 token: "TODO: update to qlog-02 token format".to_string(),
             },
 
-            Frame::Stream { stream_id, data } => qlog::QuicFrame::Stream {
+            Frame::Stream { stream_id, data } => QuicFrame::Stream {
                 stream_id: *stream_id,
                 offset: data.off() as u64,
                 length: data.len() as u64,
@@ -858,7 +865,7 @@ impl Frame {
                 offset,
                 length,
                 fin,
-            } => qlog::QuicFrame::Stream {
+            } => QuicFrame::Stream {
                 stream_id: *stream_id,
                 offset: *offset,
                 length: *length as u64,
@@ -866,51 +873,48 @@ impl Frame {
                 raw: None,
             },
 
-            Frame::MaxData { max } => qlog::QuicFrame::MaxData { maximum: *max },
+            Frame::MaxData { max } => QuicFrame::MaxData { maximum: *max },
 
-            Frame::MaxStreamData { stream_id, max } =>
-                qlog::QuicFrame::MaxStreamData {
-                    stream_id: *stream_id,
-                    maximum: *max,
-                },
-
-            Frame::MaxStreamsBidi { max } => qlog::QuicFrame::MaxStreams {
-                stream_type: qlog::StreamType::Bidirectional,
+            Frame::MaxStreamData { stream_id, max } => QuicFrame::MaxStreamData {
+                stream_id: *stream_id,
                 maximum: *max,
             },
 
-            Frame::MaxStreamsUni { max } => qlog::QuicFrame::MaxStreams {
-                stream_type: qlog::StreamType::Unidirectional,
+            Frame::MaxStreamsBidi { max } => QuicFrame::MaxStreams {
+                stream_type: StreamType::Bidirectional,
+                maximum: *max,
+            },
+
+            Frame::MaxStreamsUni { max } => QuicFrame::MaxStreams {
+                stream_type: StreamType::Unidirectional,
                 maximum: *max,
             },
 
             Frame::DataBlocked { limit } =>
-                qlog::QuicFrame::DataBlocked { limit: *limit },
+                QuicFrame::DataBlocked { limit: *limit },
 
             Frame::StreamDataBlocked { stream_id, limit } =>
-                qlog::QuicFrame::StreamDataBlocked {
+                QuicFrame::StreamDataBlocked {
                     stream_id: *stream_id,
                     limit: *limit,
                 },
 
-            Frame::StreamsBlockedBidi { limit } =>
-                qlog::QuicFrame::StreamsBlocked {
-                    stream_type: qlog::StreamType::Bidirectional,
-                    limit: *limit,
-                },
+            Frame::StreamsBlockedBidi { limit } => QuicFrame::StreamsBlocked {
+                stream_type: StreamType::Bidirectional,
+                limit: *limit,
+            },
 
-            Frame::StreamsBlockedUni { limit } =>
-                qlog::QuicFrame::StreamsBlocked {
-                    stream_type: qlog::StreamType::Unidirectional,
-                    limit: *limit,
-                },
+            Frame::StreamsBlockedUni { limit } => QuicFrame::StreamsBlocked {
+                stream_type: StreamType::Unidirectional,
+                limit: *limit,
+            },
 
             Frame::NewConnectionId {
                 seq_num,
                 retire_prior_to,
                 conn_id,
                 ..
-            } => qlog::QuicFrame::NewConnectionId {
+            } => QuicFrame::NewConnectionId {
                 sequence_number: *seq_num as u32,
                 retire_prior_to: *retire_prior_to as u32,
                 length: conn_id.len() as u64,
@@ -919,20 +923,19 @@ impl Frame {
             },
 
             Frame::RetireConnectionId { seq_num } =>
-                qlog::QuicFrame::RetireConnectionId {
+                QuicFrame::RetireConnectionId {
                     sequence_number: *seq_num as u32,
                 },
 
             Frame::PathChallenge { .. } =>
-                qlog::QuicFrame::PathChallenge { data: None },
+                QuicFrame::PathChallenge { data: None },
 
-            Frame::PathResponse { .. } =>
-                qlog::QuicFrame::PathResponse { data: None },
+            Frame::PathResponse { .. } => QuicFrame::PathResponse { data: None },
 
             Frame::ConnectionClose {
                 error_code, reason, ..
-            } => qlog::QuicFrame::ConnectionClose {
-                error_space: qlog::ErrorSpace::TransportError,
+            } => QuicFrame::ConnectionClose {
+                error_space: ErrorSpace::TransportError,
                 error_code: *error_code,
                 raw_error_code: None, // raw error is no different for us
                 reason: Some(String::from_utf8(reason.clone()).unwrap()),
@@ -940,22 +943,22 @@ impl Frame {
             },
 
             Frame::ApplicationClose { error_code, reason } =>
-                qlog::QuicFrame::ConnectionClose {
-                    error_space: qlog::ErrorSpace::ApplicationError,
+                QuicFrame::ConnectionClose {
+                    error_space: ErrorSpace::ApplicationError,
                     error_code: *error_code,
                     raw_error_code: None, // raw error is no different for us
                     reason: Some(String::from_utf8(reason.clone()).unwrap()),
                     trigger_frame_type: None, // don't know trigger type
                 },
 
-            Frame::HandshakeDone => qlog::QuicFrame::HandshakeDone,
+            Frame::HandshakeDone => QuicFrame::HandshakeDone,
 
-            Frame::Datagram { data } => qlog::QuicFrame::Datagram {
+            Frame::Datagram { data } => QuicFrame::Datagram {
                 length: data.len() as u64,
                 raw: None,
             },
 
-            Frame::DatagramHeader { length } => qlog::QuicFrame::Datagram {
+            Frame::DatagramHeader { length } => QuicFrame::Datagram {
                 length: *length as u64,
                 raw: None,
             },
