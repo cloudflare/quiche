@@ -2197,6 +2197,80 @@ impl Connection {
                 // TODO: implement CANCEL_PUSH frame
             },
 
+            frame::Frame::PriorityUpdateRequest {
+                prioritized_element_id,
+                ..
+            } => {
+                if !self.is_server {
+                    conn.close(
+                        true,
+                        Error::FrameUnexpected.to_wire(),
+                        b"PRIORITY_UPDATE received by client",
+                    )?;
+
+                    return Err(Error::FrameUnexpected);
+                }
+
+                if Some(stream_id) != self.peer_control_stream_id {
+                    conn.close(
+                        true,
+                        Error::FrameUnexpected.to_wire(),
+                        b"PRIORITY_UPDATE received on non-control stream",
+                    )?;
+
+                    return Err(Error::FrameUnexpected);
+                }
+
+                if prioritized_element_id % 4 != 0 {
+                    conn.close(
+                        true,
+                        Error::FrameUnexpected.to_wire(),
+                        b"PRIORITY_UPDATE for request stream type with wrong ID",
+                    )?;
+
+                    return Err(Error::FrameUnexpected);
+                }
+
+                // TODO: decide how to handle valid frames: generate an event?
+            },
+
+            frame::Frame::PriorityUpdatePush {
+                prioritized_element_id,
+                ..
+            } => {
+                if !self.is_server {
+                    conn.close(
+                        true,
+                        Error::FrameUnexpected.to_wire(),
+                        b"PRIORITY_UPDATE received by client",
+                    )?;
+
+                    return Err(Error::FrameUnexpected);
+                }
+
+                if Some(stream_id) != self.peer_control_stream_id {
+                    conn.close(
+                        true,
+                        Error::FrameUnexpected.to_wire(),
+                        b"PRIORITY_UPDATE received on non-control stream",
+                    )?;
+
+                    return Err(Error::FrameUnexpected);
+                }
+
+                if prioritized_element_id % 3 != 0 {
+                    conn.close(
+                        true,
+                        Error::FrameUnexpected.to_wire(),
+                        b"PRIORITY_UPDATE for push stream type with wrong ID",
+                    )?;
+
+                    return Err(Error::FrameUnexpected);
+                }
+
+                // TODO: we only implement this if we implement server push
+            },
+
             frame::Frame::Unknown => (),
         }
 
@@ -3317,6 +3391,121 @@ mod tests {
 
         // Trailing comma in dict is malformed
         assert_eq!(Err(Error::Done), Priority::try_from(b"u=7, ".as_slice()));
+    }
+
+    /// Send a PRIORITY_UPDATE for request stream from the client.
+    fn priority_update_request() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        s.send_frame_client(
+            frame::Frame::PriorityUpdateRequest {
+                prioritized_element_id: 0,
+                priority_field_value: b"u=3".to_vec(),
+            },
+            s.client.control_stream_id.unwrap(),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Send a PRIORITY_UPDATE for push stream from the client.
+    fn priority_update_push() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        s.send_frame_client(
+            frame::Frame::PriorityUpdatePush {
+                prioritized_element_id: 3,
+                priority_field_value: b"u=3".to_vec(),
+            },
+            s.client.control_stream_id.unwrap(),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Send a PRIORITY_UPDATE for request stream from the client but for an
+    /// incorrect stream type.
+    fn priority_update_request_bad_stream() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        s.send_frame_client(
+            frame::Frame::PriorityUpdateRequest {
+                prioritized_element_id: 5,
+                priority_field_value: b"u=3".to_vec(),
+            },
+            s.client.control_stream_id.unwrap(),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
+    }
+
+    #[test]
+    /// Send a PRIORITY_UPDATE for push stream from the client but for an
+    /// incorrect stream type.
+    fn priority_update_push_bad_stream() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        s.send_frame_client(
+            frame::Frame::PriorityUpdatePush {
+                prioritized_element_id: 5,
+                priority_field_value: b"u=3".to_vec(),
+            },
+            s.client.control_stream_id.unwrap(),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
+    }
+
+    #[test]
+    /// Send a PRIORITY_UPDATE for request stream from the server.
+    fn priority_update_request_from_server() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        s.send_frame_server(
+            frame::Frame::PriorityUpdateRequest {
+                prioritized_element_id: 0,
+                priority_field_value: b"u=3".to_vec(),
+            },
+            s.server.control_stream_id.unwrap(),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
+    }
+
+    #[test]
+    /// Send a PRIORITY_UPDATE for request stream from the server.
+    fn priority_update_push_from_server() {
+        let mut s = Session::default().unwrap();
+        s.handshake().unwrap();
+
+        s.send_frame_server(
+            frame::Frame::PriorityUpdatePush {
+                prioritized_element_id: 0,
+                priority_field_value: b"u=3".to_vec(),
+            },
+            s.server.control_stream_id.unwrap(),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
     }
 
     #[test]

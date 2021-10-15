@@ -33,6 +33,8 @@ pub const SETTINGS_FRAME_TYPE_ID: u64 = 0x4;
 pub const PUSH_PROMISE_FRAME_TYPE_ID: u64 = 0x5;
 pub const GOAWAY_FRAME_TYPE_ID: u64 = 0x6;
 pub const MAX_PUSH_FRAME_TYPE_ID: u64 = 0xD;
+pub const PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID: u64 = 0xF0700;
+pub const PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID: u64 = 0xF0701;
 
 pub const SETTINGS_QPACK_MAX_TABLE_CAPACITY: u64 = 0x1;
 pub const SETTINGS_MAX_FIELD_SECTION_SIZE: u64 = 0x6;
@@ -78,6 +80,16 @@ pub enum Frame {
         push_id: u64,
     },
 
+    PriorityUpdateRequest {
+        prioritized_element_id: u64,
+        priority_field_value: Vec<u8>,
+    },
+
+    PriorityUpdatePush {
+        prioritized_element_id: u64,
+        priority_field_value: Vec<u8>,
+    },
+
     Unknown,
 }
 
@@ -114,6 +126,10 @@ impl Frame {
             MAX_PUSH_FRAME_TYPE_ID => Frame::MaxPushId {
                 push_id: b.get_varint()?,
             },
+
+            PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID |
+            PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID =>
+                parse_priority_update(frame_type, payload_length, &mut b)?,
 
             _ => Frame::Unknown,
         };
@@ -236,6 +252,34 @@ impl Frame {
                 b.put_varint(*push_id)?;
             },
 
+            Frame::PriorityUpdateRequest {
+                prioritized_element_id,
+                priority_field_value,
+            } => {
+                let len = octets::varint_len(*prioritized_element_id) +
+                    priority_field_value.len();
+
+                b.put_varint(PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID)?;
+                b.put_varint(len as u64)?;
+
+                b.put_varint(*prioritized_element_id as u64)?;
+                b.put_bytes(priority_field_value)?;
+            },
+
+            Frame::PriorityUpdatePush {
+                prioritized_element_id,
+                priority_field_value,
+            } => {
+                let len = octets::varint_len(*prioritized_element_id) +
+                    priority_field_value.len();
+
+                b.put_varint(PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID)?;
+                b.put_varint(len as u64)?;
+
+                b.put_varint(*prioritized_element_id as u64)?;
+                b.put_bytes(priority_field_value)?;
+            },
+
             Frame::Unknown => unreachable!(),
         }
 
@@ -286,6 +330,30 @@ impl std::fmt::Debug for Frame {
 
             Frame::MaxPushId { push_id } => {
                 write!(f, "MAX_PUSH_ID push_id={}", push_id)?;
+            },
+
+            Frame::PriorityUpdateRequest {
+                prioritized_element_id,
+                priority_field_value,
+            } => {
+                write!(
+                    f,
+                    "PRIORITY_UPDATE request_stream_id={}, priority_field_len={}",
+                    prioritized_element_id,
+                    priority_field_value.len()
+                )?;
+            },
+
+            Frame::PriorityUpdatePush {
+                prioritized_element_id,
+                priority_field_value,
+            } => {
+                write!(
+                    f,
+                    "PRIORITY_UPDATE push_id={}, priority_field_len={}",
+                    prioritized_element_id,
+                    priority_field_value.len()
+                )?;
             },
 
             Frame::Unknown => {
@@ -370,6 +438,31 @@ fn parse_push_promise(
         push_id,
         header_block,
     })
+}
+
+fn parse_priority_update(
+    frame_type: u64, payload_length: u64, b: &mut octets::Octets,
+) -> Result<Frame> {
+    let prioritized_element_id = b.get_varint()?;
+    let priority_field_value_length =
+        payload_length - octets::varint_len(prioritized_element_id) as u64;
+    let priority_field_value =
+        b.get_bytes(priority_field_value_length as usize)?.to_vec();
+
+    match frame_type {
+        PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID =>
+            Ok(Frame::PriorityUpdateRequest {
+                prioritized_element_id,
+                priority_field_value,
+            }),
+
+        PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID => Ok(Frame::PriorityUpdatePush {
+            prioritized_element_id,
+            priority_field_value,
+        }),
+
+        _ => unreachable!(),
+    }
 }
 
 #[cfg(test)]
@@ -867,6 +960,70 @@ mod tests {
         assert_eq!(
             Frame::from_bytes(
                 MAX_PUSH_FRAME_TYPE_ID,
+                frame_payload_len as u64,
+                &d[frame_header_len..]
+            )
+            .unwrap(),
+            frame
+        );
+    }
+
+    #[test]
+    fn priority_update_request() {
+        let mut d = [42; 128];
+
+        let prioritized_element_id = 4;
+        let priority_field_value = b"abcdefghijklm".to_vec();
+        let frame_payload_len = 1 + priority_field_value.len();
+        let frame_header_len = 5;
+
+        let frame = Frame::PriorityUpdateRequest {
+            prioritized_element_id,
+            priority_field_value,
+        };
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, frame_header_len + frame_payload_len);
+
+        assert_eq!(
+            Frame::from_bytes(
+                PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID,
+                frame_payload_len as u64,
+                &d[frame_header_len..]
+            )
+            .unwrap(),
+            frame
+        );
+    }
+
+    #[test]
+    fn priority_update_push() {
+        let mut d = [42; 128];
+
+        let prioritized_element_id = 6;
+        let priority_field_value = b"abcdefghijklm".to_vec();
+        let frame_payload_len = 1 + priority_field_value.len();
+        let frame_header_len = 5;
+
+        let frame = Frame::PriorityUpdatePush {
+            prioritized_element_id,
+            priority_field_value,
+        };
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, frame_header_len + frame_payload_len);
+
+        assert_eq!(
+            Frame::from_bytes(
+                PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID,
                 frame_payload_len as u64,
                 &d[frame_header_len..]
             )
