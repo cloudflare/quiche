@@ -24,6 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use quiche::h3::NameValue;
+
 use ring::rand::*;
 
 use crate::Http3TestError;
@@ -265,7 +267,8 @@ pub fn run(
                     Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
                         info!(
                             "got response headers {:?} on stream id {}",
-                            &list, stream_id
+                            hdrs_to_strings(&list),
+                            stream_id
                         );
 
                         test.add_response_headers(stream_id, &list);
@@ -405,4 +408,15 @@ pub fn run(
     }
 
     Ok(())
+}
+
+fn hdrs_to_strings(hdrs: &[quiche::h3::Header]) -> Vec<(String, String)> {
+    hdrs.iter()
+        .map(|h| {
+            (
+                String::from_utf8(h.name().into()).unwrap(),
+                String::from_utf8(h.value().into()).unwrap(),
+            )
+        })
+        .collect()
 }

@@ -242,6 +242,17 @@ fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {
     output_sink(out);
 }
 
+pub fn hdrs_to_strings(hdrs: &[quiche::h3::Header]) -> Vec<(String, String)> {
+    hdrs.iter()
+        .map(|h| {
+            (
+                String::from_utf8(h.name().into()).unwrap(),
+                String::from_utf8(h.value().into()).unwrap(),
+            )
+        })
+        .collect()
+}
+
 pub trait HttpConn {
     fn send_requests(
         &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
@@ -1111,7 +1122,8 @@ impl HttpConn for Http3Conn {
                 Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
                     debug!(
                         "got response headers {:?} on stream id {}",
-                        list, stream_id
+                        hdrs_to_strings(&list),
+                        stream_id
                     );
 
                     let req = self
@@ -1275,7 +1287,7 @@ impl HttpConn for Http3Conn {
                     info!(
                         "{} got request {:?} on stream id {}",
                         conn.trace_id(),
-                        &list,
+                        hdrs_to_strings(&list),
                         stream_id
                     );
 
