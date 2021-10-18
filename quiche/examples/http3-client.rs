@@ -29,6 +29,8 @@ extern crate log;
 
 use std::net::ToSocketAddrs;
 
+use quiche::h3::NameValue;
+
 use ring::rand::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
@@ -238,7 +240,8 @@ fn main() {
                     Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
                         info!(
                             "got response headers {:?} on stream id {}",
-                            list, stream_id
+                            hdrs_to_strings(&list),
+                            stream_id
                         );
                     },
 
@@ -336,4 +339,15 @@ fn hex_dump(buf: &[u8]) -> String {
     let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
 
     vec.join("")
+}
+
+fn hdrs_to_strings(hdrs: &[quiche::h3::Header]) -> Vec<(String, String)> {
+    hdrs.iter()
+        .map(|h| {
+            (
+                String::from_utf8(h.name().into()).unwrap(),
+                String::from_utf8(h.value().into()).unwrap(),
+            )
+        })
+        .collect()
 }

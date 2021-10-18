@@ -502,7 +502,7 @@ fn handle_request(
     info!(
         "{} got request {:?} on stream id {}",
         conn.trace_id(),
-        headers,
+        hdrs_to_strings(headers),
         stream_id
     );
 
@@ -658,4 +658,15 @@ fn handle_writable(client: &mut Client, stream_id: u64) {
     if resp.written == resp.body.len() {
         client.partial_responses.remove(&stream_id);
     }
+}
+
+fn hdrs_to_strings(hdrs: &[quiche::h3::Header]) -> Vec<(String, String)> {
+    hdrs.iter()
+        .map(|h| {
+            (
+                String::from_utf8(h.name().into()).unwrap(),
+                String::from_utf8(h.value().into()).unwrap(),
+            )
+        })
+        .collect()
 }
