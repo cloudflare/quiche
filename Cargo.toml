@@ -2,7 +2,7 @@
 name = "quiche"
 version = "0.10.0"
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
-edition = "2018"
+edition = "2021"
 build = "src/build.rs"
 description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
 repository = "https://github.com/cloudflare/quiche"
@@ -27,6 +27,7 @@ include = [
     "/quiche.svg",
     "/src",
 ]
+rust-version = "1.56"
 
 [features]
 default = ["boringssl-vendored"]
