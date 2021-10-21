@@ -68,13 +68,8 @@ impl Representation {
 }
 
 /// A QPACK decoder.
+#[derive(Default)]
 pub struct Decoder {}
-
-impl Default for Decoder {
-    fn default() -> Decoder {
-        Decoder {}
-    }
-}
 
 impl Decoder {
     /// Creates a new QPACK decoder.
