@@ -77,7 +77,7 @@ impl std::fmt::Debug for Hystart {
         write!(f, "css_baseline_min_rtt={:?} ", self.css_baseline_min_rtt)?;
         write!(f, "rtt_sample_count={:?} ", self.rtt_sample_count)?;
         write!(f, "css_start_time={:?} ", self.css_start_time)?;
-        write!(f, "css_round_count={:?} ", self.css_round_count)?;
+        write!(f, "css_round_count={:?}", self.css_round_count)?;
 
         Ok(())
     }
