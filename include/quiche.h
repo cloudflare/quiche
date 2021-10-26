@@ -34,7 +34,13 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+#include <winsock2.h>
+#else
 #include <sys/socket.h>
+#endif
+
 #ifdef __unix__
 #include <sys/types.h>
 #endif
