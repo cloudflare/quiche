@@ -141,6 +141,9 @@ jobs:
           command: test
           args: --target=${{ matrix.target }} --tests --examples --verbose --features ffi,qlog
 
+      - name: Build C examples
+        run: make -C examples
+
   quiche_multiarch:
     runs-on: ubuntu-latest
     strategy:
