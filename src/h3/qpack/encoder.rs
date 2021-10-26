@@ -35,13 +35,8 @@ use super::LITERAL;
 use super::LITERAL_WITH_NAME_REF;
 
 /// A QPACK encoder.
+#[derive(Default)]
 pub struct Encoder {}
-
-impl Default for Encoder {
-    fn default() -> Encoder {
-        Encoder {}
-    }
-}
 
 impl Encoder {
     /// Creates a new QPACK encoder.

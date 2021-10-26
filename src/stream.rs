@@ -1514,12 +1514,12 @@ impl RangeBuf {
 
     /// Splits the buffer into two at the given index.
     pub fn split_off(&mut self, at: usize) -> RangeBuf {
-        if at > self.len {
-            panic!(
-                "`at` split index (is {}) should be <= len (is {})",
-                at, self.len
-            );
-        }
+        assert!(
+            at <= self.len,
+            "`at` split index (is {}) should be <= len (is {})",
+            at,
+            self.len
+        );
 
         let buf = RangeBuf {
             data: self.data.clone(),

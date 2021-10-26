@@ -4400,8 +4400,6 @@ impl Connection {
                         q.add_event_data_with_instant(ev_data, now).ok();
                     }
                 });
-
-                return;
             }
         }
     }
