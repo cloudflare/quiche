@@ -481,10 +481,10 @@ pub enum EventData {
     ConnectionStateUpdated(connectivity::ConnectionStateUpdated),
 
     // Security
-    #[serde(rename = "security:connection_state_updated")]
+    #[serde(rename = "security:key_updated")]
     KeyUpdated(security::KeyUpdated),
 
-    #[serde(rename = "security:connection_state_updated")]
+    #[serde(rename = "security:key_retired")]
     KeyRetired(security::KeyRetired),
 
     // Transport
