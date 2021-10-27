@@ -356,7 +356,7 @@ mod tests {
             stream_id: 40,
             offset: 40,
             length: 400,
-            fin: true,
+            fin: Some(true),
             raw: None,
         };
 
@@ -379,7 +379,7 @@ mod tests {
             stream_id: 0,
             offset: 0,
             length: 100,
-            fin: true,
+            fin: Some(true),
             raw: None,
         };
 
@@ -387,7 +387,7 @@ mod tests {
             stream_id: 0,
             offset: 0,
             length: 100,
-            fin: true,
+            fin: Some(true),
             raw: None,
         };
 

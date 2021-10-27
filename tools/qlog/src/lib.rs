@@ -841,7 +841,7 @@ mod tests {
             stream_id: 0,
             offset: 0,
             length: 100,
-            fin: true,
+            fin: Some(true),
             raw: None,
         });
 
@@ -938,7 +938,7 @@ mod tests {
             stream_id: 0,
             offset: 0,
             length: 100,
-            fin: true,
+            fin: Some(true),
             raw: None,
         }];
         let event_data = EventData::PacketSent(PacketSent {
