@@ -53,7 +53,7 @@ pub enum KeyType {
 pub struct KeyUpdated {
     key_type: KeyType,
     old: Option<Bytes>,
-    new: Bytes,
+    new: Option<Bytes>,
     generation: Option<u32>,
 }
 
