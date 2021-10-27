@@ -38,10 +38,13 @@ pub enum KeyType {
     ServerHandshakeSecret,
     ClientHandshakeSecret,
 
+    #[serde(rename = "server_0rtt_secret")]
     Server0RttSecret,
+    #[serde(rename = "client_0rtt_secret")]
     Client0RttSecret,
-
+    #[serde(rename = "server_1rtt_secret")]
     Server1RttSecret,
+    #[serde(rename = "client_1rtt_secret")]
     Client1RttSecret,
 }
 
