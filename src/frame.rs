@@ -856,7 +856,7 @@ impl Frame {
                 stream_id: *stream_id,
                 offset: data.off() as u64,
                 length: data.len() as u64,
-                fin: data.fin(),
+                fin: data.fin().then(|| true),
                 raw: None,
             },
 
@@ -869,7 +869,7 @@ impl Frame {
                 stream_id: *stream_id,
                 offset: *offset,
                 length: *length as u64,
-                fin: *fin,
+                fin: fin.then(|| true),
                 raw: None,
             },
 

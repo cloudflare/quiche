@@ -385,7 +385,7 @@ pub enum QuicFrame {
         stream_id: u64,
         offset: u64,
         length: u64,
-        fin: bool,
+        fin: Option<bool>,
 
         raw: Option<Bytes>,
     },
