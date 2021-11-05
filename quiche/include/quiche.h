@@ -41,6 +41,7 @@ extern "C" {
 #include <time.h>
 #else
 #include <sys/socket.h>
+#include <sys/time.h>
 #endif
 
 #ifdef __unix__
