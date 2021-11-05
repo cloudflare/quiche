@@ -309,6 +309,13 @@ pub enum TimerType {
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(untagged)]
+pub enum AckedRanges {
+    Single(Vec<Vec<u64>>),
+    Double(Vec<(u64, u64)>),
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum QuicFrameTypeName {
     Padding,
@@ -351,7 +358,7 @@ pub enum QuicFrame {
 
     Ack {
         ack_delay: Option<f32>,
-        acked_ranges: Option<Vec<(u64, u64)>>,
+        acked_ranges: Option<AckedRanges>,
 
         ect1: Option<u64>,
 
