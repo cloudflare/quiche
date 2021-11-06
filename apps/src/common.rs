@@ -148,7 +148,7 @@ pub fn make_qlog_writer(
     dir: &std::ffi::OsStr, role: &str, id: &str,
 ) -> std::io::BufWriter<std::fs::File> {
     let mut path = std::path::PathBuf::from(dir);
-    let filename = format!("{}-{}.qlog", role, id);
+    let filename = format!("{}-{}.sqlog", role, id);
     path.push(filename);
 
     match std::fs::File::create(&path) {

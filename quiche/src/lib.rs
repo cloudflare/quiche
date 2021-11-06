@@ -1621,7 +1621,8 @@ impl Connection {
 
     /// Sets qlog output to the designated [`Writer`].
     ///
-    /// Only events included in `QlogLevel::Base` are written.
+    /// Only events included in `QlogLevel::Base` are written. The serialization
+    /// format is JSON-SEQ.
     ///
     /// This needs to be called as soon as the connection is created, to avoid
     /// missing some early logs.
@@ -1637,7 +1638,8 @@ impl Connection {
 
     /// Sets qlog output to the designated [`Writer`].
     ///
-    /// Only qlog events included in the specified `QlogLevel` are written
+    /// Only qlog events included in the specified `QlogLevel` are written. The
+    /// serialization format is JSON-SEQ.
     ///
     /// This needs to be called as soon as the connection is created, to avoid
     /// missing some early logs.
@@ -1664,7 +1666,7 @@ impl Connection {
 
         self.qlog.level = level;
 
-        let trace = qlog::Trace::new(
+        let trace = qlog::TraceSeq::new(
             qlog::VantagePoint {
                 name: None,
                 ty: vp,

@@ -224,7 +224,7 @@
 //! Create the trace:
 //!
 //! ```
-//! let mut trace = qlog::Trace::new(
+//! let mut trace = qlog::TraceSeq::new(
 //!     qlog::VantagePoint {
 //!         name: Some("Example client".to_string()),
 //!         ty: qlog::VantagePointType::Client,
@@ -249,7 +249,7 @@
 //! using [`start_log()`]:
 //!
 //! ```
-//! # let mut trace = qlog::Trace::new(
+//! # let mut trace = qlog::TraceSeq::new(
 //! #    qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
@@ -284,7 +284,7 @@
 //! can be written in one step using [`add_event()`]:
 //!
 //! ```
-//! # let mut trace = qlog::Trace::new(
+//! # let mut trace = qlog::TraceSeq::new(
 //! #    qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
@@ -338,7 +338,7 @@
 //! empty frame array and frames are written out later:
 //!
 //! ```
-//! # let mut trace = qlog::Trace::new(
+//! # let mut trace = qlog::TraceSeq::new(
 //! #    qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
@@ -394,7 +394,7 @@
 //! [`finish_frames()`].
 //!
 //! ```
-//! # let mut trace = qlog::Trace::new(
+//! # let mut trace = qlog::TraceSeq::new(
 //! #    qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
@@ -433,7 +433,7 @@
 //! can be finalized with [`finish_log()`]:
 //!
 //! ```
-//! # let mut trace = qlog::Trace::new(
+//! # let mut trace = qlog::TraceSeq::new(
 //! #    qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
@@ -498,6 +498,9 @@ pub enum Error {
     /// in an invalid state.
     InvalidState,
 
+    // Invalid Qlog format
+    InvalidFormat,
+
     /// I/O error.
     IoError(std::io::Error),
 }
@@ -520,7 +523,9 @@ impl std::convert::From<std::io::Error> for Error {
     }
 }
 
-pub const QLOG_VERSION: &str = "draft-02";
+pub const QLOG_VERSION: &str = "0.3";
+
+pub type Bytes = String;
 
 /// A specialized [`Result`] type for quiche qlog operations.
 ///
@@ -541,18 +546,16 @@ pub struct Qlog {
 
     pub traces: Vec<Trace>,
 }
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct QlogSeq {
+    pub qlog_version: String,
+    pub qlog_format: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub summary: Option<String>,
 
-impl Default for Qlog {
-    fn default() -> Self {
-        Qlog {
-            qlog_version: QLOG_VERSION.to_string(),
-            qlog_format: "JSON".to_string(),
-            title: Some("Default qlog title".to_string()),
-            description: Some("Default qlog description".to_string()),
-            summary: Some("Default qlog title".to_string()),
-            traces: Vec::new(),
-        }
-    }
+    pub trace: TraceSeq,
 }
 
 #[derive(Clone, Copy)]
@@ -578,7 +581,7 @@ pub struct Trace {
     pub events: Vec<Event>,
 }
 
-/// Helper functions for using a qlog trace.
+/// Helper functions for using a qlog `Trace`.
 impl Trace {
     /// Creates a new qlog trace
     pub fn new(
@@ -601,7 +604,35 @@ impl Trace {
     }
 }
 
-pub type Bytes = String;
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct TraceSeq {
+    pub vantage_point: VantagePoint,
+    pub title: Option<String>,
+    pub description: Option<String>,
+
+    pub configuration: Option<Configuration>,
+
+    pub common_fields: Option<CommonFields>,
+}
+
+/// Helper functions for using a qlog `TraceSeq`.
+impl TraceSeq {
+    /// Creates a new qlog trace
+    pub fn new(
+        vantage_point: VantagePoint, title: Option<String>,
+        description: Option<String>, configuration: Option<Configuration>,
+        common_fields: Option<CommonFields>,
+    ) -> Self {
+        TraceSeq {
+            vantage_point,
+            title,
+            description,
+            configuration,
+            common_fields,
+        }
+    }
+}
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -725,6 +756,23 @@ pub mod testing {
 
     pub fn make_trace() -> Trace {
         Trace::new(
+            VantagePoint {
+                name: None,
+                ty: VantagePointType::Server,
+                flow: None,
+            },
+            Some("Quiche qlog trace".to_string()),
+            Some("Quiche qlog trace description".to_string()),
+            Some(Configuration {
+                time_offset: Some(0.0),
+                original_uris: None,
+            }),
+            None,
+        )
+    }
+
+    pub fn make_trace_seq() -> TraceSeq {
+        TraceSeq::new(
             VantagePoint {
                 name: None,
                 ty: VantagePointType::Server,
@@ -883,6 +931,28 @@ mod tests {
         assert_eq!(serialized, log_string);
 
         let deserialized: Trace = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, trace);
+    }
+
+    #[test]
+    fn trace_seq_no_events() {
+        let log_string = r#"{
+  "vantage_point": {
+    "type": "server"
+  },
+  "title": "Quiche qlog trace",
+  "description": "Quiche qlog trace description",
+  "configuration": {
+    "time_offset": 0.0
+  }
+}"#;
+
+        let trace = make_trace_seq();
+
+        let serialized = serde_json::to_string_pretty(&trace).unwrap();
+        assert_eq!(serialized, log_string);
+
+        let deserialized: TraceSeq = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, trace);
     }
 
