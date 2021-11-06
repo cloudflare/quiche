@@ -295,6 +295,7 @@ pub enum RecoveryEventTrigger {
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum LossTimerEventType {
     Set,
     Expired,
