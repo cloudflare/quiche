@@ -646,7 +646,7 @@ impl Default for Configuration {
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
 pub struct CommonFields {
     pub group_id: Option<String>,
-    pub protocol_type: Option<String>,
+    pub protocol_type: Option<Vec<String>>,
 
     pub reference_time: Option<f32>,
     pub time_format: Option<String>,
