@@ -1621,7 +1621,8 @@ impl Connection {
 
     /// Sets qlog output to the designated [`Writer`].
     ///
-    /// Only events included in `QlogLevel::Base` are written.
+    /// Only events included in `QlogLevel::Base` are written, the serialization
+    /// format is JSON.
     ///
     /// This needs to be called as soon as the connection is created, to avoid
     /// missing some early logs.
@@ -1632,7 +1633,13 @@ impl Connection {
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String,
     ) {
-        self.set_qlog_with_level(writer, title, description, QlogLevel::Base)
+        self.set_qlog_with_level(
+            writer,
+            title,
+            description,
+            QlogLevel::Base,
+            qlog::SerializationFormat::Json,
+        )
     }
 
     /// Sets qlog output to the designated [`Writer`].
@@ -1647,6 +1654,7 @@ impl Connection {
     pub fn set_qlog_with_level(
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String, qlog_level: QlogLevel,
+        qlog_format: qlog::SerializationFormat,
     ) {
         let vp = if self.is_server {
             qlog::VantagePointType::Server
@@ -1664,31 +1672,63 @@ impl Connection {
 
         self.qlog.level = level;
 
-        let trace = qlog::Trace::new(
-            qlog::VantagePoint {
-                name: None,
-                ty: vp,
-                flow: None,
-            },
-            Some(title.to_string()),
-            Some(description.to_string()),
-            Some(qlog::Configuration {
-                time_offset: Some(0.0),
-                original_uris: None,
-            }),
-            None,
-        );
+        let mut streamer = match qlog_format {
+            qlog::SerializationFormat::Json => {
+                let trace = qlog::Trace::new(
+                    qlog::VantagePoint {
+                        name: None,
+                        ty: vp,
+                        flow: None,
+                    },
+                    Some(title.to_string()),
+                    Some(description.to_string()),
+                    Some(qlog::Configuration {
+                        time_offset: Some(0.0),
+                        original_uris: None,
+                    }),
+                    None,
+                );
 
-        let mut streamer = qlog::streamer::QlogStreamer::new(
-            qlog::QLOG_VERSION.to_string(),
-            Some(title),
-            Some(description),
-            None,
-            time::Instant::now(),
-            trace,
-            self.qlog.level.clone(),
-            writer,
-        );
+                qlog::streamer::QlogStreamer::new(
+                    qlog::QLOG_VERSION.to_string(),
+                    Some(title),
+                    Some(description),
+                    None,
+                    time::Instant::now(),
+                    qlog::streamer::SerializationFormat::Json(trace),
+                    self.qlog.level.clone(),
+                    writer,
+                )
+            },
+
+            qlog::SerializationFormat::JsonSeq => {
+                let trace = qlog::TraceSeq::new(
+                    qlog::VantagePoint {
+                        name: None,
+                        ty: vp,
+                        flow: None,
+                    },
+                    Some(title.to_string()),
+                    Some(description.to_string()),
+                    Some(qlog::Configuration {
+                        time_offset: Some(0.0),
+                        original_uris: None,
+                    }),
+                    None,
+                );
+
+                qlog::streamer::QlogStreamer::new(
+                    qlog::QLOG_VERSION.to_string(),
+                    Some(title),
+                    Some(description),
+                    None,
+                    time::Instant::now(),
+                    qlog::streamer::SerializationFormat::JsonSeq(trace),
+                    self.qlog.level.clone(),
+                    writer,
+                )
+            },
+        };
 
         streamer.start_log().ok();
 

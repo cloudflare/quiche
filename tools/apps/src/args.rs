@@ -48,6 +48,7 @@ pub struct CommonArgs {
     pub dgrams_enabled: bool,
     pub dgram_count: u64,
     pub dgram_data: String,
+    pub qlog_format: String,
 }
 
 /// Creates a new `CommonArgs` structure using the provided [`Docopt`].
@@ -143,6 +144,8 @@ impl Args for CommonArgs {
 
         let disable_hystart = args.get_bool("--disable-hystart");
 
+        let qlog_format = args.get_str("--qlog-format");
+
         CommonArgs {
             alpns,
             max_data,
@@ -160,6 +163,7 @@ impl Args for CommonArgs {
             dgrams_enabled,
             dgram_count,
             dgram_data,
+            qlog_format: qlog_format.to_string(),
         }
     }
 }
@@ -183,6 +187,7 @@ impl Default for CommonArgs {
             dgrams_enabled: false,
             dgram_count: 0,
             dgram_data: "quack".to_string(),
+            qlog_format: "JSON".to_string(),
         }
     }
 }
@@ -216,6 +221,7 @@ Options:
   --no-grease              Don't send GREASE.
   --cc-algorithm NAME      Specify which congestion control algorithm to use [default: cubic].
   --disable-hystart        Disable HyStart++.
+  --qlog-format FORMAT     Format of qlog file if QLOGDIR is supplied [default: JSON].
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
   --session-file PATH      File used to cache a TLS session for resumption.
@@ -360,6 +366,7 @@ Options:
   --dgram-data DATA           Data to send for certain types of DATAGRAM application protocol [default: brrr].
   --cc-algorithm NAME         Specify which congestion control algorithm to use [default: cubic].
   --disable-hystart           Disable HyStart++.
+  --qlog-format FORMAT        Format of qlog file if QLOGDIR is supplied [default: JSON].
   -h --help                   Show this screen.
 ";
 

@@ -143,12 +143,20 @@ fn autoindex(path: path::PathBuf, index: &str) -> path::PathBuf {
     path
 }
 
+#[cfg(feature = "qlog")]
 /// Makes a buffered writer for a qlog.
 pub fn make_qlog_writer(
-    dir: &std::ffi::OsStr, role: &str, id: &str,
+    dir: &std::ffi::OsStr, role: qlog::VantagePointType,
+    serialization_format: qlog::SerializationFormat, id: &str,
 ) -> std::io::BufWriter<std::fs::File> {
     let mut path = std::path::PathBuf::from(dir);
-    let filename = format!("{}-{}.qlog", role, id);
+    let role = format!("{:?}", role).to_ascii_lowercase();
+    let filename = format!(
+        "{}-{}.{}",
+        role,
+        id,
+        serialization_format.to_file_extension()
+    );
     path.push(filename);
 
     match std::fs::File::create(&path) {

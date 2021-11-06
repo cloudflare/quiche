@@ -173,12 +173,24 @@ pub fn connect(
     {
         if let Some(dir) = std::env::var_os("QLOGDIR") {
             let id = format!("{:?}", scid);
-            let writer = make_qlog_writer(&dir, "client", &id);
+            let format = qlog::SerializationFormat::from_format_label(
+                &conn_args.qlog_format,
+            )
+            .unwrap();
 
-            conn.set_qlog(
+            let writer = make_qlog_writer(
+                &dir,
+                qlog::VantagePointType::Client,
+                format,
+                &id,
+            );
+
+            conn.set_qlog_with_level(
                 std::boxed::Box::new(writer),
                 "quiche-client qlog".to_string(),
                 format!("{} id={}", "quiche-client qlog", id),
+                quiche::QlogLevel::Base,
+                format,
             );
         }
     }

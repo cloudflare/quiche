@@ -9,13 +9,10 @@ publish = false
 # Enable quiche's fuzzing mode.
 fuzzing = ["quiche/fuzzing"]
 
-# Enable qlog support.
-qlog = ["quiche/qlog"]
-
 # Build against the boring-sys crate instead of the vendored BoringSSL.
 boring-sys = ["quiche/boring-sys"]
 
-default = ["qlog"]
+default = ["qlog", "quiche/qlog"]
 
 [dependencies]
 docopt = "1"
@@ -25,6 +22,7 @@ url = "1"
 log = "0.4"
 ring = "0.16"
 quiche = { path = "../../" }
+qlog = {path = "../../tools/qlog", optional = true }
 
 [profile.release]
 debug = true
