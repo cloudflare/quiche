@@ -128,7 +128,7 @@ impl State {
         let w_max = self.w_max / max_datagram_size as f64;
         let cwnd = cwnd as f64 / max_datagram_size as f64;
 
-        libm::cbrt((w_max - cwnd) / C)
+        ((w_max - cwnd) / C).cbrt()
     }
 
     // W_cubic(t) = C * (t - K)^3 + w_max (Eq. 1)
