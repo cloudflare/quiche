@@ -80,6 +80,15 @@ jobs:
           command: test
           args: --tests --examples --verbose --features ffi,qlog
 
+      - name: Install libev
+        run: brew install libev
+
+      - name: Install uthash
+        run: curl -o examples/uthash.h https://raw.githubusercontent.com/troydhanson/uthash/master/src/uthash.h
+
+      - name: Build C examples
+        run: make -C examples
+
   quiche_ios:
     runs-on: macos-latest
     strategy:
