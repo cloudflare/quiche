@@ -100,7 +100,7 @@ static void flush_egress(struct ev_loop *loop, struct conn_io *conn_io) {
 
 static int for_each_setting(uint64_t identifier, uint64_t value,
                            void *argp) {
-    fprintf(stderr, "got HTTP/3 SETTING: %lu=%lu\n",
+    fprintf(stderr, "got HTTP/3 SETTING: %" PRIu64 "=%" PRIu64 "\n",
             identifier, value);
 
     return 0;
