@@ -993,6 +993,9 @@ pub struct CongestionControlOps {
     pub rollback: fn(r: &mut Recovery) -> bool,
 
     pub has_custom_pacing: fn() -> bool,
+
+    pub debug_fmt:
+        fn(r: &Recovery, formatter: &mut std::fmt::Formatter) -> std::fmt::Result,
 }
 
 impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
@@ -1049,6 +1052,9 @@ impl std::fmt::Debug for Recovery {
         if self.hystart.enabled() {
             write!(f, "hystart={:?} ", self.hystart)?;
         }
+
+        // CC-specific debug info
+        (self.cc_ops.debug_fmt)(self, f)?;
 
         Ok(())
     }

@@ -47,6 +47,7 @@ pub static RENO: CongestionControlOps = CongestionControlOps {
     checkpoint,
     rollback,
     has_custom_pacing,
+    debug_fmt,
 };
 
 pub fn on_init(_r: &mut Recovery) {}
@@ -147,6 +148,10 @@ fn rollback(_r: &mut Recovery) -> bool {
 
 fn has_custom_pacing() -> bool {
     false
+}
+
+fn debug_fmt(_r: &Recovery, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    Ok(())
 }
 
 #[cfg(test)]
