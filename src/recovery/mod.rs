@@ -994,7 +994,7 @@ pub struct CongestionControlOps {
 
     pub has_custom_pacing: fn() -> bool,
 
-    pub debug_write:
+    pub debug_fmt:
         fn(r: &Recovery, formatter: &mut std::fmt::Formatter) -> std::fmt::Result,
 }
 
@@ -1054,7 +1054,7 @@ impl std::fmt::Debug for Recovery {
         }
 
         // CC-specific debug info
-        (self.cc_ops.debug_write)(self, f)?;
+        (self.cc_ops.debug_fmt)(self, f)?;
 
         Ok(())
     }
