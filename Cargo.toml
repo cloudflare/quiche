@@ -62,7 +62,7 @@ qlog = { version = "0.5", path = "tools/qlog", optional = true }
 winapi = { version = "0.3", features = ["wincrypt"] }
 
 [dev-dependencies]
-mio = "0.6"
+mio = "0.8"
 url = "1"
 
 [profile.bench]
