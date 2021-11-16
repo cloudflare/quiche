@@ -8989,7 +8989,7 @@ mod tests {
     }
 
     #[test]
-    /// Tests that the MAX_STREAMS frame is sent for unirectional streams.
+    /// Tests that the MAX_STREAMS frame is sent for unidirectional streams.
     fn stream_limit_update_uni() {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         config
