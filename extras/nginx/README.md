@@ -29,6 +29,12 @@ As well as quiche, the underlying implementation of HTTP/3 and QUIC:
  % git clone --recursive https://github.com/cloudflare/quiche
 ```
 
+If you're on a brand new system, you may need to install some build dependencies. quiche requires Rust 1.39 or later to build. You can install rust from https://rustup.rs/
+```
+ % yum install patch pcre-devel zlib-devel cmake
+ % yum groupinstall "Development Tools"
+```
+
 Next you’ll need to apply the patch to NGINX:
 ```
  % cd nginx-1.16.1
