@@ -268,7 +268,11 @@ impl Frame {
                 seq_num: b.get_varint()?,
                 retire_prior_to: b.get_varint()?,
                 conn_id: b.get_bytes_with_u8_length()?.to_vec(),
-                reset_token: b.get_bytes(16)?.buf().try_into().unwrap(),
+                reset_token: b
+                    .get_bytes(16)?
+                    .buf()
+                    .try_into()
+                    .map_err(|_| Error::BufferTooShort)?,
             },
 
             0x19 => Frame::RetireConnectionId {
@@ -276,11 +280,19 @@ impl Frame {
             },
 
             0x1a => Frame::PathChallenge {
-                data: b.get_bytes(8)?.buf().try_into().unwrap(),
+                data: b
+                    .get_bytes(8)?
+                    .buf()
+                    .try_into()
+                    .map_err(|_| Error::BufferTooShort)?,
             },
 
             0x1b => Frame::PathResponse {
-                data: b.get_bytes(8)?.buf().try_into().unwrap(),
+                data: b
+                    .get_bytes(8)?
+                    .buf()
+                    .try_into()
+                    .map_err(|_| Error::BufferTooShort)?,
             },
 
             0x1c => Frame::ConnectionClose {
