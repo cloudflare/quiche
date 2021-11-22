@@ -37,6 +37,9 @@ use std::rc::Rc;
 
 use std::cell::RefCell;
 
+use std::time::Duration;
+use std::time::Instant;
+
 use ring::rand::*;
 
 use quiche_apps::args::*;
@@ -149,9 +152,12 @@ fn main() {
         //
         // TODO: use event loop that properly supports timers
         let timeout = match continue_write {
-            true => Some(std::time::Duration::from_secs(0)),
+            true => Some(Duration::from_secs(0)),
 
-            false => clients.values().filter_map(|c| c.conn.timeout()).min(),
+            false => clients
+                .values()
+                .filter_map(|c| c.conn.timeout().min(c.pacing_delay))
+                .min(),
         };
 
         poll.poll(&mut events, timeout).unwrap();
@@ -345,6 +351,7 @@ fn main() {
                     siduck_conn: None,
                     app_proto_selected: false,
                     bytes_sent: 0,
+                    pacing_delay: None,
                 };
 
                 clients.insert(scid.clone(), client);
@@ -460,7 +467,10 @@ fn main() {
         // them on the UDP socket, until quiche reports that there are no more
         // packets to be sent.
         continue_write = false;
+
         for client in clients.values_mut() {
+            let now = Instant::now();
+
             loop {
                 let (write, send_info) = match client.conn.send(&mut out) {
                     Ok(v) => v,
@@ -502,6 +512,16 @@ fn main() {
                     client.bytes_sent = 0;
                     continue_write = true;
                     break;
+                }
+
+                // Update pacing delay after sending the packet.
+                client.pacing_delay = send_info.at.checked_duration_since(now);
+
+                // Ignore the gap smaller than 1ms.
+                if let Some(delay) = client.pacing_delay {
+                    if delay > Duration::from_millis(1) {
+                        break;
+                    }
                 }
             }
         }
