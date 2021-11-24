@@ -24,6 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::convert::TryInto;
+
 use crate::Error;
 use crate::Result;
 
@@ -141,7 +143,7 @@ pub enum Frame {
         seq_num: u64,
         retire_prior_to: u64,
         conn_id: Vec<u8>,
-        reset_token: Vec<u8>,
+        reset_token: [u8; 16],
     },
 
     RetireConnectionId {
@@ -149,11 +151,11 @@ pub enum Frame {
     },
 
     PathChallenge {
-        data: Vec<u8>,
+        data: [u8; 8],
     },
 
     PathResponse {
-        data: Vec<u8>,
+        data: [u8; 8],
     },
 
     ConnectionClose {
@@ -266,7 +268,11 @@ impl Frame {
                 seq_num: b.get_varint()?,
                 retire_prior_to: b.get_varint()?,
                 conn_id: b.get_bytes_with_u8_length()?.to_vec(),
-                reset_token: b.get_bytes(16)?.to_vec(),
+                reset_token: b
+                    .get_bytes(16)?
+                    .buf()
+                    .try_into()
+                    .map_err(|_| Error::BufferTooShort)?,
             },
 
             0x19 => Frame::RetireConnectionId {
@@ -274,11 +280,19 @@ impl Frame {
             },
 
             0x1a => Frame::PathChallenge {
-                data: b.get_bytes(8)?.to_vec(),
+                data: b
+                    .get_bytes(8)?
+                    .buf()
+                    .try_into()
+                    .map_err(|_| Error::BufferTooShort)?,
             },
 
             0x1b => Frame::PathResponse {
-                data: b.get_bytes(8)?.to_vec(),
+                data: b
+                    .get_bytes(8)?
+                    .buf()
+                    .try_into()
+                    .map_err(|_| Error::BufferTooShort)?,
             },
 
             0x1c => Frame::ConnectionClose {
@@ -1827,7 +1841,7 @@ mod tests {
             seq_num: 123_213,
             retire_prior_to: 122_211,
             conn_id: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-            reset_token: vec![0x42; 16],
+            reset_token: [0x42; 16],
         };
 
         let wire_len = {
@@ -1881,7 +1895,7 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::PathChallenge {
-            data: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            data: [1, 2, 3, 4, 5, 6, 7, 8],
         };
 
         let wire_len = {
@@ -1909,7 +1923,7 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::PathResponse {
-            data: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            data: [1, 2, 3, 4, 5, 6, 7, 8],
         };
 
         let wire_len = {

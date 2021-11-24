@@ -1079,7 +1079,7 @@ pub struct Connection {
     peer_error: Option<ConnectionError>,
 
     /// Received path challenge.
-    challenge: Option<Vec<u8>>,
+    challenge: Option<[u8; 8]>,
 
     /// The connection-level limit at which send blocking occurred.
     blocked_limit: Option<u64>,
@@ -2997,10 +2997,8 @@ impl Connection {
         }
 
         // Create PATH_RESPONSE frame.
-        if let Some(ref challenge) = self.challenge {
-            let frame = frame::Frame::PathResponse {
-                data: challenge.clone(),
-            };
+        if let Some(challenge) = self.challenge {
+            let frame = frame::Frame::PathResponse { data: challenge };
 
             if push_frame_to_pkt!(b, frames, frame, left) {
                 self.challenge = None;
@@ -7844,9 +7842,7 @@ mod tests {
         let mut pipe = testing::Pipe::default().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
-        let frames = [frame::Frame::PathChallenge {
-            data: vec![0xba; 8],
-        }];
+        let frames = [frame::Frame::PathChallenge { data: [0xba; 8] }];
 
         let pkt_type = packet::Type::Short;
 
@@ -7865,9 +7861,7 @@ mod tests {
 
         assert_eq!(
             iter.next(),
-            Some(&frame::Frame::PathResponse {
-                data: vec![0xba; 8],
-            })
+            Some(&frame::Frame::PathResponse { data: [0xba; 8] })
         );
     }
 
