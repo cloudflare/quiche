@@ -790,7 +790,11 @@ impl Connection {
         if let Err(e) = conn.stream_send(stream_id, b"", false) {
             self.streams.remove(&stream_id);
 
-            return Err(e.into());
+            if e == super::Error::Done {
+                return Err(Error::StreamBlocked);
+            } else {
+                return Err(e.into());
+            }
         };
 
         self.send_headers(conn, stream_id, headers, fin)?;
@@ -3591,6 +3595,52 @@ mod tests {
         // Once the server gives flow control credits back, we can send the
         // request.
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(4));
+    }
+
+    #[test]
+    /// Ensure StreamBlocked when connection flow control prevents headers.
+    fn headers_blocked_on_conn() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(b"\x02h3").unwrap();
+        // initial connection window is enough to allow H3 handshake but too
+        // small for a subsequent request
+        config.set_initial_max_data(50);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let mut h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        let req = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test"),
+        ];
+
+        assert_eq!(
+            s.client.send_request(&mut s.pipe.client, &req, true),
+            Err(Error::StreamBlocked)
+        );
+
+        s.advance().ok();
+
+        // Once the server gives flow control credits back, we can send the
+        // request.
+        assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
     }
 
     #[test]
