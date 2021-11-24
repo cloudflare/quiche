@@ -278,64 +278,10 @@
 //! streamer.start_log().ok();
 //! ```
 //!
-//! ### Adding simple events
+//! ### Adding events
 //!
-//! Once logging has started you can stream events. Simple events
-//! can be written in one step using [`add_event()`]:
-//!
-//! ```
-//! # let mut trace = qlog::TraceSeq::new(
-//! #    qlog::VantagePoint {
-//! #        name: Some("Example client".to_string()),
-//! #        ty: qlog::VantagePointType::Client,
-//! #        flow: None,
-//! #    },
-//! #    Some("Example qlog trace".to_string()),
-//! #    Some("Example qlog trace description".to_string()),
-//! #    Some(qlog::Configuration {
-//! #        time_offset: Some(0.0),
-//! #        original_uris: None,
-//! #    }),
-//! #    None,
-//! # );
-//! # let mut file = std::fs::File::create("foo.qlog").unwrap();
-//! # let mut streamer = qlog::streamer::QlogStreamer::new(
-//! #     qlog::QLOG_VERSION.to_string(),
-//! #     Some("Example qlog".to_string()),
-//! #     Some("Example qlog description".to_string()),
-//! #     None,
-//! #     std::time::Instant::now(),
-//! #     trace,
-//! #     qlog::events::EventImportance::Base,
-//! #     Box::new(file),
-//! # );
-//! let event_data = qlog::events::EventData::MetricsUpdated(
-//!     qlog::events::quic::MetricsUpdated {
-//!         min_rtt: Some(1.0),
-//!         smoothed_rtt: Some(1.0),
-//!         latest_rtt: Some(1.0),
-//!         rtt_variance: Some(1.0),
-//!         pto_count: Some(1),
-//!         congestion_window: Some(1234),
-//!         bytes_in_flight: Some(5678),
-//!         ssthresh: None,
-//!         packets_in_flight: None,
-//!         pacing_rate: None,
-//!     },
-//! );
-//!
-//! let event = qlog::events::Event::with_time(0.0, event_data);
-//! streamer.add_event(event).ok();
-//! ```
-//!
-//! ### Adding events with frames
-//! Some events contain optional arrays of QUIC frames. If the
-//! event has `Some(Vec<QuicFrame>)`, even if it is empty, the
-//! streamer enters a frame serializing mode that must be
-//! finalized before other events can be logged.
-//!
-//! In this example, a `PacketSent` event is created with an
-//! empty frame array and frames are written out later:
+//! Once logging has started you can stream events. Events
+//! are written in one step using [`add_event()`]:
 //!
 //! ```
 //! # let mut trace = qlog::TraceSeq::new(
@@ -371,10 +317,13 @@
 //!     Some(b"36ce104eee50101c"),
 //! );
 //!
+//! let ping = qlog::events::quic::QuicFrame::Ping;
+//! let padding = qlog::events::quic::QuicFrame::Padding;
+//!
 //! let event_data =
 //!     qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
 //!         header: pkt_hdr,
-//!         frames: Some(vec![]),
+//!         frames: Some(vec![ping, padding]),
 //!         is_coalesced: None,
 //!         retry_token: None,
 //!         stateless_reset_token: None,
@@ -386,47 +335,6 @@
 //! let event = qlog::events::Event::with_time(0.0, event_data);
 //!
 //! streamer.add_event(event).ok();
-//! ```
-//!
-//! In this example, the frames contained in the QUIC packet
-//! are PING and PADDING. Each frame is written using the
-//! [`add_frame()`] method. Frame writing is concluded with
-//! [`finish_frames()`].
-//!
-//! ```
-//! # let mut trace = qlog::TraceSeq::new(
-//! #    qlog::VantagePoint {
-//! #        name: Some("Example client".to_string()),
-//! #        ty: qlog::VantagePointType::Client,
-//! #        flow: None,
-//! #    },
-//! #    Some("Example qlog trace".to_string()),
-//! #    Some("Example qlog trace description".to_string()),
-//! #    Some(qlog::Configuration {
-//! #        time_offset: Some(0.0),
-//! #        original_uris: None,
-//! #    }),
-//! #    None,
-//! # );
-//! # let mut file = std::fs::File::create("foo.qlog").unwrap();
-//! # let mut streamer = qlog::streamer::QlogStreamer::new(
-//! #     qlog::QLOG_VERSION.to_string(),
-//! #     Some("Example qlog".to_string()),
-//! #     Some("Example qlog description".to_string()),
-//! #     None,
-//! #     std::time::Instant::now(),
-//! #     trace,
-//! #     qlog::events::EventImportance::Base,
-//! #     Box::new(file),
-//! # );
-//!
-//! let ping = qlog::events::quic::QuicFrame::Ping;
-//! let padding = qlog::events::quic::QuicFrame::Padding;
-//!
-//! streamer.add_frame(ping, false).ok();
-//! streamer.add_frame(padding, false).ok();
-//!
-//! streamer.finish_frames().ok();
 //! ```
 //!
 //! Once all events have have been written, the log
