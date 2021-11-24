@@ -54,19 +54,12 @@ pub enum StreamerState {
     Finished,
 }
 
-pub enum SerializationFormat {
-    Json(Trace),
-    JsonSeq(TraceSeq),
-}
-
 pub struct QlogStreamer {
     start_time: std::time::Instant,
     writer: Box<dyn std::io::Write + Send + Sync>,
-    qlog: Option<Qlog>,
-    qlog_seq: Option<QlogSeq>,
+    qlog: QlogSeq,
     state: StreamerState,
     log_level: EventImportance,
-    first_event: bool,
     first_frame: bool,
 }
 
@@ -80,56 +73,26 @@ impl QlogStreamer {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         qlog_version: String, title: Option<String>, description: Option<String>,
-        summary: Option<String>, start_time: std::time::Instant,
-        qlog_format: SerializationFormat, log_level: EventImportance,
+        summary: Option<String>, start_time: std::time::Instant, trace: TraceSeq,
+        log_level: EventImportance,
         writer: Box<dyn std::io::Write + Send + Sync>,
     ) -> Self {
-        match qlog_format {
-            SerializationFormat::Json(trace) => {
-                let qlog = Qlog {
-                    qlog_version,
-                    qlog_format: crate::SerializationFormat::Json
-                        .to_format_label(),
-                    title,
-                    description,
-                    summary,
-                    traces: vec![trace],
-                };
+        let qlog = QlogSeq {
+            qlog_version,
+            qlog_format: crate::SerializationFormat::JsonSeq.to_format_label(),
+            title,
+            description,
+            summary,
+            trace,
+        };
 
-                QlogStreamer {
-                    start_time,
-                    writer,
-                    qlog: Some(qlog),
-                    qlog_seq: None,
-                    state: StreamerState::Initial,
-                    log_level,
-                    first_event: true,
-                    first_frame: false,
-                }
-            },
-
-            SerializationFormat::JsonSeq(trace) => {
-                let qlog_seq = QlogSeq {
-                    qlog_version,
-                    qlog_format: crate::SerializationFormat::JsonSeq
-                        .to_format_label(),
-                    title,
-                    description,
-                    summary,
-                    trace,
-                };
-
-                QlogStreamer {
-                    start_time,
-                    writer,
-                    qlog: None,
-                    qlog_seq: Some(qlog_seq),
-                    state: StreamerState::Initial,
-                    log_level,
-                    first_event: true,
-                    first_frame: false,
-                }
-            },
+        QlogStreamer {
+            start_time,
+            writer,
+            qlog,
+            state: StreamerState::Initial,
+            log_level,
+            first_frame: false,
         }
     }
 
@@ -143,42 +106,17 @@ impl QlogStreamer {
             return Err(Error::Done);
         }
 
-        if let Some(ref qlog) = self.qlog {
-            // A `Qlog` contains a `Trace` holding a vector of events that we want
-            // to serialize in a streaming manner. So at the start of
-            // serialization, take off all closing delimiters, and
-            // leave us in a state to accept new events.
-            match serde_json::to_string(qlog) {
-                Ok(mut out) => {
-                    out.truncate(out.len() - 4);
+        // The `QlogSeq` contains a simple `TraceSeq`, so we can write
+        // it out directly as a standalone item.
+        match serde_json::to_string(&self.qlog) {
+            Ok(out) => {
+                let out = format!("{}\n", out);
+                self.writer.as_mut().write_all(out.as_bytes())?;
 
-                    self.writer.as_mut().write_all(out.as_bytes())?;
+                self.state = StreamerState::Ready;
+            },
 
-                    self.state = StreamerState::Ready;
-
-                    if let Some(ref qlog) = self.qlog {
-                        self.first_event = qlog.traces[0].events.is_empty();
-                    }
-                },
-
-                _ => return Err(Error::Done),
-            }
-        }
-
-        if let Some(ref qlog_seq) = self.qlog_seq {
-            // The `QlogSeq` contains a simple `TraceSeq`, so we can write
-            // it out directly as a standalone item.
-
-            match serde_json::to_string(qlog_seq) {
-                Ok(out) => {
-                    let out = format!("{}\n", out);
-                    self.writer.as_mut().write_all(out.as_bytes())?;
-
-                    self.state = StreamerState::Ready;
-                },
-
-                _ => return Err(Error::Done),
-            }
+            _ => return Err(Error::Done),
         }
 
         Ok(())
@@ -193,10 +131,6 @@ impl QlogStreamer {
             self.state == StreamerState::Finished
         {
             return Err(Error::InvalidState);
-        }
-
-        if self.qlog.is_some() {
-            self.writer.as_mut().write_all(b"]}]}")?;
         }
 
         self.state = StreamerState::Finished;
@@ -318,27 +252,12 @@ impl QlogStreamer {
             _ => return Err(Error::Done),
         };
 
-        // Trace events are all added to an array, so we might need to add a
-        // comma.
-        if self.qlog.is_some() {
-            let maybe_comma = if self.first_event {
-                self.first_event = false;
-                ""
-            } else {
-                ","
-            };
-
-            let out = format!("{}{}", maybe_comma, ev);
-            self.writer.as_mut().write_all(out.as_bytes())?;
-        }
-
         // TraceSeq events are written line-by-line
-        if self.qlog_seq.is_some() {
-            let maybe_newline = if contains_frames { "" } else { "\n" };
 
-            let out = format!("{}{}", ev, maybe_newline);
-            self.writer.as_mut().write_all(out.as_bytes())?;
-        }
+        let maybe_newline = if contains_frames { "" } else { "\n" };
+
+        let out = format!("{}{}", ev, maybe_newline);
+        self.writer.as_mut().write_all(out.as_bytes())?;
 
         if contains_frames {
             self.state = StreamerState::WritingFrames
@@ -386,13 +305,7 @@ impl QlogStreamer {
             return Err(Error::InvalidState);
         }
 
-        if self.qlog.is_some() {
-            self.writer.as_mut().write_all(b"]}}")?;
-        }
-
-        if self.qlog_seq.is_some() {
-            self.writer.as_mut().write_all(b"]}}\n")?;
-        }
+        self.writer.as_mut().write_all(b"]}}\n")?;
 
         self.state = StreamerState::Ready;
 
@@ -411,158 +324,10 @@ mod tests {
     use super::*;
     use crate::events::quic;
     use crate::events::RawInfo;
-    use crate::streamer::SerializationFormat;
     use testing::*;
 
     #[test]
-    fn json_format_serialization_states() {
-        let v: Vec<u8> = Vec::new();
-        let buff = std::io::Cursor::new(v);
-        let writer = Box::new(buff);
-
-        let mut trace = make_trace();
-        let pkt_hdr = make_pkt_hdr(quic::PacketType::Handshake);
-        let raw = Some(RawInfo {
-            length: Some(1251),
-            payload_length: Some(1224),
-            data: None,
-        });
-
-        let frame1 = QuicFrame::Stream {
-            stream_id: 40,
-            offset: 40,
-            length: 400,
-            fin: true,
-            raw: None,
-        };
-
-        let event_data1 = EventData::PacketSent(quic::PacketSent {
-            header: pkt_hdr.clone(),
-            frames: Some(vec![frame1]),
-            is_coalesced: None,
-            retry_token: None,
-            stateless_reset_token: None,
-            supported_versions: None,
-            raw: raw.clone(),
-            datagram_id: None,
-        });
-
-        let ev1 = Event::with_time(0.0, event_data1);
-
-        trace.push_event(ev1);
-
-        let frame2 = QuicFrame::Stream {
-            stream_id: 0,
-            offset: 0,
-            length: 100,
-            fin: true,
-            raw: None,
-        };
-
-        let frame3 = QuicFrame::Stream {
-            stream_id: 0,
-            offset: 0,
-            length: 100,
-            fin: true,
-            raw: None,
-        };
-
-        let event_data2 = EventData::PacketSent(quic::PacketSent {
-            header: pkt_hdr.clone(),
-            frames: Some(vec![]),
-            is_coalesced: None,
-            retry_token: None,
-            stateless_reset_token: None,
-            supported_versions: None,
-            raw: raw.clone(),
-            datagram_id: None,
-        });
-
-        let ev2 = Event::with_time(0.0, event_data2);
-
-        let event_data3 = EventData::PacketSent(quic::PacketSent {
-            header: pkt_hdr,
-            frames: Some(vec![]),
-            is_coalesced: None,
-            retry_token: None,
-            stateless_reset_token: Some("reset_token".to_string()),
-            supported_versions: None,
-            raw: raw.clone(),
-            datagram_id: None,
-        });
-
-        let ev3 = Event::with_time(0.0, event_data3);
-
-        let mut s = streamer::QlogStreamer::new(
-            "version".to_string(),
-            Some("title".to_string()),
-            Some("description".to_string()),
-            None,
-            std::time::Instant::now(),
-            SerializationFormat::Json(trace),
-            EventImportance::Base,
-            writer,
-        );
-
-        // Before the log is started all other operations should fail.
-        assert!(matches!(s.add_event(ev2.clone()), Err(Error::InvalidState)));
-        assert!(matches!(
-            s.add_frame(frame2.clone(), false),
-            Err(Error::InvalidState)
-        ));
-        assert!(matches!(s.finish_frames(), Err(Error::InvalidState)));
-        assert!(matches!(s.finish_log(), Err(Error::InvalidState)));
-
-        // Once a log is started, can't write frames before an event.
-        assert!(matches!(s.start_log(), Ok(())));
-        assert!(matches!(
-            s.add_frame(frame2.clone(), false),
-            Err(Error::InvalidState)
-        ));
-        assert!(matches!(s.finish_frames(), Err(Error::InvalidState)));
-
-        // Some events hold frames; can't write any more events until frame
-        // writing is concluded.
-        assert!(matches!(s.add_event(ev2.clone()), Ok(true)));
-        assert!(matches!(s.add_event(ev2.clone()), Err(Error::InvalidState)));
-
-        // While writing frames, can't write events.
-        assert!(matches!(s.add_frame(frame2.clone(), false), Ok(())));
-        assert!(matches!(s.add_event(ev2.clone()), Err(Error::InvalidState)));
-        assert!(matches!(s.finish_frames(), Ok(())));
-
-        // Adding an event that includes both frames and raw data should
-        // be allowed.
-        assert!(matches!(s.add_event(ev3.clone()), Ok(true)));
-        assert!(matches!(s.add_frame(frame3.clone(), false), Ok(())));
-        assert!(matches!(s.finish_frames(), Ok(())));
-
-        // Adding an event with an external time should work too.
-        // For tests, it will resolve to 0 but we care about proving the API
-        // here, not timing specifics.
-        let now = std::time::Instant::now();
-
-        assert!(matches!(
-            s.add_event_with_instant(ev3.clone(), now),
-            Ok(true)
-        ));
-        assert!(matches!(s.add_frame(frame3.clone(), false), Ok(())));
-        assert!(matches!(s.finish_frames(), Ok(())));
-
-        assert!(matches!(s.finish_log(), Ok(())));
-
-        let r = s.writer();
-        let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
-
-        let log_string = r#"{"qlog_version":"version","qlog_format":"JSON","title":"title","description":"description","traces":[{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0},"events":[{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":40,"offset":40,"length":400,"fin":true}]}},{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}},{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}},{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}}]}]}"#;
-
-        let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
-
-        assert_eq!(log_string, written_string);
-    }
-
-    #[test]
-    fn json_seq_format_serialization_states() {
+    fn serialization_states() {
         let v: Vec<u8> = Vec::new();
         let buff = std::io::Cursor::new(v);
         let writer = Box::new(buff);
@@ -644,7 +409,7 @@ mod tests {
             Some("description".to_string()),
             None,
             std::time::Instant::now(),
-            SerializationFormat::JsonSeq(trace),
+            trace,
             EventImportance::Base,
             writer,
         );

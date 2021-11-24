@@ -224,7 +224,7 @@
 //! Create the trace:
 //!
 //! ```
-//! let mut trace = qlog::Trace::new(
+//! let mut trace = qlog::TraceSeq::new(
 //!     qlog::VantagePoint {
 //!         name: Some("Example client".to_string()),
 //!         ty: qlog::VantagePointType::Client,
@@ -249,7 +249,7 @@
 //! using [`start_log()`]:
 //!
 //! ```
-//! # let mut trace = qlog::Trace::new(
+//! # let mut trace = qlog::TraceSeq::new(
 //! #    qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
@@ -270,7 +270,7 @@
 //!     Some("Example qlog description".to_string()),
 //!     None,
 //!     std::time::Instant::now(),
-//!     qlog::streamer::SerializationFormat::Json(trace),
+//!     trace,
 //!     qlog::events::EventImportance::Base,
 //!     Box::new(file),
 //! );
@@ -284,7 +284,7 @@
 //! can be written in one step using [`add_event()`]:
 //!
 //! ```
-//! # let mut trace = qlog::Trace::new(
+//! # let mut trace = qlog::TraceSeq::new(
 //! #    qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
@@ -305,7 +305,7 @@
 //! #     Some("Example qlog description".to_string()),
 //! #     None,
 //! #     std::time::Instant::now(),
-//! #     qlog::streamer::SerializationFormat::Json(trace),
+//! #     trace,
 //! #     qlog::events::EventImportance::Base,
 //! #     Box::new(file),
 //! # );
@@ -338,7 +338,7 @@
 //! empty frame array and frames are written out later:
 //!
 //! ```
-//! # let mut trace = qlog::Trace::new(
+//! # let mut trace = qlog::TraceSeq::new(
 //! #    qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
@@ -359,7 +359,7 @@
 //! #     Some("Example qlog description".to_string()),
 //! #     None,
 //! #     std::time::Instant::now(),
-//! #     qlog::streamer::SerializationFormat::Json(trace),
+//! #     trace,
 //! #     qlog::events::EventImportance::Base,
 //! #     Box::new(file),
 //! # );
@@ -394,7 +394,7 @@
 //! [`finish_frames()`].
 //!
 //! ```
-//! # let mut trace = qlog::Trace::new(
+//! # let mut trace = qlog::TraceSeq::new(
 //! #    qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
@@ -415,7 +415,7 @@
 //! #     Some("Example qlog description".to_string()),
 //! #     None,
 //! #     std::time::Instant::now(),
-//! #     qlog::streamer::SerializationFormat::Json(trace),
+//! #     trace,
 //! #     qlog::events::EventImportance::Base,
 //! #     Box::new(file),
 //! # );
@@ -433,7 +433,7 @@
 //! can be finalized with [`finish_log()`]:
 //!
 //! ```
-//! # let mut trace = qlog::Trace::new(
+//! # let mut trace = qlog::TraceSeq::new(
 //! #    qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
@@ -454,7 +454,7 @@
 //! #     Some("Example qlog description".to_string()),
 //! #     None,
 //! #     std::time::Instant::now(),
-//! #     qlog::streamer::SerializationFormat::Json(trace),
+//! #     trace,
 //! #     qlog::events::EventImportance::Base,
 //! #     Box::new(file),
 //! # );
