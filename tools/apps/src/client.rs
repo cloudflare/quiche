@@ -190,7 +190,6 @@ pub fn connect(
                 "quiche-client qlog".to_string(),
                 format!("{} id={}", "quiche-client qlog", id),
                 quiche::QlogLevel::Base,
-                format,
             );
         }
     }

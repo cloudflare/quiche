@@ -344,7 +344,6 @@ fn main() {
                             "quiche-server qlog".to_string(),
                             format!("{} id={}", "quiche-server qlog", id),
                             quiche::QlogLevel::Base,
-                            format,
                         );
                     }
                 }
