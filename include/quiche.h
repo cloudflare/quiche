@@ -521,7 +521,7 @@ ssize_t quiche_conn_dgram_recv_front_len(quiche_conn *conn);
 // Returns the number of items in the DATAGRAM receive queue.
 ssize_t quiche_conn_dgram_recv_queue_len(quiche_conn *conn);
 
-///Returns the total size of all items in the DATAGRAM receive queue.
+// Returns the total size of all items in the DATAGRAM receive queue.
 ssize_t quiche_conn_dgram_recv_queue_byte_size(quiche_conn *conn);
 
 // Returns the number of items in the DATAGRAM send queue.
@@ -553,72 +553,72 @@ void quiche_conn_free(quiche_conn *conn);
 #define QUICHE_H3_APPLICATION_PROTOCOL "\x02h3\x05h3-29\x05h3-28\x05h3-27"
 
 enum quiche_h3_error {
-    /// There is no error or no work to do
+    // There is no error or no work to do
     QUICHE_H3_ERR_DONE = -1,
 
-    /// The provided buffer is too short.
+    // The provided buffer is too short.
     QUICHE_H3_ERR_BUFFER_TOO_SHORT = -2,
 
-    /// Internal error in the HTTP/3 stack.
+    // Internal error in the HTTP/3 stack.
     QUICHE_H3_ERR_INTERNAL_ERROR = -3,
 
-    /// Endpoint detected that the peer is exhibiting behavior that causes.
-    /// excessive load.
+    // Endpoint detected that the peer is exhibiting behavior that causes.
+    // excessive load.
     QUICHE_H3_ERR_EXCESSIVE_LOAD = -4,
 
-    /// Stream ID or Push ID greater that current maximum was
-    /// used incorrectly, such as exceeding a limit, reducing a limit,
-    /// or being reused.
+    // Stream ID or Push ID greater that current maximum was
+    // used incorrectly, such as exceeding a limit, reducing a limit,
+    // or being reused.
     QUICHE_H3_ERR_ID_ERROR= -5,
 
-    /// The endpoint detected that its peer created a stream that it will not
-    /// accept.
+    // The endpoint detected that its peer created a stream that it will not
+    // accept.
     QUICHE_H3_ERR_STREAM_CREATION_ERROR = -6,
 
-    /// A required critical stream was closed.
+    // A required critical stream was closed.
     QUICHE_H3_ERR_CLOSED_CRITICAL_STREAM = -7,
 
-    /// No SETTINGS frame at beginning of control stream.
+    // No SETTINGS frame at beginning of control stream.
     QUICHE_H3_ERR_MISSING_SETTINGS = -8,
 
-    /// A frame was received which is not permitted in the current state.
+    // A frame was received which is not permitted in the current state.
     QUICHE_H3_ERR_FRAME_UNEXPECTED = -9,
 
-    /// Frame violated layout or size rules.
+    // Frame violated layout or size rules.
     QUICHE_H3_ERR_FRAME_ERROR = -10,
 
-    /// QPACK Header block decompression failure.
+    // QPACK Header block decompression failure.
     QUICHE_H3_ERR_QPACK_DECOMPRESSION_FAILED = -11,
 
-    /// Error originated from the transport layer.
+    // Error originated from the transport layer.
     QUICHE_H3_ERR_TRANSPORT_ERROR = -12,
 
-    /// The underlying QUIC stream (or connection) doesn't have enough capacity
-    /// for the operation to complete. The application should retry later on.
+    // The underlying QUIC stream (or connection) doesn't have enough capacity
+    // for the operation to complete. The application should retry later on.
     QUICHE_H3_ERR_STREAM_BLOCKED = -13,
 
-    /// Error in the payload of a SETTINGS frame.
+    // Error in the payload of a SETTINGS frame.
     QUICHE_H3_ERR_SETTINGS_ERROR = -14,
 
-    /// Server rejected request.
+    // Server rejected request.
     QUICHE_H3_ERR_REQUEST_REJECTED = -15,
 
-    /// Request or its response cancelled.
+    // Request or its response cancelled.
     QUICHE_H3_ERR_REQUEST_CANCELLED = -16,
 
-    /// Client's request stream terminated without containing a full-formed
-    /// request.
+    // Client's request stream terminated without containing a full-formed
+    // request.
     QUICHE_H3_ERR_REQUEST_INCOMPLETE = -17,
 
-    /// An HTTP message was malformed and cannot be processed.
+    // An HTTP message was malformed and cannot be processed.
     QUICHE_H3_ERR_MESSAGE_ERROR = -18,
 
     // The TCP connection established in response to a CONNECT request was
-    /// reset or abnormally closed.
+    // reset or abnormally closed.
     QUICHE_H3_ERR_CONNECT_ERROR = -19,
 
-    /// The requested operation cannot be served over HTTP/3. Peer should retry
-    /// over HTTP/1.1.
+    // The requested operation cannot be served over HTTP/3. Peer should retry
+    // over HTTP/1.1.
     QUICHE_H3_ERR_VERSION_FALLBACK = -20,
 };
 
