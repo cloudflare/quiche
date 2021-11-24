@@ -2142,37 +2142,12 @@ impl Connection {
             pn
         );
 
-        qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
-            let packet_size = b.len();
-
-            let qlog_pkt_hdr = qlog::events::quic::PacketHeader::with_type(
-                hdr.ty.to_qlog(),
-                pn,
-                Some(hdr.version),
-                Some(&hdr.scid),
-                Some(&hdr.dcid),
-            );
-
-            let qlog_raw_info = RawInfo {
-                length: Some(packet_size as u64),
-                payload_length: Some(payload_len as u64),
-                data: None,
-            };
-
-            let ev_data =
-                EventData::PacketReceived(qlog::events::quic::PacketReceived {
-                    header: qlog_pkt_hdr,
-                    frames: Some(vec![]),
-                    is_coalesced: None,
-                    retry_token: None,
-                    stateless_reset_token: None,
-                    supported_versions: None,
-                    raw: Some(qlog_raw_info),
-                    datagram_id: None,
-                });
-
-            q.add_event_data_with_instant(ev_data, now).ok();
-        });
+        #[cfg(feature = "qlog")]
+        let mut qlog_frames = if self.qlog.streamer.is_some() {
+            Some(vec![])
+        } else {
+            None
+        };
 
         let mut payload = packet::decrypt_pkt(
             &mut b,
@@ -2233,27 +2208,50 @@ impl Connection {
         while payload.cap() > 0 {
             let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
 
-            qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
-                q.add_frame(frame.to_qlog(), false).ok();
-            });
+            #[cfg(feature = "qlog")]
+            if let Some(frames) = &mut qlog_frames {
+                frames.push(frame.to_qlog());
+            }
 
             if frame.ack_eliciting() {
                 ack_elicited = true;
             }
 
             if let Err(e) = self.process_frame(frame, epoch, now) {
-                qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
-                    // Always conclude frame writing on error.
-                    q.finish_frames().ok();
-                });
-
                 return Err(e);
             }
         }
 
         qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
-            // Always conclude frame writing.
-            q.finish_frames().ok();
+            let packet_size = b.len();
+
+            let qlog_pkt_hdr = qlog::events::quic::PacketHeader::with_type(
+                hdr.ty.to_qlog(),
+                pn,
+                Some(hdr.version),
+                Some(&hdr.scid),
+                Some(&hdr.dcid),
+            );
+
+            let qlog_raw_info = RawInfo {
+                length: Some(packet_size as u64),
+                payload_length: Some(payload_len as u64),
+                data: None,
+            };
+
+            let ev_data =
+                EventData::PacketReceived(qlog::events::quic::PacketReceived {
+                    header: qlog_pkt_hdr,
+                    frames: Some(qlog_frames.unwrap_or_default()),
+                    is_coalesced: None,
+                    retry_token: None,
+                    stateless_reset_token: None,
+                    supported_versions: None,
+                    raw: Some(qlog_raw_info),
+                    datagram_id: None,
+                });
+
+            q.add_event_data_with_instant(ev_data, now).ok();
         });
 
         qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
@@ -3349,6 +3347,22 @@ impl Connection {
             pn
         );
 
+        #[cfg(feature = "qlog")]
+        let mut qlog_frames = if self.qlog.streamer.is_some() {
+            Some(vec![])
+        } else {
+            None
+        };
+
+        for frame in &mut frames {
+            trace!("{} tx frm {:?}", self.trace_id, frame);
+
+            #[cfg(feature = "qlog")]
+            if let Some(frames) = &mut qlog_frames {
+                frames.push(frame.to_qlog());
+            }
+        }
+
         qlog_with_type!(QLOG_PACKET_TX, self.qlog, q, {
             let qlog_pkt_hdr = qlog::events::quic::PacketHeader::with_type(
                 hdr.ty.to_qlog(),
@@ -3371,7 +3385,7 @@ impl Connection {
 
             let ev_data = EventData::PacketSent(qlog::events::quic::PacketSent {
                 header: qlog_pkt_hdr,
-                frames: Some(vec![]),
+                frames: Some(qlog_frames.unwrap_or_default()),
                 is_coalesced: None,
                 retry_token: None,
                 stateless_reset_token: None,
@@ -3381,18 +3395,6 @@ impl Connection {
             });
 
             q.add_event_data_with_instant(ev_data, now).ok();
-        });
-
-        for frame in &mut frames {
-            trace!("{} tx frm {:?}", self.trace_id, frame);
-
-            qlog_with_type!(QLOG_PACKET_TX, self.qlog, q, {
-                q.add_frame(frame.to_qlog(), false).ok();
-            });
-        }
-
-        qlog_with_type!(QLOG_PACKET_TX, self.qlog, q, {
-            q.finish_frames().ok();
         });
 
         let aead = match self.pkt_num_spaces[epoch].crypto_seal {
