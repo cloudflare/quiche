@@ -790,9 +790,9 @@ impl Connection {
 
             if e == super::Error::Done {
                 return Err(Error::StreamBlocked);
-            } else {
-                return Err(e.into());
             }
+
+            return Err(e.into());
         };
 
         self.send_headers(conn, stream_id, headers, fin)?;

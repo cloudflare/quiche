@@ -3580,7 +3580,8 @@ impl Connection {
     ///
     /// Applications can provide a 0-length buffer with the fin flag set to
     /// true. This will lead to a 0-length FIN STREAM frame being sent at the
-    /// latest offset. This is the only case where `Ok(0)` is returned.
+    /// latest offset. The `Ok(0)` value is only returned when the application
+    /// provided a 0-length buffer.
     ///
     /// In addition, if the peer has signalled that it doesn't want to receive
     /// any more data from this stream by sending the `STOP_SENDING` frame, the
@@ -3639,8 +3640,11 @@ impl Connection {
 
         // Truncate the input buffer based on the connection's send capacity if
         // necessary.
+        //
+        // When the cap is zero, the method returns Ok(0) *only* when the passed
+        // buffer is empty. We return Error::Done otherwise.
         let cap = self.tx_cap;
-        if cap == 0 && !fin {
+        if cap == 0 && !(fin && buf.is_empty()) {
             return Err(Error::Done);
         }
 
@@ -3716,6 +3720,10 @@ impl Connection {
             let now = time::Instant::now();
             q.add_event_data_with_instant(ev_data, now).ok();
         });
+
+        if sent == 0 && !buf.is_empty() {
+            return Err(Error::Done);
+        }
 
         Ok(sent)
     }
@@ -7969,7 +7977,7 @@ mod tests {
         assert_eq!(r.next(), None);
 
         loop {
-            if pipe.server.stream_send(4, b"world", false) == Ok(0) {
+            if pipe.server.stream_send(4, b"world", false) == Err(Error::Done) {
                 break;
             }
 
@@ -9149,6 +9157,25 @@ mod tests {
     }
 
     #[test]
+    /// Tests that the stream gets created with stream_send() even if there's
+    /// no data in the buffer and the fin flag is not set.
+    fn stream_zero_length_non_fin() {
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(0, b"", false), Ok(0));
+
+        // The stream now should have been created.
+        assert_eq!(pipe.client.streams.len(), 1);
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Sending an empty non-fin should not change any stream state on the
+        // other side.
+        let mut r = pipe.server.readable();
+        assert!(r.next().is_none());
+    }
+
+    #[test]
     /// Tests that completed streams are garbage collected.
     fn collect_streams() {
         let mut buf = [0; 65535];
@@ -9540,7 +9567,10 @@ mod tests {
 
         // Send again from blocked stream and make sure it is marked as blocked
         // again.
-        assert_eq!(pipe.client.stream_send(0, b"aaaaaa", false), Ok(0));
+        assert_eq!(
+            pipe.client.stream_send(0, b"aaaaaa", false),
+            Err(Error::Done)
+        );
         assert_eq!(pipe.client.streams.blocked().len(), 1);
 
         let (len, _) = pipe.client.send(&mut buf).unwrap();
