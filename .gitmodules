@@ -1,4 +1,4 @@
 [submodule "boringssl"]
-	path = deps/boringssl
+	path = quiche/deps/boringssl
 	url = https://github.com/google/boringssl.git
 	ignore = dirty

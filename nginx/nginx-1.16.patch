@@ -116,7 +116,7 @@ index 000000000..23219d92a
 +        QUICHE_BUILD_TARGET="debug"
 +    fi
 +
-+    CORE_INCS="$CORE_INCS $QUICHE/include"
++    CORE_INCS="$CORE_INCS $QUICHE/quiche/include"
 +    CORE_DEPS="$CORE_DEPS $QUICHE/target/$QUICHE_BUILD_TARGET/libquiche.a"
 +    CORE_LIBS="$CORE_LIBS $QUICHE/target/$QUICHE_BUILD_TARGET/libquiche.a $NGX_LIBPTHREAD -lm"
 +
@@ -134,7 +134,7 @@ index 000000000..6e5ede5bc
 +
 +# Copyright (C) Cloudflare, Inc.
 +
-+QUICHE_COMMON_FLAGS="--verbose --no-default-features --features ffi"
++QUICHE_COMMON_FLAGS="--package quiche --verbose --no-default-features --features ffi"
 +
 +# Default is release build
 +QUICHE_BUILD_FLAGS="$QUICHE_COMMON_FLAGS --release"

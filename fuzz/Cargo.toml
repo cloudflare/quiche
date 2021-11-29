@@ -12,7 +12,7 @@ cargo-fuzz = true
 opt-level = 3
 
 [dependencies]
-quiche = { path = "..", features = ["fuzzing"] }
+quiche = { path = "../quiche", features = ["fuzzing"] }
 lazy_static = "1"
 libfuzzer-sys = { git = "https://github.com/rust-fuzz/libfuzzer-sys.git" }
 

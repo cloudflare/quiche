@@ -32,20 +32,25 @@ jobs:
           command: fmt
           args: -- --check
 
-      - name: Install dependencies
-        run: sudo apt-get install libev-dev uthash-dev
-
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --tests --examples --verbose --features qlog
+          args: --verbose --all-targets --features=ffi,qlog
+
+      # Need to run doc tests separately.
+      # (https://github.com/rust-lang/cargo/issues/6669)
+      - name: Run cargo doc test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose --doc --features=ffi,qlog
 
       - name: Run cargo package
         uses: actions-rs/cargo@v1
         with:
           command: package
-          args: --verbose --allow-dirty
+          args: --verbose --workspace --exclude=quiche_apps --allow-dirty
 
       - name: Run cargo doc
         uses: actions-rs/cargo@v1
@@ -54,38 +59,9 @@ jobs:
           args: --no-deps
 
       - name: Build C examples
-        run: make -C examples
-
-  apps:
-    runs-on: ubuntu-latest
-    # Only run on "pull_request" event for external PRs. This is to avoid
-    # duplicate builds for PRs created from internal branches.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
-
-      - name: Install nightly toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          components: rustfmt
-          override: true
-
-      - name: Run cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --verbose --manifest-path=tools/apps/Cargo.toml
-
-      - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --manifest-path=tools/apps/Cargo.toml -- --check
+        run: |
+          sudo apt-get install libev-dev uthash-dev
+          make -C quiche/examples
 
   fuzz:
     runs-on: ubuntu-latest
@@ -132,37 +108,6 @@ jobs:
         with:
           command: fmt
           args: --manifest-path=fuzz/Cargo.toml -- --check
-
-  qlog:
-    runs-on: ubuntu-latest
-    # Only run on "pull_request" event for external PRs. This is to avoid
-    # duplicate builds for PRs created from internal branches.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
-
-      - name: Install nightly toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          components: rustfmt
-          override: true
-
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --manifest-path=tools/qlog/Cargo.toml
-
-      - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --manifest-path=tools/qlog/Cargo.toml -- --check
 
   http3_test:
     runs-on: ubuntu-latest

@@ -1,0 +1,69 @@
+[package]
+name = "quiche"
+version = "0.10.0"
+authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
+edition = "2018"
+build = "src/build.rs"
+description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
+repository = "https://github.com/cloudflare/quiche"
+readme = "README.md"
+keywords = ["quic", "http3"]
+categories = ["network-programming"]
+license = "BSD-2-Clause"
+include = [
+    "/*.md",
+    "/*.toml",
+    "/CODEOWNERS",
+    "/COPYING",
+    "/benches",
+    "/deps/boringssl/**/*.[chS]",
+    "/deps/boringssl/**/*.asm",
+    "/deps/boringssl/src/**/*.cc",
+    "/deps/boringssl/**/CMakeLists.txt",
+    "/deps/boringssl/**/sources.cmake",
+    "/deps/boringssl/LICENSE",
+    "/examples",
+    "/include",
+    "/quiche.svg",
+    "/src",
+]
+
+[features]
+default = ["boringssl-vendored"]
+
+# Build vendored BoringSSL library.
+boringssl-vendored = []
+
+# Generate pkg-config metadata file for libquiche.
+pkg-config-meta = []
+
+# Equivalent to "--cfg fuzzing", but can also be checked in build.rs.
+fuzzing = []
+
+# Expose the FFI API.
+ffi = []
+
+[package.metadata.docs.rs]
+no-default-features = true
+
+[build-dependencies]
+cmake = "0.1"
+
+[dependencies]
+log = { version = "0.4", features = ["std"] }
+libc = "0.2"
+libm = "0.2"
+ring = "0.16"
+lazy_static = "1"
+boring-sys = { version = "1.0.2", optional = true }
+qlog = { version = "0.5", path = "../qlog", optional = true }
+
+[target."cfg(windows)".dependencies]
+winapi = { version = "0.3", features = ["wincrypt"] }
+
+[dev-dependencies]
+mio = "0.6"
+url = "1"
+
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
