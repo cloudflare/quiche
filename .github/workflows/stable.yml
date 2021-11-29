@@ -26,20 +26,25 @@ jobs:
           components: clippy
           override: true
 
-      - name: Install dependencies
-        run: sudo apt-get install libev-dev uthash-dev
-
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --tests --examples --verbose --features ffi,qlog
+          args: --verbose --all-targets --features=ffi,qlog
+
+      # Need to run doc tests separately.
+      # (https://github.com/rust-lang/cargo/issues/6669)
+      - name: Run cargo doc test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose --doc --features=ffi,qlog
 
       - name: Run cargo package
         uses: actions-rs/cargo@v1
         with:
           command: package
-          args: --verbose --allow-dirty
+          args: --verbose --workspace --exclude=quiche_apps --allow-dirty
 
       - name: Run cargo clippy
         uses: actions-rs/cargo@v1
@@ -54,7 +59,9 @@ jobs:
           args: --no-deps
 
       - name: Build C examples
-        run: make -C examples
+        run: |
+          sudo apt-get install libev-dev uthash-dev
+          make -C quiche/examples
 
   quiche_macos:
     runs-on: macos-latest
@@ -78,16 +85,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --tests --examples --verbose --features ffi,qlog
-
-      - name: Install libev
-        run: brew install libev
-
-      - name: Install uthash
-        run: curl -o examples/uthash.h https://raw.githubusercontent.com/troydhanson/uthash/master/src/uthash.h
+          args: --verbose --all-targets --features ffi,qlog
 
       - name: Build C examples
-        run: make -C examples
+        run: |
+          brew install libev
+          curl -o quiche/examples/uthash.h https://raw.githubusercontent.com/troydhanson/uthash/master/src/uthash.h
+          make -C quiche/examples
 
   quiche_ios:
     runs-on: macos-latest
@@ -148,7 +152,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --target=${{ matrix.target }} --tests --examples --verbose --features ffi,qlog
+          args: --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
 
   quiche_multiarch:
     runs-on: ubuntu-latest
@@ -176,68 +180,8 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --target=${{ matrix.target }} --tests --examples --verbose --features ffi,qlog
+          args: --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
           use-cross: true
-
-  apps:
-    runs-on: ubuntu-latest
-    # Only run on "pull_request" event for external PRs. This is to avoid
-    # duplicate builds for PRs created from internal branches.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
-
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          override: true
-
-      - name: Run cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --verbose --manifest-path=tools/apps/Cargo.toml
-
-      - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --manifest-path=tools/apps/Cargo.toml -- -D warnings
-
-  qlog:
-    runs-on: ubuntu-latest
-    # Only run on "pull_request" event for external PRs. This is to avoid
-    # duplicate builds for PRs created from internal branches.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
-
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          override: true
-
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --manifest-path=tools/qlog/Cargo.toml
-
-      - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --manifest-path=tools/qlog/Cargo.toml -- -D warnings
 
   http3_test:
     runs-on: ubuntu-latest
@@ -302,8 +246,8 @@ jobs:
       - name: Build NGINX
         run: |
           cd nginx-${{ matrix.version }} &&
-          patch -p01 < ../extras/nginx/nginx-1.16.patch &&
-          ./configure --with-http_ssl_module --with-http_v2_module --with-http_v3_module --with-openssl="../deps/boringssl" --with-quiche=".." --with-debug &&
+          patch -p01 < ../nginx/nginx-1.16.patch &&
+          ./configure --with-http_ssl_module --with-http_v2_module --with-http_v3_module --with-openssl="${{ github.workspace }}/quiche/deps/boringssl" --with-quiche="${{ github.workspace }}" --with-debug &&
           make -j`nproc` &&
           objs/nginx -V
 

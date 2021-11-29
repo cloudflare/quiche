@@ -13,9 +13,9 @@ use std::sync::Mutex;
 lazy_static! {
     static ref CONFIG: Mutex<quiche::Config> = {
         let crt_path = std::env::var("QUICHE_FUZZ_CRT")
-            .unwrap_or_else(|_| "examples/cert.crt".to_string());
+            .unwrap_or_else(|_| "fuzz/cert.crt".to_string());
         let key_path = std::env::var("QUICHE_FUZZ_KEY")
-            .unwrap_or_else(|_| "examples/cert.key".to_string());
+            .unwrap_or_else(|_| "fuzz/cert.key".to_string());
 
         let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config.load_cert_chain_from_pem_file(&crt_path).unwrap();

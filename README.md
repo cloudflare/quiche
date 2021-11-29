@@ -32,12 +32,11 @@ quiche can be [integrated into curl][curl-http3] to provide support for HTTP/3.
 
 ### NGINX (unofficial)
 
-quiche can be [integrated into NGINX][nginx-http3] using an unofficial patch to
+quiche can be [integrated into NGINX](nginx/) using an unofficial patch to
 provide support for HTTP/3.
 
 [cloudflare-http3]: https://blog.cloudflare.com/http3-the-past-present-and-future/
 [curl-http3]: https://github.com/curl/curl/blob/master/docs/HTTP3.md#quiche-version
-[nginx-http3]: https://github.com/cloudflare/quiche/tree/master/extras/nginx
 
 Getting Started
 ---------------
@@ -45,20 +44,18 @@ Getting Started
 ### Command-line apps
 
 Before diving into the quiche API, here are a few examples on how to use the
-quiche tools provided as part of the [quiche-apps](tools/apps/) crate.
+quiche tools provided as part of the [quiche-apps](apps/) crate.
 
 After cloning the project according to the command mentioned in the [building](#building) section, the client can be run as follows:
 
 ```bash
- $ cargo run --manifest-path=tools/apps/Cargo.toml --bin quiche-client -- https://cloudflare-quic.com/
+ $ cargo run --bin quiche-client -- https://cloudflare-quic.com/
 ```
 
 while the server can be run as follows:
 
 ```bash
- $ cargo run --manifest-path=tools/apps/Cargo.toml --bin quiche-server -- \
-      --cert tools/apps/src/bin/cert.crt \
-      --key tools/apps/src/bin/cert.key
+ $ cargo run --bin quiche-server -- --cert tools/apps/src/bin/cert.crt --key tools/apps/src/bin/cert.key
 ```
 
 (note that the certificate provided is self-signed and should not be used in

@@ -32,7 +32,7 @@ As well as quiche, the underlying implementation of HTTP/3 and QUIC:
 Next you’ll need to apply the patch to NGINX:
 ```
  % cd nginx-1.16.1
- % patch -p01 < ../quiche/extras/nginx/nginx-1.16.patch
+ % patch -p01 < ../quiche/nginx/nginx-1.16.patch
 ```
 
 And finally build NGINX with HTTP/3 support enabled:
@@ -43,7 +43,7 @@ And finally build NGINX with HTTP/3 support enabled:
        --with-http_ssl_module                  \
        --with-http_v2_module                   \
        --with-http_v3_module                   \
-       --with-openssl=../quiche/deps/boringssl \
+       --with-openssl=../quiche/quiche/deps/boringssl \
        --with-quiche=../quiche
  % make
 ```
