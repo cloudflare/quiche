@@ -220,11 +220,11 @@ receiving HTTP requests and responses on top of the QUIC transport protocol.
 [`stream_recv()`]: https://docs.quic.tech/quiche/struct.Connection.html#method.stream_recv
 [HTTP/3 module]: https://docs.quic.tech/quiche/h3/index.html
 
-Have a look at the [examples/] directory for more complete examples on how to use
-the quiche API, including examples on how to use quiche in C/C++ applications
-(see below for more information).
+Have a look at the [quiche/examples/] directory for more complete examples on
+how to use the quiche API, including examples on how to use quiche in C/C++
+applications (see below for more information).
 
-[examples/]: examples/
+[examples/]: quiche/examples/
 
 Calling quiche from C/C++
 -------------------------
