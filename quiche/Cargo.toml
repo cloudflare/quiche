@@ -13,9 +13,7 @@ license = "BSD-2-Clause"
 include = [
     "/*.md",
     "/*.toml",
-    "/CODEOWNERS",
     "/COPYING",
-    "/benches",
     "/deps/boringssl/**/*.[chS]",
     "/deps/boringssl/**/*.asm",
     "/deps/boringssl/src/**/*.cc",
