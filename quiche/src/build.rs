@@ -175,7 +175,7 @@ fn write_pkg_config() {
 
     let profile = std::env::var("PROFILE").unwrap();
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let target_dir = format!("{}/target/{}", manifest_dir, profile);
+    let target_dir = format!("{}/../target/{}", manifest_dir, profile);
 
     let out_path = std::path::Path::new(&target_dir).join("quiche.pc");
     let mut out_file = std::fs::File::create(&out_path).unwrap();
