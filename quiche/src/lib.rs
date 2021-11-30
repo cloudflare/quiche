@@ -287,8 +287,6 @@
 //!
 //! [`CongestionControlAlgorithm`]: enum.CongestionControlAlgorithm.html
 
-#![allow(improper_ctypes)]
-#![allow(clippy::suspicious_operation_groupings)]
 #![allow(clippy::upper_case_acronyms)]
 #![warn(missing_docs)]
 

@@ -1,5 +1,3 @@
-#[allow(clippy::unreadable_literal)]
-
 // (num-bits, bits)
 pub const ENCODE_TABLE: [(usize, u64); 257] = [
     (13, 0x1ff8),

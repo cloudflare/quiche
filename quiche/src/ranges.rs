@@ -108,7 +108,6 @@ impl RangeSet {
     }
 
     pub fn push_item(&mut self, item: u64) {
-        #[allow(clippy::range_plus_one)]
         self.insert(item..item + 1);
     }
 

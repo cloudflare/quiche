@@ -50,7 +50,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --examples -- -D warnings
+          args: --examples --features=ffi,qlog -- -D warnings
 
       - name: Run cargo doc
         uses: actions-rs/cargo@v1

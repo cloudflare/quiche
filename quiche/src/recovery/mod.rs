@@ -675,7 +675,6 @@ impl Recovery {
         let mut time = self.loss_time[epoch];
 
         // Iterate over all packet number spaces starting from Handshake.
-        #[allow(clippy::needless_range_loop)]
         for e in packet::EPOCH_HANDSHAKE..packet::EPOCH_COUNT {
             let new_time = self.loss_time[e];
 
