@@ -1170,7 +1170,6 @@ fn parse_ack_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
 
     let mut ranges = ranges::RangeSet::default();
 
-    #[allow(clippy::range_plus_one)]
     ranges.insert(smallest_ack..largest_ack + 1);
 
     for _i in 0..block_count {
@@ -1189,7 +1188,6 @@ fn parse_ack_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
 
         smallest_ack = largest_ack - ack_block;
 
-        #[allow(clippy::range_plus_one)]
         ranges.insert(smallest_ack..largest_ack + 1);
     }
 

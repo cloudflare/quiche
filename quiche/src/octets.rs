@@ -24,8 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#![allow(dead_code)]
-
 /// Zero-copy abstraction for parsing and constructing network packets.
 use std::mem;
 use std::ptr;
@@ -95,7 +93,6 @@ macro_rules! put_u {
 
         let v = $v;
 
-        #[allow(clippy::range_plus_one)]
         let dst = &mut $b.buf[$b.off..($b.off + len)];
 
         unsafe {

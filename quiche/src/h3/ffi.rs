@@ -242,7 +242,7 @@ pub extern fn quiche_h3_send_response_with_priority(
         quic_conn,
         stream_id,
         &resp_headers,
-        &priority,
+        priority,
         fin,
     ) {
         Ok(_) => 0,

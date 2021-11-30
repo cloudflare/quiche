@@ -635,7 +635,6 @@ pub struct Connection {
     qpack_encoder: qpack::Encoder,
     qpack_decoder: qpack::Decoder,
 
-    #[allow(dead_code)]
     local_qpack_streams: QpackStreams,
     peer_qpack_streams: QpackStreams,
 
@@ -652,7 +651,6 @@ pub struct Connection {
 }
 
 impl Connection {
-    #[allow(clippy::unnecessary_wraps)]
     fn new(
         config: &Config, is_server: bool, enable_dgram: bool,
     ) -> Result<Connection> {
