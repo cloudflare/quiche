@@ -4354,7 +4354,7 @@ impl Connection {
             let now = time::Instant::now();
 
             if timeout <= now {
-                return Some(time::Duration::new(0, 0));
+                return Some(time::Duration::ZERO);
             }
 
             return Some(timeout.duration_since(now));

@@ -171,7 +171,7 @@ impl Recovery {
 
             largest_sent_pkt: [0; packet::EPOCH_COUNT],
 
-            latest_rtt: Duration::new(0, 0),
+            latest_rtt: Duration::ZERO,
 
             // This field should be initialized to `INITIAL_RTT` for the initial
             // PTO calculation, but it also needs to be an `Option` to track
@@ -179,13 +179,13 @@ impl Recovery {
             // handled by the `rtt()` method instead.
             smoothed_rtt: None,
 
-            minmax_filter: minmax::Minmax::new(Duration::new(0, 0)),
+            minmax_filter: minmax::Minmax::new(Duration::ZERO),
 
-            min_rtt: Duration::new(0, 0),
+            min_rtt: Duration::ZERO,
 
             rttvar: INITIAL_RTT / 2,
 
-            max_ack_delay: Duration::new(0, 0),
+            max_ack_delay: Duration::ZERO,
 
             loss_time: [None; packet::EPOCH_COUNT],
 
