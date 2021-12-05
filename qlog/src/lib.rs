@@ -629,8 +629,7 @@ pub struct Configuration {
     pub time_offset: Option<f64>,
 
     pub original_uris: Option<Vec<String>>,
-    /* TODO
-     * additionalUserSpecifiedProperty */
+    // TODO: additionalUserSpecifiedProperty
 }
 
 impl Default for Configuration {
@@ -650,8 +649,7 @@ pub struct CommonFields {
 
     pub reference_time: Option<f32>,
     pub time_format: Option<String>,
-    /* TODO
-     * additionalUserSpecifiedProperty */
+    // TODO: additionalUserSpecifiedProperty
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
