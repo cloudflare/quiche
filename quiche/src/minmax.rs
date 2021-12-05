@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn reset_filter_rtt() {
-        let mut f = Minmax::new(Duration::new(0, 0));
+        let mut f = Minmax::new(Duration::ZERO);
         let now = Instant::now();
         let rtt = Duration::from_millis(50);
 
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn get_windowed_min_rtt() {
-        let mut f = Minmax::new(Duration::new(0, 0));
+        let mut f = Minmax::new(Duration::ZERO);
         let rtt_25 = Duration::from_millis(25);
         let rtt_24 = Duration::from_millis(24);
         let win = Duration::from_millis(500);
@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn get_windowed_max_rtt() {
-        let mut f = Minmax::new(Duration::new(0, 0));
+        let mut f = Minmax::new(Duration::ZERO);
         let rtt_25 = Duration::from_millis(25);
         let rtt_24 = Duration::from_millis(24);
         let win = Duration::from_millis(500);
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn get_windowed_min_estimates_rtt() {
-        let mut f = Minmax::new(Duration::new(0, 0));
+        let mut f = Minmax::new(Duration::ZERO);
         let rtt_25 = Duration::from_millis(25);
         let rtt_24 = Duration::from_millis(24);
         let rtt_23 = Duration::from_millis(23);
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn get_windowed_max_estimates_rtt() {
-        let mut f = Minmax::new(Duration::new(0, 0));
+        let mut f = Minmax::new(Duration::ZERO);
         let rtt_25 = Duration::from_millis(25);
         let rtt_24 = Duration::from_millis(24);
         let rtt_23 = Duration::from_millis(23);
