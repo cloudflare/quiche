@@ -3606,9 +3606,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config.set_application_protos(b"\x02h3").unwrap();
-        // initial connection window is enough to allow H3 handshake but too
-        // small for a subsequent request
-        config.set_initial_max_data(50);
+        config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);
         config.set_initial_max_stream_data_uni(150);
@@ -3622,6 +3620,12 @@ mod tests {
 
         s.handshake().unwrap();
 
+        // After the HTTP handshake, some bytes of connection flow control have
+        // been consumed. Fill the connection with more grease data on the control
+        // stream.
+        let d = [42; 28];
+        assert_eq!(s.pipe.client.stream_send(2, &d, false), Ok(23));
+
         let req = vec![
             Header::new(b":method", b"GET"),
             Header::new(b":scheme", b"https"),
@@ -3629,15 +3633,20 @@ mod tests {
             Header::new(b":path", b"/test"),
         ];
 
+        // There is 0 connection-level flow control, so sending a request is
+        // blocked.
         assert_eq!(
             s.client.send_request(&mut s.pipe.client, &req, true),
             Err(Error::StreamBlocked)
         );
 
+        // Emit the control stream data and drain it at the server via poll() to
+        // consumes it via poll() and gives back flow control.
+        s.advance().ok();
+        assert_eq!(s.poll_server(), Err(Error::Done));
         s.advance().ok();
 
-        // Once the server gives flow control credits back, we can send the
-        // request.
+        // Now we can send the request.
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
     }
 
