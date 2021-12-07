@@ -612,6 +612,14 @@ pub extern fn quiche_conn_set_session(
     }
 }
 
+#[no_mangle]
+pub extern fn quiche_conn_set_token(
+    conn: &mut Connection, token: *const u8, token_len: size_t
+) {
+    let token = unsafe { slice::from_raw_parts(token, token_len) };
+    conn.set_token(token);
+}
+
 #[repr(C)]
 pub struct RecvInfo<'a> {
     from: &'a sockaddr,

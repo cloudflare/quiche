@@ -1731,6 +1731,17 @@ impl Connection {
         Ok(())
     }
 
+    /// Configures the given token for address validation.
+    ///
+    /// On the client, this can be used to set the given token to Initial Packet.
+    ///
+    /// This must only be called immediately after creating a connection, that
+    /// is, before any packet is sent or received.
+    #[inline]
+    pub fn set_token(&mut self, token: &[u8]) {
+        self.token = Some(token.to_vec());
+    }
+
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is

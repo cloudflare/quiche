@@ -282,6 +282,9 @@ void quiche_conn_set_qlog_fd(quiche_conn *conn, int fd, const char *log_title,
 // Configures the given session for resumption.
 int quiche_conn_set_session(quiche_conn *conn, const uint8_t *buf, size_t buf_len);
 
+// Configures the given token for Initial Packet
+void quiche_conn_set_token(quiche_conn *conn, const uint8_t *token, size_t token_len);
+
 typedef struct {
     struct sockaddr *from;
     socklen_t from_len;
