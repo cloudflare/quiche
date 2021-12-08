@@ -1733,7 +1733,8 @@ impl Connection {
 
     /// Configures the given token for address validation.
     ///
-    /// On the client, this can be used to set the given token to Initial Packet.
+    /// On the client, this can be used to set the given token to Initial
+    /// Packet.
     ///
     /// This must only be called immediately after creating a connection, that
     /// is, before any packet is sent or received.
