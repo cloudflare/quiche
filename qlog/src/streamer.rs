@@ -107,18 +107,12 @@ impl QlogStreamer {
             return Err(Error::Done);
         }
 
-        // The `QlogSeq` contains a simple `TraceSeq`, so we can write
-        // it out directly as a standalone item.
-        match serde_json::to_string(&self.qlog) {
-            Ok(out) => {
-                let out = format!("{}\n", out);
-                self.writer.as_mut().write_all(out.as_bytes())?;
+        self.writer.as_mut().write_all(b"")?;
+        serde_json::to_writer(self.writer.as_mut(), &self.qlog)
+            .map_err(|_| Error::Done)?;
+        self.writer.as_mut().write_all(b"\n")?;
 
-                self.state = StreamerState::Ready;
-            },
-
-            _ => return Err(Error::Done),
-        }
+        self.state = StreamerState::Ready;
 
         Ok(())
     }
@@ -236,37 +230,42 @@ impl QlogStreamer {
             return Err(Error::Done);
         }
 
-        let (ev, contains_frames) = match serde_json::to_string(&event) {
-            Ok(mut ev_out) =>
-                if let Some(f) = event.data.contains_quic_frames() {
-                    ev_out.truncate(ev_out.len() - 3);
+        self.writer.as_mut().write_all(b"")?;
 
-                    if f == 0 {
-                        self.first_frame = true;
-                    }
+        match event.data.contains_quic_frames() {
+            // If the event contains frames, we need to remove the closing JSON
+            // delimiters before writing out. These will be later restored by
+            // `finish_frames()`.
+            Some(frames_count) => {
+                match serde_json::to_string(&event) {
+                    Ok(mut ev_out) => {
+                        ev_out.truncate(ev_out.len() - 3);
 
-                    (ev_out, true)
-                } else {
-                    (ev_out, false)
-                },
+                        if frames_count == 0 {
+                            self.first_frame = true;
+                        }
 
-            _ => return Err(Error::Done),
-        };
+                        self.writer.as_mut().write_all(ev_out.as_bytes())?;
+                    },
 
-        // TraceSeq events are written line-by-line
+                    _ => return Err(Error::Done),
+                }
 
-        let maybe_newline = if contains_frames { "" } else { "\n" };
+                self.state = StreamerState::WritingFrames;
+            },
 
-        let out = format!("{}{}", ev, maybe_newline);
-        self.writer.as_mut().write_all(out.as_bytes())?;
+            // If the event does not contain frames, it can be written
+            // immediately in full.
+            None => {
+                serde_json::to_writer(self.writer.as_mut(), &event)
+                    .map_err(|_| Error::Done)?;
+                self.writer.as_mut().write_all(b"\n")?;
 
-        if contains_frames {
-            self.state = StreamerState::WritingFrames
-        } else {
-            self.state = StreamerState::Ready
-        };
+                self.state = StreamerState::Ready
+            },
+        }
 
-        Ok(contains_frames)
+        Ok(event.data.contains_quic_frames().is_some())
     }
 
     /// Writes a JSON-serialized `QuicFrame`.
@@ -277,22 +276,17 @@ impl QlogStreamer {
             return Err(Error::InvalidState);
         }
 
-        match serde_json::to_string(&frame) {
-            Ok(mut out) => {
-                if !self.first_frame {
-                    out.insert(0, ',');
-                } else {
-                    self.first_frame = false;
-                }
+        if !self.first_frame {
+            self.writer.as_mut().write_all(b",")?;
+        } else {
+            self.first_frame = false;
+        }
 
-                self.writer.as_mut().write_all(out.as_bytes())?;
+        serde_json::to_writer(self.writer.as_mut(), &frame)
+            .map_err(|_| Error::Done)?;
 
-                if last {
-                    self.finish_frames()?;
-                }
-            },
-
-            _ => return Err(Error::Done),
+        if last {
+            self.finish_frames()?;
         }
 
         Ok(())
