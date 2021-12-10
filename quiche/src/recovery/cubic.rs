@@ -95,9 +95,6 @@ pub struct State {
 
     // CUBIC state checkpoint preceding the last congestion event.
     prior: PriorState,
-
-    // Maximum bytes-in-flight size during the connection.
-    max_bytes_in_flight: usize,
 }
 
 /// Stores the CUBIC state from before the last congestion event.
@@ -191,9 +188,6 @@ fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, now: Instant) {
 
     cubic.last_sent_time = Some(now);
 
-    cubic.max_bytes_in_flight =
-        cmp::max(cubic.max_bytes_in_flight, r.bytes_in_flight + sent_bytes);
-
     reno::on_packet_sent(r, sent_bytes, now);
 }
 
@@ -201,7 +195,6 @@ fn on_packet_acked(
     r: &mut Recovery, packet: &Acked, epoch: packet::Epoch, now: Instant,
 ) {
     let in_congestion_recovery = r.in_congestion_recovery(packet.time_sent);
-    let mut enter_ca = false;
 
     r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
 
@@ -267,8 +260,7 @@ fn on_packet_acked(
             r.max_datagram_size,
         ) {
             // Exit to congestion avoidance if CSS ends.
-            // Update ssthresh later when cwnd is finally decided.
-            enter_ca = true;
+            r.ssthresh = r.congestion_window;
         }
     } else {
         // Congestion avoidance.
@@ -345,17 +337,6 @@ fn on_packet_acked(
             r.congestion_window += r.max_datagram_size;
             r.cubic_state.cwnd_inc -= r.max_datagram_size;
         }
-    }
-
-    // Limit the cwnd growth to 2 x max_bytes_in_flight, to
-    // prevent cwnd from growing without loss feedback from
-    // the network.
-    r.congestion_window =
-        cmp::min(r.congestion_window, 2 * r.cubic_state.max_bytes_in_flight);
-
-    // Enter into congestion avoidance if needed.
-    if enter_ca {
-        r.ssthresh = r.congestion_window;
     }
 }
 
@@ -440,8 +421,8 @@ fn has_custom_pacing() -> bool {
 fn debug_fmt(r: &Recovery, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     write!(
         f,
-        "cubic={{ k={} w_max={} max_bytes_in_flight={} }} ",
-        r.cubic_state.k, r.cubic_state.w_max, r.cubic_state.max_bytes_in_flight,
+        "cubic={{ k={} w_max={} }} ",
+        r.cubic_state.k, r.cubic_state.w_max
     )
 }
 
@@ -765,12 +746,13 @@ mod tests {
 
         // Now we are in CSS.
         assert_eq!(r.hystart.css_start_time().is_some(), true);
-        assert_eq!(r.cwnd(), cwnd_prev);
+        assert_eq!(r.cwnd(), cwnd_prev + r.max_datagram_size);
 
         // 3rd round, which RTT is less than previous round to
         // trigger back to Slow Start.
         let rtt_3rd = Duration::from_millis(80);
         let now = now + rtt_3rd;
+        cwnd_prev = r.cwnd();
 
         // Send 3nd round packets.
         for _ in 0..n_rtt_sample {
@@ -796,7 +778,12 @@ mod tests {
 
         // Now we are back in Slow Start.
         assert_eq!(r.hystart.css_start_time().is_some(), false);
-        assert!(r.cwnd() < r.ssthresh);
+        assert_eq!(
+            r.cwnd(),
+            cwnd_prev +
+                r.max_datagram_size / hystart::CSS_GROWTH_DIVISOR *
+                    hystart::N_RTT_SAMPLE
+        );
     }
 
     #[test]
@@ -892,9 +879,7 @@ mod tests {
 
         // Now we are in CSS.
         assert_eq!(r.hystart.css_start_time().is_some(), true);
-
-        // cwnd doesn't increase during 2nd round.
-        assert_eq!(r.cwnd(), cwnd_prev);
+        assert_eq!(r.cwnd(), cwnd_prev + r.max_datagram_size);
 
         // Run 5 (CSS_ROUNDS) in CSS, to exit to congestion avoidance.
         let rtt_css = Duration::from_millis(100);
