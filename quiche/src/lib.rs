@@ -560,6 +560,9 @@ pub enum Error {
 
     /// Not enough available identifiers.
     OutOfIdentifiers,
+
+    /// Error in key update.
+    KeyUpdate,
 }
 
 impl Error {
@@ -572,6 +575,7 @@ impl Error {
             Error::FlowControl => 0x3,
             Error::StreamLimit => 0x4,
             Error::FinalSize => 0x6,
+            Error::KeyUpdate => 0xe,
             _ => 0xa,
         }
     }
@@ -597,6 +601,7 @@ impl Error {
             Error::StreamReset { .. } => -16,
             Error::IdLimit => -17,
             Error::OutOfIdentifiers => -18,
+            Error::KeyUpdate => -19,
         }
     }
 }
@@ -1357,6 +1362,9 @@ pub struct Connection {
     /// Whether the connection handshake has been confirmed.
     handshake_confirmed: bool,
 
+    /// Key phase bit used for outgoing protected packets.
+    key_phase: bool,
+
     /// Whether an ack-eliciting packet has been sent since last receiving a
     /// packet.
     ack_eliciting_sent: bool,
@@ -1797,6 +1805,8 @@ impl Connection {
             handshake_done_acked: false,
 
             handshake_confirmed: false,
+
+            key_phase: false,
 
             ack_eliciting_sent: false,
 
@@ -2444,7 +2454,7 @@ impl Connection {
         };
 
         // Finally, discard packet if no usable key is available.
-        let aead = match aead {
+        let mut aead = match aead {
             Some(v) => v,
 
             None => {
@@ -2501,6 +2511,44 @@ impl Connection {
         #[cfg(feature = "qlog")]
         let mut qlog_frames = vec![];
 
+        // Check for key update.
+        let mut aead_next = None;
+
+        if self.handshake_confirmed &&
+            hdr.ty != Type::ZeroRTT &&
+            hdr.key_phase != self.key_phase
+        {
+            // Check if this packet arrived before key update.
+            if let Some(key_update) = self.pkt_num_spaces[epoch]
+                .key_update
+                .as_ref()
+                .and_then(|key_update| {
+                    (pn < key_update.pn_on_update).then_some(key_update)
+                })
+            {
+                aead = &key_update.crypto_open;
+            } else {
+                trace!("{} peer-initiated key update", self.trace_id);
+
+                aead_next = Some((
+                    self.pkt_num_spaces[epoch]
+                        .crypto_open
+                        .as_ref()
+                        .unwrap()
+                        .derive_next_packet_key()?,
+                    self.pkt_num_spaces[epoch]
+                        .crypto_seal
+                        .as_ref()
+                        .unwrap()
+                        .derive_next_packet_key()?,
+                ));
+
+                // `aead_next` is always `Some()` at this point, so the `unwrap()`
+                // will never fail.
+                aead = &aead_next.as_ref().unwrap().0;
+            }
+        }
+
         let mut payload = packet::decrypt_pkt(
             &mut b,
             pn,
@@ -2531,6 +2579,69 @@ impl Connection {
             // During handshake, we are on the initial path.
             self.paths.get_active_path_id()?
         };
+
+        // The key update is verified once a packet is successfully decrypted
+        // using the new keys.
+        if let Some((open_next, seal_next)) = aead_next {
+            if !self.pkt_num_spaces[epoch]
+                .key_update
+                .as_ref()
+                .map_or(true, |prev| prev.update_acked)
+            {
+                // Peer has updated keys twice without awaiting confirmation.
+                return Err(Error::KeyUpdate);
+            }
+
+            trace!("{} key update verified", self.trace_id);
+
+            let _ = self.pkt_num_spaces[epoch].crypto_seal.replace(seal_next);
+
+            let open_prev = self.pkt_num_spaces[epoch]
+                .crypto_open
+                .replace(open_next)
+                .unwrap();
+
+            let recv_path = self.paths.get_mut(recv_pid)?;
+
+            self.pkt_num_spaces[epoch].key_update = Some(packet::KeyUpdate {
+                crypto_open: open_prev,
+                pn_on_update: pn,
+                update_acked: false,
+                timer: now + (recv_path.recovery.pto() * 3),
+            });
+
+            self.key_phase = !self.key_phase;
+
+            qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
+                let trigger = Some(
+                    qlog::events::security::KeyUpdateOrRetiredTrigger::RemoteUpdate,
+                );
+
+                let ev_data_client =
+                    EventData::KeyUpdated(qlog::events::security::KeyUpdated {
+                        key_type:
+                            qlog::events::security::KeyType::Client1RttSecret,
+                        old: None,
+                        new: String::new(),
+                        generation: None,
+                        trigger: trigger.clone(),
+                    });
+
+                q.add_event_data_with_instant(ev_data_client, now).ok();
+
+                let ev_data_server =
+                    EventData::KeyUpdated(qlog::events::security::KeyUpdated {
+                        key_type:
+                            qlog::events::security::KeyType::Server1RttSecret,
+                        old: None,
+                        new: String::new(),
+                        generation: None,
+                        trigger,
+                    });
+
+                q.add_event_data_with_instant(ev_data_server, now).ok();
+            });
+        }
 
         if !self.is_server && !self.got_peer_conn_id {
             if self.odcid.is_none() {
@@ -3293,7 +3404,7 @@ impl Connection {
             },
 
             versions: None,
-            key_phase: false,
+            key_phase: self.key_phase,
         };
 
         hdr.to_bytes(&mut b)?;
@@ -3458,6 +3569,10 @@ impl Connection {
                     ack_eliciting = true;
                     in_flight = true;
                 }
+            }
+
+            if let Some(key_update) = pkt_space.key_update.as_mut() {
+                key_update.update_acked = true;
             }
         }
 
@@ -5350,7 +5465,14 @@ impl Connection {
                 .iter()
                 .filter_map(|(_, p)| p.recovery.loss_detection_timer())
                 .min();
-            let timers = [self.idle_timer, path_timer];
+
+            let key_update_timer = self.pkt_num_spaces
+                [packet::Epoch::Application]
+                .key_update
+                .as_ref()
+                .map(|key_update| key_update.timer);
+
+            let timers = [self.idle_timer, path_timer, key_update_timer];
 
             timers.iter().filter_map(|&x| x).min()
         }
@@ -5408,6 +5530,19 @@ impl Connection {
                 self.closed = true;
                 self.timed_out = true;
                 return;
+            }
+        }
+
+        if let Some(timer) = self.pkt_num_spaces[packet::Epoch::Application]
+            .key_update
+            .as_ref()
+            .map(|key_update| key_update.timer)
+        {
+            if timer <= now {
+                // Discard previous key once key update timer expired.
+                let _ = self.pkt_num_spaces[packet::Epoch::Application]
+                    .key_update
+                    .take();
             }
         }
 
@@ -8055,6 +8190,38 @@ pub mod testing {
             let written = encode_pkt(&mut self.client, pkt_type, frames, buf)?;
             recv_send(&mut self.server, buf, written)
         }
+
+        pub fn client_update_key(&mut self) -> Result<()> {
+            let space =
+                &mut self.client.pkt_num_spaces[packet::Epoch::Application];
+
+            let open_next = space
+                .crypto_open
+                .as_ref()
+                .unwrap()
+                .derive_next_packet_key()
+                .unwrap();
+
+            let seal_next = space
+                .crypto_seal
+                .as_ref()
+                .unwrap()
+                .derive_next_packet_key()?;
+
+            let open_prev = space.crypto_open.replace(open_next);
+            space.crypto_seal.replace(seal_next);
+
+            space.key_update = Some(packet::KeyUpdate {
+                crypto_open: open_prev.unwrap(),
+                pn_on_update: space.next_pkt_num,
+                update_acked: true,
+                timer: time::Instant::now(),
+            });
+
+            self.client.key_phase = !self.client.key_phase;
+
+            Ok(())
+        }
     }
 
     pub fn recv_send(
@@ -8167,7 +8334,7 @@ pub mod testing {
             pkt_num_len: pn_len,
             token: conn.token.clone(),
             versions: None,
-            key_phase: false,
+            key_phase: conn.key_phase,
         };
 
         hdr.to_bytes(&mut b)?;
@@ -9030,6 +9197,89 @@ mod tests {
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FinalSize)
         );
+    }
+
+    #[test]
+    fn update_key_request() {
+        let mut b = [0; 15];
+
+        let mut pipe = testing::Pipe::new().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Client sends message with key update request.
+        assert_eq!(pipe.client_update_key(), Ok(()));
+        assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Ensure server updates key and it correctly decrypts the message.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, false)));
+        assert_eq!(&b[..5], b"hello");
+
+        // Ensure ACK for key update.
+        assert!(
+            pipe.server.pkt_num_spaces[packet::Epoch::Application]
+                .key_update
+                .as_ref()
+                .unwrap()
+                .update_acked
+        );
+
+        // Server sends message with the new key.
+        assert_eq!(pipe.server.stream_send(4, b"world", true), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Ensure update key is completed and client can decrypt packet.
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+        assert_eq!(pipe.client.stream_recv(4, &mut b), Ok((5, true)));
+        assert_eq!(&b[..5], b"world");
+    }
+
+    #[test]
+    fn update_key_request_twice_error() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::new().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 4,
+            data: stream::RangeBuf::from(b"hello", 0, false),
+        }];
+
+        // Client sends stream frame with key update request.
+        assert_eq!(pipe.client_update_key(), Ok(()));
+        let written = testing::encode_pkt(
+            &mut pipe.client,
+            packet::Type::Short,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+
+        // Server correctly decode with new key.
+        assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+
+        // Client sends stream frame with another key update request before server
+        // ACK.
+        assert_eq!(pipe.client_update_key(), Ok(()));
+        let written = testing::encode_pkt(
+            &mut pipe.client,
+            packet::Type::Short,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+
+        // Check server correctly closes the connection with a key update error
+        // for the peer.
+        assert_eq!(pipe.server_recv(&mut buf[..written]), Err(Error::KeyUpdate));
     }
 
     #[test]
