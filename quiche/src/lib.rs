@@ -455,6 +455,9 @@ pub enum Error {
 
     /// Error in congestion control.
     CongestionControl,
+
+    /// Error in key update.
+    KeyUpdate,
 }
 
 impl Error {
@@ -467,6 +470,7 @@ impl Error {
             Error::FlowControl => 0x3,
             Error::StreamLimit => 0x4,
             Error::FinalSize => 0x6,
+            Error::KeyUpdate => 0xe,
             _ => 0xa,
         }
     }
@@ -490,6 +494,7 @@ impl Error {
             Error::CongestionControl => -14,
             Error::StreamStopped { .. } => -15,
             Error::StreamReset { .. } => -16,
+            Error::KeyUpdate => -17,
         }
     }
 }
@@ -1156,6 +1161,9 @@ pub struct Connection {
 
     /// Whether to emit DATAGRAM frames in the next packet.
     emit_dgram: bool,
+
+    /// Key phase bit used for outgoing protected packets.
+    key_phase: bool,
 }
 
 /// Creates a new server-side connection.
@@ -1558,6 +1566,8 @@ impl Connection {
             ),
 
             emit_dgram: true,
+
+            key_phase: false,
         });
 
         if let Some(odcid) = odcid {
@@ -2175,6 +2185,39 @@ impl Connection {
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
+        // Check for key update
+        let mut update_keys = false;
+        let aead = if self.handshake_confirmed &&
+            hdr.ty != Type::ZeroRTT &&
+            hdr.key_phase != self.key_phase
+        {
+            // Check if this packet comes prior key-update ACK
+            if let Some(crypto_prev) = self.pkt_num_spaces[epoch]
+                .crypto_prev
+                .as_ref()
+                .and_then(|crypto_prev| {
+                    (pn < crypto_prev.pn_on_update).then(|| crypto_prev)
+                })
+            {
+                trace!(
+                    "{} Different key-phase bit detected prior key-update ack",
+                    self.trace_id
+                );
+
+                &crypto_prev.crypto_open
+            } else {
+                trace!("{} Detected a peer-initiated key update", self.trace_id);
+
+                update_keys = true;
+                self.pkt_num_spaces[epoch]
+                    .crypto_open_next
+                    .as_ref()
+                    .expect("Expected updated keys already computed")
+            }
+        } else {
+            aead
+        };
+
         let mut payload = packet::decrypt_pkt(
             &mut b,
             pn,
@@ -2185,6 +2228,68 @@ impl Connection {
         .map_err(|e| {
             drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
         })?;
+
+        if update_keys {
+            if !self.pkt_num_spaces[epoch]
+                .crypto_prev
+                .as_ref()
+                .map_or(true, |prev| prev.update_acked)
+            {
+                // Peer has updated keys twice without awaiting confirmation
+                return Err(Error::KeyUpdate);
+            }
+
+            trace!("{} Key update verified. Generating new keys", self.trace_id);
+
+            let prev_open = {
+                self.pkt_num_spaces[epoch].crypto_seal.replace(
+                    self.pkt_num_spaces[epoch]
+                        .crypto_seal_next
+                        .take()
+                        .expect("Next open key expected to be ready"),
+                );
+
+                self.pkt_num_spaces[epoch]
+                    .crypto_open
+                    .replace(
+                        self.pkt_num_spaces[epoch]
+                            .crypto_open_next
+                            .take()
+                            .expect("Next seal key expected to be ready"),
+                    )
+                    .unwrap()
+            };
+
+            // TODO: timer for discarding this secret
+            // From: https://datatracker.ietf.org/doc/html/rfc9001#section-6.5
+            // > "An endpoint SHOULD retain old read keys for no more than [...]
+            // > After this period, old read keys and their corresponding secrets
+            // > SHOULD be discarded."
+            self.pkt_num_spaces[epoch].crypto_prev =
+                Some(crate::packet::CryptoPrev {
+                    crypto_open: prev_open,
+                    pn_on_update: pn,
+                    update_acked: false,
+                });
+
+            self.pkt_num_spaces[epoch].crypto_open_next = Some(
+                self.pkt_num_spaces[epoch]
+                    .crypto_open
+                    .as_ref()
+                    .unwrap()
+                    .derive_next_packet_key()?,
+            );
+
+            self.pkt_num_spaces[epoch].crypto_seal_next = Some(
+                self.pkt_num_spaces[epoch]
+                    .crypto_seal
+                    .as_ref()
+                    .unwrap()
+                    .derive_next_packet_key()?,
+            );
+
+            self.key_phase = !self.key_phase;
+        }
 
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
@@ -2709,7 +2814,7 @@ impl Connection {
             },
 
             versions: None,
-            key_phase: false,
+            key_phase: self.key_phase,
         };
 
         hdr.to_bytes(&mut b)?;
@@ -2787,6 +2892,10 @@ impl Connection {
 
             if push_frame_to_pkt!(b, frames, frame, left) {
                 self.pkt_num_spaces[epoch].ack_elicited = false;
+            }
+
+            if let Some(prev) = self.pkt_num_spaces[epoch].crypto_prev.as_mut() {
+                prev.update_acked = true;
             }
         }
 

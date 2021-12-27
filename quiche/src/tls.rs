@@ -737,7 +737,14 @@ extern fn set_read_secret(
             return 1;
         }
 
+        let open_next = match open.derive_next_packet_key() {
+            Ok(n) => n,
+
+            Err(_) => return 0,
+        };
+
         space.crypto_open = Some(open);
+        space.crypto_open_next = Some(open_next);
     }
 
     1
@@ -782,7 +789,14 @@ extern fn set_write_secret(
             Err(_) => return 0,
         };
 
+        let seal_next = match seal.derive_next_packet_key() {
+            Ok(n) => n,
+
+            Err(_) => return 0,
+        };
+
         space.crypto_seal = Some(seal);
+        space.crypto_seal_next = Some(seal_next);
     }
 
     1

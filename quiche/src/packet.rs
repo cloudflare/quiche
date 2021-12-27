@@ -815,6 +815,18 @@ fn compute_retry_integrity_tag(
         .map_err(|_| Error::CryptoFail)
 }
 
+pub struct CryptoPrev {
+    pub crypto_open: crypto::Open,
+
+    /// The packet number triggered the latest key-update.
+    ///
+    /// Incoming packets with lower pn should use this (prev) crypto key.
+    pub pn_on_update: u64,
+
+    /// Whether ACK frame for key-update has been sent.
+    pub update_acked: bool,
+}
+
 pub struct PktNumSpace {
     pub largest_rx_pkt_num: u64,
 
@@ -830,6 +842,13 @@ pub struct PktNumSpace {
 
     pub crypto_open: Option<crypto::Open>,
     pub crypto_seal: Option<crypto::Seal>,
+
+    /// 1-RTT keys used prior to a key update
+    pub crypto_prev: Option<CryptoPrev>,
+
+    /// 1-RTT keys to be used for the next key update
+    pub crypto_open_next: Option<crypto::Open>,
+    pub crypto_seal_next: Option<crypto::Seal>,
 
     pub crypto_0rtt_open: Option<crypto::Open>,
     pub crypto_0rtt_seal: Option<crypto::Seal>,
@@ -854,6 +873,11 @@ impl PktNumSpace {
 
             crypto_open: None,
             crypto_seal: None,
+
+            crypto_prev: None,
+
+            crypto_open_next: None,
+            crypto_seal_next: None,
 
             crypto_0rtt_open: None,
             crypto_0rtt_seal: None,

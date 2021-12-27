@@ -220,7 +220,6 @@ impl Open {
         self.alg
     }
 
-    #[allow(dead_code)] // For now this logic is not used (see: https://github.com/cloudflare/quiche/issues/1115)
     pub fn derive_next_packet_key(&self) -> Result<Open> {
         let next_secret = derive_next_secret(self.alg, &self.secret)?;
 
@@ -348,7 +347,6 @@ impl Seal {
         self.alg
     }
 
-    #[allow(dead_code)] // For now this logic is not used (see: https://github.com/cloudflare/quiche/issues/1115)
     pub fn derive_next_packet_key(&self) -> Result<Seal> {
         let next_secret = derive_next_secret(self.alg, &self.secret)?;
 
