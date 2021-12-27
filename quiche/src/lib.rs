@@ -6275,6 +6275,42 @@ pub mod testing {
             let written = encode_pkt(&mut self.client, pkt_type, frames, buf)?;
             recv_send(&mut self.server, buf, written)
         }
+
+        pub fn client_update_key(&mut self) -> Result<()> {
+            let space =
+                &mut self.client.pkt_num_spaces[packet::EPOCH_APPLICATION];
+
+            let open_next = space.crypto_open_next.take().unwrap();
+            let seal_next = space.crypto_seal_next.take().unwrap();
+
+            let open_prev = space.crypto_open.replace(open_next);
+            space.crypto_seal.replace(seal_next);
+
+            space.crypto_open_next = Some(
+                space
+                    .crypto_open
+                    .as_ref()
+                    .unwrap()
+                    .derive_next_packet_key()?,
+            );
+            space.crypto_seal_next = Some(
+                space
+                    .crypto_seal
+                    .as_ref()
+                    .unwrap()
+                    .derive_next_packet_key()?,
+            );
+
+            space.crypto_prev = Some(packet::CryptoPrev {
+                crypto_open: open_prev.unwrap(),
+                pn_on_update: space.next_pkt_num,
+                update_acked: true,
+            });
+
+            self.client.key_phase = !self.client.key_phase;
+
+            Ok(())
+        }
     }
 
     pub fn recv_send(
@@ -6359,7 +6395,7 @@ pub mod testing {
             pkt_num_len: pn_len,
             token: conn.token.clone(),
             versions: None,
-            key_phase: false,
+            key_phase: conn.key_phase,
         };
 
         hdr.to_bytes(&mut b)?;
@@ -7174,6 +7210,89 @@ mod tests {
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Err(Error::FinalSize)
         );
+    }
+
+    #[test]
+    fn update_key_request() {
+        let mut b = [0; 15];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Client sends message with key update request
+        assert_eq!(pipe.client_update_key(), Ok(()));
+        assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Ensure server updates key and it correctly decrypts the message
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, false)));
+        assert_eq!(&b[..5], b"hello");
+
+        // Ensure ACK for key update
+        assert!(
+            pipe.server.pkt_num_spaces[packet::EPOCH_APPLICATION]
+                .crypto_prev
+                .as_ref()
+                .unwrap()
+                .update_acked
+        );
+
+        // Server sends message with the new key
+        assert_eq!(pipe.server.stream_send(4, b"world", true), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Ensure update key is completed and client can decrypts packet
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+        assert_eq!(pipe.client.stream_recv(4, &mut b), Ok((5, true)));
+        assert_eq!(&b[..5], b"world");
+    }
+
+    #[test]
+    fn update_key_request_twice_error() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 4,
+            data: stream::RangeBuf::from(b"hello", 0, false),
+        }];
+
+        // Client sends stream frame with key update request
+        assert_eq!(pipe.client_update_key(), Ok(()));
+        let written = testing::encode_pkt(
+            &mut pipe.client,
+            packet::Type::Short,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+
+        // Server correctly decode with new key
+        assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+
+        // Client sends stream frame with another key update request before server
+        // ACK
+        assert_eq!(pipe.client_update_key(), Ok(()));
+        let written = testing::encode_pkt(
+            &mut pipe.client,
+            packet::Type::Short,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+
+        // Check server correctly closes the connection with a key update error
+        // for the peer
+        assert_eq!(pipe.server_recv(&mut buf[..written]), Err(Error::KeyUpdate));
     }
 
     #[test]
