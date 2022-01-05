@@ -2408,14 +2408,18 @@ impl Connection {
     ///  * When the connection timer expires (that is, any time [`on_timeout()`]
     ///    is also called).
     ///
-    ///  * When the application sends data to the peer (for examples, any time
+    ///  * When the application sends data to the peer (for example, any time
     ///    [`stream_send()`] or [`stream_shutdown()`] are called).
+    ///
+    ///  * When the application receives data from the peer (for example any
+    ///    time [`stream_recv()`] is called).
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`recv()`]: struct.Connection.html#method.recv
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
     /// [`stream_send()`]: struct.Connection.html#method.stream_send
     /// [`stream_shutdown()`]: struct.Connection.html#method.stream_shutdown
+    /// [`stream_recv()`]: struct.Connection.html#method.stream_recv
     ///
     /// ## Examples:
     ///
@@ -3476,7 +3480,11 @@ impl Connection {
     /// On success the amount of bytes read and a flag indicating the fin state
     /// is returned as a tuple, or [`Done`] if there is no data to read.
     ///
+    /// Reading data from a stream may trigger queueing of control messages
+    /// (e.g. MAX_STREAM_DATA). [`send()`] should be called after reading.
+    ///
     /// [`Done`]: enum.Error.html#variant.Done
+    /// [`send()`]: struct.Connection.html#method.send
     ///
     /// ## Examples:
     ///
