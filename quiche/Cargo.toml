@@ -45,7 +45,7 @@ ffi = []
 no-default-features = true
 
 [build-dependencies]
-cmake = "0.1"
+cmake = "=0.1.46"
 
 [dependencies]
 log = { version = "0.4", features = ["std"] }
