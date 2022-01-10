@@ -10,6 +10,7 @@ readme = "README.md"
 keywords = ["quic", "http3"]
 categories = ["network-programming"]
 license = "BSD-2-Clause"
+links = "quiche"
 include = [
     "/*.md",
     "/*.toml",

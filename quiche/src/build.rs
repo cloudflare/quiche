@@ -203,6 +203,16 @@ Cflags: -I${{includedir}}
 }
 
 fn main() {
+    let manifest_dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    let include_dir = out_dir.join("include");
+    std::fs::create_dir_all(&include_dir).unwrap();
+    std::fs::copy(
+        manifest_dir.join("include/quiche.h"),
+        include_dir.join("quiche.h")
+    ).unwrap();
+    println!("cargo:include={}", include_dir.display());
+
     if cfg!(feature = "boringssl-vendored") && !cfg!(feature = "boring-sys") {
         let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
             let mut cfg = get_boringssl_cmake_config();
