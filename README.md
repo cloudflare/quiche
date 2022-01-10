@@ -241,7 +241,7 @@ be linked directly into C/C++ applications.
 Note that in order to enable the FFI API, the ``ffi`` feature must be enabled (it
 is disabled by default), by passing ``--features ffi`` to ``cargo``.
 
-[thin C API]: https://github.com/cloudflare/quiche/blob/master/include/quiche.h
+[thin C API]: https://github.com/cloudflare/quiche/blob/master/quiche/include/quiche.h
 
 Building
 --------
