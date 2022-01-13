@@ -142,6 +142,10 @@ int quiche_config_load_priv_key_from_pem_file(quiche_config *config,
 int quiche_config_load_verify_locations_from_file(quiche_config *config,
                                                   const char *path);
 
+// Specifies a directory where trusted CA certificates are stored for the purposes of certificate verification.
+int quiche_config_load_verify_locations_from_directory(quiche_config *config,
+                                                       const char *path);
+
 // Configures whether to verify the peer's certificate.
 void quiche_config_verify_peer(quiche_config *config, bool v);
 
