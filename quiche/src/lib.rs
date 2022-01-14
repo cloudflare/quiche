@@ -610,11 +610,26 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn new(version: u32) -> Result<Config> {
+        Self::with_tls_ctx(version, tls::Context::new()?)
+    }
+
+    /// Creates a config object with the given version and [`SslContext`].
+    ///
+    /// This is useful for applications that wish to manually configure
+    /// [`SslContext`].
+    ///
+    /// [`SslContext]: https://docs.rs/boring/latest/boring/ssl/struct.SslContext.html
+    #[cfg(feature = "boring-sys")]
+    pub fn with_boring_ssl_ctx(
+        version: u32, tls_ctx: boring::ssl::SslContext,
+    ) -> Result<Config> {
+        Self::with_tls_ctx(version, tls::Context::from_boring(tls_ctx))
+    }
+
+    fn with_tls_ctx(version: u32, tls_ctx: tls::Context) -> Result<Config> {
         if !is_reserved_version(version) && !version_is_supported(version) {
             return Err(Error::UnknownVersion);
         }
-
-        let tls_ctx = tls::Context::new()?;
 
         Ok(Config {
             local_transport_params: TransportParams::default(),
@@ -11163,6 +11178,71 @@ mod tests {
 
         assert_eq!(pipe.advance(), Ok(()));
     }
+
+    #[cfg(feature = "boring-sys")]
+    #[test]
+    fn user_provided_boring_ctx() -> Result<()> {
+        // Manually construct boring ssl ctx for server
+        let server_tls_ctx = {
+            let mut builder = boring::ssl::SslContextBuilder::new(
+                boring::ssl::SslMethod::tls(),
+            )
+            .unwrap();
+            builder
+                .set_certificate_chain_file("examples/cert.crt")
+                .unwrap();
+            builder
+                .set_private_key_file(
+                    "examples/cert.key",
+                    boring::ssl::SslFiletype::PEM,
+                )
+                .unwrap();
+            builder.build()
+        };
+
+        let mut server_config =
+            Config::with_boring_ssl_ctx(crate::PROTOCOL_VERSION, server_tls_ctx)?;
+        let mut client_config = Config::new(crate::PROTOCOL_VERSION)?;
+        client_config.load_cert_chain_from_pem_file("examples/cert.crt")?;
+        client_config.load_priv_key_from_pem_file("examples/cert.key")?;
+
+        for config in [&mut client_config, &mut server_config] {
+            config.set_application_protos(b"\x06proto1\x06proto2")?;
+            config.set_initial_max_data(30);
+            config.set_initial_max_stream_data_bidi_local(15);
+            config.set_initial_max_stream_data_bidi_remote(15);
+            config.set_initial_max_stream_data_uni(10);
+            config.set_initial_max_streams_bidi(3);
+            config.set_initial_max_streams_uni(3);
+            config.set_max_idle_timeout(180_000);
+            config.verify_peer(false);
+            config.set_ack_delay_exponent(8);
+        }
+
+        let mut client_scid = [0; 16];
+        rand::rand_bytes(&mut client_scid[..]);
+        let client_scid = ConnectionId::from_ref(&client_scid);
+        let client_addr = "127.0.0.1:1234".parse().unwrap();
+
+        let mut server_scid = [0; 16];
+        rand::rand_bytes(&mut server_scid[..]);
+        let server_scid = ConnectionId::from_ref(&server_scid);
+        let server_addr = "127.0.0.1:4321".parse().unwrap();
+
+        let mut pipe = testing::Pipe {
+            client: connect(
+                Some("quic.tech"),
+                &client_scid,
+                client_addr,
+                &mut client_config,
+            )?,
+            server: accept(&server_scid, None, server_addr, &mut server_config)?,
+        };
+
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        Ok(())
+    }
 }
 
 pub use crate::packet::ConnectionId;
@@ -11188,3 +11268,6 @@ mod ranges;
 mod recovery;
 mod stream;
 mod tls;
+
+#[cfg(feature = "boring-sys")]
+pub use tls::QUICHE_EX_DATA_INDEX;
