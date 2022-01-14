@@ -610,11 +610,22 @@ impl Config {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn new(version: u32) -> Result<Config> {
+        Self::_new_for_tls_ctx(version, tls::Context::new()?)
+    }
+
+    /// Creates a config object with the given version and SslContext. This is
+    /// useful for applications which wish to manually configure SslContext
+    #[cfg(feature = "boring")]
+    pub fn new_for_tls_ctx(
+        version: u32, tls_ctx: boring::ssl::SslContext,
+    ) -> Result<Config> {
+        Self::_new_for_tls_ctx(version, tls::Context::from_boring(tls_ctx))
+    }
+
+    fn _new_for_tls_ctx(version: u32, tls_ctx: tls::Context) -> Result<Config> {
         if !is_reserved_version(version) && !version_is_supported(version) {
             return Err(Error::UnknownVersion);
         }
-
-        let tls_ctx = tls::Context::new()?;
 
         Ok(Config {
             local_transport_params: TransportParams::default(),
@@ -11174,3 +11185,6 @@ mod ranges;
 mod recovery;
 mod stream;
 mod tls;
+
+#[cfg(feature = "boring-sys")]
+pub use tls::QUICHE_EX_DATA_INDEX;

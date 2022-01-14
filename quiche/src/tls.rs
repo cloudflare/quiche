@@ -124,7 +124,8 @@ struct SSL_QUIC_METHOD {
 }
 
 lazy_static::lazy_static! {
-    static ref QUICHE_EX_DATA_INDEX: c_int = unsafe {
+    /// BoringSSL Extra Data Index for Quiche Connections
+    pub static ref QUICHE_EX_DATA_INDEX: c_int = unsafe {
         SSL_get_ex_new_index(0, ptr::null(), ptr::null(), ptr::null(), ptr::null())
     };
 }
@@ -152,6 +153,19 @@ impl Context {
 
             Ok(ctx)
         }
+    }
+
+    #[cfg(feature = "boring")]
+    pub fn from_boring(mut ssl_ctx: boring::ssl::SslContext) -> Context {
+        use foreign_types_shared::ForeignTypeRef;
+        let mut ctx = Context(ssl_ctx.as_mut().as_ptr() as _);
+
+        // Prevent the SslContext from manually dropping (which would invalidate
+        // the pointer by calling SSL_CTX_free)
+        std::mem::forget(ssl_ctx);
+
+        ctx.set_session_callback();
+        ctx
     }
 
     pub fn new_handshake(&mut self) -> Result<Handshake> {
