@@ -1051,7 +1051,7 @@ pub struct Connection {
     /// Total number of bytes sent over the connection.
     sent_bytes: u64,
 
-    /// Total number of bytes recevied over the connection.
+    /// Total number of bytes received over the connection.
     recv_bytes: u64,
 
     /// Streams map, indexed by stream ID.
@@ -1362,7 +1362,7 @@ macro_rules! qlog_with {
 
 /// Executes the provided body if the qlog feature is enabled, quiche has been
 /// configured with a log writer, the event's importance is within the
-/// confgured level.
+/// configured level.
 macro_rules! qlog_with_type {
     ($ty:expr, $qlog:expr, $qlog_streamer_ref:ident, $body:block) => {{
         #[cfg(feature = "qlog")]
@@ -3278,7 +3278,7 @@ impl Connection {
         // Alternate trying to send DATAGRAMs next time.
         self.emit_dgram = !dgram_emitted;
 
-        // Create PING for PTO probe if no other ack-elicitng frame is sent.
+        // Create PING for PTO probe if no other ack-eliciting frame is sent.
         if self.recovery.loss_probes[epoch] > 0 &&
             !ack_eliciting &&
             left >= 1 &&
@@ -4608,7 +4608,7 @@ impl Connection {
     /// Note that a `Some` return value does not necessarily imply
     /// [`is_closed()`] or any other connection state.
     /// `Some` also does not guarantee that the error has been sent to
-    /// or recieved by the peer.
+    /// or received by the peer.
     ///
     /// [`close()`]: struct.Connection.html#method.close
     /// [`is_closed()`]: struct.Connection.html#method.is_closed
@@ -5409,7 +5409,7 @@ impl Connection {
 fn drop_pkt_on_err(
     e: Error, recv_count: usize, is_server: bool, trace_id: &str,
 ) -> Error {
-    // On the server, if no other packet has been successflully processed, abort
+    // On the server, if no other packet has been successfully processed, abort
     // the connection to avoid keeping the connection open when only junk is
     // received.
     if is_server && recv_count == 0 {
@@ -5457,7 +5457,7 @@ pub struct Stats {
     /// The number of bytes lost.
     pub lost_bytes: u64,
 
-    /// The number of stream bytes retranmitted.
+    /// The number of stream bytes retransmitted.
     pub stream_retrans_bytes: u64,
 
     /// The current PMTU for the connection.
@@ -7126,7 +7126,7 @@ mod tests {
         // Force server to send a single PING frame.
         pipe.server.recovery.loss_probes[packet::EPOCH_INITIAL] = 1;
 
-        // Artifically limit the amount of bytes the server can send.
+        // Artificially limit the amount of bytes the server can send.
         pipe.server.max_send_bytes = 60;
 
         assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
@@ -8681,7 +8681,7 @@ mod tests {
         assert_eq!(w.next(), Some(4));
         assert_eq!(w.next(), None);
 
-        // Server suts down stream.
+        // Server shuts down stream.
         assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 0), Ok(()));
 
         let mut w = pipe.server.writable();
