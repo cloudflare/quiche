@@ -1374,7 +1374,7 @@ impl SendBuf {
 
     /// Returns true if all data in the stream has been sent.
     ///
-    /// This happens when the stream's send final size is knwon, and the
+    /// This happens when the stream's send final size is known, and the
     /// application has already written data up to that point.
     pub fn is_fin(&self) -> bool {
         if self.fin_off == Some(self.off) {
@@ -1448,7 +1448,7 @@ impl SendBuf {
 pub struct RangeBuf {
     /// The internal buffer holding the data.
     ///
-    /// To avoid neeless allocations when a RangeBuf is split, this field is
+    /// To avoid needless allocations when a RangeBuf is split, this field is
     /// reference-counted and can be shared between multiple RangeBuf objects,
     /// and sliced using the `start` and `len` values.
     data: Arc<Vec<u8>>,
