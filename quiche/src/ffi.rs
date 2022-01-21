@@ -1177,6 +1177,11 @@ pub extern fn quiche_conn_peer_streams_left_uni(conn: &mut Connection) -> u64 {
     conn.peer_streams_left_uni()
 }
 
+#[no_mangle]
+pub extern fn quiche_conn_send_quantum(conn: &mut Connection) -> size_t {
+    conn.send_quantum() as size_t
+}
+
 fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
     unsafe {
         match addr.sa_family as i32 {
