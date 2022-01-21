@@ -43,12 +43,12 @@ use quiche_apps::args::*;
 
 use quiche_apps::common::*;
 
+const MAX_BUF_SIZE: usize = 65535;
+
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
-const MAX_SEND_BURST_LIMIT: usize = MAX_DATAGRAM_SIZE * 10;
-
 fn main() {
-    let mut buf = [0; 65535];
+    let mut buf = [0; MAX_BUF_SIZE];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
     env_logger::builder()
@@ -461,6 +461,11 @@ fn main() {
         // packets to be sent.
         continue_write = false;
         for client in clients.values_mut() {
+            let max_send_burst = client
+                .conn
+                .send_quantum()
+                .min(MAX_BUF_SIZE / MAX_DATAGRAM_SIZE * MAX_DATAGRAM_SIZE);
+
             loop {
                 let (write, send_info) = match client.conn.send(&mut out) {
                     Ok(v) => v,
@@ -493,7 +498,7 @@ fn main() {
                 // limit write bursting
                 client.bytes_sent += write;
 
-                if client.bytes_sent >= MAX_SEND_BURST_LIMIT {
+                if client.bytes_sent >= max_send_burst {
                     trace!(
                         "{} pause writing at {}",
                         client.conn.trace_id(),
