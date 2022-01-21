@@ -156,6 +156,10 @@ pub struct Recovery {
 
     #[cfg(feature = "qlog")]
     qlog_metrics: QlogMetrics,
+
+    // The maximum size of a data aggregate scheduled and
+    // transmitted together.
+    send_quantum: usize,
 }
 
 impl Recovery {
@@ -240,6 +244,9 @@ impl Recovery {
             last_packet_scheduled_time: None,
 
             prr: prr::PRR::default(),
+
+            send_quantum: config.max_send_udp_payload_size *
+                INITIAL_WINDOW_PACKETS,
 
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
@@ -938,6 +945,10 @@ impl Recovery {
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
+    }
+
+    pub fn send_quantum(&self) -> usize {
+        self.send_quantum
     }
 }
 

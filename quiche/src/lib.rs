@@ -3474,6 +3474,19 @@ impl Connection {
         Ok((pkt_type, written))
     }
 
+    /// Returns the size of the send quantum, in bytes.
+    ///
+    /// This represents the maximum size of a packet burst as determined by the
+    /// congestion control algorithm in use.
+    ///
+    /// Applications can, for example, use it in conjuction with segmentatation
+    /// offloading mechanisms as the maximum limit for outgoing aggregates of
+    /// multiple packets.
+    #[inline]
+    pub fn send_quantum(&mut self) -> usize {
+        self.recovery.send_quantum()
+    }
+
     /// Reads contiguous data from a stream into the provided slice.
     ///
     /// The slice must be sized by the caller and will be populated up to its
