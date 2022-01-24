@@ -24,22 +24,16 @@ In practice, a single QUIC connection maps to a single Trace file with one
 or more Events. Applications can decide whether to combine Traces from
 different connections into the same Log.
 
-## Traces
+## Buffered Traces with standard JSON
 
-A [`Trace`] contains metadata such as the [`VantagePoint`] of capture and
-the [`Configuration`], and protocol event data in the [`Event`] array.
+A [`Trace`] is a single JSON object. It contains metadata such as the
+[`VantagePoint`] of capture and the [`Configuration`], and protocol event
+data in the [`Event`] array.
 
-## Writing out logs
-As events occur during the connection, the application appends them to the
-trace. The qlog crate supports two modes of writing logs: the buffered mode
-stores everything in memory and requires the application to serialize and write
-the output, the streaming mode progressively writes serialized JSON output to a
-writer designated by the application.
+JSON Traces allow applications to appends events to them before eventually
+being serialized as a complete JSON object.
 
-Buffered Mode
----------------
-
-Create the trace:
+### Creating a Trace
 
 ```rust
 let mut trace = qlog::Trace::new(
@@ -58,7 +52,7 @@ let mut trace = qlog::Trace::new(
 );
 ```
 
-### Adding events
+### Adding events to a Trace
 
 Qlog `Event` objects are added to `qlog::Trace.events`.
 
@@ -70,40 +64,41 @@ containing a single Crypto frame. It constructs the necessary elements of the
 let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
 let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
 
-let pkt_hdr = qlog::PacketHeader::new(
-    qlog::PacketType::Initial,
+let pkt_hdr = qlog::events::quic::PacketHeader::new(
+    qlog::events::quic::PacketType::Initial,
     0,                         // packet_number
     None,                      // flags
     None,                      // token
     None,                      // length
-    Some(0xff00001b),
-    Some(b"7e37e4dcc6682da8"),
+    Some(0x00000001),          // version
+    Some(&scid),
     Some(&dcid),
 );
 
-let frames = let frames = vec![qlog::QuicFrame::Crypto {
+let frames = vec![qlog::events::quic::QuicFrame::Crypto {
     offset: 0,
     length: 0,
 }];
 
-let raw = qlog::RawInfo {
+let raw = qlog::events::RawInfo {
     length: Some(1251),
     payload_length: Some(1224),
     data: None,
 };
 
-let event_data = qlog::EventData::PacketSent {
-    header: pkt_hdr,
-    frames: Some(frames),
-    is_coalesced: None,
-    retry_token: None,
-    stateless_reset_token: None,
-    supported_versions: None,
-    raw: Some(raw),
-    datagram_id: None,
-};
+let event_data =
+     qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
+         header: pkt_hdr,
+         frames: Some(frames),
+         is_coalesced: None,
+         retry_token: None,
+         stateless_reset_token: None,
+         supported_versions: None,
+         raw: Some(raw),
+         datagram_id: None,
+     });
 
-trace.push_event(qlog::Event::with_time(0.0, event_data));
+trace.push_event(qlog::events::Event::with_time(0.0, event_data));
 ```
 
 ### Serializing
@@ -120,55 +115,63 @@ serde_json::to_string_pretty(&trace).unwrap();
 would generate the following:
 
 ```
- {
-   "vantage_point": {
-     "name": "Example client",
-     "type": "client"
-   },
-   "title": "Example qlog trace",
-   "description": "Example qlog trace description",
-   "configuration": {
-     "time_offset": 0.0
-   },
-   "events": [
-     [
-       0,
-       "transport",
-       "packet_sent",
-       {
-         "header": {
-           "packet_type": "initial",
-           "packet_number": 0,
-           "version": "ff00001d",
-           "scil": 8,
-           "dcil": 8,
-           "scid": "7e37e4dcc6682da8",
-           "dcid": "36ce104eee50101c"
-         },
-         "raw": {
-             "length": 1251,
-             "payload_length": 1224
-         },
-         "frames": [
-           {
-             "frame_type": "crypto",
-             "offset": 0,
-             "length": 100,
-           }
-         ]
-       }
-     ]
-   ]
- }
+{
+  "vantage_point": {
+    "name": "Example client",
+    "type": "client"
+  },
+  "title": "Example qlog trace",
+  "description": "Example qlog trace description",
+  "configuration": {
+    "time_offset": 0.0
+  },
+  "events": [
+    {
+      "time": 0.0,
+      "name": "transport:packet_sent",
+      "data": {
+        "header": {
+          "packet_type": "initial",
+          "packet_number": 0,
+          "version": "1",
+          "scil": 8,
+          "dcil": 8,
+          "scid": "7e37e4dcc6682da8",
+          "dcid": "36ce104eee50101c"
+        },
+        "raw": {
+          "length": 1251,
+          "payload_length": 1224
+        },
+        "frames": [
+          {
+            "frame_type": "crypto",
+            "offset": 0,
+            "length": 0
+          }
+        ]
+      }
+    }
+  ]
+}
 ```
 
-Streaming Mode
----------------
+## Streaming Traces JSON Text Sequences (JSON-SEQ)
 
-Create the trace:
+To help support streaming serialization of qlogs,
+draft-ietf-quic-qlog-main-schema-01 introduced support for RFC 7464 JSON
+Text Sequences (JSON-SEQ). The qlog crate supports this format and provides
+utilities that aid streaming.
 
-```rust
-let mut trace = qlog::Trace::new(
+A [`TraceSeq`] contains metadata such as the [`VantagePoint`] of capture and
+the [`Configuration`]. However, protocol event data is handled as separate
+lines containing a record separator character, a serialized [`Event`], and a
+newline.
+
+### Creating a TraceSeq
+
+``` rust
+let mut trace = qlog::TraceSeq::new(
     qlog::VantagePoint {
         name: Some("Example client".to_string()),
         ty: qlog::VantagePointType::Client,
@@ -185,12 +188,11 @@ let mut trace = qlog::Trace::new(
 ```
 
 Create an object with the [`Write`] trait:
-
-```rust
-let mut file = std::fs::File::create("foo.qlog").unwrap();
+```
+let mut file = std::fs::File::create("foo.sqlog").unwrap();
 ```
 
-Create a [`QlogStreamer`] and start serialization to foo.qlog
+Create a [`QlogStreamer`] and start serialization to foo.sqlog
 using [`start_log()`]:
 
 ```rust
@@ -214,20 +216,22 @@ Once logging has started you can stream events. Simple events can be written in
 one step using [`add_event()`]:
 
 ```rust
-let event_data = qlog::EventData::MetricsUpdated {
-    min_rtt: Some(1.0),
-    smoothed_rtt: Some(1.0),
-    latest_rtt: Some(1.0),
-    rtt_variance: Some(1.0),
-    pto_count: Some(1),
-    congestion_window: Some(1234),
-    bytes_in_flight: Some(5678),
-    ssthresh: None,
-    packets_in_flight: None,
-    pacing_rate: None,
-};
+let event_data = qlog::events::EventData::MetricsUpdated(
+    qlog::events::quic::MetricsUpdated {
+        min_rtt: Some(1.0),
+        smoothed_rtt: Some(1.0),
+        latest_rtt: Some(1.0),
+        rtt_variance: Some(1.0),
+        pto_count: Some(1),
+        congestion_window: Some(1234),
+        bytes_in_flight: Some(5678),
+        ssthresh: None,
+        packets_in_flight: None,
+        pacing_rate: None,
+    },
+);
 
-let event = qlog::Event::with_time(0.0, event_data);
+let event = qlog::events::Event::with_time(0.0, event_data);
 streamer.add_event(event).ok();
 ```
 
@@ -240,26 +244,30 @@ In this example, a `PacketSent` event is created with an empty frame array and
 frames are written out later:
 
 ```rust
-let pkt_hdr = qlog::PacketHeader::with_type(
-    qlog::PacketType::OneRtt,
+let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
+let dcid = [0x36, 0xce, 0x10, 0x4e, 0xee, 0x50, 0x10, 0x1c];
+
+let pkt_hdr = qlog::events::quic::PacketHeader::with_type(
+    qlog::events::quic::PacketType::OneRtt,
     0,
     Some(0x00000001),
-    Some(b"7e37e4dcc6682da8"),
-    Some(b"36ce104eee50101c"),
+    Some(&scid),
+    Some(&dcid),
 );
 
-let event_data = qlog::EventData::PacketSent {
-    header: pkt_hdr,
-    frames: Some(vec![]),
-    is_coalesced: None,
-    retry_token: None,
-    stateless_reset_token: None,
-    supported_versions: None,
-    raw: None,
-    datagram_id: None,
+let event_data =
+    qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
+      header: pkt_hdr,
+      frames: Some(vec![]),
+      is_coalesced: None,
+      retry_token: None,
+      stateless_reset_token: None,
+      supported_versions: None,
+      raw: None,
+      datagram_id: None,
 };
 
-let event = qlog::Event::with_time(0.0, event_data);
+let event = qlog::events::Event::with_time(0.0, event_data);
 
 streamer.add_event(event).ok();
 ```
@@ -270,8 +278,8 @@ are PING and PADDING. Each frame is written using the
 [`finish_frames()`].
 
 ```rust
-let ping = qlog::QuicFrame::Ping;
-let padding = qlog::QuicFrame::Padding;
+let ping = qlog::events::quic::QuicFrame::Ping;
+let padding = qlog::events::quic::QuicFrame::Padding;
 
 streamer.add_frame(ping, false).ok();
 streamer.add_frame(padding, false).ok();
@@ -292,6 +300,7 @@ Serialization to JSON occurs as methods on the [`QlogStreamer`]
 are called. No additional steps are required.
 
 [`Trace`]: struct.Trace.html
+[`TraceSeq`]: struct.TraceSeq.html
 [`VantagePoint`]: struct.VantagePoint.html
 [`Configuration`]: struct.Configuration.html
 [`qlog::Trace.events`]: struct.Trace.html#structfield.events
@@ -302,7 +311,6 @@ are called. No additional steps are required.
 [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
 [`start_log()`]: struct.QlogStreamer.html#method.start_log
 [`add_event()`]: struct.QlogStreamer.html#method.add_event
-[`add_event_with_instant()`]: struct.QlogStreamer.html#method.add_event
 [`add_frame()`]: struct.QlogStreamer.html#method.add_frame
 [`finish_frames()`]: struct.QlogStreamer.html#method.finish_frames
 [`finish_log()`]: struct.QlogStreamer.html#method.finish_log
