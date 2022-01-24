@@ -55,7 +55,7 @@ After cloning the project according to the command mentioned in the [building](#
 while the server can be run as follows:
 
 ```bash
- $ cargo run --bin quiche-server -- --cert tools/apps/src/bin/cert.crt --key tools/apps/src/bin/cert.key
+ $ cargo run --bin quiche-server -- --cert apps/src/bin/cert.crt --key apps/src/bin/cert.key
 ```
 
 (note that the certificate provided is self-signed and should not be used in
