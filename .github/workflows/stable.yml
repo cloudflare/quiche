@@ -168,14 +168,6 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          target: ${{ matrix.target }}
-          override: true
-
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
