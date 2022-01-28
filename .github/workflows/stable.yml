@@ -115,6 +115,10 @@ jobs:
           target: ${{ matrix.target }}
           override: true
 
+      - name: Remove cdylib from iOS build
+        run: |
+          sed -i -e 's/, "cdylib"//g' quiche/Cargo.toml
+
       - name: Run cargo build
         uses: actions-rs/cargo@v1
         with:
