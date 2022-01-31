@@ -141,6 +141,8 @@ pub extern fn quiche_h3_event_type(ev: &h3::Event) -> u32 {
         h3::Event::GoAway { .. } => 4,
 
         h3::Event::Reset { .. } => 5,
+
+        h3::Event::PriorityUpdate { .. } => 6,
     }
 }
 
@@ -298,6 +300,31 @@ pub extern fn quiche_h3_parse_extensible_priority(
         Ok(v) => {
             parsed.urgency = v.urgency;
             parsed.incremental = v.incremental;
+            0
+        },
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_h3_take_last_priority_update(
+    conn: &mut h3::Connection, prioritized_element_id: u64,
+    cb: extern fn(
+        priority_field_value: *const u8,
+        priority_field_value_len: size_t,
+        argp: *mut c_void,
+    ) -> c_int,
+    argp: *mut c_void,
+) -> c_int {
+    match conn.take_last_priority_update(prioritized_element_id) {
+        Ok(priority) => {
+            let rc = cb(priority.as_ptr(), priority.len(), argp);
+
+            if rc != 0 {
+                return rc;
+            }
+
             0
         },
 
