@@ -545,22 +545,22 @@ impl Stream {
     fn state_transition(
         &mut self, new_state: State, expected_len: usize, resize: bool,
     ) -> Result<()> {
-        self.state = new_state;
-        self.state_off = 0;
-        self.state_len = expected_len;
-
         // Some states don't need the state buffer, so don't resize it if not
         // necessary.
         if resize {
             // A peer can influence the size of the state buffer (e.g. with the
             // payload size of a GREASE frame), so we need to limit the maximum
             // size to avoid DoS.
-            if self.state_len > MAX_STATE_BUF_SIZE {
+            if expected_len > MAX_STATE_BUF_SIZE {
                 return Err(Error::ExcessiveLoad);
             }
 
-            self.state_buf.resize(self.state_len, 0);
+            self.state_buf.resize(expected_len, 0);
         }
+
+        self.state = new_state;
+        self.state_off = 0;
+        self.state_len = expected_len;
 
         Ok(())
     }
