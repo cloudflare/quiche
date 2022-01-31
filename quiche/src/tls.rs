@@ -609,7 +609,7 @@ impl Handshake {
         Some(sigalg.to_string())
     }
 
-    pub fn peer_cert(&self) -> Option<Vec<u8>> {
+    pub fn peer_cert(&self) -> Option<&[u8]> {
         let peer_cert = unsafe {
             let chain =
                 map_result_ptr(SSL_get0_peer_certificates(self.as_ptr())).ok()?;
@@ -620,14 +620,14 @@ impl Handshake {
             let buffer =
                 map_result_ptr(sk_value(chain, 0) as *const CRYPTO_BUFFER)
                     .ok()?;
+
             let out_len = CRYPTO_BUFFER_len(buffer);
             if out_len == 0 {
                 return None;
             }
 
             let out = CRYPTO_BUFFER_data(buffer);
-            let der = slice::from_raw_parts(out, out_len as usize);
-            der.to_vec()
+            slice::from_raw_parts(out, out_len as usize)
         };
 
         Some(peer_cert)
