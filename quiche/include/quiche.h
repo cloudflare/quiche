@@ -373,6 +373,12 @@ void quiche_conn_destination_id(quiche_conn *conn, const uint8_t **out, size_t *
 void quiche_conn_application_proto(quiche_conn *conn, const uint8_t **out,
                                    size_t *out_len);
 
+// Returns the peer's leaf certificate (if any) as a DER-encoded buffer.
+void quiche_conn_peer_cert(quiche_conn *conn, const uint8_t **out, size_t *out_len);
+
+// Returns the serialized cryptographic session for the connection.
+void quiche_conn_session(quiche_conn *conn, const uint8_t **out, size_t *out_len);
+
 // Returns true if the connection handshake is complete.
 bool quiche_conn_is_established(quiche_conn *conn);
 
