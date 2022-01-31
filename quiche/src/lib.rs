@@ -4503,7 +4503,7 @@ impl Connection {
 
     /// Returns the peer's leaf certificate (if any) as a DER-encoded buffer.
     #[inline]
-    pub fn peer_cert(&self) -> Option<Vec<u8>> {
+    pub fn peer_cert(&self) -> Option<&[u8]> {
         self.handshake.peer_cert()
     }
 
@@ -4514,8 +4514,8 @@ impl Connection {
     ///
     /// [`set_session()`]: struct.Connection.html#method.set_session
     #[inline]
-    pub fn session(&self) -> Option<Vec<u8>> {
-        self.session.clone()
+    pub fn session(&self) -> Option<&[u8]> {
+        self.session.as_deref()
     }
 
     /// Returns the source connection ID.
