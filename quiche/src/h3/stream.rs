@@ -139,6 +139,9 @@ pub struct Stream {
 
     /// Whether a `Data` event has been triggered for this stream.
     data_event_triggered: bool,
+
+    /// The last `PRIORITY_UPDATE` frame encoded field value, if any.
+    last_priority_update: Option<Vec<u8>>,
 }
 
 impl Stream {
@@ -177,6 +180,8 @@ impl Stream {
             local_initialized: false,
 
             data_event_triggered: false,
+
+            last_priority_update: None,
         }
     }
 
@@ -531,6 +536,21 @@ impl Stream {
     /// Resets the data triggered state.
     fn reset_data_event(&mut self) {
         self.data_event_triggered = false;
+    }
+
+    /// Set the last priority update for the stream.
+    pub fn set_last_priority_update(&mut self, priority_update: Option<Vec<u8>>) {
+        self.last_priority_update = priority_update;
+    }
+
+    /// Take the last priority update and leave `None` in its place.
+    pub fn take_last_priority_update(&mut self) -> Option<Vec<u8>> {
+        self.last_priority_update.take()
+    }
+
+    /// Returns `true` if there is a priority update.
+    pub fn has_last_priority_update(&self) -> bool {
+        self.last_priority_update.is_some()
     }
 
     /// Returns true if the state buffer has enough data to complete the state.
