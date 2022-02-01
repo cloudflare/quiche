@@ -95,14 +95,14 @@ pub type StreamIdHashSet = HashSet<u64, BuildStreamIdHasher>;
 #[derive(Default)]
 pub struct StreamMap {
     /// Map of streams indexed by stream ID.
-    streams: HashMap<u64, Stream>,
+    streams: StreamIdHashMap<Stream>,
 
     /// Set of streams that were completed and garbage collected.
     ///
     /// Instead of keeping the full stream state forever, we collect completed
     /// streams to save memory, but we still need to keep track of previously
     /// created streams, to prevent peers from re-creating them.
-    collected: HashSet<u64>,
+    collected: StreamIdHashSet,
 
     /// Peer's maximum bidirectional stream count limit.
     peer_max_streams_bidi: u64,
@@ -146,34 +146,34 @@ pub struct StreamMap {
     /// Set of stream IDs corresponding to streams that have outstanding data
     /// to read. This is used to generate a `StreamIter` of streams without
     /// having to iterate over the full list of streams.
-    readable: HashSet<u64>,
+    readable: StreamIdHashSet,
 
     /// Set of stream IDs corresponding to streams that have enough flow control
     /// capacity to be written to, and is not finished. This is used to generate
     /// a `StreamIter` of streams without having to iterate over the full list
     /// of streams.
-    writable: HashSet<u64>,
+    writable: StreamIdHashSet,
 
     /// Set of stream IDs corresponding to streams that are almost out of flow
     /// control credit and need to send MAX_STREAM_DATA. This is used to
     /// generate a `StreamIter` of streams without having to iterate over the
     /// full list of streams.
-    almost_full: HashSet<u64>,
+    almost_full: StreamIdHashSet,
 
     /// Set of stream IDs corresponding to streams that are blocked. The value
     /// of the map elements represents the offset of the stream at which the
     /// blocking occurred.
-    blocked: HashMap<u64, u64>,
+    blocked: StreamIdHashMap<u64>,
 
     /// Set of stream IDs corresponding to streams that are reset. The value
     /// of the map elements is a tuple of the error code and final size values
     /// to include in the RESET_STREAM frame.
-    reset: HashMap<u64, (u64, u64)>,
+    reset: StreamIdHashMap<(u64, u64)>,
 
     /// Set of stream IDs corresponding to streams that are shutdown on the
     /// receive side, and need to send a STOP_SENDING frame. The value of the
     /// map elements is the error code to include in the STOP_SENDING frame.
-    stopped: HashMap<u64, u64>,
+    stopped: StreamIdHashMap<u64>,
 
     /// The maximum size of a stream window.
     max_stream_window: u64,
@@ -709,7 +709,7 @@ pub struct StreamIter {
 
 impl StreamIter {
     #[inline]
-    fn from(streams: &HashSet<u64>) -> Self {
+    fn from(streams: &StreamIdHashSet) -> Self {
         StreamIter {
             streams: streams.iter().copied().collect(),
         }
