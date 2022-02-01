@@ -173,11 +173,10 @@ fn get_boringssl_cmake_config() -> cmake::Config {
 fn write_pkg_config() {
     use std::io::prelude::*;
 
-    let profile = std::env::var("PROFILE").unwrap();
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let target_dir = format!("{}/../target/{}", manifest_dir, profile);
+    let target_dir = target_dir_path();
 
-    let out_path = std::path::Path::new(&target_dir).join("quiche.pc");
+    let out_path = target_dir.as_path().join("quiche.pc");
     let mut out_file = std::fs::File::create(&out_path).unwrap();
 
     let include_dir = format!("{}/include", manifest_dir);
@@ -196,10 +195,25 @@ Version: {}
 Libs: -Wl,-rpath,${{libdir}} -L${{libdir}} -lquiche
 Cflags: -I${{includedir}}
 ",
-        include_dir, target_dir, version
+        include_dir,
+        target_dir.to_str().unwrap(),
+        version
     );
 
     out_file.write_all(output.as_bytes()).unwrap();
+}
+
+fn target_dir_path() -> std::path::PathBuf {
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let out_dir = std::path::Path::new(&out_dir);
+
+    for p in out_dir.ancestors() {
+        if p.ends_with("build") {
+            return p.parent().unwrap().to_path_buf();
+        }
+    }
+
+    unreachable!();
 }
 
 fn main() {
