@@ -277,7 +277,6 @@
 //! [`send_response()`]: struct.Connection.html#method.send_response
 //! [`send_body()`]: struct.Connection.html#method.send_body
 
-use std::collections::HashMap;
 use std::collections::VecDeque;
 
 use crate::octets;
@@ -624,7 +623,7 @@ pub struct Connection {
     next_request_stream_id: u64,
     next_uni_stream_id: u64,
 
-    streams: HashMap<u64, stream::Stream>,
+    streams: crate::stream::StreamIdHashMap<stream::Stream>,
 
     local_settings: ConnectionSettings,
     peer_settings: ConnectionSettings,
@@ -664,7 +663,7 @@ impl Connection {
 
             next_uni_stream_id: initial_uni_stream_id,
 
-            streams: HashMap::new(),
+            streams: Default::default(),
 
             local_settings: ConnectionSettings {
                 max_field_section_size: config.max_field_section_size,
