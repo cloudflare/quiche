@@ -2812,4 +2812,37 @@ mod tests {
             Err(Error::InvalidPacket)
         );
     }
+
+    #[test]
+    fn decrypt_pkt_too_small() {
+        let mut buf = [0; 65535];
+        let mut b = octets::OctetsMut::with_slice(&mut buf);
+
+        let hdr = Header {
+            ty: Type::Initial,
+            version: crate::PROTOCOL_VERSION,
+            dcid: ConnectionId::default(),
+            scid: ConnectionId::default(),
+            pkt_num: 0,
+            pkt_num_len: 0,
+            token: None,
+            versions: None,
+            key_phase: false,
+        };
+
+        hdr.to_bytes(&mut b).unwrap();
+
+        b.put_bytes(&[0; 1]).unwrap();
+
+        // No space for decryption.
+        let payload_len = 1;
+
+        let (aead, _) =
+            crypto::derive_initial_key_material(b"", hdr.version, true).unwrap();
+
+        assert_eq!(
+            decrypt_pkt(&mut b, 0, 1, payload_len, &aead),
+            Err(Error::CryptoFail)
+        );
+    }
 }
