@@ -600,8 +600,7 @@ enum quiche_h3_error {
     // QPACK Header block decompression failure.
     QUICHE_H3_ERR_QPACK_DECOMPRESSION_FAILED = -11,
 
-    // Error originated from the transport layer.
-    QUICHE_H3_ERR_TRANSPORT_ERROR = -12,
+    // -12 was previously used for TransportError, skip it
 
     // The underlying QUIC stream (or connection) doesn't have enough capacity
     // for the operation to complete. The application should retry later on.
@@ -630,6 +629,58 @@ enum quiche_h3_error {
     // The requested operation cannot be served over HTTP/3. Peer should retry
     // over HTTP/1.1.
     QUICHE_H3_ERR_VERSION_FALLBACK = -20,
+
+    // QUIC transport had no more work to do.
+    QUICHE_H3_TRANSPORT_ERR_DONE = -1001,
+
+    // The provided buffer is too short for QUIC transport.
+    QUICHE_H3_TRANSPORT_ERR_BUFFER_TOO_SHORT = -1002,
+
+    // The provided packet cannot be parsed by QUIC transport because its
+    // version is unknown.
+    QUICHE_H3_TRANSPORT_ERR_UNKNOWN_VERSION = -1003,
+
+    // The provided packet cannot be parsed by QUIC transport because it
+    // contains an invalid frame.
+    QUICHE_H3_TRANSPORT_ERR_INVALID_FRAME = -1004,
+
+    // The provided packet cannot be parsed by QUIC transport.
+    QUICHE_H3_TRANSPORT_ERR_INVALID_PACKET = -1005,
+
+    // The operation cannot be completed by QUIC transport because the
+    // connection is in an invalid state.
+    QUICHE_H3_TRANSPORT_ERR_INVALID_STATE = -1006,
+
+    // The operation cannot be completed by QUIC transport because the stream is
+    // in an invalid state.
+    QUICHE_H3_TRANSPORT_ERR_INVALID_STREAM_STATE = -1007,
+
+    // The peer's QUIC transport params cannot be parsed.
+    QUICHE_H3_TRANSPORT_ERR_INVALID_TRANSPORT_PARAM = -1008,
+
+    // A QUIC transport cryptographic operation failed.
+    QUICHE_H3_TRANSPORT_ERR_CRYPTO_FAIL = -1009,
+
+    // The QUIC transport TLS handshake failed.
+    QUICHE_H3_TRANSPORT_ERR_TLS_FAIL = -1010,
+
+    // The peer violated the QUIC transport local flow control limits.
+    QUICHE_H3_TRANSPORT_ERR_FLOW_CONTROL = -1011,
+
+    // The peer violated the QUIC transport local stream limits.
+    QUICHE_H3_TRANSPORT_ERR_STREAM_LIMIT = -1012,
+
+    // The specified QUIC transport  stream was stopped by the peer.
+    QUICHE_H3_TRANSPORT_ERR_STREAM_STOPPED = -1015,
+
+    // The specified QUIC transport  stream was reset by the peer.
+    QUICHE_H3_TRANSPORT_ERR_STREAM_RESET = -1016,
+
+    // The received data exceeds the QUIC transport stream's final size.
+    QUICHE_H3_TRANSPORT_ERR_FINAL_SIZE = -1013,
+
+    // Error in QUIC transport congestion control.
+    QUICHE_H3_TRANSPORT_ERR_CONGESTION_CONTROL = -1014,
 };
 
 // Stores configuration shared between multiple connections.
