@@ -62,6 +62,7 @@ octets = { version = "0.1", path = "../octets" }
 boring = { version = "2.0.0", optional = true }
 foreign-types-shared = { version = "0.3.0", optional = true }
 qlog = { version = "0.6", path = "../qlog", optional = true }
+sfv = { version = "0.9", optional = true }
 
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = ["wincrypt"] }
