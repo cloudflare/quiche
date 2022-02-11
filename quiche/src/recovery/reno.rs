@@ -103,7 +103,8 @@ fn on_packet_acked(
 }
 
 fn congestion_event(
-    r: &mut Recovery, time_sent: Instant, epoch: packet::Epoch, now: Instant,
+    r: &mut Recovery, _lost_bytes: usize, time_sent: Instant,
+    epoch: packet::Epoch, now: Instant,
 ) {
     // Start a new congestion event if packet was sent after the
     // start of the previous congestion recovery period.
@@ -296,7 +297,12 @@ mod tests {
 
         let now = Instant::now();
 
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(
+            r.max_datagram_size,
+            now,
+            packet::EPOCH_APPLICATION,
+            now,
+        );
 
         // In Reno, after congestion event, cwnd will be cut in half.
         assert_eq!(prev_cwnd / 2, r.cwnd());
@@ -315,7 +321,12 @@ mod tests {
         r.on_packet_sent_cc(20000, now);
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(
+            r.max_datagram_size,
+            now,
+            packet::EPOCH_APPLICATION,
+            now,
+        );
 
         // After congestion event, cwnd will be reduced.
         let cur_cwnd =
