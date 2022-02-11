@@ -893,7 +893,7 @@ impl Recovery {
     ) {
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
 
-        self.congestion_event(largest_lost_pkt.time_sent, epoch, now);
+        self.congestion_event(lost_bytes, largest_lost_pkt.time_sent, epoch, now);
 
         if self.in_persistent_congestion(largest_lost_pkt.pkt_num) {
             self.collapse_cwnd();
@@ -901,13 +901,14 @@ impl Recovery {
     }
 
     fn congestion_event(
-        &mut self, time_sent: Instant, epoch: packet::Epoch, now: Instant,
+        &mut self, lost_bytes: usize, time_sent: Instant, epoch: packet::Epoch,
+        now: Instant,
     ) {
         if !self.in_congestion_recovery(time_sent) {
             (self.cc_ops.checkpoint)(self);
         }
 
-        (self.cc_ops.congestion_event)(self, time_sent, epoch, now);
+        (self.cc_ops.congestion_event)(self, lost_bytes, time_sent, epoch, now);
     }
 
     fn collapse_cwnd(&mut self) {
@@ -987,6 +988,7 @@ pub struct CongestionControlOps {
 
     pub congestion_event: fn(
         r: &mut Recovery,
+        lost_bytes: usize,
         time_sent: Instant,
         epoch: packet::Epoch,
         now: Instant,

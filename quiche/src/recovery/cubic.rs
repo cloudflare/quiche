@@ -341,7 +341,8 @@ fn on_packet_acked(
 }
 
 fn congestion_event(
-    r: &mut Recovery, time_sent: Instant, epoch: packet::Epoch, now: Instant,
+    r: &mut Recovery, _lost_bytes: usize, time_sent: Instant,
+    epoch: packet::Epoch, now: Instant,
 ) {
     let in_congestion_recovery = r.in_congestion_recovery(time_sent);
 
@@ -561,7 +562,12 @@ mod tests {
         let now = Instant::now();
         let prev_cwnd = r.cwnd();
 
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(
+            r.max_datagram_size,
+            now,
+            packet::EPOCH_APPLICATION,
+            now,
+        );
 
         // In CUBIC, after congestion event, cwnd will be reduced by (1 -
         // CUBIC_BETA)
@@ -583,7 +589,12 @@ mod tests {
         }
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(
+            r.max_datagram_size,
+            now,
+            packet::EPOCH_APPLICATION,
+            now,
+        );
 
         // After congestion event, cwnd will be reduced.
         let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
@@ -628,7 +639,12 @@ mod tests {
         r.on_packet_sent_cc(30000, now);
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(
+            r.max_datagram_size,
+            now,
+            packet::EPOCH_APPLICATION,
+            now,
+        );
 
         // After persistent congestion, cwnd should be the minimum window
         r.collapse_cwnd();
@@ -927,7 +943,12 @@ mod tests {
         }
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(
+            r.max_datagram_size,
+            now,
+            packet::EPOCH_APPLICATION,
+            now,
+        );
 
         // After congestion event, cwnd will be reduced.
         let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
@@ -959,7 +980,12 @@ mod tests {
 
         // Trigger another congestion event.
         let prev_cwnd = r.cwnd();
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(
+            r.max_datagram_size,
+            now,
+            packet::EPOCH_APPLICATION,
+            now,
+        );
 
         // After congestion event, cwnd will be reduced.
         let cur_cwnd = (cur_cwnd as f64 * BETA_CUBIC) as usize;
@@ -1003,7 +1029,12 @@ mod tests {
         }
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(
+            r.max_datagram_size,
+            now,
+            packet::EPOCH_APPLICATION,
+            now,
+        );
 
         // After 1st congestion event, cwnd will be reduced.
         let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
@@ -1039,7 +1070,12 @@ mod tests {
         // Fast convergence: now there is 2nd congestion event and
         // cwnd is not fully recovered to w_max, w_max will be
         // further reduced.
-        r.congestion_event(now, packet::EPOCH_APPLICATION, now);
+        r.congestion_event(
+            r.max_datagram_size,
+            now,
+            packet::EPOCH_APPLICATION,
+            now,
+        );
 
         // After 2nd congestion event, cwnd will be reduced.
         let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
