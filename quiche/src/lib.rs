@@ -1079,6 +1079,9 @@ pub struct Connection {
     /// Peer's flow control limit for the connection.
     max_tx_data: u64,
 
+    /// Last tx_data before running a full send() loop.
+    last_tx_data: u64,
+
     /// Total number of bytes the server can send before the peer's address
     /// is verified.
     max_send_bytes: usize,
@@ -1517,6 +1520,7 @@ impl Connection {
 
             tx_data: 0,
             max_tx_data: 0,
+            last_tx_data: 0,
 
             stream_retrans_bytes: 0,
 
@@ -2581,6 +2585,8 @@ impl Connection {
         }
 
         if done == 0 {
+            self.last_tx_data = self.tx_data;
+
             return Err(Error::Done);
         }
 
@@ -3460,10 +3466,14 @@ impl Connection {
             in_flight,
             delivered: 0,
             delivered_time: now,
-            recent_delivered_packet_sent_time: now,
+            first_sent_time: now,
             is_app_limited: false,
             has_data,
         };
+
+        if in_flight && self.delivery_rate_check_if_app_limited() {
+            self.recovery.delivery_rate_update_app_limited(true);
+        }
 
         self.recovery.on_packet_sent(
             sent_pkt,
@@ -3767,8 +3777,6 @@ impl Connection {
         self.tx_cap -= sent;
 
         self.tx_data += sent as u64;
-
-        self.recovery.rate_check_app_limited();
 
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
             let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
@@ -5010,6 +5018,10 @@ impl Connection {
                     self.handshake_confirmed = true;
                 }
 
+                if self.delivery_rate_check_if_app_limited() {
+                    self.recovery.delivery_rate_update_app_limited(true);
+                }
+
                 self.recovery.on_ack_received(
                     &ranges,
                     ack_delay,
@@ -5440,6 +5452,28 @@ impl Connection {
             self.recovery.cwnd_available() as u64,
             self.max_tx_data - self.tx_data,
         ) as usize;
+    }
+
+    fn delivery_rate_check_if_app_limited(&self) -> bool {
+        // Enter the app-limited phase of delivery rate when these conditions
+        // are met:
+        //
+        // - The remaining capacity is higher than available bytes in cwnd (there
+        //   is more room to send).
+        // - New data since the last send() is smaller than available bytes in
+        //   cwnd (we queued less than what we can send).
+        // - There is room to send more data in cwnd.
+        //
+        // In application-limited phases the transmission rate is limited by the
+        // application rather than the congestion control algorithm.
+        //
+        // Note that this is equivalent to CheckIfApplicationLimited() from the
+        // delivery rate draft. This is also separate from `recovery.app_limited`
+        // and only applies to delivery rate calculation.
+        self.tx_cap >= self.recovery.cwnd_available() &&
+            (self.tx_data - self.last_tx_data) <
+                self.recovery.cwnd_available() as u64 &&
+            self.recovery.cwnd_available() > 0
     }
 }
 

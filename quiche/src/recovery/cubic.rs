@@ -482,7 +482,7 @@ mod tests {
             in_flight: true,
             delivered: 0,
             delivered_time: now,
-            recent_delivered_packet_sent_time: now,
+            first_sent_time: now,
             is_app_limited: false,
             has_data: false,
         };
@@ -498,6 +498,11 @@ mod tests {
             pkt_num: p.pkt_num,
             time_sent: p.time_sent,
             size: p.size,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            rtt: Duration::ZERO,
         }];
 
         r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
@@ -525,7 +530,7 @@ mod tests {
             in_flight: true,
             delivered: 0,
             delivered_time: now,
-            recent_delivered_packet_sent_time: now,
+            first_sent_time: now,
             is_app_limited: false,
             has_data: false,
         };
@@ -542,16 +547,31 @@ mod tests {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                rtt: Duration::ZERO,
             },
             Acked {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                rtt: Duration::ZERO,
             },
             Acked {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                rtt: Duration::ZERO,
             },
         ];
 
@@ -626,6 +646,11 @@ mod tests {
                 pkt_num: 0,
                 time_sent: now,
                 size: r.max_datagram_size,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                rtt: Duration::ZERO,
             }];
 
             r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
@@ -666,6 +691,11 @@ mod tests {
             // To exit from recovery
             time_sent: now + Duration::from_millis(1),
             size: r.max_datagram_size,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            rtt: Duration::ZERO,
         }];
 
         r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
@@ -698,7 +728,7 @@ mod tests {
             in_flight: true,
             delivered: 0,
             delivered_time: now,
-            recent_delivered_packet_sent_time: now,
+            first_sent_time: now,
             is_app_limited: false,
             has_data: false,
         };
@@ -727,6 +757,11 @@ mod tests {
                 pkt_num: ack_pn,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                rtt: Duration::ZERO,
             }];
 
             r.on_packets_acked(acked, epoch, now);
@@ -759,6 +794,11 @@ mod tests {
                 pkt_num: ack_pn,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                rtt: Duration::ZERO,
             }];
 
             r.on_packets_acked(acked, epoch, now);
@@ -794,6 +834,11 @@ mod tests {
                 pkt_num: ack_pn,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                rtt: Duration::ZERO,
             }];
 
             r.on_packets_acked(acked, epoch, now);
@@ -831,7 +876,7 @@ mod tests {
             in_flight: true,
             delivered: 0,
             delivered_time: now,
-            recent_delivered_packet_sent_time: now,
+            first_sent_time: now,
             is_app_limited: false,
             has_data: false,
         };
@@ -860,6 +905,11 @@ mod tests {
                 pkt_num: ack_pn,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                rtt: Duration::ZERO,
             }];
 
             r.on_packets_acked(acked, epoch, now);
@@ -892,6 +942,11 @@ mod tests {
                 pkt_num: ack_pn,
                 time_sent: p.time_sent,
                 size: p.size,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                rtt: Duration::ZERO,
             }];
 
             r.on_packets_acked(acked, epoch, now);
@@ -925,6 +980,11 @@ mod tests {
                     pkt_num: ack_pn,
                     time_sent: p.time_sent,
                     size: p.size,
+                    delivered: 0,
+                    delivered_time: now,
+                    first_sent_time: now,
+                    is_app_limited: false,
+                    rtt: Duration::ZERO,
                 }];
 
                 r.on_packets_acked(acked, epoch, now);
@@ -969,6 +1029,11 @@ mod tests {
             // To exit from recovery
             time_sent: now + rtt,
             size: r.max_datagram_size,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            rtt: Duration::ZERO,
         }];
 
         // Ack more than cwnd bytes with rtt=100ms
@@ -1006,6 +1071,11 @@ mod tests {
             // To exit from recovery
             time_sent: now + rtt,
             size: r.max_datagram_size,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            rtt: Duration::ZERO,
         }];
 
         // Ack more than cwnd bytes with rtt=100ms.
@@ -1065,6 +1135,11 @@ mod tests {
                 pkt_num: 0,
                 time_sent: now,
                 size: r.max_datagram_size,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                rtt: Duration::ZERO,
             }];
 
             r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
