@@ -413,7 +413,7 @@ impl Error {
             Error::FrameUnexpected => -9,
             Error::FrameError => -10,
             Error::QpackDecompressionFailed => -11,
-            Error::TransportError { .. } => -12,
+            // -12 was previously used for TransportError, skip it
             Error::StreamBlocked => -13,
             Error::SettingsError => -14,
             Error::RequestRejected => -15,
@@ -422,6 +422,8 @@ impl Error {
             Error::MessageError => -18,
             Error::ConnectError => -19,
             Error::VersionFallback => -20,
+
+            Error::TransportError(quic_error) => quic_error.to_c() - 1000,
         }
     }
 }
