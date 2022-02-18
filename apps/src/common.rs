@@ -1042,7 +1042,7 @@ impl HttpConn for Http3Conn {
                 },
             };
 
-            debug!("Sent HTTP request {:?}", req.hdrs);
+            debug!("Sent HTTP request {:?}", hdrs_to_strings(&req.hdrs));
 
             req.stream_id = Some(s);
             req.response_writer =
