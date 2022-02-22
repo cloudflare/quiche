@@ -14,7 +14,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  auto/options                            |    9 +
  src/core/ngx_connection.h               |    7 +
  src/core/ngx_core.h                     |    3 +
- src/event/ngx_event_quic.c              |  620 +++++++
+ src/event/ngx_event_quic.c              |  625 +++++++
  src/event/ngx_event_quic.h              |   49 +
  src/event/ngx_event_udp.c               |    8 +
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
@@ -343,7 +343,7 @@ new file mode 100644
 index 000000000..591a809e0
 --- /dev/null
 +++ b/src/event/ngx_event_quic.c
-@@ -0,0 +1,620 @@
+@@ -0,0 +1,625 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -519,6 +519,7 @@ index 000000000..591a809e0
 +#endif
 +
 +    conn = quiche_conn_new_with_tls(scid, sizeof(scid), NULL, 0,
++                                    c->local_sockaddr, c->local_socklen,
 +                                    c->sockaddr, c->socklen, quic->config,
 +                                    c->ssl->connection, true);
 +    if (conn == NULL) {
@@ -552,6 +553,8 @@ index 000000000..591a809e0
 +    quiche_recv_info recv_info = {
 +        c->sockaddr,
 +        c->socklen,
++        c->local_sockaddr,
++        c->local_socklen,
 +    };
 +
 +    /* Process the client's Initial packet, which was saved into c->buffer by
@@ -614,6 +617,8 @@ index 000000000..591a809e0
 +        quiche_recv_info recv_info = {
 +            c->sockaddr,
 +            c->socklen,
++            c->local_sockaddr,
++            c->local_socklen,
 +        };
 +
 +        ssize_t done = quiche_conn_recv(c->quic->conn, buf, n, &recv_info);

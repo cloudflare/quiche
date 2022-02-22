@@ -60,8 +60,9 @@
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
-//! # let from = "127.0.0.1:1234".parse().unwrap();
-//! # let mut conn = quiche::accept(&scid, None, from, &mut config).unwrap();
+//! # let peer = "127.0.0.1:1234".parse().unwrap();
+//! # let local = "127.0.0.1:4321".parse().unwrap();
+//! # let mut conn = quiche::accept(&scid, None, local, peer, &mut config).unwrap();
 //! # let h3_config = quiche::h3::Config::new()?;
 //! let h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! # Ok::<(), quiche::h3::Error>(())
@@ -76,8 +77,9 @@
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
-//! # let to = "127.0.0.1:1234".parse().unwrap();
-//! # let mut conn = quiche::connect(None, &scid, to, &mut config).unwrap();
+//! # let peer = "127.0.0.1:1234".parse().unwrap();
+//! # let local = "127.0.0.1:4321".parse().unwrap();
+//! # let mut conn = quiche::connect(None, &scid, local, peer, &mut config).unwrap();
 //! # let h3_config = quiche::h3::Config::new()?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! let req = vec![
@@ -98,8 +100,9 @@
 //! ```no_run
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
-//! # let to = "127.0.0.1:1234".parse().unwrap();
-//! # let mut conn = quiche::connect(None, &scid, to, &mut config).unwrap();
+//! # let peer = "127.0.0.1:1234".parse().unwrap();
+//! # let local = "127.0.0.1:4321".parse().unwrap();
+//! # let mut conn = quiche::connect(None, &scid, local, peer, &mut config).unwrap();
 //! # let h3_config = quiche::h3::Config::new()?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! let req = vec![
@@ -129,8 +132,9 @@
 //!
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
-//! # let from = "127.0.0.1:1234".parse().unwrap();
-//! # let mut conn = quiche::accept(&scid, None, from, &mut config).unwrap();
+//! # let peer = "127.0.0.1:1234".parse().unwrap();
+//! # let local = "127.0.0.1:1234".parse().unwrap();
+//! # let mut conn = quiche::accept(&scid, None, local, peer, &mut config).unwrap();
 //! # let h3_config = quiche::h3::Config::new()?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! loop {
@@ -197,8 +201,9 @@
 //!
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
-//! # let to = "127.0.0.1:1234".parse().unwrap();
-//! # let mut conn = quiche::connect(None, &scid, to, &mut config).unwrap();
+//! # let peer = "127.0.0.1:1234".parse().unwrap();
+//! # let local = "127.0.0.1:1234".parse().unwrap();
+//! # let mut conn = quiche::connect(None, &scid, local, peer, &mut config).unwrap();
 //! # let h3_config = quiche::h3::Config::new()?;
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! loop {

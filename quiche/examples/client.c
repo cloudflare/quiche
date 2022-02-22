@@ -51,6 +51,9 @@ struct conn_io {
 
     int sock;
 
+    struct sockaddr_storage local_addr;
+    socklen_t local_addr_len;
+
     quiche_conn *conn;
 };
 
@@ -122,8 +125,10 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
         quiche_recv_info recv_info = {
             (struct sockaddr *) &peer_addr,
-
             peer_addr_len,
+
+            (struct sockaddr *) &conn_io->local_addr,
+            conn_io->local_addr_len,
         };
 
         ssize_t done = quiche_conn_recv(conn_io->conn, buf, read, &recv_info);
@@ -210,7 +215,7 @@ static void timeout_cb(EV_P_ ev_timer *w, int revents) {
         quiche_conn_stats(conn_io->conn, &stats);
 
         fprintf(stderr, "connection closed, recv=%zu sent=%zu lost=%zu rtt=%" PRIu64 "ns\n",
-                stats.recv, stats.sent, stats.lost, stats.rtt);
+                stats.recv, stats.sent, stats.lost, stats.paths[0].rtt);
 
         ev_break(EV_A_ EVBREAK_ONE);
         return;
@@ -282,17 +287,27 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    quiche_conn *conn = quiche_connect(host, (const uint8_t*) scid, sizeof(scid),
+    struct conn_io *conn_io = malloc(sizeof(*conn_io));
+    if (conn_io == NULL) {
+        fprintf(stderr, "failed to allocate connection IO\n");
+        return -1;
+    }
+
+    conn_io->local_addr_len = sizeof(conn_io->local_addr);
+    if (getsockname(sock, (struct sockaddr *)&conn_io->local_addr,
+                    &conn_io->local_addr_len) != 0)
+    {
+        perror("failed to get local address of socket");
+        return -1;
+    };
+
+    quiche_conn *conn = quiche_connect(host, (const uint8_t *) scid, sizeof(scid),
+                                       (struct sockaddr *) &conn_io->local_addr,
+                                       conn_io->local_addr_len,
                                        peer->ai_addr, peer->ai_addrlen, config);
 
     if (conn == NULL) {
         fprintf(stderr, "failed to create connection\n");
-        return -1;
-    }
-
-    struct conn_io *conn_io = malloc(sizeof(*conn_io));
-    if (conn_io == NULL) {
-        fprintf(stderr, "failed to allocate connection IO\n");
         return -1;
     }
 

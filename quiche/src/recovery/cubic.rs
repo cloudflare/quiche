@@ -46,6 +46,7 @@ use crate::recovery::Recovery;
 
 pub static CUBIC: CongestionControlOps = CongestionControlOps {
     on_init,
+    reset,
     on_packet_sent,
     on_packets_acked,
     congestion_event,
@@ -146,6 +147,10 @@ impl State {
 }
 
 fn on_init(_r: &mut Recovery) {}
+
+fn reset(r: &mut Recovery) {
+    r.cubic_state = State::default();
+}
 
 fn collapse_cwnd(r: &mut Recovery) {
     let cubic = &mut r.cubic_state;

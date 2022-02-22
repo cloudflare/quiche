@@ -119,8 +119,11 @@ pub fn run(
     // Create a QUIC connection and initiate handshake.
     let url = &test.endpoint();
 
+    let local_addr = socket.local_addr().unwrap();
+
     let mut conn =
-        quiche::connect(url.domain(), &scid, peer_addr, &mut config).unwrap();
+        quiche::connect(url.domain(), &scid, local_addr, peer_addr, &mut config)
+            .unwrap();
 
     if let Some(session_file) = &session_file {
         if let Ok(session) = std::fs::read(session_file) {
@@ -182,7 +185,10 @@ pub fn run(
 
             debug!("got {} bytes", len);
 
-            let recv_info = quiche::RecvInfo { from };
+            let recv_info = quiche::RecvInfo {
+                from,
+                to: local_addr,
+            };
 
             // Process potentially coalesced packets.
             let read = match conn.recv(&mut buf[..len], recv_info) {

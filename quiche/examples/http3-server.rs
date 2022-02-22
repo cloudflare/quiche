@@ -114,6 +114,8 @@ fn main() {
 
     let mut clients = ClientMap::new();
 
+    let local_addr = socket.local_addr().unwrap();
+
     loop {
         // Find the shorter timeout from all the active connections.
         //
@@ -261,9 +263,14 @@ fn main() {
 
                 debug!("New connection: dcid={:?} scid={:?}", hdr.dcid, scid);
 
-                let conn =
-                    quiche::accept(&scid, odcid.as_ref(), from, &mut config)
-                        .unwrap();
+                let conn = quiche::accept(
+                    &scid,
+                    odcid.as_ref(),
+                    local_addr,
+                    from,
+                    &mut config,
+                )
+                .unwrap();
 
                 let client = Client {
                     conn,
@@ -282,7 +289,10 @@ fn main() {
                 }
             };
 
-            let recv_info = quiche::RecvInfo { from };
+            let recv_info = quiche::RecvInfo {
+                to: socket.local_addr().unwrap(),
+                from,
+            };
 
             // Process potentially coalesced packets.
             let read = match client.conn.recv(pkt_buf, recv_info) {

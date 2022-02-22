@@ -48,6 +48,8 @@ pub struct CommonArgs {
     pub dgrams_enabled: bool,
     pub dgram_count: u64,
     pub dgram_data: String,
+    pub max_active_cids: u64,
+    pub enable_active_migration: bool,
 }
 
 /// Creates a new `CommonArgs` structure using the provided [`Docopt`].
@@ -68,6 +70,8 @@ pub struct CommonArgs {
 /// --dgram-proto PROTO         DATAGRAM application protocol.
 /// --dgram-count COUNT         Number of DATAGRAMs to send.
 /// --dgram-data DATA           DATAGRAM data to send.
+/// --max-active-cids NUM       Maximum number of active Connection IDs.
+/// --enable-active-migration   Enable active connection migration.
 ///
 /// [`Docopt`]: https://docs.rs/docopt/1.1.0/docopt/
 impl Args for CommonArgs {
@@ -143,6 +147,11 @@ impl Args for CommonArgs {
 
         let disable_hystart = args.get_bool("--disable-hystart");
 
+        let max_active_cids = args.get_str("--max-active-cids");
+        let max_active_cids = max_active_cids.parse::<u64>().unwrap();
+
+        let enable_active_migration = args.get_bool("--enable-active-migration");
+
         CommonArgs {
             alpns,
             max_data,
@@ -160,6 +169,8 @@ impl Args for CommonArgs {
             dgrams_enabled,
             dgram_count,
             dgram_data,
+            max_active_cids,
+            enable_active_migration,
         }
     }
 }
@@ -183,6 +194,8 @@ impl Default for CommonArgs {
             dgrams_enabled: false,
             dgram_count: 0,
             dgram_data: "quack".to_string(),
+            max_active_cids: 2,
+            enable_active_migration: false,
         }
     }
 }
@@ -216,6 +229,9 @@ Options:
   --no-grease              Don't send GREASE.
   --cc-algorithm NAME      Specify which congestion control algorithm to use [default: cubic].
   --disable-hystart        Disable HyStart++.
+  --max-active-cids NUM    The maximum number of active Connection IDs we can support [default: 2].
+  --enable-active-migration   Enable active connection migration.
+  --perform-migration      Perform connection migration on another source port.
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
   --session-file PATH      File used to cache a TLS session for resumption.
@@ -237,6 +253,7 @@ pub struct ClientArgs {
     pub connect_to: Option<String>,
     pub session_file: Option<String>,
     pub source_port: u16,
+    pub perform_migration: bool,
 }
 
 impl Args for ClientArgs {
@@ -303,6 +320,8 @@ impl Args for ClientArgs {
         let source_port = args.get_str("--source-port");
         let source_port = source_port.parse::<u16>().unwrap();
 
+        let perform_migration = args.get_bool("--perform-migration");
+
         ClientArgs {
             version,
             dump_response_path,
@@ -316,6 +335,7 @@ impl Args for ClientArgs {
             connect_to,
             session_file,
             source_port,
+            perform_migration,
         }
     }
 }
@@ -335,6 +355,7 @@ impl Default for ClientArgs {
             connect_to: None,
             session_file: None,
             source_port: 0,
+            perform_migration: false,
         }
     }
 }
@@ -367,6 +388,8 @@ Options:
   --dgram-data DATA           Data to send for certain types of DATAGRAM application protocol [default: brrr].
   --cc-algorithm NAME         Specify which congestion control algorithm to use [default: cubic].
   --disable-hystart           Disable HyStart++.
+  --max-active-cids NUM       The maximum number of active Connection IDs we can support [default: 2].
+  --enable-active-migration   Enable active connection migration.
   -h --help                   Show this screen.
 ";
 

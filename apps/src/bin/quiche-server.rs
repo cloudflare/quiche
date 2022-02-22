@@ -90,7 +90,8 @@ fn main() {
     config.set_initial_max_stream_data_uni(conn_args.max_stream_data);
     config.set_initial_max_streams_bidi(conn_args.max_streams_bidi);
     config.set_initial_max_streams_uni(conn_args.max_streams_uni);
-    config.set_disable_active_migration(true);
+    config.set_disable_active_migration(!conn_args.enable_active_migration);
+    config.set_active_connection_id_limit(conn_args.max_active_cids);
 
     config.set_max_connection_window(conn_args.max_window);
     config.set_max_stream_window(conn_args.max_stream_window);
@@ -133,11 +134,15 @@ fn main() {
     let conn_id_seed =
         ring::hmac::Key::generate(ring::hmac::HMAC_SHA256, &rng).unwrap();
 
+    let mut next_client_id = 0;
+    let mut clients_ids = ClientIdMap::new();
     let mut clients = ClientMap::new();
 
     let mut pkt_count = 0;
 
     let mut continue_write = false;
+
+    let local_addr = socket.local_addr().unwrap();
 
     loop {
         // Find the shorter timeout from all the active connections.
@@ -216,8 +221,8 @@ fn main() {
 
             // Lookup a connection based on the packet's connection ID. If there
             // is no connection matching, create a new one.
-            let client = if !clients.contains_key(&hdr.dcid) &&
-                !clients.contains_key(&conn_id)
+            let client = if !clients_ids.contains_key(&hdr.dcid) &&
+                !clients_ids.contains_key(&conn_id)
             {
                 if hdr.ty != quiche::Type::Initial {
                     error!("Packet is not Initial");
@@ -307,9 +312,14 @@ fn main() {
                 debug!("New connection: dcid={:?} scid={:?}", hdr.dcid, scid);
 
                 #[allow(unused_mut)]
-                let mut conn =
-                    quiche::accept(&scid, odcid.as_ref(), from, &mut config)
-                        .unwrap();
+                let mut conn = quiche::accept(
+                    &scid,
+                    odcid.as_ref(),
+                    local_addr,
+                    from,
+                    &mut config,
+                )
+                .unwrap();
 
                 if let Some(keylog) = &mut keylog {
                     if let Ok(keylog) = keylog.try_clone() {
@@ -332,9 +342,12 @@ fn main() {
                     }
                 }
 
+                let client_id = next_client_id;
+
                 let client = Client {
                     conn,
                     http_conn: None,
+                    client_id,
                     partial_requests: HashMap::new(),
                     partial_responses: HashMap::new(),
                     siduck_conn: None,
@@ -342,18 +355,26 @@ fn main() {
                     bytes_sent: 0,
                 };
 
-                clients.insert(scid.clone(), client);
+                clients.insert(client_id, client);
+                clients_ids.insert(scid.clone(), client_id);
 
-                clients.get_mut(&scid).unwrap()
+                next_client_id += 1;
+
+                clients.get_mut(&client_id).unwrap()
             } else {
-                match clients.get_mut(&hdr.dcid) {
+                let cid = match clients_ids.get(&hdr.dcid) {
                     Some(v) => v,
 
-                    None => clients.get_mut(&conn_id).unwrap(),
-                }
+                    None => clients_ids.get(&conn_id).unwrap(),
+                };
+
+                clients.get_mut(cid).unwrap()
             };
 
-            let recv_info = quiche::RecvInfo { from };
+            let recv_info = quiche::RecvInfo {
+                to: local_addr,
+                from,
+            };
 
             // Process potentially coalesced packets.
             let read = match client.conn.recv(pkt_buf, recv_info) {
@@ -449,6 +470,28 @@ fn main() {
                     continue 'read;
                 }
             }
+
+            handle_path_events(client);
+
+            // See whether source Connection IDs have been retired.
+            while let Some(retired_scid) = client.conn.retired_scid_next() {
+                info!("Retiring source CID {:?}", retired_scid);
+                clients_ids.remove(&retired_scid);
+            }
+
+            // Provides as many CIDs as possible.
+            while client.conn.source_cids_left() > 0 {
+                let (scid, reset_token) = generate_cid_and_reset_token(&rng);
+                if client
+                    .conn
+                    .new_source_cid(&scid, reset_token, false)
+                    .is_err()
+                {
+                    break;
+                }
+
+                clients_ids.insert(scid, client.client_id);
+            }
         }
 
         // Generate outgoing QUIC packets for all active connections and send
@@ -519,6 +562,8 @@ fn main() {
 
             !c.conn.is_closed()
         });
+
+        clients_ids.retain(|_, client_id| clients.contains_key(client_id));
     }
 }
 
@@ -576,4 +621,71 @@ fn validate_token<'a>(
     }
 
     Some(quiche::ConnectionId::from_ref(&token[addr.len()..]))
+}
+
+fn handle_path_events(client: &mut Client) {
+    while let Some(qe) = client.conn.path_event_next() {
+        match qe {
+            quiche::PathEvent::New(local_addr, peer_addr) => {
+                info!(
+                    "{} Seen new path ({}, {})",
+                    client.conn.trace_id(),
+                    local_addr,
+                    peer_addr
+                );
+
+                // Directly probe the new path.
+                client
+                    .conn
+                    .probe_path(local_addr, peer_addr)
+                    .expect("cannot probe");
+            },
+
+            quiche::PathEvent::Validated(local_addr, peer_addr) => {
+                info!(
+                    "{} Path ({}, {}) is now validated",
+                    client.conn.trace_id(),
+                    local_addr,
+                    peer_addr
+                );
+            },
+
+            quiche::PathEvent::FailedValidation(local_addr, peer_addr) => {
+                info!(
+                    "{} Path ({}, {}) failed validation",
+                    client.conn.trace_id(),
+                    local_addr,
+                    peer_addr
+                );
+            },
+
+            quiche::PathEvent::Closed(local_addr, peer_addr) => {
+                info!(
+                    "{} Path ({}, {}) is now closed and unusable",
+                    client.conn.trace_id(),
+                    local_addr,
+                    peer_addr
+                );
+            },
+
+            quiche::PathEvent::ReusedSourceConnectionId(cid_seq, old, new) => {
+                info!(
+                    "{} Peer reused cid seq {} (intially {:?}) on {:?}",
+                    client.conn.trace_id(),
+                    cid_seq,
+                    old,
+                    new
+                );
+            },
+
+            quiche::PathEvent::PeerMigrated(local_addr, peer_addr) => {
+                info!(
+                    "{} Connection migrated to ({}, {})",
+                    client.conn.trace_id(),
+                    local_addr,
+                    peer_addr
+                );
+            },
+        }
+    }
 }
