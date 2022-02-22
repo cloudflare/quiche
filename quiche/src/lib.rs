@@ -355,6 +355,7 @@ use qlog::events::EventType;
 use qlog::events::RawInfo;
 
 use std::cmp;
+use std::convert::TryInto;
 use std::time;
 
 use std::net::SocketAddr;
@@ -497,6 +498,12 @@ pub enum Error {
 
     /// Error in congestion control.
     CongestionControl,
+
+    /// Too many identifiers were provided.
+    IdLimit,
+
+    /// Not enough available identifiers.
+    OutOfIdentifiers,
 }
 
 impl Error {
@@ -532,6 +539,8 @@ impl Error {
             Error::CongestionControl => -14,
             Error::StreamStopped { .. } => -15,
             Error::StreamReset { .. } => -16,
+            Error::IdLimit => -17,
+            Error::OutOfIdentifiers => -18,
         }
     }
 }
@@ -552,6 +561,13 @@ impl std::convert::From<octets::BufferTooShortError> for Error {
     fn from(_err: octets::BufferTooShortError) -> Self {
         Error::BufferTooShort
     }
+}
+
+/// A QUIC connection event.
+#[derive(Clone, Debug, PartialEq)]
+pub enum QuicEvent {
+    /// A connection ID-specific event.
+    ConnectionId(ConnectionIdEvent),
 }
 
 /// Ancillary information about incoming packets.
@@ -640,6 +656,8 @@ pub struct Config {
 
     max_connection_window: u64,
     max_stream_window: u64,
+
+    events: bool,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -695,6 +713,8 @@ impl Config {
 
             max_connection_window: MAX_CONNECTION_WINDOW,
             max_stream_window: stream::MAX_STREAM_WINDOW,
+
+            events: false,
         })
     }
 
@@ -964,6 +984,15 @@ impl Config {
         self.local_transport_params.max_ack_delay = v;
     }
 
+    /// Sets the `active_connection_id_limit` transport parameter.
+    ///
+    /// The default value is `2`. Lower values will be ignored.
+    pub fn set_active_connection_id_limit(&mut self, v: u64) {
+        if v >= 2 {
+            self.local_transport_params.active_conn_id_limit = v;
+        }
+    }
+
     /// Sets the `disable_active_migration` transport parameter.
     ///
     /// The default value is `false`.
@@ -1034,6 +1063,23 @@ impl Config {
     pub fn set_max_stream_window(&mut self, v: u64) {
         self.max_stream_window = v;
     }
+
+    /// Sets the initial stateless reset token.
+    ///
+    /// This value is only advertised by servers. Setting a stateless retry
+    /// token as a client has no effect on the connection.
+    ///
+    /// The default value is `None`.
+    pub fn set_stateless_reset_token(&mut self, v: Option<u128>) {
+        self.local_transport_params.stateless_reset_token = v;
+    }
+
+    /// Configures the generation of QUIC events.
+    ///
+    /// The default value is `false`.
+    pub fn enable_events(&mut self, v: bool) {
+        self.events = v;
+    }
 }
 
 /// A QUIC connection.
@@ -1041,11 +1087,8 @@ pub struct Connection {
     /// QUIC wire version used for the connection.
     version: u32,
 
-    /// Peer's connection ID.
-    dcid: ConnectionId<'static>,
-
-    /// Local connection ID.
-    scid: ConnectionId<'static>,
+    /// Connection Identifiers.
+    ids: cid::ConnectionIdentifiers,
 
     /// Unique opaque ID for the connection that can be used for logging.
     trace_id: String,
@@ -1498,11 +1541,24 @@ impl Connection {
         let scid_as_hex: Vec<String> =
             scid.iter().map(|b| format!("{:02x}", b)).collect();
 
+        let mut ids = cid::ConnectionIdentifiers::new(
+            config.local_transport_params.active_conn_id_limit as usize,
+            config.events,
+        );
+        let reset_token = if is_server {
+            config.local_transport_params.stateless_reset_token
+        } else {
+            None
+        };
+
+        // XXX: We identify our only path as 0.
+        let owned_scid = scid.clone().into_owned();
+        ids.new_scid(owned_scid, reset_token, false, Some(0), false)?;
+
         let mut conn = Box::pin(Connection {
             version: config.version,
 
-            dcid: ConnectionId::default(),
-            scid: scid.to_vec().into(),
+            ids,
 
             trace_id: scid_as_hex.join(""),
 
@@ -1632,13 +1688,13 @@ impl Connection {
                 .original_destination_connection_id = Some(odcid.to_vec().into());
 
             conn.local_transport_params.retry_source_connection_id =
-                Some(scid.to_vec().into());
+                Some(conn.ids.get_scid(0)?.cid.to_vec().into());
 
             conn.did_retry = true;
         }
 
         conn.local_transport_params.initial_source_connection_id =
-            Some(scid.to_vec().into());
+            Some(conn.ids.get_scid(0)?.cid.to_vec().into());
 
         let conn_ptr = &conn as &Connection as *const Connection;
         conn.handshake.init(conn_ptr, is_server)?;
@@ -1660,7 +1716,8 @@ impl Connection {
                 conn.is_server,
             )?;
 
-            conn.dcid = dcid.to_vec().into();
+            let reset_token = conn.peer_transport_params.stateless_reset_token;
+            conn.set_initial_dcid(dcid.to_vec().into(), reset_token)?;
 
             conn.pkt_num_spaces[packet::EPOCH_INITIAL].crypto_open =
                 Some(aead_open);
@@ -1930,8 +1987,8 @@ impl Connection {
 
         let mut b = octets::OctetsMut::with_slice(buf);
 
-        let mut hdr =
-            Header::from_bytes(&mut b, self.scid.len()).map_err(|e| {
+        let mut hdr = Header::from_bytes(&mut b, self.source_id()?.len())
+            .map_err(|e| {
                 drop_pkt_on_err(
                     e,
                     self.recv_count,
@@ -1957,11 +2014,11 @@ impl Connection {
                 return Err(Error::Done);
             }
 
-            if hdr.dcid != self.scid {
+            if hdr.dcid != self.source_id()? {
                 return Err(Error::Done);
             }
 
-            if hdr.scid != self.dcid {
+            if hdr.scid != self.destination_id()? {
                 return Err(Error::Done);
             }
 
@@ -2007,7 +2064,7 @@ impl Connection {
 
             // Derive Initial secrets based on the new version.
             let (aead_open, aead_seal) = crypto::derive_initial_key_material(
-                &self.dcid,
+                &self.destination_id()?,
                 self.version,
                 self.is_server,
             )?;
@@ -2044,8 +2101,12 @@ impl Connection {
             }
 
             // Check if Retry packet is valid.
-            if packet::verify_retry_integrity(&b, &self.dcid, self.version)
-                .is_err()
+            if packet::verify_retry_integrity(
+                &b,
+                &self.destination_id()?,
+                self.version,
+            )
+            .is_err()
             {
                 return Err(Error::Done);
             }
@@ -2056,11 +2117,11 @@ impl Connection {
             self.did_retry = true;
 
             // Remember peer's new connection ID.
-            self.odcid = Some(self.dcid.clone());
+            self.odcid = Some(self.destination_id()?.into_owned());
 
-            self.dcid = hdr.scid.clone();
+            self.set_initial_dcid(hdr.scid.clone(), None)?;
 
-            self.rscid = Some(self.dcid.clone());
+            self.rscid = Some(self.destination_id()?.into_owned());
 
             // Derive Initial secrets using the new connection ID.
             let (aead_open, aead_seal) = crypto::derive_initial_key_material(
@@ -2238,18 +2299,21 @@ impl Connection {
 
         if !self.is_server && !self.got_peer_conn_id {
             if self.odcid.is_none() {
-                self.odcid = Some(self.dcid.clone());
+                self.odcid = Some(self.destination_id()?.into_owned());
             }
 
             // Replace the randomly generated destination connection ID with
             // the one supplied by the server.
-            self.dcid = hdr.scid.clone();
+            self.set_initial_dcid(
+                hdr.scid.clone(),
+                self.peer_transport_params.stateless_reset_token,
+            )?;
 
             self.got_peer_conn_id = true;
         }
 
         if self.is_server && !self.got_peer_conn_id {
-            self.dcid = hdr.scid.clone();
+            self.set_initial_dcid(hdr.scid.clone(), None)?;
 
             if !self.did_retry &&
                 (self.version >= PROTOCOL_VERSION_DRAFT28 ||
@@ -2285,7 +2349,7 @@ impl Connection {
                 ack_elicited = true;
             }
 
-            if let Err(e) = self.process_frame(frame, epoch, now) {
+            if let Err(e) = self.process_frame(frame, &hdr, epoch, now) {
                 frame_processing_err = Some(e);
                 break;
             }
@@ -2739,6 +2803,14 @@ impl Connection {
                     self.almost_full = true;
                 },
 
+                frame::Frame::NewConnectionId { seq_num, .. } => {
+                    self.ids.mark_new_scids(seq_num, true);
+                },
+
+                frame::Frame::RetireConnectionId { seq_num } => {
+                    self.ids.mark_retire_dcids(seq_num, true);
+                },
+
                 _ => (),
             }
         }
@@ -2761,8 +2833,8 @@ impl Connection {
 
             version: self.version,
 
-            dcid: ConnectionId::from_ref(&self.dcid),
-            scid: ConnectionId::from_ref(&self.scid),
+            dcid: self.destination_id()?,
+            scid: self.source_id()?,
 
             pkt_num: 0,
             pkt_num_len: pn_len,
@@ -2781,6 +2853,22 @@ impl Connection {
         };
 
         hdr.to_bytes(&mut b)?;
+
+        let hdr_trace = if log::max_level() == log::LevelFilter::Trace {
+            Some(format!("{:?}", hdr))
+        } else {
+            None
+        };
+        let hdr_ty = hdr.ty;
+
+        #[cfg(feature = "qlog")]
+        let qlog_pkt_hdr = qlog::events::quic::PacketHeader::with_type(
+            hdr.ty.to_qlog(),
+            pn,
+            Some(hdr.version),
+            Some(&hdr.scid),
+            Some(&hdr.dcid),
+        );
 
         // Calculate the space required for the packet, including the header
         // the payload length, the packet number and the AEAD overhead.
@@ -2855,6 +2943,21 @@ impl Connection {
 
             if push_frame_to_pkt!(b, frames, frame, left) {
                 self.pkt_num_spaces[epoch].ack_elicited = false;
+            }
+        }
+
+        if pkt_type == packet::Type::Short && !is_closing {
+            // Create NEW_CONNECTION_ID frames as needed.
+            for seq_num in self.ids.new_scids().map(|s| *s).collect::<Vec<u64>>()
+            {
+                let frame = self.ids.get_new_connection_id_frame_for(seq_num)?;
+
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    self.ids.mark_new_scids(seq_num, false);
+
+                    ack_eliciting = true;
+                    in_flight = true;
+                }
             }
         }
 
@@ -3029,6 +3132,18 @@ impl Connection {
 
                     ack_eliciting = true;
                     in_flight = true;
+                }
+            }
+
+            // Create RETIRE_CONNECTION_ID frames as needed.
+            for seq_num in
+                self.ids.retire_dcids().map(|s| *s).collect::<Vec<u64>>()
+            {
+                let frame = frame::Frame::RetireConnectionId { seq_num };
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    ack_eliciting = true;
+                    in_flight = true;
+                    self.ids.mark_retire_dcids(seq_num, false);
                 }
             }
         }
@@ -3413,9 +3528,9 @@ impl Connection {
         }
 
         trace!(
-            "{} tx pkt {:?} len={} pn={}",
+            "{} tx pkt {} len={} pn={}",
             self.trace_id,
-            hdr,
+            hdr_trace.unwrap_or("".to_string()),
             payload_len,
             pn
         );
@@ -3432,14 +3547,6 @@ impl Connection {
         }
 
         qlog_with_type!(QLOG_PACKET_TX, self.qlog, q, {
-            let qlog_pkt_hdr = qlog::events::quic::PacketHeader::with_type(
-                hdr.ty.to_qlog(),
-                pn,
-                Some(hdr.version),
-                Some(&hdr.scid),
-                Some(&hdr.dcid),
-            );
-
             // Qlog packet raw info described at
             // https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema-00#section-5.1
             //
@@ -3524,7 +3631,7 @@ impl Connection {
         }
 
         // On the client, drop initial state after sending an Handshake packet.
-        if !self.is_server && hdr.ty == packet::Type::Handshake {
+        if !self.is_server && hdr_ty == packet::Type::Handshake {
             self.drop_epoch_state(packet::EPOCH_INITIAL, now);
         }
 
@@ -4401,23 +4508,27 @@ impl Connection {
         match self.peer_transport_params.max_datagram_frame_size {
             None => None,
             Some(peer_frame_len) => {
-                // Start from the maximum packet size...
-                let mut max_len = self.max_send_udp_payload_size();
-                // ...subtract the Short packet header overhead...
-                // (1 byte of pkt_len + len of dcid)
-                max_len = max_len.saturating_sub(1 + self.dcid.len());
-                // ...subtract the packet number (max len)...
-                max_len = max_len.saturating_sub(packet::MAX_PKT_NUM_LEN);
-                // ...subtract the crypto overhead...
-                max_len = max_len.saturating_sub(
-                    self.pkt_num_spaces[packet::EPOCH_APPLICATION]
-                        .crypto_overhead()?,
-                );
-                // ...clamp to what peer can support...
-                max_len = cmp::min(peer_frame_len as usize, max_len);
-                // ...subtract frame overhead, checked for underflow.
-                // (1 byte of frame type + len of length )
-                max_len.checked_sub(1 + frame::MAX_DGRAM_OVERHEAD)
+                if let Ok(dcid) = self.destination_id() {
+                    // Start from the maximum packet size...
+                    let mut max_len = self.max_send_udp_payload_size();
+                    // ...subtract the Short packet header overhead...
+                    // (1 byte of pkt_len + len of dcid)
+                    max_len = max_len.saturating_sub(1 + dcid.len());
+                    // ...subtract the packet number (max len)...
+                    max_len = max_len.saturating_sub(packet::MAX_PKT_NUM_LEN);
+                    // ...subtract the crypto overhead...
+                    max_len = max_len.saturating_sub(
+                        self.pkt_num_spaces[packet::EPOCH_APPLICATION]
+                            .crypto_overhead()?,
+                    );
+                    // ...clamp to what peer can support...
+                    max_len = cmp::min(peer_frame_len as usize, max_len);
+                    // ...subtract frame overhead, checked for underflow.
+                    // (1 byte of frame type + len of length )
+                    max_len.checked_sub(1 + frame::MAX_DGRAM_OVERHEAD)
+                } else {
+                    None
+                }
             },
         }
     }
@@ -4523,6 +4634,120 @@ impl Connection {
         }
     }
 
+    /// Provides additional source Connection IDs that the peer can use to reach
+    /// this host.
+    ///
+    /// This triggers sending NEW_CONNECTION_ID frames if the provided Source
+    /// Connection ID is not already present. In the case the caller tries to
+    /// reuse a Connection ID with a different reset token, this raises an
+    /// `InvalidState`.
+    ///
+    /// At any time, the peer cannot have more Destination Connection IDs than
+    /// the maximum number of active Connection IDs it negotiated. In such case
+    /// (i.e., when [`spare_scid_spots()`] returns 0), if the host agrees to
+    /// request the removal of previous connection IDs, it sets the
+    /// `retire_if_needed` parameter. Otherwhise, an [`IdLimit`] is returned.
+    ///
+    /// Note that setting `retire_if_needed` does not prevent this function from
+    /// returning an [`IdLimit`] in the case the caller wants to retire still
+    /// unannounced Connection IDs.
+    ///
+    /// The caller is responsible from ensuring that the provided `scid` is not
+    /// repeated several times over the connection. quiche ensures that as long
+    /// as the provided Connection ID is still in use (i.e., not retired), it
+    /// does not assign a different sequence number.
+    ///
+    /// Note that if the host uses zero-length Source Connection IDs, it cannot
+    /// advertise Source Connection IDs and calling this method returns an
+    /// [`InvalidState`].
+    ///
+    /// Returns the sequence number associated to the provided Connection ID.
+    ///
+    /// [`spare_scid_spots()`]: struct.Connection.html#method.spare_scid_spots
+    /// [`IdLimit`]: enum.Error.html#IdLimit
+    /// [`InvalidState`]: enum.Error.html#InvalidState
+    pub fn new_source_cid(
+        &mut self, scid: &ConnectionId, reset_token: u128, retire_if_needed: bool,
+    ) -> Result<u64> {
+        self.ids.new_scid(
+            scid.to_vec().into(),
+            Some(reset_token),
+            true,
+            None,
+            retire_if_needed,
+        )
+    }
+
+    /// Returns the number of source Connection IDs that are active. This is
+    /// only meaningful if the host uses non-zero length Source Connection IDs.
+    pub fn active_source_cids(&self) -> usize {
+        self.ids.active_source_cids()
+    }
+
+    /// Returns the maximum number of concurrently active source Connection IDs
+    /// that can be provided to the peer.
+    pub fn max_active_source_cids(&self) -> usize {
+        self.peer_transport_params.active_conn_id_limit as usize
+    }
+
+    /// Requests the retirement of the destination Connection ID used by the
+    /// host to reach its peer.
+    ///
+    /// This triggers sending RETIRE_CONNECTION_ID frames.
+    ///
+    /// If the application tries to retire a non-existing Destination Connection
+    /// ID sequence number, or if it uses zero-length Destination Connection ID,
+    /// this method returns an [`InvalidState`].
+    ///
+    /// At any time, the host must have at least one Destination ID. If the
+    /// application tries to retire the last one, or if the caller tries to
+    /// retire the destination Connection ID used by the current active path
+    /// while having neither spare Destination Connection IDs nor validated
+    /// network paths, this method returns an [`OutOfIdentifiers`]. This
+    /// behavior prevents the caller from stalling the connection due to the
+    /// lack of validated path to send non-probing packets.
+    ///
+    /// [`InvalidState`]: enum.Error.html#InvalidState
+    /// [`OutOfIdentifiers`]: enum.Error.html#OutOfIdentifiers
+    pub fn retire_destination_cid(&mut self, dcid_seq: u64) -> Result<()> {
+        if self.ids.zero_length_dcid() {
+            return Err(Error::InvalidState);
+        }
+
+        if self.ids.lowest_available_dcid_seq().is_none() {
+            return Err(Error::OutOfIdentifiers);
+        }
+        if let Some(_) = self.ids.retire_dcid(dcid_seq)? {
+            // Let's find an available DCID to associate to that path.
+            let dcid_seq = self.ids.lowest_available_dcid_seq();
+            if let Some(dcid_seq) = dcid_seq {
+                self.ids.link_dcid_to_path_id(dcid_seq, 0)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Processes QUIC-specific events.
+    ///
+    /// On success it returns a [`QuicEvent`], or [`Done`] when there are no
+    /// events to report. Please refer to [`QuicEvent`] for the exhaustive event
+    /// list.
+    ///
+    /// Note that all events are edge-triggered, meaning that once reported they
+    /// will not be reported again by calling this method again, until the event
+    /// is re-armed.
+    ///
+    /// [`QuicEvent`]: enum.QuicEvent.html
+    /// [`Done`]: enum.Error.html#variant.Done
+    pub fn poll(&mut self) -> Result<QuicEvent> {
+        if let Some(ce) = self.ids.pop_event() {
+            return Ok(QuicEvent::ConnectionId(ce));
+        }
+
+        Err(Error::Done)
+    }
+
     /// Closes the connection with the given error and reason.
     ///
     /// The `app` parameter specifies whether an application close should be
@@ -4609,8 +4834,9 @@ impl Connection {
     /// Note that the value returned can change throughout the connection's
     /// lifetime.
     #[inline]
-    pub fn source_id(&self) -> ConnectionId {
-        ConnectionId::from_ref(self.scid.as_ref())
+    pub fn source_id(&self) -> Result<ConnectionId> {
+        let e = self.ids.oldest_scid()?;
+        Ok(ConnectionId::from_ref(e.cid.as_ref()))
     }
 
     /// Returns the destination connection ID.
@@ -4618,8 +4844,17 @@ impl Connection {
     /// Note that the value returned can change throughout the connection's
     /// lifetime.
     #[inline]
-    pub fn destination_id(&self) -> ConnectionId {
-        ConnectionId::from_ref(self.dcid.as_ref())
+    pub fn destination_id(&self) -> Result<ConnectionId> {
+        let e = self.ids.oldest_dcid()?;
+        Ok(ConnectionId::from_ref(e.cid.as_ref()))
+    }
+
+    /// Returns the number of source Connection IDs that can still be provided
+    /// to the peer without exceeding the limit it advertised.
+    #[inline]
+    pub fn spare_scid_spots(&self) -> u64 {
+        let advertised = self.ids.active_source_cids() as u64;
+        self.peer_transport_params.active_conn_id_limit - advertised
     }
 
     /// Returns true if the connection handshake is complete.
@@ -4779,7 +5014,7 @@ impl Connection {
         {
             // Validate initial_source_connection_id.
             match &peer_params.initial_source_connection_id {
-                Some(v) if v != &self.dcid =>
+                Some(v) if v != &self.destination_id()? =>
                     return Err(Error::InvalidTransportParam),
 
                 Some(_) => (),
@@ -4852,6 +5087,10 @@ impl Connection {
 
         self.recovery
             .update_max_datagram_size(peer_params.max_udp_payload_size as usize);
+
+        // Record the max_active_conn_id parameter advertised by the peer.
+        self.ids
+            .set_source_conn_id_limit(peer_params.active_conn_id_limit);
 
         self.peer_transport_params = peer_params;
     }
@@ -4984,7 +5223,9 @@ impl Connection {
                 self.streams.has_almost_full() ||
                 self.streams.has_blocked() ||
                 self.streams.has_reset() ||
-                self.streams.has_stopped())
+                self.streams.has_stopped() ||
+                self.ids.has_new_scids() ||
+                self.ids.has_retire_dcids())
         {
             // Only clients can send 0-RTT packets.
             if !self.is_server && self.is_in_early_data() {
@@ -5013,7 +5254,8 @@ impl Connection {
 
     /// Processes an incoming frame.
     fn process_frame(
-        &mut self, frame: frame::Frame, epoch: packet::Epoch, now: time::Instant,
+        &mut self, frame: frame::Frame, hdr: &packet::Header,
+        epoch: packet::Epoch, now: time::Instant,
     ) -> Result<()> {
         trace!("{} rx frm {:?}", self.trace_id, frame);
 
@@ -5317,11 +5559,43 @@ impl Connection {
                     return Err(Error::InvalidFrame);
                 },
 
-            // TODO: implement connection migration
-            frame::Frame::NewConnectionId { .. } => (),
+            frame::Frame::NewConnectionId {
+                seq_num,
+                retire_prior_to,
+                conn_id,
+                reset_token,
+            } => {
+                if self.ids.zero_length_dcid() {
+                    return Err(Error::InvalidState);
+                }
+                let retired_path_ids = self.ids.new_dcid(
+                    conn_id.into(),
+                    seq_num,
+                    u128::from_be_bytes(reset_token),
+                    retire_prior_to,
+                )?;
+                for (dcid_seq, _) in retired_path_ids {
+                    if let Some(new_dcid_seq) =
+                        self.ids.lowest_available_dcid_seq()
+                    {
+                        self.ids.link_dcid_to_path_id(new_dcid_seq, 0)?;
+                        trace!(
+                            "Path ID {} changed DCID: old seq num {} new seq num {}",
+                            0, dcid_seq, new_dcid_seq,
+                        );
+                        break;
+                    }
+                }
+            },
 
-            // TODO: implement connection migration
-            frame::Frame::RetireConnectionId { .. } => (),
+            frame::Frame::RetireConnectionId { seq_num } => {
+                if self.ids.zero_length_scid() {
+                    return Err(Error::InvalidState);
+                }
+                if let Some(_) = self.ids.retire_scid(seq_num, &hdr.dcid)? {
+                    // XXX: handle this with multiple paths.
+                }
+            },
 
             frame::Frame::PathChallenge { data } => {
                 self.challenge = Some(data);
@@ -5499,6 +5773,13 @@ impl Connection {
             (self.tx_data - self.last_tx_data) <
                 self.recovery.cwnd_available() as u64 &&
             self.recovery.cwnd_available() > 0
+    }
+
+    fn set_initial_dcid(
+        &mut self, cid: ConnectionId<'static>, reset_token: Option<u128>,
+    ) -> Result<()> {
+        self.ids.set_initial_dcid(cid.clone(), reset_token, Some(0));
+        Ok(())
     }
 }
 
@@ -5708,7 +5989,7 @@ impl std::fmt::Debug for Stats {
 struct TransportParams {
     pub original_destination_connection_id: Option<ConnectionId<'static>>,
     pub max_idle_timeout: u64,
-    pub stateless_reset_token: Option<Vec<u8>>,
+    pub stateless_reset_token: Option<u128>,
     pub max_udp_payload_size: u64,
     pub initial_max_data: u64,
     pub initial_max_stream_data_bidi_local: u64,
@@ -5782,7 +6063,12 @@ impl TransportParams {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    tp.stateless_reset_token = Some(val.get_bytes(16)?.to_vec());
+                    tp.stateless_reset_token = Some(u128::from_be_bytes(
+                        val.get_bytes(16)?
+                            .to_vec()
+                            .try_into()
+                            .map_err(|_| Error::BufferTooShort)?,
+                    ));
                 },
 
                 0x0003 => {
@@ -5927,8 +6213,8 @@ impl TransportParams {
 
         if is_server {
             if let Some(ref token) = tp.stateless_reset_token {
-                TransportParams::encode_param(&mut b, 0x0002, token.len())?;
-                b.put_bytes(token)?;
+                TransportParams::encode_param(&mut b, 0x0002, 16)?;
+                b.put_bytes(&token.to_be_bytes())?;
             }
         }
 
@@ -6067,7 +6353,7 @@ impl TransportParams {
             ty: Some(qlog::TokenType::StatelessReset),
             length: None,
             data: qlog::HexSlice::maybe_string(
-                self.stateless_reset_token.as_ref(),
+                self.stateless_reset_token.map(|s| s.to_be_bytes()).as_ref(),
             ),
             details: None,
         });
@@ -6363,8 +6649,8 @@ pub mod testing {
         let hdr = Header {
             ty: pkt_type,
             version: conn.version,
-            dcid: ConnectionId::from_ref(&conn.dcid),
-            scid: ConnectionId::from_ref(&conn.scid),
+            dcid: ConnectionId::from_ref(conn.ids.oldest_dcid()?.cid.as_ref()),
+            scid: ConnectionId::from_ref(conn.ids.oldest_scid()?.cid.as_ref()),
             pkt_num: 0,
             pkt_num_len: pn_len,
             token: conn.token.clone(),
@@ -6416,7 +6702,8 @@ pub mod testing {
     ) -> Result<Vec<frame::Frame>> {
         let mut b = octets::OctetsMut::with_slice(&mut buf[..len]);
 
-        let mut hdr = Header::from_bytes(&mut b, conn.scid.len()).unwrap();
+        let mut hdr =
+            Header::from_bytes(&mut b, conn.source_id()?.len()).unwrap();
 
         let epoch = hdr.ty.to_epoch()?;
 
@@ -6445,6 +6732,20 @@ pub mod testing {
 
         Ok(frames)
     }
+
+    pub fn create_cid_and_reset_token(
+        cid_len: usize,
+    ) -> (ConnectionId<'static>, u128) {
+        let mut cid = vec![0; cid_len];
+        rand::rand_bytes(&mut cid[..]);
+        let cid = ConnectionId::from_ref(&cid).into_owned();
+
+        let mut reset_token = [0; 16];
+        rand::rand_bytes(&mut reset_token);
+        let reset_token = u128::from_be_bytes(reset_token);
+
+        (cid, reset_token)
+    }
 }
 
 #[cfg(test)]
@@ -6457,7 +6758,7 @@ mod tests {
         let tp = TransportParams {
             original_destination_connection_id: None,
             max_idle_timeout: 30,
-            stateless_reset_token: Some(vec![0xba; 16]),
+            stateless_reset_token: Some(u128::from_be_bytes([0xba; 16])),
             max_udp_payload_size: 23_421,
             initial_max_data: 424_645_563,
             initial_max_stream_data_bidi_local: 154_323_123,
@@ -8942,11 +9243,14 @@ mod tests {
         let pn = 0;
         let pn_len = packet::pkt_num_len(pn).unwrap();
 
+        let dcid = pipe.client.destination_id().unwrap();
+        let scid = pipe.client.source_id().unwrap();
+
         let hdr = Header {
             ty: packet::Type::Initial,
             version: pipe.client.version,
-            dcid: ConnectionId::from_ref(&pipe.client.dcid),
-            scid: ConnectionId::from_ref(&pipe.client.scid),
+            dcid: ConnectionId::from_ref(&dcid),
+            scid: ConnectionId::from_ref(&scid),
             pkt_num: 0,
             pkt_num_len: pn_len,
             token: pipe.client.token.clone(),
@@ -11381,7 +11685,340 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    /// Tests that when the client provides a new ConnectionId, it eventually
+    /// reaches the server and notifies the application.
+    fn send_connection_ids() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.verify_peer(false);
+        config.set_active_connection_id_limit(3);
+        config.enable_events(true);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // So far, there should not have any QUIC event.
+        assert_eq!(pipe.client.poll(), Err(Error::Done));
+        assert_eq!(pipe.server.poll(), Err(Error::Done));
+        assert_eq!(pipe.client.spare_scid_spots(), 2);
+
+        let (scid, reset_token) = testing::create_cid_and_reset_token(16);
+        assert_eq!(pipe.client.new_source_cid(&scid, reset_token, false), Ok(1));
+
+        // Let exchange packets over the connection.
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // At this point, the server should be notified that it has a new CID.
+        assert_eq!(
+            pipe.server.poll(),
+            Ok(QuicEvent::ConnectionId(ConnectionIdEvent::NewDestination(
+                1,
+                scid,
+                reset_token
+            )))
+        );
+        assert_eq!(pipe.server.poll(), Err(Error::Done));
+        assert_eq!(pipe.client.poll(), Err(Error::Done));
+        assert_eq!(pipe.client.spare_scid_spots(), 1);
+
+        // Now, a second CID can be provided.
+        let (scid, reset_token) = testing::create_cid_and_reset_token(16);
+        assert_eq!(pipe.client.new_source_cid(&scid, reset_token, false), Ok(2));
+
+        // Let exchange packets over the connection.
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // At this point, the server should be notified that it has a new CID.
+        assert_eq!(
+            pipe.server.poll(),
+            Ok(QuicEvent::ConnectionId(ConnectionIdEvent::NewDestination(
+                2,
+                scid,
+                reset_token
+            )))
+        );
+        assert_eq!(pipe.server.poll(), Err(Error::Done));
+        assert_eq!(pipe.client.poll(), Err(Error::Done));
+        assert_eq!(pipe.client.spare_scid_spots(), 0);
+
+        // If now the client tries to send another CID, it reports an error
+        // since it exceeds the limit of active CIDs.
+        let (scid, reset_token) = testing::create_cid_and_reset_token(16);
+        assert_eq!(
+            pipe.client.new_source_cid(&scid, reset_token, false),
+            Err(Error::IdLimit),
+        );
+    }
+
+    #[test]
+    /// Exercices the handling of NEW_CONNECTION_ID and RETIRE_CONNECTION_ID
+    /// frames.
+    fn connection_id_handling() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.verify_peer(false);
+        config.set_active_connection_id_limit(2);
+        config.enable_events(true);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // So far, there should not have any QUIC event.
+        assert_eq!(pipe.client.poll(), Err(Error::Done));
+        assert_eq!(pipe.server.poll(), Err(Error::Done));
+        assert_eq!(pipe.client.spare_scid_spots(), 1);
+
+        let scid = pipe.client.source_id().unwrap().into_owned();
+
+        let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
+        assert_eq!(
+            pipe.client.new_source_cid(&scid_1, reset_token_1, false),
+            Ok(1)
+        );
+
+        // Let exchange packets over the connection.
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // At this point, the server should be notified that it has a new CID.
+        assert_eq!(
+            pipe.server.poll(),
+            Ok(QuicEvent::ConnectionId(ConnectionIdEvent::NewDestination(
+                1,
+                scid_1.clone(),
+                reset_token_1
+            )))
+        );
+        assert_eq!(pipe.server.poll(), Err(Error::Done));
+        assert_eq!(pipe.client.poll(), Err(Error::Done));
+        assert_eq!(pipe.client.spare_scid_spots(), 0);
+
+        // Now we assume that the client wants to advertise more source
+        // Connection IDs than the advertised limit. This is valid if it
+        // requests its peer to retire enough Connection IDs to fit within the
+        // limits.
+
+        let (scid_2, reset_token_2) = testing::create_cid_and_reset_token(16);
+        assert_eq!(
+            pipe.client.new_source_cid(&scid_2, reset_token_2, true),
+            Ok(2)
+        );
+
+        // Let exchange packets over the connection.
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // At this point, the server is first notified that it cannot use ID 0
+        // anymore.
+        assert_eq!(
+            pipe.server.poll(),
+            Ok(QuicEvent::ConnectionId(
+                ConnectionIdEvent::RetiredDestination(0)
+            ))
+        );
+        // It also receives the new CID.
+        assert_eq!(
+            pipe.server.poll(),
+            Ok(QuicEvent::ConnectionId(ConnectionIdEvent::NewDestination(
+                2,
+                scid_2.clone(),
+                reset_token_2
+            )))
+        );
+        assert_eq!(pipe.server.poll(), Err(Error::Done));
+
+        // Client should have received a retired notification.
+        assert_eq!(
+            pipe.client.poll(),
+            Ok(QuicEvent::ConnectionId(ConnectionIdEvent::RetiredSource(
+                scid
+            )))
+        );
+        assert_eq!(pipe.client.poll(), Err(Error::Done));
+        assert_eq!(pipe.client.spare_scid_spots(), 0);
+
+        // The active Destination Connection ID of the server should now be the
+        // one with sequence number 1.
+        assert_eq!(pipe.server.destination_id().unwrap(), scid_1);
+
+        // Now tries to experience CID retirement. If the server tries to remove
+        // non-existing DCIDs, it fails.
+        assert_eq!(
+            pipe.server.retire_destination_cid(0),
+            Err(Error::InvalidState)
+        );
+        assert_eq!(
+            pipe.server.retire_destination_cid(3),
+            Err(Error::InvalidState)
+        );
+
+        // Now it removes DCID with sequence 1.
+        assert_eq!(pipe.server.retire_destination_cid(1), Ok(()));
+
+        // Let exchange packets over the connection.
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert_eq!(pipe.server.poll(), Err(Error::Done));
+        assert_eq!(
+            pipe.client.poll(),
+            Ok(QuicEvent::ConnectionId(ConnectionIdEvent::RetiredSource(
+                scid_1
+            ))),
+        );
+
+        assert_eq!(pipe.server.destination_id().unwrap(), scid_2);
+
+        // Trying to remove the last DCID triggers an error.
+        assert_eq!(
+            pipe.server.retire_destination_cid(2),
+            Err(Error::OutOfIdentifiers)
+        );
+    }
+
+    #[test]
+    fn lost_connection_id_frames() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.verify_peer(false);
+        config.set_active_connection_id_limit(2);
+        config.enable_events(true);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let scid = pipe.client.source_id().unwrap().into_owned();
+
+        let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
+        assert_eq!(
+            pipe.client.new_source_cid(&scid_1, reset_token_1, false),
+            Ok(1)
+        );
+
+        // Packets are sent, but never received.
+        testing::emit_flight(&mut pipe.client).unwrap();
+
+        // Wait until timer expires. Since the RTT is very low, wait a bit more.
+        let timer = pipe.client.timeout().unwrap();
+        std::thread::sleep(timer + time::Duration::from_millis(1));
+
+        pipe.client.on_timeout();
+
+        // Let exchange packets over the connection.
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // At this point, the server should be notified that it has a new CID.
+        assert_eq!(
+            pipe.server.poll(),
+            Ok(QuicEvent::ConnectionId(ConnectionIdEvent::NewDestination(
+                1,
+                scid_1.clone(),
+                reset_token_1
+            )))
+        );
+
+        // Now the server retires the first Destination CID.
+        assert_eq!(pipe.server.retire_destination_cid(0), Ok(()));
+
+        // But the packet never reaches the client.
+        testing::emit_flight(&mut pipe.server).unwrap();
+
+        // Wait until timer expires. Since the RTT is very low, wait a bit more.
+        let timer = pipe.server.timeout().unwrap();
+        std::thread::sleep(timer + time::Duration::from_millis(1));
+
+        pipe.server.on_timeout();
+
+        // Let exchange packets over the connection.
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Finally the client gets notified.
+        assert_eq!(
+            pipe.client.poll(),
+            Ok(QuicEvent::ConnectionId(ConnectionIdEvent::RetiredSource(
+                scid
+            ))),
+        );
+    }
+
+    #[test]
+    fn sending_duplicate_scids() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.verify_peer(false);
+        config.set_active_connection_id_limit(3);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
+        assert_eq!(
+            pipe.client.new_source_cid(&scid_1, reset_token_1, false),
+            Ok(1)
+        );
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Trying to send the same CID with a different reset token raises an
+        // InvalidState error.
+        let reset_token_2 = reset_token_1.wrapping_add(1);
+        assert_eq!(
+            pipe.client.new_source_cid(&scid_1, reset_token_2, false),
+            Err(Error::InvalidState),
+        );
+
+        // Retrying to send the exact same CID with the same token returns the
+        // previously assigned CID seq, but without sending anything.
+        assert_eq!(
+            pipe.client.new_source_cid(&scid_1, reset_token_1, false),
+            Ok(1)
+        );
+        assert_eq!(pipe.client.ids.has_new_scids(), false);
+
+        // Now retire this new CID.
+        assert_eq!(pipe.server.retire_destination_cid(1), Ok(()));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // It is up to the application to ensure that a given SCID is not reused
+        // later.
+        assert_eq!(
+            pipe.client.new_source_cid(&scid_1, reset_token_1, false),
+            Ok(2),
+        );
+    }
 }
+
+pub use crate::cid::ConnectionIdEvent;
 
 pub use crate::packet::ConnectionId;
 pub use crate::packet::Header;
@@ -11391,6 +12028,7 @@ pub use crate::recovery::CongestionControlAlgorithm;
 
 pub use crate::stream::StreamIter;
 
+mod cid;
 mod crypto;
 mod dgram;
 #[cfg(feature = "ffi")]

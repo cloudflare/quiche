@@ -48,6 +48,7 @@ pub struct CommonArgs {
     pub dgrams_enabled: bool,
     pub dgram_count: u64,
     pub dgram_data: String,
+    pub max_active_cids: u64,
 }
 
 /// Creates a new `CommonArgs` structure using the provided [`Docopt`].
@@ -68,6 +69,7 @@ pub struct CommonArgs {
 /// --dgram-proto PROTO         DATAGRAM application protocol.
 /// --dgram-count COUNT         Number of DATAGRAMs to send.
 /// --dgram-data DATA           DATAGRAM data to send.
+/// --max-active-cids NUM       Maximum number of active Connection IDs.
 ///
 /// [`Docopt`]: https://docs.rs/docopt/1.1.0/docopt/
 impl Args for CommonArgs {
@@ -143,6 +145,9 @@ impl Args for CommonArgs {
 
         let disable_hystart = args.get_bool("--disable-hystart");
 
+        let max_active_cids = args.get_str("--max-active-cids");
+        let max_active_cids = max_active_cids.parse::<u64>().unwrap();
+
         CommonArgs {
             alpns,
             max_data,
@@ -160,6 +165,7 @@ impl Args for CommonArgs {
             dgrams_enabled,
             dgram_count,
             dgram_data,
+            max_active_cids,
         }
     }
 }
@@ -183,6 +189,7 @@ impl Default for CommonArgs {
             dgrams_enabled: false,
             dgram_count: 0,
             dgram_data: "quack".to_string(),
+            max_active_cids: 2,
         }
     }
 }
@@ -216,6 +223,7 @@ Options:
   --no-grease              Don't send GREASE.
   --cc-algorithm NAME      Specify which congestion control algorithm to use [default: cubic].
   --disable-hystart        Disable HyStart++.
+  --max-active-cids NUM    The maximum number of active Connection IDs we can support [default: 2].
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
   --session-file PATH      File used to cache a TLS session for resumption.
@@ -360,6 +368,7 @@ Options:
   --dgram-data DATA           Data to send for certain types of DATAGRAM application protocol [default: brrr].
   --cc-algorithm NAME         Specify which congestion control algorithm to use [default: cubic].
   --disable-hystart           Disable HyStart++.
+  --max-active-cids NUM       The maximum number of active Connection IDs we can support [default: 2].
   -h --help                   Show this screen.
 ";
 

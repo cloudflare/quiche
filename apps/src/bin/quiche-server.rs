@@ -43,6 +43,9 @@ use quiche_apps::args::*;
 
 use quiche_apps::common::*;
 
+use quiche::ConnectionIdEvent;
+use quiche::QuicEvent;
+
 const MAX_BUF_SIZE: usize = 65535;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
@@ -91,6 +94,8 @@ fn main() {
     config.set_initial_max_streams_bidi(conn_args.max_streams_bidi);
     config.set_initial_max_streams_uni(conn_args.max_streams_uni);
     config.set_disable_active_migration(true);
+    config.set_active_connection_id_limit(conn_args.max_active_cids);
+    config.enable_events(true);
 
     config.set_max_connection_window(conn_args.max_window);
     config.set_max_stream_window(conn_args.max_stream_window);
@@ -133,6 +138,8 @@ fn main() {
     let conn_id_seed =
         ring::hmac::Key::generate(ring::hmac::HMAC_SHA256, &rng).unwrap();
 
+    let mut next_client_id = 0;
+    let mut clients_ids = ClientIdMap::new();
     let mut clients = ClientMap::new();
 
     let mut pkt_count = 0;
@@ -216,8 +223,8 @@ fn main() {
 
             // Lookup a connection based on the packet's connection ID. If there
             // is no connection matching, create a new one.
-            let client = if !clients.contains_key(&hdr.dcid) &&
-                !clients.contains_key(&conn_id)
+            let client = if !clients_ids.contains_key(&hdr.dcid) &&
+                !clients_ids.contains_key(&conn_id)
             {
                 if hdr.ty != quiche::Type::Initial {
                     error!("Packet is not Initial");
@@ -332,9 +339,11 @@ fn main() {
                     }
                 }
 
+                let id = next_client_id;
                 let client = Client {
                     conn,
                     http_conn: None,
+                    id,
                     partial_requests: HashMap::new(),
                     partial_responses: HashMap::new(),
                     siduck_conn: None,
@@ -342,15 +351,18 @@ fn main() {
                     bytes_sent: 0,
                 };
 
-                clients.insert(scid.clone(), client);
+                clients.insert(id, client);
+                clients_ids.insert(scid.clone(), id);
+                next_client_id += 1;
 
-                clients.get_mut(&scid).unwrap()
+                clients.get_mut(&id).unwrap()
             } else {
-                match clients.get_mut(&hdr.dcid) {
+                let cid = match clients_ids.get(&hdr.dcid) {
                     Some(v) => v,
 
-                    None => clients.get_mut(&conn_id).unwrap(),
-                }
+                    None => clients_ids.get(&conn_id).unwrap(),
+                };
+                clients.get_mut(cid).unwrap()
             };
 
             let recv_info = quiche::RecvInfo { from };
@@ -449,6 +461,41 @@ fn main() {
                     continue 'read;
                 }
             }
+
+            // Handle QUIC events.
+            while let Ok(qe) = client.conn.poll() {
+                match qe {
+                    QuicEvent::ConnectionId(
+                        ConnectionIdEvent::RetiredSource(cid),
+                    ) => {
+                        info!("Retiring source CID {:?}", cid);
+                        clients_ids.remove(&cid);
+                    },
+                    QuicEvent::ConnectionId(
+                        ConnectionIdEvent::NewDestination(seq, ..),
+                    ) => {
+                        info!("Received new destination CID with seq {}", seq);
+                    },
+                    QuicEvent::ConnectionId(
+                        ConnectionIdEvent::RetiredDestination(seq),
+                    ) => {
+                        info!("Retired destination CID with seq {}", seq);
+                    },
+                }
+            }
+
+            // Provides as many CIDs as possible.
+            while client.conn.active_source_cids() <
+                client.conn.max_active_source_cids()
+            {
+                let (scid, reset_token) = generate_cid_and_reset_token(&rng);
+                if let Err(_) =
+                    client.conn.new_source_cid(&scid, reset_token, false)
+                {
+                    break;
+                }
+                clients_ids.insert(scid, client.id);
+            }
         }
 
         // Generate outgoing QUIC packets for all active connections and send
@@ -519,6 +566,7 @@ fn main() {
 
             !c.conn.is_closed()
         });
+        clients_ids.retain(|_, client_id| clients.contains_key(client_id));
     }
 }
 
@@ -576,4 +624,17 @@ fn validate_token<'a>(
     }
 
     Some(quiche::ConnectionId::from_ref(&token[addr.len()..]))
+}
+
+/// Generate a new pair of Source Connection ID and reset token.
+fn generate_cid_and_reset_token<T: SecureRandom>(
+    rng: &T,
+) -> (quiche::ConnectionId<'static>, u128) {
+    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
+    rng.fill(&mut scid).unwrap();
+    let scid = scid.to_vec().into();
+    let mut reset_token = [0; 16];
+    rng.fill(&mut reset_token).unwrap();
+    let reset_token = u128::from_be_bytes(reset_token);
+    (scid, reset_token)
 }

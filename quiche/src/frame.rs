@@ -1100,12 +1100,21 @@ impl std::fmt::Debug for Frame {
                 write!(f, "STREAMS_BLOCKED type=uni limit={}", limit)?;
             },
 
-            Frame::NewConnectionId { .. } => {
-                write!(f, "NEW_CONNECTION_ID (TODO)")?;
+            Frame::NewConnectionId {
+                seq_num,
+                retire_prior_to,
+                conn_id,
+                reset_token,
+            } => {
+                write!(
+                    f,
+                    "NEW_CONNECTION_ID seq_num={} retire_prior_to={} conn_id={:02x?} reset_token={:02x?}",
+                    seq_num, retire_prior_to, conn_id, reset_token,
+                )?;
             },
 
-            Frame::RetireConnectionId { .. } => {
-                write!(f, "RETIRE_CONNECTION_ID (TODO)")?;
+            Frame::RetireConnectionId { seq_num } => {
+                write!(f, "RETIRE_CONNECTION_ID seq_num={}", seq_num)?;
             },
 
             Frame::PathChallenge { data } => {

@@ -329,6 +329,31 @@ pub extern fn quiche_config_set_max_stream_window(config: &mut Config, v: u64) {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_active_connection_id_limit(
+    config: &mut Config, v: u64,
+) {
+    config.set_active_connection_id_limit(v);
+}
+
+#[no_mangle]
+pub extern fn quiche_config_set_stateless_reset_token(
+    config: &mut Config, v: *const u8,
+) {
+    let reset_token = unsafe { slice::from_raw_parts(v, 16) };
+    let reset_token = match reset_token.try_into() {
+        Ok(rt) => rt,
+        Err(_) => unreachable!(),
+    };
+    let reset_token = u128::from_be_bytes(reset_token);
+    config.set_stateless_reset_token(Some(reset_token));
+}
+
+#[no_mangle]
+pub extern fn quiche_config_enable_events(config: &mut Config, v: bool) {
+    config.enable_events(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_free(config: *mut Config) {
     unsafe { Box::from_raw(config) };
 }
@@ -688,6 +713,63 @@ pub extern fn quiche_conn_send(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_new_source_id(
+    conn: &mut Connection, scid: *const u8, scid_len: size_t,
+    reset_token: *const u8, retire_if_needed: bool,
+) -> i64 {
+    let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
+    let scid = ConnectionId::from_ref(scid);
+
+    let reset_token = unsafe { slice::from_raw_parts(reset_token, 16) };
+    let reset_token = match reset_token.try_into() {
+        Ok(rt) => rt,
+        Err(_) => return -1,
+    };
+    let reset_token = u128::from_be_bytes(reset_token);
+
+    match conn.new_source_cid(&scid, reset_token, retire_if_needed) {
+        Ok(scid_seq) => scid_seq as i64,
+        Err(e) => e.to_c() as i64,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_active_source_cids(conn: &Connection) -> u64 {
+    conn.active_source_cids() as u64
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_max_active_source_cids(conn: &Connection) -> u64 {
+    conn.max_active_source_cids() as u64
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_retire_destination_cid(
+    conn: &mut Connection, dcid_seq: u64,
+) -> i64 {
+    match conn.retire_destination_cid(dcid_seq) {
+        Ok(()) => 0,
+        Err(e) => e.to_c() as i64,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_poll(
+    conn: &mut Connection, ev: *mut *const QuicEvent,
+) -> i64 {
+    match conn.poll() {
+        Ok(qe) => {
+            unsafe {
+                *ev = Box::into_raw(Box::new(qe));
+            }
+
+            0
+        },
+        Err(e) => e.to_c() as i64,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_stream_recv(
     conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: size_t,
     fin: &mut bool,
@@ -870,22 +952,30 @@ pub extern fn quiche_conn_trace_id(
 #[no_mangle]
 pub extern fn quiche_conn_source_id(
     conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
-) {
-    let conn_id = conn.source_id();
+) -> c_int {
+    let conn_id = match conn.source_id() {
+        Ok(cid) => cid,
+        Err(e) => return e.to_c() as c_int,
+    };
     let id = conn_id.as_ref();
     *out = id.as_ptr();
     *out_len = id.len();
+    0
 }
 
 #[no_mangle]
 pub extern fn quiche_conn_destination_id(
     conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
-) {
-    let conn_id = conn.destination_id();
+) -> c_int {
+    let conn_id = match conn.destination_id() {
+        Ok(cid) => cid,
+        Err(e) => return e.to_c() as c_int,
+    };
     let id = conn_id.as_ref();
 
     *out = id.as_ptr();
     *out_len = id.len();
+    0
 }
 
 #[no_mangle]

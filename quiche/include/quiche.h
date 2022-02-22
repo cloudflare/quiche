@@ -222,6 +222,15 @@ void quiche_config_set_max_connection_window(quiche_config *config, uint64_t v);
 // Sets the maximum stream window.
 void quiche_config_set_max_stream_window(quiche_config *config, uint64_t v);
 
+// Sets the limit of active connection IDs.
+void quiche_config_set_active_connection_id_limit(quiche_config *config, uint64_t v);
+
+// Sets the initial stateless reset token.
+void quiche_config_set_stateless_reset_token(quiche_config *config, const uint8_t *v);
+
+// Configures the generation of QUIC events.
+void quiche_config_enable_events(quiche_config *config, bool v);
+
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 
@@ -311,6 +320,28 @@ ssize_t quiche_conn_send(quiche_conn *conn, uint8_t *out, size_t out_len,
 // Returns the size of the send quantum, in bytes.
 size_t quiche_conn_send_quantum(quiche_conn *conn);
 
+// Provides additional source Connection IDs that the peer can use to reach
+// this host.
+int64_t quiche_conn_new_source_id(quiche_conn *conn, const uint8_t *scid,
+                                  size_t scid_len, const uint8_t *reset_token,
+                                  bool retire_if_needed);
+
+// Returns the number of source Connection IDs that are active.
+uint64_t quiche_conn_active_source_cids(quiche_conn *conn);
+
+// Returns the maximum number of concurrently active source Connection IDs that
+// can be provided to the peer.
+uint64_t quiche_conn_max_active_source_cids(quiche_conn *conn);
+
+// Requests the retirement of the destination Connection ID used by the host to
+// reach its peer.
+int64_t quiche_conn_retire_destination_cid(quiche_conn *conn, uint64_t dcid_seq);
+
+typedef struct QuicEvent quiche_quic_event;
+
+// Processes QUIC-specific events.
+int64_t quiche_conn_poll(quiche_conn *conn, quiche_quic_event **ev);
+
 // Reads contiguous data from a stream.
 ssize_t quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
                                 uint8_t *out, size_t buf_len, bool *fin);
@@ -367,10 +398,10 @@ int quiche_conn_close(quiche_conn *conn, bool app, uint64_t err,
 void quiche_conn_trace_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns the source connection ID.
-void quiche_conn_source_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
+int quiche_conn_source_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns the destination connection ID.
-void quiche_conn_destination_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
+int quiche_conn_destination_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns the negotiated ALPN protocol.
 void quiche_conn_application_proto(quiche_conn *conn, const uint8_t **out,

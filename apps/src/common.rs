@@ -89,6 +89,8 @@ pub struct Client {
 
     pub http_conn: Option<Box<dyn HttpConn>>,
 
+    pub id: u64,
+
     pub siduck_conn: Option<SiDuckConn>,
 
     pub app_proto_selected: bool,
@@ -100,7 +102,8 @@ pub struct Client {
     pub bytes_sent: usize,
 }
 
-pub type ClientMap = HashMap<ConnectionId<'static>, Client>;
+pub type ClientIdMap = HashMap<ConnectionId<'static>, u64>;
+pub type ClientMap = HashMap<u64, Client>;
 
 /// Makes a buffered writer for a resource with a target URL.
 ///
