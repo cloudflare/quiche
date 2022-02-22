@@ -359,7 +359,7 @@ mod tests {
                 now,
                 "",
             ),
-            Ok(()),
+            Ok((0, 0)),
         );
 
         assert_eq!(r.app_limited(), true);
