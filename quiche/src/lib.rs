@@ -5553,6 +5553,11 @@ pub struct Stats {
     pub pmtu: usize,
 
     /// The most recent data delivery rate estimate in bytes/s.
+    ///
+    /// Note that this value could be inaccurate if the application does not
+    /// respect pacing hints (see [`SendInfo.at`]).
+    ///
+    /// [`SendInfo.at`]: struct.SendInfo.html#structfield.at
     pub delivery_rate: u64,
 
     /// The maximum idle timeout.

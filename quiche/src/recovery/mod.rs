@@ -293,8 +293,6 @@ impl Recovery {
             self.set_loss_detection_timer(handshake_status, now);
         }
 
-        self.sent[epoch].push_back(pkt);
-
         // HyStart++: Start of the round in a slow start.
         if self.hystart.enabled() &&
             epoch == packet::EPOCH_APPLICATION &&
@@ -315,6 +313,10 @@ impl Recovery {
         }
 
         self.schedule_next_packet(epoch, now, sent_bytes);
+
+        pkt.time_sent = self.get_packet_send_time();
+
+        self.sent[epoch].push_back(pkt);
 
         self.bytes_sent += sent_bytes;
         trace!("{} {:?}", trace_id, self);
@@ -483,7 +485,10 @@ impl Recovery {
         }
 
         if largest_newly_acked_pkt_num == largest_acked && has_ack_eliciting {
-            let latest_rtt = now - largest_newly_acked_sent_time;
+            // The packet's sent time could be in the future if pacing is used
+            // and the network has a very short RTT.
+            let latest_rtt =
+                now.saturating_duration_since(largest_newly_acked_sent_time);
 
             let ack_delay = if epoch == packet::EPOCH_APPLICATION {
                 Duration::from_micros(ack_delay)
