@@ -126,7 +126,7 @@ jobs:
           args: --target=${{ matrix.target }} --verbose
 
   quiche_windows:
-    runs-on: windows-latest
+    runs-on: windows-2019
     strategy:
       matrix:
         target: ["x86_64-pc-windows-msvc", "i686-pc-windows-msvc"]
