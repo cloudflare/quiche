@@ -155,7 +155,7 @@ impl Context {
         }
     }
 
-    #[cfg(feature = "boring")]
+    #[cfg(feature = "boring-sys")]
     pub fn from_boring(mut ssl_ctx: boring::ssl::SslContext) -> Context {
         use foreign_types_shared::ForeignTypeRef;
         let mut ctx = Context(ssl_ctx.as_mut().as_ptr() as _);
