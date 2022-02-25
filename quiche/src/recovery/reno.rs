@@ -96,8 +96,8 @@ fn on_packet_acked(
         r.bytes_acked_ca += packet.size;
 
         if r.bytes_acked_ca >= r.congestion_window {
-            r.congestion_window += r.max_datagram_size;
             r.bytes_acked_ca -= r.congestion_window;
+            r.congestion_window += r.max_datagram_size;
         }
     }
 }
