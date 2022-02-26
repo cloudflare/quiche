@@ -341,7 +341,9 @@ impl Recovery {
             self.bytes_sent <= self.congestion_window ||
             self.pacing_rate == 0
         {
-            self.last_packet_scheduled_time = Some(now);
+            self.last_packet_scheduled_time =
+                cmp::max(self.last_packet_scheduled_time, Some(now));
+
             return;
         }
 
