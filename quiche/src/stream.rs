@@ -1239,12 +1239,12 @@ impl SendBuf {
         self.max_data = cmp::max(self.max_data, max_data);
     }
 
-    /// Updates the last offset we were blocked_at, if any.
+    /// Updates the last offset the stream was blocked_at, if any.
     pub fn update_blocked_at(&mut self, blocked_at: Option<u64>) {
         self.blocked_at = blocked_at;
     }
 
-    /// The last offset we were blocked at, if any.
+    /// The last offset the stream blocked at, if any.
     pub fn blocked_at(&self) -> Option<u64> {
         self.blocked_at
     }
