@@ -619,7 +619,7 @@ impl Config {
     /// [`SslContext`].
     ///
     /// [`SslContext]: https://docs.rs/boring/latest/boring/ssl/struct.SslContext.html
-    #[cfg(feature = "boring-sys")]
+    #[cfg(feature = "boringssl-boring-crate")]
     pub fn with_boring_ssl_ctx(
         version: u32, tls_ctx: boring::ssl::SslContext,
     ) -> Result<Config> {
@@ -11230,7 +11230,7 @@ mod tests {
         assert_eq!(pipe.advance(), Ok(()));
     }
 
-    #[cfg(feature = "boring-sys")]
+    #[cfg(feature = "boringssl-boring-crate")]
     #[test]
     fn user_provided_boring_ctx() -> Result<()> {
         // Manually construct boring ssl ctx for server
@@ -11320,5 +11320,5 @@ mod recovery;
 mod stream;
 mod tls;
 
-#[cfg(feature = "boring-sys")]
+#[cfg(feature = "boringssl-boring-crate")]
 pub use tls::QUICHE_EX_DATA_INDEX;

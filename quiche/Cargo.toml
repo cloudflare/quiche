@@ -33,7 +33,7 @@ default = ["boringssl-vendored"]
 boringssl-vendored = []
 
 # Use BoringSSL provided by the boring crate.
-boring-sys = ["boring", "foreign-types-shared"]
+boringssl-boring-crate = ["boring", "foreign-types-shared"]
 
 # Generate pkg-config metadata file for libquiche.
 pkg-config-meta = []

@@ -217,7 +217,9 @@ fn target_dir_path() -> std::path::PathBuf {
 }
 
 fn main() {
-    if cfg!(feature = "boringssl-vendored") && !cfg!(feature = "boring-sys") {
+    if cfg!(feature = "boringssl-vendored") &&
+        !cfg!(feature = "boringssl-boring-crate")
+    {
         let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
             let mut cfg = get_boringssl_cmake_config();
 
@@ -237,7 +239,7 @@ fn main() {
         println!("cargo:rustc-link-lib=static=ssl");
     }
 
-    if cfg!(feature = "boring-sys") {
+    if cfg!(feature = "boringssl-boring-crate") {
         println!("cargo:rustc-link-lib=static=crypto");
         println!("cargo:rustc-link-lib=static=ssl");
     }
