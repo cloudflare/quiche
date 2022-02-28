@@ -1082,7 +1082,7 @@ pub struct SendBuf {
     /// The maximum offset we are allowed to send to the peer.
     max_data: u64,
 
-    /// The last offset we were blocked at, if any.
+    /// The last offset the stream was blocked at, if any.
     blocked_at: Option<u64>,
 
     /// The final stream offset written to the stream, if any.
