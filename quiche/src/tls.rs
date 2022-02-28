@@ -155,7 +155,7 @@ impl Context {
         }
     }
 
-    #[cfg(feature = "boring-sys")]
+    #[cfg(feature = "boringssl-boring-crate")]
     pub fn from_boring(ssl_ctx: boring::ssl::SslContext) -> Context {
         use foreign_types_shared::ForeignType;
 
