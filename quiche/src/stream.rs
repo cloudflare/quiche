@@ -1244,7 +1244,7 @@ impl SendBuf {
         self.blocked_at = blocked_at;
     }
 
-    /// The last offset the stream blocked at, if any.
+    /// The last offset the stream was blocked at, if any.
     pub fn blocked_at(&self) -> Option<u64> {
         self.blocked_at
     }
