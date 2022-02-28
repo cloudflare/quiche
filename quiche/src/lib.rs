@@ -3721,8 +3721,12 @@ impl Connection {
         if sent < buf.len() {
             let max_off = stream.send.max_off();
 
-            self.streams.mark_blocked(stream_id, true, max_off);
+            if stream.send.blocked_at() != Some(max_off) {
+                stream.send.update_blocked_at(Some(max_off));
+                self.streams.mark_blocked(stream_id, true, max_off);
+            }
         } else {
+            stream.send.update_blocked_at(None);
             self.streams.mark_blocked(stream_id, false, 0);
         }
 
@@ -9603,12 +9607,57 @@ mod tests {
 
         assert_eq!(iter.next(), None);
 
-        // Send again from blocked stream and make sure it is marked as blocked
-        // again.
+        // Send again from blocked stream and make sure it is not marked as
+        // blocked again.
         assert_eq!(
             pipe.client.stream_send(0, b"aaaaaa", false),
             Err(Error::Done)
         );
+        assert_eq!(pipe.client.streams.blocked().len(), 0);
+        assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
+    }
+
+    #[test]
+    fn stream_data_blocked_unblocked_flow_control() {
+        let mut buf = [0; 65535];
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(
+            pipe.client.stream_send(0, b"aaaaaaaaaaaaaaah", false),
+            Ok(15)
+        );
+        assert_eq!(pipe.client.streams.blocked().len(), 1);
+        assert_eq!(pipe.advance(), Ok(()));
+        assert_eq!(pipe.client.streams.blocked().len(), 0);
+
+        // Send again on blocked stream. It's blocked at the same offset as
+        // previously, so it should not be marked as blocked again.
+        assert_eq!(pipe.client.stream_send(0, b"h", false), Err(Error::Done));
+        assert_eq!(pipe.client.streams.blocked().len(), 0);
+
+        // No matter how many times we try to write stream data tried, no
+        // packets containing STREAM_BLOCKED should be emitted.
+        assert_eq!(pipe.client.stream_send(0, b"h", false), Err(Error::Done));
+        assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
+
+        assert_eq!(pipe.client.stream_send(0, b"h", false), Err(Error::Done));
+        assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
+
+        assert_eq!(pipe.client.stream_send(0, b"h", false), Err(Error::Done));
+        assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
+
+        // Now read some data at the server to release flow control.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(0));
+        assert_eq!(r.next(), None);
+
+        let mut b = [0; 10];
+        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((10, false)));
+        assert_eq!(&b[..10], b"aaaaaaaaaa");
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(0, b"hhhhhhhhhh!", false), Ok(10));
         assert_eq!(pipe.client.streams.blocked().len(), 1);
 
         let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -9623,13 +9672,15 @@ mod tests {
             iter.next(),
             Some(&frame::Frame::StreamDataBlocked {
                 stream_id: 0,
-                limit: 15,
+                limit: 25,
             })
         );
 
-        assert_eq!(iter.next(), Some(&frame::Frame::Padding { len: 1 }));
+        // don't care about remaining received frames
 
-        assert_eq!(iter.next(), None);
+        assert_eq!(pipe.client.stream_send(0, b"!", false), Err(Error::Done));
+        assert_eq!(pipe.client.streams.blocked().len(), 0);
+        assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
     }
 
     #[test]

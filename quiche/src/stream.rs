@@ -1082,6 +1082,9 @@ pub struct SendBuf {
     /// The maximum offset we are allowed to send to the peer.
     max_data: u64,
 
+    /// The last offset the stream was blocked at, if any.
+    blocked_at: Option<u64>,
+
     /// The final stream offset written to the stream, if any.
     fin_off: Option<u64>,
 
@@ -1234,6 +1237,16 @@ impl SendBuf {
     /// Updates the max_data limit to the given value.
     pub fn update_max_data(&mut self, max_data: u64) {
         self.max_data = cmp::max(self.max_data, max_data);
+    }
+
+    /// Updates the last offset the stream was blocked at, if any.
+    pub fn update_blocked_at(&mut self, blocked_at: Option<u64>) {
+        self.blocked_at = blocked_at;
+    }
+
+    /// The last offset the stream was blocked at, if any.
+    pub fn blocked_at(&self) -> Option<u64> {
+        self.blocked_at
     }
 
     /// Increments the acked data offset.
