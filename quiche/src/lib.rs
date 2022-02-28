@@ -2572,10 +2572,7 @@ impl Connection {
         let info = SendInfo {
             to: self.peer_addr,
 
-            at: self
-                .recovery
-                .get_packet_send_time()
-                .unwrap_or_else(time::Instant::now),
+            at: self.recovery.get_packet_send_time(),
         };
 
         Ok((done, info))

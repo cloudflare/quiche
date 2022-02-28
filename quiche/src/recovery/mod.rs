@@ -149,7 +149,7 @@ pub struct Recovery {
     // Pacing.
     pacing_rate: u64,
 
-    last_packet_scheduled_time: Option<Instant>,
+    last_packet_scheduled_time: Instant,
 
     // RFC6937 PRR.
     prr: prr::PRR,
@@ -241,7 +241,7 @@ impl Recovery {
 
             pacing_rate: 0,
 
-            last_packet_scheduled_time: None,
+            last_packet_scheduled_time: Instant::now(),
 
             prr: prr::PRR::default(),
 
@@ -325,7 +325,7 @@ impl Recovery {
         }
     }
 
-    pub fn get_packet_send_time(&self) -> Option<Instant> {
+    pub fn get_packet_send_time(&self) -> Instant {
         self.last_packet_scheduled_time
     }
 
@@ -342,22 +342,16 @@ impl Recovery {
             self.pacing_rate == 0
         {
             self.last_packet_scheduled_time =
-                cmp::max(self.last_packet_scheduled_time, Some(now));
+                cmp::max(self.last_packet_scheduled_time, now);
 
             return;
         }
 
-        self.last_packet_scheduled_time = match self.last_packet_scheduled_time {
-            Some(last_scheduled_time) => {
-                let interval: u64 =
-                    (packet_size as u64 * MICROS_PER_SEC) / self.pacing_rate;
-                let interval = Duration::from_micros(interval);
-                let next_schedule_time = last_scheduled_time + interval;
-                Some(cmp::max(now, next_schedule_time))
-            },
+        let interval = (packet_size as u64 * MICROS_PER_SEC) / self.pacing_rate;
+        let interval = Duration::from_micros(interval);
+        let next_schedule_time = self.last_packet_scheduled_time + interval;
 
-            None => Some(now),
-        };
+        self.last_packet_scheduled_time = cmp::max(now, next_schedule_time);
     }
 
     pub fn on_ack_received(
@@ -1900,7 +1894,7 @@ mod tests {
 
         // First packet will be sent out immidiately.
         assert_eq!(r.pacing_rate, 0);
-        assert_eq!(r.get_packet_send_time().unwrap(), now);
+        assert_eq!(r.get_packet_send_time(), now);
 
         // Wait 50ms for ACK.
         now += Duration::from_millis(50);
@@ -1953,7 +1947,7 @@ mod tests {
         assert_eq!(r.bytes_in_flight, 6500);
 
         // Pacing is not done during intial phase of connection.
-        assert_eq!(r.get_packet_send_time().unwrap(), now);
+        assert_eq!(r.get_packet_send_time(), now);
 
         // Send the third packet out.
         let p = Sent {
@@ -1988,7 +1982,7 @@ mod tests {
         // are passed.
         assert_eq!(r.pacing_rate, (12000.0 * PACING_MULTIPLIER / 0.05) as u64);
         assert_eq!(
-            r.get_packet_send_time().unwrap(),
+            r.get_packet_send_time(),
             now + Duration::from_micros(
                 (6500 * 1000000) / (12000.0 * PACING_MULTIPLIER / 0.05) as u64
             )
