@@ -2671,7 +2671,7 @@ impl Connection {
             }
         }
 
-        if stream_retrans_bytes > self.stream_retrans_bytes {
+        if stream_retrans_bytes < self.stream_retrans_bytes {
             self.retrans_count += 1;
         }
 
@@ -5526,8 +5526,8 @@ impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "recv={} sent={} lost={} rtt={:?} cwnd={}",
-            self.recv, self.sent, self.lost, self.rtt, self.cwnd,
+            "recv={} sent={} lost={} retrans={} rtt={:?} cwnd={}",
+            self.recv, self.sent, self.lost, self.retrans, self.rtt, self.cwnd,
         )?;
 
         write!(f, " peer_tps={{")?;
@@ -10362,6 +10362,7 @@ mod tests {
                 data: stream::RangeBuf::from(b"b", 0, false),
             })
         );
+        assert_eq!(pipe.client.stats().retrans, 1);
     }
 
     #[test]
