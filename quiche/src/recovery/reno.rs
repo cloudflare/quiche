@@ -41,7 +41,7 @@ use crate::recovery::Recovery;
 pub static RENO: CongestionControlOps = CongestionControlOps {
     on_init,
     on_packet_sent,
-    on_packet_acked,
+    on_packets_acked,
     congestion_event,
     collapse_cwnd,
     checkpoint,
@@ -54,6 +54,14 @@ pub fn on_init(_r: &mut Recovery) {}
 
 pub fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
     r.bytes_in_flight += sent_bytes;
+}
+
+fn on_packets_acked(
+    r: &mut Recovery, packets: &[Acked], epoch: packet::Epoch, now: Instant,
+) {
+    for pkt in packets {
+        on_packet_acked(r, pkt, epoch, now);
+    }
 }
 
 fn on_packet_acked(

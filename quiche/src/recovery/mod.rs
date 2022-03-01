@@ -866,9 +866,7 @@ impl Recovery {
     fn on_packets_acked(
         &mut self, acked: Vec<Acked>, epoch: packet::Epoch, now: Instant,
     ) {
-        for pkt in acked {
-            (self.cc_ops.on_packet_acked)(self, &pkt, epoch, now);
-        }
+        (self.cc_ops.on_packets_acked)(self, &acked, epoch, now);
     }
 
     fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
@@ -983,8 +981,12 @@ pub struct CongestionControlOps {
 
     pub on_packet_sent: fn(r: &mut Recovery, sent_bytes: usize, now: Instant),
 
-    pub on_packet_acked:
-        fn(r: &mut Recovery, packet: &Acked, epoch: packet::Epoch, now: Instant),
+    pub on_packets_acked: fn(
+        r: &mut Recovery,
+        packets: &[Acked],
+        epoch: packet::Epoch,
+        now: Instant,
+    ),
 
     pub congestion_event: fn(
         r: &mut Recovery,
