@@ -29,10 +29,10 @@ include = [
 [features]
 default = ["boringssl-vendored"]
 
-# Build vendored BoringSSL library.
+# Build the vendored BoringSSL library.
 boringssl-vendored = []
 
-# Use BoringSSL provided by the boring crate.
+# Use the BoringSSL library provided by the boring crate.
 boringssl-boring-crate = ["boring", "foreign-types-shared"]
 
 # Generate pkg-config metadata file for libquiche.
@@ -41,11 +41,13 @@ pkg-config-meta = []
 # Equivalent to "--cfg fuzzing", but can also be checked in build.rs.
 fuzzing = []
 
-# Expose the FFI API.
+# Build and expose the FFI API.
 ffi = []
 
 [package.metadata.docs.rs]
 no-default-features = true
+features = ["boringssl-boring-crate", "qlog"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [build-dependencies]
 cmake = "0.1"

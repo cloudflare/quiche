@@ -286,9 +286,31 @@
 //! or [`accept()`]. Otherwise the connection will use a default CC algorithm.
 //!
 //! [`CongestionControlAlgorithm`]: enum.CongestionControlAlgorithm.html
+//!
+//! ## Feature flags
+//!
+//! quiche defines a number of [feature flags] to reduce the amount of compiled
+//! code and dependencies:
+//!
+//! * `boringssl-vendored` (default): Build the vendored BoringSSL library.
+//!
+//! * `boringssl-boring-crate`: Use the BoringSSL library provided by the
+//!   [boring] crate. It takes precedence over `boringssl-vendored` if both
+//!   features are enabled.
+//!
+//! * `pkg-config-meta`: Generate pkg-config metadata file for libquiche.
+//!
+//! * `ffi`: Build and expose the FFI API.
+//!
+//! * `qlog`: Enable support for the [qlog] logging format.
+//!
+//! [feature flags]: https://doc.rust-lang.org/cargo/reference/manifest.html#the-features-section
+//! [boring]: https://crates.io/crates/boring
+//! [qlog]: https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema
 
 #![allow(clippy::upper_case_acronyms)]
 #![warn(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[macro_use]
 extern crate log;
@@ -559,6 +581,7 @@ pub enum Shutdown {
 /// Qlog logging level.
 #[repr(C)]
 #[cfg(feature = "qlog")]
+#[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
 pub enum QlogLevel {
     /// Logs any events of Core importance.
     Core  = 0,
@@ -618,8 +641,9 @@ impl Config {
     /// This is useful for applications that wish to manually configure
     /// [`SslContext`].
     ///
-    /// [`SslContext]: https://docs.rs/boring/latest/boring/ssl/struct.SslContext.html
+    /// [`SslContext`]: https://docs.rs/boring/latest/boring/ssl/struct.SslContext.html
     #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
     pub fn with_boring_ssl_ctx(
         version: u32, tls_ctx: boring::ssl::SslContext,
     ) -> Result<Config> {
@@ -1644,6 +1668,7 @@ impl Connection {
     ///
     /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
     #[cfg(feature = "qlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
     pub fn set_qlog(
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String,
@@ -1661,6 +1686,7 @@ impl Connection {
     ///
     /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
     #[cfg(feature = "qlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
     pub fn set_qlog_with_level(
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String, qlog_level: QlogLevel,

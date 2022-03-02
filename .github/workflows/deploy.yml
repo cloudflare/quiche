@@ -5,6 +5,9 @@ on:
 
 name: Deploy
 
+env:
+  RUSTDOCFLAGS: "--cfg docsrs"
+
 jobs:
   docs:
     runs-on: ubuntu-latest
@@ -18,14 +21,14 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
 
       - name: Run cargo doc
         uses: actions-rs/cargo@v1
         with:
           command: doc
-          args: --no-deps
+          args: --no-deps --all-features
 
       - name: Deploy to GitHub Pages
         uses: crazy-max/ghaction-github-pages@v2
