@@ -4,6 +4,7 @@ name: Nightly
 
 env:
   RUSTFLAGS: "-D warnings"
+  RUSTDOCFLAGS: "--cfg docsrs"
   TOOLCHAIN: "nightly"
 
 jobs:
@@ -56,7 +57,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: doc
-          args: --no-deps
+          args: --no-deps --all-features --document-private-items
 
       - name: Build C examples
         run: |
