@@ -2625,8 +2625,6 @@ impl Connection {
 
         let epoch = pkt_type.to_epoch()?;
 
-        let stream_retrans_bytes = self.stream_retrans_bytes;
-
         // Process lost frames.
         for lost in self.recovery.lost[epoch].drain(..) {
             match lost {
@@ -2637,6 +2635,8 @@ impl Connection {
                         .retransmit(offset, length);
 
                     self.stream_retrans_bytes += length as u64;
+
+                    self.retrans_count += 1;
                 },
 
                 frame::Frame::StreamHeader {
@@ -2673,6 +2673,8 @@ impl Connection {
                     }
 
                     self.stream_retrans_bytes += length as u64;
+
+                    self.retrans_count += 1;
                 },
 
                 frame::Frame::ACK { .. } => {
@@ -2707,10 +2709,6 @@ impl Connection {
 
                 _ => (),
             }
-        }
-
-        if stream_retrans_bytes < self.stream_retrans_bytes {
-            self.retrans_count += 1;
         }
 
         let mut left = b.cap();
