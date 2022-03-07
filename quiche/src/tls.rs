@@ -934,7 +934,6 @@ extern fn select_alpn(
     3 // SSL_TLSEXT_ERR_NOACK
 }
 
-#[no_mangle]
 extern fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
     let conn =
         match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
