@@ -319,10 +319,11 @@ mod httpbin_tests {
         let req = Http3Req {
             url: url.clone(),
             hdrs,
-            body: None,
             expect_resp_hdrs: expect_hdrs,
+            body: None,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         };
 
         reqs.push(req);
@@ -357,6 +358,7 @@ mod httpbin_tests {
             expect_resp_hdrs: expect_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         };
 
         reqs.push(req);
@@ -391,6 +393,7 @@ mod httpbin_tests {
             expect_resp_hdrs: expect_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         };
 
         reqs.push(req);
@@ -424,6 +427,7 @@ mod httpbin_tests {
             expect_resp_hdrs: expect_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         };
 
         reqs.push(req);
@@ -458,6 +462,7 @@ mod httpbin_tests {
             expect_resp_hdrs: expect_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         };
 
         reqs.push(req);
@@ -492,6 +497,7 @@ mod httpbin_tests {
             expect_resp_hdrs: expect_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         };
 
         reqs.push(req);
@@ -525,6 +531,7 @@ mod httpbin_tests {
             expect_resp_hdrs: expect_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         };
 
         reqs.push(req);
@@ -559,6 +566,7 @@ mod httpbin_tests {
             expect_resp_hdrs: expect_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         };
 
         reqs.push(req);
@@ -591,6 +599,7 @@ mod httpbin_tests {
             expect_resp_hdrs: expect_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         };
 
         reqs.push(req);
@@ -624,6 +633,7 @@ mod httpbin_tests {
             expect_resp_hdrs: expect_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         };
 
         reqs.push(req);
@@ -658,6 +668,7 @@ mod httpbin_tests {
             expect_resp_hdrs: expect_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         };
 
         reqs.push(req);
@@ -693,6 +704,7 @@ mod httpbin_tests {
             expect_resp_hdrs: expect_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         };
 
         reqs.push(req);
@@ -1307,6 +1319,26 @@ mod httpbin_tests {
         }
 
         assert_eq!(Ok(()), do_test(reqs, assert_headers_only, false));
+    }
+
+    #[test]
+    #[cfg(feature = "test_resets")]
+    fn drip_delay_reset() {
+        let mut reqs = Vec::new();
+
+        let expect_hdrs = Some(vec![Header::new(b":status", b"200")]);
+        let mut url = endpoint(Some("drip"));
+        url.set_query(Some("duration=30&numbytes=2&delay=1"));
+
+        reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
+
+        let assert = |reqs: &[Http3Req]| {
+            assert_headers!(reqs[0]);
+
+            assert_eq!(reqs[0].reset_stream_code, Some(256));
+        };
+
+        assert_eq!(Ok(()), do_test(reqs, assert, false));
     }
 
     #[test]

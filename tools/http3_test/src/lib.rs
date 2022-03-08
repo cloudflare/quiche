@@ -245,6 +245,7 @@ pub struct Http3Req {
     pub expect_resp_hdrs: Option<Vec<Header>>,
     pub resp_hdrs: Vec<Header>,
     pub resp_body: Vec<u8>,
+    pub reset_stream_code: Option<u64>,
 }
 
 impl Http3Req {
@@ -280,6 +281,7 @@ impl Http3Req {
             expect_resp_hdrs,
             resp_hdrs: Vec::new(),
             resp_body: Vec::new(),
+            reset_stream_code: None,
         }
     }
 }
@@ -480,6 +482,13 @@ impl Http3Test {
     ) {
         let i = self.issued_reqs.get(&stream_id).unwrap();
         self.reqs[*i].resp_body.extend_from_slice(&data[..data_len]);
+    }
+
+    /// Sets the error code when a RESET_STREAM was received for an issued
+    /// request.
+    pub fn set_reset_stream_error(&mut self, stream_id: u64, error: u64) {
+        let i = self.issued_reqs.get(&stream_id).unwrap();
+        self.reqs[*i].reset_stream_code = Some(error);
     }
 
     /// Execute the test assertion(s).
