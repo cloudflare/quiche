@@ -332,10 +332,36 @@ pub fn run(
                         }
                     },
 
-                    Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
-                        error!("request was reset by peer with {}", e);
+                    Ok((stream_id, quiche::h3::Event::Reset(e))) => {
+                        reqs_complete += 1;
 
-                        break;
+                        info!("request was reset by peer with {}", e);
+                        test.set_reset_stream_error(stream_id, e);
+
+                        if reqs_complete == reqs_count {
+                            info!(
+                                "Completed test run. {}/{} response(s) received in {:?}, closing...",
+                                reqs_complete,
+                                reqs_count,
+                                req_start.elapsed()
+                            );
+
+                            match conn.close(true, 0x00, b"kthxbye") {
+                                // Already closed.
+                                Ok(_) | Err(quiche::Error::Done) => (),
+
+                                Err(e) => {
+                                    return Err(Http3TestError::Other(format!(
+                                        "error closing conn: {:?}",
+                                        e
+                                    )));
+                                },
+                            }
+
+                            test.assert();
+
+                            break;
+                        }
                     },
 
                     Ok((_flow_id, quiche::h3::Event::Datagram)) => (),

@@ -1,9 +1,12 @@
 [package]
 name = "http3_test"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Lucas Pardue <lucaspardue.24.7@gmail.com>"]
 edition = "2018"
 publish = false
+
+[features]
+test_resets = []
 
 [dependencies]
 docopt = "1"
