@@ -71,8 +71,6 @@ const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 
 const PACING_MULTIPLIER: f64 = 1.25;
 
-const MICROS_PER_SEC: u64 = 1_000_000;
-
 pub struct Recovery {
     loss_detection_timer: Option<Instant>,
 
@@ -304,11 +302,9 @@ impl Recovery {
         // Pacing: Set the pacing rate if CC doesn't do its own.
         if !(self.cc_ops.has_custom_pacing)() {
             if let Some(srtt) = self.smoothed_rtt {
-                let cwnd = self.congestion_window as u64;
-                let rate =
-                    (cwnd * MICROS_PER_SEC) as f64 / srtt.as_micros() as f64;
-                let rate = (rate * PACING_MULTIPLIER) as u64;
-                self.set_pacing_rate(rate);
+                let rate = PACING_MULTIPLIER * self.congestion_window as f64 /
+                    srtt.as_secs_f64();
+                self.set_pacing_rate(rate as u64);
             }
         }
 
@@ -354,8 +350,8 @@ impl Recovery {
             return;
         }
 
-        let interval = (packet_size as u64 * MICROS_PER_SEC) / self.pacing_rate;
-        let interval = Duration::from_micros(interval);
+        let interval = packet_size as f64 / self.pacing_rate as f64;
+        let interval = Duration::from_secs_f64(interval);
         let next_schedule_time = self.last_packet_scheduled_time + interval;
 
         self.last_packet_scheduled_time = cmp::max(now, next_schedule_time);
@@ -2013,12 +2009,11 @@ mod tests {
 
         // We pace this outgoing packet. as all conditions for pacing
         // are passed.
-        assert_eq!(r.pacing_rate, (12000.0 * PACING_MULTIPLIER / 0.05) as u64);
+        let pacing_rate = (12000.0 * PACING_MULTIPLIER / 0.05) as u64;
+        assert_eq!(r.pacing_rate, pacing_rate);
         assert_eq!(
             r.get_packet_send_time(),
-            now + Duration::from_micros(
-                (6500 * 1000000) / (12000.0 * PACING_MULTIPLIER / 0.05) as u64
-            )
+            now + Duration::from_secs_f64(6500.0 / pacing_rate as f64)
         );
     }
 }
