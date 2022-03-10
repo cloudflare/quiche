@@ -196,6 +196,25 @@
 //! # Ok::<(), quiche::Error>(())
 //! ```
 //!
+//! ### Pacing
+//!
+//! It is recommended that applications [pace] sending of outgoing packets to
+//! avoid creating packet bursts that could cause short-term congestion and
+//! losses in the network.
+//!
+//! quiche exposes pacing hints for outgoing packets through the [`at`] field
+//! of the [`SendInfo`] structure that is returned by the [`send()`] method.
+//! This field represents the time when a specific packet should be sent into
+//! the network.
+//!
+//! Applications can use these hints by artificially delaying the sending of
+//! packets through platform-specific mechanisms (such as the [`SO_TXTIME`]
+//! socket option on Linux), or custom methods (for example by using user-space
+//! timers).
+//!
+//! [pace]: https://datatracker.ietf.org/doc/html/rfc9002#section-7.7
+//! [`SO_TXTIME`]: https://man7.org/linux/man-pages/man8/tc-etf.8.html
+//!
 //! ## Sending and receiving stream data
 //!
 //! After some back and forth, the connection will complete its handshake and
@@ -251,6 +270,7 @@
 //! [`RecvInfo`]: struct.RecvInfo.html
 //! [`send()`]: struct.Connection.html#method.send
 //! [`SendInfo`]: struct.SendInfo.html
+//! [`at`]: struct.SendInfo.html#structfield.at
 //! [`timeout()`]: struct.Connection.html#method.timeout
 //! [`on_timeout()`]: struct.Connection.html#method.on_timeout
 //! [`stream_send()`]: struct.Connection.html#method.stream_send
@@ -548,6 +568,10 @@ pub struct SendInfo {
     pub to: SocketAddr,
 
     /// The time to send the packet out.
+    ///
+    /// See [Pacing] for more details.
+    ///
+    /// [Pacing]: index.html#pacing
     pub at: time::Instant,
 }
 
@@ -5555,9 +5579,11 @@ pub struct Stats {
     /// The most recent data delivery rate estimate in bytes/s.
     ///
     /// Note that this value could be inaccurate if the application does not
-    /// respect pacing hints (see [`SendInfo.at`]).
+    /// respect pacing hints (see [`SendInfo.at`] and [Pacing] for more
+    /// details).
     ///
     /// [`SendInfo.at`]: struct.SendInfo.html#structfield.at
+    /// [Pacing]: index.html#pacing
     pub delivery_rate: u64,
 
     /// The maximum idle timeout.

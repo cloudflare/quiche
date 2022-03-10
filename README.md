@@ -171,6 +171,25 @@ loop {
 }
 ```
 
+#### Pacing
+
+It is recommended that applications [pace] sending of outgoing packets to
+avoid creating packet bursts that could cause short-term congestion and
+losses in the network.
+
+quiche exposes pacing hints for outgoing packets through the [`at`] field
+of the [`SendInfo`] structure that is returned by the [`send()`] method.
+This field represents the time when a specific packet should be sent into
+the network.
+
+Applications can use these hints by artificially delaying the sending of
+packets through platform-specific mechanisms (such as the [`SO_TXTIME`]
+socket option on Linux), or custom methods (for example by using user-space
+timers).
+
+[pace]: https://datatracker.ietf.org/doc/html/rfc9002#section-7.7
+[`SO_TXTIME`]: https://man7.org/linux/man-pages/man8/tc-etf.8.html
+
 ### Sending and receiving stream data
 
 After some back and forth, the connection will complete its handshake and
