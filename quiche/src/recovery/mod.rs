@@ -163,6 +163,9 @@ pub struct Recovery {
     // BBR state.
     bbr_state: bbr::State,
 
+    // BBRv2 state.
+    bbr2_state: bbr2::State,
+
     /// How many non-ack-eliciting packets have been sent.
     outstanding_non_ack_eliciting: usize,
 
@@ -290,6 +293,8 @@ impl Recovery {
             qlog_metrics: QlogMetrics::default(),
 
             bbr_state: bbr::State::new(),
+
+            bbr2_state: bbr2::State::new(),
 
             outstanding_non_ack_eliciting: 0,
 
@@ -1121,6 +1126,8 @@ pub enum CongestionControlAlgorithm {
     CUBIC = 1,
     /// BBR congestion control algorithm. `bbr` in a string form.
     BBR   = 2,
+    /// BBRv2 congestion control algorithm. `bbr2` in a string form.
+    BBR2  = 3,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -1134,6 +1141,7 @@ impl FromStr for CongestionControlAlgorithm {
             "reno" => Ok(CongestionControlAlgorithm::Reno),
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
             "bbr" => Ok(CongestionControlAlgorithm::BBR),
+            "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
 
             _ => Err(crate::Error::CongestionControl),
         }
@@ -1180,6 +1188,7 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
             CongestionControlAlgorithm::Reno => &reno::RENO,
             CongestionControlAlgorithm::CUBIC => &cubic::CUBIC,
             CongestionControlAlgorithm::BBR => &bbr::BBR,
+            CongestionControlAlgorithm::BBR2 => &bbr2::BBR2,
         }
     }
 }
@@ -2226,6 +2235,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -2254,6 +2265,7 @@ mod tests {
 }
 
 mod bbr;
+mod bbr2;
 mod cubic;
 mod delivery_rate;
 mod hystart;
