@@ -304,7 +304,7 @@ fn on_packet_acked(
             }
         }
 
-        let t = now - ca_start_time;
+        let t = now.saturating_duration_since(ca_start_time);
 
         // target = w_cubic(t + rtt)
         let target = r.cubic_state.w_cubic(t + r.min_rtt, r.max_datagram_size);

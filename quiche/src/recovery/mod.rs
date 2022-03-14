@@ -422,7 +422,12 @@ impl Recovery {
 
                     // Calculate new time reordering threshold.
                     let loss_delay = max_rtt.mul_f64(self.time_thresh);
-                    if now.duration_since(unacked.time_sent) > loss_delay {
+
+                    // unacked.time_sent can be in the future due to
+                    // pacing.
+                    if now.saturating_duration_since(unacked.time_sent) >
+                        loss_delay
+                    {
                         // TODO: do time threshold update
                         self.time_thresh = 5_f64 / 4_f64;
                     }
