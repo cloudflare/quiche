@@ -340,7 +340,7 @@ mod tests {
 
         let p = recovery::Sent {
             pkt_num: 0,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -381,7 +381,7 @@ mod tests {
 
         let p = recovery::Sent {
             pkt_num: 0,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
