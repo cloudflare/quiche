@@ -39,7 +39,10 @@ pub const MAX_PUSH_FRAME_TYPE_ID: u64 = 0xD;
 pub const SETTINGS_QPACK_MAX_TABLE_CAPACITY: u64 = 0x1;
 pub const SETTINGS_MAX_FIELD_SECTION_SIZE: u64 = 0x6;
 pub const SETTINGS_QPACK_BLOCKED_STREAMS: u64 = 0x7;
-pub const SETTINGS_H3_DATAGRAM: u64 = 0x276;
+// https://datatracker.ietf.org/doc/html/draft-ietf-masque-h3-datagram-06#section-7.1
+pub const SETTINGS_H3_DATAGRAM: u64 = 0xffd277;
+// https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-02.html#section-8.2
+pub const SETTINGS_ENABLE_WEBTRANSPORT: u64 = 0x2b603742;
 
 // Permit between 16 maximally-encoded and 128 minimally-encoded SETTINGS.
 const MAX_SETTINGS_PAYLOAD_SIZE: usize = 256;
@@ -63,6 +66,7 @@ pub enum Frame {
         qpack_max_table_capacity: Option<u64>,
         qpack_blocked_streams: Option<u64>,
         h3_datagram: Option<u64>,
+        enable_webtransport: Option<u64>,
         grease: Option<(u64, u64)>,
         raw: Option<Vec<(u64, u64)>>,
     },
@@ -153,6 +157,7 @@ impl Frame {
                 qpack_max_table_capacity,
                 qpack_blocked_streams,
                 h3_datagram,
+                enable_webtransport,
                 grease,
                 ..
             } => {
@@ -175,6 +180,11 @@ impl Frame {
 
                 if let Some(val) = h3_datagram {
                     len += octets::varint_len(SETTINGS_H3_DATAGRAM);
+                    len += octets::varint_len(*val);
+                }
+
+                if let Some(val) = enable_webtransport {
+                    len += octets::varint_len(SETTINGS_ENABLE_WEBTRANSPORT);
                     len += octets::varint_len(*val);
                 }
 
@@ -306,6 +316,7 @@ fn parse_settings_frame(
     let mut qpack_max_table_capacity = None;
     let mut qpack_blocked_streams = None;
     let mut h3_datagram = None;
+    let mut enable_webtransport = None; 
     let mut raw = Vec::new();
 
     // Reject SETTINGS frames that are too long.
@@ -342,6 +353,14 @@ fn parse_settings_frame(
                 h3_datagram = Some(value);
             },
 
+            SETTINGS_ENABLE_WEBTRANSPORT => {
+                if value > 1 {
+                    return Err(super::Error::SettingsError);
+                }
+
+                enable_webtransport = Some(value);
+            },            
+
             // Reserved values overlap with HTTP/2 and MUST be rejected
             0x0 | 0x2 | 0x3 | 0x4 | 0x5 =>
                 return Err(super::Error::SettingsError),
@@ -356,6 +375,7 @@ fn parse_settings_frame(
         qpack_max_table_capacity,
         qpack_blocked_streams,
         h3_datagram,
+        enable_webtransport,
         grease: None,
         raw: Some(raw),
     })
@@ -470,6 +490,7 @@ mod tests {
             (SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0),
             (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
             (SETTINGS_H3_DATAGRAM, 0),
+            (SETTINGS_ENABLE_WEBTRANSPORT, 0),
         ];
 
         let frame = Frame::Settings {
@@ -477,6 +498,7 @@ mod tests {
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: Some(0),
+            enable_webtransport: Some(0),
             grease: None,
             raw: Some(raw_settings),
         };
@@ -511,6 +533,7 @@ mod tests {
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: Some(0),
+            enable_webtransport: Some(0),
             grease: Some((33, 33)),
             raw: Default::default(),
         };
@@ -520,6 +543,7 @@ mod tests {
             (SETTINGS_QPACK_MAX_TABLE_CAPACITY, 0),
             (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
             (SETTINGS_H3_DATAGRAM, 0),
+            (SETTINGS_ENABLE_WEBTRANSPORT, 0),
             (33, 33),
         ];
 
@@ -530,6 +554,7 @@ mod tests {
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: Some(0),
+            enable_webtransport: Some(0),
             grease: None,
             raw: Some(raw_settings),
         };
@@ -566,6 +591,7 @@ mod tests {
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             h3_datagram: None,
+            enable_webtransport: None,
             grease: None,
             raw: Some(raw_settings),
         };
@@ -602,6 +628,7 @@ mod tests {
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             h3_datagram: Some(1),
+            enable_webtransport: None,
             grease: None,
             raw: Some(raw_settings),
         };
@@ -636,6 +663,7 @@ mod tests {
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             h3_datagram: Some(5),
+            enable_webtransport: None,
             grease: None,
             raw: Default::default(),
         };
@@ -674,6 +702,7 @@ mod tests {
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
             h3_datagram: None,
+            enable_webtransport: None,
             grease: None,
             raw: Some(raw_settings),
         };

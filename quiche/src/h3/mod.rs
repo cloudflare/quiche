@@ -610,6 +610,7 @@ struct ConnectionSettings {
     pub qpack_max_table_capacity: Option<u64>,
     pub qpack_blocked_streams: Option<u64>,
     pub h3_datagram: Option<u64>,
+    pub enable_webtransport: Option<u64>,
     pub raw: Option<Vec<(u64, u64)>>,
 }
 
@@ -672,6 +673,7 @@ impl Connection {
                 qpack_max_table_capacity: config.qpack_max_table_capacity,
                 qpack_blocked_streams: config.qpack_blocked_streams,
                 h3_datagram,
+                enable_webtransport,
                 raw: Default::default(),
             },
 
@@ -680,6 +682,7 @@ impl Connection {
                 qpack_max_table_capacity: None,
                 qpack_blocked_streams: None,
                 h3_datagram: None,
+                enable_webtransport: None,
                 raw: Default::default(),
             },
 
@@ -1582,6 +1585,7 @@ impl Connection {
                 .qpack_max_table_capacity,
             qpack_blocked_streams: self.local_settings.qpack_blocked_streams,
             h3_datagram: self.local_settings.h3_datagram,
+            enable_webtransport: self.local_settings.enable_webtransport,
             grease,
             raw: Default::default(),
         };
@@ -1927,6 +1931,7 @@ impl Connection {
                     qpack_max_table_capacity,
                     qpack_blocked_streams,
                     h3_datagram,
+                    enable_webtransport,
                     raw,
                 };
 
@@ -3837,6 +3842,7 @@ mod tests {
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             h3_datagram: Some(1),
+            enable_webtransport: None,
             grease: None,
             raw: Default::default(),
         };
