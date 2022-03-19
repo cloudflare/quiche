@@ -66,7 +66,7 @@ qlog = { version = "0.6", path = "../qlog", optional = true }
 winapi = { version = "0.3", features = ["wincrypt"] }
 
 [dev-dependencies]
-mio = "0.6"
+mio = { version = "0.8", features = ["net", "os-poll"] }
 url = "1"
 
 [lib]
