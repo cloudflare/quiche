@@ -29,7 +29,6 @@ use std::convert::TryInto;
 use crate::Error;
 use crate::Result;
 
-use crate::octets;
 use crate::packet;
 use crate::ranges;
 use crate::stream;

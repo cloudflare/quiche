@@ -43,7 +43,6 @@ use crate::Connection;
 use crate::ConnectionError;
 
 use crate::crypto;
-use crate::octets;
 use crate::packet;
 
 const TLS1_3_VERSION: u16 = 0x0304;

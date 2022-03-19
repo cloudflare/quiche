@@ -1,0 +1,10 @@
+[package]
+name = "octets"
+version = "0.1.0"
+authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
+edition = "2018"
+description = "Zero-copy abstraction for parsing and constructing network packets"
+repository = "https://github.com/cloudflare/quiche"
+keywords = ["quic", "http3"]
+categories = ["network-programming"]
+license = "BSD-2-Clause"

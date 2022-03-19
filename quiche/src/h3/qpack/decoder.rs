@@ -24,8 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use crate::octets;
-
 use super::Error;
 use super::Result;
 
@@ -268,8 +266,6 @@ fn decode_str(b: &mut octets::Octets) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::octets;
 
     #[test]
     fn decode_int1() {

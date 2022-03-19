@@ -26,8 +26,6 @@
 
 use super::Result;
 
-use crate::octets;
-
 pub const DATA_FRAME_TYPE_ID: u64 = 0x0;
 pub const HEADERS_FRAME_TYPE_ID: u64 = 0x1;
 pub const CANCEL_PUSH_FRAME_TYPE_ID: u64 = 0x3;

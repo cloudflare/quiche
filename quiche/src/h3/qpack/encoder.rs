@@ -26,8 +26,6 @@
 
 use super::Result;
 
-use crate::octets;
-
 use crate::h3::NameValue;
 
 use super::INDEXED;
@@ -157,8 +155,6 @@ fn encode_str(v: &[u8], prefix: usize, b: &mut octets::OctetsMut) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::octets;
 
     #[test]
     fn encode_int1() {
