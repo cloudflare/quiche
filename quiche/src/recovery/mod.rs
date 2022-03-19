@@ -376,8 +376,11 @@ impl Recovery {
         pkt.time_sent = self.get_packet_send_time();
 
         // bytes_in_flight is already updated. Use previous value.
-        self.delivery_rate
-            .on_packet_sent(&mut pkt, self.bytes_in_flight - sent_bytes);
+        self.delivery_rate.on_packet_sent(
+            &mut pkt,
+            self.bytes_in_flight - sent_bytes,
+            self.bytes_lost,
+        );
 
         self.sent[epoch].push_back(pkt);
 
@@ -527,6 +530,10 @@ impl Recovery {
                     first_sent_time: unacked.first_sent_time,
 
                     is_app_limited: unacked.is_app_limited,
+
+                    tx_in_flight: unacked.tx_in_flight,
+
+                    lost: unacked.lost,
                 });
 
                 trace!("{} packet newly acked {}", trace_id, unacked.pkt_num);
@@ -1228,6 +1235,10 @@ pub struct Sent {
 
     pub is_app_limited: bool,
 
+    pub tx_in_flight: usize,
+
+    pub lost: u64,
+
     pub has_data: bool,
 }
 
@@ -1240,6 +1251,8 @@ impl std::fmt::Debug for Sent {
         write!(f, "delivered_time={:?} ", self.delivered_time)?;
         write!(f, "first_sent_time={:?} ", self.first_sent_time)?;
         write!(f, "is_app_limited={} ", self.is_app_limited)?;
+        write!(f, "tx_in_flight={} ", self.tx_in_flight)?;
+        write!(f, "lost={} ", self.lost)?;
         write!(f, "has_data={} ", self.has_data)?;
 
         Ok(())
@@ -1263,6 +1276,10 @@ pub struct Acked {
     pub first_sent_time: Instant,
 
     pub is_app_limited: bool,
+
+    pub tx_in_flight: usize,
+
+    pub lost: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1465,6 +1482,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1491,6 +1510,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1517,6 +1538,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1543,6 +1566,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1602,6 +1627,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1628,6 +1655,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1700,6 +1729,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1726,6 +1757,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1752,6 +1785,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1778,6 +1813,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1861,6 +1898,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1887,6 +1926,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1913,6 +1954,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1939,6 +1982,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -2035,6 +2080,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -2093,6 +2140,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -2124,6 +2173,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
