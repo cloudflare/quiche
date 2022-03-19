@@ -35,6 +35,7 @@ pub const HTTP3_CONTROL_STREAM_TYPE_ID: u64 = 0x0;
 pub const HTTP3_PUSH_STREAM_TYPE_ID: u64 = 0x1;
 pub const QPACK_ENCODER_STREAM_TYPE_ID: u64 = 0x2;
 pub const QPACK_DECODER_STREAM_TYPE_ID: u64 = 0x3;
+pub const WEBTRANSPORT_STREAM_TYPE_ID: u64 = 0x54;
 
 const MAX_STATE_BUF_SIZE: usize = (1 << 24) - 1;
 

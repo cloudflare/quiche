@@ -279,7 +279,7 @@
 
 use std::collections::VecDeque;
 
-use crate::octets;
+use crate::{octets, h3::stream::WEBTRANSPORT_STREAM_TYPE_ID};
 
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
@@ -2125,6 +2125,19 @@ impl Connection {
                 }
 
                 // TODO: implement CANCEL_PUSH frame
+            },
+
+            frame::Frame::WebTransport { .. } => {
+                if stream_id !=  WEBTRANSPORT_STREAM_TYPE_ID {
+                    conn.close(
+                        true,
+                        Error::FrameUnexpected.to_wire(),
+                        b"WEBTRANSPORT frame received on non-webtransport stream",
+                    )?;
+
+                    return Err(Error::FrameUnexpected);
+                }
+                // Do nothing. The WebTransport event is returned separately.
             },
 
             frame::Frame::Unknown => (),

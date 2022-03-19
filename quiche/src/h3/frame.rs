@@ -35,6 +35,8 @@ pub const SETTINGS_FRAME_TYPE_ID: u64 = 0x4;
 pub const PUSH_PROMISE_FRAME_TYPE_ID: u64 = 0x5;
 pub const GOAWAY_FRAME_TYPE_ID: u64 = 0x6;
 pub const MAX_PUSH_FRAME_TYPE_ID: u64 = 0xD;
+pub const WEBTRANSPORT_BIDI_FRAME_TYPE_ID: u64 = 0x41;
+pub const WEBTRANSPORT_UNI_FRAME_TYPE_ID: u64 = 0x54;
 
 pub const SETTINGS_QPACK_MAX_TABLE_CAPACITY: u64 = 0x1;
 pub const SETTINGS_MAX_FIELD_SECTION_SIZE: u64 = 0x6;
@@ -52,6 +54,12 @@ const MAX_SETTINGS_PAYLOAD_SIZE: usize = 256;
 #[derive(Clone, PartialEq)]
 pub enum Frame {
     Data {
+        payload: Vec<u8>,
+    },
+
+    WebTransport {
+        is_bidi: bool,
+        session_id: u64,
         payload: Vec<u8>,
     },
 
@@ -100,6 +108,12 @@ impl Frame {
             DATA_FRAME_TYPE_ID => Frame::Data {
                 payload: b.get_bytes(payload_length as usize)?.to_vec(),
             },
+
+            WEBTRANSPORT_BIDI_FRAME_TYPE_ID =>
+                parse_webtransport_frame(payload_length, &mut b, true)?,
+
+            WEBTRANSPORT_UNI_FRAME_TYPE_ID =>
+                parse_webtransport_frame(payload_length, &mut b, false)?,
 
             HEADERS_FRAME_TYPE_ID => Frame::Headers {
                 header_block: b.get_bytes(payload_length as usize)?.to_vec(),
@@ -255,6 +269,18 @@ impl Frame {
                 b.put_varint(*push_id)?;
             },
 
+            Frame::WebTransport { is_bidi, session_id, payload } => {
+                let frame_type = if *is_bidi {
+                    WEBTRANSPORT_BIDI_FRAME_TYPE_ID
+                } else {
+                    WEBTRANSPORT_UNI_FRAME_TYPE_ID
+                };
+                b.put_varint(frame_type)?;
+                b.put_varint(octets::varint_len(*session_id) as u64)?;
+                b.put_varint(*session_id)?;
+                b.put_bytes(payload.as_ref())?;
+            },
+
             Frame::Unknown => unreachable!(),
         }
 
@@ -305,6 +331,10 @@ impl std::fmt::Debug for Frame {
 
             Frame::MaxPushId { push_id } => {
                 write!(f, "MAX_PUSH_ID push_id={}", push_id)?;
+            },
+
+            Frame::WebTransport { is_bidi, session_id, payload } => {
+                write!(f, "WEBTRANSPORT is_bidi={}, session_id={}, len={}", is_bidi, session_id, payload.len())?;
             },
 
             Frame::Unknown => {
@@ -385,6 +415,19 @@ fn parse_settings_frame(
         enable_webtransport,
         grease: None,
         raw: Some(raw),
+    })
+}
+
+fn parse_webtransport_frame(
+    payload_length: u64, b: &mut octets::Octets, is_bidi: bool,
+) -> Result<Frame> {
+    let session_id = b.get_varint()?;
+    let payload_length = payload_length - octets::varint_len(session_id) as u64;
+    let payload = b.get_bytes(payload_length as usize)?.to_vec();
+    Ok(Frame::WebTransport {
+        is_bidi,
+        session_id,
+        payload,
     })
 }
 
