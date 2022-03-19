@@ -737,7 +737,7 @@ extern fn set_read_secret(
     if level != crypto::Level::ZeroRTT || conn.is_server {
         let secret = unsafe { slice::from_raw_parts(secret, secret_len) };
 
-        let open = match crypto::Open::from_secret(aead, secret) {
+        let open = match crypto::Open::from_secret(aead, secret, conn.version) {
             Ok(v) => v,
 
             Err(_) => return 0,
@@ -787,7 +787,7 @@ extern fn set_write_secret(
     if level != crypto::Level::ZeroRTT || !conn.is_server {
         let secret = unsafe { slice::from_raw_parts(secret, secret_len) };
 
-        let seal = match crypto::Seal::from_secret(aead, secret) {
+        let seal = match crypto::Seal::from_secret(aead, secret, conn.version) {
             Ok(v) => v,
 
             Err(_) => return 0,

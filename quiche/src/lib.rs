@@ -370,6 +370,7 @@ pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
 /// Supported QUIC versions.
 ///
 /// Note that the older ones might not be fully supported.
+const PROTOCOL_VERSION_V2: u32 = 0x709a_50c4;
 const PROTOCOL_VERSION_V1: u32 = 0x0000_0001;
 const PROTOCOL_VERSION_DRAFT27: u32 = 0xff00_001b;
 const PROTOCOL_VERSION_DRAFT28: u32 = 0xff00_001c;
@@ -1383,11 +1384,17 @@ pub fn retry(
 pub fn version_is_supported(version: u32) -> bool {
     matches!(
         version,
-        PROTOCOL_VERSION_V1 |
+        PROTOCOL_VERSION_V2 |
+            PROTOCOL_VERSION_V1 |
             PROTOCOL_VERSION_DRAFT27 |
             PROTOCOL_VERSION_DRAFT28 |
             PROTOCOL_VERSION_DRAFT29
     )
+}
+
+#[inline]
+fn version_is_final(version: u32) -> bool {
+    matches!(version, PROTOCOL_VERSION_V2 | PROTOCOL_VERSION_V1)
 }
 
 /// Pushes a frame to the output packet if there is enough space.
@@ -1644,7 +1651,7 @@ impl Connection {
         conn.handshake.init(conn_ptr, is_server)?;
 
         conn.handshake
-            .use_legacy_codepoint(config.version != PROTOCOL_VERSION_V1);
+            .use_legacy_codepoint(!version_is_final(config.version));
 
         conn.encode_transport_params()?;
 
@@ -1983,8 +1990,8 @@ impl Connection {
             for &v in supported_versions {
                 found_version = true;
 
-                // The final version takes precedence over draft ones.
-                if v == PROTOCOL_VERSION_V1 {
+                // The final versions take precedence over draft ones.
+                if version_is_final(v) {
                     self.version = v;
                     break;
                 }
@@ -2023,7 +2030,7 @@ impl Connection {
                 Some(aead_seal);
 
             self.handshake
-                .use_legacy_codepoint(self.version != PROTOCOL_VERSION_V1);
+                .use_legacy_codepoint(!version_is_final(self.version));
 
             // Encode transport parameters again, as the new version might be
             // using a different format.
@@ -2091,7 +2098,7 @@ impl Connection {
             self.did_version_negotiation = true;
 
             self.handshake
-                .use_legacy_codepoint(self.version != PROTOCOL_VERSION_V1);
+                .use_legacy_codepoint(!version_is_final(self.version));
 
             // Encode transport parameters again, as the new version might be
             // using a different format.
@@ -2282,7 +2289,7 @@ impl Connection {
 
             if !self.did_retry &&
                 (self.version >= PROTOCOL_VERSION_DRAFT28 ||
-                    self.version == PROTOCOL_VERSION_V1)
+                    version_is_final(self.version))
             {
                 self.local_transport_params
                     .original_destination_connection_id =
@@ -4774,7 +4781,7 @@ impl Connection {
         &mut self, peer_params: TransportParams,
     ) -> Result<()> {
         if self.version >= PROTOCOL_VERSION_DRAFT28 ||
-            self.version == PROTOCOL_VERSION_V1
+            version_is_final(self.version)
         {
             // Validate initial_source_connection_id.
             match &peer_params.initial_source_connection_id {
@@ -6560,8 +6567,8 @@ mod tests {
 
         assert_eq!(pipe.handshake(), Ok(()));
 
-        assert_eq!(pipe.client.version, PROTOCOL_VERSION);
-        assert_eq!(pipe.server.version, PROTOCOL_VERSION);
+        assert_eq!(pipe.client.version, PROTOCOL_VERSION_V2);
+        assert_eq!(pipe.server.version, PROTOCOL_VERSION_V2);
     }
 
     #[test]
