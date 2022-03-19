@@ -279,8 +279,6 @@
 
 use std::collections::VecDeque;
 
-use crate::octets;
-
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
 /// This can be passed directly to the [`Config::set_application_protos()`]

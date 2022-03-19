@@ -2,9 +2,10 @@ FROM rust:1.53 as build
 
 WORKDIR /build
 
-COPY quiche/ ./quiche/
-COPY qlog/ ./qlog/
 COPY apps/ ./apps/
+COPY octets/ ./octets/
+COPY qlog/ ./qlog/
+COPY quiche/ ./quiche/
 
 RUN apt-get update && apt-get install -y cmake && \
     rm -rf /var/lib/apt/lists/*

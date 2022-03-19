@@ -32,7 +32,6 @@ use crate::Error;
 use crate::Result;
 
 use crate::crypto;
-use crate::octets;
 use crate::rand;
 use crate::ranges;
 use crate::stream;
@@ -945,7 +944,6 @@ mod tests {
     use super::*;
 
     use crate::crypto;
-    use crate::octets;
 
     #[test]
     fn retry() {

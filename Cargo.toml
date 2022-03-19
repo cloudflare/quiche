@@ -1,5 +1,5 @@
 [workspace]
-members = [ "quiche", "qlog", "apps" ]
+members = [ "apps", "octets", "qlog", "quiche" ]
 exclude = [ "fuzz", "tools/http3_test" ]
 
 [profile.bench]

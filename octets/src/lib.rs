@@ -290,6 +290,11 @@ impl<'a> Octets<'a> {
         self.buf.len()
     }
 
+    /// Returns `true` if the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.buf.len() == 0
+    }
+
     /// Returns the current offset of the buffer.
     pub fn off(&self) -> usize {
         self.off
@@ -624,6 +629,11 @@ impl<'a> OctetsMut<'a> {
     /// Returns the total length of the buffer.
     pub fn len(&self) -> usize {
         self.buf.len()
+    }
+
+    /// Returns `true` if the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.buf.len() == 0
     }
 
     /// Returns the current offset of the buffer.

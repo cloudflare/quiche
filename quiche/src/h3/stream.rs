@@ -27,8 +27,6 @@
 use super::Error;
 use super::Result;
 
-use crate::octets;
-
 use super::frame;
 
 pub const HTTP3_CONTROL_STREAM_TYPE_ID: u64 = 0x0;
