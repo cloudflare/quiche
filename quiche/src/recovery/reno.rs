@@ -88,14 +88,7 @@ fn on_packet_acked(
             r.congestion_window += r.max_datagram_size;
         }
 
-        if r.hystart.on_packet_acked(
-            epoch,
-            packet,
-            r.latest_rtt,
-            r.congestion_window,
-            now,
-            r.max_datagram_size,
-        ) {
+        if r.hystart.on_packet_acked(epoch, packet, r.latest_rtt, now) {
             // Exit to congestion avoidance if CSS ends.
             r.ssthresh = r.congestion_window;
         }
