@@ -57,7 +57,7 @@ pub fn connect(
         Rc::new(RefCell::new(output_sink)) as Rc<RefCell<dyn FnMut(_)>>;
 
     // Setup the event loop.
-    let poll = mio::Poll::new().unwrap();
+    let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
     // We'll only connect to the first server provided in URL list.
@@ -81,15 +81,12 @@ pub fn connect(
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
     let socket = std::net::UdpSocket::bind(bind_addr).unwrap();
+    socket.set_nonblocking(true).unwrap();
 
-    let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
-    poll.register(
-        &socket,
-        mio::Token(0),
-        mio::Ready::readable(),
-        mio::PollOpt::edge(),
-    )
-    .unwrap();
+    let mut socket = mio::net::UdpSocket::from_std(socket);
+    poll.registry()
+        .register(&mut socket, mio::Token(0), mio::Interest::READABLE)
+        .unwrap();
 
     // Create the configuration for the QUIC connection.
     let mut config = quiche::Config::new(args.version).unwrap();
@@ -198,7 +195,7 @@ pub fn connect(
 
     let (write, send_info) = conn.send(&mut out).expect("initial send failed");
 
-    while let Err(e) = socket.send_to(&out[..write], &send_info.to) {
+    while let Err(e) = socket.send_to(&out[..write], send_info.to) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
             trace!("send() would block");
             continue;
@@ -402,7 +399,7 @@ pub fn connect(
                 },
             };
 
-            if let Err(e) = socket.send_to(&out[..write], &send_info.to) {
+            if let Err(e) = socket.send_to(&out[..write], send_info.to) {
                 if e.kind() == std::io::ErrorKind::WouldBlock {
                     trace!("send() would block");
                     break;

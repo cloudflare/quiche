@@ -61,22 +61,19 @@ fn main() {
     let args = ServerArgs::with_docopt(&docopt);
 
     // Setup the event loop.
-    let poll = mio::Poll::new().unwrap();
+    let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
     // Create the UDP listening socket, and register it with the event loop.
     let socket = net::UdpSocket::bind(args.listen).unwrap();
+    socket.set_nonblocking(true).unwrap();
 
     info!("listening on {:}", socket.local_addr().unwrap());
 
-    let socket = mio::net::UdpSocket::from_socket(socket).unwrap();
-    poll.register(
-        &socket,
-        mio::Token(0),
-        mio::Ready::readable(),
-        mio::PollOpt::edge(),
-    )
-    .unwrap();
+    let mut socket = mio::net::UdpSocket::from_std(socket);
+    poll.registry()
+        .register(&mut socket, mio::Token(0), mio::Interest::READABLE)
+        .unwrap();
 
     // Create the configuration for the QUIC connections.
     let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
@@ -238,7 +235,7 @@ fn main() {
 
                     let out = &out[..len];
 
-                    if let Err(e) = socket.send_to(out, &from) {
+                    if let Err(e) = socket.send_to(out, from) {
                         if e.kind() == std::io::ErrorKind::WouldBlock {
                             trace!("send() would block");
                             break;
@@ -277,7 +274,7 @@ fn main() {
 
                         let out = &out[..len];
 
-                        if let Err(e) = socket.send_to(out, &from) {
+                        if let Err(e) = socket.send_to(out, from) {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
                                 trace!("send() would block");
                                 break;
@@ -484,7 +481,7 @@ fn main() {
                 };
 
                 // TODO: coalesce packets.
-                if let Err(e) = socket.send_to(&out[..write], &send_info.to) {
+                if let Err(e) = socket.send_to(&out[..write], send_info.to) {
                     if e.kind() == std::io::ErrorKind::WouldBlock {
                         trace!("send() would block");
                         break;
