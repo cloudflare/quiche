@@ -74,10 +74,8 @@ pub fn run(
 
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
-    let socket = std::net::UdpSocket::bind(bind_addr).unwrap();
-    socket.set_nonblocking(true).unwrap();
-
-    let mut socket = mio::net::UdpSocket::from_std(socket);
+    let mut socket =
+        mio::net::UdpSocket::bind(bind_addr.parse().unwrap()).unwrap();
     poll.registry()
         .register(&mut socket, mio::Token(0), mio::Interest::READABLE)
         .unwrap();
