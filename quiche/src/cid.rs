@@ -316,11 +316,11 @@ impl ConnectionIdentifiers {
         // received NEW_CONNECTION_ID frame MUST send a corresponding
         // RETIRE_CONNECTION_ID frame that retires the newly received connection
         // ID, unless it has already done so for that sequence number.
-        if seq < self.largest_peer_retire_prior_to {
-            if !self.retire_dcids.contains(&seq) {
-                self.retire_dcids.push_back(seq);
-                return Ok(retired_path_ids);
-            }
+        if seq < self.largest_peer_retire_prior_to &&
+            !self.retire_dcids.contains(&seq)
+        {
+            self.retire_dcids.push_back(seq);
+            return Ok(retired_path_ids);
         }
 
         // A receiver MUST ignore any Retire Prior To fields that do not

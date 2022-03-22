@@ -2948,8 +2948,7 @@ impl Connection {
 
         if pkt_type == packet::Type::Short && !is_closing {
             // Create NEW_CONNECTION_ID frames as needed.
-            for seq_num in self.ids.new_scids().map(|s| *s).collect::<Vec<u64>>()
-            {
+            for seq_num in self.ids.new_scids().copied().collect::<Vec<u64>>() {
                 let frame = self.ids.get_new_connection_id_frame_for(seq_num)?;
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
@@ -3136,8 +3135,7 @@ impl Connection {
             }
 
             // Create RETIRE_CONNECTION_ID frames as needed.
-            for seq_num in
-                self.ids.retire_dcids().map(|s| *s).collect::<Vec<u64>>()
+            for seq_num in self.ids.retire_dcids().copied().collect::<Vec<u64>>()
             {
                 let frame = frame::Frame::RetireConnectionId { seq_num };
                 if push_frame_to_pkt!(b, frames, frame, left) {
@@ -3530,7 +3528,7 @@ impl Connection {
         trace!(
             "{} tx pkt {} len={} pn={}",
             self.trace_id,
-            hdr_trace.unwrap_or("".to_string()),
+            hdr_trace.unwrap_or_else(|| "".to_string()),
             payload_len,
             pn
         );
@@ -4717,7 +4715,7 @@ impl Connection {
         if self.ids.lowest_available_dcid_seq().is_none() {
             return Err(Error::OutOfIdentifiers);
         }
-        if let Some(_) = self.ids.retire_dcid(dcid_seq)? {
+        if self.ids.retire_dcid(dcid_seq)?.is_some() {
             // Let's find an available DCID to associate to that path.
             let dcid_seq = self.ids.lowest_available_dcid_seq();
             if let Some(dcid_seq) = dcid_seq {
@@ -5592,7 +5590,7 @@ impl Connection {
                 if self.ids.zero_length_scid() {
                     return Err(Error::InvalidState);
                 }
-                if let Some(_) = self.ids.retire_scid(seq_num, &hdr.dcid)? {
+                if self.ids.retire_scid(seq_num, &hdr.dcid)?.is_some() {
                     // XXX: handle this with multiple paths.
                 }
             },
