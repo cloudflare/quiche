@@ -323,13 +323,13 @@ fn on_packets_acked(
 }
 
 fn congestion_event(
-    r: &mut Recovery, lost_bytes: usize, time_sent: Instant,
+    r: &mut Recovery, lost_bytes: usize, largest_lost_pkt: &Sent,
     _epoch: packet::Epoch, now: Instant,
 ) {
     r.bbr_state.newly_lost_bytes = lost_bytes;
 
     // Upon entering Fast Recovery.
-    if !r.in_congestion_recovery(time_sent) {
+    if !r.in_congestion_recovery(largest_lost_pkt.time_sent) {
         // Upon entering Fast Recovery.
         bbr_enter_recovery(r, now);
     }
