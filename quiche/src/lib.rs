@@ -369,12 +369,13 @@ use std::cmp;
 use std::convert::TryInto;
 use std::time;
 
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use std::str::FromStr;
 
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::convert::TryFrom;
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
@@ -1125,6 +1126,38 @@ impl Config {
     /// The default value is `false`.
     pub fn set_disable_dcid_reuse(&mut self, v: bool) {
         self.disable_dcid_reuse = v;
+    }
+
+    // TODO: add docs
+    pub fn set_preferred_address(
+        &mut self,
+        addr_str_v4: Option<String>,
+        addr_str_v6: Option<String>,
+        connection_id: &ConnectionId,
+        stateless_reset_token: Vec<u8>
+    ) -> Result<()> {
+        if addr_str_v6.is_none() && addr_str_v4.is_none() {
+            return Err(Error::TlsFail);
+        }
+
+        let mut addr_v4 = None;
+        if addr_str_v4.is_some() {
+            addr_v4 = Some(SocketAddrV4::from_str(addr_str_v4.unwrap().as_str()).map_err(|_| Error::TlsFail)?);
+        }
+
+        let mut addr_v6 = None;
+        if addr_str_v6.is_some() {
+            addr_v6 = Some(SocketAddrV6::from_str(addr_str_v6.unwrap().as_str()).map_err(|_| Error::TlsFail)?);
+        }
+
+        self.local_transport_params.preferred_address_params = Some(PreferredAddressParams::new(
+            addr_v4,
+            addr_v6,
+            connection_id.to_vec().into(),
+            stateless_reset_token
+        ));
+
+        Ok(())
     }
 }
 
@@ -5751,8 +5784,24 @@ impl Connection {
         }
     }
 
+    // TODO: add docs
+    pub fn server_preferred_address_v4(&self) -> Option<(SocketAddrV4, ConnectionId, Vec<u8>)> {
+        match self.peer_transport_params.preferred_address_params.as_ref() {
+            Some(params) => params.address_v4(),
+            None => None,
+        }
+    }
+
+    // TODO: add docs
+    pub fn server_preferred_address_v6(&self) -> Option<(SocketAddrV6, ConnectionId, Vec<u8>)> {
+        match self.peer_transport_params.preferred_address_params.as_ref() {
+            Some(params) => params.address_v6(),
+            None => None,
+        }
+    }
+
     fn encode_transport_params(&mut self) -> Result<()> {
-        let mut raw_params = [0; 128];
+        let mut raw_params = [0; 189];
 
         let raw_params = TransportParams::encode(
             &self.local_transport_params,
@@ -7038,7 +7087,7 @@ struct TransportParams {
     pub ack_delay_exponent: u64,
     pub max_ack_delay: u64,
     pub disable_active_migration: bool,
-    // pub preferred_address: ...,
+    pub preferred_address_params: Option<PreferredAddressParams<'static>>,
     pub active_conn_id_limit: u64,
     pub initial_source_connection_id: Option<ConnectionId<'static>>,
     pub retry_source_connection_id: Option<ConnectionId<'static>>,
@@ -7065,6 +7114,7 @@ impl Default for TransportParams {
             initial_source_connection_id: None,
             retry_source_connection_id: None,
             max_datagram_frame_size: None,
+            preferred_address_params: None,
         }
     }
 }
@@ -7186,7 +7236,7 @@ impl TransportParams {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    // TODO: decode preferred_address
+                    tp.preferred_address_params = Some(PreferredAddressParams::decode(&mut val)?);
                 },
 
                 0x000e => {
@@ -7345,7 +7395,18 @@ impl TransportParams {
             TransportParams::encode_param(&mut b, 0x000c, 0)?;
         }
 
-        // TODO: encode preferred_address
+        if is_server {
+           if let Some(pa) = &tp.preferred_address_params {
+               let mut param_buf = [0; 61];
+               let pref_addr_params = PreferredAddressParams::encode(pa, &mut param_buf)?;
+               TransportParams::encode_param(
+                   &mut b,
+                   0x000d,
+                   pref_addr_params.len()
+               )?;
+               b.put_bytes(pref_addr_params)?;
+           }
+        }
 
         if tp.active_conn_id_limit != 2 {
             TransportParams::encode_param(
@@ -7391,14 +7452,45 @@ impl TransportParams {
             self.original_destination_connection_id.as_ref(),
         );
 
-        let stateless_reset_token = Some(qlog::Token {
-            ty: Some(qlog::TokenType::StatelessReset),
-            length: None,
-            data: qlog::HexSlice::maybe_string(
-                self.stateless_reset_token.map(|s| s.to_be_bytes()).as_ref(),
-            ),
-            details: None,
-        });
+        let stateless_reset_token = Some(qlog::Token::new(
+            Some(qlog::TokenType::StatelessReset),
+            None,
+            self.stateless_reset_token.map(|s| s.to_be_bytes().to_vec()),
+            None,
+        ));
+
+        let preferred_address = match &self.preferred_address_params {
+            Some(params) => {
+                let stateless_reset_token = qlog::Token::new(
+                    Some(qlog::TokenType::StatelessReset),
+                    None,
+                    Some(params.stateless_reset_token.clone()),
+                    None
+                );
+
+                Some(qlog::events::quic::PreferredAddress {
+                    ip_v4: params
+                        .addr_v4
+                        .map(|sock_addr| sock_addr.ip().to_string())
+                        .unwrap_or_else(|| "".to_string()),
+                    ip_v6: params
+                        .addr_v6
+                        .map(|sock_addr| sock_addr.ip().to_string())
+                        .unwrap_or_else(|| "".to_string()),
+                    port_v4: params
+                        .addr_v4
+                        .map(|sock_addr| sock_addr.port())
+                        .unwrap_or(0),
+                    port_v6: params
+                        .addr_v6
+                        .map(|sock_addr| sock_addr.port())
+                        .unwrap_or(0),
+                    connection_id: "".to_string(),
+                    stateless_reset_token,
+                })
+            }
+            None => None
+        };
 
         EventData::TransportParametersSet(
             qlog::events::quic::TransportParametersSet {
@@ -7432,10 +7524,112 @@ impl TransportParams {
                 ),
                 initial_max_streams_bidi: Some(self.initial_max_streams_bidi),
                 initial_max_streams_uni: Some(self.initial_max_streams_uni),
-
-                preferred_address: None,
+                preferred_address,
             },
         )
+    }
+}
+
+// TODO: add docs
+#[derive(Clone, Debug, PartialEq)]
+struct PreferredAddressParams<'a> {
+    addr_v4: Option<SocketAddrV4>,
+    addr_v6: Option<SocketAddrV6>,
+    connection_id: ConnectionId<'a>,
+    stateless_reset_token: Vec<u8>,
+}
+
+impl<'a> PreferredAddressParams<'a> {
+    fn new(
+        addr_v4: Option<SocketAddrV4>,
+        addr_v6: Option<SocketAddrV6>,
+        connection_id: ConnectionId<'a>,
+        stateless_reset_token: Vec<u8>
+    ) -> Self {
+        PreferredAddressParams {
+            addr_v4,
+            addr_v6,
+            connection_id,
+            stateless_reset_token,
+        }
+    }
+    
+    fn decode(b: &mut octets::Octets) -> Result<Self> {
+        let mut addr_v4 = None;
+        let ip_v4 = b.get_u32()?;
+        let port_v4 = b.get_u16()?;
+
+        if (ip_v4 == 0) ^ (port_v4 == 0) {
+            return Err(Error::InvalidTransportParam);
+        }
+
+        if ip_v4 != 0 {
+            addr_v4 = Some(SocketAddrV4::new(Ipv4Addr::from(ip_v4), port_v4));
+        }
+
+        let mut addr_v6 = None;
+        let ip_v6_b = <[u8; 16]>::try_from(b.get_bytes(16)?.slice(16)?).map_err(|_| Error::TlsFail)?;
+        let ip_v6 = Ipv6Addr::from(ip_v6_b);
+        let port_v6 = b.get_u16()?;
+
+        if ip_v6.is_unspecified() ^ (port_v6 == 0) {
+            return Err(Error::InvalidTransportParam);
+        }
+
+        if !ip_v6.is_unspecified() {
+            addr_v6 = Some(SocketAddrV6::new(ip_v6, port_v6, 0, 0));
+        }
+
+        if addr_v4.is_none() && addr_v6.is_none() {
+            return Err(Error::InvalidTransportParam);
+        }
+
+        let cid = b.get_bytes_with_varint_length()?.to_vec().into();
+        let stateless_reset_token = b.get_bytes(16)?.to_vec();
+
+        Ok(PreferredAddressParams::new(addr_v4, addr_v6, cid, stateless_reset_token))
+    }
+
+    fn encode<'o>(pa: &PreferredAddressParams, out: &'o mut [u8]) -> Result<&'o mut [u8]>  {
+        let mut b = octets::OctetsMut::with_slice(out);
+
+        let (ip_v4, port_v4) = match pa.addr_v4 {
+            Some(ip) => (ip.ip().octets(), ip.port()),
+            None => ([0; 4], 0),
+        };
+
+        b.put_bytes(&ip_v4)?;
+        b.put_u16(port_v4)?;
+
+        let (ip_v6, port_v6) = match pa.addr_v6 {
+            Some(ip) => (ip.ip().octets(), ip.port()),
+            None => ([0; 16], 0),
+        };
+
+        b.put_bytes(&ip_v6)?;
+        b.put_u16(port_v6)?;
+
+        b.put_varint(pa.connection_id.len() as u64)?;
+        b.put_bytes(&pa.connection_id)?;
+
+        b.put_bytes(&pa.stateless_reset_token)?;
+
+        let len = b.off();
+        Ok(&mut out[..len])
+    }
+
+    fn address_v4(&self) -> Option<(SocketAddrV4, ConnectionId, Vec<u8>)> {
+        match self.addr_v4 {
+            Some(addr) => Some((addr, self.connection_id.clone(), self.stateless_reset_token.clone())),
+            None => None,
+        }
+    }
+
+    fn address_v6(&self) -> Option<(SocketAddrV6, ConnectionId, Vec<u8>)> {
+        match self.addr_v6 {
+            Some(addr) => Some((addr, self.connection_id.clone(), self.stateless_reset_token.clone())),
+            None => None,
+        }
     }
 }
 
@@ -7906,12 +8100,18 @@ mod tests {
             initial_source_connection_id: Some(b"woot woot".to_vec().into()),
             retry_source_connection_id: Some(b"retry".to_vec().into()),
             max_datagram_frame_size: Some(32),
+            preferred_address_params: Some(PreferredAddressParams::new(
+                Some(SocketAddrV4::from_str("0.0.0.1:12345").unwrap()),
+                Some(SocketAddrV6::from_str("[::1]:12345").unwrap()),
+                ConnectionId::from_vec(vec![0; MAX_CONN_ID_LEN]),
+                vec![0xba; 16]
+            )),
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 94);
+        assert_eq!(raw_params.len(), 157);
 
         let new_tp = TransportParams::decode(&raw_params, false).unwrap();
 
@@ -7936,6 +8136,7 @@ mod tests {
             initial_source_connection_id: Some(b"woot woot".to_vec().into()),
             retry_source_connection_id: None,
             max_datagram_frame_size: Some(32),
+            preferred_address_params: None,
         };
 
         let mut raw_params = [42; 256];
@@ -7981,6 +8182,53 @@ mod tests {
             TransportParams::decode(raw_params.as_slice(), true),
             Err(Error::InvalidTransportParam)
         );
+    }
+
+    #[test]
+    fn server_preferred_address() {
+        let preferred_addr_v4 = SocketAddrV4::from_str("0.0.0.1:8080").unwrap();
+        let preferred_addr_v6 = SocketAddrV6::from_str("[::1]:8080").unwrap();
+        let connection_id = &ConnectionId::from_vec(vec![0; MAX_CONN_ID_LEN]);
+        let stateless_reset_token = vec![0xba; 16];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
+        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+        config.set_application_protos(&[b"proto1", b"proto2"]).unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_max_idle_timeout(180_000);
+        config.verify_peer(false);
+        config.set_ack_delay_exponent(8);
+        config.set_preferred_address(
+            Some(preferred_addr_v4.to_string()),
+            Some(preferred_addr_v6.to_string()),
+            &connection_id,
+            stateless_reset_token.clone()
+        ).unwrap();
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+        assert_eq!(pipe.client.server_preferred_address_v4(), None);
+        assert_eq!(pipe.client.server_preferred_address_v6(), None);
+
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(
+            pipe.client.server_preferred_address_v4(),
+            Some((preferred_addr_v4, connection_id.clone(), stateless_reset_token.clone()))
+        );
+        assert_eq!(
+            pipe.client.server_preferred_address_v6(),
+            Some((preferred_addr_v6, connection_id.clone(), stateless_reset_token.clone()))
+        );
+
+        assert_eq!(pipe.server.server_preferred_address_v4(), None);
+        assert_eq!(pipe.server.server_preferred_address_v6(), None);
     }
 
     #[test]
