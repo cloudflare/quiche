@@ -50,6 +50,12 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
+          args: --features=ffi,qlog -- -D warnings
+
+      - name: Run cargo clippy on examples
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
           args: --examples --features=ffi,qlog -- -D warnings
 
       - name: Run cargo doc
