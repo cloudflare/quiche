@@ -164,8 +164,6 @@ impl QlogStreamer {
     /// returned and the streamer enters a frame-serialization mode that is only
     /// concluded by `finish_frames()`. In this mode, attempts to log additional
     /// events are ignored.
-    ///
-    /// If the event contains no array of `QuicFrames` return `false`.
     pub fn add_event_data_with_instant(
         &mut self, event_data: EventData, now: std::time::Instant,
     ) -> Result<()> {
@@ -196,8 +194,6 @@ impl QlogStreamer {
     /// returned and the streamer enters a frame-serialization mode that is only
     /// concluded by `finish_frames()`. In this mode, attempts to log additional
     /// events are ignored.
-    ///
-    /// If the event contains no array of `QuicFrames` return `false`.
     pub fn add_event(&mut self, event: Event) -> Result<()> {
         if self.state != StreamerState::Ready {
             return Err(Error::InvalidState);
