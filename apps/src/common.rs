@@ -185,9 +185,7 @@ fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {
             writeln!(
                 out,
                 "          \"value\": \"{}\"",
-                std::str::from_utf8(h.value())
-                    .unwrap()
-                    .replace("\"", "\\\"")
+                std::str::from_utf8(h.value()).unwrap().replace('"', "\\\"")
             )
             .unwrap();
 
@@ -214,9 +212,7 @@ fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {
             writeln!(
                 out,
                 "          \"value\": \"{}\"",
-                std::str::from_utf8(h.value())
-                    .unwrap()
-                    .replace("\"", "\\\"")
+                std::str::from_utf8(h.value()).unwrap().replace('"', "\\\"")
             )
             .unwrap();
 
