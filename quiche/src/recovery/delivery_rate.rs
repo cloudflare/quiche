@@ -266,7 +266,7 @@ mod tests {
         // Bytes acked so far.
         assert_eq!(r.delivery_rate._delivered(), 2400);
 
-        // Estimated delivery rate = (1200 x 2) / 0.5s = 48000.
+        // Estimated delivery rate = (1200 x 2) / 0.05s = 48000.
         assert_eq!(r.delivery_rate(), 48000);
     }
 
