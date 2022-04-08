@@ -2213,7 +2213,7 @@ impl Connection {
         );
 
         #[cfg(feature = "qlog")]
-        let mut qlog_frames = self.qlog.streamer.as_ref().map(|_| vec![]);
+        let mut qlog_frames = vec![];
 
         let mut payload = packet::decrypt_pkt(
             &mut b,
@@ -2278,9 +2278,7 @@ impl Connection {
             let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
 
             qlog_with_type!(QLOG_PACKET_RX, self.qlog, _q, {
-                if let Some(frames) = &mut qlog_frames {
-                    frames.push(frame.to_qlog());
-                }
+                qlog_frames.push(frame.to_qlog());
             });
 
             if frame.ack_eliciting() {
@@ -2313,7 +2311,7 @@ impl Connection {
             let ev_data =
                 EventData::PacketReceived(qlog::events::quic::PacketReceived {
                     header: qlog_pkt_hdr,
-                    frames: Some(qlog_frames.unwrap_or_default()),
+                    frames: Some(qlog_frames),
                     is_coalesced: None,
                     retry_token: None,
                     stateless_reset_token: None,
@@ -3423,15 +3421,13 @@ impl Connection {
         );
 
         #[cfg(feature = "qlog")]
-        let mut qlog_frames = self.qlog.streamer.as_ref().map(|_| vec![]);
+        let mut qlog_frames = vec![];
 
         for frame in &mut frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);
 
             qlog_with_type!(QLOG_PACKET_TX, self.qlog, _q, {
-                if let Some(frames) = &mut qlog_frames {
-                    frames.push(frame.to_qlog());
-                }
+                qlog_frames.push(frame.to_qlog());
             });
         }
 
@@ -3457,7 +3453,7 @@ impl Connection {
 
             let ev_data = EventData::PacketSent(qlog::events::quic::PacketSent {
                 header: qlog_pkt_hdr,
-                frames: Some(qlog_frames.unwrap_or_default()),
+                frames: Some(qlog_frames),
                 is_coalesced: None,
                 retry_token: None,
                 stateless_reset_token: None,
