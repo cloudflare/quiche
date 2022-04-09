@@ -456,10 +456,9 @@ fn main() {
         // packets to be sent.
         continue_write = false;
         for client in clients.values_mut() {
-            let max_send_burst = client
-                .conn
-                .send_quantum()
-                .min(MAX_BUF_SIZE / MAX_DATAGRAM_SIZE * MAX_DATAGRAM_SIZE);
+            let max_send_burst = client.conn.send_quantum().min(MAX_BUF_SIZE) /
+                MAX_DATAGRAM_SIZE *
+                MAX_DATAGRAM_SIZE;
 
             loop {
                 let (write, send_info) = match client.conn.send(&mut out) {
