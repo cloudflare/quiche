@@ -768,6 +768,7 @@ typedef struct {
     size_t value_len;
 } quiche_h3_header;
 
+// Extensible Priorities parameters.
 typedef struct {
     uint8_t urgency;
     bool incremental;
@@ -800,8 +801,8 @@ ssize_t quiche_h3_recv_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
 
 // Try to parse an Extensible Priority field value.
 int quiche_h3_parse_extensible_priority(uint8_t *priority,
-                                            size_t priority_len,
-                                            quiche_h3_priority *parsed);
+                                        size_t priority_len,
+                                        quiche_h3_priority *parsed);
 
 // Returns whether the peer enabled HTTP/3 DATAGRAM frame support.
 bool quiche_h3_dgram_enabled_by_peer(quiche_h3_conn *conn,

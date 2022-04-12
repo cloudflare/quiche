@@ -615,6 +615,11 @@ pub enum Event {
 }
 
 /// Extensible Priorities parameters.
+///
+/// The `TryFrom` trait supports constructing this object from the serialized
+/// Structured Fields Dictionary field value. I.e, use `TryFrom` to parse the
+/// value of a Priority header field or a PRIORITY_UPDATE frame. Using this
+/// trait requires the `sfv` feature to be enabled.
 #[derive(Debug, PartialEq)]
 #[repr(C)]
 pub struct Priority {
@@ -646,7 +651,7 @@ impl Priority {
 impl TryFrom<&[u8]> for Priority {
     type Error = crate::h3::Error;
 
-    /// Try to parse Extensible Priority field value.
+    /// Try to parse an Extensible Priority field value.
     ///
     /// The field value is expected to be a Structured Fields Dictionary; see
     /// [Extensible Priorities].
