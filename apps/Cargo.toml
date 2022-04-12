@@ -19,6 +19,7 @@ boringssl-boring-crate = ["quiche/boringssl-boring-crate"]
 sfv = ["quiche/sfv"]
 
 default = ["qlog", "sfv"]
+
 [dependencies]
 docopt = "1"
 env_logger = "0.6"
