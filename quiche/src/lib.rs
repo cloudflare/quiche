@@ -3421,7 +3421,7 @@ impl Connection {
         );
 
         #[cfg(feature = "qlog")]
-        let mut qlog_frames = vec![];
+        let mut qlog_frames = Vec::with_capacity(frames.len());
 
         for frame in &mut frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);
