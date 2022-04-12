@@ -642,6 +642,7 @@ impl Priority {
 }
 
 #[cfg(feature = "sfv")]
+#[cfg_attr(docsrs, doc(cfg(feature = "sfv")))]
 impl TryFrom<&[u8]> for Priority {
     type Error = crate::h3::Error;
 
