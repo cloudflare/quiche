@@ -267,6 +267,9 @@ impl Recovery {
         self.largest_sent_pkt[epoch] =
             cmp::max(self.largest_sent_pkt[epoch], pkt_num);
 
+        self.delivery_rate
+            .on_packet_sent(&mut pkt, self.bytes_in_flight, now);
+
         if in_flight {
             if ack_eliciting {
                 self.time_of_last_sent_ack_eliciting_pkt[epoch] = Some(now);
@@ -276,12 +279,6 @@ impl Recovery {
 
             self.update_app_limited(
                 (self.bytes_in_flight + sent_bytes) < self.congestion_window,
-            );
-
-            self.delivery_rate.on_packet_sent(
-                &mut pkt,
-                self.bytes_in_flight,
-                now,
             );
 
             self.on_packet_sent_cc(sent_bytes, now);
