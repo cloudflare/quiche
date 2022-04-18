@@ -768,6 +768,12 @@ typedef struct {
     size_t value_len;
 } quiche_h3_header;
 
+// Extensible Priorities parameters.
+typedef struct {
+    uint8_t urgency;
+    bool incremental;
+} quiche_h3_priority;
+
 // Sends an HTTP/3 request.
 int64_t quiche_h3_send_request(quiche_h3_conn *conn, quiche_conn *quic_conn,
                                quiche_h3_header *headers, size_t headers_len,
@@ -782,7 +788,7 @@ int quiche_h3_send_response(quiche_h3_conn *conn, quiche_conn *quic_conn,
 int quiche_h3_send_response_with_priority(quiche_h3_conn *conn,
                             quiche_conn *quic_conn, uint64_t stream_id,
                             quiche_h3_header *headers, size_t headers_len,
-                            const char *priority, bool fin);
+                            quiche_h3_priority *priority, bool fin);
 
 // Sends an HTTP/3 body chunk on the given stream.
 ssize_t quiche_h3_send_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
@@ -792,6 +798,11 @@ ssize_t quiche_h3_send_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
 // Reads request or response body data into the provided buffer.
 ssize_t quiche_h3_recv_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t stream_id, uint8_t *out, size_t out_len);
+
+// Try to parse an Extensible Priority field value.
+int quiche_h3_parse_extensible_priority(uint8_t *priority,
+                                        size_t priority_len,
+                                        quiche_h3_priority *parsed);
 
 // Returns whether the peer enabled HTTP/3 DATAGRAM frame support.
 bool quiche_h3_dgram_enabled_by_peer(quiche_h3_conn *conn,

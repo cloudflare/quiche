@@ -24,11 +24,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::ffi;
+#[cfg(feature = "sfv")]
+use std::convert::TryFrom;
+
 use std::ptr;
 use std::slice;
 
-use libc::c_char;
 use libc::c_int;
 use libc::c_void;
 use libc::size_t;
@@ -37,6 +38,7 @@ use libc::ssize_t;
 use crate::*;
 
 use crate::h3::NameValue;
+use crate::h3::Priority;
 
 #[no_mangle]
 pub extern fn quiche_h3_config_new() -> *mut h3::Config {
@@ -232,11 +234,9 @@ pub extern fn quiche_h3_send_response(
 #[no_mangle]
 pub extern fn quiche_h3_send_response_with_priority(
     conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
-    headers: *const Header, headers_len: size_t, priority: *const c_char,
-    fin: bool,
+    headers: *const Header, headers_len: size_t, priority: &Priority, fin: bool,
 ) -> c_int {
     let resp_headers = headers_from_ptr(headers, headers_len);
-    let priority = unsafe { ffi::CStr::from_ptr(priority).to_str().unwrap() };
 
     match conn.send_response_with_priority(
         quic_conn,
@@ -284,6 +284,24 @@ pub extern fn quiche_h3_recv_body(
         Ok(v) => v as ssize_t,
 
         Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
+#[cfg(feature = "sfv")]
+pub extern fn quiche_h3_parse_extensible_priority(
+    priority: *const u8, priority_len: size_t, parsed: &mut Priority,
+) -> c_int {
+    let priority = unsafe { slice::from_raw_parts(priority, priority_len) };
+
+    match h3::Priority::try_from(priority) {
+        Ok(v) => {
+            parsed.urgency = v.urgency;
+            parsed.incremental = v.incremental;
+            0
+        },
+
+        Err(e) => e.to_c() as c_int,
     }
 }
 

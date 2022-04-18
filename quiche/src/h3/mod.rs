@@ -279,6 +279,9 @@
 
 use std::collections::VecDeque;
 
+#[cfg(feature = "sfv")]
+use std::convert::TryFrom;
+
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
 /// This can be passed directly to the [`Config::set_application_protos()`]
@@ -290,6 +293,14 @@ pub const APPLICATION_PROTOCOL: &[u8] = b"\x02h3\x05h3-29\x05h3-28\x05h3-27";
 
 // The offset used when converting HTTP/3 urgency to quiche urgency.
 const PRIORITY_URGENCY_OFFSET: u8 = 124;
+
+// Parameter values as specified in [Extensible Priorities].
+//
+// [Extensible Priorities]: https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-priority-12#section-4.
+const PRIORITY_URGENCY_LOWER_BOUND: u8 = 0;
+const PRIORITY_URGENCY_UPPER_BOUND: u8 = 7;
+const PRIORITY_URGENCY_DEFAULT: u8 = 3;
+const PRIORITY_INCREMENTAL_DEFAULT: bool = false;
 
 /// A specialized [`Result`] type for quiche HTTP/3 operations.
 ///
@@ -603,6 +614,104 @@ pub enum Event {
     GoAway,
 }
 
+/// Extensible Priorities parameters.
+///
+/// The `TryFrom` trait supports constructing this object from the serialized
+/// Structured Fields Dictionary field value. I.e, use `TryFrom` to parse the
+/// value of a Priority header field or a PRIORITY_UPDATE frame. Using this
+/// trait requires the `sfv` feature to be enabled.
+#[derive(Debug, PartialEq)]
+#[repr(C)]
+pub struct Priority {
+    urgency: u8,
+    incremental: bool,
+}
+
+impl Default for Priority {
+    fn default() -> Self {
+        Priority {
+            urgency: PRIORITY_URGENCY_DEFAULT as u8,
+            incremental: PRIORITY_INCREMENTAL_DEFAULT,
+        }
+    }
+}
+
+impl Priority {
+    /// Creates a new Priority.
+    pub fn new(urgency: u8, incremental: bool) -> Self {
+        Priority {
+            urgency,
+            incremental,
+        }
+    }
+}
+
+#[cfg(feature = "sfv")]
+#[cfg_attr(docsrs, doc(cfg(feature = "sfv")))]
+impl TryFrom<&[u8]> for Priority {
+    type Error = crate::h3::Error;
+
+    /// Try to parse an Extensible Priority field value.
+    ///
+    /// The field value is expected to be a Structured Fields Dictionary; see
+    /// [Extensible Priorities].
+    ///
+    /// If the `u` or `i` fields are contained with correct types, a constructed
+    /// Priority object is returned. Note that urgency values outside of valid
+    /// range (0 through 7) are clamped to 7.
+    ///
+    /// If the `u` or `i` fields are contained with the wrong types,
+    /// Error::Done is returned.
+    ///
+    /// Omitted parameters will yield default values.
+    ///
+    /// [Extensible Priorities]: https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-priority-12#section-4.
+    fn try_from(value: &[u8]) -> std::result::Result<Self, Self::Error> {
+        let dict = match sfv::Parser::parse_dictionary(value) {
+            Ok(v) => v,
+
+            Err(_) => return Err(Error::Done),
+        };
+
+        let urgency = match dict.get("u") {
+            // If there is a u parameter, try to read it as an Item of type
+            // Integer. If the value out of the spec's allowed range
+            // (0 through 7), that's an error so set it to the upper
+            // bound (lowest priority) to avoid interference with
+            // other streams.
+            Some(sfv::ListEntry::Item(item)) => match item.bare_item.as_int() {
+                Some(v) => {
+                    if !(PRIORITY_URGENCY_LOWER_BOUND as i64..=
+                        PRIORITY_URGENCY_UPPER_BOUND as i64)
+                        .contains(&v)
+                    {
+                        PRIORITY_URGENCY_UPPER_BOUND
+                    } else {
+                        v as u8
+                    }
+                },
+
+                None => return Err(Error::Done),
+            },
+
+            Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+
+            // Omitted so use default value.
+            None => PRIORITY_URGENCY_DEFAULT,
+        };
+
+        let incremental = match dict.get("i") {
+            Some(sfv::ListEntry::Item(item)) =>
+                item.bare_item.as_bool().ok_or(Error::Done)?,
+
+            // Omitted so use default value.
+            _ => false,
+        };
+
+        Ok(Priority::new(urgency as u8, incremental))
+    }
+}
+
 struct ConnectionSettings {
     pub max_field_section_size: Option<u64>,
     pub qpack_max_table_capacity: Option<u64>,
@@ -823,10 +932,10 @@ impl Connection {
         &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
         fin: bool,
     ) -> Result<()> {
-        let priority = "u=3";
+        let priority = Default::default();
 
         self.send_response_with_priority(
-            conn, stream_id, headers, priority, fin,
+            conn, stream_id, headers, &priority, fin,
         )?;
 
         Ok(())
@@ -835,56 +944,32 @@ impl Connection {
     /// Sends an HTTP/3 response on the specified stream with specified
     /// priority.
     ///
+    /// The `priority` parameter represents [Extensible Priority]
+    /// parameters. If the urgency is outside the range 0-7, it will be clamped
+    /// to 7.
+    ///
     /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
     /// doesn't have enough capacity for the operation to complete. When this
     /// happens the application should retry the operation once the stream is
     /// reported as writable again.
     ///
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
+    /// [Extensible Priority]: https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-priority-12#section-4.
     pub fn send_response_with_priority<T: NameValue>(
         &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
-        priority: &str, fin: bool,
+        priority: &Priority, fin: bool,
     ) -> Result<()> {
         if !self.streams.contains_key(&stream_id) {
             return Err(Error::FrameUnexpected);
         }
 
-        let mut urgency = 3u8.saturating_add(PRIORITY_URGENCY_OFFSET);
-        let mut incremental = false;
+        // Clamp and shift urgency into quiche-priority space
+        let urgency = priority
+            .urgency
+            .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND) +
+            PRIORITY_URGENCY_OFFSET;
 
-        for param in priority.split(',') {
-            if param.trim() == "i" {
-                incremental = true;
-                continue;
-            }
-
-            if param.trim().starts_with("u=") {
-                // u is an sh-integer (an i64) but it has a constrained range of
-                // 0-7. So detect anything outside that range and clamp it to
-                // the lowest urgency in order to avoid it interfering with
-                // valid items.
-                //
-                // TODO: this also detects when u is not an sh-integer and
-                // clamps it in the same way. A real structured header parser
-                // would actually fail to parse.
-                let mut u = param
-                    .rsplit('=')
-                    .next()
-                    .unwrap()
-                    .parse::<i64>()
-                    .unwrap_or(7);
-
-                if !(0..=7).contains(&u) {
-                    u = 7;
-                }
-
-                // The HTTP/3 urgency needs to be shifted into the quiche
-                // urgency range.
-                urgency = (u as u8).saturating_add(PRIORITY_URGENCY_OFFSET);
-            }
-        }
-
-        conn.stream_priority(stream_id, urgency, incremental)?;
+        conn.stream_priority(stream_id, urgency, priority.incremental)?;
 
         self.send_headers(conn, stream_id, headers, fin)?;
 
@@ -3146,6 +3231,92 @@ mod tests {
         assert_eq!(s.poll_client(), Ok((0, Event::GoAway)));
 
         assert_eq!(s.poll_client(), Err(Error::IdError));
+    }
+
+    #[test]
+    #[cfg(feature = "sfv")]
+    fn parse_priority_field_value() {
+        // Legal dicts
+        assert_eq!(
+            Ok(Priority::new(0, false)),
+            Priority::try_from(b"u=0".as_slice())
+        );
+        assert_eq!(
+            Ok(Priority::new(3, false)),
+            Priority::try_from(b"u=3".as_slice())
+        );
+        assert_eq!(
+            Ok(Priority::new(7, false)),
+            Priority::try_from(b"u=7".as_slice())
+        );
+
+        assert_eq!(
+            Ok(Priority::new(0, true)),
+            Priority::try_from(b"u=0, i".as_slice())
+        );
+        assert_eq!(
+            Ok(Priority::new(3, true)),
+            Priority::try_from(b"u=3, i".as_slice())
+        );
+        assert_eq!(
+            Ok(Priority::new(7, true)),
+            Priority::try_from(b"u=7, i".as_slice())
+        );
+
+        assert_eq!(
+            Ok(Priority::new(0, true)),
+            Priority::try_from(b"u=0, i=?1".as_slice())
+        );
+        assert_eq!(
+            Ok(Priority::new(3, true)),
+            Priority::try_from(b"u=3, i=?1".as_slice())
+        );
+        assert_eq!(
+            Ok(Priority::new(7, true)),
+            Priority::try_from(b"u=7, i=?1".as_slice())
+        );
+
+        assert_eq!(
+            Ok(Priority::new(3, false)),
+            Priority::try_from(b"".as_slice())
+        );
+
+        assert_eq!(
+            Ok(Priority::new(0, true)),
+            Priority::try_from(b"u=0;foo, i;bar".as_slice())
+        );
+        assert_eq!(
+            Ok(Priority::new(3, true)),
+            Priority::try_from(b"u=3;hello, i;world".as_slice())
+        );
+        assert_eq!(
+            Ok(Priority::new(7, true)),
+            Priority::try_from(b"u=7;croeso, i;gymru".as_slice())
+        );
+
+        assert_eq!(
+            Ok(Priority::new(0, true)),
+            Priority::try_from(b"u=0, i, spinaltap=11".as_slice())
+        );
+
+        // Illegal formats
+        assert_eq!(Err(Error::Done), Priority::try_from(b"0".as_slice()));
+        assert_eq!(
+            Ok(Priority::new(7, false)),
+            Priority::try_from(b"u=-1".as_slice())
+        );
+        assert_eq!(Err(Error::Done), Priority::try_from(b"u=0.2".as_slice()));
+        assert_eq!(
+            Ok(Priority::new(7, false)),
+            Priority::try_from(b"u=100".as_slice())
+        );
+        assert_eq!(
+            Err(Error::Done),
+            Priority::try_from(b"u=3, i=true".as_slice())
+        );
+
+        // Trailing comma in dict is malformed
+        assert_eq!(Err(Error::Done), Priority::try_from(b"u=7, ".as_slice()));
     }
 
     #[test]
