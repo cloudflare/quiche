@@ -1541,19 +1541,18 @@ impl Connection {
         let scid_as_hex: Vec<String> =
             scid.iter().map(|b| format!("{:02x}", b)).collect();
 
-        let mut ids = cid::ConnectionIdentifiers::new(
-            config.local_transport_params.active_conn_id_limit as usize,
-            config.events,
-        );
         let reset_token = if is_server {
             config.local_transport_params.stateless_reset_token
         } else {
             None
         };
 
-        // XXX: We identify our only path as 0.
-        let owned_scid = scid.clone().into_owned();
-        ids.new_scid(owned_scid, reset_token, false, Some(0), false)?;
+        let ids = cid::ConnectionIdentifiers::new(
+            config.local_transport_params.active_conn_id_limit as usize,
+            config.events,
+            scid.clone(),
+            reset_token,
+        );
 
         let mut conn = Box::pin(Connection {
             version: config.version,
@@ -1987,7 +1986,7 @@ impl Connection {
 
         let mut b = octets::OctetsMut::with_slice(buf);
 
-        let mut hdr = Header::from_bytes(&mut b, self.source_id()?.len())
+        let mut hdr = Header::from_bytes(&mut b, self.source_id().len())
             .map_err(|e| {
                 drop_pkt_on_err(
                     e,
@@ -2014,11 +2013,11 @@ impl Connection {
                 return Err(Error::Done);
             }
 
-            if hdr.dcid != self.source_id()? {
+            if hdr.dcid != self.source_id() {
                 return Err(Error::Done);
             }
 
-            if hdr.scid != self.destination_id()? {
+            if hdr.scid != self.destination_id() {
                 return Err(Error::Done);
             }
 
@@ -2064,7 +2063,7 @@ impl Connection {
 
             // Derive Initial secrets based on the new version.
             let (aead_open, aead_seal) = crypto::derive_initial_key_material(
-                &self.destination_id()?,
+                &self.destination_id(),
                 self.version,
                 self.is_server,
             )?;
@@ -2103,7 +2102,7 @@ impl Connection {
             // Check if Retry packet is valid.
             if packet::verify_retry_integrity(
                 &b,
-                &self.destination_id()?,
+                &self.destination_id(),
                 self.version,
             )
             .is_err()
@@ -2117,11 +2116,11 @@ impl Connection {
             self.did_retry = true;
 
             // Remember peer's new connection ID.
-            self.odcid = Some(self.destination_id()?.into_owned());
+            self.odcid = Some(self.destination_id().into_owned());
 
             self.set_initial_dcid(hdr.scid.clone(), None)?;
 
-            self.rscid = Some(self.destination_id()?.into_owned());
+            self.rscid = Some(self.destination_id().into_owned());
 
             // Derive Initial secrets using the new connection ID.
             let (aead_open, aead_seal) = crypto::derive_initial_key_material(
@@ -2299,7 +2298,7 @@ impl Connection {
 
         if !self.is_server && !self.got_peer_conn_id {
             if self.odcid.is_none() {
-                self.odcid = Some(self.destination_id()?.into_owned());
+                self.odcid = Some(self.destination_id().into_owned());
             }
 
             // Replace the randomly generated destination connection ID with
@@ -2804,11 +2803,11 @@ impl Connection {
                 },
 
                 frame::Frame::NewConnectionId { seq_num, .. } => {
-                    self.ids.mark_new_scids(seq_num, true);
+                    self.ids.mark_advertise_new_scid_seq(seq_num, true);
                 },
 
                 frame::Frame::RetireConnectionId { seq_num } => {
-                    self.ids.mark_retire_dcids(seq_num, true);
+                    self.ids.mark_retire_dcid_seq(seq_num, true);
                 },
 
                 _ => (),
@@ -2833,8 +2832,8 @@ impl Connection {
 
             version: self.version,
 
-            dcid: self.destination_id()?,
-            scid: self.source_id()?,
+            dcid: self.destination_id(),
+            scid: self.source_id(),
 
             pkt_num: 0,
             pkt_num_len: pn_len,
@@ -2948,14 +2947,16 @@ impl Connection {
 
         if pkt_type == packet::Type::Short && !is_closing {
             // Create NEW_CONNECTION_ID frames as needed.
-            for seq_num in self.ids.new_scids().copied().collect::<Vec<u64>>() {
+            while let Some(seq_num) = self.ids.next_advertise_new_scid_seq() {
                 let frame = self.ids.get_new_connection_id_frame_for(seq_num)?;
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
-                    self.ids.mark_new_scids(seq_num, false);
+                    self.ids.mark_advertise_new_scid_seq(seq_num, false);
 
                     ack_eliciting = true;
                     in_flight = true;
+                } else {
+                    break;
                 }
             }
         }
@@ -3135,13 +3136,14 @@ impl Connection {
             }
 
             // Create RETIRE_CONNECTION_ID frames as needed.
-            for seq_num in self.ids.retire_dcids().copied().collect::<Vec<u64>>()
-            {
+            while let Some(seq_num) = self.ids.next_retire_dcid_seq() {
                 let frame = frame::Frame::RetireConnectionId { seq_num };
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     ack_eliciting = true;
                     in_flight = true;
-                    self.ids.mark_retire_dcids(seq_num, false);
+                    self.ids.mark_retire_dcid_seq(seq_num, false);
+                } else {
+                    break;
                 }
             }
         }
@@ -4506,27 +4508,24 @@ impl Connection {
         match self.peer_transport_params.max_datagram_frame_size {
             None => None,
             Some(peer_frame_len) => {
-                if let Ok(dcid) = self.destination_id() {
-                    // Start from the maximum packet size...
-                    let mut max_len = self.max_send_udp_payload_size();
-                    // ...subtract the Short packet header overhead...
-                    // (1 byte of pkt_len + len of dcid)
-                    max_len = max_len.saturating_sub(1 + dcid.len());
-                    // ...subtract the packet number (max len)...
-                    max_len = max_len.saturating_sub(packet::MAX_PKT_NUM_LEN);
-                    // ...subtract the crypto overhead...
-                    max_len = max_len.saturating_sub(
-                        self.pkt_num_spaces[packet::EPOCH_APPLICATION]
-                            .crypto_overhead()?,
-                    );
-                    // ...clamp to what peer can support...
-                    max_len = cmp::min(peer_frame_len as usize, max_len);
-                    // ...subtract frame overhead, checked for underflow.
-                    // (1 byte of frame type + len of length )
-                    max_len.checked_sub(1 + frame::MAX_DGRAM_OVERHEAD)
-                } else {
-                    None
-                }
+                let dcid = self.destination_id();
+                // Start from the maximum packet size...
+                let mut max_len = self.max_send_udp_payload_size();
+                // ...subtract the Short packet header overhead...
+                // (1 byte of pkt_len + len of dcid)
+                max_len = max_len.saturating_sub(1 + dcid.len());
+                // ...subtract the packet number (max len)...
+                max_len = max_len.saturating_sub(packet::MAX_PKT_NUM_LEN);
+                // ...subtract the crypto overhead...
+                max_len = max_len.saturating_sub(
+                    self.pkt_num_spaces[packet::EPOCH_APPLICATION]
+                        .crypto_overhead()?,
+                );
+                // ...clamp to what peer can support...
+                max_len = cmp::min(peer_frame_len as usize, max_len);
+                // ...subtract frame overhead, checked for underflow.
+                // (1 byte of frame type + len of length )
+                max_len.checked_sub(1 + frame::MAX_DGRAM_OVERHEAD)
             },
         }
     }
@@ -4832,9 +4831,9 @@ impl Connection {
     /// Note that the value returned can change throughout the connection's
     /// lifetime.
     #[inline]
-    pub fn source_id(&self) -> Result<ConnectionId> {
-        let e = self.ids.oldest_scid()?;
-        Ok(ConnectionId::from_ref(e.cid.as_ref()))
+    pub fn source_id(&self) -> ConnectionId {
+        let e = self.ids.oldest_scid();
+        ConnectionId::from_ref(e.cid.as_ref())
     }
 
     /// Returns the destination connection ID.
@@ -4842,9 +4841,9 @@ impl Connection {
     /// Note that the value returned can change throughout the connection's
     /// lifetime.
     #[inline]
-    pub fn destination_id(&self) -> Result<ConnectionId> {
-        let e = self.ids.oldest_dcid()?;
-        Ok(ConnectionId::from_ref(e.cid.as_ref()))
+    pub fn destination_id(&self) -> ConnectionId {
+        let e = self.ids.oldest_dcid();
+        ConnectionId::from_ref(e.cid.as_ref())
     }
 
     /// Returns the number of source Connection IDs that can still be provided
@@ -5012,7 +5011,7 @@ impl Connection {
         {
             // Validate initial_source_connection_id.
             match &peer_params.initial_source_connection_id {
-                Some(v) if v != &self.destination_id()? =>
+                Some(v) if v != &self.destination_id() =>
                     return Err(Error::InvalidTransportParam),
 
                 Some(_) => (),
@@ -5776,7 +5775,7 @@ impl Connection {
     fn set_initial_dcid(
         &mut self, cid: ConnectionId<'static>, reset_token: Option<u128>,
     ) -> Result<()> {
-        self.ids.set_initial_dcid(cid.clone(), reset_token, Some(0));
+        self.ids.set_initial_dcid(cid, reset_token, Some(0));
         Ok(())
     }
 }
@@ -6647,8 +6646,8 @@ pub mod testing {
         let hdr = Header {
             ty: pkt_type,
             version: conn.version,
-            dcid: ConnectionId::from_ref(conn.ids.oldest_dcid()?.cid.as_ref()),
-            scid: ConnectionId::from_ref(conn.ids.oldest_scid()?.cid.as_ref()),
+            dcid: ConnectionId::from_ref(conn.ids.oldest_dcid().cid.as_ref()),
+            scid: ConnectionId::from_ref(conn.ids.oldest_scid().cid.as_ref()),
             pkt_num: 0,
             pkt_num_len: pn_len,
             token: conn.token.clone(),
@@ -6700,8 +6699,7 @@ pub mod testing {
     ) -> Result<Vec<frame::Frame>> {
         let mut b = octets::OctetsMut::with_slice(&mut buf[..len]);
 
-        let mut hdr =
-            Header::from_bytes(&mut b, conn.source_id()?.len()).unwrap();
+        let mut hdr = Header::from_bytes(&mut b, conn.source_id().len()).unwrap();
 
         let epoch = hdr.ty.to_epoch()?;
 
@@ -9241,8 +9239,8 @@ mod tests {
         let pn = 0;
         let pn_len = packet::pkt_num_len(pn).unwrap();
 
-        let dcid = pipe.client.destination_id().unwrap();
-        let scid = pipe.client.source_id().unwrap();
+        let dcid = pipe.client.destination_id();
+        let scid = pipe.client.source_id();
 
         let hdr = Header {
             ty: packet::Type::Initial,
@@ -11784,7 +11782,7 @@ mod tests {
         assert_eq!(pipe.server.poll(), Err(Error::Done));
         assert_eq!(pipe.client.spare_scid_spots(), 1);
 
-        let scid = pipe.client.source_id().unwrap().into_owned();
+        let scid = pipe.client.source_id().into_owned();
 
         let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
         assert_eq!(
@@ -11853,7 +11851,7 @@ mod tests {
 
         // The active Destination Connection ID of the server should now be the
         // one with sequence number 1.
-        assert_eq!(pipe.server.destination_id().unwrap(), scid_1);
+        assert_eq!(pipe.server.destination_id(), scid_1);
 
         // Now tries to experience CID retirement. If the server tries to remove
         // non-existing DCIDs, it fails.
@@ -11880,7 +11878,7 @@ mod tests {
             ))),
         );
 
-        assert_eq!(pipe.server.destination_id().unwrap(), scid_2);
+        assert_eq!(pipe.server.destination_id(), scid_2);
 
         // Trying to remove the last DCID triggers an error.
         assert_eq!(
@@ -11908,7 +11906,7 @@ mod tests {
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
-        let scid = pipe.client.source_id().unwrap().into_owned();
+        let scid = pipe.client.source_id().into_owned();
 
         let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
         assert_eq!(

@@ -398,10 +398,10 @@ int quiche_conn_close(quiche_conn *conn, bool app, uint64_t err,
 void quiche_conn_trace_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns the source connection ID.
-int quiche_conn_source_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
+void quiche_conn_source_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns the destination connection ID.
-int quiche_conn_destination_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
+void quiche_conn_destination_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns the negotiated ALPN protocol.
 void quiche_conn_application_proto(quiche_conn *conn, const uint8_t **out,
