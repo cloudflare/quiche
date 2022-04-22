@@ -175,6 +175,14 @@ impl Rate {
     pub fn sample_is_app_limited(&self) -> bool {
         self.rate_sample.is_app_limited
     }
+
+    pub fn sample_delivered(&self) -> usize {
+        self.rate_sample.delivered
+    }
+
+    pub fn sample_prior_delivered(&self) -> usize {
+        self.rate_sample.prior_delivered
+    }
 }
 
 #[derive(Default, Debug)]
