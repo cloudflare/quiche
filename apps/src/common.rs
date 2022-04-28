@@ -454,6 +454,11 @@ struct Http3Request {
     response_writer: Option<std::io::BufWriter<std::fs::File>>,
 }
 
+type Http3ResponseBuilderResult = std::result::Result<
+    (Vec<quiche::h3::Header>, Vec<u8>, quiche::h3::Priority),
+    (u64, String),
+>;
+
 pub struct Http09Conn {
     stream_id: u64,
     reqs_sent: usize,
@@ -914,10 +919,7 @@ impl Http3Conn {
     /// Builds an HTTP/3 response given a request.
     fn build_h3_response(
         root: &str, index: &str, request: &[quiche::h3::Header],
-    ) -> std::result::Result<
-        (Vec<quiche::h3::Header>, Vec<u8>, quiche::h3::Priority),
-        (u64, String),
-    > {
+    ) -> Http3ResponseBuilderResult {
         let mut file_path = path::PathBuf::from(root);
         let mut scheme = None;
         let mut authority = None;
