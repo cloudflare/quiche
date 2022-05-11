@@ -33,6 +33,7 @@ use std::io::prelude::*;
 
 use std::collections::HashMap;
 
+#[cfg(feature = "sfv")]
 use std::convert::TryFrom;
 
 use std::fmt::Write as _;
@@ -1147,10 +1148,14 @@ impl Http3Conn {
                 .push(quiche::h3::Header::new(b"priority", priority.as_slice()));
         }
 
+        #[cfg(feature = "sfv")]
         let priority = match quiche::h3::Priority::try_from(priority.as_slice()) {
             Ok(v) => v,
-            Err(_) => Default::default(),
+            Err(_) => quiche::h3::Priority::default(),
         };
+
+        #[cfg(not(feature = "sfv"))]
+        let priority = quiche::h3::Priority::default();
 
         Ok((headers, body, priority))
     }
