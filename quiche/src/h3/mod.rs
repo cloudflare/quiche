@@ -478,7 +478,7 @@ pub struct Config {
 
 impl Config {
     /// Creates a new configuration object with default settings.
-    pub fn new() -> Result<Config> {
+    pub const fn new() -> Result<Config> {
         Ok(Config {
             max_field_section_size: None,
             qpack_max_table_capacity: None,
@@ -552,7 +552,7 @@ pub struct HeaderRef<'a>(&'a [u8], &'a [u8]);
 
 impl<'a> HeaderRef<'a> {
     /// Creates a new header.
-    pub fn new(name: &'a [u8], value: &'a [u8]) -> Self {
+    pub const fn new(name: &'a [u8], value: &'a [u8]) -> Self {
         Self(name, value)
     }
 }
@@ -657,7 +657,7 @@ impl Default for Priority {
 
 impl Priority {
     /// Creates a new Priority.
-    pub fn new(urgency: u8, incremental: bool) -> Self {
+    pub const fn new(urgency: u8, incremental: bool) -> Self {
         Priority {
             urgency,
             incremental,
