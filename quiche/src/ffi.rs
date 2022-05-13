@@ -417,7 +417,7 @@ pub extern fn quiche_accept(
     let from = std_addr_from_c(from, from_len);
 
     match accept(&scid, odcid.as_ref(), from, config) {
-        Ok(c) => Box::into_raw(Pin::into_inner(c)),
+        Ok(c) => Box::into_raw(Box::new(c)),
 
         Err(_) => ptr::null_mut(),
     }
@@ -440,7 +440,7 @@ pub extern fn quiche_connect(
     let to = std_addr_from_c(to, to_len);
 
     match connect(server_name, &scid, to, config) {
-        Ok(c) => Box::into_raw(Pin::into_inner(c)),
+        Ok(c) => Box::into_raw(Box::new(c)),
 
         Err(_) => ptr::null_mut(),
     }
@@ -525,7 +525,7 @@ pub extern fn quiche_conn_new_with_tls(
         tls,
         is_server,
     ) {
-        Ok(c) => Box::into_raw(Pin::into_inner(c)),
+        Ok(c) => Box::into_raw(Box::new(c)),
 
         Err(_) => ptr::null_mut(),
     }

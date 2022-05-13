@@ -371,12 +371,8 @@ impl Handshake {
         unsafe { SSL_get_error(self.as_ptr(), ret_code) }
     }
 
-    pub fn init(
-        &mut self, conn: *const Connection, is_server: bool,
-    ) -> Result<()> {
+    pub fn init(&mut self, is_server: bool) -> Result<()> {
         self.set_state(is_server);
-
-        self.set_ex_data(*QUICHE_EX_DATA_INDEX, conn)?;
 
         self.set_min_proto_version(TLS1_3_VERSION);
         self.set_max_proto_version(TLS1_3_VERSION);
@@ -558,13 +554,21 @@ impl Handshake {
         map_result_ssl(self, rc)
     }
 
-    pub fn do_handshake(&mut self) -> Result<()> {
+    pub fn do_handshake(&mut self, conn_ptr: *mut Connection) -> Result<()> {
+        self.set_ex_data(*QUICHE_EX_DATA_INDEX, conn_ptr)?;
         let rc = unsafe { SSL_do_handshake(self.as_mut_ptr()) };
+        self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
+
         map_result_ssl(self, rc)
     }
 
-    pub fn process_post_handshake(&mut self) -> Result<()> {
+    pub fn process_post_handshake(
+        &mut self, conn_ptr: *mut Connection,
+    ) -> Result<()> {
+        self.set_ex_data(*QUICHE_EX_DATA_INDEX, conn_ptr)?;
         let rc = unsafe { SSL_process_quic_post_handshake(self.as_mut_ptr()) };
+        self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
+
         map_result_ssl(self, rc)
     }
 

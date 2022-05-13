@@ -42,7 +42,7 @@ struct PartialResponse {
 }
 
 struct Client {
-    conn: std::pin::Pin<Box<quiche::Connection>>,
+    conn: quiche::Connection,
 
     partial_responses: HashMap<u64, PartialResponse>,
 }
