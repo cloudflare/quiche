@@ -359,7 +359,6 @@ use std::time;
 
 use std::net::SocketAddr;
 
-use std::pin::Pin;
 use std::str::FromStr;
 
 use std::collections::VecDeque;
@@ -1246,7 +1245,7 @@ pub struct Connection {
 pub fn accept(
     scid: &ConnectionId, odcid: Option<&ConnectionId>, from: SocketAddr,
     config: &mut Config,
-) -> Result<Pin<Box<Connection>>> {
+) -> Result<Connection> {
     let conn = Connection::new(scid, odcid, from, config, true)?;
 
     Ok(conn)
@@ -1272,7 +1271,7 @@ pub fn accept(
 pub fn connect(
     server_name: Option<&str>, scid: &ConnectionId, to: SocketAddr,
     config: &mut Config,
-) -> Result<Pin<Box<Connection>>> {
+) -> Result<Connection> {
     let mut conn = Connection::new(scid, None, to, config, false)?;
 
     if let Some(server_name) = server_name {
@@ -1484,7 +1483,7 @@ impl Connection {
     fn new(
         scid: &ConnectionId, odcid: Option<&ConnectionId>, peer: SocketAddr,
         config: &mut Config, is_server: bool,
-    ) -> Result<Pin<Box<Connection>>> {
+    ) -> Result<Connection> {
         let tls = config.tls_ctx.new_handshake()?;
         Connection::with_tls(scid, odcid, peer, config, tls, is_server)
     }
@@ -1492,13 +1491,13 @@ impl Connection {
     fn with_tls(
         scid: &ConnectionId, odcid: Option<&ConnectionId>, peer: SocketAddr,
         config: &mut Config, tls: tls::Handshake, is_server: bool,
-    ) -> Result<Pin<Box<Connection>>> {
+    ) -> Result<Connection> {
         let max_rx_data = config.local_transport_params.initial_max_data;
 
         let scid_as_hex: Vec<String> =
             scid.iter().map(|b| format!("{:02x}", b)).collect();
 
-        let mut conn = Box::pin(Connection {
+        let mut conn = Connection {
             version: config.version,
 
             dcid: ConnectionId::default(),
@@ -1625,7 +1624,7 @@ impl Connection {
             ),
 
             emit_dgram: true,
-        });
+        };
 
         if let Some(odcid) = odcid {
             conn.local_transport_params
@@ -1640,8 +1639,7 @@ impl Connection {
         conn.local_transport_params.initial_source_connection_id =
             Some(scid.to_vec().into());
 
-        let conn_ptr = &conn as &Connection as *const Connection;
-        conn.handshake.init(conn_ptr, is_server)?;
+        conn.handshake.init(is_server)?;
 
         conn.handshake
             .use_legacy_codepoint(config.version != PROTOCOL_VERSION_V1);
@@ -4862,12 +4860,13 @@ impl Connection {
     ///
     /// If the connection is already established, it does nothing.
     fn do_handshake(&mut self) -> Result<()> {
-        if self.handshake_completed {
-            // Handshake is already complete, nothing more to do.
-            return Ok(());
+        let conn_ptr = self as &mut Connection as *mut Connection;
+
+        if self.is_established() {
+            return self.handshake.process_post_handshake(conn_ptr);
         }
 
-        match self.handshake.do_handshake() {
+        match self.handshake.do_handshake(conn_ptr) {
             Ok(_) => (),
 
             Err(Error::Done) => {
@@ -5179,11 +5178,7 @@ impl Connection {
                     self.handshake.provide_data(level, recv_buf)?;
                 }
 
-                if self.is_established() {
-                    self.handshake.process_post_handshake()?;
-                } else {
-                    self.do_handshake()?;
-                }
+                self.do_handshake()?;
             },
 
             frame::Frame::CryptoHeader { .. } => unreachable!(),
@@ -6118,8 +6113,8 @@ pub mod testing {
     use super::*;
 
     pub struct Pipe {
-        pub client: Pin<Box<Connection>>,
-        pub server: Pin<Box<Connection>>,
+        pub client: Connection,
+        pub server: Connection,
     }
 
     impl Pipe {

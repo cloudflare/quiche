@@ -88,7 +88,7 @@ pub struct PartialResponse {
 }
 
 pub struct Client {
-    pub conn: std::pin::Pin<Box<quiche::Connection>>,
+    pub conn: quiche::Connection,
 
     pub http_conn: Option<Box<dyn HttpConn>>,
 
@@ -267,14 +267,14 @@ pub trait HttpConn {
     fn report_incomplete(&self, start: &std::time::Instant) -> bool;
 
     fn handle_requests(
-        &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
+        &mut self, conn: &mut quiche::Connection,
         partial_requests: &mut HashMap<u64, PartialRequest>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         index: &str, buf: &mut [u8],
     ) -> quiche::h3::Result<()>;
 
     fn handle_writable(
-        &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
+        &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     );
 }
@@ -638,7 +638,7 @@ impl HttpConn for Http09Conn {
     }
 
     fn handle_requests(
-        &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
+        &mut self, conn: &mut quiche::Connection,
         partial_requests: &mut HashMap<u64, PartialRequest>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         index: &str, buf: &mut [u8],
@@ -746,7 +746,7 @@ impl HttpConn for Http09Conn {
     }
 
     fn handle_writable(
-        &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
+        &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
         trace!("{} stream {} is writable", conn.trace_id(), stream_id);
@@ -1438,7 +1438,7 @@ impl HttpConn for Http3Conn {
     }
 
     fn handle_requests(
-        &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
+        &mut self, conn: &mut quiche::Connection,
         _partial_requests: &mut HashMap<u64, PartialRequest>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         index: &str, buf: &mut [u8],
@@ -1632,7 +1632,7 @@ impl HttpConn for Http3Conn {
     }
 
     fn handle_writable(
-        &mut self, conn: &mut std::pin::Pin<Box<quiche::Connection>>,
+        &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
         debug!("{} stream {} is writable", conn.trace_id(), stream_id);

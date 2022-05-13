@@ -46,7 +46,7 @@ struct PartialResponse {
 }
 
 struct Client {
-    conn: std::pin::Pin<Box<quiche::Connection>>,
+    conn: quiche::Connection,
 
     http3_conn: Option<quiche::h3::Connection>,
 
