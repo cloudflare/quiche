@@ -864,8 +864,13 @@ impl Frame {
             },
 
             Frame::NewToken { token } => QuicFrame::NewToken {
-                length: token.len().to_string(),
-                token: "TODO: update to qlog-02 token format".to_string(),
+                token: qlog::Token {
+                    // TODO: pick the token type some how
+                    ty: Some(qlog::TokenType::StatelessReset),
+                    length: None,
+                    data: qlog::HexSlice::maybe_string(Some(token)),
+                    details: None,
+                },
             },
 
             Frame::Stream { stream_id, data } => QuicFrame::Stream {
@@ -929,13 +934,18 @@ impl Frame {
                 seq_num,
                 retire_prior_to,
                 conn_id,
-                ..
+                reset_token,
             } => QuicFrame::NewConnectionId {
                 sequence_number: *seq_num as u32,
                 retire_prior_to: *retire_prior_to as u32,
-                length: conn_id.len() as u64,
-                connection_id: "TODO: update to qlog-02 token format".to_string(),
-                reset_token: "TODO: update to qlog-02 token format".to_string(),
+                connection_id_length: Some(conn_id.len() as u8),
+                connection_id: format!("{}", qlog::HexSlice::new(conn_id)),
+                stateless_reset_token: Some(qlog::Token {
+                    ty: Some(qlog::TokenType::StatelessReset),
+                    length: None,
+                    data: qlog::HexSlice::maybe_string(Some(reset_token)),
+                    details: None,
+                }),
             },
 
             Frame::RetireConnectionId { seq_num } =>
@@ -951,8 +961,8 @@ impl Frame {
             Frame::ConnectionClose {
                 error_code, reason, ..
             } => QuicFrame::ConnectionClose {
-                error_space: ErrorSpace::TransportError,
-                error_code: *error_code,
+                error_space: Some(ErrorSpace::TransportError),
+                error_code: Some(*error_code),
                 raw_error_code: None, // raw error is no different for us
                 reason: Some(String::from_utf8(reason.clone()).unwrap()),
                 trigger_frame_type: None, // don't know trigger type
@@ -960,8 +970,8 @@ impl Frame {
 
             Frame::ApplicationClose { error_code, reason } =>
                 QuicFrame::ConnectionClose {
-                    error_space: ErrorSpace::ApplicationError,
-                    error_code: *error_code,
+                    error_space: Some(ErrorSpace::ApplicationError),
+                    error_code: Some(*error_code),
                     raw_error_code: None, // raw error is no different for us
                     reason: Some(String::from_utf8(reason.clone()).unwrap()),
                     trigger_frame_type: None, // don't know trigger type

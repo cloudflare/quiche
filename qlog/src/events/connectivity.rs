@@ -42,10 +42,12 @@ pub enum TransportOwner {
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionState {
     Attempted,
-    Reset,
-    Handshake,
-    Active,
-    Keepalive,
+    PeerValidated,
+    HandshakeStarted,
+    EarlyWrite,
+    HandshakeCompleted,
+    HandshakeConfirmed,
+    Closing,
     Draining,
     Closed,
 }
@@ -61,13 +63,25 @@ pub enum ConnectivityEventType {
     ConnectionStateUpdated,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionClosedTrigger {
+    Clean,
+    HandshakeTimeout,
+    IdleTimeout,
+    Error,
+    StatelessReset,
+    VersionMismatch,
+    Application,
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct ServerListening {
-    ip_v4: Option<String>, // human-readable or bytes
-    ip_v6: Option<String>, // human-readable or bytes
-    port_v4: u32,
-    port_v6: u32,
+    pub ip_v4: Option<String>, // human-readable or bytes
+    pub ip_v6: Option<String>, // human-readable or bytes
+    pub port_v4: Option<u16>,
+    pub port_v6: Option<u16>,
 
     retry_required: Option<bool>,
 }
@@ -75,48 +89,50 @@ pub struct ServerListening {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct ConnectionStarted {
-    ip_version: String, // "v4" or "v6"
-    src_ip: String,     // human-readable or bytes
-    dst_ip: String,     // human-readable or bytes
+    pub ip_version: Option<String>, // "v4" or "v6"
+    pub src_ip: String,             // human-readable or bytes
+    pub dst_ip: String,             // human-readable or bytes
 
-    protocol: Option<String>,
-    src_port: u32,
-    dst_port: u32,
+    pub protocol: Option<String>,
+    pub src_port: Option<u16>,
+    pub dst_port: Option<u16>,
 
-    src_cid: Option<Bytes>,
-    dst_cid: Option<Bytes>,
+    pub src_cid: Option<Bytes>,
+    pub dst_cid: Option<Bytes>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct ConnectionClosed {
-    owner: Option<TransportOwner>,
+    pub owner: Option<TransportOwner>,
 
-    connection_code: Option<ConnectionErrorCode>,
-    application_code: Option<ApplicationErrorCode>,
-    internal_code: Option<u32>,
+    pub connection_code: Option<ConnectionErrorCode>,
+    pub application_code: Option<ApplicationErrorCode>,
+    pub internal_code: Option<u32>,
 
-    reason: Option<String>,
+    pub reason: Option<String>,
+
+    pub trigger: Option<ConnectionClosedTrigger>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct ConnectionIdUpdated {
-    owner: Option<TransportOwner>,
+    pub owner: Option<TransportOwner>,
 
-    old: Option<Bytes>,
-    new: Option<Bytes>,
+    pub old: Option<Bytes>,
+    pub new: Option<Bytes>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct SpinBitUpdated {
-    state: bool,
+    pub state: bool,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct ConnectionStateUpdated {
-    old: Option<ConnectionState>,
-    new: ConnectionState,
+    pub old: Option<ConnectionState>,
+    pub new: ConnectionState,
 }

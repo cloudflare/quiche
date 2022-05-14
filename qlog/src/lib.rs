@@ -137,6 +137,7 @@
 //!         supported_versions: None,
 //!         raw: Some(raw),
 //!         datagram_id: None,
+//!         trigger: None,
 //!     });
 //!
 //! trace.push_event(qlog::events::Event::with_time(0.0, event_data));
@@ -337,6 +338,7 @@
 //!         supported_versions: None,
 //!         raw: None,
 //!         datagram_id: None,
+//!         trigger: None,
 //!     });
 //!
 //! let event = qlog::events::Event::with_time(0.0, event_data);
@@ -748,6 +750,7 @@ mod tests {
                 data: None,
             }),
             datagram_id: None,
+            trigger: None,
         });
 
         let ev = Event::with_time(0.0, ev_data);
@@ -818,6 +821,7 @@ mod tests {
                 data: None,
             }),
             datagram_id: None,
+            trigger: None,
         });
 
         let ev = Event::with_time(0.0, ev_data);
@@ -936,6 +940,7 @@ mod tests {
                 data: None,
             }),
             datagram_id: None,
+            trigger: None,
         });
 
         let ev = Event::with_time(0.0, event_data);
