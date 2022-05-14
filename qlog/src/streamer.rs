@@ -257,6 +257,7 @@ mod tests {
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
+            trigger: None,
         });
 
         let ev1 = Event::with_time(0.0, event_data1);
@@ -286,6 +287,7 @@ mod tests {
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
+            trigger: None,
         });
 
         let ev2 = Event::with_time(0.0, event_data2);
@@ -299,6 +301,7 @@ mod tests {
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
+            trigger: None,
         });
 
         let ev3 = Event::with_time(0.0, event_data3);
