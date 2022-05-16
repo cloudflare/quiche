@@ -26,6 +26,9 @@
 
 use super::Result;
 
+#[cfg(feature = "qlog")]
+use qlog::events::h3::Http3Frame;
+
 pub const DATA_FRAME_TYPE_ID: u64 = 0x0;
 pub const HEADERS_FRAME_TYPE_ID: u64 = 0x1;
 pub const CANCEL_PUSH_FRAME_TYPE_ID: u64 = 0x3;
@@ -90,7 +93,10 @@ pub enum Frame {
         priority_field_value: Vec<u8>,
     },
 
-    Unknown,
+    Unknown {
+        raw_type: u64,
+        payload_length: u64,
+    },
 }
 
 impl Frame {
@@ -131,7 +137,10 @@ impl Frame {
             PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID =>
                 parse_priority_update(frame_type, payload_length, &mut b)?,
 
-            _ => Frame::Unknown,
+            _ => Frame::Unknown {
+                raw_type: frame_type,
+                payload_length,
+            },
         };
 
         Ok(frame)
@@ -280,22 +289,133 @@ impl Frame {
                 b.put_bytes(priority_field_value)?;
             },
 
-            Frame::Unknown => unreachable!(),
+            Frame::Unknown { .. } => unreachable!(),
         }
 
         Ok(before - b.cap())
+    }
+
+    #[cfg(feature = "qlog")]
+    pub fn to_qlog(&self) -> Http3Frame {
+        match self {
+            Frame::Data { .. } => Http3Frame::Data { raw: None },
+
+            // Qlog expects the `headers` to be represented as an array of
+            // name:value pairs. At this stage, we only have the qpack block, so
+            // populate the field with an empty vec.
+            Frame::Headers { .. } => Http3Frame::Headers { headers: vec![] },
+
+            Frame::CancelPush { push_id } =>
+                Http3Frame::CancelPush { push_id: *push_id },
+
+            Frame::Settings {
+                max_field_section_size,
+                qpack_max_table_capacity,
+                qpack_blocked_streams,
+                h3_datagram,
+                grease,
+                ..
+            } => {
+                let mut settings = vec![];
+
+                if let Some(v) = max_field_section_size {
+                    settings.push(qlog::events::h3::Setting {
+                        name: "MAX_FIELD_SECTION_SIZE".to_string(),
+                        value: *v,
+                    });
+                }
+
+                if let Some(v) = qpack_max_table_capacity {
+                    settings.push(qlog::events::h3::Setting {
+                        name: "QPACK_MAX_TABLE_CAPACITY".to_string(),
+                        value: *v,
+                    });
+                }
+
+                if let Some(v) = qpack_blocked_streams {
+                    settings.push(qlog::events::h3::Setting {
+                        name: "QPACK_BLOCKED_STREAMS".to_string(),
+                        value: *v,
+                    });
+                }
+
+                if let Some(v) = h3_datagram {
+                    settings.push(qlog::events::h3::Setting {
+                        name: "H3_DATAGRAM".to_string(),
+                        value: *v,
+                    });
+                }
+
+                if let Some((k, v)) = grease {
+                    settings.push(qlog::events::h3::Setting {
+                        name: k.to_string(),
+                        value: *v,
+                    });
+                }
+
+                qlog::events::h3::Http3Frame::Settings { settings }
+            },
+
+            // Qlog expects the `headers` to be represented as an array of
+            // name:value pairs. At this stage, we only have the qpack block, so
+            // populate the field with an empty vec.
+            Frame::PushPromise { push_id, .. } => Http3Frame::PushPromise {
+                push_id: *push_id,
+                headers: vec![],
+            },
+
+            Frame::GoAway { id } => Http3Frame::Goaway { id: *id },
+
+            Frame::MaxPushId { push_id } =>
+                Http3Frame::MaxPushId { push_id: *push_id },
+
+            Frame::PriorityUpdateRequest {
+                prioritized_element_id,
+                priority_field_value,
+            } => Http3Frame::PriorityUpdate {
+                target_stream_type:
+                    qlog::events::h3::H3PriorityTargetStreamType::Request,
+                prioritized_element_id: *prioritized_element_id,
+                priority_field_value: String::from_utf8_lossy(
+                    priority_field_value,
+                )
+                .into_owned(),
+            },
+
+            Frame::PriorityUpdatePush {
+                prioritized_element_id,
+                priority_field_value,
+            } => Http3Frame::PriorityUpdate {
+                target_stream_type:
+                    qlog::events::h3::H3PriorityTargetStreamType::Request,
+                prioritized_element_id: *prioritized_element_id,
+                priority_field_value: String::from_utf8_lossy(
+                    priority_field_value,
+                )
+                .into_owned(),
+            },
+
+            Frame::Unknown {
+                raw_type,
+                payload_length,
+            } => Http3Frame::Unknown {
+                raw_frame_type: *raw_type,
+                raw_length: Some(*payload_length as u32),
+                raw: None,
+            },
+        }
     }
 }
 
 impl std::fmt::Debug for Frame {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Frame::Data { payload } => {
-                write!(f, "DATA len={}", payload.len())?;
+            Frame::Data { .. } => {
+                write!(f, "DATA")?;
             },
 
-            Frame::Headers { header_block } => {
-                write!(f, "HEADERS len={}", header_block.len())?;
+            Frame::Headers { .. } => {
+                write!(f, "HEADERS")?;
             },
 
             Frame::CancelPush { push_id } => {
@@ -356,8 +476,8 @@ impl std::fmt::Debug for Frame {
                 )?;
             },
 
-            Frame::Unknown => {
-                write!(f, "UNKNOWN")?;
+            Frame::Unknown { raw_type, .. } => {
+                write!(f, "UNKNOWN raw_type={}", raw_type,)?;
             },
         }
 
@@ -1036,6 +1156,12 @@ mod tests {
     fn unknown_type() {
         let d = [42; 12];
 
-        assert_eq!(Frame::from_bytes(255, 12345, &d[..]), Ok(Frame::Unknown));
+        assert_eq!(
+            Frame::from_bytes(255, 12345, &d[..]),
+            Ok(Frame::Unknown {
+                raw_type: 255,
+                payload_length: 12345
+            })
+        );
     }
 }
