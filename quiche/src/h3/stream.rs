@@ -46,6 +46,20 @@ pub enum Type {
     Unknown,
 }
 
+impl Type {
+    #[cfg(feature = "qlog")]
+    pub fn to_qlog(self) -> qlog::events::h3::H3StreamType {
+        match self {
+            Type::Control => qlog::events::h3::H3StreamType::Control,
+            Type::Request => qlog::events::h3::H3StreamType::Data,
+            Type::Push => qlog::events::h3::H3StreamType::Push,
+            Type::QpackEncoder => qlog::events::h3::H3StreamType::QpackEncode,
+            Type::QpackDecoder => qlog::events::h3::H3StreamType::QpackDecode,
+            Type::Unknown => qlog::events::h3::H3StreamType::Unknown,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum State {
     /// Reading the stream's type.
@@ -330,6 +344,11 @@ impl Stream {
         Ok(())
     }
 
+    // Returns the stream's current frame type, if any
+    pub fn frame_type(&self) -> Option<u64> {
+        self.frame_type
+    }
+
     /// Sets the frame's payload length and transitions to the next state.
     pub fn set_frame_payload_len(&mut self, len: u64) -> Result<()> {
         assert_eq!(self.state, State::FramePayloadLen);
@@ -444,20 +463,24 @@ impl Stream {
     }
 
     /// Tries to parse a frame from the state buffer.
-    pub fn try_consume_frame(&mut self) -> Result<frame::Frame> {
+    ///
+    /// If successful, returns the `frame::Frame` and the payload length.
+    pub fn try_consume_frame(&mut self) -> Result<(frame::Frame, u64)> {
         // Processing a frame other than DATA, so re-arm the Data event.
         self.reset_data_event();
+
+        let payload_len = self.state_len as u64;
 
         // TODO: properly propagate frame parsing errors.
         let frame = frame::Frame::from_bytes(
             self.frame_type.unwrap(),
-            self.state_len as u64,
+            payload_len,
             &self.state_buf,
         )?;
 
         self.state_transition(State::FrameType, 1, true)?;
 
-        Ok(frame)
+        Ok((frame, payload_len))
     }
 
     /// Tries to read DATA payload from the transport stream.
@@ -649,7 +672,7 @@ mod tests {
         // Parse the SETTINGS frame payload.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        assert_eq!(stream.try_consume_frame(), Ok(frame));
+        assert_eq!(stream.try_consume_frame(), Ok((frame, 6)));
         assert_eq!(stream.state, State::FrameType);
     }
 
@@ -713,7 +736,7 @@ mod tests {
         // Parse the SETTINGS frame payload.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        assert_eq!(stream.try_consume_frame(), Ok(frame));
+        assert_eq!(stream.try_consume_frame(), Ok((frame, 6)));
         assert_eq!(stream.state, State::FrameType);
 
         // Parse the second SETTINGS frame type.
@@ -886,7 +909,7 @@ mod tests {
         // Parse the HEADERS frame.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        assert_eq!(stream.try_consume_frame(), Ok(hdrs));
+        assert_eq!(stream.try_consume_frame(), Ok((hdrs, 12)));
         assert_eq!(stream.state, State::FrameType);
 
         // Parse the DATA frame type.
@@ -979,7 +1002,7 @@ mod tests {
         // Parse the HEADERS frame.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
-        assert_eq!(stream.try_consume_frame(), Ok(hdrs));
+        assert_eq!(stream.try_consume_frame(), Ok((hdrs, 12)));
         assert_eq!(stream.state, State::FrameType);
 
         // Parse the DATA frame type.
