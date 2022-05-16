@@ -43,9 +43,10 @@ pub enum H3StreamType {
     Data,
     Control,
     Push,
-    Reserved,
     QpackEncode,
     QpackDecode,
+    Reserved,
+    Unknown,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -53,6 +54,13 @@ pub enum H3StreamType {
 pub enum H3PushDecision {
     Claimed,
     Abandoned,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum H3PriorityTargetStreamType {
+    Request,
+    Push,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -98,10 +106,9 @@ pub struct HttpHeader {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct Setting {
     pub name: String,
-    pub value: String,
+    pub value: u64,
 }
 
-// ================================================================== //
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum Http3FrameTypeName {
@@ -117,128 +124,59 @@ pub enum Http3FrameTypeName {
     Unknown,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(tag = "frame_type")]
+#[serde(rename_all = "snake_case")]
+// Strictly, the qlog spec says that all these frame types have a frame_type
+// field. But instead of making that a rust object property, just use serde to
+// ensure it goes out on the wire. This means that deserialization of frames
+// also works automatically.
 pub enum Http3Frame {
     Data {
-        frame_type: Http3FrameTypeName,
-
         raw: Option<Bytes>,
     },
 
     Headers {
-        frame_type: Http3FrameTypeName,
         headers: Vec<HttpHeader>,
     },
 
     CancelPush {
-        frame_type: Http3FrameTypeName,
-        push_id: String,
+        push_id: u64,
     },
 
     Settings {
-        frame_type: Http3FrameTypeName,
         settings: Vec<Setting>,
     },
 
     PushPromise {
-        frame_type: Http3FrameTypeName,
-        push_id: String,
+        push_id: u64,
         headers: Vec<HttpHeader>,
     },
 
     Goaway {
-        frame_type: Http3FrameTypeName,
-        stream_id: String,
+        id: u64,
     },
 
     MaxPushId {
-        frame_type: Http3FrameTypeName,
-        push_id: String,
+        push_id: u64,
     },
 
-    DuplicatePush {
-        frame_type: Http3FrameTypeName,
-        push_id: String,
+    PriorityUpdate {
+        target_stream_type: H3PriorityTargetStreamType,
+        prioritized_element_id: u64,
+        priority_field_value: String,
     },
 
     Reserved {
-        frame_type: Http3FrameTypeName,
+        length: Option<u64>,
     },
 
     Unknown {
-        frame_type: Http3FrameTypeName,
+        raw_frame_type: u64,
+        raw_length: Option<u32>,
+        raw: Option<Bytes>,
     },
-}
-
-impl Http3Frame {
-    pub fn data(raw: Option<Bytes>) -> Self {
-        Http3Frame::Data {
-            frame_type: Http3FrameTypeName::Data,
-            raw,
-        }
-    }
-
-    pub fn headers(headers: Vec<HttpHeader>) -> Self {
-        Http3Frame::Headers {
-            frame_type: Http3FrameTypeName::Headers,
-            headers,
-        }
-    }
-
-    pub fn cancel_push(push_id: String) -> Self {
-        Http3Frame::CancelPush {
-            frame_type: Http3FrameTypeName::CancelPush,
-            push_id,
-        }
-    }
-
-    pub fn settings(settings: Vec<Setting>) -> Self {
-        Http3Frame::Settings {
-            frame_type: Http3FrameTypeName::Settings,
-            settings,
-        }
-    }
-
-    pub fn push_promise(push_id: String, headers: Vec<HttpHeader>) -> Self {
-        Http3Frame::PushPromise {
-            frame_type: Http3FrameTypeName::PushPromise,
-            push_id,
-            headers,
-        }
-    }
-
-    pub fn goaway(stream_id: String) -> Self {
-        Http3Frame::Goaway {
-            frame_type: Http3FrameTypeName::Goaway,
-            stream_id,
-        }
-    }
-
-    pub fn max_push_id(push_id: String) -> Self {
-        Http3Frame::MaxPushId {
-            frame_type: Http3FrameTypeName::MaxPushId,
-            push_id,
-        }
-    }
-
-    pub fn duplicate_push(push_id: String) -> Self {
-        Http3Frame::DuplicatePush {
-            frame_type: Http3FrameTypeName::DuplicatePush,
-            push_id,
-        }
-    }
-
-    pub fn reserved() -> Self {
-        Http3Frame::Reserved {
-            frame_type: Http3FrameTypeName::Reserved,
-        }
-    }
-
-    pub fn unknown() -> Self {
-        Http3Frame::Unknown {
-            frame_type: Http3FrameTypeName::Unknown,
-        }
-    }
 }
 
 #[serde_with::skip_serializing_none]
