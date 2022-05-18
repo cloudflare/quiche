@@ -558,18 +558,16 @@ impl Handshake {
         map_result_ssl(self, rc)
     }
 
-    pub fn do_handshake(&mut self, conn_ptr: *mut Connection) -> Result<()> {
-        self.set_ex_data(*QUICHE_EX_DATA_INDEX, conn_ptr)?;
+    pub fn do_handshake(&mut self, ex_data: &mut ExData) -> Result<()> {
+        self.set_ex_data(*QUICHE_EX_DATA_INDEX, ex_data)?;
         let rc = unsafe { SSL_do_handshake(self.as_mut_ptr()) };
         self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
 
         map_result_ssl(self, rc)
     }
 
-    pub fn process_post_handshake(
-        &mut self, conn_ptr: *mut Connection,
-    ) -> Result<()> {
-        self.set_ex_data(*QUICHE_EX_DATA_INDEX, conn_ptr)?;
+    pub fn process_post_handshake(&mut self, ex_data: &mut ExData) -> Result<()> {
+        self.set_ex_data(*QUICHE_EX_DATA_INDEX, ex_data)?;
         let rc = unsafe { SSL_process_quic_post_handshake(self.as_mut_ptr()) };
         self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
 
@@ -691,6 +689,22 @@ impl Drop for Handshake {
     }
 }
 
+pub struct ExData<'a> {
+    pub application_protos: &'a Vec<Vec<u8>>,
+
+    pub pkt_num_spaces: &'a mut [packet::PktNumSpace; packet::EPOCH_COUNT],
+
+    pub session: &'a mut Option<Vec<u8>>,
+
+    pub local_error: &'a mut Option<super::ConnectionError>,
+
+    pub keylog: Option<&'a mut Box<dyn std::io::Write + Send + Sync>>,
+
+    pub trace_id: &'a str,
+
+    pub is_server: bool,
+}
+
 fn get_ex_data_from_ptr<'a, T>(ptr: *mut SSL, idx: c_int) -> Option<&'a mut T> {
     unsafe {
         let data = SSL_get_ex_data(ptr, idx) as *mut T;
@@ -715,23 +729,24 @@ extern fn set_read_secret(
     ssl: *mut SSL, level: crypto::Level, cipher: *const SSL_CIPHER,
     secret: *const u8, secret_len: usize,
 ) -> c_int {
-    let conn =
-        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
-            Some(v) => v,
+    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
+    {
+        Some(v) => v,
 
-            None => return 0,
-        };
+        None => return 0,
+    };
 
-    trace!("{} set read secret lvl={:?}", conn.trace_id, level);
+    trace!("{} set read secret lvl={:?}", ex_data.trace_id, level);
 
     let space = match level {
-        crypto::Level::Initial => &mut conn.pkt_num_spaces[packet::EPOCH_INITIAL],
+        crypto::Level::Initial =>
+            &mut ex_data.pkt_num_spaces[packet::EPOCH_INITIAL],
         crypto::Level::ZeroRTT =>
-            &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
+            &mut ex_data.pkt_num_spaces[packet::EPOCH_APPLICATION],
         crypto::Level::Handshake =>
-            &mut conn.pkt_num_spaces[packet::EPOCH_HANDSHAKE],
+            &mut ex_data.pkt_num_spaces[packet::EPOCH_HANDSHAKE],
         crypto::Level::OneRTT =>
-            &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
+            &mut ex_data.pkt_num_spaces[packet::EPOCH_APPLICATION],
     };
 
     let aead = match get_cipher_from_ptr(cipher) {
@@ -741,7 +756,7 @@ extern fn set_read_secret(
     };
 
     // 0-RTT read secrets are present only on the server.
-    if level != crypto::Level::ZeroRTT || conn.is_server {
+    if level != crypto::Level::ZeroRTT || ex_data.is_server {
         let secret = unsafe { slice::from_raw_parts(secret, secret_len) };
 
         let open = match crypto::Open::from_secret(aead, secret) {
@@ -765,23 +780,24 @@ extern fn set_write_secret(
     ssl: *mut SSL, level: crypto::Level, cipher: *const SSL_CIPHER,
     secret: *const u8, secret_len: usize,
 ) -> c_int {
-    let conn =
-        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
-            Some(v) => v,
+    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
+    {
+        Some(v) => v,
 
-            None => return 0,
-        };
+        None => return 0,
+    };
 
-    trace!("{} set write secret lvl={:?}", conn.trace_id, level);
+    trace!("{} set write secret lvl={:?}", ex_data.trace_id, level);
 
     let space = match level {
-        crypto::Level::Initial => &mut conn.pkt_num_spaces[packet::EPOCH_INITIAL],
+        crypto::Level::Initial =>
+            &mut ex_data.pkt_num_spaces[packet::EPOCH_INITIAL],
         crypto::Level::ZeroRTT =>
-            &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
+            &mut ex_data.pkt_num_spaces[packet::EPOCH_APPLICATION],
         crypto::Level::Handshake =>
-            &mut conn.pkt_num_spaces[packet::EPOCH_HANDSHAKE],
+            &mut ex_data.pkt_num_spaces[packet::EPOCH_HANDSHAKE],
         crypto::Level::OneRTT =>
-            &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
+            &mut ex_data.pkt_num_spaces[packet::EPOCH_APPLICATION],
     };
 
     let aead = match get_cipher_from_ptr(cipher) {
@@ -791,7 +807,7 @@ extern fn set_write_secret(
     };
 
     // 0-RTT write secrets are present only on the client.
-    if level != crypto::Level::ZeroRTT || !conn.is_server {
+    if level != crypto::Level::ZeroRTT || !ex_data.is_server {
         let secret = unsafe { slice::from_raw_parts(secret, secret_len) };
 
         let seal = match crypto::Seal::from_secret(aead, secret) {
@@ -809,16 +825,16 @@ extern fn set_write_secret(
 extern fn add_handshake_data(
     ssl: *mut SSL, level: crypto::Level, data: *const u8, len: usize,
 ) -> c_int {
-    let conn =
-        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
-            Some(v) => v,
+    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
+    {
+        Some(v) => v,
 
-            None => return 0,
-        };
+        None => return 0,
+    };
 
     trace!(
         "{} write message lvl={:?} len={}",
-        conn.trace_id,
+        ex_data.trace_id,
         level,
         len
     );
@@ -826,12 +842,13 @@ extern fn add_handshake_data(
     let buf = unsafe { slice::from_raw_parts(data, len) };
 
     let space = match level {
-        crypto::Level::Initial => &mut conn.pkt_num_spaces[packet::EPOCH_INITIAL],
+        crypto::Level::Initial =>
+            &mut ex_data.pkt_num_spaces[packet::EPOCH_INITIAL],
         crypto::Level::ZeroRTT => unreachable!(),
         crypto::Level::Handshake =>
-            &mut conn.pkt_num_spaces[packet::EPOCH_HANDSHAKE],
+            &mut ex_data.pkt_num_spaces[packet::EPOCH_HANDSHAKE],
         crypto::Level::OneRTT =>
-            &mut conn.pkt_num_spaces[packet::EPOCH_APPLICATION],
+            &mut ex_data.pkt_num_spaces[packet::EPOCH_APPLICATION],
     };
 
     if space.crypto_stream.send.write(buf, false).is_err() {
@@ -849,22 +866,22 @@ extern fn flush_flight(_ssl: *mut SSL) -> c_int {
 }
 
 extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int {
-    let conn =
-        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
-            Some(v) => v,
+    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
+    {
+        Some(v) => v,
 
-            None => return 0,
-        };
+        None => return 0,
+    };
 
     trace!(
         "{} send alert lvl={:?} alert={:x}",
-        conn.trace_id,
+        ex_data.trace_id,
         level,
         alert
     );
 
     let error: u64 = TLS_ALERT_ERROR + u64::from(alert);
-    conn.local_error = Some(ConnectionError {
+    *ex_data.local_error = Some(ConnectionError {
         is_app: false,
         error_code: error,
         reason: Vec::new(),
@@ -874,14 +891,14 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int {
 }
 
 extern fn keylog(ssl: *mut SSL, line: *const c_char) {
-    let conn =
-        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
-            Some(v) => v,
+    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
+    {
+        Some(v) => v,
 
-            None => return,
-        };
+        None => return,
+    };
 
-    if let Some(keylog) = &mut conn.keylog {
+    if let Some(keylog) = &mut ex_data.keylog {
         let data = unsafe { ffi::CStr::from_ptr(line).to_bytes() };
 
         let mut full_line = Vec::with_capacity(data.len() + 1);
@@ -896,14 +913,14 @@ extern fn select_alpn(
     ssl: *mut SSL, out: *mut *const u8, out_len: *mut u8, inp: *mut u8,
     in_len: c_uint, _arg: *mut c_void,
 ) -> c_int {
-    let conn =
-        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
-            Some(v) => v,
+    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
+    {
+        Some(v) => v,
 
-            None => return 3, // SSL_TLSEXT_ERR_NOACK
-        };
+        None => return 3, // SSL_TLSEXT_ERR_NOACK
+    };
 
-    if conn.application_protos.is_empty() {
+    if ex_data.application_protos.is_empty() {
         return 3; // SSL_TLSEXT_ERR_NOACK
     }
 
@@ -912,7 +929,7 @@ extern fn select_alpn(
     });
 
     while let Ok(proto) = protos.get_bytes_with_u8_length() {
-        let found = conn.application_protos.iter().any(|expected| {
+        let found = ex_data.application_protos.iter().any(|expected| {
             trace!(
                 "checking peer ALPN {:?} against {:?}",
                 std::str::from_utf8(proto.as_ref()),
@@ -942,12 +959,12 @@ extern fn select_alpn(
 }
 
 extern fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
-    let conn =
-        match get_ex_data_from_ptr::<Connection>(ssl, *QUICHE_EX_DATA_INDEX) {
-            Some(v) => v,
+    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
+    {
+        Some(v) => v,
 
-            None => return 0,
-        };
+        None => return 0,
+    };
 
     let handshake = Handshake(ssl);
     let peer_params = handshake.quic_transport_params();
@@ -994,7 +1011,7 @@ extern fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
         return 0;
     }
 
-    conn.session = Some(buffer);
+    *ex_data.session = Some(buffer);
 
     // Prevent handshake from being freed, as we still need it.
     std::mem::forget(handshake);

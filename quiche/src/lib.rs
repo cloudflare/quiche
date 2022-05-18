@@ -4860,13 +4860,27 @@ impl Connection {
     ///
     /// If the connection is already established, it does nothing.
     fn do_handshake(&mut self) -> Result<()> {
-        let conn_ptr = self as &mut Connection as *mut Connection;
+        let mut ex_data = tls::ExData {
+            application_protos: &self.application_protos,
 
-        if self.is_established() {
-            return self.handshake.process_post_handshake(conn_ptr);
+            pkt_num_spaces: &mut self.pkt_num_spaces,
+
+            session: &mut self.session,
+
+            local_error: &mut self.local_error,
+
+            keylog: self.keylog.as_mut(),
+
+            trace_id: &self.trace_id,
+
+            is_server: self.is_server,
+        };
+
+        if self.handshake_completed {
+            return self.handshake.process_post_handshake(&mut ex_data);
         }
 
-        match self.handshake.do_handshake(conn_ptr) {
+        match self.handshake.do_handshake(&mut ex_data) {
             Ok(_) => (),
 
             Err(Error::Done) => {
@@ -11463,6 +11477,3 @@ mod ranges;
 mod recovery;
 mod stream;
 mod tls;
-
-#[cfg(feature = "boringssl-boring-crate")]
-pub use tls::QUICHE_EX_DATA_INDEX;
