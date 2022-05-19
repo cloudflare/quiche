@@ -512,6 +512,10 @@ impl Handshake {
                 0, // TLSEXT_NAMETYPE_host_name
             );
 
+            if ptr.is_null() {
+                return None;
+            }
+
             ffi::CStr::from_ptr(ptr)
         };
 
