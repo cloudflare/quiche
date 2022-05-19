@@ -5493,7 +5493,7 @@ impl Connection {
         // delivery rate draft. This is also separate from `recovery.app_limited`
         // and only applies to delivery rate calculation.
         self.tx_cap >= self.recovery.cwnd_available() &&
-            (self.tx_data - self.last_tx_data) <
+            (self.tx_data.saturating_sub(self.last_tx_data)) <
                 self.recovery.cwnd_available() as u64 &&
             self.recovery.cwnd_available() > 0
     }
@@ -11377,6 +11377,67 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
 
         Ok(())
+    }
+
+    #[test]
+    /// Tests that resetting a stream restores flow control for unsent data.
+    fn last_tx_data_larger_than_tx_data() {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .set_application_protos(b"\x06proto1\x06proto2")
+            .unwrap();
+        config.set_initial_max_data(12000);
+        config.set_initial_max_stream_data_bidi_local(20000);
+        config.set_initial_max_stream_data_bidi_remote(20000);
+        config.set_max_recv_udp_payload_size(1200);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client opens stream 4 and 8.
+        assert_eq!(pipe.client.stream_send(4, b"a", true), Ok(1));
+        assert_eq!(pipe.client.stream_send(8, b"b", true), Ok(1));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server reads stream data.
+        let mut b = [0; 15];
+        pipe.server.stream_recv(4, &mut b).unwrap();
+
+        // Server sends stream data close to cwnd (12000).
+        let buf = [0; 10000];
+        assert_eq!(pipe.server.stream_send(4, &buf, false), Ok(10000));
+
+        testing::emit_flight(&mut pipe.server).unwrap();
+
+        // Server buffers some data, until send capacity limit reached.
+        let mut buf = [0; 1200];
+        assert_eq!(pipe.server.stream_send(4, &buf, false), Ok(1200));
+        assert_eq!(pipe.server.stream_send(8, &buf, false), Ok(800));
+        assert_eq!(pipe.server.stream_send(4, &buf, false), Err(Error::Done));
+
+        // Wait for PTO to expire.
+        let timer = pipe.server.timeout().unwrap();
+        std::thread::sleep(timer + time::Duration::from_millis(1));
+
+        pipe.server.on_timeout();
+
+        // Server sends PTO probe (not limited to cwnd),
+        // to update last_tx_data.
+        let (len, _) = pipe.server.send(&mut buf).unwrap();
+        assert_eq!(len, 1200);
+
+        // Client sends STOP_SENDING to decrease tx_data
+        // by unsent data. It will make last_tx_data > tx_data
+        // and trigger #1232 bug.
+        let frames = [frame::Frame::StopSending {
+            stream_id: 4,
+            error_code: 42,
+        }];
+
+        let pkt_type = packet::Type::Short;
+        pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
     }
 }
 
