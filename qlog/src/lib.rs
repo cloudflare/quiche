@@ -30,6 +30,8 @@
 //! events. It supports serialization and deserialization but defers logging IO
 //! choices to applications.
 //!
+//! Serialization operates in either a [buffered mode] or a [streaming mode].
+//!
 //! The crate uses Serde for conversion between Rust and JSON.
 //!
 //! [main logging schema]: https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema
@@ -37,6 +39,8 @@
 //! https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-quic-events.html
 //! [HTTP/3 and QPACK event definitions]:
 //! https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-h3-events.html
+//! [buffered mode]: #buffered-traces-with-standard-json
+//! [streaming mode]: #streaming-traces-with-json-seq
 //!
 //! Overview
 //! ---------------
@@ -212,7 +216,7 @@
 //! }
 //! ```
 //!
-//! ## Streaming Traces JSON Text Sequences (JSON-SEQ)
+//! ## Streaming Traces with JSON-SEQ
 //!
 //! To help support streaming serialization of qlogs,
 //! draft-ietf-quic-qlog-main-schema-01 introduced support for RFC 7464 JSON
@@ -285,7 +289,9 @@
 //! ### Adding events
 //!
 //! Once logging has started you can stream events. Events
-//! are written in one step using [`add_event()`]:
+//! are written in one step using one of [`add_event()`],
+//! [`add_event_with_instant()`], [`add_event_now()`],
+//! [`add_event_data_with_instant()`], or [`add_event_data_now()`] :
 //!
 //! ```
 //! # let mut trace = qlog::TraceSeq::new(
@@ -391,11 +397,13 @@
 //! [`push_event()`]: struct.Trace.html#method.push_event
 //! [`QlogStreamer`]: struct.QlogStreamer.html
 //! [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
-//! [`start_log()`]: struct.QlogStreamer.html#method.start_log
-//! [`add_event()`]: struct.QlogStreamer.html#method.add_event
-//! [`add_frame()`]: struct.QlogStreamer.html#method.add_frame
-//! [`finish_frames()`]: struct.QlogStreamer.html#method.finish_frames
-//! [`finish_log()`]: struct.QlogStreamer.html#method.finish_log
+//! [`start_log()`]: streamer/struct.QlogStreamer.html#method.start_log
+//! [`add_event()`]: streamer/struct.QlogStreamer.html#method.add_event
+//! [`add_event_with_instant()`]: streamer/struct.QlogStreamer.html#method.add_event_with_instant
+//! [`add_event_now()`]: streamer/struct.QlogStreamer.html#method.add_event_now
+//! [`add_event_data_with_instant()`]: streamer/struct.QlogStreamer.html#method.add_event_data_with_instant
+//! [`add_event_data_now()`]: streamer/struct.QlogStreamer.html#method.add_event_data_now
+//! [`finish_log()`]: streamer/struct.QlogStreamer.html#method.finish_log
 
 use crate::events::quic::PacketHeader;
 use crate::events::Event;
@@ -496,9 +504,9 @@ pub struct Trace {
     pub events: Vec<Event>,
 }
 
-/// Helper functions for using a qlog `Trace`.
+/// Helper functions for using a qlog [Trace].
 impl Trace {
-    /// Creates a new qlog trace
+    /// Creates a new qlog [Trace]
     pub fn new(
         vantage_point: VantagePoint, title: Option<String>,
         description: Option<String>, configuration: Option<Configuration>,
@@ -514,6 +522,7 @@ impl Trace {
         }
     }
 
+    /// Append an [Event] to a [Trace]
     pub fn push_event(&mut self, event: Event) {
         self.events.push(event);
     }
@@ -531,9 +540,9 @@ pub struct TraceSeq {
     pub common_fields: Option<CommonFields>,
 }
 
-/// Helper functions for using a qlog `TraceSeq`.
+/// Helper functions for using a qlog [TraceSeq].
 impl TraceSeq {
-    /// Creates a new qlog trace
+    /// Creates a new qlog [TraceSeq]
     pub fn new(
         vantage_point: VantagePoint, title: Option<String>,
         description: Option<String>, configuration: Option<Configuration>,
