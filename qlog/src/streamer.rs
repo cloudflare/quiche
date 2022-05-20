@@ -56,13 +56,15 @@ pub struct QlogStreamer {
 }
 
 impl QlogStreamer {
-    /// Creates a QlogStreamer object.
+    /// Creates a [QlogStreamer] object.
     ///
-    /// It owns a `Qlog` object that contains the provided `Trace` containing
-    /// `Events`.
+    /// It owns a [QlogSeq] object that contains the provided [TraceSeq]
+    /// containing [Event]s.
     ///
-    /// All serialization will be written to the provided `Write` using the
+    /// All serialization will be written to the provided [`Write`] using the
     /// JSON-SEQ format.
+    ///
+    /// [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         qlog_version: String, title: Option<String>, description: Option<String>,
@@ -90,9 +92,16 @@ impl QlogStreamer {
 
     /// Starts qlog streaming serialization.
     ///
-    /// This writes out the JSON-serialized form of all initial qlog information
-    /// `Event`s are separately appended using `add_event()` and
-    /// `add_event_with_instant()`.
+    /// This writes out the JSON-SEQ-serialized form of all initial qlog
+    /// information. [Event]s are separately appended using [add_event()],
+    /// [add_event_with_instant()], [add_event_now()],
+    /// [add_event_data_with_instant()], or [add_event_data_now()].
+    ///
+    /// [add_event()]: #method.add_event
+    /// [add_event_with_instant()]: #method.add_event_with_instant
+    /// [add_event_now()]: #method.add_event_now
+    /// [add_event_data_with_instant()]: #method.add_event_data_with_instant
+    /// [add_event_data_now()]: #method.add_event_data_now
     pub fn start_log(&mut self) -> Result<()> {
         if self.state != StreamerState::Initial {
             return Err(Error::Done);
@@ -110,7 +119,6 @@ impl QlogStreamer {
 
     /// Finishes qlog streaming serialization.
     ///
-    /// The JSON-serialized output has remaining close delimiters added.
     /// After this is called, no more serialization will occur.
     pub fn finish_log(&mut self) -> Result<()> {
         if self.state == StreamerState::Initial ||
@@ -126,15 +134,15 @@ impl QlogStreamer {
         Ok(())
     }
 
-    /// Writes a JSON-serialized `Event` using `std::time::Instant::now()`.
+    /// Writes a JSON-SEQ-serialized [Event] using [std::time::Instant::now()].
     pub fn add_event_now(&mut self, event: Event) -> Result<()> {
         let now = std::time::Instant::now();
 
         self.add_event_with_instant(event, now)
     }
 
-    /// Writes a JSON-serialized `Event` using the provided EventData and
-    /// Instant.
+    /// Writes a JSON-SEQ-serialized [Event] using the provided
+    /// [std::time::Instant].
     pub fn add_event_with_instant(
         &mut self, mut event: Event, now: std::time::Instant,
     ) -> Result<()> {
@@ -158,12 +166,16 @@ impl QlogStreamer {
         self.add_event(event)
     }
 
-    /// Writes a JSON-serialized `Event` using the provided Instant.
-    ///
-    /// Some qlog events can contain `QuicFrames`. If this is detected `true` is
-    /// returned and the streamer enters a frame-serialization mode that is only
-    /// concluded by `finish_frames()`. In this mode, attempts to log additional
-    /// events are ignored.
+    /// Writes a JSON-SEQ-serialized [Event] based on the provided [EventData]
+    /// at time [std::time::Instant::now()].
+    pub fn add_event_data_now(&mut self, event_data: EventData) -> Result<()> {
+        let now = std::time::Instant::now();
+
+        self.add_event_data_with_instant(event_data, now)
+    }
+
+    /// Writes a JSON-SEQ-serialized [Event] based on the provided [EventData]
+    /// and [std::time::Instant].
     pub fn add_event_data_with_instant(
         &mut self, event_data: EventData, now: std::time::Instant,
     ) -> Result<()> {
@@ -188,12 +200,7 @@ impl QlogStreamer {
         self.add_event(event)
     }
 
-    /// Writes a JSON-serialized `Event` using the provided Event.
-    ///
-    /// Some qlog events can contain `QuicFrames`. If this is detected `true` is
-    /// returned and the streamer enters a frame-serialization mode that is only
-    /// concluded by `finish_frames()`. In this mode, attempts to log additional
-    /// events are ignored.
+    /// Writes a JSON-SEQ-serialized [Event] using the provided [Event].
     pub fn add_event(&mut self, event: Event) -> Result<()> {
         if self.state != StreamerState::Ready {
             return Err(Error::InvalidState);
