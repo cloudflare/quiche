@@ -848,9 +848,6 @@ impl Config {
 
     /// Configures the list of supported application protocols.
     ///
-    /// The list of protocols `protos` must be in wire-format (i.e. a series
-    /// of non-empty, 8-bit length-prefixed strings).
-    ///
     /// On the client this configures the list of protocols to send to the
     /// server as part of the ALPN extension.
     ///
@@ -863,21 +860,46 @@ impl Config {
     ///
     /// ```
     /// # let mut config = quiche::Config::new(0xbabababa)?;
-    /// config.set_application_protos(b"\x08http/1.1\x08http/0.9")?;
+    /// config.set_application_protos(&[b"http/1.1", b"http/0.9"]);
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn set_application_protos(&mut self, protos: &[u8]) -> Result<()> {
+    pub fn set_application_protos(
+        &mut self, protos_list: &[&[u8]],
+    ) -> Result<()> {
+        self.application_protos =
+            protos_list.iter().map(|s| s.to_vec()).collect();
+
+        self.tls_ctx.set_alpn(protos_list)
+    }
+
+    /// Configures the list of supported application protocols using wire
+    /// format.
+    ///
+    /// The list of protocols `protos` must be a series of non-empty, 8-bit
+    /// length-prefixed strings.
+    ///
+    /// See [`set_application_protos`](Self::set_application_protos) for more
+    /// background about application protocols.
+    ///
+    /// ## Examples:
+    ///
+    /// ```
+    /// # let mut config = quiche::Config::new(0xbabababa)?;
+    /// config.set_application_protos_wire_format(b"\x08http/1.1\x08http/0.9")?;
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn set_application_protos_wire_format(
+        &mut self, protos: &[u8],
+    ) -> Result<()> {
         let mut b = octets::Octets::with_slice(protos);
 
         let mut protos_list = Vec::new();
 
         while let Ok(proto) = b.get_bytes_with_u8_length() {
-            protos_list.push(proto.to_vec());
+            protos_list.push(proto.buf());
         }
 
-        self.application_protos = protos_list;
-
-        self.tls_ctx.set_alpn(&self.application_protos)
+        self.set_application_protos(&protos_list)
     }
 
     /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
@@ -7431,7 +7453,7 @@ pub mod testing {
             let mut config = Config::new(crate::PROTOCOL_VERSION)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
-            config.set_application_protos(b"\x06proto1\x06proto2")?;
+            config.set_application_protos(&[b"proto1", b"proto2"])?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
             config.set_initial_max_stream_data_bidi_remote(15);
@@ -7527,7 +7549,7 @@ pub mod testing {
             let mut config = Config::new(crate::PROTOCOL_VERSION)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
-            config.set_application_protos(b"\x06proto1\x06proto2")?;
+            config.set_application_protos(&[b"proto1", b"proto2"])?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
             config.set_initial_max_stream_data_bidi_remote(15);
@@ -7565,7 +7587,7 @@ pub mod testing {
             let server_addr = Pipe::server_addr();
 
             let mut config = Config::new(crate::PROTOCOL_VERSION)?;
-            config.set_application_protos(b"\x06proto1\x06proto2")?;
+            config.set_application_protos(&[b"proto1", b"proto2"])?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
             config.set_initial_max_stream_data_bidi_remote(15);
@@ -7965,7 +7987,7 @@ mod tests {
     fn unknown_version() {
         let mut config = Config::new(0xbabababa).unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
 
@@ -7993,7 +8015,7 @@ mod tests {
 
         let mut config = Config::new(0xbabababa).unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
 
@@ -8020,7 +8042,7 @@ mod tests {
             .load_verify_locations_from_file("examples/rootca.crt")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
@@ -8169,7 +8191,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -8199,7 +8221,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -8225,7 +8247,7 @@ mod tests {
 
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         config
-            .set_application_protos(b"\x06proto3\x06proto4")
+            .set_application_protos(&[b"proto3\x06proto4"])
             .unwrap();
         config.verify_peer(false);
 
@@ -8255,7 +8277,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -8316,7 +8338,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -8387,7 +8409,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -8439,7 +8461,7 @@ mod tests {
     fn handshake_downgrade_v1() {
         let mut config = Config::new(PROTOCOL_VERSION_DRAFT29).unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
 
@@ -8460,7 +8482,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
 
         let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
@@ -8508,7 +8530,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -8566,7 +8588,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(2_u64.pow(32) + 5);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -9743,7 +9765,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(15);
         config.set_initial_max_stream_data_bidi_local(30);
@@ -10034,7 +10056,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(15);
         config.set_initial_max_stream_data_bidi_local(30);
@@ -10520,7 +10542,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -10596,7 +10618,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -10863,7 +10885,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
 
         let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
@@ -10930,7 +10952,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
 
         let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
@@ -10990,7 +11012,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
 
         let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
@@ -11258,7 +11280,7 @@ mod tests {
     fn app_limited_true() {
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
@@ -11299,7 +11321,7 @@ mod tests {
     fn app_limited_false() {
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
@@ -11342,7 +11364,7 @@ mod tests {
     fn app_limited_false_no_frame() {
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
@@ -11385,7 +11407,7 @@ mod tests {
     fn app_limited_false_no_header() {
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
@@ -11428,7 +11450,7 @@ mod tests {
     fn app_limited_not_changed_on_no_new_frames() {
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(50000);
@@ -11538,7 +11560,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(1_000_000);
         config.set_initial_max_stream_data_bidi_local(1_000_000);
@@ -11764,7 +11786,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -11884,7 +11906,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(1_000_000);
         config.set_initial_max_stream_data_bidi_local(1_000_000);
@@ -12196,7 +12218,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
 
         let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
@@ -12304,7 +12326,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -12376,7 +12398,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -12413,7 +12435,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -12483,7 +12505,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -12529,7 +12551,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -12576,7 +12598,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -12627,7 +12649,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -12822,7 +12844,7 @@ mod tests {
 
         let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         client_config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         client_config.set_max_recv_udp_payload_size(1200);
 
@@ -12834,11 +12856,11 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         server_config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         server_config.verify_peer(false);
         server_config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         // Larger than the client
         server_config.set_max_send_udp_payload_size(1500);
@@ -12911,7 +12933,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(100000);
         config.set_initial_max_stream_data_bidi_local(10000);
@@ -12990,7 +13012,7 @@ mod tests {
         client_config.load_priv_key_from_pem_file("examples/cert.key")?;
 
         for config in [&mut client_config, &mut server_config] {
-            config.set_application_protos(b"\x06proto1\x06proto2")?;
+            config.set_application_protos(&[b"proto1", b"proto2"])?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
             config.set_initial_max_stream_data_bidi_remote(15);
@@ -13032,7 +13054,7 @@ mod tests {
     fn last_tx_data_larger_than_tx_data() {
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.set_initial_max_data(12000);
         config.set_initial_max_stream_data_bidi_local(20000);
@@ -13100,7 +13122,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(3);
@@ -13159,7 +13181,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(2);
@@ -13259,7 +13281,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(2);
@@ -13319,7 +13341,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(3);
@@ -13440,7 +13462,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(2);
@@ -13531,7 +13553,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(2);
@@ -13596,7 +13618,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(2);
@@ -13648,7 +13670,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_initial_max_data(30);
@@ -13681,7 +13703,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(2);
@@ -13732,7 +13754,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(2);
@@ -13798,7 +13820,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(2);
@@ -13824,7 +13846,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_initial_max_data(100000);
@@ -13958,7 +13980,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(3);
@@ -14171,7 +14193,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(2);
@@ -14248,7 +14270,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(2);
@@ -14315,7 +14337,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config
-            .set_application_protos(b"\x06proto1\x06proto2")
+            .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
         config.set_active_connection_id_limit(3);

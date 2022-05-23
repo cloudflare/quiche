@@ -32,7 +32,7 @@ pub trait Args {
 
 /// Contains commons arguments for creating a quiche QUIC connection.
 pub struct CommonArgs {
-    pub alpns: Vec<u8>,
+    pub alpns: Vec<&'static [u8]>,
     pub max_data: u64,
     pub max_window: u64,
     pub max_stream_data: u64,
@@ -81,28 +81,24 @@ impl Args for CommonArgs {
         let http_version = args.get_str("--http-version");
         let dgram_proto = args.get_str("--dgram-proto");
         let (alpns, dgrams_enabled) = match (http_version, dgram_proto) {
-            ("HTTP/0.9", "none") =>
-                (alpns::length_prefixed(&alpns::HTTP_09), false),
+            ("HTTP/0.9", "none") => (alpns::HTTP_09.to_vec(), false),
 
             ("HTTP/0.9", _) =>
                 panic!("Unsupported HTTP version and DATAGRAM protocol."),
 
-            ("HTTP/3", "none") => (alpns::length_prefixed(&alpns::HTTP_3), false),
+            ("HTTP/3", "none") => (alpns::HTTP_3.to_vec(), false),
 
-            ("HTTP/3", "oneway") =>
-                (alpns::length_prefixed(&alpns::HTTP_3), true),
+            ("HTTP/3", "oneway") => (alpns::HTTP_3.to_vec(), true),
 
             ("all", "none") => (
-                [
-                    alpns::length_prefixed(&alpns::HTTP_3),
-                    alpns::length_prefixed(&alpns::HTTP_09),
-                ]
-                .concat(),
+                [alpns::HTTP_3.as_slice(), &alpns::HTTP_09]
+                    .concat()
+                    .to_vec(),
                 false,
             ),
 
             // SiDuck is it's own application protocol.
-            (_, "siduck") => (alpns::length_prefixed(&alpns::SIDUCK), true),
+            (_, "siduck") => (alpns::SIDUCK.to_vec(), true),
 
             (..) => panic!("Unsupported HTTP version and DATAGRAM protocol."),
         };
@@ -178,7 +174,7 @@ impl Args for CommonArgs {
 impl Default for CommonArgs {
     fn default() -> Self {
         CommonArgs {
-            alpns: alpns::length_prefixed(&alpns::HTTP_3),
+            alpns: alpns::HTTP_3.to_vec(),
             max_data: 10000000,
             max_window: 25165824,
             max_stream_data: 1000000,

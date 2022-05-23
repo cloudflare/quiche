@@ -14,7 +14,7 @@ lazy_static! {
     static ref CONFIG: Mutex<quiche::Config> = {
         let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .set_application_protos(b"\x05hq-23\x08http/0.9")
+            .set_application_protos(&[b"hq-23", b"http/0.9"])
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);

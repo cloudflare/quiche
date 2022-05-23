@@ -60,21 +60,10 @@ const H3_MESSAGE_ERROR: u64 = 0x10E;
 ///
 /// This module contains constants and functions for working with ALPN.
 pub mod alpns {
-    pub const HTTP_09: [&str; 5] =
-        ["hq-interop", "hq-29", "hq-28", "hq-27", "http/0.9"];
-    pub const HTTP_3: [&str; 4] = ["h3", "h3-29", "h3-28", "h3-27"];
-    pub const SIDUCK: [&str; 2] = ["siduck", "siduck-00"];
-
-    pub fn length_prefixed(alpns: &[&str]) -> Vec<u8> {
-        let mut out = Vec::new();
-
-        for s in alpns {
-            out.push(s.len() as u8);
-            out.extend_from_slice(s.as_bytes());
-        }
-
-        out
-    }
+    pub const HTTP_09: [&[u8]; 5] =
+        [b"hq-interop", b"hq-29", b"hq-28", b"hq-27", b"http/0.9"];
+    pub const HTTP_3: [&[u8]; 4] = [b"h3", b"h3-29", b"h3-28", b"h3-27"];
+    pub const SIDUCK: [&[u8]; 2] = [b"siduck", b"siduck-00"];
 }
 
 pub struct PartialRequest {
