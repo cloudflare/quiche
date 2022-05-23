@@ -319,7 +319,7 @@ use qlog::events::EventType;
 ///
 /// [`Config::set_application_protos()`]:
 /// ../struct.Config.html#method.set_application_protos
-pub const APPLICATION_PROTOCOL: &[u8] = b"\x02h3\x05h3-29\x05h3-28\x05h3-27";
+pub const APPLICATION_PROTOCOL: &[&[u8]] = &[b"h3", b"h3-29", b"h3-28", b"h3-27"];
 
 // The offset used when converting HTTP/3 urgency to quiche urgency.
 const PRIORITY_URGENCY_OFFSET: u8 = 124;
@@ -2666,7 +2666,7 @@ pub mod testing {
             let mut config = crate::Config::new(crate::PROTOCOL_VERSION)?;
             config.load_cert_chain_from_pem_file("examples/cert.crt")?;
             config.load_priv_key_from_pem_file("examples/cert.key")?;
-            config.set_application_protos(b"\x02h3")?;
+            config.set_application_protos(&[b"h3"])?;
             config.set_initial_max_data(1500);
             config.set_initial_max_stream_data_bidi_local(150);
             config.set_initial_max_stream_data_bidi_remote(150);
@@ -4409,7 +4409,7 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);
@@ -4546,7 +4546,7 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);
@@ -4592,7 +4592,7 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);
@@ -4702,7 +4702,7 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(69);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);
@@ -4750,7 +4750,7 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);
@@ -4795,7 +4795,7 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);
@@ -4845,7 +4845,7 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);
@@ -5007,7 +5007,7 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);
@@ -5055,7 +5055,7 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);
@@ -5147,7 +5147,7 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);
@@ -5499,7 +5499,7 @@ mod tests {
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config.set_application_protos(b"\x02h3").unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
         config.set_initial_max_stream_data_bidi_local(150);
         config.set_initial_max_stream_data_bidi_remote(150);

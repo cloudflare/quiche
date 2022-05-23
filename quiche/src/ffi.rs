@@ -196,12 +196,14 @@ pub extern fn quiche_config_enable_early_data(config: &mut Config) {
 }
 
 #[no_mangle]
+/// Corresponds to the `Config::set_application_protos_wire_format` Rust
+/// function.
 pub extern fn quiche_config_set_application_protos(
     config: &mut Config, protos: *const u8, protos_len: size_t,
 ) -> c_int {
     let protos = unsafe { slice::from_raw_parts(protos, protos_len) };
 
-    match config.set_application_protos(protos) {
+    match config.set_application_protos_wire_format(protos) {
         Ok(_) => 0,
 
         Err(e) => e.to_c() as c_int,

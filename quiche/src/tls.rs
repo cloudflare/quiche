@@ -294,12 +294,12 @@ impl Context {
         }
     }
 
-    pub fn set_alpn(&mut self, v: &[Vec<u8>]) -> Result<()> {
+    pub fn set_alpn(&mut self, v: &[&[u8]]) -> Result<()> {
         let mut protos: Vec<u8> = Vec::new();
 
         for proto in v {
             protos.push(proto.len() as u8);
-            protos.append(&mut proto.clone());
+            protos.extend_from_slice(proto);
         }
 
         // Configure ALPN for servers.
