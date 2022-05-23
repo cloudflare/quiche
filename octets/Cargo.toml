@@ -1,6 +1,6 @@
 [package]
 name = "octets"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
 edition = "2018"
 description = "Zero-copy abstraction for parsing and constructing network packets"
