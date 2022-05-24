@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["quic", "http3"]
 categories = ["network-programming"]
 license = "BSD-2-Clause"
-rust-version = "1.56"
+rust-version = "1.57"
 include = [
     "/*.md",
     "/*.toml",
