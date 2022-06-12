@@ -185,8 +185,6 @@ impl Frame {
     ) -> Result<Frame> {
         let frame_type = b.get_varint()?;
 
-        // println!("GOT FRAME {:x}", frame_type);
-
         let frame = match frame_type {
             0x00 => {
                 let mut len = 1;
