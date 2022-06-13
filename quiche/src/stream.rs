@@ -254,46 +254,63 @@ impl StreamMap {
                         (local_params.initial_max_stream_data_uni, 0),
                 };
 
+                // The two least significant bits from a stream id identify the
+                // type of stream. Truncate those bits to get the sequence for
+                // that stream type.
+                let stream_sequence = id >> 2;
+
                 // Enforce stream count limits.
                 match (is_local(id, is_server), is_bidi(id)) {
                     (true, true) => {
-                        if self.local_opened_streams_bidi >=
-                            self.peer_max_streams_bidi
-                        {
+                        let n = std::cmp::max(
+                            self.local_opened_streams_bidi,
+                            stream_sequence + 1,
+                        );
+
+                        if n > self.peer_max_streams_bidi {
                             return Err(Error::StreamLimit);
                         }
 
-                        self.local_opened_streams_bidi += 1;
+                        self.local_opened_streams_bidi = n;
                     },
 
                     (true, false) => {
-                        if self.local_opened_streams_uni >=
-                            self.peer_max_streams_uni
-                        {
+                        let n = std::cmp::max(
+                            self.local_opened_streams_uni,
+                            stream_sequence + 1,
+                        );
+
+                        if n > self.peer_max_streams_uni {
                             return Err(Error::StreamLimit);
                         }
 
-                        self.local_opened_streams_uni += 1;
+                        self.local_opened_streams_uni = n;
                     },
 
                     (false, true) => {
-                        if self.peer_opened_streams_bidi >=
-                            self.local_max_streams_bidi
-                        {
+                        let n = std::cmp::max(
+                            self.peer_opened_streams_bidi,
+                            stream_sequence + 1,
+                        );
+
+                        if n > self.local_max_streams_bidi {
                             return Err(Error::StreamLimit);
                         }
 
-                        self.peer_opened_streams_bidi += 1;
+                        self.peer_opened_streams_bidi = n;
                     },
 
                     (false, false) => {
-                        if self.peer_opened_streams_uni >=
-                            self.local_max_streams_uni
-                        {
+                        let n = std::cmp::max(
+                            self.peer_opened_streams_uni,
+                            stream_sequence + 1,
+                        );
+
+                        if n > self.local_max_streams_uni {
                             return Err(Error::StreamLimit);
                         }
 
-                        self.peer_opened_streams_uni += 1;
+                        self.peer_opened_streams_uni = n;
                     },
                 };
 
@@ -3233,5 +3250,68 @@ mod tests {
         assert_eq!(new_new_buf.fin(), true);
 
         assert_eq!(&new_new_buf[..], b"");
+    }
+
+    /// RFC9000 2.1: A stream ID that is used out of order results in all
+    /// streams of that type with lower-numbered stream IDs also being opened.
+    #[test]
+    fn stream_limit_auto_open() {
+        let local_tp = crate::TransportParams::default();
+        let peer_tp = crate::TransportParams::default();
+
+        let mut streams = StreamMap::new(5, 5, 5);
+
+        let stream_id = 500;
+        assert!(!is_local(stream_id, true), "stream id is peer initiated");
+        assert!(is_bidi(stream_id), "stream id is bidirectional");
+        assert_eq!(
+            streams
+                .get_or_create(stream_id, &local_tp, &peer_tp, false, true)
+                .err(),
+            Some(Error::StreamLimit),
+            "stream limit should be exceeded"
+        );
+    }
+
+    /// Stream limit should be satisfied regardless of what order we open
+    /// streams
+    #[test]
+    fn stream_create_out_of_order() {
+        let local_tp = crate::TransportParams::default();
+        let peer_tp = crate::TransportParams::default();
+
+        let mut streams = StreamMap::new(5, 5, 5);
+
+        for stream_id in [8, 12, 4] {
+            assert!(is_local(stream_id, false), "stream id is client initiated");
+            assert!(is_bidi(stream_id), "stream id is bidirectional");
+            assert!(streams
+                .get_or_create(stream_id, &local_tp, &peer_tp, false, true)
+                .is_ok());
+        }
+    }
+
+    /// Check stream limit boundary cases
+    #[test]
+    fn stream_limit_edge() {
+        let local_tp = crate::TransportParams::default();
+        let peer_tp = crate::TransportParams::default();
+
+        let mut streams = StreamMap::new(3, 3, 3);
+
+        // Highest permitted
+        let stream_id = 8;
+        assert!(streams
+            .get_or_create(stream_id, &local_tp, &peer_tp, false, true)
+            .is_ok());
+
+        // One more than highest permitted
+        let stream_id = 12;
+        assert_eq!(
+            streams
+                .get_or_create(stream_id, &local_tp, &peer_tp, false, true)
+                .err(),
+            Some(Error::StreamLimit)
+        );
     }
 }

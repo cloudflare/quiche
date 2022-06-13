@@ -7273,15 +7273,15 @@ mod tests {
 
         let frames = [
             frame::Frame::Stream {
+                stream_id: 0,
+                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+            },
+            frame::Frame::Stream {
                 stream_id: 4,
                 data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 8,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 12,
                 data: stream::RangeBuf::from(b"a", 0, false),
             },
         ];
@@ -7303,16 +7303,16 @@ mod tests {
         let frames = [
             // One byte less than stream limit.
             frame::Frame::Stream {
-                stream_id: 4,
+                stream_id: 0,
                 data: stream::RangeBuf::from(b"aaaaaaaaaaaaaa", 0, false),
             },
             // Same stream, but one byte more.
             frame::Frame::Stream {
-                stream_id: 4,
+                stream_id: 0,
                 data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
             },
             frame::Frame::Stream {
-                stream_id: 12,
+                stream_id: 8,
                 data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
             },
         ];
@@ -7330,11 +7330,11 @@ mod tests {
 
         let frames = [
             frame::Frame::Stream {
-                stream_id: 4,
+                stream_id: 0,
                 data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
             },
             frame::Frame::Stream {
-                stream_id: 8,
+                stream_id: 4,
                 data: stream::RangeBuf::from(b"a", 0, false),
             },
         ];
@@ -7343,11 +7343,11 @@ mod tests {
 
         assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
+        pipe.server.stream_recv(0, &mut buf).unwrap();
         pipe.server.stream_recv(4, &mut buf).unwrap();
-        pipe.server.stream_recv(8, &mut buf).unwrap();
 
         let frames = [frame::Frame::Stream {
-            stream_id: 8,
+            stream_id: 4,
             data: stream::RangeBuf::from(b"a", 1, false),
         }];
 
@@ -7367,7 +7367,7 @@ mod tests {
         assert_eq!(
             iter.next(),
             Some(&frame::Frame::MaxStreamData {
-                stream_id: 4,
+                stream_id: 0,
                 max: 30
             })
         );
@@ -7800,33 +7800,33 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
 
         // Client sends some data.
-        assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(0, b"hello", false), Ok(5));
         assert_eq!(pipe.advance(), Ok(()));
 
         // Server gets data and sends data back, closing stream.
         let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(0));
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, false)));
-        assert!(!pipe.server.stream_finished(4));
+        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, false)));
+        assert!(!pipe.server.stream_finished(0));
 
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+        assert_eq!(pipe.server.stream_send(0, b"", true), Ok(0));
         assert_eq!(pipe.advance(), Ok(()));
 
         let mut r = pipe.client.readable();
-        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(0));
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.client.stream_recv(4, &mut b), Ok((0, true)));
-        assert!(pipe.client.stream_finished(4));
+        assert_eq!(pipe.client.stream_recv(0, &mut b), Ok((0, true)));
+        assert!(pipe.client.stream_finished(0));
 
         // Client sends RESET_STREAM, closing stream.
         let frames = [frame::Frame::ResetStream {
-            stream_id: 4,
+            stream_id: 0,
             error_code: 42,
             final_size: 5,
         }];
@@ -7836,15 +7836,15 @@ mod tests {
 
         // Server is notified of stream readability, due to reset.
         let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(0));
         assert_eq!(r.next(), None);
 
         assert_eq!(
-            pipe.server.stream_recv(4, &mut b),
+            pipe.server.stream_recv(0, &mut b),
             Err(Error::StreamReset(42))
         );
 
-        assert!(pipe.server.stream_finished(4));
+        assert!(pipe.server.stream_finished(0));
 
         // Sending RESET_STREAM again shouldn't make stream readable again.
         assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
@@ -7864,33 +7864,33 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
 
         // Client sends some data.
-        assert_eq!(pipe.client.stream_send(4, b"h", false), Ok(1));
+        assert_eq!(pipe.client.stream_send(0, b"h", false), Ok(1));
         assert_eq!(pipe.advance(), Ok(()));
 
         // Server gets data and sends data back, closing stream.
         let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(0));
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((1, false)));
-        assert!(!pipe.server.stream_finished(4));
+        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((1, false)));
+        assert!(!pipe.server.stream_finished(0));
 
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+        assert_eq!(pipe.server.stream_send(0, b"", true), Ok(0));
         assert_eq!(pipe.advance(), Ok(()));
 
         let mut r = pipe.client.readable();
-        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(0));
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.client.stream_recv(4, &mut b), Ok((0, true)));
-        assert!(pipe.client.stream_finished(4));
+        assert_eq!(pipe.client.stream_recv(0, &mut b), Ok((0, true)));
+        assert!(pipe.client.stream_finished(0));
 
         // Client sends RESET_STREAM, closing stream.
         let frames = [frame::Frame::ResetStream {
-            stream_id: 4,
+            stream_id: 0,
             error_code: 42,
             final_size: 5,
         }];
@@ -7900,15 +7900,15 @@ mod tests {
 
         // Server is notified of stream readability, due to reset.
         let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(0));
         assert_eq!(r.next(), None);
 
         assert_eq!(
-            pipe.server.stream_recv(4, &mut b),
+            pipe.server.stream_recv(0, &mut b),
             Err(Error::StreamReset(42))
         );
 
-        assert!(pipe.server.stream_finished(4));
+        assert!(pipe.server.stream_finished(0));
 
         // Sending RESET_STREAM again shouldn't make stream readable again.
         assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
@@ -7928,20 +7928,20 @@ mod tests {
 
         let frames = [
             frame::Frame::Stream {
-                stream_id: 4,
+                stream_id: 0,
                 data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
             },
             frame::Frame::Stream {
-                stream_id: 8,
+                stream_id: 4,
                 data: stream::RangeBuf::from(b"a", 0, false),
             },
             frame::Frame::ResetStream {
-                stream_id: 8,
+                stream_id: 4,
                 error_code: 0,
                 final_size: 15,
             },
             frame::Frame::Stream {
-                stream_id: 12,
+                stream_id: 8,
                 data: stream::RangeBuf::from(b"a", 0, false),
             },
         ];
@@ -8097,27 +8097,27 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
 
         // Client sends some data, and closes stream.
-        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+        assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
         assert_eq!(pipe.advance(), Ok(()));
 
         // Server gets data.
         let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(0));
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
-        assert!(pipe.server.stream_finished(4));
+        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, true)));
+        assert!(pipe.server.stream_finished(0));
 
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), None);
 
         // Server sends data, until blocked.
         let mut r = pipe.server.writable();
-        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(0));
         assert_eq!(r.next(), None);
 
         loop {
-            if pipe.server.stream_send(4, b"world", false) == Err(Error::Done) {
+            if pipe.server.stream_send(0, b"world", false) == Err(Error::Done) {
                 break;
             }
 
@@ -8129,7 +8129,7 @@ mod tests {
 
         // Client sends STOP_SENDING.
         let frames = [frame::Frame::StopSending {
-            stream_id: 4,
+            stream_id: 0,
             error_code: 42,
         }];
 
@@ -8150,7 +8150,7 @@ mod tests {
         assert_eq!(
             iter.next(),
             Some(&frame::Frame::ResetStream {
-                stream_id: 4,
+                stream_id: 0,
                 error_code: 42,
                 final_size: 15,
             })
@@ -8158,11 +8158,11 @@ mod tests {
 
         // Stream is writable, but writing returns an error.
         let mut r = pipe.server.writable();
-        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(0));
         assert_eq!(r.next(), None);
 
         assert_eq!(
-            pipe.server.stream_send(4, b"world", true),
+            pipe.server.stream_send(0, b"world", true),
             Err(Error::StreamStopped(42)),
         );
 
@@ -8185,7 +8185,7 @@ mod tests {
 
         // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
         let frames = [frame::Frame::StopSending {
-            stream_id: 4,
+            stream_id: 0,
             error_code: 42,
         }];
 
@@ -8708,7 +8708,7 @@ mod tests {
         let mut r = pipe.client.readable();
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
 
         let mut r = pipe.client.readable();
         assert_eq!(r.next(), None);
@@ -8720,22 +8720,22 @@ mod tests {
 
         // Server received stream.
         let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(0));
         assert_eq!(r.next(), None);
 
         assert_eq!(
-            pipe.server.stream_send(4, b"aaaaaaaaaaaaaaa", false),
+            pipe.server.stream_send(0, b"aaaaaaaaaaaaaaa", false),
             Ok(15)
         );
         assert_eq!(pipe.advance(), Ok(()));
 
         let mut r = pipe.client.readable();
-        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(0));
         assert_eq!(r.next(), None);
 
         // Client drains stream.
         let mut b = [0; 15];
-        pipe.client.stream_recv(4, &mut b).unwrap();
+        pipe.client.stream_recv(0, &mut b).unwrap();
         assert_eq!(pipe.advance(), Ok(()));
 
         let mut r = pipe.client.readable();
@@ -8743,19 +8743,19 @@ mod tests {
 
         // Server shuts down stream.
         let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(0));
         assert_eq!(r.next(), None);
 
-        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 0), Ok(()));
+        assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 0), Ok(()));
 
         let mut r = pipe.server.readable();
         assert_eq!(r.next(), None);
 
         // Client creates multiple streams.
-        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
         assert_eq!(pipe.advance(), Ok(()));
 
-        assert_eq!(pipe.client.stream_send(12, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
         assert_eq!(pipe.advance(), Ok(()));
 
         let mut r = pipe.server.readable();
@@ -8778,22 +8778,22 @@ mod tests {
         let mut w = pipe.client.writable();
         assert_eq!(w.next(), None);
 
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
 
         // Client created stream.
         let mut w = pipe.client.writable();
-        assert_eq!(w.next(), Some(4));
+        assert_eq!(w.next(), Some(0));
         assert_eq!(w.next(), None);
 
         assert_eq!(pipe.advance(), Ok(()));
 
         // Server created stream.
         let mut w = pipe.server.writable();
-        assert_eq!(w.next(), Some(4));
+        assert_eq!(w.next(), Some(0));
         assert_eq!(w.next(), None);
 
         assert_eq!(
-            pipe.server.stream_send(4, b"aaaaaaaaaaaaaaa", false),
+            pipe.server.stream_send(0, b"aaaaaaaaaaaaaaa", false),
             Ok(15)
         );
 
@@ -8805,25 +8805,25 @@ mod tests {
 
         // Client drains stream.
         let mut b = [0; 15];
-        pipe.client.stream_recv(4, &mut b).unwrap();
+        pipe.client.stream_recv(0, &mut b).unwrap();
         assert_eq!(pipe.advance(), Ok(()));
 
         // Server stream is writable again.
         let mut w = pipe.server.writable();
-        assert_eq!(w.next(), Some(4));
+        assert_eq!(w.next(), Some(0));
         assert_eq!(w.next(), None);
 
         // Server shuts down stream.
-        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 0), Ok(()));
+        assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Write, 0), Ok(()));
 
         let mut w = pipe.server.writable();
         assert_eq!(w.next(), None);
 
         // Client creates multiple streams.
-        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
         assert_eq!(pipe.advance(), Ok(()));
 
-        assert_eq!(pipe.client.stream_send(12, b"aaaaa", false), Ok(5));
+        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
         assert_eq!(pipe.advance(), Ok(()));
 
         let mut w = pipe.server.writable();
@@ -8836,10 +8836,10 @@ mod tests {
         assert_eq!(w.len(), 0);
 
         // Server finishes stream.
-        assert_eq!(pipe.server.stream_send(12, b"aaaaa", true), Ok(5));
+        assert_eq!(pipe.server.stream_send(8, b"aaaaa", true), Ok(5));
 
         let mut w = pipe.server.writable();
-        assert_eq!(w.next(), Some(8));
+        assert_eq!(w.next(), Some(4));
         assert_eq!(w.next(), None);
     }
 
