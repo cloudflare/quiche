@@ -731,7 +731,7 @@ pub fn is_bidi(stream_id: u64) -> bool {
 /// An iterator over QUIC streams.
 #[derive(Default)]
 pub struct StreamIter {
-    streams: Vec<u64>,
+    streams: VecDeque<u64>,
 }
 
 impl StreamIter {
@@ -748,7 +748,7 @@ impl Iterator for StreamIter {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.streams.pop()
+        self.streams.pop_front()
     }
 }
 
