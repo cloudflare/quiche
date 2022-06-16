@@ -219,6 +219,7 @@ Options:
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
   --session-file PATH      File used to cache a TLS session for resumption.
+  --source-port PORT       Source port to use when connecting to the server [default: 0].
   -h --help                Show this screen.
 ";
 
@@ -235,6 +236,7 @@ pub struct ClientArgs {
     pub method: String,
     pub connect_to: Option<String>,
     pub session_file: Option<String>,
+    pub source_port: u16,
 }
 
 impl Args for ClientArgs {
@@ -298,6 +300,9 @@ impl Args for ClientArgs {
             None
         };
 
+        let source_port = args.get_str("--source-port");
+        let source_port = source_port.parse::<u16>().unwrap();
+
         ClientArgs {
             version,
             dump_response_path,
@@ -310,6 +315,7 @@ impl Args for ClientArgs {
             method,
             connect_to,
             session_file,
+            source_port,
         }
     }
 }
@@ -328,6 +334,7 @@ impl Default for ClientArgs {
             method: "GET".to_string(),
             connect_to: None,
             session_file: None,
+            source_port: 0,
         }
     }
 }

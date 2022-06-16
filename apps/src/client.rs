@@ -74,8 +74,8 @@ pub fn connect(
     // server address. This is needed on macOS and BSD variants that don't
     // support binding to IN6ADDR_ANY for both v4 and v6.
     let bind_addr = match peer_addr {
-        std::net::SocketAddr::V4(_) => "0.0.0.0:0",
-        std::net::SocketAddr::V6(_) => "[::]:0",
+        std::net::SocketAddr::V4(_) => format!("0.0.0.0:{}", args.source_port),
+        std::net::SocketAddr::V6(_) => format!("[::]:{}", args.source_port),
     };
 
     // Create the UDP socket backing the QUIC connection, and register it with
