@@ -1022,7 +1022,10 @@ extern fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
 fn map_result(bssl_result: c_int) -> Result<()> {
     match bssl_result {
         1 => Ok(()),
-        _ => Err(Error::TlsFail),
+        _ => {
+            log_ssl_error();
+            Err(Error::TlsFail)
+        },
     }
 }
 

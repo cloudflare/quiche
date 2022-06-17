@@ -232,6 +232,7 @@ Options:
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
   --session-file PATH      File used to cache a TLS session for resumption.
   --source-port PORT       Source port to use when connecting to the server [default: 0].
+  --trust-origin-ca-pem <file>  Path to the pem file of the origin's CA, if not publicly trusted.
   -h --help                Show this screen.
 ";
 
@@ -250,6 +251,7 @@ pub struct ClientArgs {
     pub session_file: Option<String>,
     pub source_port: u16,
     pub perform_migration: bool,
+    pub trust_origin_ca_pem: Option<String>,
 }
 
 impl Args for ClientArgs {
@@ -318,6 +320,13 @@ impl Args for ClientArgs {
 
         let perform_migration = args.get_bool("--perform-migration");
 
+        let trust_origin_ca_pem = args.get_str("--trust-origin-ca-pem");
+        let trust_origin_ca_pem = if !trust_origin_ca_pem.is_empty() {
+            Some(trust_origin_ca_pem.to_string())
+        } else {
+            None
+        };
+
         ClientArgs {
             version,
             dump_response_path,
@@ -332,6 +341,7 @@ impl Args for ClientArgs {
             session_file,
             source_port,
             perform_migration,
+            trust_origin_ca_pem,
         }
     }
 }
@@ -352,6 +362,7 @@ impl Default for ClientArgs {
             session_file: None,
             source_port: 0,
             perform_migration: false,
+            trust_origin_ca_pem: None,
         }
     }
 }
