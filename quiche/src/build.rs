@@ -32,7 +32,7 @@ const CMAKE_PARAMS_ARM_LINUX: &[(&str, &[(&str, &str)])] = &[
 /// so adjust library location based on platform and build target.
 /// See issue: https://github.com/alexcrichton/cmake-rs/issues/18
 fn get_boringssl_platform_output_path() -> String {
-    if cfg!(windows) {
+    if cfg!(target_env = "msvc") {
         // Code under this branch should match the logic in cmake-rs
         let debug_env_var =
             std::env::var("DEBUG").expect("DEBUG variable not defined in env");
