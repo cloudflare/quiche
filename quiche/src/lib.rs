@@ -6532,7 +6532,7 @@ mod tests {
 
     #[test]
     fn transport_params_forbid_duplicates() {
-        // given an encoded param
+        // Given an encoded param.
         let initial_source_connection_id = b"id";
         let initial_source_connection_id_raw = [
             15,
@@ -6541,7 +6541,7 @@ mod tests {
             initial_source_connection_id[1] as u8,
         ];
 
-        // no error when decoding the param
+        // No error when decoding the param.
         let tp = TransportParams::decode(
             initial_source_connection_id_raw.as_slice(),
             true,
@@ -6553,12 +6553,12 @@ mod tests {
             Some(initial_source_connection_id.to_vec().into())
         );
 
-        // duplicate the param
+        // Duplicate the param.
         let mut raw_params = Vec::new();
         raw_params.append(&mut initial_source_connection_id_raw.to_vec());
         raw_params.append(&mut initial_source_connection_id_raw.to_vec());
 
-        // decoding fails
+        // Decoding fails.
         assert_eq!(
             TransportParams::decode(raw_params.as_slice(), true),
             Err(Error::InvalidTransportParam)
