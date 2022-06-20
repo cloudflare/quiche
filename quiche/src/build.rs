@@ -32,7 +32,9 @@ const CMAKE_PARAMS_ARM_LINUX: &[(&str, &[(&str, &str)])] = &[
 /// so adjust library location based on platform and build target.
 /// See issue: https://github.com/alexcrichton/cmake-rs/issues/18
 fn get_boringssl_platform_output_path() -> String {
-    if cfg!(target_env = "msvc") {
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap();
+
+    if target_env == "msvc" {
         // Code under this branch should match the logic in cmake-rs
         let debug_env_var =
             std::env::var("DEBUG").expect("DEBUG variable not defined in env");
@@ -155,6 +157,18 @@ fn get_boringssl_cmake_config() -> cmake::Config {
             _ => boringssl_cmake,
         },
 
+        "windows" => match arch.as_ref() {
+            "x86_64" => {
+                // Override _WIN32_WINNT to use 64bit APIs,
+                // such as GetTickCount64().
+                boringssl_cmake.cxxflag("-D_WIN32_WINNT=0x0600");
+
+                boringssl_cmake
+            },
+
+            _ => boringssl_cmake,
+        },
+
         _ => {
             // Configure BoringSSL for building on 32-bit non-windows platforms.
             if arch == "x86" && os != "windows" {
@@ -235,13 +249,13 @@ fn main() {
         let build_dir = format!("{}/build/{}", bssl_dir, build_path);
         println!("cargo:rustc-link-search=native={}", build_dir);
 
-        println!("cargo:rustc-link-lib=static=crypto");
         println!("cargo:rustc-link-lib=static=ssl");
+        println!("cargo:rustc-link-lib=static=crypto");
     }
 
     if cfg!(feature = "boringssl-boring-crate") {
-        println!("cargo:rustc-link-lib=static=crypto");
         println!("cargo:rustc-link-lib=static=ssl");
+        println!("cargo:rustc-link-lib=static=crypto");
     }
 
     // MacOS: Allow cdylib to link with undefined symbols
