@@ -361,6 +361,7 @@ use std::net::SocketAddr;
 
 use std::str::FromStr;
 
+use std::collections::HashSet;
 use std::collections::VecDeque;
 
 /// The current QUIC wire version.
@@ -5768,15 +5769,19 @@ impl Default for TransportParams {
 impl TransportParams {
     fn decode(buf: &[u8], is_server: bool) -> Result<TransportParams> {
         let mut params = octets::Octets::with_slice(buf);
+        let mut seen_params = HashSet::new();
 
         let mut tp = TransportParams::default();
 
         while params.cap() > 0 {
             let id = params.get_varint()?;
 
-            let mut val = params.get_bytes_with_varint_length()?;
+            if seen_params.contains(&id) {
+                return Err(Error::InvalidTransportParam);
+            }
+            seen_params.insert(id);
 
-            // TODO: forbid duplicated param
+            let mut val = params.get_bytes_with_varint_length()?;
 
             match id {
                 0x0000 => {
@@ -6527,6 +6532,41 @@ mod tests {
         let new_tp = TransportParams::decode(&raw_params, true).unwrap();
 
         assert_eq!(new_tp, tp);
+    }
+
+    #[test]
+    fn transport_params_forbid_duplicates() {
+        // Given an encoded param.
+        let initial_source_connection_id = b"id";
+        let initial_source_connection_id_raw = [
+            15,
+            initial_source_connection_id.len() as u8,
+            initial_source_connection_id[0] as u8,
+            initial_source_connection_id[1] as u8,
+        ];
+
+        // No error when decoding the param.
+        let tp = TransportParams::decode(
+            initial_source_connection_id_raw.as_slice(),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(
+            tp.initial_source_connection_id,
+            Some(initial_source_connection_id.to_vec().into())
+        );
+
+        // Duplicate the param.
+        let mut raw_params = Vec::new();
+        raw_params.append(&mut initial_source_connection_id_raw.to_vec());
+        raw_params.append(&mut initial_source_connection_id_raw.to_vec());
+
+        // Decoding fails.
+        assert_eq!(
+            TransportParams::decode(raw_params.as_slice(), true),
+            Err(Error::InvalidTransportParam)
+        );
     }
 
     #[test]
