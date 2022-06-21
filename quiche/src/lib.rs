@@ -6658,6 +6658,12 @@ impl Connection {
     fn encode_transport_params(&mut self) -> Result<()> {
         let mut raw_params = [0; 189];
 
+        // A server that chooses a zero-length connection ID MUST NOT provide a preferred address.
+        if self.ids.zero_length_scid()
+            && self.local_transport_params.preferred_address_params.is_some() {
+            self.local_transport_params.preferred_address_params.take();
+        }
+
         let raw_params = TransportParams::encode(
             &self.local_transport_params,
             self.is_server,
@@ -9291,6 +9297,59 @@ mod tests {
 
         assert_eq!(pipe.server.server_preferred_address_v4(), None);
         assert_eq!(pipe.server.server_preferred_address_v6(), None);
+    }
+
+    #[test]
+    fn server_preferred_address_with_zero_len_cid() {
+        let preferred_addr_v4 = SocketAddrV4::from_str("0.0.0.1:8080").unwrap();
+        let preferred_addr_v6 = SocketAddrV6::from_str("[::1]:8080").unwrap();
+        let stateless_reset_token = vec![0xba; 16];
+        // Given a zero length cid.
+        let connection_id = &ConnectionId::from_vec(Vec::new());
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
+        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+        config.set_application_protos(&[b"proto1", b"proto2"]).unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_max_idle_timeout(180_000);
+        config.verify_peer(false);
+        config.set_ack_delay_exponent(8);
+
+        // Zero-length connection ID must not be included in this transport param.
+        assert_eq!(
+            config.set_preferred_address(
+                Some(preferred_addr_v4.to_string()),
+                Some(preferred_addr_v6.to_string()),
+                &connection_id,
+                stateless_reset_token.clone()
+            ),
+            Err(Error::TlsFail)
+        );
+
+        let connection_id = &ConnectionId::from_vec(vec![0; MAX_CONN_ID_LEN]);
+        config.set_preferred_address(
+            Some(preferred_addr_v4.to_string()),
+            Some(preferred_addr_v6.to_string()),
+            &connection_id,
+            stateless_reset_token.clone()
+        ).unwrap();
+
+        // Server chooses a zero-length connection ID.
+        let mut pipe = testing::Pipe::with_config_and_scid_lengths(
+            &mut config, MAX_CONN_ID_LEN, 0
+        ).unwrap();
+
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Preferred address will not be included.
+        assert_eq!(pipe.client.server_preferred_address_v4(), None);
+        assert_eq!(pipe.client.server_preferred_address_v6(), None);
     }
 
     #[test]
