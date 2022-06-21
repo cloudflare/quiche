@@ -369,7 +369,7 @@ pub struct Handshake {
 impl Handshake {
     #[cfg(feature = "ffi")]
     pub unsafe fn from_ptr(ssl: *mut c_void) -> Handshake {
-        Handshake::new(ssl)
+        Handshake::new(ssl as *mut SSL)
     }
 
     fn new(ptr: *mut SSL) -> Handshake {
