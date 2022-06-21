@@ -1271,7 +1271,7 @@ impl Config {
         self.disable_dcid_reuse = v;
     }
 
-    // TODO: add docs
+    /// Set the server's preferred address.
     pub fn set_preferred_address(
         &mut self,
         addr_str_v4: Option<String>,
@@ -6556,6 +6556,7 @@ impl Connection {
     }
     
     // TODO: add docs
+    /// Returns the server's preferred address for V4.
     pub fn server_preferred_address_v4(&self) -> Option<(SocketAddrV4, ConnectionId, Vec<u8>)> {
         match self.peer_transport_params.preferred_address_params.as_ref() {
             Some(params) => params.address_v4(),
@@ -6563,7 +6564,7 @@ impl Connection {
         }
     }
 
-    // TODO: add docs
+    /// Returns the server's preferred address for V6.
     pub fn server_preferred_address_v6(&self) -> Option<(SocketAddrV6, ConnectionId, Vec<u8>)> {
         match self.peer_transport_params.preferred_address_params.as_ref() {
             Some(params) => params.address_v6(),
@@ -6684,6 +6685,7 @@ impl Connection {
             .set_source_conn_id_limit(peer_params.active_conn_id_limit);
 
         if let Some(preferred_address) = &peer_params.preferred_address_params {
+            // Zero-length connection ID must not be sent.
             if preferred_address.connection_id.len() == 0 {
                 return Err(Error::InvalidTransportParam);
             }
@@ -8440,7 +8442,6 @@ impl TransportParams {
     }
 }
 
-// TODO: add docs
 #[derive(Clone, Debug, PartialEq)]
 struct PreferredAddressParams<'a> {
     addr_v4: Option<SocketAddrV4>,
