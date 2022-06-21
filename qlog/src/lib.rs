@@ -636,17 +636,13 @@ pub struct Token {
 
 impl Token {
     pub fn new(
-        ty: Option<TokenType>,
-        length: Option<u32>,
-        stateless_reset_token: Option<Vec<u8>>,
-        details: Option<String>
+        ty: Option<TokenType>, length: Option<u32>,
+        stateless_reset_token: Option<Vec<u8>>, details: Option<String>,
     ) -> Self {
         Token {
             ty,
             length,
-            data: HexSlice::maybe_string(
-                stateless_reset_token.as_ref(),
-            ),
+            data: HexSlice::maybe_string(stateless_reset_token.as_ref()),
             details,
         }
     }

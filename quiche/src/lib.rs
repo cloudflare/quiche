@@ -1353,32 +1353,20 @@ impl Config {
 
     /// Set the server's preferred address.
     pub fn set_preferred_address(
-        &mut self,
-        addr_str_v4: Option<String>,
-        addr_str_v6: Option<String>,
-        connection_id: &ConnectionId,
-        stateless_reset_token: Vec<u8>
+        &mut self, v4: Option<SocketAddrV4>, v6: Option<SocketAddrV6>,
+        connection_id: &ConnectionId, stateless_reset_token: Vec<u8>,
     ) -> Result<()> {
-        if (addr_str_v6.is_none() && addr_str_v4.is_none()) || connection_id.is_empty() {
+        if (v4.is_none() && v6.is_none()) || connection_id.is_empty() {
             return Err(Error::TlsFail);
         }
 
-        let mut addr_v4 = None;
-        if addr_str_v4.is_some() {
-            addr_v4 = Some(SocketAddrV4::from_str(addr_str_v4.unwrap().as_str()).map_err(|_| Error::TlsFail)?);
-        }
-
-        let mut addr_v6 = None;
-        if addr_str_v6.is_some() {
-            addr_v6 = Some(SocketAddrV6::from_str(addr_str_v6.unwrap().as_str()).map_err(|_| Error::TlsFail)?);
-        }
-
-        self.local_transport_params.preferred_address_params = Some(PreferredAddressParams::new(
-            addr_v4,
-            addr_v6,
-            connection_id.to_vec().into(),
-            stateless_reset_token
-        ));
+        self.local_transport_params.preferred_address_params =
+            Some(PreferredAddressParams::new(
+                v4,
+                v6,
+                connection_id.to_vec().into(),
+                stateless_reset_token,
+            ));
 
         Ok(())
     }
@@ -6641,7 +6629,9 @@ impl Connection {
     
     // TODO: add docs
     /// Returns the server's preferred address for V4.
-    pub fn server_preferred_address_v4(&self) -> Option<(SocketAddrV4, ConnectionId, Vec<u8>)> {
+    pub fn server_preferred_address_v4(
+        &self,
+    ) -> Option<(SocketAddrV4, ConnectionId, Vec<u8>)> {
         match self.peer_transport_params.preferred_address_params.as_ref() {
             Some(params) => params.address_v4(),
             None => None,
@@ -6649,7 +6639,9 @@ impl Connection {
     }
 
     /// Returns the server's preferred address for V6.
-    pub fn server_preferred_address_v6(&self) -> Option<(SocketAddrV6, ConnectionId, Vec<u8>)> {
+    pub fn server_preferred_address_v6(
+        &self,
+    ) -> Option<(SocketAddrV6, ConnectionId, Vec<u8>)> {
         match self.peer_transport_params.preferred_address_params.as_ref() {
             Some(params) => params.address_v6(),
             None => None,
@@ -6659,9 +6651,13 @@ impl Connection {
     fn encode_transport_params(&mut self) -> Result<()> {
         let mut raw_params = [0; 189];
 
-        // A server that chooses a zero-length connection ID MUST NOT provide a preferred address.
-        if self.ids.zero_length_scid()
-            && self.local_transport_params.preferred_address_params.is_some() {
+        // A server that chooses a zero-length connection ID MUST NOT provide a
+        // preferred address.
+        if self.ids.zero_length_scid() &&
+            self.local_transport_params
+                .preferred_address_params
+                .is_some()
+        {
             self.local_transport_params.preferred_address_params.take();
         }
 
@@ -8232,7 +8228,8 @@ impl TransportParams {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    tp.preferred_address_params = Some(PreferredAddressParams::decode(&mut val)?);
+                    tp.preferred_address_params =
+                        Some(PreferredAddressParams::decode(&mut val)?);
                 },
 
                 0x000e => {
@@ -8392,16 +8389,17 @@ impl TransportParams {
         }
 
         if is_server {
-           if let Some(pa) = &tp.preferred_address_params {
-               let mut param_buf = [0; 61];
-               let pref_addr_params = PreferredAddressParams::encode(pa, &mut param_buf)?;
-               TransportParams::encode_param(
-                   &mut b,
-                   0x000d,
-                   pref_addr_params.len()
-               )?;
-               b.put_bytes(pref_addr_params)?;
-           }
+            if let Some(pa) = &tp.preferred_address_params {
+                let mut param_buf = [0; 61];
+                let pref_addr_params =
+                    PreferredAddressParams::encode(pa, &mut param_buf)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x000d,
+                    pref_addr_params.len(),
+                )?;
+                b.put_bytes(pref_addr_params)?;
+            }
         }
 
         if tp.active_conn_id_limit != 2 {
@@ -8465,7 +8463,7 @@ impl TransportParams {
                     Some(qlog::TokenType::StatelessReset),
                     None,
                     Some(params.stateless_reset_token.clone()),
-                    None
+                    None,
                 );
 
                 Some(qlog::events::quic::PreferredAddress {
@@ -8488,8 +8486,8 @@ impl TransportParams {
                     connection_id: "".to_string(),
                     stateless_reset_token,
                 })
-            }
-            None => None
+            },
+            None => None,
         };
 
         EventData::TransportParametersSet(
@@ -8540,10 +8538,8 @@ struct PreferredAddressParams<'a> {
 
 impl<'a> PreferredAddressParams<'a> {
     fn new(
-        addr_v4: Option<SocketAddrV4>,
-        addr_v6: Option<SocketAddrV6>,
-        connection_id: ConnectionId<'a>,
-        stateless_reset_token: Vec<u8>
+        addr_v4: Option<SocketAddrV4>, addr_v6: Option<SocketAddrV6>,
+        connection_id: ConnectionId<'a>, stateless_reset_token: Vec<u8>,
     ) -> Self {
         PreferredAddressParams {
             addr_v4,
@@ -8552,7 +8548,7 @@ impl<'a> PreferredAddressParams<'a> {
             stateless_reset_token,
         }
     }
-    
+
     fn decode(b: &mut octets::Octets) -> Result<Self> {
         let mut addr_v4 = None;
         let ip_v4 = b.get_u32()?;
@@ -8567,7 +8563,8 @@ impl<'a> PreferredAddressParams<'a> {
         }
 
         let mut addr_v6 = None;
-        let ip_v6_b = <[u8; 16]>::try_from(b.get_bytes(16)?.slice(16)?).map_err(|_| Error::TlsFail)?;
+        let ip_v6_b = <[u8; 16]>::try_from(b.get_bytes(16)?.slice(16)?)
+            .map_err(|_| Error::TlsFail)?;
         let ip_v6 = Ipv6Addr::from(ip_v6_b);
         let port_v6 = b.get_u16()?;
 
@@ -8586,10 +8583,17 @@ impl<'a> PreferredAddressParams<'a> {
         let cid = b.get_bytes_with_varint_length()?.to_vec().into();
         let stateless_reset_token = b.get_bytes(16)?.to_vec();
 
-        Ok(PreferredAddressParams::new(addr_v4, addr_v6, cid, stateless_reset_token))
+        Ok(PreferredAddressParams::new(
+            addr_v4,
+            addr_v6,
+            cid,
+            stateless_reset_token,
+        ))
     }
 
-    fn encode<'o>(pa: &PreferredAddressParams, out: &'o mut [u8]) -> Result<&'o mut [u8]>  {
+    fn encode<'o>(
+        pa: &PreferredAddressParams, out: &'o mut [u8],
+    ) -> Result<&'o mut [u8]> {
         let mut b = octets::OctetsMut::with_slice(out);
 
         let (ip_v4, port_v4) = match pa.addr_v4 {
@@ -8618,17 +8622,23 @@ impl<'a> PreferredAddressParams<'a> {
     }
 
     fn address_v4(&self) -> Option<(SocketAddrV4, ConnectionId, Vec<u8>)> {
-        match self.addr_v4 {
-            Some(addr) => Some((addr, self.connection_id.clone(), self.stateless_reset_token.clone())),
-            None => None,
-        }
+        self.addr_v4.map(|addr| {
+            (
+                addr,
+                self.connection_id.clone(),
+                self.stateless_reset_token.clone(),
+            )
+        })
     }
 
     fn address_v6(&self) -> Option<(SocketAddrV6, ConnectionId, Vec<u8>)> {
-        match self.addr_v6 {
-            Some(addr) => Some((addr, self.connection_id.clone(), self.stateless_reset_token.clone())),
-            None => None,
-        }
+        self.addr_v6.map(|addr| {
+            (
+                addr,
+                self.connection_id.clone(),
+                self.stateless_reset_token.clone(),
+            )
+        })
     }
 }
 
@@ -9173,7 +9183,7 @@ mod tests {
                 Some(SocketAddrV4::from_str("0.0.0.1:12345").unwrap()),
                 Some(SocketAddrV6::from_str("[::1]:12345").unwrap()),
                 ConnectionId::from_vec(vec![0; MAX_CONN_ID_LEN]),
-                vec![0xba; 16]
+                vec![0xba; 16],
             )),
         };
 
@@ -9261,9 +9271,15 @@ mod tests {
         let stateless_reset_token = vec![0xba; 16];
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
-        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
-        config.set_application_protos(&[b"proto1", b"proto2"]).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
         config.set_initial_max_stream_data_bidi_remote(15);
@@ -9273,12 +9289,14 @@ mod tests {
         config.set_max_idle_timeout(180_000);
         config.verify_peer(false);
         config.set_ack_delay_exponent(8);
-        config.set_preferred_address(
-            Some(preferred_addr_v4.to_string()),
-            Some(preferred_addr_v6.to_string()),
-            &connection_id,
-            stateless_reset_token.clone()
-        ).unwrap();
+        config
+            .set_preferred_address(
+                Some(preferred_addr_v4),
+                Some(preferred_addr_v6),
+                &connection_id,
+                stateless_reset_token.clone(),
+            )
+            .unwrap();
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
 
@@ -9289,11 +9307,19 @@ mod tests {
 
         assert_eq!(
             pipe.client.server_preferred_address_v4(),
-            Some((preferred_addr_v4, connection_id.clone(), stateless_reset_token.clone()))
+            Some((
+                preferred_addr_v4,
+                connection_id.clone(),
+                stateless_reset_token.clone()
+            ))
         );
         assert_eq!(
             pipe.client.server_preferred_address_v6(),
-            Some((preferred_addr_v6, connection_id.clone(), stateless_reset_token.clone()))
+            Some((
+                preferred_addr_v6,
+                connection_id.clone(),
+                stateless_reset_token.clone()
+            ))
         );
 
         assert_eq!(pipe.server.server_preferred_address_v4(), None);
@@ -9309,9 +9335,15 @@ mod tests {
         let connection_id = &ConnectionId::from_vec(Vec::new());
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
-        config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
-        config.set_application_protos(&[b"proto1", b"proto2"]).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
         config.set_initial_max_stream_data_bidi_remote(15);
@@ -9325,8 +9357,8 @@ mod tests {
         // Zero-length connection ID must not be included in this transport param.
         assert_eq!(
             config.set_preferred_address(
-                Some(preferred_addr_v4.to_string()),
-                Some(preferred_addr_v6.to_string()),
+                Some(preferred_addr_v4),
+                Some(preferred_addr_v6),
                 &connection_id,
                 stateless_reset_token.clone()
             ),
@@ -9334,17 +9366,22 @@ mod tests {
         );
 
         let connection_id = &ConnectionId::from_vec(vec![0; MAX_CONN_ID_LEN]);
-        config.set_preferred_address(
-            Some(preferred_addr_v4.to_string()),
-            Some(preferred_addr_v6.to_string()),
-            &connection_id,
-            stateless_reset_token.clone()
-        ).unwrap();
+        config
+            .set_preferred_address(
+                Some(preferred_addr_v4),
+                Some(preferred_addr_v6),
+                &connection_id,
+                stateless_reset_token.clone(),
+            )
+            .unwrap();
 
         // Server chooses a zero-length connection ID.
         let mut pipe = testing::Pipe::with_config_and_scid_lengths(
-            &mut config, MAX_CONN_ID_LEN, 0
-        ).unwrap();
+            &mut config,
+            MAX_CONN_ID_LEN,
+            0,
+        )
+        .unwrap();
 
         assert_eq!(pipe.handshake(), Ok(()));
 
