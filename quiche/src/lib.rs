@@ -1136,7 +1136,7 @@ impl Config {
         connection_id: &ConnectionId,
         stateless_reset_token: Vec<u8>
     ) -> Result<()> {
-        if addr_str_v6.is_none() && addr_str_v4.is_none() {
+        if (addr_str_v6.is_none() && addr_str_v4.is_none()) || connection_id.is_empty() {
             return Err(Error::TlsFail);
         }
 
@@ -5908,6 +5908,12 @@ impl Connection {
         // Record the max_active_conn_id parameter advertised by the peer.
         self.ids
             .set_source_conn_id_limit(peer_params.active_conn_id_limit);
+
+        if let Some(preferred_address) = &peer_params.preferred_address_params {
+            if preferred_address.connection_id.len() == 0 {
+                return Err(Error::InvalidTransportParam);
+            }
+        }
 
         self.peer_transport_params = peer_params;
 
