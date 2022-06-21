@@ -26,7 +26,7 @@
 
 use std::time;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 
@@ -479,7 +479,7 @@ pub struct PathMap {
 
     /// The mapping from the (local `SocketAddr`, peer `SocketAddr`) to the
     /// `Path` structure identifier.
-    addrs_to_paths: HashMap<(SocketAddr, SocketAddr), usize>,
+    addrs_to_paths: BTreeMap<(SocketAddr, SocketAddr), usize>,
 
     /// Path-specific events to be notified to the application.
     events: VecDeque<PathEvent>,
@@ -495,7 +495,7 @@ impl PathMap {
         mut initial_path: Path, max_concurrent_paths: usize, is_server: bool,
     ) -> Self {
         let mut paths = Slab::with_capacity(max_concurrent_paths);
-        let mut addrs_to_paths = HashMap::new();
+        let mut addrs_to_paths = BTreeMap::new();
 
         let local_addr = initial_path.local_addr;
         let peer_addr = initial_path.peer_addr;
