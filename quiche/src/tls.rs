@@ -645,6 +645,39 @@ impl Handshake {
         Some(sigalg.to_string())
     }
 
+    pub fn peer_cert_chain(&self) -> Option<Vec<&[u8]>> {
+        let cert_chain = unsafe {
+            let chain =
+                map_result_ptr(SSL_get0_peer_certificates(self.as_ptr())).ok()?;
+
+            let num = sk_num(chain);
+            if num <= 0 {
+                return None;
+            }
+
+            let mut cert_chain = vec![];
+            for i in 0..num {
+                let buffer =
+                    map_result_ptr(sk_value(chain, i) as *const CRYPTO_BUFFER)
+                        .ok()?;
+
+                let out_len = CRYPTO_BUFFER_len(buffer);
+                if out_len == 0 {
+                    return None;
+                }
+
+                let out = CRYPTO_BUFFER_data(buffer);
+                let slice = slice::from_raw_parts(out, out_len as usize);
+
+                cert_chain.push(slice);
+            }
+
+            cert_chain
+        };
+
+        Some(cert_chain)
+    }
+
     pub fn peer_cert(&self) -> Option<&[u8]> {
         let peer_cert = unsafe {
             let chain =
