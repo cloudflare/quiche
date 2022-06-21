@@ -5566,6 +5566,17 @@ impl Connection {
         self.handshake.peer_cert()
     }
 
+    /// Returns the peer's certificate chain (if any) as a vector of DER-encoded
+    /// buffers.
+    ///
+    /// The certificate at index 0 is the peer's leaf certificate, the other
+    /// certificates (if any) are the chain certificate authorities used to
+    /// sign the leaf certificate.
+    #[inline]
+    pub fn peer_cert_chain(&self) -> Option<Vec<&[u8]>> {
+        self.handshake.peer_cert_chain()
+    }
+
     /// Returns the serialized cryptographic session for the connection.
     ///
     /// This can be used by a client to cache a connection's session, and resume
@@ -10877,6 +10888,29 @@ mod tests {
             Some(c) => assert_eq!(c.len(), 753),
 
             None => panic!("missing server certificate"),
+        }
+    }
+
+    #[test]
+    fn peer_cert_chain() {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert-big.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+
+        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        match pipe.client.peer_cert_chain() {
+            Some(c) => assert_eq!(c.len(), 5),
+
+            None => panic!("missing server certificate chain"),
         }
     }
 
