@@ -167,7 +167,7 @@ impl Context {
     pub fn new_handshake(&mut self) -> Result<Handshake> {
         unsafe {
             let ssl = SSL_new(self.as_mut_ptr());
-            Ok(Handshake(ssl))
+            Ok(Handshake::new(ssl))
         }
     }
 
@@ -358,13 +358,25 @@ impl Drop for Context {
     }
 }
 
-pub struct Handshake(*mut SSL);
+pub struct Handshake {
+    /// Raw pointer
+    ptr: *mut SSL,
+    /// SSL_process_quic_post_handshake should be called when whenever
+    /// SSL_provide_quic_data is called to process the provided data.
+    provided_data_outstanding: bool,
+}
 
 impl Handshake {
     #[cfg(feature = "ffi")]
     pub unsafe fn from_ptr(ssl: *mut c_void) -> Handshake {
-        let ssl = ssl as *mut SSL;
-        Handshake(ssl)
+        Handshake::new(ssl as *mut SSL)
+    }
+
+    fn new(ptr: *mut SSL) -> Handshake {
+        Handshake {
+            ptr,
+            provided_data_outstanding: false,
+        }
     }
 
     pub fn get_error(&self, ret_code: c_int) -> c_int {
@@ -547,6 +559,7 @@ impl Handshake {
     pub fn provide_data(
         &mut self, level: crypto::Level, buf: &[u8],
     ) -> Result<()> {
+        self.provided_data_outstanding = true;
         let rc = unsafe {
             SSL_provide_quic_data(
                 self.as_mut_ptr(),
@@ -567,6 +580,13 @@ impl Handshake {
     }
 
     pub fn process_post_handshake(&mut self, ex_data: &mut ExData) -> Result<()> {
+        // If SSL_provide_quic_data hasn't been called since we last called
+        // SSL_process_quic_post_handshake, then there's nothing to do.
+        if !self.provided_data_outstanding {
+            return Ok(());
+        }
+        self.provided_data_outstanding = false;
+
         self.set_ex_data(*QUICHE_EX_DATA_INDEX, ex_data)?;
         let rc = unsafe { SSL_process_quic_post_handshake(self.as_mut_ptr()) };
         self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
@@ -667,11 +687,11 @@ impl Handshake {
     }
 
     fn as_ptr(&self) -> *const SSL {
-        self.0
+        self.ptr
     }
 
     fn as_mut_ptr(&mut self) -> *mut SSL {
-        self.0
+        self.ptr
     }
 }
 
@@ -966,7 +986,7 @@ extern fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
         None => return 0,
     };
 
-    let handshake = Handshake(ssl);
+    let handshake = Handshake::new(ssl);
     let peer_params = handshake.quic_transport_params();
 
     // Serialize session object into buffer.
