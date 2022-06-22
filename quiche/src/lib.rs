@@ -1354,7 +1354,7 @@ impl Config {
     /// Set the server's preferred address.
     pub fn set_preferred_address(
         &mut self, v4: Option<SocketAddrV4>, v6: Option<SocketAddrV6>,
-        connection_id: &ConnectionId, stateless_reset_token: Vec<u8>,
+        connection_id: &ConnectionId, stateless_reset_token: u128,
     ) -> Result<()> {
         if (v4.is_none() && v6.is_none()) || connection_id.is_empty() {
             return Err(Error::TlsFail);
@@ -6627,21 +6627,22 @@ impl Connection {
         self.is_server
     }
     
-    // TODO: add docs
-    /// Returns the server's preferred address for V4.
+    /// Returns the server's preferred address which is a tuple with a
+    /// V4 socket address, a connection ID and a stateless reset token.
     pub fn server_preferred_address_v4(
         &self,
-    ) -> Option<(SocketAddrV4, ConnectionId, Vec<u8>)> {
+    ) -> Option<(SocketAddrV4, ConnectionId, u128)> {
         match self.peer_transport_params.preferred_address_params.as_ref() {
             Some(params) => params.address_v4(),
             None => None,
         }
     }
 
-    /// Returns the server's preferred address for V6.
+    /// Returns the server's preferred address which is a tuple with a
+    /// V6 socket address, a connection ID and a stateless reset token.
     pub fn server_preferred_address_v6(
         &self,
-    ) -> Option<(SocketAddrV6, ConnectionId, Vec<u8>)> {
+    ) -> Option<(SocketAddrV6, ConnectionId, u128)> {
         match self.peer_transport_params.preferred_address_params.as_ref() {
             Some(params) => params.address_v6(),
             None => None,
@@ -6766,7 +6767,7 @@ impl Connection {
 
         if let Some(preferred_address) = &peer_params.preferred_address_params {
             // Zero-length connection ID must not be sent.
-            if preferred_address.connection_id.len() == 0 {
+            if preferred_address.connection_id.is_empty() {
                 return Err(Error::InvalidTransportParam);
             }
         }
@@ -8462,7 +8463,7 @@ impl TransportParams {
                 let stateless_reset_token = qlog::Token::new(
                     Some(qlog::TokenType::StatelessReset),
                     None,
-                    Some(params.stateless_reset_token.clone()),
+                    Some(params.stateless_reset_token.to_be_bytes().to_vec()),
                     None,
                 );
 
@@ -8533,13 +8534,13 @@ struct PreferredAddressParams<'a> {
     addr_v4: Option<SocketAddrV4>,
     addr_v6: Option<SocketAddrV6>,
     connection_id: ConnectionId<'a>,
-    stateless_reset_token: Vec<u8>,
+    stateless_reset_token: u128,
 }
 
 impl<'a> PreferredAddressParams<'a> {
     fn new(
         addr_v4: Option<SocketAddrV4>, addr_v6: Option<SocketAddrV6>,
-        connection_id: ConnectionId<'a>, stateless_reset_token: Vec<u8>,
+        connection_id: ConnectionId<'a>, stateless_reset_token: u128,
     ) -> Self {
         PreferredAddressParams {
             addr_v4,
@@ -8581,7 +8582,12 @@ impl<'a> PreferredAddressParams<'a> {
         }
 
         let cid = b.get_bytes_with_varint_length()?.to_vec().into();
-        let stateless_reset_token = b.get_bytes(16)?.to_vec();
+        let stateless_reset_token = u128::from_be_bytes(
+            b.get_bytes(16)?
+                .to_vec()
+                .try_into()
+                .map_err(|_| Error::BufferTooShort)?,
+        );
 
         Ok(PreferredAddressParams::new(
             addr_v4,
@@ -8615,29 +8621,21 @@ impl<'a> PreferredAddressParams<'a> {
         b.put_varint(pa.connection_id.len() as u64)?;
         b.put_bytes(&pa.connection_id)?;
 
-        b.put_bytes(&pa.stateless_reset_token)?;
+        b.put_bytes(&pa.stateless_reset_token.to_be_bytes())?;
 
         let len = b.off();
         Ok(&mut out[..len])
     }
 
-    fn address_v4(&self) -> Option<(SocketAddrV4, ConnectionId, Vec<u8>)> {
+    fn address_v4(&self) -> Option<(SocketAddrV4, ConnectionId, u128)> {
         self.addr_v4.map(|addr| {
-            (
-                addr,
-                self.connection_id.clone(),
-                self.stateless_reset_token.clone(),
-            )
+            (addr, self.connection_id.clone(), self.stateless_reset_token)
         })
     }
 
-    fn address_v6(&self) -> Option<(SocketAddrV6, ConnectionId, Vec<u8>)> {
+    fn address_v6(&self) -> Option<(SocketAddrV6, ConnectionId, u128)> {
         self.addr_v6.map(|addr| {
-            (
-                addr,
-                self.connection_id.clone(),
-                self.stateless_reset_token.clone(),
-            )
+            (addr, self.connection_id.clone(), self.stateless_reset_token)
         })
     }
 }
@@ -9183,7 +9181,7 @@ mod tests {
                 Some(SocketAddrV4::from_str("0.0.0.1:12345").unwrap()),
                 Some(SocketAddrV6::from_str("[::1]:12345").unwrap()),
                 ConnectionId::from_vec(vec![0; MAX_CONN_ID_LEN]),
-                vec![0xba; 16],
+                u128::from_be_bytes([0xba; 16]),
             )),
         };
 
@@ -9268,7 +9266,7 @@ mod tests {
         let preferred_addr_v4 = SocketAddrV4::from_str("0.0.0.1:8080").unwrap();
         let preferred_addr_v6 = SocketAddrV6::from_str("[::1]:8080").unwrap();
         let connection_id = &ConnectionId::from_vec(vec![0; MAX_CONN_ID_LEN]);
-        let stateless_reset_token = vec![0xba; 16];
+        let stateless_reset_token = u128::from_be_bytes([0xba; 16]);
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         config
@@ -9310,7 +9308,7 @@ mod tests {
             Some((
                 preferred_addr_v4,
                 connection_id.clone(),
-                stateless_reset_token.clone()
+                stateless_reset_token
             ))
         );
         assert_eq!(
@@ -9318,7 +9316,7 @@ mod tests {
             Some((
                 preferred_addr_v6,
                 connection_id.clone(),
-                stateless_reset_token.clone()
+                stateless_reset_token
             ))
         );
 
@@ -9330,7 +9328,7 @@ mod tests {
     fn server_preferred_address_with_zero_len_cid() {
         let preferred_addr_v4 = SocketAddrV4::from_str("0.0.0.1:8080").unwrap();
         let preferred_addr_v6 = SocketAddrV6::from_str("[::1]:8080").unwrap();
-        let stateless_reset_token = vec![0xba; 16];
+        let stateless_reset_token = u128::from_be_bytes([0xba; 16]);
         // Given a zero length cid.
         let connection_id = &ConnectionId::from_vec(Vec::new());
 
@@ -9360,7 +9358,7 @@ mod tests {
                 Some(preferred_addr_v4),
                 Some(preferred_addr_v6),
                 &connection_id,
-                stateless_reset_token.clone()
+                stateless_reset_token,
             ),
             Err(Error::TlsFail)
         );
@@ -9371,7 +9369,7 @@ mod tests {
                 Some(preferred_addr_v4),
                 Some(preferred_addr_v6),
                 &connection_id,
-                stateless_reset_token.clone(),
+                stateless_reset_token,
             )
             .unwrap();
 
