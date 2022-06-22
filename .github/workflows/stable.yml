@@ -165,7 +165,15 @@ jobs:
         with:
           args: install nasm
 
+      - name: Run cargo build
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
+
       - name: Run cargo test
+        if: matrix.target != 'x86_64-pc-windows-gnu'
         uses: actions-rs/cargo@v1
         with:
           command: test
