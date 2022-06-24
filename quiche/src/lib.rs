@@ -3541,7 +3541,7 @@ impl Connection {
 
         // Create CONNECTION_CLOSE frame. Try to send this only on the active
         // path, unless it is the last one available.
-        if self.paths.get(send_pid)?.active() || self.paths.iter().len() == 1 {
+        if self.paths.get(send_pid)?.active() || self.paths.len() == 1 {
             if let Some(conn_err) = self.local_error.as_ref() {
                 if conn_err.is_app {
                     // Create ApplicationClose frame.
@@ -13690,7 +13690,7 @@ mod tests {
             .iter_mut()
             .for_each(|(_, si)| si.from = "127.0.0.1:9292".parse().unwrap());
         assert_eq!(testing::process_flight(&mut pipe.client, flight), Ok(()));
-        assert_eq!(pipe.client.paths.iter().len(), 1);
+        assert_eq!(pipe.client.paths.len(), 1);
     }
 
     #[test]
@@ -13785,7 +13785,7 @@ mod tests {
         );
         assert_eq!(pipe.server.path_event_next(), None);
 
-        assert_eq!(pipe.server.paths.iter().len(), 2);
+        assert_eq!(pipe.server.paths.len(), 2);
 
         // Now forge a packet reusing the unverified path's CID over another
         // 4-tuple.
@@ -13798,7 +13798,7 @@ mod tests {
             .for_each(|(_, si)| si.from = client_addr_3);
         testing::process_flight(&mut pipe.server, flight)
             .expect("failed to process");
-        assert_eq!(pipe.server.paths.iter().len(), 2);
+        assert_eq!(pipe.server.paths.len(), 2);
         assert_eq!(
             pipe.server.path_event_next(),
             Some(PathEvent::ReusedSourceConnectionId(

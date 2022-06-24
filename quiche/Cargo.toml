@@ -58,7 +58,7 @@ log = { version = "0.4", features = ["std"] }
 libc = "0.2"
 libm = "0.2"
 ring = "0.16"
-slab = "0.4.5"
+slab = "0.4"
 lazy_static = "1"
 octets = { version = "0.2", path = "../octets" }
 boring = { version = "2.0.0", optional = true }
