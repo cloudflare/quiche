@@ -588,6 +588,12 @@ impl PathMap {
         self.paths.iter_mut()
     }
 
+    /// Returns the number of existing paths.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.paths.len()
+    }
+
     /// Returns the `Path` identifier related to the provided `addrs`.
     #[inline]
     pub fn path_id_from_addrs(
