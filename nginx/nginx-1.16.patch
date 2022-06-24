@@ -4017,7 +4017,7 @@ new file mode 100644
 index 000000000..30955c4cd
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3_module.c
-@@ -0,0 +1,286 @@
+@@ -0,0 +1,306 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -4044,7 +4044,20 @@ index 000000000..30955c4cd
 +static void ngx_http_v3_cleanup_ctx(void *data);
 +
 +
++static ngx_conf_enum_t  ngx_quiche_cc_algorithm[] = {
++	{ ngx_string("reno"), QUICHE_CC_RENO },
++	{ ngx_string("cubic"), QUICHE_CC_CUBIC },
++	{ ngx_null_string, 0 }
++};
++
 +static ngx_command_t  ngx_http_v3_commands[] = {
++
++    { ngx_string("http3_cc_algorithm"),
++      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_TAKE1,
++      ngx_conf_set_enum_slot,
++      NGX_HTTP_SRV_CONF_OFFSET,
++      offsetof(ngx_http_v3_srv_conf_t, cc_algorithm),
++      ngx_quiche_cc_algorithm },
 +
 +    { ngx_string("http3_max_concurrent_streams"),
 +      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_TAKE1,
@@ -4168,6 +4181,7 @@ index 000000000..30955c4cd
 +    h3scf->max_requests = NGX_CONF_UNSET_UINT;
 +    h3scf->max_header_size = NGX_CONF_UNSET_SIZE;
 +    h3scf->concurrent_streams = NGX_CONF_UNSET_UINT;
++    h3scf->cc_algorithm = NGX_CONF_UNSET_UINT;
 +
 +    return h3scf;
 +}
@@ -4210,6 +4224,9 @@ index 000000000..30955c4cd
 +    ngx_conf_merge_uint_value(conf->concurrent_streams,
 +                              prev->concurrent_streams, 128);
 +
++    ngx_conf_merge_uint_value(conf->cc_algorithm,
++                              prev->cc_algorithm, QUICHE_CC_RENO);
++
 +    conf->quic.log = cf->log;
 +
 +#if (NGX_DEBUG)
@@ -4233,6 +4250,9 @@ index 000000000..30955c4cd
 +
 +    quiche_config_set_initial_max_streams_bidi(conf->quic.config,
 +                                               conf->concurrent_streams);
++
++    quiche_config_set_cc_algorithm(conf->quic.config,
++                                   conf->cc_algorithm);
 +
 +    /* For HTTP/3 we only need 3 unidirectional streams. */
 +    quiche_config_set_initial_max_streams_uni(conf->quic.config, 3);
@@ -4309,7 +4329,7 @@ new file mode 100644
 index 000000000..72e189def
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3_module.h
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,35 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -4337,6 +4357,7 @@ index 000000000..72e189def
 +    ngx_uint_t                      max_requests;
 +    ngx_uint_t                      max_header_size;
 +    ngx_uint_t                      concurrent_streams;
++    ngx_uint_t                      cc_algorithm;
 +} ngx_http_v3_srv_conf_t;
 +
 +
