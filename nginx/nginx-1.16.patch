@@ -29,7 +29,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/v3/ngx_http_v3.c               | 2231 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   79 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
- src/http/v3/ngx_http_v3_module.c        |  286 +++
+ src/http/v3/ngx_http_v3_module.c        |  306 +++
  src/http/v3/ngx_http_v3_module.h        |   34 +
  src/os/unix/ngx_udp_sendmsg_chain.c     |    1 +
  28 files changed, 3746 insertions(+), 11 deletions(-)
