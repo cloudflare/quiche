@@ -230,6 +230,7 @@ Options:
   --perform-migration      Perform connection migration on another source port.
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
+  --send-priority-update   Send HTTP/3 priority updates if the query string params 'u' or 'i' are present in URLs
   --session-file PATH      File used to cache a TLS session for resumption.
   --source-port PORT       Source port to use when connecting to the server [default: 0].
   -h --help                Show this screen.
@@ -250,6 +251,7 @@ pub struct ClientArgs {
     pub session_file: Option<String>,
     pub source_port: u16,
     pub perform_migration: bool,
+    pub send_priority_update: bool,
 }
 
 impl Args for ClientArgs {
@@ -318,6 +320,8 @@ impl Args for ClientArgs {
 
         let perform_migration = args.get_bool("--perform-migration");
 
+        let send_priority_update = args.get_bool("--send-priority-update");
+
         ClientArgs {
             version,
             dump_response_path,
@@ -332,6 +336,7 @@ impl Args for ClientArgs {
             session_file,
             source_port,
             perform_migration,
+            send_priority_update,
         }
     }
 }
@@ -352,6 +357,7 @@ impl Default for ClientArgs {
             session_file: None,
             source_port: 0,
             perform_migration: false,
+            send_priority_update: false,
         }
     }
 }

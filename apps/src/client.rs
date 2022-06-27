@@ -389,6 +389,7 @@ pub fn connect(
                     &args.req_headers,
                     &args.body,
                     &args.method,
+                    args.send_priority_update,
                     args.dump_json,
                     dgram_sender,
                     Rc::clone(&output_sink),
