@@ -125,7 +125,7 @@ int quiche_enable_debug_logging(void (*cb)(const char *line, void *argp),
                                 void *argp);
 
 // Stores configuration shared between multiple connections.
-typedef struct Config quiche_config;
+typedef struct quiche_config quiche_config;
 
 // Creates a config object with the given version.
 quiche_config *quiche_config_new(uint32_t version);
@@ -240,7 +240,7 @@ int quiche_header_info(const uint8_t *buf, size_t buf_len, size_t dcil,
                        uint8_t *token, size_t *token_len);
 
 // A QUIC connection.
-typedef struct Connection quiche_conn;
+typedef struct quiche_conn quiche_conn;
 
 // Creates a new server-side connection.
 quiche_conn *quiche_accept(const uint8_t *scid, size_t scid_len,
@@ -357,7 +357,7 @@ bool quiche_conn_stream_readable(quiche_conn *conn, uint64_t stream_id);
 // Returns true if all the data has been read from the specified stream.
 bool quiche_conn_stream_finished(quiche_conn *conn, uint64_t stream_id);
 
-typedef struct StreamIter quiche_stream_iter;
+typedef struct quiche_stream_iter quiche_stream_iter;
 
 // Returns an iterator over streams that have outstanding data to read.
 quiche_stream_iter *quiche_conn_readable(quiche_conn *conn);
@@ -750,7 +750,7 @@ enum quiche_h3_error {
 };
 
 // Stores configuration shared between multiple connections.
-typedef struct Http3Config quiche_h3_config;
+typedef struct quiche_h3_config quiche_h3_config;
 
 // Creates an HTTP/3 config object with default settings values.
 quiche_h3_config *quiche_h3_config_new(void);
@@ -768,7 +768,7 @@ void quiche_h3_config_set_qpack_blocked_streams(quiche_h3_config *config, uint64
 void quiche_h3_config_free(quiche_h3_config *config);
 
 // A QUIC connection.
-typedef struct Http3Connection quiche_h3_conn;
+typedef struct quiche_h3_conn quiche_h3_conn;
 
 // Creates a new server-side connection.
 quiche_h3_conn *quiche_h3_accept(quiche_conn *quiche_conn,
@@ -788,7 +788,7 @@ enum quiche_h3_event_type {
     QUICHE_H3_EVENT_PRIORITY_UPDATE,
 };
 
-typedef struct Http3Event quiche_h3_event;
+typedef struct quiche_h3_event quiche_h3_event;
 
 // Processes HTTP/3 data received from the peer.
 int64_t quiche_h3_conn_poll(quiche_h3_conn *conn, quiche_conn *quic_conn,
