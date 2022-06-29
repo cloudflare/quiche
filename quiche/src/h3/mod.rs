@@ -298,6 +298,8 @@ use qlog::events::h3::H3FrameParsed;
 #[cfg(feature = "qlog")]
 use qlog::events::h3::H3Owner;
 #[cfg(feature = "qlog")]
+use qlog::events::h3::H3PriorityTargetStreamType;
+#[cfg(feature = "qlog")]
 use qlog::events::h3::H3StreamType;
 #[cfg(feature = "qlog")]
 use qlog::events::h3::H3StreamTypeSet;
@@ -326,7 +328,7 @@ const PRIORITY_URGENCY_OFFSET: u8 = 124;
 
 // Parameter values as specified in [Extensible Priorities].
 //
-// [Extensible Priorities]: https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-priority-12#section-4.
+// [Extensible Priorities]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
 const PRIORITY_URGENCY_LOWER_BOUND: u8 = 0;
 const PRIORITY_URGENCY_UPPER_BOUND: u8 = 7;
 const PRIORITY_URGENCY_DEFAULT: u8 = 3;
@@ -720,7 +722,7 @@ impl TryFrom<&[u8]> for Priority {
     ///
     /// Omitted parameters will yield default values.
     ///
-    /// [Extensible Priorities]: https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-priority-12#section-4.
+    /// [Extensible Priorities]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     fn try_from(value: &[u8]) -> std::result::Result<Self, Self::Error> {
         let dict = match sfv::Parser::parse_dictionary(value) {
             Ok(v) => v,
@@ -1009,7 +1011,7 @@ impl Connection {
     /// reported as writable again.
     ///
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
-    /// [Extensible Priority]: https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-priority-12#section-4.
+    /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     pub fn send_response_with_priority<T: NameValue>(
         &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
         priority: &Priority, fin: bool,
@@ -1410,6 +1412,108 @@ impl Connection {
         }
 
         Ok(total)
+    }
+
+    /// Sends a PRIORITY_UPDATE frame on the control stream with specified
+    /// request stream ID and priority.
+    ///
+    /// The `priority` parameter represents [Extensible Priority]
+    /// parameters. If the urgency is outside the range 0-7, it will be clamped
+    /// to 7.
+    ///
+    /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application should retry the operation once the stream is
+    /// reported as writable again.
+    ///
+    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
+    /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
+    pub fn send_priority_update_for_request(
+        &mut self, conn: &mut super::Connection, stream_id: u64,
+        priority: &Priority,
+    ) -> Result<()> {
+        let mut d = [42; 20];
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+
+        // Validate that it is sane to send PRIORITY_UPDATE.
+        if self.is_server {
+            return Err(Error::FrameUnexpected);
+        }
+
+        if stream_id % 4 != 0 {
+            return Err(Error::FrameUnexpected);
+        }
+
+        let control_stream_id =
+            self.control_stream_id.ok_or(Error::FrameUnexpected)?;
+
+        let urgency = priority
+            .urgency
+            .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND);
+
+        let mut field_value = format!("u={}", urgency);
+
+        if priority.incremental {
+            field_value.push_str(",i");
+        }
+
+        let priority_field_value = field_value.as_bytes();
+        let frame_payload_len =
+            octets::varint_len(stream_id as u64) + priority_field_value.len();
+
+        let overhead =
+            octets::varint_len(frame::PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID) +
+                octets::varint_len(stream_id as u64) +
+                octets::varint_len(frame_payload_len as u64);
+
+        // Make sure the control stream has enough capacity.
+        match conn.stream_writable(
+            control_stream_id,
+            overhead + priority_field_value.len(),
+        ) {
+            Ok(true) => (),
+
+            Ok(false) => return Err(Error::StreamBlocked),
+
+            Err(e) => {
+                return Err(e.into());
+            },
+        }
+
+        b.put_varint(frame::PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID)?;
+        b.put_varint(frame_payload_len as u64)?;
+        b.put_varint(stream_id as u64)?;
+        let off = b.off();
+        conn.stream_send(control_stream_id, &d[..off], false)?;
+
+        // Sending field value separately avoids unnecessary copy.
+        conn.stream_send(control_stream_id, priority_field_value, false)?;
+
+        trace!(
+            "{} tx frm PRIORITY_UPDATE request_stream={} priority_field_value={}",
+            conn.trace_id(),
+            stream_id,
+            field_value,
+        );
+
+        qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
+            let frame = Http3Frame::PriorityUpdate {
+                target_stream_type: H3PriorityTargetStreamType::Request,
+                prioritized_element_id: stream_id,
+                priority_field_value: field_value.clone(),
+            };
+
+            let ev_data = EventData::H3FrameCreated(H3FrameCreated {
+                stream_id,
+                length: Some(priority_field_value.len() as u64),
+                frame,
+                raw: None,
+            });
+
+            q.add_event_data_now(ev_data).ok();
+        });
+
+        Ok(())
     }
 
     /// Take the last PRIORITY_UPDATE for a prioritized element ID.
@@ -3750,15 +3854,13 @@ mod tests {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
-        s.send_frame_client(
-            frame::Frame::PriorityUpdateRequest {
-                prioritized_element_id: 0,
-                priority_field_value: b"u=3".to_vec(),
-            },
-            s.client.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.client
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
+                urgency: 3,
+                incremental: false,
+            })
+            .unwrap();
+        s.advance().ok();
 
         assert_eq!(s.poll_server(), Ok((0, Event::PriorityUpdate)));
         assert_eq!(s.poll_server(), Err(Error::Done));
@@ -3770,30 +3872,24 @@ mod tests {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
-        s.send_frame_client(
-            frame::Frame::PriorityUpdateRequest {
-                prioritized_element_id: 0,
-                priority_field_value: b"u=3".to_vec(),
-            },
-            s.client.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.client
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
+                urgency: 3,
+                incremental: false,
+            })
+            .unwrap();
+        s.advance().ok();
 
         assert_eq!(s.poll_server(), Ok((0, Event::PriorityUpdate)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
-        // Once the PriorityUpdate event was fired, subsequent frames will not
-        // rearm it.
-        s.send_frame_client(
-            frame::Frame::PriorityUpdateRequest {
-                prioritized_element_id: 0,
-                priority_field_value: b"u=5".to_vec(),
-            },
-            s.client.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.client
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
+                urgency: 5,
+                incremental: false,
+            })
+            .unwrap();
+        s.advance().ok();
 
         assert_eq!(s.poll_server(), Err(Error::Done));
 
@@ -3802,15 +3898,13 @@ mod tests {
         assert_eq!(s.server.take_last_priority_update(0), Ok(b"u=5".to_vec()));
         assert_eq!(s.server.take_last_priority_update(0), Err(Error::Done));
 
-        s.send_frame_client(
-            frame::Frame::PriorityUpdateRequest {
-                prioritized_element_id: 0,
-                priority_field_value: b"u=7".to_vec(),
-            },
-            s.client.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.client
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
+                urgency: 7,
+                incremental: false,
+            })
+            .unwrap();
+        s.advance().ok();
 
         assert_eq!(s.poll_server(), Ok((0, Event::PriorityUpdate)));
         assert_eq!(s.poll_server(), Err(Error::Done));
@@ -3826,41 +3920,35 @@ mod tests {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
-        s.send_frame_client(
-            frame::Frame::PriorityUpdateRequest {
-                prioritized_element_id: 0,
-                priority_field_value: b"u=3".to_vec(),
-            },
-            s.client.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.client
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
+                urgency: 3,
+                incremental: false,
+            })
+            .unwrap();
+        s.advance().ok();
 
         assert_eq!(s.poll_server(), Ok((0, Event::PriorityUpdate)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
-        s.send_frame_client(
-            frame::Frame::PriorityUpdateRequest {
-                prioritized_element_id: 4,
-                priority_field_value: b"u=1".to_vec(),
-            },
-            s.client.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.client
+            .send_priority_update_for_request(&mut s.pipe.client, 4, &Priority {
+                urgency: 1,
+                incremental: false,
+            })
+            .unwrap();
+        s.advance().ok();
 
         assert_eq!(s.poll_server(), Ok((4, Event::PriorityUpdate)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
-        s.send_frame_client(
-            frame::Frame::PriorityUpdateRequest {
-                prioritized_element_id: 8,
-                priority_field_value: b"u=2".to_vec(),
-            },
-            s.client.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.client
+            .send_priority_update_for_request(&mut s.pipe.client, 8, &Priority {
+                urgency: 2,
+                incremental: false,
+            })
+            .unwrap();
+        s.advance().ok();
 
         assert_eq!(s.poll_server(), Ok((8, Event::PriorityUpdate)));
         assert_eq!(s.poll_server(), Err(Error::Done));
@@ -3928,15 +4016,13 @@ mod tests {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
-        s.send_frame_client(
-            frame::Frame::PriorityUpdateRequest {
-                prioritized_element_id: 0,
-                priority_field_value: b"u=3".to_vec(),
-            },
-            s.client.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.client
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
+                urgency: 3,
+                incremental: false,
+            })
+            .unwrap();
+        s.advance().ok();
 
         let (stream, req) = s.send_request(true).unwrap();
         let ev_headers = Event::Headers {
@@ -3965,15 +4051,13 @@ mod tests {
         assert_eq!(s.poll_client(), Err(Error::Done));
 
         // Now send a PRIORITY_UPDATE for the completed request stream.
-        s.send_frame_client(
-            frame::Frame::PriorityUpdateRequest {
-                prioritized_element_id: 0,
-                priority_field_value: b"u=3".to_vec(),
-            },
-            s.client.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.client
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
+                urgency: 3,
+                incremental: false,
+            })
+            .unwrap();
+        s.advance().ok();
 
         // No event generated at server
         assert_eq!(s.poll_server(), Err(Error::Done));
@@ -3986,15 +4070,13 @@ mod tests {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
 
-        s.send_frame_client(
-            frame::Frame::PriorityUpdateRequest {
-                prioritized_element_id: 0,
-                priority_field_value: b"u=3".to_vec(),
-            },
-            s.client.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.client
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
+                urgency: 3,
+                incremental: false,
+            })
+            .unwrap();
+        s.advance().ok();
 
         let (stream, req) = s.send_request(false).unwrap();
         let ev_headers = Event::Headers {
@@ -4025,15 +4107,13 @@ mod tests {
         assert_eq!(s.poll_server(), Err(Error::Done));
 
         // Now send a PRIORITY_UPDATE for the closed request stream.
-        s.send_frame_client(
-            frame::Frame::PriorityUpdateRequest {
-                prioritized_element_id: 0,
-                priority_field_value: b"u=3".to_vec(),
-            },
-            s.client.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.client
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
+                urgency: 3,
+                incremental: false,
+            })
+            .unwrap();
+        s.advance().ok();
 
         // No event generated at server
         assert_eq!(s.poll_server(), Err(Error::Done));

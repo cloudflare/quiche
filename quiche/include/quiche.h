@@ -869,6 +869,13 @@ int quiche_h3_parse_extensible_priority(uint8_t *priority,
                                         size_t priority_len,
                                         quiche_h3_priority *parsed);
 
+/// Sends a PRIORITY_UPDATE frame on the control stream with specified
+/// request stream ID and priority.
+int quiche_h3_send_priority_update_for_request(quiche_h3_conn *conn,
+                                               quiche_conn *quic_conn,
+                                               uint64_t stream_id,
+                                               quiche_h3_priority *priority);
+
 // Take the last received PRIORITY_UPDATE frame for a stream.
 //
 // The `cb` callback will be called once. `cb` should check the validity of
