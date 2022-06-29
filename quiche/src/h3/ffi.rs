@@ -308,6 +308,18 @@ pub extern fn quiche_h3_parse_extensible_priority(
 }
 
 #[no_mangle]
+pub extern fn quiche_h3_send_priority_update_for_request(
+    conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
+    priority: &Priority,
+) -> c_int {
+    match conn.send_priority_update_for_request(quic_conn, stream_id, priority) {
+        Ok(()) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_h3_take_last_priority_update(
     conn: &mut h3::Connection, prioritized_element_id: u64,
     cb: extern fn(
