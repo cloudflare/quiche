@@ -240,17 +240,6 @@ fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {
     output_sink(out);
 }
 
-pub fn hdrs_to_strings(hdrs: &[quiche::h3::Header]) -> Vec<(String, String)> {
-    hdrs.iter()
-        .map(|h| {
-            (
-                String::from_utf8(h.name().into()).unwrap(),
-                String::from_utf8(h.value().into()).unwrap(),
-            )
-        })
-        .collect()
-}
-
 /// Generate a new pair of Source Connection ID and reset token.
 pub fn generate_cid_and_reset_token<T: SecureRandom>(
     rng: &T,
@@ -1236,7 +1225,7 @@ impl HttpConn for Http3Conn {
                 },
             };
 
-            debug!("Sent HTTP request {:?}", hdrs_to_strings(&req.hdrs));
+            debug!("Sent HTTP request {:?}", &req.hdrs);
 
             if let Some(priority) = &req.priority {
                 // If sending the priority fails, don't try again.
@@ -1323,8 +1312,7 @@ impl HttpConn for Http3Conn {
                 Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
                     debug!(
                         "got response headers {:?} on stream id {}",
-                        hdrs_to_strings(&list),
-                        stream_id
+                        &list, stream_id
                     );
 
                     let req = self
@@ -1499,7 +1487,7 @@ impl HttpConn for Http3Conn {
                     info!(
                         "{} got request {:?} on stream id {}",
                         conn.trace_id(),
-                        hdrs_to_strings(&list),
+                        &list,
                         stream_id
                     );
 
