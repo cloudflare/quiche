@@ -290,6 +290,7 @@ use std::collections::VecDeque;
 
 #[cfg(feature = "sfv")]
 use std::convert::TryFrom;
+use std::fmt;
 
 #[cfg(feature = "qlog")]
 use qlog::events::h3::H3FrameCreated;
@@ -562,8 +563,23 @@ pub trait NameValue {
 }
 
 /// An owned name-value pair representing a raw HTTP header.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Header(Vec<u8>, Vec<u8>);
+
+fn try_print_as_readable(hdr: &[u8], f: &mut fmt::Formatter) -> fmt::Result {
+    match std::str::from_utf8(hdr) {
+        Ok(s) => f.write_str(s),
+        Err(_) => write!(f, "{:?}", hdr),
+    }
+}
+
+impl fmt::Debug for Header {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        try_print_as_readable(&self.0, f)?;
+        f.write_str(": ")?;
+        try_print_as_readable(&self.1, f)
+    }
+}
 
 impl Header {
     /// Creates a new header.
