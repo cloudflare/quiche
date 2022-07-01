@@ -420,6 +420,9 @@ fn main() {
 
                     client.http_conn = Some(Http3Conn::with_conn(
                         &mut client.conn,
+                        conn_args.max_field_section_size,
+                        conn_args.qpack_max_table_capacity,
+                        conn_args.qpack_blocked_streams,
                         dgram_sender,
                         Rc::new(RefCell::new(stdout_sink)),
                     ));

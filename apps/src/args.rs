@@ -50,6 +50,9 @@ pub struct CommonArgs {
     pub dgram_data: String,
     pub max_active_cids: u64,
     pub enable_active_migration: bool,
+    pub max_field_section_size: Option<u64>,
+    pub qpack_max_table_capacity: Option<u64>,
+    pub qpack_blocked_streams: Option<u64>,
 }
 
 /// Creates a new `CommonArgs` structure using the provided [`Docopt`].
@@ -72,6 +75,9 @@ pub struct CommonArgs {
 /// --dgram-data DATA           DATAGRAM data to send.
 /// --max-active-cids NUM       Maximum number of active Connection IDs.
 /// --enable-active-migration   Enable active connection migration.
+/// --max-field-section-size BYTES  Max size of uncompressed field section.
+/// --qpack-max-table-capacity BYTES  Max capacity of dynamic QPACK decoding.
+/// --qpack-blocked-streams STREAMS  Limit of blocked streams while decoding.
 ///
 /// [`Docopt`]: https://docs.rs/docopt/1.1.0/docopt/
 impl Args for CommonArgs {
@@ -148,6 +154,39 @@ impl Args for CommonArgs {
 
         let enable_active_migration = args.get_bool("--enable-active-migration");
 
+        let max_field_section_size =
+            if args.get_str("--max-field-section-size") != "" {
+                Some(
+                    args.get_str("--max-field-section-size")
+                        .parse::<u64>()
+                        .unwrap(),
+                )
+            } else {
+                None
+            };
+
+        let qpack_max_table_capacity =
+            if args.get_str("--qpack-max-table-capacity") != "" {
+                Some(
+                    args.get_str("--qpack-max-table-capacity")
+                        .parse::<u64>()
+                        .unwrap(),
+                )
+            } else {
+                None
+            };
+
+        let qpack_blocked_streams =
+            if args.get_str("--qpack-blocked-streams") != "" {
+                Some(
+                    args.get_str("--qpack-blocked-streams")
+                        .parse::<u64>()
+                        .unwrap(),
+                )
+            } else {
+                None
+            };
+
         CommonArgs {
             alpns,
             max_data,
@@ -167,6 +206,9 @@ impl Args for CommonArgs {
             dgram_data,
             max_active_cids,
             enable_active_migration,
+            max_field_section_size,
+            qpack_max_table_capacity,
+            qpack_blocked_streams,
         }
     }
 }
@@ -192,6 +234,9 @@ impl Default for CommonArgs {
             dgram_data: "quack".to_string(),
             max_active_cids: 2,
             enable_active_migration: false,
+            max_field_section_size: None,
+            qpack_max_table_capacity: None,
+            qpack_blocked_streams: None,
         }
     }
 }
@@ -231,6 +276,9 @@ Options:
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
   --send-priority-update   Send HTTP/3 priority updates if the query string params 'u' or 'i' are present in URLs
+  --max-field-section-size BYTES    Max size of uncompressed field section. Default is unlimited.
+  --qpack-max-table-capacity BYTES  Max capacity of dynamic QPACK decoding.. Any value other that 0 is currently unsupported.
+  --qpack-blocked-streams STREAMS   Limit of blocked streams while decoding. Any value other that 0 is currently unsupported.
   --session-file PATH      File used to cache a TLS session for resumption.
   --source-port PORT       Source port to use when connecting to the server [default: 0].
   -h --help                Show this screen.
@@ -392,6 +440,9 @@ Options:
   --disable-hystart           Disable HyStart++.
   --max-active-cids NUM       The maximum number of active Connection IDs we can support [default: 2].
   --enable-active-migration   Enable active connection migration.
+  --max-field-section-size BYTES    Max size of uncompressed HTTP/3 field section. Default is unlimited.
+  --qpack-max-table-capacity BYTES  Max capacity of QPACK dynamic table decoding. Any value other that 0 is currently unsupported.
+  --qpack-blocked-streams STREAMS   Limit of streams that can be blocked while decoding. Any value other that 0 is currently unsupported.
   -h --help                   Show this screen.
 ";
 
