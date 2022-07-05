@@ -415,8 +415,26 @@ impl Recovery {
             let lowest_acked_in_block = r.start;
             let largest_acked_in_block = r.end - 1;
 
+            // If this ACK range starts sufficiently far away from the head of our
+            // sent vecdeque, search for where we should start
+            // iterating instead of linearly scanning.
+            let to_skip = if self.sent[epoch]
+                .front()
+                .map(|p| lowest_acked_in_block.saturating_sub(p.pkt_num) > 100)
+                .unwrap_or(false)
+            {
+                match self.sent[epoch]
+                    .binary_search_by(|p| p.pkt_num.cmp(&lowest_acked_in_block))
+                {
+                    Ok(n) => n,
+                    Err(n) => n,
+                }
+            } else {
+                0
+            };
+
             let unacked_iter = self.sent[epoch]
-                .iter_mut()
+                .range_mut(to_skip..)
                 // Skip packets that precede the lowest acked packet in the block.
                 .skip_while(|p| p.pkt_num < lowest_acked_in_block)
                 // Skip packets that follow the largest acked packet in the block.
