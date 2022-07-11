@@ -291,6 +291,7 @@ use std::collections::VecDeque;
 #[cfg(feature = "sfv")]
 use std::convert::TryFrom;
 use std::fmt;
+use std::fmt::Write;
 
 #[cfg(feature = "qlog")]
 use qlog::events::h3::H3FrameCreated;
@@ -568,16 +569,18 @@ pub struct Header(Vec<u8>, Vec<u8>);
 
 fn try_print_as_readable(hdr: &[u8], f: &mut fmt::Formatter) -> fmt::Result {
     match std::str::from_utf8(hdr) {
-        Ok(s) => f.write_str(s),
+        Ok(s) => f.write_str(&s.escape_default().to_string()),
         Err(_) => write!(f, "{:?}", hdr),
     }
 }
 
 impl fmt::Debug for Header {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_char('"')?;
         try_print_as_readable(&self.0, f)?;
         f.write_str(": ")?;
-        try_print_as_readable(&self.1, f)
+        try_print_as_readable(&self.1, f)?;
+        f.write_char('"')
     }
 }
 

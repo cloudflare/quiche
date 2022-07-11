@@ -439,13 +439,13 @@ pub fn run(
     Ok(())
 }
 
-fn hdrs_to_strings(hdrs: &[quiche::h3::Header]) -> Vec<(String, String)> {
+pub fn hdrs_to_strings(hdrs: &[quiche::h3::Header]) -> Vec<(String, String)> {
     hdrs.iter()
         .map(|h| {
-            (
-                String::from_utf8(h.name().into()).unwrap(),
-                String::from_utf8(h.value().into()).unwrap(),
-            )
+            let name = String::from_utf8_lossy(h.name()).to_string();
+            let value = String::from_utf8_lossy(h.value()).to_string();
+
+            (name, value)
         })
         .collect()
 }
