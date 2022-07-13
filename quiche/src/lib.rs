@@ -2802,10 +2802,10 @@ impl Connection {
     /// On success the number of bytes written to the output buffer is
     /// returned, or [`Done`] if there was nothing to write.
     ///
-    /// The application should call `send_on_path()` multiple times until
+    /// The application should call [`send_on_path()`] multiple times until
     /// [`Done`] is returned, indicating that there are no more packets to
-    /// send. It is recommended that [`send()`] be called in the following
-    /// cases:
+    /// send. It is recommended that [`send_on_path()`] be called in the
+    /// following cases:
     ///
     ///  * When the application receives QUIC packets from the peer (that is,
     ///    any time [`recv()`] is also called).
@@ -2820,13 +2820,13 @@ impl Connection {
     ///    time [`stream_recv()`] is called).
     ///
     /// Once [`is_draining()`] returns `true`, it is no longer necessary to call
-    /// [`send()`] and all calls will return [`Done`].
+    /// [`send_on_path()`] and all calls will return [`Done`].
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`InvalidState`]: enum.Error.html#InvalidState
     /// [`recv()`]: struct.Connection.html#method.recv
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
-    /// [`send()`]: struct.Connection.html#method.send
+    /// [`send_on_path()`]: struct.Connection.html#method.send_on_path
     /// [`stream_send()`]: struct.Connection.html#method.stream_send
     /// [`stream_shutdown()`]: struct.Connection.html#method.stream_shutdown
     /// [`stream_recv()`]: struct.Connection.html#method.stream_recv
@@ -5655,11 +5655,12 @@ impl Connection {
 
     /// Returns true if the connection is draining.
     ///
-    /// If this returns true, the connection object cannot yet be dropped, but
+    /// If this returns `true`, the connection object cannot yet be dropped, but
     /// no new application data can be sent or received. An application should
     /// continue calling the [`recv()`], [`timeout()`], and [`on_timeout()`]
     /// methods as normal, until the [`is_closed()`] method returns `true`.
-    /// It is no longer necessary to call [`send()`].
+    /// In contrast, once [`is_draining()`] returns `true`, calling [`send()`]
+    /// is not required because no new outgoing packets will be generated.
     ///
     /// [`recv()`]: struct.Connection.html#method.recv
     /// [`send()`]: struct.Connection.html#method.send
