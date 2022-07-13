@@ -1322,6 +1322,21 @@ impl Connection {
         Ok((len, flow_id, b.off()))
     }
 
+    /// Returns a DATAGRAM
+    ///
+    /// See [`recv_dgram()`] for more information
+    ///
+    /// [`recv_dgram()`]: Self::recv_dgram
+    pub fn recv_dgram_vec(
+        &mut self, conn: &mut super::Connection,
+    ) -> Result<(Vec<u8>, u64, usize)> {
+        let v = conn.dgram_recv_vec()?;
+        let mut b = octets::Octets::with_slice(v.as_slice());
+        let flow_id = b.get_varint()?;
+        let off = b.off();
+        Ok((v, flow_id, off))
+    }
+
     /// Returns the maximum HTTP/3 DATAGRAM payload that can be sent.
     pub fn dgram_max_writable_len(
         &self, conn: &super::Connection, flow_id: u64,
