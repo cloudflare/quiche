@@ -2734,6 +2734,9 @@ impl Connection {
     ///  * When the application receives data from the peer (for example any
     ///    time [`stream_recv()`] is called).
     ///
+    /// Once [`is_draining`] returns true, it is no longer necessary to call
+    /// `send()` and all calls will return [`Done`].
+    ///
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`recv()`]: struct.Connection.html#method.recv
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
@@ -2813,6 +2816,9 @@ impl Connection {
     ///
     ///  * When the application receives data from the peer (for example any
     ///    time [`stream_recv()`] is called).
+    ///
+    /// Once [`is_draining`] returns true, it is no longer necessary to call
+    /// `send()` and all calls will return [`Done`].
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`InvalidState`]: enum.Error.html#InvalidState
@@ -5647,9 +5653,9 @@ impl Connection {
     ///
     /// If this returns true, the connection object cannot yet be dropped, but
     /// no new application data can be sent or received. An application should
-    /// continue calling the [`recv()`], [`send()`], [`timeout()`], and
-    /// [`on_timeout()`] methods as normal, until the [`is_closed()`] method
-    /// returns `true`.
+    /// continue calling the [`recv()`], [`timeout()`], and [`on_timeout()`]
+    /// methods as normal, until the [`is_closed()`] method returns `true`.
+    /// It is no longer necessary to call [`send()`].
     ///
     /// [`recv()`]: struct.Connection.html#method.recv
     /// [`send()`]: struct.Connection.html#method.send
