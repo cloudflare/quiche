@@ -2734,7 +2734,7 @@ impl Connection {
     ///  * When the application receives data from the peer (for example any
     ///    time [`stream_recv()`] is called).
     ///
-    /// Once [`is_draining`] returns true, it is no longer necessary to call
+    /// Once [`is_draining`] returns `true`, it is no longer necessary to call
     /// `send()` and all calls will return [`Done`].
     ///
     /// [`Done`]: enum.Error.html#variant.Done
@@ -2817,7 +2817,7 @@ impl Connection {
     ///  * When the application receives data from the peer (for example any
     ///    time [`stream_recv()`] is called).
     ///
-    /// Once [`is_draining`] returns true, it is no longer necessary to call
+    /// Once [`is_draining`] returns `true`, it is no longer necessary to call
     /// `send()` and all calls will return [`Done`].
     ///
     /// [`Done`]: enum.Error.html#variant.Done
