@@ -242,7 +242,8 @@ fn main() {
                     .cxxflag("-DBORINGSSL_UNSAFE_FUZZER_MODE");
             }
 
-            cfg.build_target("bssl").build().display().to_string()
+            cfg.build_target("ssl").build();
+            cfg.build_target("crypto").build().display().to_string()
         });
 
         let build_path = get_boringssl_platform_output_path();
