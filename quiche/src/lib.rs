@@ -2718,9 +2718,9 @@ impl Connection {
     /// On success the number of bytes written to the output buffer is
     /// returned, or [`Done`] if there was nothing to write.
     ///
-    /// The application should call [`send()`] multiple times until [`Done`] is
+    /// The application should call `send()` multiple times until [`Done`] is
     /// returned, indicating that there are no more packets to send. It is
-    /// recommended that [`send()`] be called in the following cases:
+    /// recommended that `send()` be called in the following cases:
     ///
     ///  * When the application receives QUIC packets from the peer (that is,
     ///    any time [`recv()`] is also called).
@@ -2735,12 +2735,11 @@ impl Connection {
     ///    time [`stream_recv()`] is called).
     ///
     /// Once [`is_draining()`] returns `true`, it is no longer necessary to call
-    /// [`send()`] and all calls will return [`Done`].
+    /// `send()` and all calls will return [`Done`].
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`recv()`]: struct.Connection.html#method.recv
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
-    /// [`send()`]: struct.Connection.html#method.send
     /// [`stream_send()`]: struct.Connection.html#method.stream_send
     /// [`stream_shutdown()`]: struct.Connection.html#method.stream_shutdown
     /// [`stream_recv()`]: struct.Connection.html#method.stream_recv
@@ -2802,9 +2801,9 @@ impl Connection {
     /// On success the number of bytes written to the output buffer is
     /// returned, or [`Done`] if there was nothing to write.
     ///
-    /// The application should call [`send_on_path()`] multiple times until
+    /// The application should call `send_on_path()` multiple times until
     /// [`Done`] is returned, indicating that there are no more packets to
-    /// send. It is recommended that [`send_on_path()`] be called in the
+    /// send. It is recommended that `send_on_path()` be called in the
     /// following cases:
     ///
     ///  * When the application receives QUIC packets from the peer (that is,
@@ -2820,13 +2819,12 @@ impl Connection {
     ///    time [`stream_recv()`] is called).
     ///
     /// Once [`is_draining()`] returns `true`, it is no longer necessary to call
-    /// [`send_on_path()`] and all calls will return [`Done`].
+    /// `send_on_path()` and all calls will return [`Done`].
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`InvalidState`]: enum.Error.html#InvalidState
     /// [`recv()`]: struct.Connection.html#method.recv
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
-    /// [`send_on_path()`]: struct.Connection.html#method.send_on_path
     /// [`stream_send()`]: struct.Connection.html#method.stream_send
     /// [`stream_shutdown()`]: struct.Connection.html#method.stream_shutdown
     /// [`stream_recv()`]: struct.Connection.html#method.stream_recv
