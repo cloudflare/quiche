@@ -5657,7 +5657,8 @@ impl Connection {
     /// no new application data can be sent or received. An application should
     /// continue calling the [`recv()`], [`timeout()`], and [`on_timeout()`]
     /// methods as normal, until the [`is_closed()`] method returns `true`.
-    /// In contrast, once [`is_draining()`] returns `true`, calling [`send()`]
+    ///
+    /// In contrast, once `is_draining()` returns `true`, calling [`send()`]
     /// is not required because no new outgoing packets will be generated.
     ///
     /// [`recv()`]: struct.Connection.html#method.recv
