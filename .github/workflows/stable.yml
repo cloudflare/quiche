@@ -135,7 +135,7 @@ jobs:
     runs-on: windows-2019
     strategy:
       matrix:
-        target: ["x86_64-pc-windows-msvc", "i686-pc-windows-msvc", "x86_64-pc-windows-gnu"]
+        target: ["x86_64-pc-windows-msvc", "i686-pc-windows-msvc", "x86_64-pc-windows-gnu", "i686-pc-windows-gnu"]
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -149,16 +149,19 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
+          toolchain: ${{ env.TOOLCHAIN }}-${{ matrix.target }}
           target: ${{ matrix.target }}
           override: true
 
-      - name: Set up MinGW
+      - name: Set up MinGW for 64 bit
         if: matrix.target == 'x86_64-pc-windows-gnu'
-        uses: egor-tensin/setup-mingw@v2
+        uses: bwoodsend/setup-winlibs-action@v1
+
+      - name: Set up MinGW for 32 bit
+        if: matrix.target == 'i686-pc-windows-gnu'
+        uses: bwoodsend/setup-winlibs-action@v1
         with:
-          platform: x64
-          cc: 1
+          architecture: i686
 
       - name: Install dependencies
         uses: crazy-max/ghaction-chocolatey@v1
@@ -166,14 +169,14 @@ jobs:
           args: install nasm
 
       - name: Run cargo build
-        if: matrix.target == 'x86_64-pc-windows-gnu'
+        if: endsWith(matrix.target, '-gnu')
         uses: actions-rs/cargo@v1
         with:
           command: build
           args: --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
 
       - name: Run cargo test
-        if: matrix.target != 'x86_64-pc-windows-gnu'
+        if: endsWith(matrix.target, '-msvc')
         uses: actions-rs/cargo@v1
         with:
           command: test
