@@ -346,6 +346,13 @@
 #[macro_use]
 extern crate log;
 
+#[cfg(not(windows))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(windows))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 #[cfg(feature = "qlog")]
 use qlog::events::connectivity::TransportOwner;
 #[cfg(feature = "qlog")]
