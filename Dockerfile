@@ -2,6 +2,7 @@ FROM rust:1.57 as build
 
 WORKDIR /build
 
+COPY Cargo.toml .
 COPY apps/ ./apps/
 COPY octets/ ./octets/
 COPY qlog/ ./qlog/
