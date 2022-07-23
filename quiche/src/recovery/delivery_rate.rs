@@ -354,6 +354,7 @@ mod tests {
             r.on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::EPOCH_APPLICATION,
                 HandshakeStatus::default(),
                 now,
