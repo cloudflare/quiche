@@ -662,6 +662,15 @@ ssize_t quiche_conn_send_ack_eliciting_on_path(quiche_conn *conn,
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
 
+// Writes an unsigned variable-length integer in network byte-order into
+// the provided buffer.
+int quiche_put_varint(uint8_t *buf, size_t buf_len,
+                      uint64_t val);
+
+// Reads an unsigned variable-length integer in network byte-order from
+// the provided buffer and returns the wire length.
+ssize_t quiche_get_varint(const uint8_t *buf, size_t buf_len,
+                          uint64_t val);
 
 // HTTP/3 API
 //
@@ -830,7 +839,6 @@ enum quiche_h3_event_type {
     QUICHE_H3_EVENT_HEADERS,
     QUICHE_H3_EVENT_DATA,
     QUICHE_H3_EVENT_FINISHED,
-    QUICHE_H3_EVENT_DATAGRAM,
     QUICHE_H3_EVENT_GOAWAY,
     QUICHE_H3_EVENT_RESET,
     QUICHE_H3_EVENT_PRIORITY_UPDATE,
@@ -942,15 +950,6 @@ int quiche_h3_take_last_priority_update(quiche_h3_conn *conn,
 // Returns whether the peer enabled HTTP/3 DATAGRAM frame support.
 bool quiche_h3_dgram_enabled_by_peer(quiche_h3_conn *conn,
                                      quiche_conn *quic_conn);
-
-// Writes data to the DATAGRAM send queue.
-ssize_t quiche_h3_send_dgram(quiche_h3_conn *conn, quiche_conn *quic_conn,
-                            uint64_t flow_id, uint8_t *data, size_t data_len);
-
-// Reads data from the DATAGRAM receive queue.
-ssize_t quiche_h3_recv_dgram(quiche_h3_conn *conn, quiche_conn *quic_conn,
-                            uint64_t *flow_id, size_t *flow_id_len,
-                            uint8_t *out, size_t out_len);
 
 // Frees the HTTP/3 connection object.
 void quiche_h3_conn_free(quiche_h3_conn *conn);
