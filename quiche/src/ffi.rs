@@ -720,6 +720,7 @@ pub struct RecvInfo<'a> {
     from_len: socklen_t,
     to: &'a sockaddr,
     to_len: socklen_t,
+    ecn: u8,
 }
 
 impl<'a> From<&RecvInfo<'a>> for crate::RecvInfo {
@@ -727,6 +728,7 @@ impl<'a> From<&RecvInfo<'a>> for crate::RecvInfo {
         crate::RecvInfo {
             from: std_addr_from_c(info.from, info.from_len),
             to: std_addr_from_c(info.to, info.to_len),
+            ecn: info.ecn,
         }
     }
 }

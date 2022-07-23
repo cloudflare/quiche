@@ -332,6 +332,9 @@ typedef struct {
     // The local address the packet was received on.
     struct sockaddr *to;
     socklen_t to_len;
+
+    // The ECN marking on the incoming packet.
+    uint8_t ecn;
 } quiche_recv_info;
 
 // Processes QUIC packets received from the peer.

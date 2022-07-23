@@ -47,7 +47,7 @@ fuzz_target!(|data: &[u8]| {
         quiche::accept(&SCID, None, to, from, &mut CONFIG.lock().unwrap())
             .unwrap();
 
-    let info = quiche::RecvInfo { from, to };
+    let info = quiche::RecvInfo { from, to, ecn: 0 };
 
     conn.recv(&mut buf, info).ok();
 });

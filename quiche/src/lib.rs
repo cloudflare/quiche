@@ -116,13 +116,14 @@
 //! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let peer = "127.0.0.1:1234".parse().unwrap();
 //! # let local = "127.0.0.1:4321".parse().unwrap();
+//! # let ecn = 0;
 //! # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
 //! let to = socket.local_addr().unwrap();
 //!
 //! loop {
 //!     let (read, from) = socket.recv_from(&mut buf).unwrap();
 //!
-//!     let recv_info = quiche::RecvInfo { from, to };
+//!     let recv_info = quiche::RecvInfo { from, to, ecn };
 //!
 //!     let read = match conn.recv(&mut buf[..read], recv_info) {
 //!         Ok(v) => v,
@@ -636,6 +637,14 @@ pub struct RecvInfo {
 
     /// The local address the packet was received on.
     pub to: SocketAddr,
+
+    /// The ECN marking on the incoming packet.
+    ///
+    /// `0` means no ECN marking has been received, while non-zero values are
+    /// described in [RFC3168].
+    ///
+    /// [RFC3168]: https://datatracker.ietf.org/doc/html/rfc3168#section-5
+    pub ecn: u8,
 }
 
 /// Ancillary information about outgoing packets.
@@ -2104,6 +2113,7 @@ impl Connection {
     /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
     /// # let peer = "127.0.0.1:1234".parse().unwrap();
     /// # let local = socket.local_addr().unwrap();
+    /// # let ecn = 0;
     /// # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
     /// loop {
     ///     let (read, from) = socket.recv_from(&mut buf).unwrap();
@@ -2111,6 +2121,7 @@ impl Connection {
     ///     let recv_info = quiche::RecvInfo {
     ///         from,
     ///         to: local,
+    ///         ecn,
     ///     };
     ///
     ///     let read = match conn.recv(&mut buf[..read], recv_info) {
@@ -2129,6 +2140,10 @@ impl Connection {
 
         if len == 0 {
             return Err(Error::BufferTooShort);
+        }
+
+        if info.ecn > 0x03 {
+            return Err(Error::InvalidPacket);
         }
 
         let recv_pid = self.paths.path_id_from_addrs(&(info.to, info.from));
@@ -2972,6 +2987,30 @@ impl Connection {
         self.pkt_num_spaces[epoch].largest_rx_pkt_num =
             cmp::max(self.pkt_num_spaces[epoch].largest_rx_pkt_num, pn);
 
+        if info.ecn > 0 {
+            // Create the `EcnCounts` struct if this is the first non-zero ECN
+            // value received.
+            if self.pkt_num_spaces[epoch].ecn_counts.is_none() {
+                self.pkt_num_spaces[epoch].ecn_counts =
+                    Some(packet::EcnCounts::default());
+            }
+
+            if let Some(ref mut ecn_counts) =
+                self.pkt_num_spaces[epoch].ecn_counts
+            {
+                match info.ecn {
+                    // ECN capable (ECT(0)).
+                    0x01 => ecn_counts.ect0_count += 1,
+                    0x02 => ecn_counts.ect1_count += 1,
+
+                    // Congestion event (ECN-CE).
+                    0x03 => ecn_counts.ecn_ce_count += 1,
+
+                    _ => unreachable!(),
+                };
+            }
+        }
+
         if !probing {
             self.pkt_num_spaces[epoch].largest_rx_non_probing_pkt_num = cmp::max(
                 self.pkt_num_spaces[epoch].largest_rx_non_probing_pkt_num,
@@ -3575,7 +3614,7 @@ impl Connection {
             let frame = frame::Frame::ACK {
                 ack_delay,
                 ranges: pkt_space.recv_pkt_need_ack.clone(),
-                ecn_counts: None, // sending ECN is not supported at this time
+                ecn_counts: pkt_space.ecn_counts,
             };
 
             // When a PING frame needs to be sent, avoid sending the ACK if
@@ -8282,6 +8321,7 @@ pub mod testing {
             let info = RecvInfo {
                 to: server_path.peer_addr(),
                 from: server_path.local_addr(),
+                ecn: 0,
             };
 
             self.client.recv(buf, info)
@@ -8292,6 +8332,7 @@ pub mod testing {
             let info = RecvInfo {
                 to: client_path.peer_addr(),
                 from: client_path.local_addr(),
+                ecn: 0,
             };
 
             self.server.recv(buf, info)
@@ -8345,6 +8386,7 @@ pub mod testing {
         let info = RecvInfo {
             to: active_path.local_addr(),
             from: active_path.peer_addr(),
+            ecn: 0,
         };
 
         conn.recv(&mut buf[..len], info)?;
@@ -8369,6 +8411,7 @@ pub mod testing {
             let info = RecvInfo {
                 to: si.to,
                 from: si.from,
+                ecn: 0,
             };
 
             conn.recv(&mut pkt, info)?;
@@ -15304,6 +15347,7 @@ mod tests {
         let ri = RecvInfo {
             to: si.to,
             from: si.from,
+            ecn: 0,
         };
         assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
 
@@ -15348,6 +15392,7 @@ mod tests {
         let ri = RecvInfo {
             to: si.to,
             from: si.from,
+            ecn: 0,
         };
         assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
 
@@ -15365,6 +15410,7 @@ mod tests {
         let ri = RecvInfo {
             to: si.to,
             from: si.from,
+            ecn: 0,
         };
         assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
 
@@ -15383,6 +15429,7 @@ mod tests {
         let ri = RecvInfo {
             to: si.to,
             from: si.from,
+            ecn: 0,
         };
         assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
 
@@ -15400,6 +15447,7 @@ mod tests {
         let ri = RecvInfo {
             to: si.to,
             from: si.from,
+            ecn: 0,
         };
         assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
 
@@ -16301,6 +16349,7 @@ mod tests {
             .recv(&mut pkt_buf[..written], RecvInfo {
                 to: server_addr,
                 from: client_addr_2,
+                ecn: 0,
             })
             .expect("server receive path challenge");
 
@@ -16309,6 +16358,63 @@ mod tests {
             .server
             .paths_iter(server_addr)
             .any(|path| path == client_addr_2));
+    }
+
+    /// Tests that incoming ECN values are reported back to the sender.
+    #[test]
+    fn ecn_reporting() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::new().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let pkt_type = packet::Type::Short;
+
+        let frames = [frame::Frame::Stream {
+            stream_id: 0,
+            data: stream::RangeBuf::from(b"aaaaa", 0, true),
+        }];
+
+        let written =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+
+        let active_path = pipe.server.paths.get_active().unwrap();
+
+        let info = RecvInfo {
+            from: active_path.peer_addr(),
+            to: active_path.local_addr(),
+            ecn: 0x03,
+        };
+
+        // Server receives packet with ECN markings.
+        let len = pipe.server.recv(&mut buf[..written], info).unwrap();
+        assert_eq!(len, written);
+
+        // Server sends ACK_ECN freame.
+        let (len, _) = pipe.server.send(&mut buf).unwrap();
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+        let mut iter = frames.iter();
+
+        let mut ranges = ranges::RangeSet::default();
+        ranges.push_item(0);
+
+        let ecn_counts = Some(packet::EcnCounts {
+            ect0_count: 0,
+            ect1_count: 0,
+            ecn_ce_count: 1,
+        });
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::ACK {
+                ack_delay: 0,
+                ranges,
+                ecn_counts,
+            })
+        );
     }
 }
 
