@@ -298,6 +298,7 @@ pub fn connect(
                 let recv_info = quiche::RecvInfo {
                     to: local_addr,
                     from,
+                    ecn: 0,
                 };
 
                 // Process potentially coalesced packets.

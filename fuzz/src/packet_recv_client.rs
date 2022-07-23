@@ -46,7 +46,7 @@ fuzz_target!(|data: &[u8]| {
     )
     .unwrap();
 
-    let info = quiche::RecvInfo { from, to };
+    let info = quiche::RecvInfo { from, to, ecn: 0 };
 
     conn.recv(&mut buf, info).ok();
 });
