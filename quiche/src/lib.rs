@@ -376,6 +376,7 @@
 //! [boring]: https://crates.io/crates/boring
 //! [qlog]: https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema
 
+#![allow(clippy::too_many_arguments)]
 #![allow(clippy::upper_case_acronyms)]
 #![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -662,6 +663,9 @@ pub struct SendInfo {
     ///
     /// [Pacing]: index.html#pacing
     pub at: time::Instant,
+
+    /// The ECN marking for the outgoing packet.
+    pub ecn: u8,
 }
 
 /// Represents information carried by `CONNECTION_CLOSE` frames.
@@ -3330,6 +3334,8 @@ impl Connection {
             to: send_path.peer_addr(),
 
             at: send_path.recovery.get_packet_send_time(),
+
+            ecn: 0x01, // ECT(0)
         };
 
         Ok((done, info))
@@ -6682,7 +6688,9 @@ impl Connection {
             frame::Frame::Ping => (),
 
             frame::Frame::ACK {
-                ranges, ack_delay, ..
+                ranges,
+                ack_delay,
+                ecn_counts,
             } => {
                 let ack_delay = ack_delay
                     .checked_mul(2_u64.pow(
@@ -6709,6 +6717,7 @@ impl Connection {
                     let (lost_packets, lost_bytes) = p.recovery.on_ack_received(
                         &ranges,
                         ack_delay,
+                        ecn_counts,
                         epoch,
                         handshake_status,
                         now,

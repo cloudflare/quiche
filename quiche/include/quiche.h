@@ -352,6 +352,9 @@ typedef struct {
 
     // The time to send the packet out.
     struct timespec at;
+
+    // The ECN marking for the outgoing packet.
+    uint8_t ecn;
 } quiche_send_info;
 
 // Writes a single QUIC packet to be sent to the peer.
