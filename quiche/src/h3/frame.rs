@@ -242,7 +242,7 @@ impl Frame {
 
                 if let Some(val) = h3_datagram {
                     b.put_varint(SETTINGS_H3_DATAGRAM_00)?;
-                    b.put_varint(*val as u64)?;
+                    b.put_varint(*val)?;
                     b.put_varint(SETTINGS_H3_DATAGRAM)?;
                     b.put_varint(*val)?;
                 }

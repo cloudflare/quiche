@@ -26,6 +26,7 @@ env_logger = "0.6"
 mio = { version = "0.8", features = ["net", "os-poll"] }
 url = "1"
 log = "0.4"
+octets = { version = "0.2", path = "../octets" }
 ring = "0.16"
 quiche = { path = "../quiche" }
 libc = "0.2"

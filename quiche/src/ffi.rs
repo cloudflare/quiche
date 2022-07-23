@@ -1321,6 +1321,42 @@ pub extern fn quiche_conn_send_quantum(conn: &Connection) -> size_t {
     conn.send_quantum() as size_t
 }
 
+#[no_mangle]
+pub extern fn quiche_put_varint(
+    buf: *mut u8, buf_len: size_t, val: u64,
+) -> c_int {
+    let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
+
+    let mut b = octets::OctetsMut::with_slice(buf);
+    match b.put_varint(val) {
+        Ok(_) => 0,
+
+        Err(e) => {
+            let err: Error = e.into();
+            err.to_c() as c_int
+        },
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_get_varint(
+    buf: *const u8, buf_len: size_t, val: *mut u64,
+) -> ssize_t {
+    let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
+
+    let mut b = octets::Octets::with_slice(buf);
+    match b.get_varint() {
+        Ok(v) => unsafe { *val = v },
+
+        Err(e) => {
+            let err: Error = e.into();
+            return err.to_c();
+        },
+    };
+
+    b.off() as ssize_t
+}
+
 fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
     match addr.sa_family as i32 {
         AF_INET => {
