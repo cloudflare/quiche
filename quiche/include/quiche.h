@@ -499,7 +499,7 @@ typedef struct {
     // The number of sent bytes on this path.
     uint64_t sent_bytes;
 
-    // The number of recevied bytes on this path.
+    // The number of received bytes on this path.
     uint64_t recv_bytes;
 
     // The number of bytes lost on this path.
@@ -531,7 +531,7 @@ typedef struct {
     // The number of sent bytes.
     uint64_t sent_bytes;
 
-    // The number of recevied bytes.
+    // The number of received bytes.
     uint64_t recv_bytes;
 
     // The number of bytes lost.
