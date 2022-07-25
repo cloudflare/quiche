@@ -5287,7 +5287,7 @@ impl Connection {
     /// the maximum number of active Connection IDs it negotiated. In such case
     /// (i.e., when [`source_cids_left()`] returns 0), if the host agrees to
     /// request the removal of previous connection IDs, it sets the
-    /// `retire_if_needed` parameter. Otherwhise, an [`IdLimit`] is returned.
+    /// `retire_if_needed` parameter. Otherwise, an [`IdLimit`] is returned.
     ///
     /// Note that setting `retire_if_needed` does not prevent this function from
     /// returning an [`IdLimit`] in the case the caller wants to retire still

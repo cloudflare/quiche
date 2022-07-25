@@ -343,7 +343,7 @@ impl ConnectionIdentifiers {
     /// the maximum number of active Connection IDs it negotiated. In such case
     /// (i.e., when [`active_source_cids()`] - `peer_active_conn_id_limit` = 0,
     /// if the caller agrees to request the removal of previous connection IDs,
-    /// it sets the `retire_if_needed` parameter. Otherwhise, an [`IdLimit`] is
+    /// it sets the `retire_if_needed` parameter. Otherwise, an [`IdLimit`] is
     /// returned.
     ///
     /// Note that setting `retire_if_needed` does not prevent this function from
