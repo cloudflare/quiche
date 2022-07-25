@@ -487,7 +487,7 @@ typedef struct {
     // The number of QUIC packets that were lost on this path.
     size_t lost;
 
-    // The number of sent QUIC packets with retranmitted data on this path.
+    // The number of sent QUIC packets with retransmitted data on this path.
     size_t retrans;
 
     // The estimated round-trip time of the path (in nanoseconds).
@@ -525,7 +525,7 @@ typedef struct {
     // The number of QUIC packets that were lost.
     size_t lost;
 
-    // The number of sent QUIC packets with retranmitted data.
+    // The number of sent QUIC packets with retransmitted data.
     size_t retrans;
 
     // The number of sent bytes.

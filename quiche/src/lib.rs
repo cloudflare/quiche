@@ -6896,7 +6896,7 @@ pub struct Stats {
     /// The number of bytes sent lost.
     pub lost_bytes: u64,
 
-    /// The number of stream bytes retranmitted.
+    /// The number of stream bytes retransmitted.
     pub stream_retrans_bytes: u64,
 
     /// The maximum idle timeout.
