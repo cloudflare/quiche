@@ -2010,7 +2010,7 @@ mod tests {
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
         assert_eq!(r.bytes_in_flight, 6000);
 
-        // Pacing is not done during intial phase of connection.
+        // Pacing is not done during initial phase of connection.
         assert_eq!(r.get_packet_send_time(), now);
 
         // Send the third packet out.
