@@ -726,7 +726,7 @@ mod httpbin_tests {
         // This test explicitly tries to exceed the server's
         // MAX_FIELD_SECTION_SIZE setting. Therefore, it is expected that
         // the invoker supplies an additional header to this test
-        // via the EXTRA_HEADERS envirnment variable.
+        // via the EXTRA_HEADERS environment variable.
         if let Some(headers) = &extra_headers() {
             for (name, val) in headers {
                 println!("{}: {}", name, val);
