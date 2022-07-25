@@ -352,7 +352,7 @@
 //! streamer.add_event(event).ok();
 //! ```
 //!
-//! Once all events have have been written, the log
+//! Once all events have been written, the log
 //! can be finalized with [`finish_log()`]:
 //!
 //! ```
