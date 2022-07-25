@@ -93,7 +93,7 @@ pub enum PathEvent {
     Closed(SocketAddr, SocketAddr),
 
     /// The stack observes that the Source Connection ID with the given sequence
-    /// number, initialy used by the peer over the first pair of `SocketAddr`s,
+    /// number, initially used by the peer over the first pair of `SocketAddr`s,
     /// is now reused over the second pair of `SocketAddr`s.
     ReusedSourceConnectionId(
         u64,
