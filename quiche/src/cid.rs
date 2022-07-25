@@ -662,7 +662,7 @@ impl ConnectionIdentifiers {
         self.scids.iter().filter(|e| e.path_id.is_none()).count()
     }
 
-    /// Returns the number of Destination Connectino IDs that have not been
+    /// Returns the number of Destination Connection IDs that have not been
     /// assigned to a path yet.
     ///
     /// Note that this function returns 0 if the host uses zero length
