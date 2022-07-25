@@ -1037,7 +1037,7 @@ mod tests {
         // Ack more than cwnd bytes with rtt=100ms
         r.update_rtt(rtt, Duration::from_millis(0), now);
 
-        // Trigger detecting sprurious congestion event
+        // Trigger detecting spurious congestion event
         r.on_packets_acked(
             acked,
             packet::EPOCH_APPLICATION,
@@ -1079,7 +1079,7 @@ mod tests {
         // Ack more than cwnd bytes with rtt=100ms.
         r.update_rtt(rtt, Duration::from_millis(0), now);
 
-        // Trigger detecting sprurious congestion event.
+        // Trigger detecting spurious congestion event.
         r.on_packets_acked(
             acked,
             packet::EPOCH_APPLICATION,
