@@ -737,7 +737,7 @@ impl PathMap {
     /// Sets the path with identifier 'path_id' to be active.
     ///
     /// There can be exactly one active path on which non-probing packets can be
-    /// sent. If another path is marked as active, it will be superseeded by the
+    /// sent. If another path is marked as active, it will be superseded by the
     /// one having `path_id` as identifier.
     ///
     /// A server should always ensure that the active path is validated. If it
