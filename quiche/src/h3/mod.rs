@@ -4611,7 +4611,7 @@ mod tests {
     }
 
     #[test]
-    /// Tests that calling poll() after an error occured does nothing.
+    /// Tests that calling poll() after an error occurred does nothing.
     fn poll_after_error() {
         let mut s = Session::default().unwrap();
         s.handshake().unwrap();
