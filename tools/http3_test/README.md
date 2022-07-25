@@ -21,7 +21,7 @@ https://cloudflare-quic.com/b
 Environment Variable Overrides
 ------------------------------
 
-A set of environment variables allow tuning of test beheviour:
+A set of environment variables allow tuning of test behaviour:
 
 * HTTPBIN_ENDPOINT - httpbin server URL, the authority is used in SNI.
                      Default value is https://cloudflare-quic.com/b
