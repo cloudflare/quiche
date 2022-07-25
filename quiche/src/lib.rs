@@ -4089,7 +4089,7 @@ impl Connection {
     /// This represents the maximum size of a packet burst as determined by the
     /// congestion control algorithm in use.
     ///
-    /// Applications can, for example, use it in conjunction with segmentatation
+    /// Applications can, for example, use it in conjunction with segmentation
     /// offloading mechanisms as the maximum limit for outgoing aggregates of
     /// multiple packets.
     #[inline]
@@ -4105,7 +4105,7 @@ impl Connection {
     /// This represents the maximum size of a packet burst as determined by the
     /// congestion control algorithm in use.
     ///
-    /// Applications can, for example, use it in conjunction with segmentatation
+    /// Applications can, for example, use it in conjunction with segmentation
     /// offloading mechanisms as the maximum limit for outgoing aggregates of
     /// multiple packets.
     ///
