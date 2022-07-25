@@ -399,7 +399,7 @@ impl Path {
         if let Some(lost_probe_time) = lost_probe_time {
             self.last_probe_lost_time = match self.last_probe_lost_time {
                 Some(last) => {
-                    // Count a loss if at least 1-RTT happenned.
+                    // Count a loss if at least 1-RTT happened.
                     if lost_probe_time - last >= self.recovery.rtt() {
                         self.probing_lost += 1;
                         Some(lost_probe_time)
