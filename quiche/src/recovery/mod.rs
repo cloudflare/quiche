@@ -1953,7 +1953,7 @@ mod tests {
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 1);
         assert_eq!(r.bytes_in_flight, 12000);
 
-        // First packet will be sent out immidiately.
+        // First packet will be sent out immediately.
         assert_eq!(r.pacer.rate(), 0);
         assert_eq!(r.get_packet_send_time(), now);
 
