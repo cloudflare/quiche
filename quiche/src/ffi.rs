@@ -29,7 +29,11 @@ use std::ptr;
 use std::slice;
 use std::sync::atomic;
 
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
+use std::net::SocketAddrV4;
+use std::net::SocketAddrV6;
 
 #[cfg(unix)]
 use std::os::unix::io::FromRawFd;
@@ -41,6 +45,31 @@ use libc::size_t;
 use libc::sockaddr;
 use libc::ssize_t;
 use libc::timespec;
+
+#[cfg(not(windows))]
+use libc::AF_INET;
+#[cfg(windows)]
+use winapi::shared::ws2def::AF_INET;
+
+#[cfg(not(windows))]
+use libc::AF_INET6;
+#[cfg(windows)]
+use winapi::shared::ws2def::AF_INET6;
+
+#[cfg(not(windows))]
+use libc::in_addr;
+#[cfg(windows)]
+use winapi::shared::inaddr::IN_ADDR as in_addr;
+
+#[cfg(not(windows))]
+use libc::in6_addr;
+#[cfg(windows)]
+use winapi::shared::in6addr::IN6_ADDR as in6_addr;
+
+#[cfg(not(windows))]
+use libc::sa_family_t;
+#[cfg(windows)]
+use winapi::shared::ws2def::ADDRESS_FAMILY as sa_family_t;
 
 #[cfg(not(windows))]
 use libc::sockaddr_in;
@@ -62,15 +91,12 @@ use libc::c_int as socklen_t;
 #[cfg(not(windows))]
 use libc::socklen_t;
 
-#[cfg(not(windows))]
-use libc::AF_INET;
 #[cfg(windows)]
-use winapi::shared::ws2def::AF_INET;
-
-#[cfg(not(windows))]
-use libc::AF_INET6;
+use winapi::shared::in6addr::in6_addr_u;
 #[cfg(windows)]
-use winapi::shared::ws2def::AF_INET6;
+use winapi::shared::inaddr::in_addr_S_un;
+#[cfg(windows)]
+use winapi::shared::ws2ipdef::SOCKADDR_IN6_LH_u;
 
 use crate::*;
 
@@ -1259,54 +1285,155 @@ pub extern fn quiche_conn_send_quantum(conn: &mut Connection) -> size_t {
 }
 
 fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
-    unsafe {
-        match addr.sa_family as i32 {
-            AF_INET => {
-                assert!(addr_len as usize == std::mem::size_of::<sockaddr_in>());
+    match addr.sa_family as i32 {
+        AF_INET => {
+            assert!(addr_len as usize == std::mem::size_of::<sockaddr_in>());
 
-                SocketAddr::V4(
-                    *(addr as *const _ as *const sockaddr_in as *const _),
-                )
-            },
+            let in4 = unsafe { *(addr as *const _ as *const sockaddr_in) };
 
-            AF_INET6 => {
-                assert!(addr_len as usize == std::mem::size_of::<sockaddr_in6>());
+            #[cfg(not(windows))]
+            let ip_addr = Ipv4Addr::from(u32::from_be(in4.sin_addr.s_addr));
+            #[cfg(windows)]
+            let ip_addr = {
+                let ip_bytes = unsafe { in4.sin_addr.S_un.S_un_b() };
 
-                SocketAddr::V6(
-                    *(addr as *const _ as *const sockaddr_in6 as *const _),
-                )
-            },
+                Ipv4Addr::from([
+                    ip_bytes.s_b1,
+                    ip_bytes.s_b2,
+                    ip_bytes.s_b3,
+                    ip_bytes.s_b4,
+                ])
+            };
 
-            _ => unimplemented!("unsupported address type"),
-        }
+            let port = u16::from_be(in4.sin_port);
+
+            let out = SocketAddrV4::new(ip_addr, port);
+
+            out.into()
+        },
+
+        AF_INET6 => {
+            assert!(addr_len as usize == std::mem::size_of::<sockaddr_in6>());
+
+            let in6 = unsafe { *(addr as *const _ as *const sockaddr_in6) };
+
+            let ip_addr = Ipv6Addr::from(
+                #[cfg(not(windows))]
+                in6.sin6_addr.s6_addr,
+                #[cfg(windows)]
+                *unsafe { in6.sin6_addr.u.Byte() },
+            );
+
+            let port = u16::from_be(in6.sin6_port);
+
+            #[cfg(not(windows))]
+            let scope_id = in6.sin6_scope_id;
+            #[cfg(windows)]
+            let scope_id = unsafe { *in6.u.sin6_scope_id() };
+
+            let out =
+                SocketAddrV6::new(ip_addr, port, in6.sin6_flowinfo, scope_id);
+
+            out.into()
+        },
+
+        _ => unimplemented!("unsupported address type"),
     }
 }
 
 fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
-    unsafe {
-        match addr {
-            SocketAddr::V4(addr) => {
-                let sa_len = std::mem::size_of::<sockaddr_in>();
+    let sin_port = addr.port().to_be();
 
-                let src = addr as *const _ as *const u8;
-                let dst = out as *mut _ as *mut u8;
+    match addr {
+        SocketAddr::V4(addr) => unsafe {
+            let sa_len = std::mem::size_of::<sockaddr_in>();
+            let out_in = out as *mut _ as *mut sockaddr_in;
 
-                std::ptr::copy_nonoverlapping(src, dst, sa_len);
+            let s_addr = u32::from_ne_bytes(addr.ip().octets());
 
-                sa_len as socklen_t
-            },
+            #[cfg(not(windows))]
+            let sin_addr = in_addr { s_addr };
+            #[cfg(windows)]
+            let sin_addr = {
+                let mut s_un = std::mem::zeroed::<in_addr_S_un>();
+                *s_un.S_addr_mut() = s_addr;
+                in_addr { S_un: s_un }
+            };
 
-            SocketAddr::V6(addr) => {
-                let sa_len = std::mem::size_of::<sockaddr_in6>();
+            *out_in = sockaddr_in {
+                sin_family: AF_INET as sa_family_t,
 
-                let src = addr as *const _ as *const u8;
-                let dst = out as *mut _ as *mut u8;
+                sin_addr,
 
-                std::ptr::copy_nonoverlapping(src, dst, sa_len);
+                #[cfg(any(
+                    target_os = "macos",
+                    target_os = "ios",
+                    target_os = "watchos",
+                    target_os = "freebsd",
+                    target_os = "dragonfly",
+                    target_os = "openbsd",
+                    target_os = "netbsd"
+                ))]
+                sin_len: sa_len as u8,
 
-                sa_len as socklen_t
-            },
-        }
+                sin_port,
+
+                sin_zero: std::mem::zeroed(),
+            };
+
+            sa_len as socklen_t
+        },
+
+        SocketAddr::V6(addr) => unsafe {
+            let sa_len = std::mem::size_of::<sockaddr_in6>();
+            let out_in6 = out as *mut _ as *mut sockaddr_in6;
+
+            #[cfg(not(windows))]
+            let sin6_addr = in6_addr {
+                s6_addr: addr.ip().octets(),
+            };
+            #[cfg(windows)]
+            let sin6_addr = {
+                let mut u = std::mem::zeroed::<in6_addr_u>();
+                *u.Byte_mut() = addr.ip().octets();
+                in6_addr { u }
+            };
+
+            #[cfg(windows)]
+            let u = {
+                let mut u = std::mem::zeroed::<SOCKADDR_IN6_LH_u>();
+                *u.sin6_scope_id_mut() = addr.scope_id();
+                u
+            };
+
+            *out_in6 = sockaddr_in6 {
+                sin6_family: AF_INET6 as sa_family_t,
+
+                sin6_addr,
+
+                #[cfg(any(
+                    target_os = "macos",
+                    target_os = "ios",
+                    target_os = "watchos",
+                    target_os = "freebsd",
+                    target_os = "dragonfly",
+                    target_os = "openbsd",
+                    target_os = "netbsd"
+                ))]
+                sin6_len: sa_len as u8,
+
+                sin6_port: sin_port,
+
+                sin6_flowinfo: addr.flowinfo(),
+
+                #[cfg(not(windows))]
+                sin6_scope_id: addr.scope_id(),
+                #[cfg(windows)]
+                u,
+            };
+
+            sa_len as socklen_t
+        },
     }
 }
 
@@ -1322,4 +1449,109 @@ fn std_time_to_c(_time: &std::time::Instant, out: &mut timespec) {
     // TODO: implement Instant conversion for systems that don't use timespec.
     out.tv_sec = 0;
     out.tv_nsec = 0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(windows)]
+    use winapi::um::ws2tcpip::inet_ntop;
+
+    #[test]
+    fn addr_v4() {
+        let addr = "127.0.0.1:8080".parse().unwrap();
+
+        let mut out: sockaddr_storage = unsafe { std::mem::zeroed() };
+
+        assert_eq!(
+            std_addr_to_c(&addr, &mut out),
+            std::mem::size_of::<sockaddr_in>() as socklen_t
+        );
+
+        let s = std::ffi::CString::new("ddd.ddd.ddd.ddd").unwrap();
+
+        let s = unsafe {
+            let in_addr = &out as *const _ as *const sockaddr_in;
+            assert_eq!(u16::from_be((*in_addr).sin_port), addr.port());
+
+            let dst = s.into_raw();
+
+            inet_ntop(
+                AF_INET,
+                &((*in_addr).sin_addr) as *const _ as *const c_void,
+                dst,
+                16,
+            );
+
+            std::ffi::CString::from_raw(dst).into_string().unwrap()
+        };
+
+        assert_eq!(s, "127.0.0.1");
+
+        let addr = unsafe {
+            std_addr_from_c(
+                &*(&out as *const _ as *const sockaddr),
+                std::mem::size_of::<sockaddr_in>() as socklen_t,
+            )
+        };
+
+        assert_eq!(addr, "127.0.0.1:8080".parse().unwrap());
+    }
+
+    #[test]
+    fn addr_v6() {
+        let addr = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:8080"
+            .parse()
+            .unwrap();
+
+        let mut out: sockaddr_storage = unsafe { std::mem::zeroed() };
+
+        assert_eq!(
+            std_addr_to_c(&addr, &mut out),
+            std::mem::size_of::<sockaddr_in6>() as socklen_t
+        );
+
+        let s = std::ffi::CString::new("dddd:dddd:dddd:dddd:dddd:dddd:dddd:dddd")
+            .unwrap();
+
+        let s = unsafe {
+            let in6_addr = &out as *const _ as *const sockaddr_in6;
+            assert_eq!(u16::from_be((*in6_addr).sin6_port), addr.port());
+
+            let dst = s.into_raw();
+
+            inet_ntop(
+                AF_INET6,
+                &((*in6_addr).sin6_addr) as *const _ as *const c_void,
+                dst,
+                45,
+            );
+
+            std::ffi::CString::from_raw(dst).into_string().unwrap()
+        };
+
+        assert_eq!(s, "2001:db8:85a3::8a2e:370:7334");
+
+        let addr = unsafe {
+            std_addr_from_c(
+                &*(&out as *const _ as *const sockaddr),
+                std::mem::size_of::<sockaddr_in6>() as socklen_t,
+            )
+        };
+
+        assert_eq!(
+            addr,
+            "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:8080"
+                .parse()
+                .unwrap()
+        );
+    }
+
+    #[cfg(not(windows))]
+    extern {
+        fn inet_ntop(
+            af: c_int, src: *const c_void, dst: *mut c_char, size: socklen_t,
+        ) -> *mut c_char;
+    }
 }
