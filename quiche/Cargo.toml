@@ -67,7 +67,7 @@ qlog = { version = "0.8", path = "../qlog", optional = true }
 sfv = { version = "0.9", optional = true }
 
 [target."cfg(windows)".dependencies]
-winapi = { version = "0.3", features = ["wincrypt", "ws2def", "ws2ipdef"] }
+winapi = { version = "0.3", features = ["wincrypt", "ws2def", "ws2ipdef", "ws2tcpip"] }
 
 [dev-dependencies]
 mio = { version = "0.8", features = ["net", "os-poll"] }
