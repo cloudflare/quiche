@@ -1337,29 +1337,19 @@ impl Connection {
     fn process_dgrams(
         &mut self, conn: &mut super::Connection,
     ) -> Result<(u64, Event)> {
-        let mut d = [0; 8];
+        if conn.dgram_recv_queue_len() > 0 {
+            if self.dgram_event_triggered {
+                return Err(Error::Done);
+            }
 
-        match conn.dgram_recv_peek(&mut d, 8) {
-            Ok(_) => {
-                if self.dgram_event_triggered {
-                    return Err(Error::Done);
-                }
+            self.dgram_event_triggered = true;
 
-                self.dgram_event_triggered = true;
-
-                Ok((0, Event::Datagram))
-            },
-
-            Err(crate::Error::Done) => {
-                // The dgram recv queue is empty, so re-arm the Datagram event
-                // so it is issued next time a DATAGRAM is received.
-                self.dgram_event_triggered = false;
-
-                Err(Error::Done)
-            },
-
-            Err(e) => Err(Error::TransportError(e)),
+            return Ok((0, Event::Datagram));
         }
+
+        self.dgram_event_triggered = false;
+
+        Err(Error::Done)
     }
 
     /// Reads request or response body data into the provided buffer.
