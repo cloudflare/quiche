@@ -672,7 +672,7 @@ fn handle_path_events(client: &mut Client) {
 
             quiche::PathEvent::ReusedSourceConnectionId(cid_seq, old, new) => {
                 info!(
-                    "{} Peer reused cid seq {} (intially {:?}) on {:?}",
+                    "{} Peer reused cid seq {} (initially {:?}) on {:?}",
                     client.conn.trace_id(),
                     cid_seq,
                     old,

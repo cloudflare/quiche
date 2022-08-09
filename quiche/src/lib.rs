@@ -4089,7 +4089,7 @@ impl Connection {
     /// This represents the maximum size of a packet burst as determined by the
     /// congestion control algorithm in use.
     ///
-    /// Applications can, for example, use it in conjuction with segmentatation
+    /// Applications can, for example, use it in conjunction with segmentation
     /// offloading mechanisms as the maximum limit for outgoing aggregates of
     /// multiple packets.
     #[inline]
@@ -4105,7 +4105,7 @@ impl Connection {
     /// This represents the maximum size of a packet burst as determined by the
     /// congestion control algorithm in use.
     ///
-    /// Applications can, for example, use it in conjuction with segmentatation
+    /// Applications can, for example, use it in conjunction with segmentation
     /// offloading mechanisms as the maximum limit for outgoing aggregates of
     /// multiple packets.
     ///
@@ -5287,7 +5287,7 @@ impl Connection {
     /// the maximum number of active Connection IDs it negotiated. In such case
     /// (i.e., when [`source_cids_left()`] returns 0), if the host agrees to
     /// request the removal of previous connection IDs, it sets the
-    /// `retire_if_needed` parameter. Otherwhise, an [`IdLimit`] is returned.
+    /// `retire_if_needed` parameter. Otherwise, an [`IdLimit`] is returned.
     ///
     /// Note that setting `retire_if_needed` does not prevent this function from
     /// returning an [`IdLimit`] in the case the caller wants to retire still
@@ -6896,7 +6896,7 @@ pub struct Stats {
     /// The number of bytes sent lost.
     pub lost_bytes: u64,
 
-    /// The number of stream bytes retranmitted.
+    /// The number of stream bytes retransmitted.
     pub stream_retrans_bytes: u64,
 
     /// The maximum idle timeout.

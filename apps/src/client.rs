@@ -457,7 +457,7 @@ pub fn connect(
                     new,
                 ) => {
                     info!(
-                        "Peer reused cid seq {} (intially {:?}) on {:?}",
+                        "Peer reused cid seq {} (initially {:?}) on {:?}",
                         cid_seq, old, new
                     );
                 },

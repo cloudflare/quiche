@@ -50,7 +50,7 @@ And finally build NGINX with HTTP/3 support enabled:
 
 The (optional) `--build` argument will embed the latest commit hash from the
 quiche repository in the NGINX binary, so that it can be retrieved when running
-`nginx -V`. The `nginx -V` output can also be provided when submiiting bug/issue
+`nginx -V`. The `nginx -V` output can also be provided when submitting bug/issue
 requests to help with triage.
 
 ```

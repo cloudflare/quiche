@@ -343,7 +343,7 @@ impl ConnectionIdentifiers {
     /// the maximum number of active Connection IDs it negotiated. In such case
     /// (i.e., when [`active_source_cids()`] - `peer_active_conn_id_limit` = 0,
     /// if the caller agrees to request the removal of previous connection IDs,
-    /// it sets the `retire_if_needed` parameter. Otherwhise, an [`IdLimit`] is
+    /// it sets the `retire_if_needed` parameter. Otherwise, an [`IdLimit`] is
     /// returned.
     ///
     /// Note that setting `retire_if_needed` does not prevent this function from
@@ -662,7 +662,7 @@ impl ConnectionIdentifiers {
         self.scids.iter().filter(|e| e.path_id.is_none()).count()
     }
 
-    /// Returns the number of Destination Connectino IDs that have not been
+    /// Returns the number of Destination Connection IDs that have not been
     /// assigned to a path yet.
     ///
     /// Note that this function returns 0 if the host uses zero length

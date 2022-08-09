@@ -93,7 +93,7 @@ pub enum PathEvent {
     Closed(SocketAddr, SocketAddr),
 
     /// The stack observes that the Source Connection ID with the given sequence
-    /// number, initialy used by the peer over the first pair of `SocketAddr`s,
+    /// number, initially used by the peer over the first pair of `SocketAddr`s,
     /// is now reused over the second pair of `SocketAddr`s.
     ReusedSourceConnectionId(
         u64,
@@ -399,7 +399,7 @@ impl Path {
         if let Some(lost_probe_time) = lost_probe_time {
             self.last_probe_lost_time = match self.last_probe_lost_time {
                 Some(last) => {
-                    // Count a loss if at least 1-RTT happenned.
+                    // Count a loss if at least 1-RTT happened.
                     if lost_probe_time - last >= self.recovery.rtt() {
                         self.probing_lost += 1;
                         Some(lost_probe_time)
@@ -737,7 +737,7 @@ impl PathMap {
     /// Sets the path with identifier 'path_id' to be active.
     ///
     /// There can be exactly one active path on which non-probing packets can be
-    /// sent. If another path is marked as active, it will be superseeded by the
+    /// sent. If another path is marked as active, it will be superseded by the
     /// one having `path_id` as identifier.
     ///
     /// A server should always ensure that the active path is validated. If it
