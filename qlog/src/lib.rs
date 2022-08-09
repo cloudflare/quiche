@@ -449,6 +449,7 @@ impl std::convert::From<std::io::Error> for Error {
 pub const QLOG_VERSION: &str = "0.3";
 
 pub type Bytes = String;
+pub type StatelessResetToken = Bytes;
 
 /// A specialized [`Result`] type for quiche qlog operations.
 ///
@@ -612,7 +613,6 @@ pub struct CommonFields {
 pub enum TokenType {
     Retry,
     Resumption,
-    StatelessReset,
 }
 
 #[serde_with::skip_serializing_none]
