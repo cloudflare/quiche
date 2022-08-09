@@ -33,6 +33,7 @@ use super::DataRecipient;
 use super::RawInfo;
 use super::Token;
 use crate::HexSlice;
+use crate::StatelessResetToken;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -461,7 +462,7 @@ pub enum QuicFrame {
         retire_prior_to: u32,
         connection_id_length: Option<u8>,
         connection_id: Bytes,
-        stateless_reset_token: Option<Token>,
+        stateless_reset_token: Option<StatelessResetToken>,
     },
 
     RetireConnectionId {
@@ -509,7 +510,7 @@ pub struct PreferredAddress {
     pub port_v6: u16,
 
     pub connection_id: Bytes,
-    pub stateless_reset_token: Token,
+    pub stateless_reset_token: StatelessResetToken,
 }
 
 #[serde_with::skip_serializing_none]
@@ -541,7 +542,7 @@ pub struct TransportParametersSet {
     pub original_destination_connection_id: Option<Bytes>,
     pub initial_source_connection_id: Option<Bytes>,
     pub retry_source_connection_id: Option<Bytes>,
-    pub stateless_reset_token: Option<Token>,
+    pub stateless_reset_token: Option<StatelessResetToken>,
     pub disable_active_migration: Option<bool>,
 
     pub max_idle_timeout: Option<u64>,
@@ -614,7 +615,7 @@ pub struct PacketReceived {
 
     pub retry_token: Option<Token>,
 
-    pub stateless_reset_token: Option<Bytes>,
+    pub stateless_reset_token: Option<StatelessResetToken>,
 
     pub supported_versions: Option<Vec<Bytes>>,
 
@@ -637,7 +638,7 @@ pub struct PacketSent {
 
     pub retry_token: Option<Token>,
 
-    pub stateless_reset_token: Option<Bytes>,
+    pub stateless_reset_token: Option<StatelessResetToken>,
 
     pub supported_versions: Option<Vec<Bytes>>,
 

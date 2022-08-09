@@ -7401,14 +7401,9 @@ impl TransportParams {
             self.original_destination_connection_id.as_ref(),
         );
 
-        let stateless_reset_token = Some(qlog::Token {
-            ty: Some(qlog::TokenType::StatelessReset),
-            length: None,
-            data: qlog::HexSlice::maybe_string(
-                self.stateless_reset_token.map(|s| s.to_be_bytes()).as_ref(),
-            ),
-            details: None,
-        });
+        let stateless_reset_token = qlog::HexSlice::maybe_string(
+            self.stateless_reset_token.map(|s| s.to_be_bytes()).as_ref(),
+        );
 
         EventData::TransportParametersSet(
             qlog::events::quic::TransportParametersSet {

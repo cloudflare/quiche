@@ -874,8 +874,8 @@ impl Frame {
             Frame::NewToken { token } => QuicFrame::NewToken {
                 token: qlog::Token {
                     // TODO: pick the token type some how
-                    ty: Some(qlog::TokenType::StatelessReset),
-                    length: None,
+                    ty: Some(qlog::TokenType::Retry),
+                    length: Some(token.len() as u32),
                     data: qlog::HexSlice::maybe_string(Some(token)),
                     details: None,
                 },
@@ -948,12 +948,9 @@ impl Frame {
                 retire_prior_to: *retire_prior_to as u32,
                 connection_id_length: Some(conn_id.len() as u8),
                 connection_id: format!("{}", qlog::HexSlice::new(conn_id)),
-                stateless_reset_token: Some(qlog::Token {
-                    ty: Some(qlog::TokenType::StatelessReset),
-                    length: None,
-                    data: qlog::HexSlice::maybe_string(Some(reset_token)),
-                    details: None,
-                }),
+                stateless_reset_token: qlog::HexSlice::maybe_string(Some(
+                    reset_token,
+                )),
             },
 
             Frame::RetireConnectionId { seq_num } =>
