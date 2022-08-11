@@ -37,7 +37,7 @@ pub type Result<T> = std::result::Result<T, BufferTooShortError>;
 /// An error indicating that the provided [`OctetsMut`] is not big enough.
 ///
 /// [`OctetsMut`]: struct.OctetsMut.html
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BufferTooShortError;
 
 impl std::fmt::Display for BufferTooShortError {
@@ -118,7 +118,7 @@ macro_rules! put_u {
 /// Additionally, an offset (initially set to the start of the buffer) is
 /// incremented as bytes are read from / written to the buffer, to allow for
 /// sequential operations.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Octets<'a> {
     buf: &'a [u8],
     off: usize,
@@ -320,7 +320,7 @@ impl<'a> AsRef<[u8]> for Octets<'a> {
 /// A zero-copy mutable byte buffer.
 ///
 /// Like `Octets` but mutable.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct OctetsMut<'a> {
     buf: &'a mut [u8],
     off: usize,

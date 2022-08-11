@@ -355,7 +355,7 @@ const QLOG_STREAM_TYPE_SET: EventType =
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// An HTTP/3 error.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     /// There is no error or no work to do
     Done,
@@ -564,7 +564,7 @@ pub trait NameValue {
 }
 
 /// An owned name-value pair representing a raw HTTP header.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Header(Vec<u8>, Vec<u8>);
 
 fn try_print_as_readable(hdr: &[u8], f: &mut fmt::Formatter) -> fmt::Result {
@@ -604,7 +604,7 @@ impl NameValue for Header {
 }
 
 /// A non-owned name-value pair representing a raw HTTP header.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HeaderRef<'a>(&'a [u8], &'a [u8]);
 
 impl<'a> HeaderRef<'a> {
@@ -625,7 +625,7 @@ impl<'a> NameValue for HeaderRef<'a> {
 }
 
 /// An HTTP/3 connection event.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// Request/response headers were received.
     Headers {
@@ -696,7 +696,7 @@ pub enum Event {
 /// Structured Fields Dictionary field value. I.e, use `TryFrom` to parse the
 /// value of a Priority header field or a PRIORITY_UPDATE frame. Using this
 /// trait requires the `sfv` feature to be enabled.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct Priority {
     urgency: u8,

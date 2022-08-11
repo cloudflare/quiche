@@ -332,7 +332,7 @@ macro_rules! assert_headers {
 /// however they like.
 pub type Http3Assert = fn(&[Http3Req]);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Http3TestError {
     HandshakeFail,
     HttpFail,

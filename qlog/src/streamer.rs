@@ -40,7 +40,7 @@ use crate::events::EventType;
 /// [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
 use super::*;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum StreamerState {
     Initial,
     Ready,
@@ -306,7 +306,7 @@ mod tests {
             retry_token: None,
             stateless_reset_token: Some("reset_token".to_string()),
             supported_versions: None,
-            raw: raw.clone(),
+            raw,
             datagram_id: None,
             trigger: None,
         });
@@ -341,7 +341,7 @@ mod tests {
         // here, not timing specifics.
         let now = std::time::Instant::now();
 
-        assert!(matches!(s.add_event_with_instant(ev3.clone(), now), Ok(())));
+        assert!(matches!(s.add_event_with_instant(ev3, now), Ok(())));
 
         assert!(matches!(s.finish_log(), Ok(())));
 

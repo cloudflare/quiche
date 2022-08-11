@@ -30,7 +30,7 @@ use serde::Serialize;
 use super::h3::HttpHeader;
 use super::Bytes;
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackEventType {
     StateUpdated,
@@ -42,42 +42,42 @@ pub enum QpackEventType {
     InstructionParsed,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackOwner {
     Local,
     Remote,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackStreamState {
     Blocked,
     Unblocked,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackUpdateType {
     Added,
     Evicted,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct QpackDynamicTableEntry {
     pub index: u64,
     pub name: Option<String>,
     pub value: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct QpackHeaderBlockPrefix {
     pub required_insert_count: u64,
     pub sign_bit: bool,
     pub delta_base: u64,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackInstructionTypeName {
     SetDynamicTableCapacityInstruction,
@@ -89,14 +89,14 @@ pub enum QpackInstructionTypeName {
     InsertCountIncrementInstruction,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackTableType {
     Static,
     Dynamic,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub enum QPackInstruction {
     SetDynamicTableCapacityInstruction {
         instruction_type: QpackInstructionTypeName,
@@ -153,7 +153,7 @@ pub enum QPackInstruction {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum QpackHeaderBlockRepresentationTypeName {
     IndexedHeaderField,
@@ -161,7 +161,7 @@ pub enum QpackHeaderBlockRepresentationTypeName {
     LiteralHeaderFieldWithoutName,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub enum QpackHeaderBlockRepresentation {
     IndexedHeaderField {
         header_field_type: QpackHeaderBlockRepresentationTypeName,
@@ -206,7 +206,7 @@ pub enum QpackHeaderBlockRepresentation {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct QpackStateUpdated {
     pub owner: Option<QpackOwner>,
 
@@ -218,7 +218,7 @@ pub struct QpackStateUpdated {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct QpackStreamStateUpdated {
     pub stream_id: u64,
 
@@ -226,7 +226,7 @@ pub struct QpackStreamStateUpdated {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct QpackDynamicTableUpdated {
     pub update_type: QpackUpdateType,
 
@@ -234,7 +234,7 @@ pub struct QpackDynamicTableUpdated {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct QpackHeadersEncoded {
     pub stream_id: Option<u64>,
 
@@ -248,7 +248,7 @@ pub struct QpackHeadersEncoded {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct QpackHeadersDecoded {
     pub stream_id: Option<u64>,
 
@@ -262,7 +262,7 @@ pub struct QpackHeadersDecoded {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct QpackInstructionCreated {
     pub instruction: QPackInstruction,
 
@@ -271,7 +271,7 @@ pub struct QpackInstructionCreated {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct QpackInstructionParsed {
     pub instruction: QPackInstruction,
 

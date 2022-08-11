@@ -47,14 +47,14 @@ pub const MAX_DGRAM_OVERHEAD: usize = 2;
 pub const MAX_STREAM_OVERHEAD: usize = 12;
 pub const MAX_STREAM_SIZE: u64 = 1 << 62;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EcnCounts {
     ect0_count: u64,
     ect1_count: u64,
     ecn_ce_count: u64,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Frame {
     Padding {
         len: usize,
@@ -1377,7 +1377,7 @@ mod tests {
         };
 
         assert_eq!(wire_len, 1);
-        assert_eq!(&d[..wire_len], [0x01 as u8]);
+        assert_eq!(&d[..wire_len], [0x01_u8]);
 
         let mut b = octets::Octets::with_slice(&d);
         assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));

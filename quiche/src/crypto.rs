@@ -38,7 +38,7 @@ use crate::Result;
 use crate::packet;
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
     Initial   = 0,
     ZeroRTT   = 1,
@@ -60,7 +60,7 @@ impl Level {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Algorithm {
     #[allow(non_camel_case_types)]
     AES128_GCM,

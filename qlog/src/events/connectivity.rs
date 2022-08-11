@@ -31,14 +31,14 @@ use super::ApplicationErrorCode;
 use super::Bytes;
 use super::ConnectionErrorCode;
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportOwner {
     Local,
     Remote,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionState {
     Attempted,
@@ -52,7 +52,7 @@ pub enum ConnectionState {
     Closed,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectivityEventType {
     ServerListening,
@@ -63,7 +63,7 @@ pub enum ConnectivityEventType {
     ConnectionStateUpdated,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionClosedTrigger {
     Clean,
@@ -76,7 +76,7 @@ pub enum ConnectionClosedTrigger {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ServerListening {
     pub ip_v4: Option<String>, // human-readable or bytes
     pub ip_v6: Option<String>, // human-readable or bytes
@@ -87,7 +87,7 @@ pub struct ServerListening {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ConnectionStarted {
     pub ip_version: Option<String>, // "v4" or "v6"
     pub src_ip: String,             // human-readable or bytes
@@ -102,7 +102,7 @@ pub struct ConnectionStarted {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ConnectionClosed {
     pub owner: Option<TransportOwner>,
 
@@ -116,7 +116,7 @@ pub struct ConnectionClosed {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ConnectionIdUpdated {
     pub owner: Option<TransportOwner>,
 
@@ -125,13 +125,13 @@ pub struct ConnectionIdUpdated {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct SpinBitUpdated {
     pub state: bool,
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ConnectionStateUpdated {
     pub old: Option<ConnectionState>,
     pub new: ConnectionState,

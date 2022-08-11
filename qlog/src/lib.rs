@@ -559,7 +559,7 @@ impl TraceSeq {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct VantagePoint {
     pub name: Option<String>,
 
@@ -569,7 +569,7 @@ pub struct VantagePoint {
     pub flow: Option<VantagePointType>,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum VantagePointType {
     Client,
@@ -607,7 +607,7 @@ pub struct CommonFields {
     // TODO: additionalUserSpecifiedProperty
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum TokenType {
     Retry,
@@ -616,7 +616,7 @@ pub enum TokenType {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct Token {
     #[serde(rename(serialize = "type"))]
     pub ty: Option<TokenType>,
@@ -747,7 +747,7 @@ mod tests {
 
         let pkt_hdr = make_pkt_hdr(PacketType::Initial);
         let ev_data = EventData::PacketSent(PacketSent {
-            header: pkt_hdr.clone(),
+            header: pkt_hdr,
             frames: None,
             is_coalesced: None,
             retry_token: None,
@@ -818,7 +818,7 @@ mod tests {
         });
 
         let ev_data = EventData::PacketSent(PacketSent {
-            header: pkt_hdr.clone(),
+            header: pkt_hdr,
             frames: Some(frames),
             is_coalesced: None,
             retry_token: None,
