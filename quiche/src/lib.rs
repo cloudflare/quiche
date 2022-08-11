@@ -456,7 +456,7 @@ const MAX_PROBING_TIMEOUTS: usize = 3;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// A QUIC error.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     /// There is no more work to do.
     Done,
@@ -582,7 +582,7 @@ impl std::convert::From<octets::BufferTooShortError> for Error {
 }
 
 /// Ancillary information about incoming packets.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecvInfo {
     /// The remote address the packet was received from.
     pub from: SocketAddr,
@@ -592,7 +592,7 @@ pub struct RecvInfo {
 }
 
 /// Ancillary information about outgoing packets.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SendInfo {
     /// The local address the packet should be sent from.
     pub from: SocketAddr,
@@ -609,7 +609,7 @@ pub struct SendInfo {
 }
 
 /// Represents information carried by `CONNECTION_CLOSE` frames.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConnectionError {
     /// Whether the error came from the application or the transport layer.
     pub is_app: bool,
@@ -7923,7 +7923,7 @@ mod tests {
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
         assert_eq!(raw_params.len(), 94);
 
-        let new_tp = TransportParams::decode(&raw_params, false).unwrap();
+        let new_tp = TransportParams::decode(raw_params, false).unwrap();
 
         assert_eq!(new_tp, tp);
 
@@ -7953,7 +7953,7 @@ mod tests {
             TransportParams::encode(&tp, false, &mut raw_params).unwrap();
         assert_eq!(raw_params.len(), 69);
 
-        let new_tp = TransportParams::decode(&raw_params, true).unwrap();
+        let new_tp = TransportParams::decode(raw_params, true).unwrap();
 
         assert_eq!(new_tp, tp);
     }
@@ -8241,7 +8241,7 @@ mod tests {
 
         let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
 
-        assert_eq!(pipe.client.set_session(&session), Ok(()));
+        assert_eq!(pipe.client.set_session(session), Ok(()));
         assert_eq!(pipe.handshake(), Ok(()));
 
         assert_eq!(pipe.client.is_established(), true);
@@ -8305,7 +8305,7 @@ mod tests {
 
         // Configure session on new connection.
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(&session), Ok(()));
+        assert_eq!(pipe.client.set_session(session), Ok(()));
 
         // Client sends initial flight.
         let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -8366,7 +8366,7 @@ mod tests {
 
         // Configure session on new connection.
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(&session), Ok(()));
+        assert_eq!(pipe.client.set_session(session), Ok(()));
 
         // Client sends initial flight.
         let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -8437,7 +8437,7 @@ mod tests {
 
         // Configure session on new connection.
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(&session), Ok(()));
+        assert_eq!(pipe.client.set_session(session), Ok(()));
 
         // Client sends initial flight.
         pipe.client.send(&mut buf).unwrap();
@@ -8558,7 +8558,7 @@ mod tests {
 
         // Configure session on new connection.
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(&session), Ok(()));
+        assert_eq!(pipe.client.set_session(session), Ok(()));
 
         // Client sends initial flight.
         let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -9518,7 +9518,7 @@ mod tests {
 
         // Emulate handshake packet delay by not making server process client
         // packet.
-        let delayed = flight.clone();
+        let delayed = flight;
 
         testing::emit_flight(&mut pipe.server).ok();
 
@@ -9684,7 +9684,7 @@ mod tests {
 
         assert_eq!(frames.len(), 1);
 
-        match frames.iter().next() {
+        match frames.first() {
             Some(frame::Frame::ACK { .. }) => (),
 
             f => panic!("expected ACK frame, got {:?}", f),
@@ -10163,7 +10163,7 @@ mod tests {
             testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
 
         assert_eq!(
-            frames.iter().next(),
+            frames.first(),
             Some(&frame::Frame::Stream {
                 stream_id: 0,
                 data: stream::RangeBuf::from(b"aaaaa", 0, false),
@@ -10176,7 +10176,7 @@ mod tests {
             testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
 
         assert_eq!(
-            frames.iter().next(),
+            frames.first(),
             Some(&frame::Frame::Stream {
                 stream_id: 4,
                 data: stream::RangeBuf::from(b"aaaaa", 0, false),
@@ -11656,7 +11656,7 @@ mod tests {
 
             let frames =
                 testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
-            let stream = frames.iter().next().unwrap();
+            let stream = frames.first().unwrap();
 
             assert_eq!(stream, &frame::Frame::Stream {
                 stream_id: 8,
@@ -11679,7 +11679,7 @@ mod tests {
 
             let frames =
                 testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
-            let stream = frames.iter().next().unwrap();
+            let stream = frames.first().unwrap();
 
             assert_eq!(stream, &frame::Frame::Stream {
                 stream_id: 16,
@@ -11702,7 +11702,7 @@ mod tests {
 
             let frames =
                 testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
-            let stream = frames.iter().next().unwrap();
+            let stream = frames.first().unwrap();
 
             assert_eq!(stream, &frame::Frame::Stream {
                 stream_id: 20,
@@ -11727,7 +11727,7 @@ mod tests {
                 testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
 
             assert_eq!(
-                frames.iter().next(),
+                frames.first(),
                 Some(&frame::Frame::Stream {
                     stream_id: 12,
                     data: stream::RangeBuf::from(&out, off, false),
@@ -11740,7 +11740,7 @@ mod tests {
             let frames =
                 testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
 
-            let stream = frames.iter().next().unwrap();
+            let stream = frames.first().unwrap();
 
             assert_eq!(stream, &frame::Frame::Stream {
                 stream_id: 4,
@@ -11763,7 +11763,7 @@ mod tests {
 
             let frames =
                 testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
-            let stream = frames.iter().next().unwrap();
+            let stream = frames.first().unwrap();
 
             assert_eq!(stream, &frame::Frame::Stream {
                 stream_id: 0,
@@ -11849,7 +11849,7 @@ mod tests {
             testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
 
         assert_eq!(
-            frames.iter().next(),
+            frames.first(),
             Some(&frame::Frame::Stream {
                 stream_id: 8,
                 data: stream::RangeBuf::from(b"b", 0, false),
@@ -11863,7 +11863,7 @@ mod tests {
             testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
 
         assert_eq!(
-            frames.iter().next(),
+            frames.first(),
             Some(&frame::Frame::Stream {
                 stream_id: 0,
                 data: stream::RangeBuf::from(b"b", 0, false),
@@ -11877,7 +11877,7 @@ mod tests {
             testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
 
         assert_eq!(
-            frames.iter().next(),
+            frames.first(),
             Some(&frame::Frame::Stream {
                 stream_id: 12,
                 data: stream::RangeBuf::from(b"b", 0, false),
@@ -11890,7 +11890,7 @@ mod tests {
             testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
 
         assert_eq!(
-            frames.iter().next(),
+            frames.first(),
             Some(&frame::Frame::Stream {
                 stream_id: 4,
                 data: stream::RangeBuf::from(b"b", 0, false),
@@ -12751,7 +12751,7 @@ mod tests {
             testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
 
         assert_eq!(
-            frames.iter().next(),
+            frames.first(),
             Some(&frame::Frame::ConnectionClose {
                 error_code: 0x1234,
                 frame_type: 0,
@@ -12777,7 +12777,7 @@ mod tests {
             testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
 
         assert_eq!(
-            frames.iter().next(),
+            frames.first(),
             Some(&frame::Frame::ApplicationClose {
                 error_code: 0x1234,
                 reason: b"hello!".to_vec(),

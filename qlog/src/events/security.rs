@@ -29,7 +29,7 @@ use serde::Serialize;
 
 use super::Bytes;
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyType {
     ServerInitialSecret,
@@ -48,7 +48,7 @@ pub enum KeyType {
     Client1RttSecret,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyUpdateOrRetiredTrigger {
     Tls,
@@ -57,7 +57,7 @@ pub enum KeyUpdateOrRetiredTrigger {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct KeyUpdated {
     pub key_type: KeyType,
 
@@ -70,7 +70,7 @@ pub struct KeyUpdated {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct KeyRetired {
     pub key_type: KeyType,
     pub key: Option<Bytes>,

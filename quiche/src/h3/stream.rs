@@ -36,7 +36,7 @@ pub const QPACK_DECODER_STREAM_TYPE_ID: u64 = 0x3;
 
 const MAX_STATE_BUF_SIZE: usize = (1 << 24) - 1;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Type {
     Control,
     Request,
@@ -60,7 +60,7 @@ impl Type {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
     /// Reading the stream's type.
     StreamType,

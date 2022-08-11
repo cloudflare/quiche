@@ -62,7 +62,7 @@ pub const EPOCH_COUNT: usize = 3;
 pub type Epoch = usize;
 
 /// QUIC packet type.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Type {
     /// Initial packet.
     Initial,
@@ -238,7 +238,7 @@ impl<'a> std::fmt::Debug for ConnectionId<'a> {
 }
 
 /// A QUIC packet's header.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Header<'a> {
     /// The type of the packet.
     pub ty: Type,
@@ -970,7 +970,7 @@ mod tests {
         assert!(hdr.to_bytes(&mut b).is_ok());
 
         // Add fake retry integrity token.
-        b.put_bytes(&vec![0xba; 16]).unwrap();
+        b.put_bytes(&[0xba; 16]).unwrap();
 
         let mut b = octets::OctetsMut::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
@@ -1879,7 +1879,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(written, expected_pkt.len());
-        assert_eq!(&out[..written], &expected_pkt[..]);
+        assert_eq!(&out[..written], expected_pkt);
     }
 
     #[test]

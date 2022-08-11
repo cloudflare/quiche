@@ -71,7 +71,7 @@ impl PathState {
 }
 
 /// A path-specific event.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PathEvent {
     /// A new network path (local address, peer address) has been seen on a
     /// received packet. Note that this event is only triggered for servers, as

@@ -40,7 +40,7 @@ const LITERAL_WITH_NAME_REF: u8 = 0b0100_0000;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// A QPACK error.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     /// The provided buffer is too short.
     BufferTooShort,

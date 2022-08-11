@@ -1005,7 +1005,7 @@ impl Recovery {
 ///
 /// This enum provides currently available list of congestion control
 /// algorithms.
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub enum CongestionControlAlgorithm {
     /// Reno congestion control algorithm. `reno` in a string form.
