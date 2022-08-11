@@ -929,9 +929,13 @@ impl Connection {
     /// On success the new connection is returned.
     ///
     /// The [`StreamLimit`] error is returned when the HTTP/3 control stream
-    /// cannot be created.
+    /// cannot be created due to stream limits.
     ///
-    /// [`StreamLimit`]: ../enum.Error.html#variant.InvalidState
+    /// The [`InternalError`] error is returned when the HTTP/3 control stream
+    /// cannot be created due to flow control limits.
+    ///
+    /// [`StreamLimit`]: ../enum.Error.html#variant.StreamLimit
+    /// [`InternalError`]: ../enum.Error.html#variant.InternalError
     pub fn with_transport(
         conn: &mut super::Connection, config: &Config,
     ) -> Result<Connection> {
@@ -2003,8 +2007,21 @@ impl Connection {
 
     /// Sends SETTINGS frame based on HTTP/3 configuration.
     fn send_settings(&mut self, conn: &mut super::Connection) -> Result<()> {
-        let stream_id =
-            self.open_uni_stream(conn, stream::HTTP3_CONTROL_STREAM_TYPE_ID)?;
+        let stream_id = match self
+            .open_uni_stream(conn, stream::HTTP3_CONTROL_STREAM_TYPE_ID)
+        {
+            Ok(v) => v,
+
+            Err(e) => {
+                trace!("{} Control stream blocked", conn.trace_id(),);
+
+                if e == Error::Done {
+                    return Err(Error::InternalError);
+                }
+
+                return Err(e);
+            },
+        };
 
         self.control_stream_id = Some(stream_id);
 

@@ -977,8 +977,7 @@ impl Http3Conn {
                     qpack_max_table_capacity,
                     qpack_blocked_streams,
                 ),
-            )
-            .unwrap(),
+            ).expect("Unable to create HTTP/3 connection, check the server's uni stream limit and window size"),
             reqs_hdrs_sent: 0,
             reqs_complete: 0,
             largest_processed_request: 0,
@@ -999,17 +998,18 @@ impl Http3Conn {
         qpack_blocked_streams: Option<u64>,
         dgram_sender: Option<Http3DgramSender>,
         output_sink: Rc<RefCell<dyn FnMut(String)>>,
-    ) -> Box<dyn HttpConn> {
+    ) -> std::result::Result<Box<dyn HttpConn>, String> {
+        let h3_conn = quiche::h3::Connection::with_transport(
+            conn,
+            &make_h3_config(
+                max_field_section_size,
+                qpack_max_table_capacity,
+                qpack_blocked_streams,
+            ),
+        ).map_err(|_| "Unable to create HTTP/3 connection, check the client's uni stream limit and window size")?;
+
         let h_conn = Http3Conn {
-            h3_conn: quiche::h3::Connection::with_transport(
-                conn,
-                &make_h3_config(
-                    max_field_section_size,
-                    qpack_max_table_capacity,
-                    qpack_blocked_streams,
-                ),
-            )
-            .unwrap(),
+            h3_conn,
             reqs_hdrs_sent: 0,
             reqs_complete: 0,
             largest_processed_request: 0,
@@ -1021,7 +1021,7 @@ impl Http3Conn {
             output_sink,
         };
 
-        Box::new(h_conn)
+        Ok(Box::new(h_conn))
     }
 
     /// Builds an HTTP/3 response given a request.

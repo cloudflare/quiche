@@ -441,14 +441,21 @@ fn main() {
                         None
                     };
 
-                    client.http_conn = Some(Http3Conn::with_conn(
+                    client.http_conn = match Http3Conn::with_conn(
                         &mut client.conn,
                         conn_args.max_field_section_size,
                         conn_args.qpack_max_table_capacity,
                         conn_args.qpack_blocked_streams,
                         dgram_sender,
                         Rc::new(RefCell::new(stdout_sink)),
-                    ));
+                    ) {
+                        Ok(v) => Some(v),
+
+                        Err(e) => {
+                            trace!("{} {}", client.conn.trace_id(), e);
+                            None
+                        },
+                    };
 
                     client.app_proto_selected = true;
                 } else if alpns::SIDUCK.contains(&app_proto) {
