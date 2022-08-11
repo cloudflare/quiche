@@ -219,7 +219,7 @@ fn main() {
         if conn.is_established() && http3_conn.is_none() {
             http3_conn = Some(
                 quiche::h3::Connection::with_transport(&mut conn, &h3_config)
-                    .unwrap(),
+                .expect("Unable to create HTTP/3 connection, check the server's uni stream limit and window size"),
             );
         }
 
