@@ -1242,6 +1242,7 @@ pub struct Connection {
 
     /// Draining timeout expiration time.
     draining_timer: Option<time::Instant>,
+    max_drain_timeout: Option<time::Duration>,
 
     /// List of raw packets that were received before they could be decrypted.
     undecryptable_pkts: VecDeque<(Vec<u8>, RecvInfo)>,
@@ -1695,6 +1696,7 @@ impl Connection {
             idle_timer: None,
 
             draining_timer: None,
+            max_drain_timeout: None,
 
             undecryptable_pkts: VecDeque::new(),
 
@@ -3561,7 +3563,7 @@ impl Connection {
 
                         if push_frame_to_pkt!(b, frames, frame, left) {
                             let pto = self.paths.get(send_pid)?.recovery.pto();
-                            self.draining_timer = Some(now + (pto * 3));
+                            self.set_draining_timer(now, pto * 3);
 
                             ack_eliciting = true;
                             in_flight = true;
@@ -3577,7 +3579,7 @@ impl Connection {
 
                     if push_frame_to_pkt!(b, frames, frame, left) {
                         let pto = self.paths.get(send_pid)?.recovery.pto();
-                        self.draining_timer = Some(now + (pto * 3));
+                        self.set_draining_timer(now, pto * 3);
 
                         ack_eliciting = true;
                         in_flight = true;
@@ -5532,6 +5534,20 @@ impl Connection {
         Ok(())
     }
 
+    /// Closes the connection with a timeout. If the connection close has
+    /// already been initiated, the deadline will be unaffected. Timeouts
+    /// greater than the idle timeout will be ignored.
+    ///
+    /// See [`close()`] for more information
+    ///
+    /// [`close()`]: struct.Connection.html#method.close
+    pub fn close_with_timeout(
+        &mut self, app: bool, err: u64, reason: &[u8], timeout: time::Duration,
+    ) -> Result<()> {
+        self.max_drain_timeout.replace(timeout);
+        self.close(app, err, reason)
+    }
+
     /// Returns a string uniquely representing the connection.
     ///
     /// This can be used for logging purposes to differentiate between multiple
@@ -5669,6 +5685,24 @@ impl Connection {
     #[inline]
     pub fn is_draining(&self) -> bool {
         self.draining_timer.is_some()
+    }
+
+    /// Updates the draining timer to be no later than `timeout` from now. The
+    /// timer will also never exceed idle timeout.
+    fn set_draining_timer(
+        &mut self, now: time::Instant, timeout: time::Duration,
+    ) {
+        let deadline = now +
+            [Some(timeout), self.idle_timeout(), self.max_drain_timeout]
+                .iter()
+                .filter_map(|&d| d)
+                .min()
+                .unwrap_or(timeout);
+        self.draining_timer.replace(
+            self.draining_timer
+                .map(|c| cmp::min(c, deadline))
+                .unwrap_or(deadline),
+        );
     }
 
     /// Returns true if the connection is closed.
@@ -6448,7 +6482,7 @@ impl Connection {
                 });
 
                 let path = self.paths.get_active()?;
-                self.draining_timer = Some(now + (path.recovery.pto() * 3));
+                self.set_draining_timer(now, path.recovery.pto() * 3);
             },
 
             frame::Frame::ApplicationClose { error_code, reason } => {
@@ -6459,7 +6493,7 @@ impl Connection {
                 });
 
                 let path = self.paths.get_active()?;
-                self.draining_timer = Some(now + (path.recovery.pto() * 3));
+                self.set_draining_timer(now, path.recovery.pto() * 3);
             },
 
             frame::Frame::HandshakeDone => {
