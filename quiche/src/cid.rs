@@ -61,8 +61,7 @@ impl BoundedNonEmptyConnectionIdVecDeque {
     /// Creates a `VecDeque` with the provided `capacity` and inserts
     /// `initial_entry` in it.
     fn new(capacity: usize, initial_entry: ConnectionIdEntry) -> Self {
-        let capacity = std::cmp::max(capacity, 1);
-        let mut inner = VecDeque::with_capacity(capacity);
+        let mut inner = VecDeque::with_capacity(1);
         inner.push_back(initial_entry);
         Self { inner, capacity }
     }
@@ -72,8 +71,6 @@ impl BoundedNonEmptyConnectionIdVecDeque {
     fn resize(&mut self, new_capacity: usize) {
         if new_capacity > self.capacity {
             self.capacity = new_capacity;
-            let additional = new_capacity - self.inner.len();
-            self.inner.reserve_exact(additional);
         }
     }
 
@@ -313,12 +310,15 @@ impl ConnectionIdentifiers {
 
     /// Sets the maximum number of source connection IDs our peer allows us.
     pub fn set_source_conn_id_limit(&mut self, v: u64) {
+        // Bound conn id limit so our scids queue sizing is valid.
+        let v = std::cmp::min(v, (usize::MAX / 2) as u64) as usize;
+
         // It must be at least 2.
         if v >= 2 {
-            self.source_conn_id_limit = v as usize;
+            self.source_conn_id_limit = v;
             // We need to track up to (2 * source_conn_id_limit - 1) source
             // Connection IDs when the host wants to force their renewal.
-            self.scids.resize((2 * v - 1) as usize);
+            self.scids.resize(2 * v - 1);
         }
     }
 
