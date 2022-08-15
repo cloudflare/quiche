@@ -29,8 +29,6 @@ use crate::Result;
 
 use std::collections::VecDeque;
 
-const DGRAM_QUEUE_DEFAULT_LEN: usize = 256;
-
 /// Keeps track of DATAGRAM frames.
 #[derive(Default)]
 pub struct DatagramQueue {
@@ -42,9 +40,7 @@ pub struct DatagramQueue {
 impl DatagramQueue {
     pub fn new(queue_max_len: usize) -> Self {
         DatagramQueue {
-            queue: VecDeque::with_capacity(
-                DGRAM_QUEUE_DEFAULT_LEN.min(queue_max_len),
-            ),
+            queue: VecDeque::new(),
             queue_bytes_size: 0,
             queue_max_len,
         }
