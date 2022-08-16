@@ -476,6 +476,7 @@ pub struct PathMap {
     /// The paths of the connection. Each of them has an internal identifier
     /// that is used by `addrs_to_paths` and `ConnectionEntry`.
     paths: Slab<Path>,
+    max_concurrent_paths: usize,
 
     /// The mapping from the (local `SocketAddr`, peer `SocketAddr`) to the
     /// `Path` structure identifier.
@@ -494,7 +495,7 @@ impl PathMap {
     pub fn new(
         mut initial_path: Path, max_concurrent_paths: usize, is_server: bool,
     ) -> Self {
-        let mut paths = Slab::with_capacity(max_concurrent_paths);
+        let mut paths = Slab::with_capacity(1); // most connections only have one path
         let mut addrs_to_paths = BTreeMap::new();
 
         let local_addr = initial_path.local_addr;
@@ -508,6 +509,7 @@ impl PathMap {
 
         Self {
             paths,
+            max_concurrent_paths,
             addrs_to_paths,
             events: VecDeque::new(),
             is_server,
@@ -608,7 +610,7 @@ impl PathMap {
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     fn make_room_for_new_path(&mut self) -> Result<()> {
-        if self.paths.len() < self.paths.capacity() {
+        if self.paths.len() < self.max_concurrent_paths {
             return Ok(());
         }
 
