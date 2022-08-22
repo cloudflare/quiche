@@ -3857,8 +3857,14 @@ impl Connection {
         // Alternate trying to send DATAGRAMs next time.
         self.emit_dgram = !dgram_emitted;
 
-        // Create PING for PTO probe if no other ack-eliciting frame is sent.
-        if self.paths.get(send_pid)?.recovery.loss_probes[epoch] > 0 &&
+        // Create PING for PTO probe if no other ack-eliciting frame is sent or if
+        // we've sent too many non ACK eliciting packets without having
+        // sent an ACK eliciting one
+        if self
+            .paths
+            .get_mut(send_pid)?
+            .recovery
+            .should_elicit_ack(epoch) &&
             !ack_eliciting &&
             left >= 1 &&
             !is_closing
