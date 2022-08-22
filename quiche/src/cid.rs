@@ -58,7 +58,7 @@ struct BoundedNonEmptyConnectionIdVecDeque {
 }
 
 impl BoundedNonEmptyConnectionIdVecDeque {
-    /// Creates a `VecDeque` with the provided `capacity` and inserts
+    /// Creates a `VecDeque` bounded by `capacity` and inserts
     /// `initial_entry` in it.
     fn new(capacity: usize, initial_entry: ConnectionIdEntry) -> Self {
         let mut inner = VecDeque::with_capacity(1);
@@ -66,8 +66,9 @@ impl BoundedNonEmptyConnectionIdVecDeque {
         Self { inner, capacity }
     }
 
-    /// Updates the capacity of the inner `VecDeque` to `new_capacity`. Does
-    /// nothing if `new_capacity` is lower or equal to the current `capacity`.
+    /// Updates the maximum capacity of the inner `VecDeque` to `new_capacity`.
+    /// Does nothing if `new_capacity` is lower or equal to the current
+    /// `capacity`.
     fn resize(&mut self, new_capacity: usize) {
         if new_capacity > self.capacity {
             self.capacity = new_capacity;
