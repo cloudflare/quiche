@@ -476,6 +476,8 @@ pub struct PathMap {
     /// The paths of the connection. Each of them has an internal identifier
     /// that is used by `addrs_to_paths` and `ConnectionEntry`.
     paths: Slab<Path>,
+
+    /// The maximum number of concurrent paths allowed.
     max_concurrent_paths: usize,
 
     /// The mapping from the (local `SocketAddr`, peer `SocketAddr`) to the
