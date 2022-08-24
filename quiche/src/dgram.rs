@@ -29,12 +29,10 @@ use crate::Result;
 
 use std::collections::VecDeque;
 
-const DGRAM_QUEUE_DEFAULT_LEN: usize = 256;
-
 /// Keeps track of DATAGRAM frames.
 #[derive(Default)]
 pub struct DatagramQueue {
-    queue: VecDeque<Vec<u8>>,
+    queue: Option<VecDeque<Vec<u8>>>,
     queue_max_len: usize,
     queue_bytes_size: usize,
 }
@@ -42,9 +40,7 @@ pub struct DatagramQueue {
 impl DatagramQueue {
     pub fn new(queue_max_len: usize) -> Self {
         DatagramQueue {
-            queue: VecDeque::with_capacity(
-                DGRAM_QUEUE_DEFAULT_LEN.min(queue_max_len),
-            ),
+            queue: None,
             queue_bytes_size: 0,
             queue_max_len,
         }
@@ -56,17 +52,19 @@ impl DatagramQueue {
         }
 
         self.queue_bytes_size += data.len();
-        self.queue.push_back(data);
+        self.queue
+            .get_or_insert_with(Default::default)
+            .push_back(data);
 
         Ok(())
     }
 
     pub fn peek_front_len(&self) -> Option<usize> {
-        self.queue.front().map(|d| d.len())
+        self.queue.as_ref().and_then(|q| q.front().map(|d| d.len()))
     }
 
     pub fn peek_front_bytes(&self, buf: &mut [u8], len: usize) -> Result<usize> {
-        match self.queue.front() {
+        match self.queue.as_ref().and_then(|q| q.front()) {
             Some(d) => {
                 let len = std::cmp::min(len, d.len());
                 if buf.len() < len {
@@ -82,7 +80,7 @@ impl DatagramQueue {
     }
 
     pub fn pop(&mut self) -> Option<Vec<u8>> {
-        if let Some(d) = self.queue.pop_front() {
+        if let Some(d) = self.queue.as_mut().and_then(|q| q.pop_front()) {
             self.queue_bytes_size = self.queue_bytes_size.saturating_sub(d.len());
             return Some(d);
         }
@@ -91,21 +89,22 @@ impl DatagramQueue {
     }
 
     pub fn has_pending(&self) -> bool {
-        !self.queue.is_empty()
+        !self.queue.as_ref().map(|q| q.is_empty()).unwrap_or(true)
     }
 
     pub fn purge<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
-        self.queue.retain(|d| !f(d));
-        self.queue_bytes_size =
-            self.queue.iter().fold(0, |total, d| total + d.len());
+        if let Some(q) = self.queue.as_mut() {
+            q.retain(|d| !f(d));
+            self.queue_bytes_size = q.iter().fold(0, |total, d| total + d.len());
+        }
     }
 
     pub fn is_full(&self) -> bool {
-        self.queue.len() == self.queue_max_len
+        self.len() == self.queue_max_len
     }
 
     pub fn len(&self) -> usize {
-        self.queue.len()
+        self.queue.as_ref().map(|q| q.len()).unwrap_or(0)
     }
 
     pub fn byte_size(&self) -> usize {
