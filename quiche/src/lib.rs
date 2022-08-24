@@ -5333,6 +5333,11 @@ impl Connection {
 
     /// Returns the number of source Connection IDs that can still be provided
     /// to the peer without exceeding the limit it advertised.
+    ///
+    /// The application should not issue the maximum number of permitted source
+    /// Connection IDs, but instead treat this as an untrusted upper bound.
+    /// Applications should limit how many outstanding source ConnectionIDs
+    /// are simultaneously issued to prevent issuing more than they can handle.
     #[inline]
     pub fn source_cids_left(&self) -> usize {
         self.max_active_source_cids() - self.active_source_cids()
