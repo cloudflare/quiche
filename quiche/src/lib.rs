@@ -5719,7 +5719,6 @@ impl Connection {
     /// Collects and returns statistics about the connection.
     #[inline]
     pub fn stats(&self) -> Stats {
-        let paths = self.paths.iter().map(|(_, p)| p.stats()).collect();
         Stats {
             recv: self.recv_count,
             sent: self.sent_count,
@@ -5729,6 +5728,7 @@ impl Connection {
             recv_bytes: self.recv_bytes,
             lost_bytes: self.lost_bytes,
             stream_retrans_bytes: self.stream_retrans_bytes,
+            paths_count: self.paths.len(),
             peer_max_idle_timeout: self.peer_transport_params.max_idle_timeout,
             peer_max_udp_payload_size: self
                 .peer_transport_params
@@ -5762,8 +5762,13 @@ impl Connection {
             peer_max_datagram_frame_size: self
                 .peer_transport_params
                 .max_datagram_frame_size,
-            paths,
         }
+    }
+
+    /// Collects and returns statistics about each known path for the
+    /// connection.
+    pub fn path_stats(&self) -> impl Iterator<Item = PathStats> + '_ {
+        self.paths.iter().map(|(_, p)| p.stats())
     }
 
     fn encode_transport_params(&mut self) -> Result<()> {
@@ -6904,6 +6909,9 @@ pub struct Stats {
     /// The number of stream bytes retransmitted.
     pub stream_retrans_bytes: u64,
 
+    /// The number of known paths for the connection.
+    pub paths_count: usize,
+
     /// The maximum idle timeout.
     pub peer_max_idle_timeout: u64,
 
@@ -6942,9 +6950,6 @@ pub struct Stats {
 
     /// DATAGRAM frame extension parameter, if any.
     pub peer_max_datagram_frame_size: Option<u64>,
-
-    /// Statistics of the current paths.
-    pub paths: Vec<path::PathStats>,
 }
 
 impl std::fmt::Debug for Stats {
@@ -7026,14 +7031,6 @@ impl std::fmt::Debug for Stats {
             self.peer_max_datagram_frame_size,
         )?;
 
-        write!(f, " }}")?;
-
-        write!(f, " paths={{ ")?;
-        for (i, p) in self.paths.iter().enumerate() {
-            write!(f, "{}: {{", i)?;
-            p.fmt(f)?;
-            write!(f, "}} ")?;
-        }
         write!(f, "}}")
     }
 }
@@ -14468,6 +14465,7 @@ pub use crate::packet::Header;
 pub use crate::packet::Type;
 
 pub use crate::path::PathEvent;
+pub use crate::path::PathStats;
 pub use crate::path::SocketAddrIter;
 
 pub use crate::recovery::CongestionControlAlgorithm;

@@ -401,10 +401,13 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
 
         if (quiche_conn_is_closed(conn_io->conn)) {
             quiche_stats stats;
+            quiche_path_stats path_stats;
 
             quiche_conn_stats(conn_io->conn, &stats);
+            quiche_conn_path_stats(conn_io->conn, 0, &path_stats);
+
             fprintf(stderr, "connection closed, recv=%zu sent=%zu lost=%zu rtt=%" PRIu64 "ns cwnd=%zu\n",
-                    stats.recv, stats.sent, stats.lost, stats.paths[0].rtt, stats.paths[0].cwnd);
+                    stats.recv, stats.sent, stats.lost, path_stats.rtt, path_stats.cwnd);
 
             HASH_DELETE(hh, conns->h, conn_io);
 
@@ -425,10 +428,13 @@ static void timeout_cb(EV_P_ ev_timer *w, int revents) {
 
     if (quiche_conn_is_closed(conn_io->conn)) {
         quiche_stats stats;
+        quiche_path_stats path_stats;
 
         quiche_conn_stats(conn_io->conn, &stats);
+        quiche_conn_path_stats(conn_io->conn, 0, &path_stats);
+
         fprintf(stderr, "connection closed, recv=%zu sent=%zu lost=%zu rtt=%" PRIu64 "ns cwnd=%zu\n",
-                stats.recv, stats.sent, stats.lost, stats.paths[0].rtt, stats.paths[0].cwnd);
+                stats.recv, stats.sent, stats.lost, path_stats.rtt, path_stats.cwnd);
 
         HASH_DELETE(hh, conns->h, conn_io);
 

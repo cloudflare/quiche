@@ -211,11 +211,13 @@ static void timeout_cb(EV_P_ ev_timer *w, int revents) {
 
     if (quiche_conn_is_closed(conn_io->conn)) {
         quiche_stats stats;
+        quiche_path_stats path_stats;
 
         quiche_conn_stats(conn_io->conn, &stats);
+        quiche_conn_path_stats(conn_io->conn, 0, &path_stats);
 
         fprintf(stderr, "connection closed, recv=%zu sent=%zu lost=%zu rtt=%" PRIu64 "ns\n",
-                stats.recv, stats.sent, stats.lost, stats.paths[0].rtt);
+                stats.recv, stats.sent, stats.lost, path_stats.rtt);
 
         ev_break(EV_A_ EVBREAK_ONE);
         return;

@@ -317,7 +317,11 @@ pub fn connect(
         trace!("done reading");
 
         if conn.is_closed() {
-            info!("connection closed, {:?}", conn.stats());
+            info!(
+                "connection closed, {:?} {:?}",
+                conn.stats(),
+                conn.path_stats().collect::<Vec<quiche::PathStats>>()
+            );
 
             if !conn.is_established() {
                 error!(
@@ -560,7 +564,11 @@ pub fn connect(
         }
 
         if conn.is_closed() {
-            info!("connection closed, {:?}", conn.stats());
+            info!(
+                "connection closed, {:?} {:?}",
+                conn.stats(),
+                conn.path_stats().collect::<Vec<quiche::PathStats>>()
+            );
 
             if !conn.is_established() {
                 error!(
