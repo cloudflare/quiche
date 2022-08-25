@@ -464,6 +464,77 @@ bool quiche_stream_iter_next(quiche_stream_iter *iter, uint64_t *stream_id);
 void quiche_stream_iter_free(quiche_stream_iter *iter);
 
 typedef struct {
+    // The number of QUIC packets received on this connection.
+    size_t recv;
+
+    // The number of QUIC packets sent on this connection.
+    size_t sent;
+
+    // The number of QUIC packets that were lost.
+    size_t lost;
+
+    // The number of sent QUIC packets with retransmitted data.
+    size_t retrans;
+
+    // The number of sent bytes.
+    uint64_t sent_bytes;
+
+    // The number of received bytes.
+    uint64_t recv_bytes;
+
+    // The number of bytes lost.
+    uint64_t lost_bytes;
+
+    // The number of stream bytes retransmitted.
+    uint64_t stream_retrans_bytes;
+
+    // The number of known paths for the connection.
+    size_t paths_count;
+
+    // The maximum idle timeout.
+    uint64_t peer_max_idle_timeout;
+
+    // The maximum UDP payload size.
+    uint64_t peer_max_udp_payload_size;
+
+    // The initial flow control maximum data for the connection.
+    uint64_t peer_initial_max_data;
+
+    // The initial flow control maximum data for local bidirectional streams.
+    uint64_t peer_initial_max_stream_data_bidi_local;
+
+    // The initial flow control maximum data for remote bidirectional streams.
+    uint64_t peer_initial_max_stream_data_bidi_remote;
+
+    // The initial flow control maximum data for unidirectional streams.
+    uint64_t peer_initial_max_stream_data_uni;
+
+    // The initial maximum bidirectional streams.
+    uint64_t peer_initial_max_streams_bidi;
+
+    // The initial maximum unidirectional streams.
+    uint64_t peer_initial_max_streams_uni;
+
+    // The ACK delay exponent.
+    uint64_t peer_ack_delay_exponent;
+
+    // The max ACK delay.
+    uint64_t peer_max_ack_delay;
+
+    // Whether active migration is disabled.
+    bool peer_disable_active_migration;
+
+    // The active connection ID limit.
+    uint64_t peer_active_conn_id_limit;
+
+    // DATAGRAM frame extension parameter, if any.
+    ssize_t peer_max_datagram_frame_size;
+} quiche_stats;
+
+// Collects and returns statistics about the connection.
+void quiche_conn_stats(quiche_conn *conn, quiche_stats *out);
+
+typedef struct {
     // The local address used by this path.
     struct sockaddr_storage local_addr;
     socklen_t local_addr_len;
@@ -515,79 +586,12 @@ typedef struct {
     uint64_t delivery_rate;
 } quiche_path_stats;
 
-typedef struct {
-    // The number of QUIC packets received on this connection.
-    size_t recv;
 
-    // The number of QUIC packets sent on this connection.
-    size_t sent;
-
-    // The number of QUIC packets that were lost.
-    size_t lost;
-
-    // The number of sent QUIC packets with retransmitted data.
-    size_t retrans;
-
-    // The number of sent bytes.
-    uint64_t sent_bytes;
-
-    // The number of received bytes.
-    uint64_t recv_bytes;
-
-    // The number of bytes lost.
-    uint64_t lost_bytes;
-
-    // The number of stream bytes retransmitted.
-    uint64_t stream_retrans_bytes;
-
-    // The maximum idle timeout.
-    uint64_t peer_max_idle_timeout;
-
-    // The maximum UDP payload size.
-    uint64_t peer_max_udp_payload_size;
-
-    // The initial flow control maximum data for the connection.
-    uint64_t peer_initial_max_data;
-
-    // The initial flow control maximum data for local bidirectional streams.
-    uint64_t peer_initial_max_stream_data_bidi_local;
-
-    // The initial flow control maximum data for remote bidirectional streams.
-    uint64_t peer_initial_max_stream_data_bidi_remote;
-
-    // The initial flow control maximum data for unidirectional streams.
-    uint64_t peer_initial_max_stream_data_uni;
-
-    // The initial maximum bidirectional streams.
-    uint64_t peer_initial_max_streams_bidi;
-
-    // The initial maximum unidirectional streams.
-    uint64_t peer_initial_max_streams_uni;
-
-    // The ACK delay exponent.
-    uint64_t peer_ack_delay_exponent;
-
-    // The max ACK delay.
-    uint64_t peer_max_ack_delay;
-
-    // Whether active migration is disabled.
-    bool peer_disable_active_migration;
-
-    // The active connection ID limit.
-    uint64_t peer_active_conn_id_limit;
-
-    // DATAGRAM frame extension parameter, if any.
-    ssize_t peer_max_datagram_frame_size;
-
-    // The stats of the connection's paths.
-    quiche_path_stats paths[8];
-
-    // The number of stats of the connection's paths.
-    size_t paths_len;
-} quiche_stats;
-
-// Collects and returns statistics about the connection.
-void quiche_conn_stats(quiche_conn *conn, quiche_stats *out);
+// Collects and returns statistics about the specified path for the connection.
+//
+// The `idx` argument represent the path's index (also see the `paths_count`
+// field of `quiche_stats`).
+int quiche_conn_path_stats(quiche_conn *conn, size_t idx, quiche_path_stats *out);
 
 // Returns the maximum DATAGRAM payload that can be sent.
 ssize_t quiche_conn_dgram_max_writable_len(quiche_conn *conn);

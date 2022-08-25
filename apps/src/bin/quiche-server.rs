@@ -556,9 +556,10 @@ fn main() {
 
             if c.conn.is_closed() {
                 info!(
-                    "{} connection collected {:?}",
+                    "{} connection collected {:?} {:?}",
                     c.conn.trace_id(),
-                    c.conn.stats()
+                    c.conn.stats(),
+                    c.conn.path_stats().collect::<Vec<quiche::PathStats>>()
                 );
             }
 
