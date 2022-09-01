@@ -666,7 +666,7 @@ impl<'a> AsMut<[u8]> for OctetsMut<'a> {
 
 /// Returns how many bytes it would take to encode `v` as a variable-length
 /// integer.
-pub fn varint_len(v: u64) -> usize {
+pub const fn varint_len(v: u64) -> usize {
     if v <= 63 {
         1
     } else if v <= 16383 {
@@ -681,7 +681,7 @@ pub fn varint_len(v: u64) -> usize {
 }
 
 /// Returns how long the variable-length integer is, given its first byte.
-pub fn varint_parse_len(first: u8) -> usize {
+pub const fn varint_parse_len(first: u8) -> usize {
     match first >> 6 {
         0 => 1,
         1 => 2,
