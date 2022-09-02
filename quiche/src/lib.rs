@@ -4861,6 +4861,12 @@ impl Connection {
         self.dgram_send_queue.byte_size()
     }
 
+    /// Returns whether or not the DATAGRAM send queue is full.
+    #[inline]
+    pub fn dgram_send_queue_full(&self) -> bool {
+        self.dgram_send_queue.is_full()
+    }
+
     /// Sends data in a DATAGRAM frame.
     ///
     /// [`Done`] is returned if no data was written.
