@@ -557,9 +557,13 @@ impl Config {
 
     /// Sets or omits the `SETTINGS_ENABLE_CONNECT_PROTOCOL` setting.
     ///
-    /// The default value is `0`.
-    pub fn set_connect_protocol_enabled(&mut self, v: u64) {
-        self.connect_protocol_enabled = Some(v);
+    /// The default value is `false`.
+    pub fn enable_extended_connect(&mut self, enabled: bool) {
+        if enabled {
+            self.connect_protocol_enabled = Some(1);
+        } else {
+            self.connect_protocol_enabled = None;
+        }
     }
 }
 
