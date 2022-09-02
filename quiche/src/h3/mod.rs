@@ -1303,7 +1303,7 @@ impl Connection {
     /// method.
     ///
     /// [`poll()`]: struct.Connection.html#method.poll
-    pub fn connect_protocol_enabled_by_peer(&self) -> bool {
+    pub fn extended_connect_enabled_by_peer(&self) -> bool {
         self.peer_settings.connect_protocol_enabled == Some(1)
     }
 
