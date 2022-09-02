@@ -199,6 +199,13 @@ pub extern fn quiche_h3_event_headers_has_body(ev: &h3::Event) -> bool {
 }
 
 #[no_mangle]
+pub extern fn quiche_h3_extended_connect_enabled_by_peer(
+    conn: &h3::Connection,
+) -> bool {
+    conn.extended_connect_enabled_by_peer()
+}
+
+#[no_mangle]
 pub extern fn quiche_h3_event_free(ev: *mut h3::Event) {
     unsafe { Box::from_raw(ev) };
 }
