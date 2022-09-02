@@ -1083,6 +1083,13 @@ impl Http3Conn {
                     method = Some(std::str::from_utf8(hdr.value()).unwrap())
                 },
 
+                b":protocol" => {
+                    return Err((
+                        H3_MESSAGE_ERROR,
+                        ":protocol not supported".to_string(),
+                    ));
+                },
+
                 b"priority" => priority = hdr.value().to_vec(),
 
                 b"host" => host = Some(std::str::from_utf8(hdr.value()).unwrap()),
