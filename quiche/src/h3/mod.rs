@@ -1296,7 +1296,7 @@ impl Connection {
             conn.dgram_max_writable_len().is_some()
     }
 
-    /// Returns whether the peer enabled HTTP/3 CONNECT protocol support.
+    /// Returns whether the peer enabled extended CONNECT support.
     ///
     /// Support is signalled by the peer's SETTINGS, so this method always
     /// returns false until they have been processed using the [`poll()`]
