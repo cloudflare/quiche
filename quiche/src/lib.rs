@@ -14460,6 +14460,37 @@ mod tests {
         assert_eq!(fin, true);
         assert_eq!(rcv_data_1 + rcv_data_2, DATA_BYTES);
     }
+
+    #[test]
+    fn consecutive_non_ack_eliciting() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client sends a bunch of PING frames, causing server to ACK (ACKs aren't
+        // ack-eliciting)
+        let frames = [frame::Frame::Ping];
+        let pkt_type = packet::Type::Short;
+        for _ in 0..100 {
+            let len = pipe
+                .send_pkt_to_server(pkt_type, &frames, &mut buf)
+                .unwrap();
+            assert!(len > 0);
+
+            let frames =
+                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            if frames
+                .iter()
+                .any(|frame| matches!(frame, frame::Frame::Ping))
+            {
+                // found an explicity eliciting of an ACK
+                return;
+            }
+        }
+
+        assert!(false, "we never found a PING");
+    }
 }
 
 pub use crate::packet::ConnectionId;
