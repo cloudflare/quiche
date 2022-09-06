@@ -563,6 +563,16 @@ pub trait NameValue {
     fn value(&self) -> &[u8];
 }
 
+impl NameValue for (&[u8], &[u8]) {
+    fn name(&self) -> &[u8] {
+        self.0
+    }
+
+    fn value(&self) -> &[u8] {
+        self.1
+    }
+}
+
 /// An owned name-value pair representing a raw HTTP header.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Header(Vec<u8>, Vec<u8>);
