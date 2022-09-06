@@ -3860,11 +3860,7 @@ impl Connection {
         // Create PING for PTO probe if no other ack-eliciting frame is sent or if
         // we've sent too many non ACK eliciting packets without having
         // sent an ACK eliciting one
-        if self
-            .paths
-            .get_mut(send_pid)?
-            .recovery
-            .should_elicit_ack(epoch) &&
+        if self.paths.get(send_pid)?.recovery.should_elicit_ack(epoch) &&
             !ack_eliciting &&
             left >= 1 &&
             !is_closing
