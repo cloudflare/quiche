@@ -4093,7 +4093,7 @@ impl Connection {
     /// offloading mechanisms as the maximum limit for outgoing aggregates of
     /// multiple packets.
     #[inline]
-    pub fn send_quantum(&mut self) -> usize {
+    pub fn send_quantum(&self) -> usize {
         match self.paths.get_active() {
             Ok(p) => p.recovery.send_quantum(),
             _ => 0,
@@ -4112,7 +4112,7 @@ impl Connection {
     /// If the (`local_addr`, peer_addr`) 4-tuple relates to a non-existing
     /// path, this method returns 0.
     pub fn send_quantum_on_path(
-        &mut self, local_addr: SocketAddr, peer_addr: SocketAddr,
+        &self, local_addr: SocketAddr, peer_addr: SocketAddr,
     ) -> usize {
         self.paths
             .path_id_from_addrs(&(local_addr, peer_addr))
