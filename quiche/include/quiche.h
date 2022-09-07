@@ -226,7 +226,7 @@ void quiche_config_set_max_stream_window(quiche_config *config, uint64_t v);
 // Sets the limit of active connection IDs.
 void quiche_config_set_active_connection_id_limit(quiche_config *config, uint64_t v);
 
-// Sets the initial stateless reset token.
+// Sets the initial stateless reset token. |v| must contain 16 bytes, otherwise the behaviour is undefined.
 void quiche_config_set_stateless_reset_token(quiche_config *config, const uint8_t *v);
 
 // Frees the config object.
