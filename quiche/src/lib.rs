@@ -3245,6 +3245,11 @@ impl Connection {
         let mut in_flight = false;
         let mut has_data = false;
 
+        // Whether or not we should explicitly elicit an ACK via PING frame if we
+        // implicitly elicit one otherwise.
+        let ack_elicit_required =
+            self.paths.get(send_pid)?.recovery.should_elicit_ack(epoch);
+
         let header_offset = b.off();
 
         // Reserve space for payload length in advance. Since we don't yet know
@@ -3296,9 +3301,13 @@ impl Connection {
         }
 
         // Create ACK frame.
+        //
+        // If we think we may explicitly elicit an ACK via PING later, go ahead
+        // and generate an ACK (if there's anything to ACK) since we're going to
+        // send a packet with PING anyways - even if we haven't received
+        // anything ACK eliciting.
         if self.pkt_num_spaces[epoch].recv_pkt_need_ack.len() > 0 &&
-            (self.pkt_num_spaces[epoch].ack_elicited ||
-                self.paths.get(send_pid)?.recovery.loss_probes[epoch] > 0) &&
+            (self.pkt_num_spaces[epoch].ack_elicited || ack_elicit_required) &&
             !is_closing &&
             self.paths.get(send_pid)?.active()
         {
@@ -3860,9 +3869,7 @@ impl Connection {
         // Create PING for PTO probe if no other ack-eliciting frame is sent or if
         // we've sent too many non ACK eliciting packets without having
         // sent an ACK eliciting one
-        let should_elicit_ack =
-            self.paths.get(send_pid)?.recovery.should_elicit_ack(epoch);
-        if should_elicit_ack && !ack_eliciting && left >= 1 && !is_closing {
+        if ack_elicit_required && !ack_eliciting && left >= 1 && !is_closing {
             let frame = frame::Frame::Ping;
 
             if push_frame_to_pkt!(b, frames, frame, left) {
