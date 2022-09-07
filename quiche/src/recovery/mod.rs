@@ -163,7 +163,7 @@ pub struct Recovery {
     // BBR state.
     bbr_state: bbr::State,
 
-    /// How many non-ack-eliciting packets have been sent
+    /// How many non-ack-eliciting packets have been sent.
     outstanding_non_ack_eliciting: usize,
 }
 
@@ -305,7 +305,7 @@ impl Recovery {
     /// otherwise have constructed an ACK eliciting packet.
     pub fn should_elicit_ack(&self, epoch: packet::Epoch) -> bool {
         self.loss_probes[epoch] > 0 ||
-            self.outstanding_non_ack_eliciting >
+            self.outstanding_non_ack_eliciting >=
                 MAX_OUTSTANDING_NON_ACK_ELICITING
     }
 

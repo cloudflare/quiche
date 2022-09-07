@@ -3860,11 +3860,9 @@ impl Connection {
         // Create PING for PTO probe if no other ack-eliciting frame is sent or if
         // we've sent too many non ACK eliciting packets without having
         // sent an ACK eliciting one
-        if self.paths.get(send_pid)?.recovery.should_elicit_ack(epoch) &&
-            !ack_eliciting &&
-            left >= 1 &&
-            !is_closing
-        {
+        let should_elicit_ack =
+            self.paths.get(send_pid)?.recovery.should_elicit_ack(epoch);
+        if should_elicit_ack && !ack_eliciting && left >= 1 && !is_closing {
             let frame = frame::Frame::Ping;
 
             if push_frame_to_pkt!(b, frames, frame, left) {
@@ -14472,7 +14470,7 @@ mod tests {
         // ack-eliciting)
         let frames = [frame::Frame::Ping];
         let pkt_type = packet::Type::Short;
-        for _ in 0..100 {
+        for _ in 0..24 {
             let len = pipe
                 .send_pkt_to_server(pkt_type, &frames, &mut buf)
                 .unwrap();
@@ -14480,16 +14478,28 @@ mod tests {
 
             let frames =
                 testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
-            if frames
-                .iter()
-                .any(|frame| matches!(frame, frame::Frame::Ping))
-            {
-                // found an explicity eliciting of an ACK
-                return;
-            }
+            assert!(
+                frames
+                    .iter()
+                    .all(|frame| matches!(frame, frame::Frame::ACK { .. })),
+                "ACK only"
+            );
         }
 
-        assert!(false, "we never found a PING");
+        // After 24 non-ack-eliciting, an ACK is explicitly elicited with a PING
+        let len = pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+        assert!(len > 0);
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+        assert!(
+            frames
+                .iter()
+                .any(|frame| matches!(frame, frame::Frame::Ping)),
+            "found a PING"
+        );
     }
 }
 
