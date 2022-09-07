@@ -769,6 +769,9 @@ void quiche_h3_config_set_qpack_max_table_capacity(quiche_h3_config *config, uin
 // Sets the `SETTINGS_QPACK_BLOCKED_STREAMS` setting.
 void quiche_h3_config_set_qpack_blocked_streams(quiche_h3_config *config, uint64_t v);
 
+// Sets the `SETTINGS_ENABLE_CONNECT_PROTOCOL` setting.
+void quiche_h3_config_enable_extended_connect(quiche_h3_config *config, bool enabled);
+
 // Frees the HTTP/3 config object.
 void quiche_h3_config_free(quiche_h3_config *config);
 
@@ -826,6 +829,9 @@ int quiche_h3_for_each_setting(quiche_h3_conn *conn,
 
 // Check whether data will follow the headers on the stream.
 bool quiche_h3_event_headers_has_body(quiche_h3_event *ev);
+
+// Check whether or not extended connection is enabled by the peer
+bool quiche_h3_extended_connect_enabled_by_peer(quiche_h3_conn *conn);
 
 // Frees the HTTP/3 event object.
 void quiche_h3_event_free(quiche_h3_event *ev);

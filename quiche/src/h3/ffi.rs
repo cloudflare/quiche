@@ -71,6 +71,13 @@ pub extern fn quiche_h3_config_set_qpack_blocked_streams(
 }
 
 #[no_mangle]
+pub extern fn quiche_h3_config_enable_extended_connect(
+    config: &mut h3::Config, enabled: bool,
+) {
+    config.enable_extended_connect(enabled);
+}
+
+#[no_mangle]
 pub extern fn quiche_h3_config_free(config: *mut h3::Config) {
     unsafe { Box::from_raw(config) };
 }
@@ -189,6 +196,13 @@ pub extern fn quiche_h3_event_headers_has_body(ev: &h3::Event) -> bool {
 
         _ => unreachable!(),
     }
+}
+
+#[no_mangle]
+pub extern fn quiche_h3_extended_connect_enabled_by_peer(
+    conn: &h3::Connection,
+) -> bool {
+    conn.extended_connect_enabled_by_peer()
 }
 
 #[no_mangle]
