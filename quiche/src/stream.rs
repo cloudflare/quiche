@@ -352,12 +352,12 @@ impl StreamMap {
             .entry(urgency)
             .or_insert_with(|| (BinaryHeap::new(), VecDeque::new()));
 
-        if !incr {
-            // Non-incremental streams are scheduled in order of their stream ID.
-            queues.0.push(std::cmp::Reverse(stream_id))
-        } else {
+        if incr {
             // Incremental streams are scheduled in a round-robin fashion.
             queues.1.push_back(stream_id)
+        } else {
+            // Non-incremental streams are scheduled in order of their stream ID.
+            queues.0.push(std::cmp::Reverse(stream_id))
         };
     }
 
