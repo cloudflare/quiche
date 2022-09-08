@@ -70,6 +70,10 @@ const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 
 const PACING_MULTIPLIER: f64 = 1.25;
 
+// How many non ACK eliciting packets we send before including a PING to solicit
+// an ACK.
+const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
+
 pub struct Recovery {
     loss_detection_timer: Option<Instant>,
 
@@ -158,6 +162,9 @@ pub struct Recovery {
 
     // BBR state.
     bbr_state: bbr::State,
+
+    /// How many non-ack-eliciting packets have been sent.
+    outstanding_non_ack_eliciting: usize,
 }
 
 pub struct RecoveryConfig {
@@ -271,6 +278,8 @@ impl Recovery {
             qlog_metrics: QlogMetrics::default(),
 
             bbr_state: bbr::State::new(),
+
+            outstanding_non_ack_eliciting: 0,
         }
     }
 
@@ -292,6 +301,14 @@ impl Recovery {
         self.prr = prr::PRR::default();
     }
 
+    /// Returns whether or not we should elicit an ACK even if we wouldn't
+    /// otherwise have constructed an ACK eliciting packet.
+    pub fn should_elicit_ack(&self, epoch: packet::Epoch) -> bool {
+        self.loss_probes[epoch] > 0 ||
+            self.outstanding_non_ack_eliciting >=
+                MAX_OUTSTANDING_NON_ACK_ELICITING
+    }
+
     pub fn on_packet_sent(
         &mut self, mut pkt: Sent, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
@@ -300,6 +317,12 @@ impl Recovery {
         let in_flight = pkt.in_flight;
         let sent_bytes = pkt.size;
         let pkt_num = pkt.pkt_num;
+
+        if ack_eliciting {
+            self.outstanding_non_ack_eliciting = 0;
+        } else {
+            self.outstanding_non_ack_eliciting += 1;
+        }
 
         self.largest_sent_pkt[epoch] =
             cmp::max(self.largest_sent_pkt[epoch], pkt_num);
