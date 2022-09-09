@@ -4863,7 +4863,7 @@ impl Connection {
 
     /// Returns whether or not the DATAGRAM send queue is full.
     #[inline]
-    pub fn dgram_send_queue_full(&self) -> bool {
+    pub fn is_dgram_send_queue_full(&self) -> bool {
         self.dgram_send_queue.is_full()
     }
 
