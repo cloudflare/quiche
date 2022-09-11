@@ -627,6 +627,7 @@ pub struct ConnectionError {
 ///
 /// [`stream_shutdown()`]: struct.Connection.html#method.stream_shutdown
 #[repr(C)]
+#[derive(PartialEq, Eq)]
 pub enum Shutdown {
     /// Stop receiving stream data.
     Read  = 0,
@@ -4439,17 +4440,40 @@ impl Connection {
     /// be sent to the peer to signal it to stop sending data.
     ///
     /// When the `direction` argument is set to [`Shutdown::Write`], outstanding
-    /// data in the stream's send buffer is dropped, and no additional data
-    /// is added to it. Data passed to [`stream_send()`] after calling this
-    /// method will be ignored.
+    /// data in the stream's send buffer is dropped, and no additional data is
+    /// added to it. Data passed to [`stream_send()`] after calling this method
+    /// will be ignored. In addition, a `RESET_STREAM` frame will be sent to the
+    /// peer to signal the reset.
+    ///
+    /// Locally-initiated unidirectional streams can only be closed in the
+    /// [`Shutdown::Write`] direction. Remotely-initiated unidirectional streams
+    /// can only be closed in the [`Shutdown::Read`] direction. Using an
+    /// incorrect direction will return [`InvalidStreamState`].
     ///
     /// [`Shutdown::Read`]: enum.Shutdown.html#variant.Read
     /// [`Shutdown::Write`]: enum.Shutdown.html#variant.Write
     /// [`stream_recv()`]: struct.Connection.html#method.stream_recv
     /// [`stream_send()`]: struct.Connection.html#method.stream_send
+    /// [`InvalidStreamState`]: enum.Error.html#variant.InvalidStreamState
     pub fn stream_shutdown(
         &mut self, stream_id: u64, direction: Shutdown, err: u64,
     ) -> Result<()> {
+        // Don't try to stop a local unidirectional stream.
+        if direction == Shutdown::Read &&
+            stream::is_local(stream_id, self.is_server) &&
+            !stream::is_bidi(stream_id)
+        {
+            return Err(Error::InvalidStreamState(stream_id));
+        }
+
+        // Dont' try to reset a remote unidirectional stream.
+        if direction == Shutdown::Write &&
+            !stream::is_local(stream_id, self.is_server) &&
+            !stream::is_bidi(stream_id)
+        {
+            return Err(Error::InvalidStreamState(stream_id));
+        }
+
         // Get existing stream.
         let stream = self.streams.get_mut(stream_id).ok_or(Error::Done)?;
 
@@ -9978,6 +10002,30 @@ mod tests {
             pipe.server.stream_shutdown(4, Shutdown::Read, 0),
             Err(Error::Done)
         );
+    }
+
+    #[test]
+    fn stream_shutdown_uni() {
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Exchange some data on uni streams.
+        assert_eq!(pipe.client.stream_send(2, b"hello, world", false), Ok(10));
+        assert_eq!(pipe.server.stream_send(3, b"hello, world", false), Ok(10));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Test local and remote shutdown.
+        assert_eq!(pipe.client.stream_shutdown(2, Shutdown::Write, 42), Ok(()));
+        assert_eq!(
+            pipe.client.stream_shutdown(2, Shutdown::Read, 42),
+            Err(Error::InvalidStreamState(2))
+        );
+
+        assert_eq!(
+            pipe.client.stream_shutdown(3, Shutdown::Write, 42),
+            Err(Error::InvalidStreamState(3))
+        );
+        assert_eq!(pipe.client.stream_shutdown(3, Shutdown::Read, 42), Ok(()));
     }
 
     #[test]
