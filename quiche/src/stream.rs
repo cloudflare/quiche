@@ -1355,8 +1355,11 @@ impl SendBuf {
                 None
             };
 
-            // Advance the buffer's position if the retransmit range is past
-            // the buffer's starting offset.
+            // To calculate how long the buffer will be expanded by
+            let buf_pos = buf.pos;
+
+            // Reduce the buffer's position (expand the buffer) if the retransmit
+            // range is past the buffer's starting offset.
             buf.pos = if off > buf.off && off <= buf.max_off() {
                 cmp::min(buf.pos, buf.start + (off - buf.off) as usize)
             } else {
@@ -1365,7 +1368,7 @@ impl SendBuf {
 
             self.pos = cmp::min(self.pos, i);
 
-            self.len += buf.len() as u64;
+            self.len += (buf_pos - buf.pos) as u64;
 
             if let Some(b) = new_buf {
                 self.data.insert(i + 1, b);
