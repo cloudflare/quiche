@@ -3317,4 +3317,32 @@ mod tests {
             Some(Error::StreamLimit)
         );
     }
+
+    /// Check SendBuf::len calculation on a retransmit case
+    #[test]
+    fn send_buf_len_on_retransmit() {
+        let mut buf = [0; 15];
+
+        let mut send = SendBuf::new(std::u64::MAX);
+        assert_eq!(send.len, 0);
+        assert_eq!(send.off_front(), 0);
+
+        let first = b"something";
+
+        assert!(send.write(first, false).is_ok());
+        assert_eq!(send.off_front(), 0);
+
+        assert_eq!(send.len, 9);
+
+        let (written, fin) = send.emit(&mut buf[..4]).unwrap();
+        assert_eq!(written, 4);
+        assert_eq!(fin, false);
+        assert_eq!(&buf[..written], b"some");
+        assert_eq!(send.len, 5);
+        assert_eq!(send.off_front(), 4);
+
+        send.retransmit(3, 5);
+        assert_eq!(send.len, 6);
+        assert_eq!(send.off_front(), 3);
+    }
 }
