@@ -3310,7 +3310,9 @@ impl Connection {
         // anything ACK eliciting.
         if self.pkt_num_spaces[epoch].recv_pkt_need_ack.len() > 0 &&
             (self.pkt_num_spaces[epoch].ack_elicited || ack_elicit_required) &&
-            !is_closing &&
+            (!is_closing ||
+                (pkt_type == Type::Handshake &&
+                    self.local_error().map_or(false, |le| le.is_app))) &&
             self.paths.get(send_pid)?.active()
         {
             let ack_delay =
@@ -12927,7 +12929,7 @@ mod tests {
     }
 
     #[test]
-    fn app_close() {
+    fn app_close_by_client() {
         let mut buf = [0; 65535];
 
         let mut pipe = testing::Pipe::default().unwrap();
@@ -12947,6 +12949,60 @@ mod tests {
             Some(&frame::Frame::ApplicationClose {
                 error_code: 0x1234,
                 reason: b"hello!".to_vec(),
+            })
+        );
+    }
+
+    #[test]
+    fn app_close_by_server_during_handshake() {
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Client sends initial flight.
+        let flight = testing::emit_flight(&mut pipe.client).unwrap();
+        testing::process_flight(&mut pipe.server, flight).unwrap();
+
+        let flight = testing::emit_flight(&mut pipe.server).unwrap();
+
+        // Both connections are not established.
+        assert!(!pipe.client.is_established() && !pipe.server.is_established());
+
+        testing::process_flight(&mut pipe.client, flight).unwrap();
+
+        // Connection is established on the client.
+        assert!(pipe.client.is_established());
+
+        // Client sends after connection is established.
+        pipe.client.stream_send(0, b"badauthtoken", true).unwrap();
+
+        let flight = testing::emit_flight(&mut pipe.client).unwrap();
+        testing::process_flight(&mut pipe.server, flight).unwrap();
+
+        // Connection is established on the server but the Handshake ACK has not
+        // been sent yet.
+        assert!(pipe.server.is_established());
+
+        // Server closes after connection is established.
+        pipe.server
+            .close(true, 123, b"Invalid authentication")
+            .unwrap();
+
+        // Server sends Handshake ACK and then 1RTT CONNECTION_CLOSE.
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert_eq!(
+            pipe.server.local_error(),
+            Some(&ConnectionError {
+                is_app: true,
+                error_code: 123,
+                reason: b"Invalid authentication".to_vec()
+            })
+        );
+        assert_eq!(
+            pipe.client.peer_error(),
+            Some(&ConnectionError {
+                is_app: true,
+                error_code: 123,
+                reason: b"Invalid authentication".to_vec()
             })
         );
     }
