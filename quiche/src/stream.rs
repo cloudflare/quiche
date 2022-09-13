@@ -716,6 +716,11 @@ impl Stream {
             (false, false) => self.recv.is_fin(),
         }
     }
+
+    /// Returns true if the stream is not storing incoming data.
+    pub fn is_draining(&self) -> bool {
+        self.recv.drain
+    }
 }
 
 /// Returns true if the stream was created locally.

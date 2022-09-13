@@ -6324,6 +6324,8 @@ impl Connection {
 
                 let was_readable = stream.is_readable();
 
+                let was_draining = stream.is_draining();
+
                 stream.recv.write(data)?;
 
                 if !was_readable && stream.is_readable() {
@@ -6331,6 +6333,18 @@ impl Connection {
                 }
 
                 self.rx_data += max_off_delta;
+
+                if was_draining {
+                    // When a stream is in draining state it will not queue
+                    // incoming data for the application to read, so consider
+                    // the received data as consumed, which might trigger a flow
+                    // control update.
+                    self.flow_control.add_consumed(max_off_delta as u64);
+
+                    if self.should_update_max_data() {
+                        self.almost_full = true;
+                    }
+                }
             },
 
             frame::Frame::StreamHeader { .. } => unreachable!(),
@@ -10002,6 +10016,55 @@ mod tests {
             pipe.server.stream_shutdown(4, Shutdown::Read, 0),
             Err(Error::Done)
         );
+    }
+
+    #[test]
+    fn stream_shutdown_read_update_max_data() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(10000);
+        config.set_initial_max_stream_data_bidi_remote(10000);
+        config.set_initial_max_streams_bidi(10);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((1, false)));
+        assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 123), Ok(()));
+
+        assert_eq!(pipe.server.rx_data, 1);
+        assert_eq!(pipe.client.tx_data, 1);
+        assert_eq!(pipe.client.max_tx_data, 30);
+
+        assert_eq!(
+            pipe.client
+                .stream_send(0, &buf[..pipe.client.tx_cap], false),
+            Ok(29)
+        );
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert_eq!(pipe.server.stream_readable(0), false); // nothing can be consumed
+
+        // The client has increased its tx_data, and server has received it, so
+        // it increases flow control accordingly.
+        assert_eq!(pipe.client.tx_data, 30);
+        assert_eq!(pipe.server.rx_data, 30);
+        assert_eq!(pipe.client.tx_cap, 45);
     }
 
     #[test]
