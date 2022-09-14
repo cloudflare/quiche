@@ -4317,24 +4317,27 @@ impl Connection {
             self.blocked_limit = Some(self.max_tx_data);
         }
 
-        // Truncate the input buffer based on the connection's send capacity if
-        // necessary.
-        //
-        // When the cap is zero, the method returns Ok(0) *only* when the passed
-        // buffer is empty. We return Error::Done otherwise.
+        // Copy tx_cap here to use after borrow
         let cap = self.tx_cap;
+
+        // Get existing stream or create a new one.
+        // Even if the cap is zero, new streams are created internally so that
+        // they will eventually be in `writable()` and can be retried later.
+        let stream = self.get_or_create_stream(stream_id, true)?;
+
+        // When the cap is zero, the method returns Ok(0) *only* when fin is true
+        // AND the passed buffer is empty. We return Error::Done otherwise.
         if cap == 0 && !(fin && buf.is_empty()) {
             return Err(Error::Done);
         }
 
+        // Truncate the input buffer based on the connection's send capacity if
+        // necessary.
         let (buf, fin) = if cap < buf.len() {
             (&buf[..cap], false)
         } else {
             (buf, fin)
         };
-
-        // Get existing stream or create a new one.
-        let stream = self.get_or_create_stream(stream_id, true)?;
 
         #[cfg(feature = "qlog")]
         let offset = stream.send.off_back();
@@ -9887,9 +9890,10 @@ mod tests {
             pipe.server.stream_send(4, b"hello", false),
             Err(Error::Done)
         );
+
         assert_eq!(
             pipe.server.stream_send(8, b"hello", false),
-            Err(Error::Done)
+            Err(Error::InvalidStreamState(8))
         );
 
         // Client sends STOP_SENDING.
@@ -10253,7 +10257,7 @@ mod tests {
         );
         assert_eq!(
             pipe.server.stream_send(8, b"hello", false),
-            Err(Error::Done)
+            Err(Error::InvalidStreamState(8))
         );
 
         // Client shouldn't update flow control.
@@ -13223,6 +13227,80 @@ mod tests {
         assert_eq!(pipe.server.tx_cap, 0);
 
         assert_eq!(pipe.advance(), Ok(()));
+    }
+
+    #[test]
+    /// Tests that if an application tries to start a stream while tx_cap is 0
+    /// the stream is created internally and later returned in writable()
+    fn create_stream_when_tx_capacity_full() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(10000);
+        config.set_initial_max_stream_data_bidi_remote(10000);
+        config.set_initial_max_streams_bidi(10);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+
+        let r = pipe.client.writable().collect::<Vec<u64>>();
+        assert_eq!(r.len(), 1);
+        assert_eq!(r, [0]);
+
+        // use up tx_cap
+        let tx_cap = pipe.client.tx_cap;
+        assert_eq!(pipe.client.stream_send(0, &buf[..tx_cap], false), Ok(29));
+        assert_eq!(pipe.client.tx_cap, 0);
+
+        // Creating these new streams returns Error:Done, so nothing can be sent
+        // right now. The streams should still be marked as writeable later for an
+        // application to retry
+        assert_eq!(
+            pipe.client.stream_send(4, b"opening a new stream", true),
+            Err(Error::Done)
+        );
+        assert_eq!(
+            pipe.client
+                .stream_send(8, b"opening another new stream", false),
+            Err(Error::Done)
+        );
+
+        assert_eq!(pipe.client.streams.get(0).is_some(), true);
+        assert_eq!(pipe.client.streams.get(4).is_some(), true);
+        assert_eq!(pipe.client.streams.get(8).is_some(), true);
+
+        // reset client.tx_cap
+        assert_eq!(pipe.advance(), Ok(()));
+        assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((30, false)));
+        assert_eq!(
+            pipe.server.stream_recv(4, &mut buf),
+            Err(Error::InvalidStreamState(4))
+        );
+        assert_eq!(
+            pipe.server.stream_recv(8, &mut buf),
+            Err(Error::InvalidStreamState(8))
+        );
+        assert_eq!(pipe.advance(), Ok(()));
+        assert_eq!(pipe.client.tx_cap, 45);
+
+        // streams that could not open are marked as writable and can be retried
+        let mut r = pipe.client.writable().collect::<Vec<u64>>();
+        assert_eq!(r.len(), 3);
+        r.sort();
+        assert_eq!(r, [0, 4, 8]);
     }
 
     #[cfg(feature = "boringssl-boring-crate")]
