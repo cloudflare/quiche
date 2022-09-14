@@ -4889,6 +4889,36 @@ mod tests {
     }
 
     #[test]
+    /// Tests that receiving an empty SETTINGS frame is handled and reported.
+    fn empty_settings() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(1500);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(5);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+        config.set_ack_delay_exponent(8);
+        config.grease(false);
+
+        let h3_config = Config::new().unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        assert!(s.client.peer_settings_raw().is_some());
+        assert!(s.server.peer_settings_raw().is_some());
+    }
+
+    #[test]
     /// Tests that receiving a H3_DATAGRAM setting is ok.
     fn dgram_setting() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
