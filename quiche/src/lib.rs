@@ -4885,6 +4885,18 @@ impl Connection {
         self.dgram_send_queue.byte_size()
     }
 
+    /// Returns whether or not the DATAGRAM send queue is full.
+    #[inline]
+    pub fn is_dgram_send_queue_full(&self) -> bool {
+        self.dgram_send_queue.is_full()
+    }
+
+    /// Returns whether or not the DATAGRAM recv queue is full.
+    #[inline]
+    pub fn is_dgram_recv_queue_full(&self) -> bool {
+        self.dgram_recv_queue.is_full()
+    }
+
     /// Sends data in a DATAGRAM frame.
     ///
     /// [`Done`] is returned if no data was written.
@@ -12602,7 +12614,7 @@ mod tests {
         config.set_initial_max_stream_data_uni(10);
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 10, 10);
+        config.enable_dgram(true, 2, 3);
         config.verify_peer(false);
 
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
@@ -12614,6 +12626,7 @@ mod tests {
         assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
         assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
         assert_eq!(pipe.client.dgram_send(b"hola, mundo"), Ok(()));
+        assert!(pipe.client.is_dgram_send_queue_full());
 
         assert_eq!(pipe.client.dgram_send_queue_byte_size(), 34);
 
@@ -12622,6 +12635,7 @@ mod tests {
 
         assert_eq!(pipe.client.dgram_send_queue_len(), 2);
         assert_eq!(pipe.client.dgram_send_queue_byte_size(), 23);
+        assert!(!pipe.client.is_dgram_send_queue_full());
 
         // Before packets exchanged, no dgrams on server receive side.
         assert_eq!(pipe.server.dgram_recv_queue_len(), 0);
@@ -12634,11 +12648,13 @@ mod tests {
 
         assert_eq!(pipe.server.dgram_recv_queue_len(), 2);
         assert_eq!(pipe.server.dgram_recv_queue_byte_size(), 23);
+        assert!(pipe.server.is_dgram_recv_queue_full());
 
         let result1 = pipe.server.dgram_recv(&mut buf);
         assert_eq!(result1, Ok(12));
         assert_eq!(buf[0], b'h');
         assert_eq!(buf[1], b'e');
+        assert!(!pipe.server.is_dgram_recv_queue_full());
 
         let result2 = pipe.server.dgram_recv(&mut buf);
         assert_eq!(result2, Ok(11));
