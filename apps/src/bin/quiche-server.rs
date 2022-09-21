@@ -90,7 +90,11 @@ fn main() {
         .unwrap();
 
     let max_datagram_size = MAX_DATAGRAM_SIZE;
-    let enable_gso = detect_gso(&socket, max_datagram_size);
+    let enable_gso = if args.disable_gso {
+        false
+    } else {
+        detect_gso(&socket, max_datagram_size)
+    };
 
     trace!("GSO detected: {}", enable_gso);
 

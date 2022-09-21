@@ -443,6 +443,7 @@ Options:
   --max-field-section-size BYTES    Max size of uncompressed HTTP/3 field section. Default is unlimited.
   --qpack-max-table-capacity BYTES  Max capacity of QPACK dynamic table decoding. Any value other that 0 is currently unsupported.
   --qpack-blocked-streams STREAMS   Limit of streams that can be blocked while decoding. Any value other that 0 is currently unsupported.
+  --disable-gso               Disable GSO (linux only).
   -h --help                   Show this screen.
 ";
 
@@ -454,6 +455,7 @@ pub struct ServerArgs {
     pub index: String,
     pub cert: String,
     pub key: String,
+    pub disable_gso: bool,
 }
 
 impl Args for ServerArgs {
@@ -466,6 +468,7 @@ impl Args for ServerArgs {
         let index = args.get_str("--index").to_string();
         let cert = args.get_str("--cert").to_string();
         let key = args.get_str("--key").to_string();
+        let disable_gso = args.get_bool("--disable-gso");
 
         ServerArgs {
             listen,
@@ -474,6 +477,7 @@ impl Args for ServerArgs {
             index,
             cert,
             key,
+            disable_gso,
         }
     }
 }
