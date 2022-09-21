@@ -15,7 +15,8 @@ DOWNLOAD_DIR=/downloads
 QUICHE_CLIENT=quiche-client
 QUICHE_SERVER=quiche-server
 QUICHE_CLIENT_OPT="--no-verify --dump-responses ${DOWNLOAD_DIR} --wire-version 00000001"
-QUICHE_SERVER_OPT_COMMON="--listen [::]:443 --root $WWW_DIR --cert /certs/cert.pem --key /certs/priv.key"
+# interop container has tso off. need to disable gso as well.
+QUICHE_SERVER_OPT_COMMON="--listen [::]:443 --root $WWW_DIR --cert /certs/cert.pem --key /certs/priv.key --disable-gso"
 QUICHE_SERVER_OPT="$QUICHE_SERVER_OPT_COMMON --no-retry "
 LOG_DIR=/logs
 LOG=$LOG_DIR/log.txt
