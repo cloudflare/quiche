@@ -987,27 +987,27 @@ pub extern fn quiche_conn_session(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_established(conn: &mut Connection) -> bool {
+pub extern fn quiche_conn_is_established(conn: &Connection) -> bool {
     conn.is_established()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_in_early_data(conn: &mut Connection) -> bool {
+pub extern fn quiche_conn_is_in_early_data(conn: &Connection) -> bool {
     conn.is_in_early_data()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_draining(conn: &mut Connection) -> bool {
+pub extern fn quiche_conn_is_draining(conn: &Connection) -> bool {
     conn.is_draining()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_closed(conn: &mut Connection) -> bool {
+pub extern fn quiche_conn_is_closed(conn: &Connection) -> bool {
     conn.is_closed()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_timed_out(conn: &mut Connection) -> bool {
+pub extern fn quiche_conn_is_timed_out(conn: &Connection) -> bool {
     conn.is_timed_out()
 }
 
