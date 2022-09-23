@@ -1236,8 +1236,7 @@ impl SendBuf {
 
             // Copy data to the output buffer.
             let out_pos = (next_off - out_off) as usize;
-            (&mut out[out_pos..out_pos + buf_len])
-                .copy_from_slice(&buf[..buf_len]);
+            out[out_pos..out_pos + buf_len].copy_from_slice(&buf[..buf_len]);
 
             self.len -= buf_len as u64;
 
