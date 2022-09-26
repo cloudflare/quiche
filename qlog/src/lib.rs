@@ -141,6 +141,7 @@
 //!         supported_versions: None,
 //!         raw: Some(raw),
 //!         datagram_id: None,
+//!         send_at_time: None,
 //!         trigger: None,
 //!     });
 //!
@@ -344,6 +345,7 @@
 //!         supported_versions: None,
 //!         raw: None,
 //!         datagram_id: None,
+//!         send_at_time: None,
 //!         trigger: None,
 //!     });
 //!
@@ -759,6 +761,7 @@ mod tests {
                 data: None,
             }),
             datagram_id: None,
+            send_at_time: None,
             trigger: None,
         });
 
@@ -830,6 +833,7 @@ mod tests {
                 data: None,
             }),
             datagram_id: None,
+            send_at_time: None,
             trigger: None,
         });
 
@@ -949,6 +953,7 @@ mod tests {
                 data: None,
             }),
             datagram_id: None,
+            send_at_time: None,
             trigger: None,
         });
 

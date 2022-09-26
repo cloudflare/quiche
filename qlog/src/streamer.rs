@@ -223,6 +223,10 @@ impl QlogStreamer {
     pub fn writer(&self) -> &Box<dyn std::io::Write + Send + Sync> {
         &self.writer
     }
+
+    pub fn start_time(&self) -> std::time::Instant {
+        self.start_time
+    }
 }
 
 #[cfg(test)]
@@ -264,6 +268,7 @@ mod tests {
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
+            send_at_time: None,
             trigger: None,
         });
 
@@ -294,6 +299,7 @@ mod tests {
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
+            send_at_time: None,
             trigger: None,
         });
 
@@ -308,6 +314,7 @@ mod tests {
             supported_versions: None,
             raw,
             datagram_id: None,
+            send_at_time: None,
             trigger: None,
         });
 
