@@ -2483,9 +2483,9 @@ impl Connection {
             }
         }
 
-        let payload_len = payload.len();
-
         qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
+            let payload_len = payload.len();
+
             let packet_size = b.len();
 
             let qlog_pkt_hdr = qlog::events::quic::PacketHeader::with_type(
