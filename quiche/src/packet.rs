@@ -625,7 +625,8 @@ pub fn decrypt_pkt<'a>(
 pub fn encrypt_hdr(
     b: &mut octets::OctetsMut, pn_len: usize, payload: &[u8], aead: &crypto::Seal,
 ) -> Result<()> {
-    let sample = &payload[4 - pn_len..16 + (4 - pn_len)];
+    let sample = &payload
+        [MAX_PKT_NUM_LEN - pn_len..SAMPLE_LEN + (MAX_PKT_NUM_LEN - pn_len)];
 
     let mask = aead.new_mask(sample)?;
 
