@@ -2275,9 +2275,9 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        // Long header packets have an explicit payload length, but short
+        // Long header packets have an explicit length field, but short
         // packets don't so just use the remaining capacity in the buffer.
-        let payload_len = if hdr.ty == packet::Type::Short {
+        let len_field = if hdr.ty == packet::Type::Short {
             b.cap()
         } else {
             b.get_varint().map_err(|e| {
@@ -2291,8 +2291,8 @@ impl Connection {
         };
 
         // Make sure the buffer is same or larger than an explicit
-        // payload length.
-        if payload_len > b.cap() {
+        // payload length and the packet number length combined.
+        if len_field > b.cap() {
             return Err(drop_pkt_on_err(
                 Error::InvalidPacket,
                 self.recv_count,
@@ -2343,7 +2343,7 @@ impl Connection {
                     //
                     // TODO: in the future we might want to buffer other types
                     // of undecryptable packets as well.
-                    let pkt_len = b.off() + payload_len;
+                    let pkt_len = b.off() + len_field;
                     let pkt = (b.buf()[..pkt_len]).to_vec();
 
                     self.undecryptable_pkts.push_back((pkt, *info));
@@ -2375,15 +2375,6 @@ impl Connection {
 
         let pn_len = hdr.pkt_num_len;
 
-        trace!(
-            "{} rx pkt {:?} len={} pn={} {}",
-            self.trace_id,
-            hdr,
-            payload_len,
-            pn,
-            AddrTupleFmt(info.from, info.to)
-        );
-
         #[cfg(feature = "qlog")]
         let mut qlog_frames = vec![];
 
@@ -2391,12 +2382,21 @@ impl Connection {
             &mut b,
             pn,
             pn_len,
-            payload_len,
+            len_field,
             aead,
         )
         .map_err(|e| {
             drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
         })?;
+
+        trace!(
+            "{} rx pkt {:?} len={} pn={} {}",
+            self.trace_id,
+            hdr,
+            payload.len(),
+            pn,
+            AddrTupleFmt(info.from, info.to)
+        );
 
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
@@ -2486,6 +2486,8 @@ impl Connection {
                 break;
             }
         }
+
+        let payload_len = payload.len();
 
         qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
             let packet_size = b.len();
