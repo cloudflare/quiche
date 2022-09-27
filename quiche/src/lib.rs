@@ -2379,11 +2379,7 @@ impl Connection {
         let mut qlog_frames = vec![];
 
         let mut payload = packet::decrypt_pkt(
-            &mut b,
-            pn,
-            pn_len,
-            len_field,
-            aead,
+            &mut b, pn, pn_len, len_field, aead,
         )
         .map_err(|e| {
             drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
