@@ -47,6 +47,7 @@ use crate::packet;
 
 const TLS1_3_VERSION: u16 = 0x0304;
 const TLS_ALERT_ERROR: u64 = 0x100;
+const INTERNAL_ERROR: u64 = 0x01;
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
@@ -576,6 +577,7 @@ impl Handshake {
         let rc = unsafe { SSL_do_handshake(self.as_mut_ptr()) };
         self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
 
+        self.set_transport_error(ex_data, rc);
         self.map_result_ssl(rc)
     }
 
@@ -591,6 +593,7 @@ impl Handshake {
         let rc = unsafe { SSL_process_quic_post_handshake(self.as_mut_ptr()) };
         self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
 
+        self.set_transport_error(ex_data, rc);
         self.map_result_ssl(rc)
     }
 
@@ -777,6 +780,22 @@ impl Handshake {
                     _ => Err(Error::TlsFail),
                 }
             },
+        }
+    }
+
+    fn set_transport_error(&mut self, ex_data: &mut ExData, bssl_result: c_int) {
+        // SSL_ERROR_SSL
+        if self.get_error(bssl_result) == 1 {
+            // SSL_ERROR_SSL can't be recovered so ensure we set a
+            // local_error so the connection is closed.
+            // See https://www.openssl.org/docs/man1.1.1/man3/SSL_get_error.html
+            if ex_data.local_error.is_none() {
+                *ex_data.local_error = Some(ConnectionError {
+                    is_app: false,
+                    error_code: INTERNAL_ERROR,
+                    reason: Vec::new(),
+                })
+            }
         }
     }
 }
