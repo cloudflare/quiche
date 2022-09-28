@@ -26,7 +26,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   33 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2231 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2236 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   79 +
  src/http/v3/ngx_http_v3_filter_module.c |   68 +
  src/http/v3/ngx_http_v3_module.c        |  286 +++
@@ -1613,7 +1613,7 @@ new file mode 100644
 index 000000000..1a05d4e01
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2234 @@
+@@ -0,0 +1,2236 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -2901,8 +2901,10 @@ index 000000000..1a05d4e01
 +        if (r->headers_in.chunked) {
 +            rb->rest = clcf->client_body_buffer_size;
 +            r->headers_in.content_length_n = 0;
++        } else if (r->headers_in.content_length_n > 0) {
++            rb->rest = r->headers_in.content_length_n + 1;
 +        } else {
-+            rb->rest = r->headers_in.content_length_n;
++            rb->rest = 0;
 +        }
 +    }
 +
