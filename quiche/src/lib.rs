@@ -2034,6 +2034,15 @@ impl Connection {
             left -= read;
         }
 
+        // Even though the packet was previously "accepted", it
+        // should be safe to forward the error, as it also comes
+        // from the `recv()` method.
+        self.process_undecrypted_0rtt_packets()?;
+
+        Ok(done)
+    }
+
+    fn process_undecrypted_0rtt_packets(&mut self) -> Result<()> {
         // Process previously undecryptable 0-RTT packets if the decryption key
         // is now available.
         if self.pkt_num_spaces[packet::EPOCH_APPLICATION]
@@ -2045,15 +2054,11 @@ impl Connection {
                 if let Err(e) = self.recv(&mut pkt, info) {
                     self.undecryptable_pkts.clear();
 
-                    // Even though the packet was previously "accepted", it
-                    // should be safe to forward the error, as it also comes
-                    // from the `recv()` method.
                     return Err(e);
                 }
             }
         }
-
-        Ok(done)
+        Ok(())
     }
 
     /// Processes a single QUIC packet received from the peer.
@@ -2878,27 +2883,13 @@ impl Connection {
             self.do_handshake()?;
         }
 
-        // Process previously undecryptable 0-RTT packets if the decryption key
-        // is now available.
-        if self.pkt_num_spaces[packet::EPOCH_APPLICATION]
-            .crypto_0rtt_open
-            .is_some()
-        {
-            while let Some((mut pkt, info)) = self.undecryptable_pkts.pop_front()
-            {
-                if self.recv(&mut pkt, info).is_err() {
-                    self.undecryptable_pkts.clear();
-
-                    // Forwarding the error value here could confuse
-                    // applications, as they may not expect getting a `recv()`
-                    // error when calling `send()`.
-                    //
-                    // We simply fall-through to sending packets, which should
-                    // take care of terminating the connection as needed.
-                    break;
-                }
-            }
-        }
+        // Forwarding the error value here could confuse
+        // applications, as they may not expect getting a `recv()`
+        // error when calling `send()`.
+        //
+        // We simply fall-through to sending packets, which should
+        // take care of terminating the connection as needed.
+        let _ = self.process_undecrypted_0rtt_packets();
 
         // There's no point in trying to send a packet if the Initial secrets
         // have not been derived yet, so return early.
