@@ -79,13 +79,11 @@ impl Default for Rate {
 }
 
 impl Rate {
-    pub fn on_packet_sent(
-        &mut self, pkt: &mut Sent, bytes_in_flight: usize, now: Instant,
-    ) {
-        // No packets in flight yet?
+    pub fn on_packet_sent(&mut self, pkt: &mut Sent, bytes_in_flight: usize) {
+        // No packets in flight.
         if bytes_in_flight == 0 {
-            self.first_sent_time = now;
-            self.delivered_time = now;
+            self.first_sent_time = pkt.time_sent;
+            self.delivered_time = pkt.time_sent;
         }
 
         pkt.first_sent_time = self.first_sent_time;

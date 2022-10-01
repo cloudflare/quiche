@@ -327,9 +327,6 @@ impl Recovery {
         self.largest_sent_pkt[epoch] =
             cmp::max(self.largest_sent_pkt[epoch], pkt_num);
 
-        self.delivery_rate
-            .on_packet_sent(&mut pkt, self.bytes_in_flight, now);
-
         if in_flight {
             if ack_eliciting {
                 self.time_of_last_sent_ack_eliciting_pkt[epoch] = Some(now);
@@ -368,6 +365,10 @@ impl Recovery {
         self.schedule_next_packet(epoch, now, sent_bytes);
 
         pkt.time_sent = self.get_packet_send_time();
+
+        // bytes_in_flight is already updated. Use previous value.
+        self.delivery_rate
+            .on_packet_sent(&mut pkt, self.bytes_in_flight - sent_bytes);
 
         self.sent[epoch].push_back(pkt);
 
@@ -1185,11 +1186,11 @@ pub struct Sent {
 impl std::fmt::Debug for Sent {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "pkt_num={:?} ", self.pkt_num)?;
-        write!(f, "pkt_sent_time={:?} ", self.time_sent.elapsed())?;
+        write!(f, "pkt_sent_time={:?} ", self.time_sent)?;
         write!(f, "pkt_size={:?} ", self.size)?;
         write!(f, "delivered={:?} ", self.delivered)?;
-        write!(f, "delivered_time={:?} ", self.delivered_time.elapsed())?;
-        write!(f, "first_sent_time={:?} ", self.first_sent_time.elapsed())?;
+        write!(f, "delivered_time={:?} ", self.delivered_time)?;
+        write!(f, "first_sent_time={:?} ", self.first_sent_time)?;
         write!(f, "is_app_limited={} ", self.is_app_limited)?;
         write!(f, "has_data={} ", self.has_data)?;
 
