@@ -593,9 +593,9 @@ impl ConnectionIdentifiers {
     /// Updates the Source Connection ID entry with the provided sequence number
     /// to indicate that it is now linked to the provided path ID.
     pub fn link_scid_to_path_id(
-        &mut self, dcid_seq: u64, path_id: usize,
+        &mut self, scid_seq: u64, path_id: usize,
     ) -> Result<()> {
-        let e = self.scids.get_mut(dcid_seq).ok_or(Error::InvalidState)?;
+        let e = self.scids.get_mut(scid_seq).ok_or(Error::InvalidState)?;
         e.path_id = Some(path_id);
         Ok(())
     }
@@ -696,6 +696,18 @@ impl ConnectionIdentifiers {
     #[inline]
     pub fn oldest_dcid(&self) -> &ConnectionIdEntry {
         self.dcids.get_oldest()
+    }
+
+    /// Returns the lowest DCID sequence number still in use.
+    #[inline]
+    pub fn min_dcid_seq(&self) -> u64 {
+        self.dcids.iter().map(|e| e.seq).min().unwrap_or(0)
+    }
+
+    /// Returns the lowest SCID sequence number still in use.
+    #[inline]
+    pub fn min_scid_seq(&self) -> u64 {
+        self.scids.iter().map(|e| e.seq).min().unwrap_or(0)
     }
 
     /// Adds or remove the source Connection ID sequence number from the

@@ -439,7 +439,7 @@ pub fn connect(
                     );
                 },
 
-                quiche::PathEvent::Closed(local_addr, peer_addr) => {
+                quiche::PathEvent::Closed(local_addr, peer_addr, _e, _reason) => {
                     info!(
                         "Path ({}, {}) is now closed and unusable",
                         local_addr, peer_addr

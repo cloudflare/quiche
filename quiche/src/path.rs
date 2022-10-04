@@ -42,7 +42,7 @@ use crate::recovery::HandshakeStatus;
 
 /// The different states of the path validation.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PathState {
+pub enum PathValidationState {
     /// The path failed its validation.
     Failed,
 
@@ -59,15 +59,15 @@ pub enum PathState {
     Validated,
 }
 
-impl PathState {
+impl PathValidationState {
     #[cfg(feature = "ffi")]
     pub fn to_c(self) -> libc::ssize_t {
         match self {
-            PathState::Failed => -1,
-            PathState::Unknown => 0,
-            PathState::Validating => 1,
-            PathState::ValidatingMTU => 2,
-            PathState::Validated => 3,
+            PathValidationState::Failed => -1,
+            PathValidationState::Unknown => 0,
+            PathValidationState::Validating => 1,
+            PathValidationState::ValidatingMTU => 2,
+            PathValidationState::Validated => 3,
         }
     }
 }
@@ -92,7 +92,8 @@ pub enum PathEvent {
 
     /// The related network path between local `SocketAddr` and peer
     /// `SocketAddr` has been closed and is now unusable on this connection.
-    Closed(SocketAddr, SocketAddr),
+    /// An error code and a reason message are provided.
+    Closed(SocketAddr, SocketAddr, u64, Vec<u8>),
 
     /// The stack observes that the Source Connection ID with the given sequence
     /// number, initially used by the peer over the first pair of `SocketAddr`s,
@@ -112,7 +113,6 @@ pub enum PathEvent {
 }
 
 /// A network path on which QUIC packets can be sent.
-#[derive(Debug)]
 pub struct Path {
     /// The local address.
     local_addr: SocketAddr,
@@ -127,7 +127,7 @@ pub struct Path {
     pub active_dcid_seq: Option<u64>,
 
     /// The current validation state of the path.
-    state: PathState,
+    validation_state: PathValidationState,
 
     /// Is this path used to send non-probing packets.
     active: bool,
@@ -201,10 +201,10 @@ impl Path {
         local_addr: SocketAddr, peer_addr: SocketAddr,
         recovery_config: &recovery::RecoveryConfig, is_initial: bool,
     ) -> Self {
-        let (state, active_scid_seq, active_dcid_seq) = if is_initial {
-            (PathState::Validated, Some(0), Some(0))
+        let (validation_state, active_scid_seq, active_dcid_seq) = if is_initial {
+            (PathValidationState::Validated, Some(0), Some(0))
         } else {
-            (PathState::Unknown, None, None)
+            (PathValidationState::Unknown, None, None)
         };
 
         Self {
@@ -212,7 +212,7 @@ impl Path {
             peer_addr,
             active_scid_seq,
             active_dcid_seq,
-            state,
+            validation_state,
             active: false,
             recovery: recovery::Recovery::new_with_config(recovery_config),
             in_flight_challenges: VecDeque::new(),
@@ -250,8 +250,8 @@ impl Path {
 
     /// Returns whether the path is working (i.e., not failed).
     #[inline]
-    fn working(&self) -> bool {
-        self.state > PathState::Failed
+    pub fn working(&self) -> bool {
+        self.validation_state > PathValidationState::Failed
     }
 
     /// Returns whether the path is active.
@@ -264,7 +264,7 @@ impl Path {
     #[inline]
     pub fn usable(&self) -> bool {
         self.active() ||
-            (self.state == PathState::Validated &&
+            (self.validation_state == PathValidationState::Validated &&
                 self.active_dcid_seq.is_some())
     }
 
@@ -281,30 +281,33 @@ impl Path {
         !self.received_challenges.is_empty() || self.validation_requested()
     }
 
-    /// Promotes the path to the provided state only if the new state is greater
-    /// than the current one.
-    fn promote_to(&mut self, state: PathState) {
-        if self.state < state {
-            self.state = state;
+    /// Promotes the path to the provided validation state only if the new state
+    /// is greater than the current one.
+    fn promote_to(&mut self, state: PathValidationState) {
+        if self.validation_state < state {
+            self.validation_state = state;
         }
     }
 
     /// Returns whether the path is validated.
     #[inline]
     pub fn validated(&self) -> bool {
-        self.state == PathState::Validated
+        self.validation_state == PathValidationState::Validated
     }
 
     /// Returns whether this path failed its validation.
     #[inline]
     fn validation_failed(&self) -> bool {
-        self.state == PathState::Failed
+        self.validation_state == PathValidationState::Failed
     }
 
     // Returns whether this path is under path validation process.
     #[inline]
     pub fn under_validation(&self) -> bool {
-        matches!(self.state, PathState::Validating | PathState::ValidatingMTU)
+        matches!(
+            self.validation_state,
+            PathValidationState::Validating | PathValidationState::ValidatingMTU
+        )
     }
 
     /// Requests path validation.
@@ -320,7 +323,7 @@ impl Path {
     }
 
     pub fn on_challenge_sent(&mut self) {
-        self.promote_to(PathState::Validating);
+        self.promote_to(PathValidationState::Validating);
         self.challenge_requested = false;
     }
 
@@ -358,15 +361,15 @@ impl Path {
         });
 
         // The 4-tuple is reachable, but we didn't check Path MTU yet.
-        self.promote_to(PathState::ValidatingMTU);
+        self.promote_to(PathValidationState::ValidatingMTU);
 
         self.max_challenge_size =
             std::cmp::max(self.max_challenge_size, challenge_size);
 
-        if self.state == PathState::ValidatingMTU {
+        if self.validation_state == PathValidationState::ValidatingMTU {
             if self.max_challenge_size >= crate::MIN_CLIENT_INITIAL_LEN {
                 // Path MTU is sufficient for QUIC traffic.
-                self.promote_to(PathState::Validated);
+                self.promote_to(PathValidationState::Validated);
                 return true;
             }
 
@@ -378,13 +381,18 @@ impl Path {
     }
 
     fn on_failed_validation(&mut self) {
-        self.state = PathState::Failed;
+        self.validation_state = PathValidationState::Failed;
         self.active = false;
     }
 
     #[inline]
     pub fn pop_received_challenge(&mut self) -> Option<[u8; 8]> {
         self.received_challenges.pop_front()
+    }
+
+    #[inline]
+    pub fn path_timer(&self) -> Option<time::Instant> {
+        self.recovery.loss_detection_timer()
     }
 
     pub fn on_loss_detection_timeout(
@@ -446,15 +454,17 @@ impl Path {
         PathStats {
             local_addr: self.local_addr,
             peer_addr: self.peer_addr,
-            validation_state: self.state,
-            active: self.active,
+            validation_state: self.validation_state,
+            active: self.active(),
             recv: self.recv_count,
             sent: self.sent_count,
             lost: self.recovery.lost_count,
+            lost_spurious: self.recovery.lost_spurious_count,
             retrans: self.retrans_count,
             rtt: self.recovery.rtt(),
             min_rtt: self.recovery.min_rtt(),
             rttvar: self.recovery.rttvar(),
+            rtt_update: self.recovery.rtt_update_count,
             cwnd: self.recovery.cwnd(),
             sent_bytes: self.sent_bytes,
             recv_bytes: self.recv_bytes,
@@ -646,7 +656,12 @@ impl PathMap {
         self.addrs_to_paths
             .remove(&(path.local_addr, path.peer_addr));
 
-        self.notify_event(PathEvent::Closed(path.local_addr, path.peer_addr));
+        self.notify_event(PathEvent::Closed(
+            path.local_addr,
+            path.peer_addr,
+            0,
+            "unused path".into(),
+        ));
 
         Ok(())
     }
@@ -798,9 +813,9 @@ pub struct PathStats {
     pub peer_addr: SocketAddr,
 
     /// The path validation state.
-    pub validation_state: PathState,
+    pub validation_state: PathValidationState,
 
-    /// Whether the path is marked as active.
+    /// Is it active?
     pub active: bool,
 
     /// The number of QUIC packets received.
@@ -811,6 +826,9 @@ pub struct PathStats {
 
     /// The number of QUIC packets that were lost.
     pub lost: usize,
+
+    /// The number of QUIC packets that were spuriously marked as lost.
+    pub lost_spurious: usize,
 
     /// The number of sent QUIC packets with retransmitted data.
     pub retrans: usize,
@@ -824,6 +842,9 @@ pub struct PathStats {
     /// The estimated round-trip time variation in samples using a mean
     /// variation.
     pub rttvar: time::Duration,
+
+    /// The number of round-trip time updates over that path.
+    pub rtt_update: usize,
 
     /// The size of the connection's congestion window in bytes.
     pub cwnd: usize,
@@ -869,8 +890,8 @@ impl std::fmt::Debug for PathStats {
         )?;
         write!(
             f,
-            "recv={} sent={} lost={} retrans={} rtt={:?} min_rtt={:?} rttvar={:?} cwnd={}",
-            self.recv, self.sent, self.lost, self.retrans, self.rtt, self.min_rtt, self.rttvar, self.cwnd,
+            "recv={} sent={} lost={} lost_spurious={} retrans={} rtt={:?} min_rtt={:?} rttvar={:?} rtt_update={} cwnd={}",
+            self.recv, self.sent, self.lost, self.lost_spurious, self.retrans, self.rtt, self.min_rtt, self.rttvar, self.rtt_update, self.cwnd,
         )?;
 
         write!(
@@ -933,7 +954,10 @@ mod tests {
         assert!(!path_mgr.get_mut(pid).unwrap().probing_required());
         assert!(path_mgr.get_mut(pid).unwrap().under_validation());
         assert!(!path_mgr.get_mut(pid).unwrap().validated());
-        assert_eq!(path_mgr.get_mut(pid).unwrap().state, PathState::Validating);
+        assert_eq!(
+            path_mgr.get_mut(pid).unwrap().validation_state,
+            PathValidationState::Validating
+        );
         assert_eq!(path_mgr.pop_event(), None);
 
         // Receives the response. The path is reachable, but the MTU is not
@@ -945,8 +969,8 @@ mod tests {
         assert!(path_mgr.get_mut(pid).unwrap().under_validation());
         assert!(!path_mgr.get_mut(pid).unwrap().validated());
         assert_eq!(
-            path_mgr.get_mut(pid).unwrap().state,
-            PathState::ValidatingMTU
+            path_mgr.get_mut(pid).unwrap().validation_state,
+            PathValidationState::ValidatingMTU
         );
         assert_eq!(path_mgr.pop_event(), None);
 
@@ -965,7 +989,10 @@ mod tests {
         assert!(!path_mgr.get_mut(pid).unwrap().probing_required());
         assert!(!path_mgr.get_mut(pid).unwrap().under_validation());
         assert!(path_mgr.get_mut(pid).unwrap().validated());
-        assert_eq!(path_mgr.get_mut(pid).unwrap().state, PathState::Validated);
+        assert_eq!(
+            path_mgr.get_mut(pid).unwrap().validation_state,
+            PathValidationState::Validated
+        );
         assert_eq!(
             path_mgr.pop_event(),
             Some(PathEvent::Validated(client_addr_2, server_addr))

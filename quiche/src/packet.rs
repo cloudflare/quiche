@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::ops::Index;
 use std::ops::IndexMut;
@@ -106,6 +107,8 @@ where
         self.index_mut(usize::from(index))
     }
 }
+
+pub const INITIAL_PACKET_NUMBER_SPACE_ID: u64 = 0;
 
 /// QUIC packet type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -649,8 +652,8 @@ pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize) -> u64 
 }
 
 pub fn decrypt_pkt<'a>(
-    b: &'a mut octets::OctetsMut, pn: u64, pn_len: usize, payload_len: usize,
-    aead: &crypto::Open,
+    b: &'a mut octets::OctetsMut, path_seq: u32, pn: u64, pn_len: usize,
+    payload_len: usize, aead: &crypto::Open,
 ) -> Result<octets::Octets<'a>> {
     let payload_offset = b.off();
 
@@ -662,8 +665,12 @@ pub fn decrypt_pkt<'a>(
 
     let mut ciphertext = payload.peek_bytes_mut(payload_len)?;
 
-    let payload_len =
-        aead.open_with_u64_counter(pn, header.as_ref(), ciphertext.as_mut())?;
+    let payload_len = aead.open_with_u64_counter(
+        path_seq,
+        pn,
+        header.as_ref(),
+        ciphertext.as_mut(),
+    )?;
 
     Ok(b.get_bytes(payload_len)?)
 }
@@ -694,13 +701,16 @@ pub fn encrypt_hdr(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn encrypt_pkt(
-    b: &mut octets::OctetsMut, pn: u64, pn_len: usize, payload_len: usize,
-    payload_offset: usize, extra_in: Option<&[u8]>, aead: &crypto::Seal,
+    b: &mut octets::OctetsMut, path_seq: u32, pn: u64, pn_len: usize,
+    payload_len: usize, payload_offset: usize, extra_in: Option<&[u8]>,
+    aead: &crypto::Seal,
 ) -> Result<usize> {
     let (mut header, mut payload) = b.split_at(payload_offset)?;
 
     let ciphertext_len = aead.seal_with_u64_counter(
+        path_seq,
         pn,
         header.as_ref(),
         payload.as_mut(),
@@ -867,16 +877,6 @@ pub struct PktNumSpace {
     pub recv_pkt_num: PktNumWindow,
 
     pub ack_elicited: bool,
-
-    pub key_update: Option<KeyUpdate>,
-
-    pub crypto_open: Option<crypto::Open>,
-    pub crypto_seal: Option<crypto::Seal>,
-
-    pub crypto_0rtt_open: Option<crypto::Open>,
-    pub crypto_0rtt_seal: Option<crypto::Seal>,
-
-    pub crypto_stream: stream::Stream,
 }
 
 impl PktNumSpace {
@@ -895,7 +895,33 @@ impl PktNumSpace {
             recv_pkt_num: PktNumWindow::default(),
 
             ack_elicited: false,
+        }
+    }
 
+    fn clear(&mut self) {
+        self.ack_elicited = false;
+    }
+
+    fn ready(&self) -> bool {
+        self.ack_elicited
+    }
+}
+
+pub struct PktNumSpaceCrypto {
+    pub key_update: Option<KeyUpdate>,
+
+    pub crypto_open: Option<crypto::Open>,
+    pub crypto_seal: Option<crypto::Seal>,
+
+    pub crypto_0rtt_open: Option<crypto::Open>,
+    pub crypto_0rtt_seal: Option<crypto::Seal>,
+
+    pub crypto_stream: stream::Stream,
+}
+
+impl PktNumSpaceCrypto {
+    pub fn new() -> PktNumSpaceCrypto {
+        PktNumSpaceCrypto {
             key_update: None,
 
             crypto_open: None,
@@ -915,7 +941,7 @@ impl PktNumSpace {
         }
     }
 
-    pub fn clear(&mut self) {
+    fn clear(&mut self) {
         self.crypto_stream = stream::Stream::new(
             0, // dummy
             u64::MAX,
@@ -924,20 +950,167 @@ impl PktNumSpace {
             true,
             stream::MAX_STREAM_WINDOW,
         );
-
-        self.ack_elicited = false;
     }
 
     pub fn crypto_overhead(&self) -> Option<usize> {
         Some(self.crypto_seal.as_ref()?.alg().tag_len())
     }
 
-    pub fn ready(&self) -> bool {
-        self.crypto_stream.is_flushable() || self.ack_elicited
+    fn ready(&self) -> bool {
+        self.crypto_stream.is_flushable()
     }
 
     pub fn has_keys(&self) -> bool {
         self.crypto_open.is_some() && self.crypto_seal.is_some()
+    }
+}
+
+pub struct PktNumSpaceImplMap {
+    pkt_num_spaces: [PktNumSpace; Epoch::Application as usize],
+    application_pkt_num_spaces: BTreeMap<u64, PktNumSpace>,
+
+    /// Lowest possible RX space ID still in use.
+    lowest_rx_space_id: u64,
+    /// Lowest possible TX space ID still in use.
+    lowest_tx_space_id: u64,
+}
+
+impl PktNumSpaceImplMap {
+    fn new() -> PktNumSpaceImplMap {
+        PktNumSpaceImplMap {
+            pkt_num_spaces: [PktNumSpace::new(), PktNumSpace::new()],
+            application_pkt_num_spaces: BTreeMap::from([(0, PktNumSpace::new())]),
+
+            lowest_rx_space_id: 0,
+            lowest_tx_space_id: 0,
+        }
+    }
+
+    pub fn get(&self, epoch: Epoch, space_id: u64) -> Result<&PktNumSpace> {
+        match epoch {
+            Epoch::Application => self
+                .application_pkt_num_spaces
+                .get(&space_id)
+                .ok_or(Error::InvalidState),
+            e => Ok(&self.pkt_num_spaces[e]),
+        }
+    }
+
+    pub fn get_mut_or_create(
+        &mut self, epoch: Epoch, space_id: u64,
+    ) -> &mut PktNumSpace {
+        match epoch {
+            Epoch::Application => self
+                .application_pkt_num_spaces
+                .entry(space_id)
+                .or_insert_with(PktNumSpace::new),
+            e => &mut self.pkt_num_spaces[e],
+        }
+    }
+
+    pub fn get_mut(
+        &mut self, epoch: Epoch, space_id: u64,
+    ) -> Result<&mut PktNumSpace> {
+        match epoch {
+            Epoch::Application => self
+                .application_pkt_num_spaces
+                .get_mut(&space_id)
+                .ok_or(Error::InvalidState),
+            e => Ok(&mut self.pkt_num_spaces[e]),
+        }
+    }
+
+    fn is_ready(&self, epoch: Epoch, space_id: Option<u64>) -> bool {
+        match (epoch, space_id) {
+            (Epoch::Application, None) => self
+                .application_pkt_num_spaces
+                .values()
+                .any(|pns| pns.ready()),
+            (e, Some(s)) => match self.get(e, s) {
+                Ok(pns) => pns.ready(),
+                Err(_) => false,
+            },
+            (e, None) => match self.get(e, 0) {
+                Ok(pns) => pns.ready(),
+                Err(_) => false,
+            },
+        }
+    }
+
+    /// Remove application packet number spaces whose connection IDs have been
+    /// retired, to free their memory.
+    fn remove_dangling_application_pkt_num_spaces(&mut self) {
+        let lowest_space_id =
+            std::cmp::min(self.lowest_rx_space_id, self.lowest_tx_space_id);
+        self.application_pkt_num_spaces
+            .retain(|&s, _| s >= lowest_space_id)
+    }
+
+    pub fn update_lowest_active_rx_id(&mut self, rx_id: u64) {
+        if rx_id > self.lowest_rx_space_id {
+            self.lowest_rx_space_id = rx_id;
+            self.remove_dangling_application_pkt_num_spaces();
+        }
+    }
+
+    pub fn update_lowest_active_tx_id(&mut self, tx_id: u64) {
+        if tx_id > self.lowest_tx_space_id {
+            self.lowest_tx_space_id = tx_id;
+            self.remove_dangling_application_pkt_num_spaces();
+        }
+    }
+}
+
+pub struct PktNumSpaceCryptoMap {
+    inner: [PktNumSpaceCrypto; Epoch::count()],
+}
+
+impl PktNumSpaceCryptoMap {
+    fn new() -> PktNumSpaceCryptoMap {
+        PktNumSpaceCryptoMap {
+            inner: [
+                PktNumSpaceCrypto::new(),
+                PktNumSpaceCrypto::new(),
+                PktNumSpaceCrypto::new(),
+            ],
+        }
+    }
+
+    #[inline]
+    pub fn get(&self, epoch: Epoch) -> &PktNumSpaceCrypto {
+        &self.inner[epoch]
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self, epoch: Epoch) -> &mut PktNumSpaceCrypto {
+        &mut self.inner[epoch]
+    }
+}
+
+pub struct PktNumSpaceMap {
+    pub spaces: PktNumSpaceImplMap,
+    pub crypto: PktNumSpaceCryptoMap,
+}
+
+impl PktNumSpaceMap {
+    pub fn new() -> PktNumSpaceMap {
+        PktNumSpaceMap {
+            spaces: PktNumSpaceImplMap::new(),
+            crypto: PktNumSpaceCryptoMap::new(),
+        }
+    }
+
+    pub fn clear(&mut self, epoch: Epoch) {
+        self.spaces.get_mut(epoch, 0).map(|pns| pns.clear()).ok();
+        self.crypto.get_mut(epoch).clear();
+    }
+
+    /// Returns whether the epoch is ready.
+    /// When specifying the Epoch::Application, if `space_id` is `None`, it will
+    /// consider all the application data packet number spaces; otherwise it
+    /// only consider the specified `space_id`.
+    pub fn is_ready(&self, epoch: Epoch, space_id: Option<u64>) -> bool {
+        self.crypto.get(epoch).ready() || self.spaces.is_ready(epoch, space_id)
     }
 }
 
@@ -1310,7 +1483,8 @@ mod tests {
         assert_eq!(pn, expected_pn);
 
         let payload =
-            decrypt_pkt(&mut b, pn, hdr.pkt_num_len, payload_len, &aead).unwrap();
+            decrypt_pkt(&mut b, 0, pn, hdr.pkt_num_len, payload_len, &aead)
+                .unwrap();
 
         let payload = payload.as_ref();
         assert_eq!(&payload[..expected_frames.len()], expected_frames);
@@ -1528,7 +1702,8 @@ mod tests {
         assert_eq!(pn, 654_360_564);
 
         let payload =
-            decrypt_pkt(&mut b, pn, hdr.pkt_num_len, payload_len, &aead).unwrap();
+            decrypt_pkt(&mut b, 0, pn, hdr.pkt_num_len, payload_len, &aead)
+                .unwrap();
 
         let payload = payload.as_ref();
         assert_eq!(&payload, &[0x01]);
@@ -1560,6 +1735,7 @@ mod tests {
 
         let written = encrypt_pkt(
             &mut b,
+            0,
             pn,
             pn_len,
             payload_len,
@@ -1897,6 +2073,7 @@ mod tests {
 
         let written = encrypt_pkt(
             &mut b,
+            0,
             pn,
             pn_len,
             payload_len,
@@ -1937,7 +2114,7 @@ mod tests {
             crypto::derive_initial_key_material(b"", hdr.version, true).unwrap();
 
         assert_eq!(
-            decrypt_pkt(&mut b, 0, 1, payload_len, &aead),
+            decrypt_pkt(&mut b, 0, 0, 1, payload_len, &aead),
             Err(Error::InvalidPacket)
         );
     }
@@ -1970,7 +2147,7 @@ mod tests {
             crypto::derive_initial_key_material(b"", hdr.version, true).unwrap();
 
         assert_eq!(
-            decrypt_pkt(&mut b, 0, 1, payload_len, &aead),
+            decrypt_pkt(&mut b, 0, 0, 1, payload_len, &aead),
             Err(Error::CryptoFail)
         );
     }

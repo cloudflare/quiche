@@ -34,6 +34,7 @@ use std::time::Instant;
 
 use crate::recovery::Acked;
 use crate::recovery::Sent;
+use crate::recovery::SpacedPktNum;
 
 #[derive(Debug)]
 pub struct Rate {
@@ -44,13 +45,13 @@ pub struct Rate {
     first_sent_time: Instant,
 
     // Packet number of the last sent packet with app limited.
-    end_of_app_limited: u64,
+    end_of_app_limited: SpacedPktNum,
 
     // Packet number of the last sent packet.
-    last_sent_packet: u64,
+    last_sent_packet: SpacedPktNum,
 
     // Packet number of the largest acked packet.
-    largest_acked: u64,
+    largest_acked: SpacedPktNum,
 
     // Sample of rate estimation.
     rate_sample: RateSample,
@@ -67,11 +68,11 @@ impl Default for Rate {
 
             first_sent_time: now,
 
-            end_of_app_limited: 0,
+            end_of_app_limited: SpacedPktNum(0, 0),
 
-            last_sent_packet: 0,
+            last_sent_packet: SpacedPktNum(0, 0),
 
-            largest_acked: 0,
+            largest_acked: SpacedPktNum(0, 0),
 
             rate_sample: RateSample::default(),
         }
@@ -157,11 +158,15 @@ impl Rate {
     }
 
     pub fn update_app_limited(&mut self, v: bool) {
-        self.end_of_app_limited = if v { self.last_sent_packet.max(1) } else { 0 }
+        self.end_of_app_limited = if v {
+            self.last_sent_packet.max(SpacedPktNum(0, 1))
+        } else {
+            SpacedPktNum(0, 0)
+        }
     }
 
     pub fn app_limited(&mut self) -> bool {
-        self.end_of_app_limited != 0
+        self.end_of_app_limited.1 != 0
     }
 
     pub fn delivered(&self) -> usize {
@@ -229,7 +234,7 @@ mod tests {
         // Send 2 packets.
         for pn in 0..2 {
             let pkt = Sent {
-                pkt_num: pn,
+                pkt_num: SpacedPktNum(0, pn),
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
@@ -261,7 +266,7 @@ mod tests {
         // Ack 2 packets.
         for pn in 0..2 {
             let acked = Acked {
-                pkt_num: pn,
+                pkt_num: SpacedPktNum(0, pn),
                 time_sent: now,
                 size: mss,
                 rtt,
@@ -297,7 +302,7 @@ mod tests {
         // Send 10 packets to fill cwnd.
         for pn in 0..10 {
             let pkt = Sent {
-                pkt_num: pn,
+                pkt_num: SpacedPktNum(0, pn),
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
@@ -338,7 +343,7 @@ mod tests {
         // Send 5 packets.
         for pn in 0..5 {
             let pkt = Sent {
-                pkt_num: pn,
+                pkt_num: SpacedPktNum(0, pn),
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
@@ -372,6 +377,7 @@ mod tests {
 
         assert_eq!(
             r.on_ack_received(
+                0,
                 &acked,
                 25,
                 packet::Epoch::Application,

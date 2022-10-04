@@ -917,7 +917,7 @@ impl Drop for Handshake {
 pub struct ExData<'a> {
     pub application_protos: &'a Vec<Vec<u8>>,
 
-    pub pkt_num_spaces: &'a mut [packet::PktNumSpace; packet::Epoch::count()],
+    pub pkt_num_spaces: &'a mut packet::PktNumSpaceMap,
 
     pub session: &'a mut Option<Vec<u8>>,
 
@@ -964,14 +964,22 @@ extern fn set_read_secret(
     trace!("{} set read secret lvl={:?}", ex_data.trace_id, level);
 
     let space = match level {
-        crypto::Level::Initial =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Initial],
-        crypto::Level::ZeroRTT =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
-        crypto::Level::Handshake =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Handshake],
-        crypto::Level::OneRTT =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
+        crypto::Level::Initial => ex_data
+            .pkt_num_spaces
+            .crypto
+            .get_mut(packet::Epoch::Initial),
+        crypto::Level::ZeroRTT => ex_data
+            .pkt_num_spaces
+            .crypto
+            .get_mut(packet::Epoch::Application),
+        crypto::Level::Handshake => ex_data
+            .pkt_num_spaces
+            .crypto
+            .get_mut(packet::Epoch::Handshake),
+        crypto::Level::OneRTT => ex_data
+            .pkt_num_spaces
+            .crypto
+            .get_mut(packet::Epoch::Application),
     };
 
     let aead = match get_cipher_from_ptr(cipher) {
@@ -1015,14 +1023,22 @@ extern fn set_write_secret(
     trace!("{} set write secret lvl={:?}", ex_data.trace_id, level);
 
     let space = match level {
-        crypto::Level::Initial =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Initial],
-        crypto::Level::ZeroRTT =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
-        crypto::Level::Handshake =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Handshake],
-        crypto::Level::OneRTT =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
+        crypto::Level::Initial => ex_data
+            .pkt_num_spaces
+            .crypto
+            .get_mut(packet::Epoch::Initial),
+        crypto::Level::ZeroRTT => ex_data
+            .pkt_num_spaces
+            .crypto
+            .get_mut(packet::Epoch::Application),
+        crypto::Level::Handshake => ex_data
+            .pkt_num_spaces
+            .crypto
+            .get_mut(packet::Epoch::Handshake),
+        crypto::Level::OneRTT => ex_data
+            .pkt_num_spaces
+            .crypto
+            .get_mut(packet::Epoch::Application),
     };
 
     let aead = match get_cipher_from_ptr(cipher) {
@@ -1067,13 +1083,19 @@ extern fn add_handshake_data(
     let buf = unsafe { slice::from_raw_parts(data, len) };
 
     let space = match level {
-        crypto::Level::Initial =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Initial],
+        crypto::Level::Initial => ex_data
+            .pkt_num_spaces
+            .crypto
+            .get_mut(packet::Epoch::Initial),
         crypto::Level::ZeroRTT => unreachable!(),
-        crypto::Level::Handshake =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Handshake],
-        crypto::Level::OneRTT =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
+        crypto::Level::Handshake => ex_data
+            .pkt_num_spaces
+            .crypto
+            .get_mut(packet::Epoch::Handshake),
+        crypto::Level::OneRTT => ex_data
+            .pkt_num_spaces
+            .crypto
+            .get_mut(packet::Epoch::Application),
     };
 
     if space.crypto_stream.send.write(buf, false).is_err() {

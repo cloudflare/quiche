@@ -373,34 +373,7 @@ impl Frame {
                 } else {
                     b.put_varint(0x03)?;
                 }
-
-                let mut it = ranges.iter().rev();
-
-                let first = it.next().unwrap();
-                let ack_block = (first.end - 1) - first.start;
-
-                b.put_varint(first.end - 1)?;
-                b.put_varint(*ack_delay)?;
-                b.put_varint(it.len() as u64)?;
-                b.put_varint(ack_block)?;
-
-                let mut smallest_ack = first.start;
-
-                for block in it {
-                    let gap = smallest_ack - block.end - 1;
-                    let ack_block = (block.end - 1) - block.start;
-
-                    b.put_varint(gap)?;
-                    b.put_varint(ack_block)?;
-
-                    smallest_ack = block.start;
-                }
-
-                if let Some(ecn) = ecn_counts {
-                    b.put_varint(ecn.ect0_count)?;
-                    b.put_varint(ecn.ect1_count)?;
-                    b.put_varint(ecn.ecn_ce_count)?;
-                }
+                common_ack_to_bytes(b, ack_delay, ranges, ecn_counts)?;
             },
 
             Frame::ResetStream {
@@ -585,36 +558,8 @@ impl Frame {
                 ranges,
                 ecn_counts,
             } => {
-                let mut it = ranges.iter().rev();
-
-                let first = it.next().unwrap();
-                let ack_block = (first.end - 1) - first.start;
-
-                let mut len = 1 + // frame type
-                    octets::varint_len(first.end - 1) + // largest_ack
-                    octets::varint_len(*ack_delay) + // ack_delay
-                    octets::varint_len(it.len() as u64) + // block_count
-                    octets::varint_len(ack_block); // first_block
-
-                let mut smallest_ack = first.start;
-
-                for block in it {
-                    let gap = smallest_ack - block.end - 1;
-                    let ack_block = (block.end - 1) - block.start;
-
-                    len += octets::varint_len(gap) + // gap
-                           octets::varint_len(ack_block); // ack_block
-
-                    smallest_ack = block.start;
-                }
-
-                if let Some(ecn) = ecn_counts {
-                    len += octets::varint_len(ecn.ect0_count) +
-                        octets::varint_len(ecn.ect1_count) +
-                        octets::varint_len(ecn.ecn_ce_count);
-                }
-
-                len
+                1 + // frame_type
+                common_ack_wire_len(ack_delay, ranges, ecn_counts)
             },
 
             Frame::ResetStream {
@@ -1169,9 +1114,9 @@ impl std::fmt::Debug for Frame {
     }
 }
 
-fn parse_ack_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
-    let first = ty as u8;
-
+fn parse_common_ack_frame(
+    b: &mut octets::Octets, has_ecn: bool,
+) -> Result<(u64, ranges::RangeSet, Option<EcnCounts>)> {
     let largest_ack = b.get_varint()?;
     let ack_delay = b.get_varint()?;
     let block_count = b.get_varint()?;
@@ -1206,7 +1151,7 @@ fn parse_ack_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
         ranges.insert(smallest_ack..largest_ack + 1);
     }
 
-    let ecn_counts = if first & 0x01 != 0 {
+    let ecn_counts = if has_ecn {
         let ecn = EcnCounts {
             ect0_count: b.get_varint()?,
             ect1_count: b.get_varint()?,
@@ -1218,11 +1163,88 @@ fn parse_ack_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
         None
     };
 
+    Ok((ack_delay, ranges, ecn_counts))
+}
+
+fn parse_ack_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
+    let first = ty as u8;
+    let (ack_delay, ranges, ecn_counts) =
+        parse_common_ack_frame(b, first & 0x01 != 0)?;
+
     Ok(Frame::ACK {
         ack_delay,
         ranges,
         ecn_counts,
     })
+}
+
+fn common_ack_to_bytes(
+    b: &mut octets::OctetsMut, ack_delay: &u64, ranges: &ranges::RangeSet,
+    ecn_counts: &Option<EcnCounts>,
+) -> Result<()> {
+    let mut it = ranges.iter().rev();
+
+    let first = it.next().unwrap();
+    let ack_block = (first.end - 1) - first.start;
+
+    b.put_varint(first.end - 1)?;
+    b.put_varint(*ack_delay)?;
+    b.put_varint(it.len() as u64)?;
+    b.put_varint(ack_block)?;
+
+    let mut smallest_ack = first.start;
+
+    for block in it {
+        let gap = smallest_ack - block.end - 1;
+        let ack_block = (block.end - 1) - block.start;
+
+        b.put_varint(gap)?;
+        b.put_varint(ack_block)?;
+
+        smallest_ack = block.start;
+    }
+
+    if let Some(ecn) = ecn_counts {
+        b.put_varint(ecn.ect0_count)?;
+        b.put_varint(ecn.ect1_count)?;
+        b.put_varint(ecn.ecn_ce_count)?;
+    }
+
+    Ok(())
+}
+
+fn common_ack_wire_len(
+    ack_delay: &u64, ranges: &ranges::RangeSet, ecn_counts: &Option<EcnCounts>,
+) -> usize {
+    let mut it = ranges.iter().rev();
+
+    let first = it.next().unwrap();
+    let ack_block = (first.end - 1) - first.start;
+
+    let mut len = octets::varint_len(first.end - 1) + // largest_ack
+        octets::varint_len(*ack_delay) + // ack_delay
+        octets::varint_len(it.len() as u64) + // block_count
+        octets::varint_len(ack_block); // first_block
+
+    let mut smallest_ack = first.start;
+
+    for block in it {
+        let gap = smallest_ack - block.end - 1;
+        let ack_block = (block.end - 1) - block.start;
+
+        len += octets::varint_len(gap) + // gap
+                octets::varint_len(ack_block); // ack_block
+
+        smallest_ack = block.start;
+    }
+
+    if let Some(ecn) = ecn_counts {
+        len += octets::varint_len(ecn.ect0_count) +
+            octets::varint_len(ecn.ect1_count) +
+            octets::varint_len(ecn.ecn_ce_count);
+    }
+
+    len
 }
 
 pub fn encode_crypto_header(
