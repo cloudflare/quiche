@@ -414,7 +414,7 @@ mod tests {
         // Send 5 packets.
         for pn in 0..5 {
             let pkt = Sent {
-                pkt_num: pn,
+                pkt_num: SpacedPktNum(0, pn),
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
@@ -447,6 +447,7 @@ mod tests {
 
         assert_eq!(
             r.on_ack_received(
+                0,
                 &acked,
                 25,
                 packet::Epoch::Application,
@@ -482,7 +483,7 @@ mod tests {
         // Send 5 packets.
         for pn in 0..5 {
             let pkt = Sent {
-                pkt_num: pn,
+                pkt_num: SpacedPktNum(0, pn),
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
@@ -516,6 +517,7 @@ mod tests {
         // 2 acked, 2 x MSS lost.
         assert_eq!(
             r.on_ack_received(
+                0,
                 &acked,
                 25,
                 packet::Epoch::Application,
@@ -549,7 +551,7 @@ mod tests {
         // Stop right before filled_pipe=true.
         for _ in 0..3 {
             let pkt = Sent {
-                pkt_num: pn,
+                pkt_num: SpacedPktNum(0, pn),
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
@@ -583,6 +585,7 @@ mod tests {
 
             assert_eq!(
                 r.on_ack_received(
+                    0,
                     &acked,
                     25,
                     packet::Epoch::Application,
@@ -598,7 +601,7 @@ mod tests {
         // Stop at right before filled_pipe=true.
         for _ in 0..5 {
             let pkt = Sent {
-                pkt_num: pn,
+                pkt_num: SpacedPktNum(0, pn),
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
@@ -635,6 +638,7 @@ mod tests {
 
         assert_eq!(
             r.on_ack_received(
+                0,
                 &acked,
                 25,
                 packet::Epoch::Application,
@@ -668,7 +672,7 @@ mod tests {
         // smaller than BBRInFlight(1).
         for (pn, _) in (0..4).enumerate() {
             let pkt = Sent {
-                pkt_num: pn as u64,
+                pkt_num: SpacedPktNum(0, pn as u64),
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
@@ -699,6 +703,7 @@ mod tests {
 
             assert_eq!(
                 r.on_ack_received(
+                    0,
                     &acked,
                     25,
                     packet::Epoch::Application,
@@ -737,7 +742,7 @@ mod tests {
         // smaller than BBRInFlight(1).
         for _ in 0..4 {
             let pkt = Sent {
-                pkt_num: pn,
+                pkt_num: SpacedPktNum(0, pn),
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
@@ -770,6 +775,7 @@ mod tests {
 
             assert_eq!(
                 r.on_ack_received(
+                    0,
                     &acked,
                     25,
                     packet::Epoch::Application,
@@ -789,7 +795,7 @@ mod tests {
         let now = now + RTPROP_FILTER_LEN;
 
         let pkt = Sent {
-            pkt_num: pn,
+            pkt_num: SpacedPktNum(0, pn),
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -824,6 +830,7 @@ mod tests {
 
         assert_eq!(
             r.on_ack_received(
+                0,
                 &acked,
                 25,
                 packet::Epoch::Application,

@@ -202,7 +202,7 @@ mod tests {
         let now = Instant::now();
 
         let p = recovery::Sent {
-            pkt_num: 0,
+            pkt_num: recovery::SpacedPktNum(0, 0),
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -251,7 +251,7 @@ mod tests {
         let now = Instant::now();
 
         let p = recovery::Sent {
-            pkt_num: 0,
+            pkt_num: recovery::SpacedPktNum(0, 0),
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -362,7 +362,7 @@ mod tests {
         let rtt = Duration::from_millis(100);
 
         let mut acked = vec![Acked {
-            pkt_num: 0,
+            pkt_num: recovery::SpacedPktNum(0, 0),
             // To exit from recovery
             time_sent: now + rtt,
             // More than cur_cwnd to increase cwnd
