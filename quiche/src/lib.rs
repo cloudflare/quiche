@@ -421,6 +421,9 @@ const MAX_SEND_UDP_PAYLOAD_SIZE: usize = 1200;
 // The default length of DATAGRAM queues.
 const DEFAULT_MAX_DGRAM_QUEUE_LEN: usize = 0;
 
+// The default urgency of STREAM/DGRAM.
+const DEFAULT_URGENCY: u8 = 127;
+
 // The DATAGRAM standard recommends either none or 65536 as maximum DATAGRAM
 // frames size. We enforce the recommendation for forward compatibility.
 const MAX_DGRAM_FRAME_SIZE: u64 = 65536;
@@ -3660,15 +3663,22 @@ impl Connection {
         // where one type is preferred but its buffer is empty, fall back
         // to the other type in order not to waste this function call.
         let mut dgram_emitted = false;
-        let dgrams_to_emit = self.dgram_max_writable_len().is_some();
+        let dgrams_to_emit = self.dgram_send_queue.len() > 0;
         let stream_to_emit = self.streams.has_flushable();
 
-        let mut do_dgram = self.emit_dgram && dgrams_to_emit;
-        let do_stream = !self.emit_dgram && stream_to_emit;
-
-        if !do_stream && dgrams_to_emit {
-            do_dgram = true;
-        }
+        let do_dgram = if dgrams_to_emit && stream_to_emit {
+            let dgram_lowest_urgency = self.dgram_send_queue.highest_priority();
+            let stream_lowest_urgency = self.streams.highest_priority();
+            if dgram_lowest_urgency < stream_lowest_urgency {
+                true
+            } else if dgram_lowest_urgency > stream_lowest_urgency {
+                false
+            } else {
+                self.emit_dgram
+            }
+        } else {
+            dgrams_to_emit
+        };
 
         // Create DATAGRAM frame.
         if (pkt_type == packet::Type::Short || pkt_type == packet::Type::ZeroRTT) &&
@@ -4921,6 +4931,42 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn dgram_send(&mut self, buf: &[u8]) -> Result<()> {
+        self.dgram_send_priority(buf, DEFAULT_URGENCY)
+    }
+
+    /// Sends data in a DATAGRAM frame with a specified urgency.
+    ///
+    /// [`Done`] is returned if no data was written.
+    /// [`InvalidState`] is returned if the peer does not support DATAGRAM.
+    /// [`BufferTooShort`] is returned if the DATAGRAM frame length is larger
+    /// than peer's supported DATAGRAM frame length. Use
+    /// [`dgram_max_writable_len()`] to get the largest supported DATAGRAM
+    /// frame length.
+    ///
+    /// Note that there is no flow control of DATAGRAM frames, so in order to
+    /// avoid buffering an infinite amount of frames we apply an internal
+    /// limit.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// [`BufferTooShort`]: enum.Error.html#variant.BufferTooShort
+    /// [`dgram_max_writable_len()`]:
+    /// struct.Connection.html#method.dgram_max_writable_len
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
+    /// # let peer = "127.0.0.1:1234".parse().unwrap();
+    /// # let local = socket.local_addr().unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
+    /// conn.dgram_send_priority(b"hello", 255)?;
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn dgram_send_priority(&mut self, buf: &[u8], urgency: u8) -> Result<()> {
         let max_payload_len = match self.dgram_max_writable_len() {
             Some(v) => v,
 
@@ -4931,7 +4977,7 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
-        self.dgram_send_queue.push(buf.to_vec())?;
+        self.dgram_send_queue.push(buf.to_vec(), urgency)?;
 
         let active_path = self.paths.get_active_mut()?;
 
@@ -4951,6 +4997,16 @@ impl Connection {
     ///
     /// [`dgram_send()`]: struct.Connection.html#method.dgram_send
     pub fn dgram_send_vec(&mut self, buf: Vec<u8>) -> Result<()> {
+        self.dgram_send_vec_priority(buf, DEFAULT_URGENCY)
+    }
+    
+    /// Sends data in a DATAGRAM frame.
+    ///
+    /// This is the same as [`dgram_send()`] but takes a `Vec<u8>` instead of
+    /// a slice.
+    ///
+    /// [`dgram_send()`]: struct.Connection.html#method.dgram_send
+    pub fn dgram_send_vec_priority(&mut self, buf: Vec<u8>, urgency: u8) -> Result<()> {
         let max_payload_len = match self.dgram_max_writable_len() {
             Some(v) => v,
 
@@ -4961,7 +5017,7 @@ impl Connection {
             return Err(Error::BufferTooShort);
         }
 
-        self.dgram_send_queue.push(buf)?;
+        self.dgram_send_queue.push(buf, urgency)?;
 
         let active_path = self.paths.get_active_mut()?;
 
@@ -6558,7 +6614,7 @@ impl Connection {
                     self.dgram_recv_queue.pop();
                 }
 
-                self.dgram_recv_queue.push(data)?;
+                self.dgram_recv_queue.push(data, DEFAULT_URGENCY)?;
             },
 
             frame::Frame::DatagramHeader { .. } => unreachable!(),
@@ -12054,7 +12110,7 @@ mod tests {
 
     #[test]
     /// Tests that streams and datagrams are correctly scheduled.
-    fn stream_datagram_priority() {
+    fn stream_datagram_same_priority() {
         // Limit 1-RTT packet size to avoid congestion control interference.
         const MAX_TEST_PACKET_SIZE: usize = 540;
 
@@ -12094,9 +12150,10 @@ mod tests {
 
         // Server prioritizes Stream 0 and 4 with the same urgency with
         // incremental, meaning the frames should be sent in round-robin
-        // fashion. It also sends DATAGRAMS which are always interleaved with
-        // STREAM frames. So we'll expect a mix of frame types regardless
-        // of the order that the application writes things in.
+        // fashion. It also sends DATAGRAMS with the same urgency, meaning
+        // they are interleaved with STREAM frames. So we'll expect a mix
+        // of frame types regardless of the order that the application
+        // writes things in.
 
         pipe.server.stream_recv(0, &mut b).unwrap();
         assert_eq!(pipe.server.stream_priority(0, 255, true), Ok(()));
@@ -12110,7 +12167,7 @@ mod tests {
         pipe.server.stream_send(4, &out, false).unwrap();
 
         for _ in 1..=6 {
-            assert_eq!(pipe.server.dgram_send(&out), Ok(()));
+            assert_eq!(pipe.server.dgram_send_priority(&out, 255), Ok(()));
         }
 
         let mut off_0 = 0;
@@ -12183,6 +12240,149 @@ mod tests {
 
                 _ => unreachable!(),
             };
+            assert_eq!(frame_iter.next(), None);
+        }
+    }
+
+    #[test]
+    /// Tests that streams and datagrams with the differfent priority are correctly scheduled.
+    fn stream_datagram_different_priority() {
+        // Limit 1-RTT packet size to avoid congestion control interference.
+        const MAX_TEST_PACKET_SIZE: usize = 540;
+
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(1_000_000);
+        config.set_initial_max_stream_data_bidi_local(1_000_000);
+        config.set_initial_max_stream_data_bidi_remote(1_000_000);
+        config.set_initial_max_stream_data_uni(0);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(0);
+        config.enable_dgram(true, 10, 10);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let mut b = [0; 1];
+
+        let out = [b'b'; 500];
+
+        // Server prioritizes streams and dgrams as follows:
+        //  * First three dgrams have the highest priority.
+        //  * Stream 0 has the second highest priority.
+        //  * Stream 4 has the third highest priority.
+        //  * Second three dgrams have the lowest priority.
+
+        pipe.server.stream_recv(0, &mut b).unwrap();
+        assert_eq!(pipe.server.stream_priority(0, 1, false), Ok(()));
+        pipe.server.stream_send(0, &out, false).unwrap();
+        pipe.server.stream_send(0, &out, false).unwrap();
+        pipe.server.stream_send(0, &out, false).unwrap();
+
+        assert_eq!(pipe.server.stream_priority(4, 2, false), Ok(()));
+        pipe.server.stream_send(4, &out, false).unwrap();
+        pipe.server.stream_send(4, &out, false).unwrap();
+        pipe.server.stream_send(4, &out, false).unwrap();
+
+        for _ in 1..=3 {
+            assert_eq!(pipe.server.dgram_send_priority(&out, 0), Ok(()));
+        }
+        for _ in 1..=3 {
+            assert_eq!(pipe.server.dgram_send_priority(&out, 3), Ok(()));
+        }
+
+        for _ in 1..=3 {
+            // DATAGRAM
+            let (len, _) =
+                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+
+            let frames =
+                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            let mut frame_iter = frames.iter();
+
+            assert_eq!(frame_iter.next().unwrap(), &frame::Frame::Datagram {
+                data: out.into(),
+            });
+            assert_eq!(frame_iter.next(), None);
+        }
+
+        let mut off_0 = 0;
+        for _ in 1..=3 {
+            // STREAM 8
+            let (len, _) =
+                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+
+            let frames =
+                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            let mut frame_iter = frames.iter();
+            let stream = frame_iter.next().unwrap();
+
+            assert_eq!(stream, &frame::Frame::Stream {
+                stream_id: 0,
+                data: stream::RangeBuf::from(&out, off_0, false),
+            });
+
+            off_0 = match stream {
+                frame::Frame::Stream { data, .. } => data.max_off(),
+
+                _ => unreachable!(),
+            };
+            assert_eq!(frame_iter.next(), None);
+        }
+
+        let mut off_4 = 0;
+        for _ in 1..=3 {
+            // STREAM 4
+            let (len, _) =
+                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+
+            let frames =
+                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            let mut frame_iter = frames.iter();
+            let stream = frame_iter.next().unwrap();
+
+            assert_eq!(stream, &frame::Frame::Stream {
+                stream_id: 4,
+                data: stream::RangeBuf::from(&out, off_4, false),
+            });
+
+            off_4 = match stream {
+                frame::Frame::Stream { data, .. } => data.max_off(),
+
+                _ => unreachable!(),
+            };
+            assert_eq!(frame_iter.next(), None);
+        }
+
+        for _ in 1..=3 {
+            // DATAGRAM
+            let (len, _) =
+                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+
+            let frames =
+                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            let mut frame_iter = frames.iter();
+
+            assert_eq!(frame_iter.next().unwrap(), &frame::Frame::Datagram {
+                data: out.into(),
+            });
             assert_eq!(frame_iter.next(), None);
         }
     }

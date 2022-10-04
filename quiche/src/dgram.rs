@@ -27,12 +27,13 @@
 use crate::Error;
 use crate::Result;
 
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 
 /// Keeps track of DATAGRAM frames.
 #[derive(Default)]
 pub struct DatagramQueue {
-    queue: Option<VecDeque<Vec<u8>>>,
+    queue: BTreeMap<u8, VecDeque<Vec<u8>>>,
     queue_max_len: usize,
     queue_bytes_size: usize,
 }
@@ -40,31 +41,32 @@ pub struct DatagramQueue {
 impl DatagramQueue {
     pub fn new(queue_max_len: usize) -> Self {
         DatagramQueue {
-            queue: None,
+            queue: BTreeMap::new(),
             queue_bytes_size: 0,
             queue_max_len,
         }
     }
 
-    pub fn push(&mut self, data: Vec<u8>) -> Result<()> {
+    pub fn push(&mut self, data: Vec<u8>, urgency: u8) -> Result<()> {
         if self.is_full() {
             return Err(Error::Done);
         }
 
         self.queue_bytes_size += data.len();
         self.queue
-            .get_or_insert_with(Default::default)
+            .entry(urgency)
+            .or_insert_with(Default::default)
             .push_back(data);
 
         Ok(())
     }
 
     pub fn peek_front_len(&self) -> Option<usize> {
-        self.queue.as_ref().and_then(|q| q.front().map(|d| d.len()))
+        self.queue.iter().next().and_then(|(_, q)| q.front().map(|d| d.len()))
     }
 
     pub fn peek_front_bytes(&self, buf: &mut [u8], len: usize) -> Result<usize> {
-        match self.queue.as_ref().and_then(|q| q.front()) {
+        match self.queue.iter().next().and_then(|(_, q)| q.front()) {
             Some(d) => {
                 let len = std::cmp::min(len, d.len());
                 if buf.len() < len {
@@ -80,7 +82,23 @@ impl DatagramQueue {
     }
 
     pub fn pop(&mut self) -> Option<Vec<u8>> {
-        if let Some(d) = self.queue.as_mut().and_then(|q| q.pop_front()) {
+        let (data, clear) =
+            if let Some((urgency, q)) = self.queue.iter_mut().next() {
+                let data = q.pop_front();
+                let clear = if q.is_empty() {
+                    Some(*urgency)
+                } else {
+                    None
+                };
+                (data, clear)
+            } else {
+                (None, None)
+            };
+        
+        if let Some(urgency) = &clear {
+            self.queue.remove(urgency);
+        }
+        if let Some(d) = data {
             self.queue_bytes_size = self.queue_bytes_size.saturating_sub(d.len());
             return Some(d);
         }
@@ -89,11 +107,11 @@ impl DatagramQueue {
     }
 
     pub fn has_pending(&self) -> bool {
-        !self.queue.as_ref().map(|q| q.is_empty()).unwrap_or(true)
+        !self.queue.iter().next().map(|(_, q)| q.is_empty()).unwrap_or(true)
     }
 
     pub fn purge<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
-        if let Some(q) = self.queue.as_mut() {
+        for (_, q) in self.queue.iter_mut() {
             q.retain(|d| !f(d));
             self.queue_bytes_size = q.iter().fold(0, |total, d| total + d.len());
         }
@@ -104,10 +122,15 @@ impl DatagramQueue {
     }
 
     pub fn len(&self) -> usize {
-        self.queue.as_ref().map(|q| q.len()).unwrap_or(0)
+        self.queue.iter().map(|(_, q)| q.len()).sum()
     }
 
     pub fn byte_size(&self) -> usize {
         self.queue_bytes_size
     }
+
+    pub fn highest_priority(&self) -> u8 {
+        self.queue.iter().next().map(|(u, _)| *u).unwrap_or(crate::DEFAULT_URGENCY)
+    }
+    
 }
