@@ -123,7 +123,7 @@ fn bbr_set_send_quantum(r: &mut Recovery) {
 
         rate if rate < PACING_RATE_24MBPS => 2 * r.max_datagram_size,
 
-        _ => cmp::min((rate / 1000_u64) as usize, 30 * r.max_datagram_size),
+        _ => cmp::min((rate / 1000_u64) as usize, 64 * 1024),
     }
 }
 
