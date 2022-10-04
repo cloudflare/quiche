@@ -5000,7 +5000,7 @@ impl Connection {
         self.dgram_send_vec_priority(buf, DEFAULT_URGENCY)
     }
     
-    /// Sends data in a DATAGRAM frame.
+    /// Sends data in a DATAGRAM frame with a specified urgency.
     ///
     /// This is the same as [`dgram_send()`] but takes a `Vec<u8>` instead of
     /// a slice.
