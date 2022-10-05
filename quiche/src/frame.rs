@@ -969,7 +969,7 @@ impl Frame {
                 error_space: Some(ErrorSpace::TransportError),
                 error_code: Some(*error_code),
                 raw_error_code: None, // raw error is no different for us
-                reason: Some(String::from_utf8(reason.clone()).unwrap()),
+                reason: String::from_utf8(reason.clone()).ok(),
                 trigger_frame_type: None, // don't know trigger type
             },
 
@@ -978,7 +978,7 @@ impl Frame {
                     error_space: Some(ErrorSpace::ApplicationError),
                     error_code: Some(*error_code),
                     raw_error_code: None, // raw error is no different for us
-                    reason: Some(String::from_utf8(reason.clone()).unwrap()),
+                    reason: String::from_utf8(reason.clone()).ok(),
                     trigger_frame_type: None, // don't know trigger type
                 },
 
