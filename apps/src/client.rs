@@ -26,6 +26,8 @@
 
 use crate::args::*;
 use crate::common::*;
+use crate::recvfrom::recv_from;
+use crate::sendto::send_to;
 
 use std::net::ToSocketAddrs;
 
@@ -131,6 +133,9 @@ pub fn connect(
     config.set_max_connection_window(conn_args.max_window);
     config.set_max_stream_window(conn_args.max_stream_window);
 
+    config.enable_ecn(conn_args.enable_ecn);
+    config.set_ecn_use_ect1(conn_args.use_ect1);
+
     let mut keylog = None;
 
     if let Some(keylog_path) = std::env::var_os("SSLKEYLOGFILE") {
@@ -224,7 +229,15 @@ pub fn connect(
 
     let (write, send_info) = conn.send(&mut out).expect("initial send failed");
 
-    while let Err(e) = socket.send_to(&out[..write], send_info.to) {
+    while let Err(e) = send_to(
+        &socket,
+        &out[..write],
+        &send_info,
+        MAX_DATAGRAM_SIZE,
+        false,
+        false,
+        conn_args.enable_ecn,
+    ) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
             trace!(
                 "{} -> {}: send() would block",
@@ -274,7 +287,12 @@ pub fn connect(
 
             let local_addr = socket.local_addr().unwrap();
             'read: loop {
-                let (len, from) = match socket.recv_from(&mut buf) {
+                let (len, recv_info) = match recv_from(
+                    socket,
+                    local_addr,
+                    &mut buf,
+                    conn_args.enable_ecn,
+                ) {
                     Ok(v) => v,
 
                     Err(e) => {
@@ -303,12 +321,6 @@ pub fn connect(
                 }
 
                 pkt_count += 1;
-
-                let recv_info = quiche::RecvInfo {
-                    to: local_addr,
-                    from,
-                    ecn: 0,
-                };
 
                 // Process potentially coalesced packets.
                 let read = match conn.recv(&mut buf[..len], recv_info) {
@@ -529,7 +541,15 @@ pub fn connect(
                         },
                     };
 
-                    if let Err(e) = socket.send_to(&out[..write], send_info.to) {
+                    if let Err(e) = send_to(
+                        socket,
+                        &out[..write],
+                        &send_info,
+                        MAX_DATAGRAM_SIZE,
+                        false,
+                        false,
+                        conn_args.enable_ecn,
+                    ) {
                         if e.kind() == std::io::ErrorKind::WouldBlock {
                             trace!(
                                 "{} -> {}: send() would block",
