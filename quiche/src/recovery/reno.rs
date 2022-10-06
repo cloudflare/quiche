@@ -220,6 +220,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         // Send initcwnd full MSS packets to become no longer app limited
@@ -273,6 +274,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         // Send initcwnd full MSS packets to become no longer app limited
@@ -354,6 +356,7 @@ mod tests {
             has_data: false,
             tx_in_flight: 0,
             lost: 0,
+            ecn_marked: false,
         };
 
         r.congestion_event(
@@ -395,6 +398,7 @@ mod tests {
             has_data: false,
             tx_in_flight: 0,
             lost: 0,
+            ecn_marked: false,
         };
 
         // Trigger congestion event to update ssthresh

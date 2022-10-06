@@ -742,6 +742,9 @@ pub struct Config {
     max_stream_window: u64,
 
     disable_dcid_reuse: bool,
+
+    ecn_enabled: bool,
+    ecn_use_ect1: bool,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -807,6 +810,9 @@ impl Config {
             max_stream_window: stream::MAX_STREAM_WINDOW,
 
             disable_dcid_reuse: false,
+
+            ecn_enabled: false,
+            ecn_use_ect1: false,
         })
     }
 
@@ -1261,6 +1267,21 @@ impl Config {
     /// The default value is `false`.
     pub fn set_disable_dcid_reuse(&mut self, v: bool) {
         self.disable_dcid_reuse = v;
+    }
+
+    /// Sets whether the QUIC connection should send packets with ECN support.
+    ///
+    /// The default value is `false`.
+    pub fn enable_ecn(&mut self, v: bool) {
+        self.ecn_enabled = v;
+    }
+
+    /// Sets whether the QUIC connection should send packets with ECN support
+    /// with ECT(1) marking instead of ECT(0).
+    ///
+    /// The default value is `false`.
+    pub fn set_ecn_use_ect1(&mut self, v: bool) {
+        self.ecn_use_ect1 = v;
     }
 }
 
@@ -2991,7 +3012,7 @@ impl Connection {
         self.pkt_num_spaces[epoch].largest_rx_pkt_num =
             cmp::max(self.pkt_num_spaces[epoch].largest_rx_pkt_num, pn);
 
-        if info.ecn > 0 {
+        if info.ecn != ecn::ECN_NOT_ECT {
             // Create the `EcnCounts` struct if this is the first non-zero ECN
             // value received.
             if self.pkt_num_spaces[epoch].ecn_counts.is_none() {
@@ -3003,14 +3024,13 @@ impl Connection {
                 self.pkt_num_spaces[epoch].ecn_counts
             {
                 match info.ecn {
-                    // ECN capable (ECT(0)).
-                    0x01 => ecn_counts.ect0_count += 1,
-                    0x02 => ecn_counts.ect1_count += 1,
+                    ecn::ECN_ECT0 => ecn_counts.ect0_count += 1,
 
-                    // Congestion event (ECN-CE).
-                    0x03 => ecn_counts.ecn_ce_count += 1,
+                    ecn::ECN_ECT1 => ecn_counts.ect1_count += 1,
 
-                    _ => unreachable!(),
+                    ecn::ECN_CE => ecn_counts.ecn_ce_count += 1,
+
+                    e => warn!("{} invalid ECN value {}", self.trace_id, e),
                 };
             }
         }
@@ -3327,7 +3347,7 @@ impl Connection {
             done += pad_len;
         }
 
-        let send_path = self.paths.get(send_pid)?;
+        let send_path = self.paths.get_mut(send_pid)?;
 
         let info = SendInfo {
             from: send_path.local_addr(),
@@ -3335,7 +3355,7 @@ impl Connection {
 
             at: send_path.recovery.get_packet_send_time(),
 
-            ecn: 0x01, // ECT(0)
+            ecn: send_path.recovery.ecn.get_ecn_value_to_send(),
         };
 
         Ok((done, info))
@@ -4373,6 +4393,7 @@ impl Connection {
             tx_in_flight: 0,
             lost: 0,
             has_data,
+            ecn_marked: path.recovery.ecn.is_next_sent_pkt_ecn_marked(),
         };
 
         if in_flight && is_app_limited {
@@ -16442,6 +16463,7 @@ pub use crate::stream::StreamIter;
 mod cid;
 mod crypto;
 mod dgram;
+mod ecn;
 #[cfg(feature = "ffi")]
 mod ffi;
 mod flowcontrol;
