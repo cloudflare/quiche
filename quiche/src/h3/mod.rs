@@ -940,8 +940,8 @@ impl Connection {
     pub fn with_transport(
         conn: &mut super::Connection, config: &Config,
     ) -> Result<Connection> {
-        if !conn.is_server && (!conn.is_established() || conn.is_in_early_data())
-        {
+        let is_client = !conn.is_server;
+        if is_client && !(conn.is_established() || conn.is_in_early_data()) {
             trace!("{} QUIC connection must be established or in early data before creating an HTTP/3 connection", conn.trace_id());
             return Err(Error::InternalError);
         }
@@ -3150,6 +3150,84 @@ mod tests {
     /// Make sure that random GREASE values is within the specified limit.
     fn grease_value_in_varint_limit() {
         assert!(grease_value() < 2u64.pow(62) - 1);
+    }
+
+    #[test]
+    fn h3_handshake_0rtt() {
+        let mut buf = [0; 65535];
+
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(15);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.enable_early_data();
+        config.verify_peer(false);
+
+        let h3_config = Config::new().unwrap();
+
+        // Perform initial handshake.
+        let mut pipe = crate::testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Extract session,
+        let session = pipe.client.session().unwrap();
+
+        // Configure session on new connection.
+        let mut pipe = crate::testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.client.set_session(session), Ok(()));
+
+        // Can't create an H3 connection until the QUIC connection is determined
+        // to have made sufficient early data progress.
+        assert!(matches!(
+            Connection::with_transport(&mut pipe.client, &h3_config),
+            Err(Error::InternalError)
+        ));
+
+        // Client sends initial flight.
+        let (len, _) = pipe.client.send(&mut buf).unwrap();
+
+        // Now an H3 connection can be created.
+        assert!(matches!(
+            Connection::with_transport(&mut pipe.client, &h3_config),
+            Ok(_)
+        ));
+        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+
+        // Client sends 0-RTT packet.
+        let pkt_type = crate::packet::Type::ZeroRTT;
+
+        let frames = [crate::frame::Frame::Stream {
+            stream_id: 6,
+            data: crate::stream::RangeBuf::from(b"aaaaa", 0, true),
+        }];
+
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Ok(1200)
+        );
+
+        assert_eq!(pipe.server.undecryptable_pkts.len(), 0);
+
+        // 0-RTT stream data is readable.
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(6));
+        assert_eq!(r.next(), None);
+
+        let mut b = [0; 15];
+        assert_eq!(pipe.server.stream_recv(6, &mut b), Ok((5, true)));
+        assert_eq!(&b[..5], b"aaaaa");
     }
 
     #[test]
