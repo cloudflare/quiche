@@ -942,7 +942,7 @@ impl Connection {
     ) -> Result<Connection> {
         if !conn.is_server && (!conn.is_established() || conn.is_in_early_data())
         {
-            trace!("QUIC connection must be established or in early data before creating an HTTP/3 connection.");
+            trace!("{} QUIC connection must be established or in early data before creating an HTTP/3 connection", conn.trace_id());
             return Err(Error::InternalError);
         }
 
