@@ -931,7 +931,8 @@ impl Connection {
     /// The [`StreamLimit`] error is returned when the HTTP/3 control stream
     /// cannot be created due to stream limits.
     ///
-    /// The [`InternalError`] error is returned when the HTTP/3 control stream
+    /// The [`InternalError`] error is returned when either the underlying QUIC
+    /// connection is not in a suitable state, or the HTTP/3 control stream
     /// cannot be created due to flow control limits.
     ///
     /// [`StreamLimit`]: ../enum.Error.html#variant.StreamLimit
@@ -939,6 +940,12 @@ impl Connection {
     pub fn with_transport(
         conn: &mut super::Connection, config: &Config,
     ) -> Result<Connection> {
+        if !conn.is_server && (!conn.is_established() || conn.is_in_early_data())
+        {
+            trace!("{} QUIC connection must be established or in early data before creating an HTTP/3 connection", conn.trace_id());
+            return Err(Error::InternalError);
+        }
+
         let mut http3_conn =
             Connection::new(config, conn.is_server, conn.dgram_enabled())?;
 
