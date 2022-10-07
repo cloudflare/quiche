@@ -158,8 +158,10 @@ impl Pacer {
         self.last_packet_size = Some(packet_size);
 
         if self.used >= self.capacity || !same_size {
-            self.iv =
-                Duration::from_secs_f64(self.used as f64 / self.rate as f64);
+            self.iv = std::cmp::max(
+                super::GRANULARITY,
+                Duration::from_secs_f64(self.used as f64 / self.rate as f64),
+            );
 
             self.used = 0;
 
