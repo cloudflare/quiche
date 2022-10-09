@@ -13210,7 +13210,8 @@ mod tests {
             )?,
             server: accept(
                 &server_scid,
-                None, server_addr,
+                None,
+                server_addr,
                 client_addr,
                 &mut server_config
             )?,
