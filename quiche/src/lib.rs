@@ -13213,7 +13213,7 @@ mod tests {
                 None,
                 server_addr,
                 client_addr,
-                &mut server_config
+                &mut server_config,
             )?,
         };
 
