@@ -172,6 +172,7 @@ pub struct RecoveryConfig {
     pub max_ack_delay: Duration,
     cc_ops: &'static CongestionControlOps,
     hystart: bool,
+    pacing: bool,
 }
 
 impl RecoveryConfig {
@@ -181,6 +182,7 @@ impl RecoveryConfig {
             max_ack_delay: Duration::ZERO,
             cc_ops: config.cc_algorithm.into(),
             hystart: config.hystart,
+            pacing: config.pacing,
         }
     }
 }
@@ -265,6 +267,7 @@ impl Recovery {
             hystart: hystart::Hystart::new(recovery_config.hystart),
 
             pacer: pacer::Pacer::new(
+                recovery_config.pacing,
                 initial_congestion_window,
                 0,
                 recovery_config.max_send_udp_payload_size,
@@ -392,12 +395,16 @@ impl Recovery {
         &mut self, epoch: packet::Epoch, now: Instant, packet_size: usize,
     ) {
         // Don't pace in any of these cases:
-        //   * Packet epoch is not EPOCH_APPLICATION.
         //   * Packet contains no data.
-        //   * The start of the connection (within initcwnd).
-        let sent_bytes = if epoch != packet::EPOCH_APPLICATION ||
-            self.bytes_sent < self.max_datagram_size * INITIAL_WINDOW_PACKETS
-        {
+        //   * Packet epoch is not EPOCH_APPLICATION.
+        //   * The congestion window is within initcwnd.
+
+        let is_app = epoch == packet::EPOCH_APPLICATION;
+
+        let in_initcwnd =
+            self.bytes_sent < self.max_datagram_size * INITIAL_WINDOW_PACKETS;
+
+        let sent_bytes = if !self.pacer.enabled() || !is_app || in_initcwnd {
             0
         } else {
             packet_size
@@ -694,15 +701,19 @@ impl Recovery {
         let max_datagram_size =
             cmp::min(self.max_datagram_size, new_max_datagram_size);
 
-        // Congestion Window is updated only when it's not updated already.
+        // Update cwnd if it hasn't been updated yet.
         if self.congestion_window ==
             self.max_datagram_size * INITIAL_WINDOW_PACKETS
         {
             self.congestion_window = max_datagram_size * INITIAL_WINDOW_PACKETS;
         }
 
-        self.pacer =
-            pacer::Pacer::new(self.congestion_window, 0, max_datagram_size);
+        self.pacer = pacer::Pacer::new(
+            self.pacer.enabled(),
+            self.congestion_window,
+            0,
+            max_datagram_size,
+        );
 
         self.max_datagram_size = max_datagram_size;
     }
