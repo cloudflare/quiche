@@ -13205,9 +13205,16 @@ mod tests {
                 Some("quic.tech"),
                 &client_scid,
                 client_addr,
+                server_addr,
                 &mut client_config,
             )?,
-            server: accept(&server_scid, None, server_addr, &mut server_config)?,
+            server: accept(
+                &server_scid,
+                None,
+                server_addr,
+                client_addr,
+                &mut server_config,
+            )?,
         };
 
         assert_eq!(pipe.handshake(), Ok(()));
