@@ -2601,6 +2601,21 @@ impl Connection {
 
                         stream.send.ack_and_drop(offset, length);
 
+                        qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
+                            let ev_data = EventData::DataMoved(
+                                qlog::events::quic::DataMoved {
+                                    stream_id: Some(stream_id),
+                                    offset: Some(offset),
+                                    length: Some(length as u64),
+                                    from: Some(DataRecipient::Transport),
+                                    to: Some(DataRecipient::Dropped),
+                                    data: None,
+                                },
+                            );
+
+                            q.add_event_data_with_instant(ev_data, now).ok();
+                        });
+
                         // Only collect the stream if it is complete and not
                         // readable. If it is readable, it will get collected when
                         // stream_recv() is used.
