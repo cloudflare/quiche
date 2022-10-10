@@ -460,7 +460,7 @@ impl Handshake {
         let cstr = ffi::CString::new(name).map_err(|_| Error::TlsFail)?;
         let rc =
             unsafe { SSL_set_tlsext_host_name(self.as_mut_ptr(), cstr.as_ptr()) };
-        map_result_ssl(self, rc)?;
+        self.map_result_ssl(rc)?;
 
         let param = unsafe { SSL_get0_param(self.as_mut_ptr()) };
 
@@ -477,7 +477,7 @@ impl Handshake {
                 buf.len(),
             )
         };
-        map_result_ssl(self, rc)
+        self.map_result_ssl(rc)
     }
 
     #[cfg(test)]
@@ -568,7 +568,7 @@ impl Handshake {
                 buf.len(),
             )
         };
-        map_result_ssl(self, rc)
+        self.map_result_ssl(rc)
     }
 
     pub fn do_handshake(&mut self, ex_data: &mut ExData) -> Result<()> {
@@ -576,7 +576,7 @@ impl Handshake {
         let rc = unsafe { SSL_do_handshake(self.as_mut_ptr()) };
         self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
 
-        map_result_ssl(self, rc)
+        self.map_result_ssl(rc)
     }
 
     pub fn process_post_handshake(&mut self, ex_data: &mut ExData) -> Result<()> {
@@ -591,7 +591,7 @@ impl Handshake {
         let rc = unsafe { SSL_process_quic_post_handshake(self.as_mut_ptr()) };
         self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
 
-        map_result_ssl(self, rc)
+        self.map_result_ssl(rc)
     }
 
     pub fn reset_early_data_reject(&mut self) {
@@ -716,7 +716,7 @@ impl Handshake {
 
     pub fn clear(&mut self) -> Result<()> {
         let rc = unsafe { SSL_clear(self.as_mut_ptr()) };
-        map_result_ssl(self, rc)
+        self.map_result_ssl(rc)
     }
 
     fn as_ptr(&self) -> *const SSL {
@@ -725,6 +725,59 @@ impl Handshake {
 
     fn as_mut_ptr(&mut self) -> *mut SSL {
         self.ptr
+    }
+
+    fn map_result_ssl(&mut self, bssl_result: c_int) -> Result<()> {
+        match bssl_result {
+            1 => Ok(()),
+
+            _ => {
+                let ssl_err = self.get_error(bssl_result);
+                match ssl_err {
+                    // SSL_ERROR_SSL
+                    1 => {
+                        log_ssl_error();
+
+                        Err(Error::TlsFail)
+                    },
+
+                    // SSL_ERROR_WANT_READ
+                    2 => Err(Error::Done),
+
+                    // SSL_ERROR_WANT_WRITE
+                    3 => Err(Error::Done),
+
+                    // SSL_ERROR_WANT_X509_LOOKUP
+                    4 => Err(Error::Done),
+
+                    // SSL_ERROR_SYSCALL
+                    5 => Err(Error::TlsFail),
+
+                    // SSL_ERROR_PENDING_SESSION
+                    11 => Err(Error::Done),
+
+                    // SSL_ERROR_PENDING_CERTIFICATE
+                    12 => Err(Error::Done),
+
+                    // SSL_ERROR_WANT_PRIVATE_KEY_OPERATION
+                    13 => Err(Error::Done),
+
+                    // SSL_ERROR_PENDING_TICKET
+                    14 => Err(Error::Done),
+
+                    // SSL_ERROR_EARLY_DATA_REJECTED
+                    15 => {
+                        self.reset_early_data_reject();
+                        Err(Error::Done)
+                    },
+
+                    // SSL_ERROR_WANT_CERTIFICATE_VERIFY
+                    16 => Err(Error::Done),
+
+                    _ => Err(Error::TlsFail),
+                }
+            },
+        }
     }
 }
 
@@ -1090,59 +1143,6 @@ fn map_result_ptr<'a, T>(bssl_result: *const T) -> Result<&'a T> {
     match unsafe { bssl_result.as_ref() } {
         Some(v) => Ok(v),
         None => Err(Error::TlsFail),
-    }
-}
-
-fn map_result_ssl(ssl: &mut Handshake, bssl_result: c_int) -> Result<()> {
-    match bssl_result {
-        1 => Ok(()),
-
-        _ => {
-            let ssl_err = ssl.get_error(bssl_result);
-            match ssl_err {
-                // SSL_ERROR_SSL
-                1 => {
-                    log_ssl_error();
-
-                    Err(Error::TlsFail)
-                },
-
-                // SSL_ERROR_WANT_READ
-                2 => Err(Error::Done),
-
-                // SSL_ERROR_WANT_WRITE
-                3 => Err(Error::Done),
-
-                // SSL_ERROR_WANT_X509_LOOKUP
-                4 => Err(Error::Done),
-
-                // SSL_ERROR_SYSCALL
-                5 => Err(Error::TlsFail),
-
-                // SSL_ERROR_PENDING_SESSION
-                11 => Err(Error::Done),
-
-                // SSL_ERROR_PENDING_CERTIFICATE
-                12 => Err(Error::Done),
-
-                // SSL_ERROR_WANT_PRIVATE_KEY_OPERATION
-                13 => Err(Error::Done),
-
-                // SSL_ERROR_PENDING_TICKET
-                14 => Err(Error::Done),
-
-                // SSL_ERROR_EARLY_DATA_REJECTED
-                15 => {
-                    ssl.reset_early_data_reject();
-                    Err(Error::Done)
-                },
-
-                // SSL_ERROR_WANT_CERTIFICATE_VERIFY
-                16 => Err(Error::Done),
-
-                _ => Err(Error::TlsFail),
-            }
-        },
     }
 }
 
