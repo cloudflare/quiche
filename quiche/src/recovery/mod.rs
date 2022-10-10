@@ -922,6 +922,52 @@ impl Recovery {
         self.loss_detection_timer = timeout;
     }
 
+    pub fn mark_all_inflight_as_lost(
+        &mut self, now: Instant, trace_id: &str,
+    ) -> (usize, usize) {
+        let mut lost_packets = 0;
+        let mut lost_bytes = 0;
+        for &e in packet::Epoch::epochs(
+            packet::Epoch::Initial..=packet::Epoch::Application,
+        ) {
+            let mut epoch_lost_bytes = 0;
+            let mut largest_lost_pkt = None;
+            for sent in self.sent[e].drain(..) {
+                if sent.time_acked.is_none() {
+                    self.lost[e].extend_from_slice(&sent.frames);
+                    if sent.in_flight {
+                        epoch_lost_bytes += sent.size;
+
+                        self.in_flight_count[e] =
+                            self.in_flight_count[e].saturating_sub(1);
+
+                        trace!(
+                            "{} packet {:?} lost on epoch {}",
+                            trace_id,
+                            sent.pkt_num,
+                            e
+                        );
+
+                        // Frames have already been removed from the packet.
+                        largest_lost_pkt = Some(sent);
+                    }
+
+                    lost_packets += 1;
+                    self.lost_count += 1;
+                }
+            }
+
+            self.bytes_lost += epoch_lost_bytes as u64;
+            lost_bytes += epoch_lost_bytes;
+
+            if let Some(pkt) = largest_lost_pkt {
+                self.on_packets_lost(lost_bytes, &pkt, e, now);
+            }
+        }
+
+        (lost_packets, lost_bytes)
+    }
+
     fn detect_lost_packets(
         &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
     ) -> (usize, usize) {

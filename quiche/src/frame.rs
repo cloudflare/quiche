@@ -177,6 +177,27 @@ pub enum Frame {
     DatagramHeader {
         length: usize,
     },
+
+    ACKMP {
+        space_identifier: u64,
+        ack_delay: u64,
+        ranges: ranges::RangeSet,
+        ecn_counts: Option<EcnCounts>,
+    },
+
+    PathAbandon {
+        identifier_type: u64,
+        path_identifier: Option<u64>,
+        error_code: u64,
+        reason: Vec<u8>,
+    },
+
+    PathStatus {
+        identifier_type: u64,
+        path_identifier: Option<u64>,
+        seq_num: u64,
+        status: u64,
+    },
 }
 
 impl Frame {
@@ -307,6 +328,42 @@ impl Frame {
 
             0x30 | 0x31 => parse_datagram_frame(frame_type, b)?,
 
+            0xbaba00..=0xbaba01 => parse_ack_mp_frame(frame_type, b)?,
+
+            0xbaba05 => {
+                let identifier_type = b.get_varint()?;
+                let path_identifier = match identifier_type {
+                    0x00 | 0x01 => Some(b.get_varint()?),
+                    0x02 => None,
+                    _ => return Err(Error::InvalidFrame),
+                };
+
+                Frame::PathAbandon {
+                    identifier_type,
+                    path_identifier,
+                    error_code: b.get_varint()?,
+                    reason: b.get_bytes_with_varint_length()?.to_vec(),
+                }
+            },
+
+            0xbaba06 => {
+                let identifier_type = b.get_varint()?;
+                let path_identifier = match identifier_type {
+                    0x00 | 0x01 => Some(b.get_varint()?),
+                    0x02 => None,
+                    _ => return Err(Error::InvalidFrame),
+                };
+                let seq_num = b.get_varint()?;
+                let status = b.get_varint()?;
+
+                Frame::PathStatus {
+                    identifier_type,
+                    path_identifier,
+                    seq_num,
+                    status,
+                }
+            },
+
             _ => return Err(Error::InvalidFrame),
         };
 
@@ -315,7 +372,8 @@ impl Frame {
             (_, Frame::Padding { .. }) | (_, Frame::Ping { .. }) => true,
 
             // ACK, CRYPTO, HANDSHAKE_DONE, NEW_TOKEN, PATH_RESPONSE, and
-            // RETIRE_CONNECTION_ID can't be sent on 0-RTT packets.
+            // RETIRE_CONNECTION_ID can't be sent on 0-RTT packets. Multipath
+            // frames are only available in 1-RTT packets.
             (packet::Type::ZeroRTT, Frame::ACK { .. }) => false,
             (packet::Type::ZeroRTT, Frame::Crypto { .. }) => false,
             (packet::Type::ZeroRTT, Frame::HandshakeDone) => false,
@@ -323,6 +381,9 @@ impl Frame {
             (packet::Type::ZeroRTT, Frame::PathResponse { .. }) => false,
             (packet::Type::ZeroRTT, Frame::RetireConnectionId { .. }) => false,
             (packet::Type::ZeroRTT, Frame::ConnectionClose { .. }) => false,
+            (packet::Type::ZeroRTT, Frame::ACKMP { .. }) => false,
+            (packet::Type::ZeroRTT, Frame::PathAbandon { .. }) => false,
+            (packet::Type::ZeroRTT, Frame::PathStatus { .. }) => false,
 
             // ACK, CRYPTO and CONNECTION_CLOSE can be sent on all other packet
             // types.
@@ -542,6 +603,54 @@ impl Frame {
             },
 
             Frame::DatagramHeader { .. } => (),
+
+            Frame::ACKMP {
+                space_identifier,
+                ack_delay,
+                ranges,
+                ecn_counts,
+            } => {
+                if ecn_counts.is_none() {
+                    b.put_varint(0xbaba00)?;
+                } else {
+                    b.put_varint(0xbaba01)?;
+                }
+                b.put_varint(*space_identifier)?;
+                common_ack_to_bytes(b, ack_delay, ranges, ecn_counts)?;
+            },
+
+            Frame::PathAbandon {
+                identifier_type,
+                path_identifier,
+                error_code,
+                reason,
+            } => {
+                b.put_varint(0xbaba05)?;
+
+                b.put_varint(*identifier_type)?;
+                if let Some(path_identifier) = path_identifier {
+                    b.put_varint(*path_identifier)?;
+                }
+                b.put_varint(*error_code)?;
+                b.put_varint(reason.len() as u64)?;
+                b.put_bytes(reason.as_ref())?;
+            },
+
+            Frame::PathStatus {
+                identifier_type,
+                path_identifier,
+                seq_num,
+                status,
+            } => {
+                b.put_varint(0xbaba06)?;
+
+                b.put_varint(*identifier_type)?;
+                if let Some(path_identifier) = path_identifier {
+                    b.put_varint(*path_identifier)?;
+                }
+                b.put_varint(*seq_num)?;
+                b.put_varint(*status)?;
+            },
         }
 
         Ok(before - b.cap())
@@ -729,6 +838,48 @@ impl Frame {
                 2 + // length, always encode as 2-byte varint
                 *length // data
             },
+
+            Frame::ACKMP {
+                space_identifier,
+                ack_delay,
+                ranges,
+                ecn_counts,
+            } => {
+                4 + // frame_type
+                octets::varint_len(*space_identifier) + // space_identifier
+                common_ack_wire_len(ack_delay, ranges, ecn_counts)
+            },
+
+            Frame::PathAbandon {
+                path_identifier,
+                error_code,
+                reason,
+                ..
+            } => {
+                let path_identifier_size =
+                    path_identifier.map(octets::varint_len).unwrap_or(0);
+                4 + // frame type
+                1 + // identifier type
+                path_identifier_size +
+                octets::varint_len(*error_code) +
+                octets::varint_len(reason.len() as u64) + // reason_len
+                reason.len()
+            },
+
+            Frame::PathStatus {
+                path_identifier,
+                seq_num,
+                status,
+                ..
+            } => {
+                let path_identifier_size =
+                    path_identifier.map(octets::varint_len).unwrap_or(0);
+                4 + // frame size
+                1 + // identifier type
+                path_identifier_size +
+                octets::varint_len(*seq_num) +
+                octets::varint_len(*status)
+            },
         }
     }
 
@@ -739,7 +890,8 @@ impl Frame {
             Frame::Padding { .. } |
                 Frame::ACK { .. } |
                 Frame::ApplicationClose { .. } |
-                Frame::ConnectionClose { .. }
+                Frame::ConnectionClose { .. } |
+                Frame::ACKMP { .. }
         )
     }
 
@@ -941,6 +1093,60 @@ impl Frame {
                 length: *length as u64,
                 raw: None,
             },
+
+            Frame::ACKMP {
+                space_identifier,
+                ack_delay,
+                ranges,
+                ecn_counts,
+            } => {
+                let ack_ranges = AckedRanges::Double(
+                    ranges.iter().map(|r| (r.start, r.end - 1)).collect(),
+                );
+
+                let (ect0, ect1, ce) = match ecn_counts {
+                    Some(ecn) => (
+                        Some(ecn.ect0_count),
+                        Some(ecn.ect1_count),
+                        Some(ecn.ecn_ce_count),
+                    ),
+
+                    None => (None, None, None),
+                };
+
+                QuicFrame::AckMp {
+                    space_identifier: *space_identifier,
+                    ack_delay: Some(*ack_delay as f32 / 1000.0),
+                    acked_ranges: Some(ack_ranges),
+                    ect1,
+                    ect0,
+                    ce,
+                }
+            },
+
+            Frame::PathAbandon {
+                identifier_type,
+                path_identifier,
+                error_code,
+                reason,
+            } => QuicFrame::PathAbandon {
+                identifier_type: *identifier_type,
+                path_identifier: *path_identifier,
+                error_code: *error_code,
+                reason: Some(String::from_utf8_lossy(reason).into_owned()),
+            },
+
+            Frame::PathStatus {
+                identifier_type,
+                path_identifier,
+                seq_num,
+                status,
+            } => QuicFrame::PathStatus {
+                identifier_type: *identifier_type,
+                path_identifier: *path_identifier,
+                seq_num: *seq_num,
+                status: *status,
+            },
         }
     }
 }
@@ -1108,6 +1314,45 @@ impl std::fmt::Debug for Frame {
             Frame::DatagramHeader { length } => {
                 write!(f, "DATAGRAM len={length}")?;
             },
+
+            Frame::ACKMP {
+                space_identifier,
+                ack_delay,
+                ranges,
+                ecn_counts,
+            } => {
+                write!(
+                    f,
+                    "ACK_MP space_id={} delay={} blocks={:?} ecn_counts={:?}",
+                    space_identifier, ack_delay, ranges, ecn_counts
+                )?;
+            },
+
+            Frame::PathAbandon {
+                identifier_type,
+                path_identifier,
+                error_code,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "PATH_ABANDON id_type={} path_id={:x?} err={:x} reason={:x?}",
+                    identifier_type, path_identifier, error_code, reason
+                )?;
+            },
+
+            Frame::PathStatus {
+                identifier_type,
+                path_identifier,
+                seq_num,
+                status,
+            } => {
+                write!(
+                    f,
+                    "PATH_STATUS id_type={} path_id={:x?} seq_num={:x} status={:x}",
+                    identifier_type, path_identifier, seq_num, status,
+                )?;
+            },
         }
 
         Ok(())
@@ -1172,6 +1417,19 @@ fn parse_ack_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
         parse_common_ack_frame(b, first & 0x01 != 0)?;
 
     Ok(Frame::ACK {
+        ack_delay,
+        ranges,
+        ecn_counts,
+    })
+}
+
+fn parse_ack_mp_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
+    let space_identifier = b.get_varint()?;
+    let (ack_delay, ranges, ecn_counts) =
+        parse_common_ack_frame(b, ty & 0x01 != 0)?;
+
+    Ok(Frame::ACKMP {
+        space_identifier,
         ack_delay,
         ranges,
         ecn_counts,
@@ -2103,5 +2361,190 @@ mod tests {
         };
 
         assert_eq!(frame_data, data);
+    }
+
+    #[test]
+    fn path_abandon() {
+        let mut d = [42; 128];
+
+        let frame = Frame::PathAbandon {
+            identifier_type: 1,
+            path_identifier: Some(421_124),
+            error_code: 0xbeef,
+            reason: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        };
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 26);
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Short),
+            Ok(frame.clone())
+        );
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn path_abandon_no_path_identifier() {
+        let mut d = [42; 128];
+
+        let frame = Frame::PathAbandon {
+            identifier_type: 2,
+            path_identifier: None,
+            error_code: 0xbeef,
+            reason: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        };
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 22);
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert_eq!(
+            Frame::from_bytes(&mut b, packet::Type::Short),
+            Ok(frame.clone())
+        );
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&mut d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn ack_mp() {
+        let mut d = [42; 128];
+
+        let mut ranges = ranges::RangeSet::default();
+        ranges.insert(4..7);
+        ranges.insert(9..12);
+        ranges.insert(15..19);
+        ranges.insert(3000..5000);
+
+        let frame = Frame::ACKMP {
+            space_identifier: 894_994,
+            ack_delay: 874_656_534,
+            ranges,
+            ecn_counts: None,
+        };
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 24);
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn ack_mp_ecn() {
+        let mut d = [42; 128];
+
+        let mut ranges = ranges::RangeSet::default();
+        ranges.insert(4..7);
+        ranges.insert(9..12);
+        ranges.insert(15..19);
+        ranges.insert(3000..5000);
+
+        let ecn_counts = Some(EcnCounts {
+            ect0_count: 100,
+            ect1_count: 200,
+            ecn_ce_count: 300,
+        });
+
+        let frame = Frame::ACKMP {
+            space_identifier: 894_994,
+            ack_delay: 874_656_534,
+            ranges,
+            ecn_counts,
+        };
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 30);
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn path_status() {
+        let mut d = [42; 128];
+
+        let identifier_type = 1;
+        let path_identifier = Some(0xabcdef00);
+        let seq_num = 0x42;
+        let status = 1;
+
+        let frame = Frame::PathStatus {
+            identifier_type,
+            path_identifier,
+            seq_num,
+            status,
+        };
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(frame.wire_len(), wire_len);
+        assert_eq!(wire_len, 16);
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
     }
 }

@@ -606,7 +606,7 @@ mod tests {
         let prev_cwnd = r.cwnd();
 
         let p = recovery::Sent {
-            pkt_num: 0,
+            pkt_num: recovery::SpacedPktNum(0, 0),
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -650,7 +650,7 @@ mod tests {
         }
 
         let p = recovery::Sent {
-            pkt_num: 0,
+            pkt_num: recovery::SpacedPktNum(0, 0),
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -726,7 +726,7 @@ mod tests {
 
         // Trigger congestion event to update ssthresh
         let p = recovery::Sent {
-            pkt_num: 0,
+            pkt_num: recovery::SpacedPktNum(0, 0),
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -1107,7 +1107,7 @@ mod tests {
 
         // Trigger congestion event to update ssthresh
         let p = recovery::Sent {
-            pkt_num: 0,
+            pkt_num: recovery::SpacedPktNum(0, 0),
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -1168,7 +1168,7 @@ mod tests {
 
         // Trigger another congestion event.
         let p = recovery::Sent {
-            pkt_num: 0,
+            pkt_num: recovery::SpacedPktNum(0, 0),
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -1243,7 +1243,7 @@ mod tests {
 
         // Trigger congestion event to update ssthresh
         let p = recovery::Sent {
-            pkt_num: 0,
+            pkt_num: recovery::SpacedPktNum(0, 0),
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -1309,7 +1309,7 @@ mod tests {
         // cwnd is not fully recovered to w_max, w_max will be
         // further reduced.
         let p = recovery::Sent {
-            pkt_num: 0,
+            pkt_num: recovery::SpacedPktNum(0, 0),
             frames: smallvec![],
             time_sent: now,
             time_acked: None,

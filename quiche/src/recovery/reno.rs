@@ -339,7 +339,7 @@ mod tests {
         let now = Instant::now();
 
         let p = recovery::Sent {
-            pkt_num: 0,
+            pkt_num: recovery::SpacedPktNum(0, 0),
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -380,7 +380,7 @@ mod tests {
         r.on_packet_sent_cc(20000, now);
 
         let p = recovery::Sent {
-            pkt_num: 0,
+            pkt_num: recovery::SpacedPktNum(0, 0),
             frames: smallvec![],
             time_sent: now,
             time_acked: None,

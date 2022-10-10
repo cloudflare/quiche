@@ -1059,6 +1059,10 @@ impl PktNumSpaceImplMap {
             self.remove_dangling_application_pkt_num_spaces();
         }
     }
+
+    pub fn application_data_space_ids(&self) -> impl Iterator<Item = u64> + '_ {
+        self.application_pkt_num_spaces.keys().copied()
+    }
 }
 
 pub struct PktNumSpaceCryptoMap {
