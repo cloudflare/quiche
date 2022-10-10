@@ -445,6 +445,7 @@ pub enum DataRecipient {
     Application,
     Transport,
     Network,
+    Dropped,
 }
 
 #[serde_with::skip_serializing_none]
