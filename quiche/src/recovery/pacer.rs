@@ -43,37 +43,44 @@ use std::time::Instant;
 
 #[derive(Debug)]
 pub struct Pacer {
-    // Bucket capacity (bytes).
+    /// Whether pacing is enabled.
+    enabled: bool,
+
+    /// Bucket capacity (bytes).
     capacity: usize,
 
-    // Bucket used (bytes).
+    /// Bucket used (bytes).
     used: usize,
 
-    // Sending pacing rate (bytes/sec).
+    /// Sending pacing rate (bytes/sec).
     rate: u64,
 
-    // Timestamp of last packet sent time update.
+    /// Timestamp of the last packet sent time update.
     last_update: Instant,
 
-    // Timestamp of next packet to be sent.
+    /// Timestamp of the next packet to be sent.
     next_time: Instant,
 
-    // Current MSS.
+    /// Current MSS.
     max_datagram_size: usize,
 
-    // Last packet size.
+    /// Last packet size.
     last_packet_size: Option<usize>,
 
-    // Interval to be added in next burst.
+    /// Interval to be added in next burst.
     iv: Duration,
 }
 
 impl Pacer {
-    pub fn new(capacity: usize, rate: u64, max_datagram_size: usize) -> Self {
-        // Resize capacity round down to MSS.
+    pub fn new(
+        enabled: bool, capacity: usize, rate: u64, max_datagram_size: usize,
+    ) -> Self {
+        // Round capacity to MSS.
         let capacity = capacity / max_datagram_size * max_datagram_size;
 
         Pacer {
+            enabled,
+
             capacity,
 
             used: 0,
@@ -92,12 +99,17 @@ impl Pacer {
         }
     }
 
-    // Return the current pacing rate.
+    /// Returns whether pacing is enabled.
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Returns the current pacing rate.
     pub fn rate(&self) -> u64 {
         self.rate
     }
 
-    // Update bucket capacity or pacing_rate.
+    /// Updates the bucket capacity or pacing_rate.
     pub fn update(&mut self, capacity: usize, rate: u64, now: Instant) {
         let capacity = capacity / self.max_datagram_size * self.max_datagram_size;
 
@@ -110,7 +122,7 @@ impl Pacer {
         self.rate = rate;
     }
 
-    // Reset pacer for next burst.
+    /// Resets the pacer for the next burst.
     pub fn reset(&mut self, now: Instant) {
         self.used = 0;
 
@@ -123,7 +135,7 @@ impl Pacer {
         self.iv = Duration::ZERO;
     }
 
-    // Update the timestamp to sent.
+    /// Updates the timestamp for the packet to send.
     pub fn send(&mut self, packet_size: usize, now: Instant) {
         if self.rate == 0 {
             self.reset(now);
@@ -142,7 +154,7 @@ impl Pacer {
 
         let elapsed = now.saturating_duration_since(self.last_update);
 
-        // if too old, reset it.
+        // If too old, reset it.
         if elapsed > interval {
             self.reset(now);
         }
@@ -169,7 +181,7 @@ impl Pacer {
         };
     }
 
-    // Returns the timestamp to send a next packet.
+    /// Returns the timestamp for the next packet.
     pub fn next_time(&self) -> Instant {
         self.next_time
     }
@@ -185,17 +197,16 @@ mod tests {
         let max_burst = datagram_size * 10;
         let pacing_rate = 100_000;
 
-        let mut p = Pacer::new(max_burst, pacing_rate, datagram_size);
+        let mut p = Pacer::new(true, max_burst, pacing_rate, datagram_size);
 
         let now = Instant::now();
 
-        // send 6000 (a half of max_burst) -> no timestamp change yet
+        // Send 6000 (half of max_burst) -> no timestamp change yet.
         p.send(6000, now);
 
-        // it may not be exactly same.
         assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
 
-        // send 6000 bytes -> max_burst filled
+        // Send 6000 bytes -> max_burst filled.
         p.send(6000, now);
 
         assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
@@ -203,7 +214,7 @@ mod tests {
         // Start of a new burst.
         let now = now + Duration::from_millis(5);
 
-        // send 1000 bytes and next_time is updated
+        // Send 1000 bytes and next_time is updated.
         p.send(1000, now);
 
         let interval = max_burst as f64 / pacing_rate as f64;
@@ -212,27 +223,26 @@ mod tests {
     }
 
     #[test]
+    /// Same as pacer_update() but adds some idle time between transfers to
+    /// trigger a reset.
     fn pacer_idle() {
-        // same as pacer_update() but insert some idleness
-        // between two transfer, causing resetting
         let datagram_size = 1200;
         let max_burst = datagram_size * 10;
         let pacing_rate = 100_000;
 
-        let mut p = Pacer::new(max_burst, pacing_rate, datagram_size);
+        let mut p = Pacer::new(true, max_burst, pacing_rate, datagram_size);
 
         let now = Instant::now();
 
-        // send 6000 (a half of max_burst) -> no timestamp change yet
+        // Send 6000 (half of max_burst) -> no timestamp change yet.
         p.send(6000, now);
 
-        // it may not be exactly same.
         assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
 
-        // sleep 200ms to reset the idle pacer (at least 120ms).
+        // Sleep 200ms to reset the idle pacer (at least 120ms).
         let now = now + Duration::from_millis(200);
 
-        // send 6000 bytes -> idle reset and a new burst started
+        // Send 6000 bytes -> idle reset and a new burst  isstarted.
         p.send(6000, now);
 
         assert_eq!(p.next_time(), now);
