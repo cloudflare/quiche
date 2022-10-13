@@ -16437,14 +16437,18 @@ mod tests {
             ecn_ce_count: 1,
         });
 
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::ACK {
-                ack_delay: 0,
-                ranges,
-                ecn_counts,
-            })
-        );
+        let ack = iter.next();
+        assert!(matches!(ack, Some(&frame::Frame::ACK { .. })));
+        let (ack_ranges, ack_ecn_counts) = match ack {
+            Some(frame::Frame::ACK {
+                ranges: r,
+                ecn_counts: ec,
+                ..
+            }) => (r, ec),
+            _ => unreachable!(),
+        };
+        assert_eq!(*ack_ranges, ranges);
+        assert_eq!(*ack_ecn_counts, ecn_counts);
     }
 }
 

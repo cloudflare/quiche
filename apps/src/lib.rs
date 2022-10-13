@@ -29,6 +29,7 @@ extern crate log;
 
 pub mod args;
 pub mod client;
+#[cfg(target_os = "linux")]
 pub mod cmsg;
 pub mod common;
 pub mod recvfrom;

@@ -758,6 +758,8 @@ pub struct SendInfo {
     to_len: socklen_t,
 
     at: timespec,
+
+    ecn: u8,
 }
 
 #[no_mangle]
@@ -776,6 +778,8 @@ pub extern fn quiche_conn_send(
             out_info.to_len = std_addr_to_c(&info.to, &mut out_info.to);
 
             std_time_to_c(&info.at, &mut out_info.at);
+
+            out_info.ecn = info.ecn;
 
             v as ssize_t
         },
