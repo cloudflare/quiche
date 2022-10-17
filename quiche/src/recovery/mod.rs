@@ -319,6 +319,7 @@ impl Recovery {
         let ack_eliciting = pkt.ack_eliciting;
         let in_flight = pkt.in_flight;
         let sent_bytes = pkt.size;
+        let sent_time = pkt.time_sent;
         let pkt_num = pkt.pkt_num;
 
         if ack_eliciting {
@@ -332,7 +333,7 @@ impl Recovery {
 
         if in_flight {
             if ack_eliciting {
-                self.time_of_last_sent_ack_eliciting_pkt[epoch] = Some(now);
+                self.time_of_last_sent_ack_eliciting_pkt[epoch] = Some(sent_time);
             }
 
             self.in_flight_count[epoch] += 1;
@@ -341,11 +342,11 @@ impl Recovery {
                 (self.bytes_in_flight + sent_bytes) < self.congestion_window,
             );
 
-            self.on_packet_sent_cc(sent_bytes, now);
+            self.on_packet_sent_cc(sent_bytes, sent_time);
 
             self.prr.on_packet_sent(sent_bytes);
 
-            self.set_loss_detection_timer(handshake_status, now);
+            self.set_loss_detection_timer(handshake_status, sent_time);
         }
 
         // HyStart++: Start of the round in a slow start.
@@ -367,8 +368,6 @@ impl Recovery {
 
         self.schedule_next_packet(epoch, now, sent_bytes);
 
-        pkt.time_sent = self.get_packet_send_time();
-
         // bytes_in_flight is already updated. Use previous value.
         self.delivery_rate
             .on_packet_sent(&mut pkt, self.bytes_in_flight - sent_bytes);
@@ -387,7 +386,7 @@ impl Recovery {
         self.pacer.update(self.send_quantum, rate, now);
     }
 
-    pub fn get_packet_send_time(&self) -> Instant {
+    pub fn get_packet_send_time(&self) -> Option<Instant> {
         self.pacer.next_time()
     }
 
@@ -404,7 +403,7 @@ impl Recovery {
         let in_initcwnd =
             self.bytes_sent < self.max_datagram_size * INITIAL_WINDOW_PACKETS;
 
-        let sent_bytes = if !self.pacer.enabled() || !is_app || in_initcwnd {
+        let sent_bytes = if !is_app || in_initcwnd {
             0
         } else {
             packet_size
@@ -1999,7 +1998,7 @@ mod tests {
 
         // First packet will be sent out immediately.
         assert_eq!(r.pacer.rate(), 0);
-        assert_eq!(r.get_packet_send_time(), now);
+        assert!(r.get_packet_send_time().is_none());
 
         // Wait 50ms for ACK.
         now += Duration::from_millis(50);
@@ -2055,7 +2054,7 @@ mod tests {
         assert_eq!(r.bytes_in_flight, 6000);
 
         // Pacing is not done during initial phase of connection.
-        assert_eq!(r.get_packet_send_time(), now);
+        assert!(r.get_packet_send_time().is_none());
 
         // Send the third packet out.
         let p = Sent {
@@ -2113,15 +2112,14 @@ mod tests {
         assert_eq!(r.sent[packet::EPOCH_APPLICATION].len(), 3);
         assert_eq!(r.bytes_in_flight, 13000);
 
-        // We pace this outgoing packet. as all conditions for pacing
-        // are passed.
+        // We pace this outgoing packet as all conditions for pacing are passed.
         let pacing_rate =
             (r.congestion_window as f64 * PACING_MULTIPLIER / 0.05) as u64;
         assert_eq!(r.pacer.rate(), pacing_rate);
 
         assert_eq!(
-            r.get_packet_send_time(),
-            now + Duration::from_secs_f64(12000.0 / pacing_rate as f64)
+            r.get_packet_send_time().unwrap(),
+            now + Duration::from_secs_f64(13000.0 / pacing_rate as f64)
         );
     }
 }

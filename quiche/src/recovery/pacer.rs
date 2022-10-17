@@ -59,16 +59,13 @@ pub struct Pacer {
     last_update: Instant,
 
     /// Timestamp of the next packet to be sent.
-    next_time: Instant,
+    next_time: Option<Instant>,
 
     /// Current MSS.
     max_datagram_size: usize,
 
     /// Last packet size.
     last_packet_size: Option<usize>,
-
-    /// Interval to be added in next burst.
-    iv: Duration,
 }
 
 impl Pacer {
@@ -89,13 +86,11 @@ impl Pacer {
 
             last_update: Instant::now(),
 
-            next_time: Instant::now(),
+            next_time: None,
 
             max_datagram_size,
 
             last_packet_size: None,
-
-            iv: Duration::ZERO,
         }
     }
 
@@ -128,25 +123,15 @@ impl Pacer {
 
         self.last_update = now;
 
-        self.next_time = self.next_time.max(now);
+        self.next_time = Some(self.next_time.unwrap_or(now).max(now));
 
         self.last_packet_size = None;
-
-        self.iv = Duration::ZERO;
     }
 
     /// Updates the timestamp for the packet to send.
     pub fn send(&mut self, packet_size: usize, now: Instant) {
         if self.rate == 0 {
-            self.reset(now);
-
-            return;
-        }
-
-        if !self.iv.is_zero() {
-            self.next_time = self.next_time.max(now) + self.iv;
-
-            self.iv = Duration::ZERO;
+            return self.reset(now);
         }
 
         let interval =
@@ -169,21 +154,30 @@ impl Pacer {
 
         self.last_packet_size = Some(packet_size);
 
-        if self.used >= self.capacity || !same_size {
-            self.iv =
-                Duration::from_secs_f64(self.used as f64 / self.rate as f64);
+        let iv = if self.used > self.capacity || !same_size {
+            let iv = Duration::from_secs_f64(self.used as f64 / self.rate as f64);
 
             self.used = 0;
 
             self.last_update = now;
 
             self.last_packet_size = None;
+
+            iv
+        } else {
+            Duration::ZERO
         };
+
+        self.next_time = Some(self.next_time.unwrap_or(now).max(now) + iv);
     }
 
     /// Returns the timestamp for the next packet.
-    pub fn next_time(&self) -> Instant {
-        self.next_time
+    pub fn next_time(&self) -> Option<Instant> {
+        if self.enabled {
+            self.next_time
+        } else {
+            None
+        }
     }
 }
 
@@ -202,14 +196,14 @@ mod tests {
         let now = Instant::now();
 
         // Send 6000 (half of max_burst) -> no timestamp change yet.
-        p.send(6000, now);
+        assert!(p.next_time().is_none());
 
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
+        p.send(6000, now);
 
         // Send 6000 bytes -> max_burst filled.
-        p.send(6000, now);
+        assert!(p.next_time().is_none());
 
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
+        p.send(6000, now);
 
         // Start of a new burst.
         let now = now + Duration::from_millis(5);
@@ -217,9 +211,12 @@ mod tests {
         // Send 1000 bytes and next_time is updated.
         p.send(1000, now);
 
-        let interval = max_burst as f64 / pacing_rate as f64;
+        let interval = (max_burst + 1000) as f64 / pacing_rate as f64;
 
-        assert_eq!(p.next_time() - now, Duration::from_secs_f64(interval));
+        assert_eq!(
+            p.next_time().unwrap() - now,
+            Duration::from_secs_f64(interval)
+        );
     }
 
     #[test]
@@ -237,7 +234,7 @@ mod tests {
         // Send 6000 (half of max_burst) -> no timestamp change yet.
         p.send(6000, now);
 
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
+        assert!(p.next_time().is_none());
 
         // Sleep 200ms to reset the idle pacer (at least 120ms).
         let now = now + Duration::from_millis(200);
@@ -245,6 +242,6 @@ mod tests {
         // Send 6000 bytes -> idle reset and a new burst  isstarted.
         p.send(6000, now);
 
-        assert_eq!(p.next_time(), now);
+        assert!(p.next_time().is_none());
     }
 }

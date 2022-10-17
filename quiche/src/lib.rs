@@ -2932,9 +2932,11 @@ impl Connection {
             left = cmp::min(left, send_path.max_send_bytes);
         }
 
+        let mut send_at = None;
+
         // Generate coalesced packets.
         while left > 0 {
-            let (ty, written) = match self.send_single(
+            let (ty, written, send_time) = match self.send_single(
                 &mut out[done..done + left],
                 send_pid,
                 has_initial,
@@ -2948,6 +2950,10 @@ impl Connection {
 
             done += written;
             left -= written;
+
+            if send_at.is_none() {
+                send_at = Some(send_time);
+            }
 
             match ty {
                 packet::Type::Initial => has_initial = true,
@@ -2997,7 +3003,7 @@ impl Connection {
             from: send_path.local_addr(),
             to: send_path.peer_addr(),
 
-            at: send_path.recovery.get_packet_send_time(),
+            at: send_at.unwrap_or_else(time::Instant::now),
         };
 
         Ok((done, info))
@@ -3005,7 +3011,7 @@ impl Connection {
 
     fn send_single(
         &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
-    ) -> Result<(packet::Type, usize)> {
+    ) -> Result<(packet::Type, usize, time::Instant)> {
         let now = time::Instant::now();
 
         if out.is_empty() {
@@ -4016,18 +4022,27 @@ impl Connection {
             aead,
         )?;
 
+        let bytes_sent = if ack_eliciting { written } else { 0 };
+
+        let time_sent = self
+            .paths
+            .get_mut(send_pid)?
+            .recovery
+            .get_packet_send_time()
+            .unwrap_or(now);
+
         let sent_pkt = recovery::Sent {
             pkt_num: pn,
             frames,
-            time_sent: now,
+            time_sent,
             time_acked: None,
             time_lost: None,
-            size: if ack_eliciting { written } else { 0 },
+            size: bytes_sent,
             ack_eliciting,
             in_flight,
             delivered: 0,
-            delivered_time: now,
-            first_sent_time: now,
+            delivered_time: time_sent,
+            first_sent_time: time_sent,
             is_app_limited: false,
             has_data,
         };
@@ -4059,7 +4074,8 @@ impl Connection {
 
         // Record sent packet size if we probe the path.
         if let Some(data) = challenge_data {
-            self.paths.on_challenge_sent(send_pid, data, written, now)?;
+            self.paths
+                .on_challenge_sent(send_pid, data, written, time_sent)?;
         }
 
         self.pkt_num_spaces[epoch].next_pkt_num += 1;
@@ -4093,7 +4109,7 @@ impl Connection {
         // packet since last receiving a packet.
         if ack_eliciting && !self.ack_eliciting_sent {
             if let Some(idle_timeout) = self.idle_timeout() {
-                self.idle_timer = Some(now + idle_timeout);
+                self.idle_timer = Some(time_sent + idle_timeout);
             }
         }
 
@@ -4101,7 +4117,7 @@ impl Connection {
             self.ack_eliciting_sent = true;
         }
 
-        Ok((pkt_type, written))
+        Ok((pkt_type, written, time_sent))
     }
 
     /// Returns the size of the send quantum, in bytes.
@@ -12460,7 +12476,7 @@ mod tests {
         // Client sends Initial packet with ACK.
         let active_pid =
             pipe.client.paths.get_active_path_id().expect("no active");
-        let (ty, len) = pipe
+        let (ty, len, _) = pipe
             .client
             .send_single(&mut buf, active_pid, false)
             .unwrap();
@@ -12469,7 +12485,7 @@ mod tests {
         assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
 
         // Client sends Handshake packet.
-        let (ty, len) = pipe
+        let (ty, len, _) = pipe
             .client
             .send_single(&mut buf, active_pid, false)
             .unwrap();
