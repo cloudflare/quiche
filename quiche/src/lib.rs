@@ -3195,17 +3195,15 @@ impl Connection {
         let hdr_ty = hdr.ty;
 
         #[cfg(feature = "qlog")]
-        let qlog_pkt_hdr = if self.qlog.streamer.is_some() {
-            Some(qlog::events::quic::PacketHeader::with_type(
+        let qlog_pkt_hdr = self.qlog.streamer.as_ref().map(|_q| {
+            qlog::events::quic::PacketHeader::with_type(
                 hdr.ty.to_qlog(),
                 pn,
                 Some(hdr.version),
                 Some(&hdr.scid),
                 Some(&hdr.dcid),
-            ))
-        } else {
-            None
-        };
+            )
+        });
 
         // Calculate the space required for the packet, including the header
         // the payload length, the packet number and the AEAD overhead.
@@ -3985,18 +3983,19 @@ impl Connection {
                 let send_at_time =
                     now.duration_since(q.start_time()).as_secs_f32() * 1000.0;
 
-                let ev_data = EventData::PacketSent(qlog::events::quic::PacketSent {
-                    header,
-                    frames: Some(qlog_frames),
-                    is_coalesced: None,
-                    retry_token: None,
-                    stateless_reset_token: None,
-                    supported_versions: None,
-                    raw: Some(qlog_raw_info),
-                    datagram_id: None,
-                    send_at_time: Some(send_at_time),
-                    trigger: None,
-                });
+                let ev_data =
+                    EventData::PacketSent(qlog::events::quic::PacketSent {
+                        header,
+                        frames: Some(qlog_frames),
+                        is_coalesced: None,
+                        retry_token: None,
+                        stateless_reset_token: None,
+                        supported_versions: None,
+                        raw: Some(qlog_raw_info),
+                        datagram_id: None,
+                        send_at_time: Some(send_at_time),
+                        trigger: None,
+                    });
 
                 q.add_event_data_with_instant(ev_data, now).ok();
             }
