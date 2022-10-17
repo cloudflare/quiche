@@ -212,6 +212,9 @@ void quiche_config_set_cc_algorithm(quiche_config *config, enum quiche_cc_algori
 // Configures whether to use HyStart++.
 void quiche_config_enable_hystart(quiche_config *config, bool v);
 
+// Configures whether to enable pacing (enabled by default).
+void quiche_config_enable_pacing(quiche_config *config, bool v);
+
 // Configures whether to enable receiving DATAGRAM frames.
 void quiche_config_enable_dgram(quiche_config *config, bool enabled,
                                 size_t recv_queue_len,

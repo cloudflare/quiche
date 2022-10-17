@@ -330,6 +330,11 @@ pub extern fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_enable_pacing(config: &mut Config, v: bool) {
+    config.enable_pacing(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_enable_dgram(
     config: &mut Config, enabled: bool, recv_queue_len: size_t,
     send_queue_len: size_t,
