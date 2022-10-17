@@ -3977,6 +3977,9 @@ impl Connection {
                 data: None,
             };
 
+            let send_at_time =
+                now.duration_since(q.start_time()).as_secs_f32() * 1000.0;
+
             let ev_data = EventData::PacketSent(qlog::events::quic::PacketSent {
                 header: qlog_pkt_hdr,
                 frames: Some(qlog_frames),
@@ -3986,6 +3989,7 @@ impl Connection {
                 supported_versions: None,
                 raw: Some(qlog_raw_info),
                 datagram_id: None,
+                send_at_time: Some(send_at_time),
                 trigger: None,
             });
 
