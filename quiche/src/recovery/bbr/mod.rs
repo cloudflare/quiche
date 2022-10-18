@@ -426,7 +426,7 @@ mod tests {
 
             r.on_packet_sent(
                 pkt,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -444,7 +444,7 @@ mod tests {
             r.on_ack_received(
                 &acked,
                 25,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -493,7 +493,7 @@ mod tests {
 
             r.on_packet_sent(
                 pkt,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -512,7 +512,7 @@ mod tests {
             r.on_ack_received(
                 &acked,
                 25,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -559,7 +559,7 @@ mod tests {
 
             r.on_packet_sent(
                 pkt,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -578,7 +578,7 @@ mod tests {
                 r.on_ack_received(
                     &acked,
                     25,
-                    packet::EPOCH_APPLICATION,
+                    packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
                     "",
@@ -607,7 +607,7 @@ mod tests {
 
             r.on_packet_sent(
                 pkt,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -629,7 +629,7 @@ mod tests {
             r.on_ack_received(
                 &acked,
                 25,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -678,7 +678,7 @@ mod tests {
 
             r.on_packet_sent(
                 pkt,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -696,7 +696,7 @@ mod tests {
                 r.on_ack_received(
                     &acked,
                     25,
-                    packet::EPOCH_APPLICATION,
+                    packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
                     "",
@@ -748,7 +748,7 @@ mod tests {
 
             r.on_packet_sent(
                 pkt,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -766,7 +766,7 @@ mod tests {
                 r.on_ack_received(
                     &acked,
                     25,
-                    packet::EPOCH_APPLICATION,
+                    packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
                     "",
@@ -799,7 +799,7 @@ mod tests {
 
         r.on_packet_sent(
             pkt,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             HandshakeStatus::default(),
             now,
             "",
@@ -819,7 +819,7 @@ mod tests {
             r.on_ack_received(
                 &acked,
                 25,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",

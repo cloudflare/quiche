@@ -24,6 +24,10 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::fmt::Display;
+use std::ops::Index;
+use std::ops::IndexMut;
+use std::ops::RangeInclusive;
 use std::time;
 
 use ring::aead;
@@ -49,17 +53,59 @@ pub const MAX_PKT_NUM_LEN: usize = 4;
 
 const SAMPLE_LEN: usize = 16;
 
-pub const EPOCH_INITIAL: usize = 0;
-pub const EPOCH_HANDSHAKE: usize = 1;
-pub const EPOCH_APPLICATION: usize = 2;
-pub const EPOCH_COUNT: usize = 3;
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Epoch {
+    Initial     = 0,
+    Handshake   = 1,
+    Application = 2,
+}
 
-/// Packet number space epoch.
-///
-/// This should only ever be one of `EPOCH_INITIAL`, `EPOCH_HANDSHAKE` or
-/// `EPOCH_APPLICATION`, and can be used to index state specific to a packet
-/// number space in `Connection` and `Recovery`.
-pub type Epoch = usize;
+static EPOCHS: [Epoch; 3] =
+    [Epoch::Initial, Epoch::Handshake, Epoch::Application];
+
+impl Epoch {
+    /// Returns an ordered slice containing the `Epoch`s that fit in the
+    /// provided `range`.
+    pub fn epochs(range: RangeInclusive<Epoch>) -> &'static [Epoch] {
+        &EPOCHS[*range.start() as usize..=*range.end() as usize]
+    }
+
+    pub const fn count() -> usize {
+        3
+    }
+}
+
+impl Display for Epoch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", usize::from(*self))
+    }
+}
+
+impl From<Epoch> for usize {
+    fn from(e: Epoch) -> Self {
+        e as usize
+    }
+}
+
+impl<T> Index<Epoch> for [T]
+where
+    T: Sized,
+{
+    type Output = T;
+
+    fn index(&self, index: Epoch) -> &Self::Output {
+        self.index(usize::from(index))
+    }
+}
+
+impl<T> IndexMut<Epoch> for [T]
+where
+    T: Sized,
+{
+    fn index_mut(&mut self, index: Epoch) -> &mut Self::Output {
+        self.index_mut(usize::from(index))
+    }
+}
 
 /// QUIC packet type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,25 +132,23 @@ pub enum Type {
 impl Type {
     pub(crate) fn from_epoch(e: Epoch) -> Type {
         match e {
-            EPOCH_INITIAL => Type::Initial,
+            Epoch::Initial => Type::Initial,
 
-            EPOCH_HANDSHAKE => Type::Handshake,
+            Epoch::Handshake => Type::Handshake,
 
-            EPOCH_APPLICATION => Type::Short,
-
-            _ => unreachable!(),
+            Epoch::Application => Type::Short,
         }
     }
 
     pub(crate) fn to_epoch(self) -> Result<Epoch> {
         match self {
-            Type::Initial => Ok(EPOCH_INITIAL),
+            Type::Initial => Ok(Epoch::Initial),
 
-            Type::ZeroRTT => Ok(EPOCH_APPLICATION),
+            Type::ZeroRTT => Ok(Epoch::Application),
 
-            Type::Handshake => Ok(EPOCH_HANDSHAKE),
+            Type::Handshake => Ok(Epoch::Handshake),
 
-            Type::Short => Ok(EPOCH_APPLICATION),
+            Type::Short => Ok(Epoch::Application),
 
             _ => Err(Error::InvalidPacket),
         }
