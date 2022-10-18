@@ -3973,40 +3973,6 @@ impl Connection {
             });
         }
 
-        qlog_with_type!(QLOG_PACKET_TX, self.qlog, q, {
-            if let Some(header) = qlog_pkt_hdr {
-                // Qlog packet raw info described at
-                // https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema-00#section-5.1
-                //
-                // `length` includes packet headers and trailers (AEAD tag).
-                let length = payload_len + payload_offset + crypto_overhead;
-                let qlog_raw_info = RawInfo {
-                    length: Some(length as u64),
-                    payload_length: Some(payload_len as u64),
-                    data: None,
-                };
-
-                let send_at_time =
-                    now.duration_since(q.start_time()).as_secs_f32() * 1000.0;
-
-                let ev_data =
-                    EventData::PacketSent(qlog::events::quic::PacketSent {
-                        header,
-                        frames: Some(qlog_frames),
-                        is_coalesced: None,
-                        retry_token: None,
-                        stateless_reset_token: None,
-                        supported_versions: None,
-                        raw: Some(qlog_raw_info),
-                        datagram_id: None,
-                        send_at_time: Some(send_at_time),
-                        trigger: None,
-                    });
-
-                q.add_event_data_with_instant(ev_data, now).ok();
-            }
-        });
-
         let aead = match self.pkt_num_spaces[epoch].crypto_seal {
             Some(ref v) => v,
             None => return Err(Error::InvalidState),
@@ -4030,6 +3996,40 @@ impl Connection {
             .recovery
             .get_packet_send_time()
             .unwrap_or(now);
+
+        qlog_with_type!(QLOG_PACKET_TX, self.qlog, q, {
+            if let Some(header) = qlog_pkt_hdr {
+                // Qlog packet raw info described at
+                // https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema-00#section-5.1
+                //
+                // `length` includes packet headers and trailers (AEAD tag).
+                let qlog_raw_info = RawInfo {
+                    length: Some(bytes_sent as u64),
+                    payload_length: Some(payload_len as u64),
+                    data: None,
+                };
+
+                let send_at_time =
+                    time_sent.duration_since(q.start_time()).as_secs_f32() *
+                        1000.0;
+
+                let ev_data =
+                    EventData::PacketSent(qlog::events::quic::PacketSent {
+                        header,
+                        frames: Some(qlog_frames),
+                        is_coalesced: None,
+                        retry_token: None,
+                        stateless_reset_token: None,
+                        supported_versions: None,
+                        raw: Some(qlog_raw_info),
+                        datagram_id: None,
+                        send_at_time: Some(send_at_time),
+                        trigger: None,
+                    });
+
+                q.add_event_data_with_instant(ev_data, now).ok();
+            }
+        });
 
         let sent_pkt = recovery::Sent {
             pkt_num: pn,
