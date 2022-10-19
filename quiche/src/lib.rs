@@ -8441,7 +8441,7 @@ pub mod testing {
             let info = RecvInfo {
                 to: si.to,
                 from: si.from,
-                ecn: 0,
+                ecn: si.ecn,
             };
 
             conn.recv(&mut pkt, info)?;
@@ -16449,6 +16449,124 @@ mod tests {
         };
         assert_eq!(*ack_ranges, ranges);
         assert_eq!(*ack_ecn_counts, ecn_counts);
+    }
+
+    #[test]
+    fn connection_migration_with_ecn() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+        config.set_active_connection_id_limit(3);
+        config.set_initial_max_data(20000);
+        config.set_initial_max_stream_data_bidi_local(20000);
+        config.set_initial_max_stream_data_bidi_remote(20000);
+        config.set_initial_max_stream_data_uni(20000);
+        config.set_initial_max_streams_bidi(10);
+        config.enable_ecn(true);
+
+        let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 2);
+
+        let server_addr = testing::Pipe::server_addr();
+        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
+
+        // Case 1: the client first probes the new address, the server too, and
+        // then migrates.
+        assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
+        assert_eq!(pipe.advance(), Ok(()));
+        assert_eq!(
+            pipe.client.path_event_next(),
+            Some(PathEvent::Validated(client_addr_2, server_addr))
+        );
+        assert_eq!(pipe.client.path_event_next(), None);
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::New(server_addr, client_addr_2))
+        );
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::Validated(server_addr, client_addr_2))
+        );
+        assert_eq!(
+            pipe.client.is_path_validated(client_addr_2, server_addr),
+            Ok(true)
+        );
+        assert_eq!(
+            pipe.server.is_path_validated(server_addr, client_addr_2),
+            Ok(true)
+        );
+        // Send some data.
+        let data_buf = [0x42; 10000];
+        assert_eq!(pipe.client.stream_send(0, &data_buf[..], true), Ok(10000));
+        assert_eq!(pipe.advance(), Ok(()));
+        let ecn_counts = pipe
+            .client
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .ecn
+            .ecn_counts();
+        assert_eq!(pipe.client.migrate(client_addr_2, server_addr), Ok(1));
+        assert_eq!(pipe.client.stream_send(4, b"data", true), Ok(4));
+        assert_eq!(pipe.advance(), Ok(()));
+        assert_eq!(
+            pipe.client
+                .paths
+                .get_active()
+                .expect("no active")
+                .local_addr(),
+            client_addr_2
+        );
+        assert_eq!(
+            pipe.client
+                .paths
+                .get_active()
+                .expect("no active")
+                .peer_addr(),
+            server_addr
+        );
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::PeerMigrated(server_addr, client_addr_2))
+        );
+        assert_eq!(pipe.server.path_event_next(), None);
+        assert_eq!(
+            pipe.server
+                .paths
+                .get_active()
+                .expect("no active")
+                .local_addr(),
+            server_addr
+        );
+        assert_eq!(
+            pipe.server
+                .paths
+                .get_active()
+                .expect("no active")
+                .peer_addr(),
+            client_addr_2
+        );
+        let ecn_counts_2 = pipe
+            .client
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .ecn
+            .ecn_counts();
+        assert_eq!(ecn_counts[0], ecn_counts_2[0]);
+        assert_eq!(ecn_counts[1], ecn_counts_2[1]);
+        assert_eq!(ecn_counts[2].ect0_count + 1, ecn_counts_2[2].ect0_count);
+        assert_eq!(ecn_counts[2].ect1_count, ecn_counts_2[2].ect1_count);
+        assert_eq!(ecn_counts[2].ecn_ce_count, ecn_counts_2[2].ecn_ce_count);
     }
 }
 

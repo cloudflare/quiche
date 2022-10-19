@@ -223,6 +223,11 @@ impl Ecn {
             self.state = EcnState::Unsupported;
         }
     }
+
+    /// Returns the latest ECN counters.
+    pub fn ecn_counts(&self) -> [packet::EcnCounts; packet::Epoch::count()] {
+        self.last_ecn_counts
+    }
 }
 
 #[cfg(test)]
