@@ -174,6 +174,9 @@ pub struct Recovery {
 
     /// Initial congestion window size in terms of packet count.
     initial_congestion_window_packets: usize,
+
+    /// Prague state.
+    prague_state: prague::State,
 }
 
 pub struct RecoveryConfig {
@@ -313,6 +316,8 @@ impl Recovery {
 
             initial_congestion_window_packets: recovery_config
                 .initial_congestion_window_packets,
+
+            prague_state: prague::State::default(),
         }
     }
 
@@ -473,7 +478,7 @@ impl Recovery {
         let mut has_ack_eliciting = false;
 
         let mut largest_newly_acked_pkt_num = 0;
-        let mut largest_newly_acked_size = 0;
+        let mut newly_acked_size = 0;
         let mut largest_newly_acked_sent_time = now;
 
         let mut newly_ecn_marked_acked = 0;
@@ -548,7 +553,7 @@ impl Recovery {
                 }
 
                 largest_newly_acked_pkt_num = unacked.pkt_num;
-                largest_newly_acked_size = unacked.size;
+                newly_acked_size += unacked.size;
                 largest_newly_acked_sent_time = unacked.time_sent;
 
                 self.acked[epoch].extend(unacked.frames.drain(..));
@@ -638,7 +643,7 @@ impl Recovery {
         self.process_ecn(
             newly_ecn_marked_acked,
             ecn_counts,
-            largest_newly_acked_size,
+            newly_acked_size,
             &largest_sent,
             epoch,
             now,
@@ -1118,16 +1123,18 @@ impl Recovery {
 
     fn process_ecn(
         &mut self, newly_ecn_marked_acked: u64,
-        ecn_counts: Option<packet::EcnCounts>, largest_acked_size: usize,
+        ecn_counts: Option<packet::EcnCounts>, acked_size: usize,
         largest_acked_sent: &Sent, epoch: packet::Epoch, now: Instant,
     ) {
-        if self
-            .ecn
-            .on_ack_received(epoch, newly_ecn_marked_acked, ecn_counts) >
-            0
-        {
-            self.congestion_event(
-                largest_acked_size,
+        let new_ce_marks =
+            self.ecn
+                .on_ack_received(epoch, newly_ecn_marked_acked, ecn_counts);
+        if newly_ecn_marked_acked > 0 {
+            (self.cc_ops.process_ecn)(
+                self,
+                newly_ecn_marked_acked,
+                new_ce_marks,
+                acked_size,
                 largest_acked_sent,
                 epoch,
                 now,
@@ -1199,13 +1206,15 @@ impl Recovery {
 #[repr(C)]
 pub enum CongestionControlAlgorithm {
     /// Reno congestion control algorithm. `reno` in a string form.
-    Reno  = 0,
+    Reno   = 0,
     /// CUBIC congestion control algorithm (default). `cubic` in a string form.
-    CUBIC = 1,
+    CUBIC  = 1,
     /// BBR congestion control algorithm. `bbr` in a string form.
-    BBR   = 2,
+    BBR    = 2,
     /// BBRv2 congestion control algorithm. `bbr2` in a string form.
-    BBR2  = 3,
+    BBR2   = 3,
+    /// Prague congestion control algorithm. `prague` in a string form.
+    Prague = 4,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -1220,6 +1229,7 @@ impl FromStr for CongestionControlAlgorithm {
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
             "bbr" => Ok(CongestionControlAlgorithm::BBR),
             "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
+            "prague" => Ok(CongestionControlAlgorithm::Prague),
 
             _ => Err(crate::Error::CongestionControl),
         }
@@ -1248,6 +1258,16 @@ pub struct CongestionControlOps {
         now: Instant,
     ),
 
+    pub process_ecn: fn(
+        r: &mut Recovery,
+        newly_ecn_marked_acked: u64,
+        new_ce_marks: u64,
+        acked_bytes: usize,
+        sent: &Sent,
+        epoch: packet::Epoch,
+        now: Instant,
+    ),
+
     pub collapse_cwnd: fn(r: &mut Recovery),
 
     pub checkpoint: fn(r: &mut Recovery),
@@ -1267,6 +1287,7 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
             CongestionControlAlgorithm::CUBIC => &cubic::CUBIC,
             CongestionControlAlgorithm::BBR => &bbr::BBR,
             CongestionControlAlgorithm::BBR2 => &bbr2::BBR2,
+            CongestionControlAlgorithm::Prague => &prague::PRAGUE,
         }
     }
 }
@@ -2374,5 +2395,6 @@ mod cubic;
 mod delivery_rate;
 mod hystart;
 mod pacer;
+mod prague;
 mod prr;
 mod reno;

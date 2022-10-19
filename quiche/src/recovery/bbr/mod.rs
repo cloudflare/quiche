@@ -42,6 +42,7 @@ pub static BBR: CongestionControlOps = CongestionControlOps {
     on_packet_sent,
     on_packets_acked,
     congestion_event,
+    process_ecn,
     collapse_cwnd,
     checkpoint,
     rollback,
@@ -332,6 +333,20 @@ fn congestion_event(
     if !r.in_congestion_recovery(largest_lost_pkt.time_sent) {
         // Upon entering Fast Recovery.
         bbr_enter_recovery(r, now);
+    }
+}
+
+fn process_ecn(
+    r: &mut Recovery, _newly_ecn_marked_acked: u64, new_ce_marks: u64,
+    _acked_bytes: usize, largest_sent: &Sent, epoch: packet::Epoch, now: Instant,
+) {
+    if new_ce_marks > 0 {
+        r.congestion_event(
+            new_ce_marks as usize * r.max_datagram_size,
+            largest_sent,
+            epoch,
+            now,
+        );
     }
 }
 
