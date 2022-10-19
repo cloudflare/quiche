@@ -24,6 +24,10 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::sync::mpsc;
+use std::sync::Arc;
+use std::sync::Mutex;
+
 use crate::events::EventData;
 use crate::events::EventImportance;
 use crate::events::EventType;
@@ -49,10 +53,16 @@ pub enum StreamerState {
 
 pub struct QlogStreamer {
     start_time: std::time::Instant,
-    writer: Box<dyn std::io::Write + Send + Sync>,
+    writer: Arc<Mutex<Box<dyn std::io::Write + Send + Sync>>>,
+    sender: Mutex<mpsc::Sender<Event>>,
     qlog: QlogSeq,
     state: StreamerState,
     log_level: EventImportance,
+}
+
+pub struct QlogWorker {
+    writer: Arc<Mutex<Box<dyn std::io::Write + Send + Sync>>>,
+    receiver: mpsc::Receiver<Event>,
 }
 
 impl QlogStreamer {
@@ -81,9 +91,33 @@ impl QlogStreamer {
             trace,
         };
 
+        let (sender, receiver) = mpsc::channel();
+
+        let writer = Arc::new(Mutex::new(writer));
+
+        let worker = QlogWorker {
+            writer: writer.clone(),
+            receiver,
+        };
+
+        std::thread::spawn(move || {
+            while let Ok(event) = worker.receiver.recv() {
+                let mut writer = worker.writer.lock().unwrap();
+
+                writer.as_mut().write_all(b"").unwrap();
+
+                serde_json::to_writer(writer.as_mut(), &event)
+                    .map_err(|_| Error::Done)
+                    .unwrap();
+
+                writer.as_mut().write_all(b"\n").unwrap();
+            }
+        });
+
         QlogStreamer {
             start_time,
             writer,
+            sender: Mutex::new(sender),
             qlog,
             state: StreamerState::Initial,
             log_level,
@@ -107,10 +141,12 @@ impl QlogStreamer {
             return Err(Error::Done);
         }
 
-        self.writer.as_mut().write_all(b"")?;
-        serde_json::to_writer(self.writer.as_mut(), &self.qlog)
+        let mut writer = self.writer.lock().unwrap();
+
+        writer.as_mut().write_all(b"")?;
+        serde_json::to_writer(writer.as_mut(), &self.qlog)
             .map_err(|_| Error::Done)?;
-        self.writer.as_mut().write_all(b"\n")?;
+        writer.as_mut().write_all(b"\n")?;
 
         self.state = StreamerState::Ready;
 
@@ -129,7 +165,7 @@ impl QlogStreamer {
 
         self.state = StreamerState::Finished;
 
-        self.writer.as_mut().flush()?;
+        self.writer.lock().unwrap().as_mut().flush()?;
 
         Ok(())
     }
@@ -210,19 +246,16 @@ impl QlogStreamer {
             return Err(Error::Done);
         }
 
-        self.writer.as_mut().write_all(b"")?;
-        serde_json::to_writer(self.writer.as_mut(), &event)
-            .map_err(|_| Error::Done)?;
-        self.writer.as_mut().write_all(b"\n")?;
+        self.sender.lock().unwrap().send(event).unwrap();
 
         Ok(())
     }
 
-    /// Returns the writer.
-    #[allow(clippy::borrowed_box)]
-    pub fn writer(&self) -> &Box<dyn std::io::Write + Send + Sync> {
-        &self.writer
-    }
+    // /// Returns the writer.
+    // #[allow(clippy::borrowed_box)]
+    // pub fn writer(&self) -> &Box<dyn std::io::Write + Send + Sync> {
+    //     &self.writer
+    // }
 
     pub fn start_time(&self) -> std::time::Instant {
         self.start_time
