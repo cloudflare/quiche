@@ -1031,6 +1031,7 @@ impl Recovery {
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight as u64,
             ssthresh: self.ssthresh as u64,
+            pacing_rate: self.pacer.rate(),
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
@@ -1272,6 +1273,7 @@ struct QlogMetrics {
     cwnd: u64,
     bytes_in_flight: u64,
     ssthresh: u64,
+    pacing_rate: u64,
 }
 
 #[cfg(feature = "qlog")]
@@ -1341,6 +1343,14 @@ impl QlogMetrics {
             None
         };
 
+        let new_pacing_rate = if self.pacing_rate != latest.pacing_rate {
+            self.pacing_rate = latest.pacing_rate;
+            emit_event = true;
+            Some(latest.pacing_rate)
+        } else {
+            None
+        };
+
         if emit_event {
             // QVis can't use all these fields and they can be large.
             return Some(EventData::MetricsUpdated(
@@ -1354,7 +1364,7 @@ impl QlogMetrics {
                     bytes_in_flight: new_bytes_in_flight,
                     ssthresh: new_ssthresh,
                     packets_in_flight: None,
-                    pacing_rate: None,
+                    pacing_rate: new_pacing_rate,
                 },
             ));
         }
