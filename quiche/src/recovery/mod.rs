@@ -416,7 +416,7 @@ impl Recovery {
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
         epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
         trace_id: &str,
-    ) -> Result<(usize, usize)> {
+    ) -> Result<(usize, usize, usize)> {
         let largest_acked = ranges.last().unwrap();
 
         // While quiche used to consider ACK frames acknowledging packet numbers
@@ -443,6 +443,8 @@ impl Recovery {
         let mut undo_cwnd = false;
 
         let max_rtt = cmp::max(self.latest_rtt, self.rtt());
+
+        let lost_spurious_count_prev = self.lost_spurious_count;
 
         // Detect and mark acked packets, without removing them from the sent
         // packets list.
@@ -532,8 +534,10 @@ impl Recovery {
             (self.cc_ops.rollback)(self);
         }
 
+        let lost_spurious_packets = self.lost_spurious_count - lost_spurious_count_prev;
+
         if newly_acked.is_empty() {
-            return Ok((0, 0));
+            return Ok((0, 0, lost_spurious_packets));
         }
 
         if largest_newly_acked_pkt_num == largest_acked && has_ack_eliciting {
@@ -567,7 +571,7 @@ impl Recovery {
 
         self.drain_packets(epoch, now);
 
-        Ok((lost_packets, lost_bytes))
+        Ok((lost_packets, lost_bytes, lost_spurious_packets))
     }
 
     pub fn on_loss_detection_timeout(

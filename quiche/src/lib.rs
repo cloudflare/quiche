@@ -1185,6 +1185,7 @@ pub struct Connection {
 
     /// Total number of lost packets.
     lost_count: usize,
+    spurious_count: usize,
 
     /// Total number of packets sent with data retransmitted.
     retrans_count: usize,
@@ -1664,6 +1665,7 @@ impl Connection {
             recv_count: 0,
             sent_count: 0,
             lost_count: 0,
+            spurious_count: 0,
             retrans_count: 0,
             sent_bytes: 0,
             recv_bytes: 0,
@@ -5805,6 +5807,7 @@ impl Connection {
             recv: self.recv_count,
             sent: self.sent_count,
             lost: self.lost_count,
+            spurious: self.spurious_count,
             retrans: self.retrans_count,
             sent_bytes: self.sent_bytes,
             recv_bytes: self.recv_bytes,
@@ -6185,7 +6188,7 @@ impl Connection {
                         p.recovery.delivery_rate_update_app_limited(true);
                     }
 
-                    let (lost_packets, lost_bytes) = p.recovery.on_ack_received(
+                    let (lost_packets, lost_bytes, spurious_packets) = p.recovery.on_ack_received(
                         &ranges,
                         ack_delay,
                         epoch,
@@ -6196,6 +6199,7 @@ impl Connection {
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
+                    self.spurious_count += spurious_packets
                 }
 
                 if self.handshake_confirmed {
@@ -6989,6 +6993,7 @@ pub struct Stats {
 
     /// The number of QUIC packets that were lost.
     pub lost: usize,
+    pub spurious: usize,
 
     /// The number of sent QUIC packets with retransmitted data.
     pub retrans: usize,
@@ -7053,8 +7058,8 @@ impl std::fmt::Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "recv={} sent={} lost={} retrans={}",
-            self.recv, self.sent, self.lost, self.retrans,
+            "recv={} sent={} lost={} retrans={} spurious={}",
+            self.recv, self.sent, self.lost, self.retrans, self.spurious,
         )?;
 
         write!(
