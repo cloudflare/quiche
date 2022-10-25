@@ -153,9 +153,6 @@ pub struct Recovery {
     // RFC6937 PRR.
     prr: prr::PRR,
 
-    #[cfg(feature = "qlog")]
-    qlog_metrics: QlogMetrics,
-
     // The maximum size of a data aggregate scheduled and
     // transmitted together.
     send_quantum: usize,
@@ -165,6 +162,12 @@ pub struct Recovery {
 
     /// How many non-ack-eliciting packets have been sent.
     outstanding_non_ack_eliciting: usize,
+
+    #[cfg(feature = "qlog")]
+    qlog_metrics: QlogMetrics,
+
+    #[cfg(feature = "qlog")]
+    qlog_prev_cc_state: &'static str,
 }
 
 pub struct RecoveryConfig {
@@ -277,12 +280,15 @@ impl Recovery {
 
             send_quantum: initial_congestion_window,
 
-            #[cfg(feature = "qlog")]
-            qlog_metrics: QlogMetrics::default(),
-
             bbr_state: bbr::State::new(),
 
             outstanding_non_ack_eliciting: 0,
+
+            #[cfg(feature = "qlog")]
+            qlog_metrics: QlogMetrics::default(),
+
+            #[cfg(feature = "qlog")]
+            qlog_prev_cc_state: "",
         }
     }
 
@@ -1022,7 +1028,9 @@ impl Recovery {
     }
 
     #[cfg(feature = "qlog")]
-    pub fn maybe_qlog(&mut self) -> Option<EventData> {
+    pub fn maybe_qlog(
+        &mut self, qlog: &mut qlog::streamer::QlogStreamer, now: Instant,
+    ) {
         let qlog_metrics = QlogMetrics {
             min_rtt: self.min_rtt,
             smoothed_rtt: self.rtt(),
@@ -1034,7 +1042,25 @@ impl Recovery {
             pacing_rate: self.pacer.rate(),
         };
 
-        self.qlog_metrics.maybe_update(qlog_metrics)
+        if let Some(ev_data) = self.qlog_metrics.maybe_update(qlog_metrics) {
+            qlog.add_event_data_with_instant(ev_data, now).ok();
+        }
+
+        let cc_state = (self.cc_ops.state_str)(self, now);
+
+        if cc_state != self.qlog_prev_cc_state {
+            let ev_data = EventData::CongestionStateUpdated(
+                qlog::events::quic::CongestionStateUpdated {
+                    old: None,
+                    new: cc_state.to_string(),
+                    trigger: None,
+                },
+            );
+
+            qlog.add_event_data_with_instant(ev_data, now).ok();
+
+            self.qlog_prev_cc_state = cc_state;
+        }
     }
 
     pub fn send_quantum(&self) -> usize {
@@ -1103,6 +1129,8 @@ pub struct CongestionControlOps {
     pub rollback: fn(r: &mut Recovery) -> bool,
 
     pub has_custom_pacing: fn() -> bool,
+
+    pub state_str: fn(r: &Recovery, now: Instant) -> &'static str,
 
     pub debug_fmt:
         fn(r: &Recovery, formatter: &mut std::fmt::Formatter) -> std::fmt::Result,

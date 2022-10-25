@@ -2537,9 +2537,7 @@ impl Connection {
 
         qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
             let recv_path = self.paths.get_mut(recv_pid)?;
-            if let Some(ev_data) = recv_path.recovery.maybe_qlog() {
-                q.add_event_data_with_instant(ev_data, now).ok();
-            }
+            recv_path.recovery.maybe_qlog(q, now);
         });
 
         if let Some(e) = frame_processing_err {
@@ -4065,11 +4063,8 @@ impl Connection {
         );
 
         qlog_with_type!(QLOG_METRICS, self.qlog, q, {
-            if let Some(ev_data) =
-                self.paths.get_mut(send_pid)?.recovery.maybe_qlog()
-            {
-                q.add_event_data_with_instant(ev_data, now).ok();
-            }
+            let send_path = self.paths.get_mut(send_pid)?;
+            send_path.recovery.maybe_qlog(q, now);
         });
 
         // Record sent packet size if we probe the path.
@@ -5185,9 +5180,7 @@ impl Connection {
                     self.lost_bytes += lost_bytes as u64;
 
                     qlog_with_type!(QLOG_METRICS, self.qlog, q, {
-                        if let Some(ev_data) = p.recovery.maybe_qlog() {
-                            q.add_event_data_with_instant(ev_data, now).ok();
-                        }
+                        p.recovery.maybe_qlog(q, now);
                     });
                 }
             }
