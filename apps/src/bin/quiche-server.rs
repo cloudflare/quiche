@@ -129,6 +129,7 @@ fn main() {
 
     config.enable_pacing(pacing);
     config.enable_ecn(conn_args.enable_ecn);
+    config.set_ecn_use_ect1(conn_args.use_ect1);
 
     let mut keylog = None;
 
