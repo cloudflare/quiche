@@ -72,10 +72,13 @@ pub struct State {
     /// https://www.ietf.org/archive/id/draft-briscoe-iccrg-prague-congestion-control-01.html
     alpha: f64,
 
+    frac_acked_without_ce: f64,
+
     /// The rtt_virt/srtt ratio, ensured to be >= 1.0.
     rtt_virt_ratio: f64,
 
     reduced_due_to_ce: bool,
+    saw_ce_mark: bool,
 
     /// The number of newly marked CE packets during this RTT.
     newly_ce_marked: u64,
@@ -133,8 +136,14 @@ fn on_packets_acked(
 
 fn ca_after_ce(r: &mut Recovery, acked_bytes: usize) {
     let increase = (1.0 / r.prague_state.rtt_virt_ratio.powi(2)) *
-        (acked_bytes as f64 / r.congestion_window as f64);
-    r.congestion_window += increase.round() as usize;
+        acked_bytes as f64 *
+        r.prague_state.frac_acked_without_ce;
+    r.bytes_acked_ca += increase.round() as usize;
+
+    if r.bytes_acked_ca >= r.congestion_window {
+        r.bytes_acked_ca -= r.congestion_window;
+        r.congestion_window += r.max_datagram_size;
+    }
 }
 
 fn on_packet_acked(
@@ -214,8 +223,16 @@ fn update_alpha(
         return;
     }
 
+    // If this is the first CE mark, set alpha to 1.
     let frac = new_ce_counts as f64 / newly_ecn_marked_acked as f64;
-    r.prague_state.alpha += G * (frac - r.prague_state.alpha);
+    if !r.prague_state.saw_ce_mark && new_ce_counts > 0 {
+        r.prague_state.alpha = 1.0;
+        r.prague_state.saw_ce_mark = true;
+    } else {
+        r.prague_state.alpha += G * (frac - r.prague_state.alpha);
+    }
+    // Register the fraction of Non CE-marked / total acked for additive increase.
+    r.prague_state.frac_acked_without_ce = 1.0 - frac;
 
     // Start a new round.
     r.prague_state.largest_sent_pn[epoch] = r.largest_sent_pkt[epoch];
@@ -242,7 +259,8 @@ fn enter_cwr(r: &mut Recovery, time_sent: Instant) {
     if r.congestion_window <
         recovery::MINIMUM_WINDOW_PACKETS * r.max_datagram_size
     {
-        r.congestion_window = r.max_datagram_size;
+        r.congestion_window =
+            recovery::MINIMUM_WINDOW_PACKETS * r.max_datagram_size;
     }
     r.ssthresh = r.congestion_window;
 
@@ -312,6 +330,7 @@ fn debug_fmt(_r: &Recovery, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
 
 #[cfg(test)]
 mod tests {
+    use crate::packet::EcnCounts;
     use crate::recovery;
 
     use super::*;
@@ -584,5 +603,166 @@ mod tests {
 
         // After acking more than cwnd, expect cwnd increased by MSS
         assert_eq!(r.cwnd(), cur_cwnd + r.max_datagram_size);
+    }
+
+    #[test]
+    fn prague_process_ecn() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::Prague);
+        cfg.ecn_enabled = true;
+
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+        let mut total_sent = 0;
+
+        let p = recovery::Sent {
+            pkt_num: 0,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: r.max_datagram_size,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: std::time::Instant::now(),
+            first_sent_time: std::time::Instant::now(),
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+            ecn_marked: false,
+        };
+
+        // Send initcwnd full MSS packets to become no longer app limited
+        for _ in 0..r.initial_congestion_window_packets {
+            r.on_packet_sent_cc(p.size, now);
+            total_sent += p.size;
+        }
+
+        let cwnd_prev = r.cwnd();
+
+        let a = Acked {
+            pkt_num: p.pkt_num,
+            time_sent: p.time_sent,
+            size: p.size,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            rtt: Duration::ZERO,
+        };
+
+        let mut acked = vec![a.clone(); r.initial_congestion_window_packets];
+
+        // Let's have one packet that received CE mark.
+        r.process_ecn(
+            r.initial_congestion_window_packets as u64,
+            Some(EcnCounts {
+                ect0_count: r.initial_congestion_window_packets as u64 - 1,
+                ect1_count: 0,
+                ecn_ce_count: 1,
+            }),
+            total_sent,
+            &p,
+            packet::Epoch::Application,
+            now,
+        );
+
+        r.on_packets_acked(&mut acked, packet::Epoch::Application, now);
+
+        // Alpha should now be 1.
+        assert_eq!(r.prague_state.alpha, 1.0);
+        assert_eq!(r.ssthresh, cwnd_prev / 2);
+        assert_eq!(r.bytes_in_flight, 0);
+        // We increase of 12000 * 0.9 = 10800. As we only increase cwnd per
+        // max_datagram_size steps, this means we should increase by 1200 the
+        // cwnd and keep (10800 - 6000) = 4800 in bytes_acked_ca.
+        assert_eq!(r.cwnd(), r.ssthresh + r.max_datagram_size);
+        assert_eq!(r.bytes_acked_ca, 4800);
+
+        // Make a round without any ECN feedback.
+        total_sent = 0;
+        let cwnd_prev = r.cwnd();
+        let sshthres_prev = r.ssthresh;
+        let nb_sent = cwnd_prev / r.max_datagram_size;
+        for _ in 0..nb_sent {
+            r.on_packet_sent_cc(p.size, now);
+            total_sent += p.size;
+        }
+        let mut acked = vec![a.clone(); nb_sent];
+        let tot_ect0 =
+            r.initial_congestion_window_packets as u64 - 1 + nb_sent as u64;
+
+        r.process_ecn(
+            nb_sent as u64,
+            Some(EcnCounts {
+                ect0_count: tot_ect0,
+                ect1_count: 0,
+                ecn_ce_count: 1,
+            }),
+            total_sent,
+            &p,
+            packet::Epoch::Application,
+            now,
+        );
+
+        r.on_packets_acked(&mut acked, packet::Epoch::Application, now);
+
+        // Alpha should be 1 - G.
+        assert_eq!(r.prague_state.alpha, 1.0 - G);
+        assert_eq!(r.ssthresh, sshthres_prev);
+        assert_eq!(r.bytes_in_flight, 0);
+        // We increase of 7200. As we only increase cwnd per
+        // max_datagram_size steps, this means we should increase by 1200 the
+        // cwnd and keep (4800 + 7200 - 7200) = 4800 in bytes_acked_ca.
+        assert_eq!(r.cwnd(), cwnd_prev + r.max_datagram_size);
+        assert_eq!(r.bytes_acked_ca, 4800);
+
+        // A last round with 2 CE feedbacks.
+        total_sent = 0;
+        let cwnd_prev = r.cwnd();
+        let alpha_prev = r.prague_state.alpha;
+        let nb_sent = cwnd_prev / r.max_datagram_size;
+        for _ in 0..nb_sent {
+            r.on_packet_sent_cc(p.size, now);
+            total_sent += p.size;
+        }
+        let mut acked = vec![a.clone(); nb_sent];
+
+        r.process_ecn(
+            nb_sent as u64,
+            Some(EcnCounts {
+                ect0_count: tot_ect0 + nb_sent as u64 - 2,
+                ect1_count: 0,
+                ecn_ce_count: 3,
+            }),
+            total_sent,
+            &p,
+            packet::Epoch::Application,
+            now,
+        );
+
+        r.on_packets_acked(&mut acked, packet::Epoch::Application, now);
+
+        // Alpha should be (1 - G) + G * (2 / 7 - (1 - G)).
+        assert_eq!(
+            r.prague_state.alpha,
+            alpha_prev + G * (2.0 / 7.0 - alpha_prev)
+        );
+        assert_eq!(
+            r.ssthresh,
+            ((1.0 - r.prague_state.alpha / 2.0) * cwnd_prev as f64).round()
+                as usize
+        );
+        assert_eq!(r.bytes_in_flight, 0);
+        // We increase of 8400 * 5 / 7 = 6000. The cwnd being 4634 and the
+        // remaining CA being 4800, we increase of two packets.
+        assert_eq!(r.cwnd(), r.ssthresh + 2 * r.max_datagram_size);
+        // This means (4800 + 6000 - 4634 - 5834) = 332. 331 because of
+        // rounding...
+        assert_eq!(r.bytes_acked_ca, 331);
     }
 }
