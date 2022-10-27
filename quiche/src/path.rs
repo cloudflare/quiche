@@ -187,6 +187,9 @@ pub struct Path {
     /// Whether the connection tries to migrate to this path, but it still needs
     /// to be validated.
     migrating: bool,
+
+    /// Whether or not we should force eliciting of an ACK (e.g. via PING frame)
+    pub needs_ack_eliciting: bool,
 }
 
 impl Path {
@@ -227,6 +230,7 @@ impl Path {
             challenge_requested: false,
             failure_notified: false,
             migrating: false,
+            needs_ack_eliciting: false,
         }
     }
 
