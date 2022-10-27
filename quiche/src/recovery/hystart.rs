@@ -110,7 +110,7 @@ impl Hystart {
 
     pub fn in_css(&self, epoch: packet::Epoch) -> bool {
         self.enabled &&
-            epoch == packet::EPOCH_APPLICATION &&
+            epoch == packet::Epoch::Application &&
             self.css_start_time().is_some()
     }
 
@@ -131,7 +131,7 @@ impl Hystart {
         &mut self, epoch: packet::Epoch, packet: &recovery::Acked, rtt: Duration,
         now: Instant,
     ) -> bool {
-        if !(self.enabled && epoch == packet::EPOCH_APPLICATION) {
+        if !(self.enabled && epoch == packet::Epoch::Application) {
             return false;
         }
 

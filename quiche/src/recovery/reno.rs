@@ -233,7 +233,7 @@ mod tests {
             rtt: Duration::ZERO,
         }];
 
-        r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
+        r.on_packets_acked(acked, packet::Epoch::Application, now);
 
         // Check if cwnd increased by packet size (slow start).
         assert_eq!(r.cwnd(), cwnd_prev + p.size);
@@ -304,7 +304,7 @@ mod tests {
             },
         ];
 
-        r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
+        r.on_packets_acked(acked, packet::Epoch::Application, now);
 
         // Acked 3 packets.
         assert_eq!(r.cwnd(), cwnd_prev + p.size * 3);
@@ -324,7 +324,7 @@ mod tests {
         r.congestion_event(
             r.max_datagram_size,
             now,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             now,
         );
 
@@ -348,7 +348,7 @@ mod tests {
         r.congestion_event(
             r.max_datagram_size,
             now,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             now,
         );
 
@@ -374,7 +374,7 @@ mod tests {
 
         // Ack more than cwnd bytes with rtt=100ms
         r.update_rtt(rtt, Duration::from_millis(0), now);
-        r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now + rtt * 2);
+        r.on_packets_acked(acked, packet::Epoch::Application, now + rtt * 2);
 
         // After acking more than cwnd, expect cwnd increased by MSS
         assert_eq!(r.cwnd(), cur_cwnd + r.max_datagram_size);

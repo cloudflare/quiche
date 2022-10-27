@@ -503,7 +503,7 @@ mod tests {
             rtt: Duration::ZERO,
         }];
 
-        r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
+        r.on_packets_acked(acked, packet::Epoch::Application, now);
 
         // Check if cwnd increased by packet size (slow start)
         assert_eq!(r.cwnd(), cwnd_prev + p.size);
@@ -573,7 +573,7 @@ mod tests {
             },
         ];
 
-        r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
+        r.on_packets_acked(acked, packet::Epoch::Application, now);
 
         // Acked 3 packets.
         assert_eq!(r.cwnd(), cwnd_prev + p.size * 3);
@@ -591,7 +591,7 @@ mod tests {
         r.congestion_event(
             r.max_datagram_size,
             now,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             now,
         );
 
@@ -618,7 +618,7 @@ mod tests {
         r.congestion_event(
             r.max_datagram_size,
             now,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             now,
         );
 
@@ -651,7 +651,7 @@ mod tests {
                 rtt: Duration::ZERO,
             }];
 
-            r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
+            r.on_packets_acked(acked, packet::Epoch::Application, now);
             now += rtt;
         }
 
@@ -673,7 +673,7 @@ mod tests {
         r.congestion_event(
             r.max_datagram_size,
             now,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             now,
         );
 
@@ -696,7 +696,7 @@ mod tests {
             rtt: Duration::ZERO,
         }];
 
-        r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
+        r.on_packets_acked(acked, packet::Epoch::Application, now);
 
         // Slow start again - cwnd will be increased by 1 MSS
         assert_eq!(
@@ -713,7 +713,7 @@ mod tests {
 
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
-        let epoch = packet::EPOCH_APPLICATION;
+        let epoch = packet::Epoch::Application;
 
         let p = recovery::Sent {
             pkt_num: 0,
@@ -861,7 +861,7 @@ mod tests {
 
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
-        let epoch = packet::EPOCH_APPLICATION;
+        let epoch = packet::Epoch::Application;
 
         let p = recovery::Sent {
             pkt_num: 0,
@@ -1012,7 +1012,7 @@ mod tests {
         r.congestion_event(
             r.max_datagram_size,
             now,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             now,
         );
 
@@ -1040,7 +1040,7 @@ mod tests {
         // Trigger detecting spurious congestion event
         r.on_packets_acked(
             acked,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             now + rtt + Duration::from_millis(5),
         );
 
@@ -1054,7 +1054,7 @@ mod tests {
         r.congestion_event(
             r.max_datagram_size,
             now,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             now,
         );
 
@@ -1082,7 +1082,7 @@ mod tests {
         // Trigger detecting spurious congestion event.
         r.on_packets_acked(
             acked,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             now + rtt + Duration::from_millis(5),
         );
 
@@ -1108,7 +1108,7 @@ mod tests {
         r.congestion_event(
             r.max_datagram_size,
             now,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             now,
         );
 
@@ -1140,7 +1140,7 @@ mod tests {
                 rtt: Duration::ZERO,
             }];
 
-            r.on_packets_acked(acked, packet::EPOCH_APPLICATION, now);
+            r.on_packets_acked(acked, packet::Epoch::Application, now);
             now += rtt;
         }
 
@@ -1154,7 +1154,7 @@ mod tests {
         r.congestion_event(
             r.max_datagram_size,
             now,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             now,
         );
 

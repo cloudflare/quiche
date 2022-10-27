@@ -49,13 +49,11 @@ pub enum Level {
 impl Level {
     pub fn from_epoch(e: packet::Epoch) -> Level {
         match e {
-            packet::EPOCH_INITIAL => Level::Initial,
+            packet::Epoch::Initial => Level::Initial,
 
-            packet::EPOCH_HANDSHAKE => Level::Handshake,
+            packet::Epoch::Handshake => Level::Handshake,
 
-            packet::EPOCH_APPLICATION => Level::OneRTT,
-
-            _ => unreachable!(),
+            packet::Epoch::Application => Level::OneRTT,
         }
     }
 }
