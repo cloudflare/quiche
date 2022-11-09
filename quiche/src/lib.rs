@@ -4807,6 +4807,9 @@ impl Connection {
     /// Queue a PING frame to be sent for the active path if no other
     /// ACK-eliciting frame would otherwise be sent. See
     /// [`send_ack_eliciting_on_path()`] for more detail.
+    ///
+    /// [`send_ack_eliciting_on_path()`]:
+    /// struct.Connection.html#method.send_ack_eliciting_on_path
     pub fn send_ack_eliciting(&mut self) -> Result<()> {
         if self.is_closed() || self.is_draining() {
             return Ok(());
