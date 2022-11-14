@@ -225,7 +225,7 @@ pub fn run(
 
             if let Some(session_file) = session_file {
                 if let Some(session) = conn.session() {
-                    std::fs::write(session_file, &session).ok();
+                    std::fs::write(session_file, session).ok();
                 }
             }
 
@@ -428,7 +428,7 @@ pub fn run(
 
             if let Some(session_file) = session_file {
                 if let Some(session) = conn.session() {
-                    std::fs::write(session_file, &session).ok();
+                    std::fs::write(session_file, session).ok();
                 }
             }
 

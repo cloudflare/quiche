@@ -334,7 +334,7 @@ pub fn connect(
 
             if let Some(session_file) = &args.session_file {
                 if let Some(session) = conn.session() {
-                    std::fs::write(session_file, &session).ok();
+                    std::fs::write(session_file, session).ok();
                 }
             }
 
@@ -581,7 +581,7 @@ pub fn connect(
 
             if let Some(session_file) = &args.session_file {
                 if let Some(session) = conn.session() {
-                    std::fs::write(session_file, &session).ok();
+                    std::fs::write(session_file, session).ok();
                 }
             }
 

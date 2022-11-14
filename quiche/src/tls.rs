@@ -278,11 +278,9 @@ impl Context {
     }
 
     pub fn set_verify(&mut self, verify: bool) {
-        let mode = if verify {
-            0x01 // SSL_VERIFY_PEER
-        } else {
-            0x00 // SSL_VERIFY_NONE
-        };
+        // true  -> 0x01 SSL_VERIFY_PEER
+        // false -> 0x00 SSL_VERIFY_NONE
+        let mode = i32::from(verify);
 
         unsafe {
             SSL_CTX_set_verify(self.as_mut_ptr(), mode, ptr::null());
@@ -333,7 +331,7 @@ impl Context {
     }
 
     pub fn set_early_data_enabled(&mut self, enabled: bool) {
-        let enabled = if enabled { 1 } else { 0 };
+        let enabled = i32::from(enabled);
 
         unsafe {
             SSL_CTX_set_early_data_enabled(self.as_mut_ptr(), enabled);
@@ -452,9 +450,7 @@ impl Handshake {
     }
 
     pub fn set_quiet_shutdown(&mut self, mode: bool) {
-        unsafe {
-            SSL_set_quiet_shutdown(self.as_mut_ptr(), if mode { 1 } else { 0 })
-        }
+        unsafe { SSL_set_quiet_shutdown(self.as_mut_ptr(), i32::from(mode)) }
     }
 
     pub fn set_host_name(&mut self, name: &str) -> Result<()> {
