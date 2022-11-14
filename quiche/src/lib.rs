@@ -14803,7 +14803,7 @@ mod tests {
     }
 
     #[test]
-    fn ping() {
+    fn send_ack_eliciting_causes_ping() {
         // First establish a connection
         let mut pipe = testing::Pipe::default().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
@@ -14823,7 +14823,7 @@ mod tests {
     }
 
     #[test]
-    fn ping_not_needed() {
+    fn send_ack_eliciting_no_ping() {
         // First establish a connection
         let mut pipe = testing::Pipe::default().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
