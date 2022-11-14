@@ -3887,9 +3887,11 @@ impl Connection {
         // Alternate trying to send DATAGRAMs next time.
         self.emit_dgram = !dgram_emitted;
 
-        // Create PING for PTO probe if no other ack-eliciting frame is sent or if
-        // we've sent too many non ACK eliciting packets without having
-        // sent an ACK eliciting one
+        // If no other ack-eliciting frame is sent, include a PING frame
+        // - if PTO probe needed; OR
+        // - if we've sent too many non ack-eliciting packets without having
+        // sent an ACK eliciting one; OR
+        // - the application requested an ack-eliciting frame be sent.
         let path = self.paths.get_mut(send_pid)?;
         if (ack_elicit_required || path.needs_ack_eliciting) &&
             !ack_eliciting &&
@@ -4804,12 +4806,15 @@ impl Connection {
         MIN_CLIENT_INITIAL_LEN
     }
 
-    /// Queue a PING frame to be sent for the active path if no other
-    /// ACK-eliciting frame would otherwise be sent. See
-    /// [`send_ack_eliciting_on_path()`] for more detail.
+    /// Schedule an ack-eliciting packet on the active path.
     ///
-    /// [`send_ack_eliciting_on_path()`]:
-    /// struct.Connection.html#method.send_ack_eliciting_on_path
+    /// QUIC packets might not contain ack-eliciting frames during normal
+    /// operating conditions. If the packet would already contain
+    /// ack-eliciting frames, this method does not change any behavior.
+    /// However, if the packet would not ordinarily contain ack-eliciting
+    /// frames, this method ensures that a PING frame sent.
+    ///
+    /// Calling this method multiple times before [`send()`] has no effect.
     pub fn send_ack_eliciting(&mut self) -> Result<()> {
         if self.is_closed() || self.is_draining() {
             return Ok(());
@@ -4818,9 +4823,13 @@ impl Connection {
         Ok(())
     }
 
-    /// Queue a PING frame to be sent for the specified path if no other
-    /// ACK-eliciting frame would otherwise be sent. Calling this method
-    /// multiple times before calling send will have no effect.
+    /// Schedule an ack-eliciting packet on the specified path.
+    ///
+    /// See [`send_ack_eliciting()`] for more detail. [`InvalidState`] is
+    /// returned if there is no record of the path.
+    ///
+    /// [`send_ack_eliciting()`]: struct.Connection.html#method.send_ack_eliciting
+    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
     pub fn send_ack_eliciting_on_path(
         &mut self, local: SocketAddr, peer: SocketAddr,
     ) -> Result<()> {
