@@ -4815,7 +4815,7 @@ impl Connection {
     /// frames, this method ensures that a PING frame sent.
     ///
     /// Calling this method multiple times before [`send()`] has no effect.
-
+    ///
     /// [`send()`]: struct.Connection.html#method.send
     pub fn send_ack_eliciting(&mut self) -> Result<()> {
         if self.is_closed() || self.is_draining() {
