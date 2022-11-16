@@ -70,6 +70,10 @@ fn recvmsg(
 ) -> std::io::Result<(usize, RecvInfo)> {
     use std::io::IoSliceMut;
     use std::mem::MaybeUninit;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
+    use std::net::SocketAddrV4;
+    use std::net::SocketAddrV6;
     use std::os::unix::io::AsRawFd;
 
     use libc::CMSG_LEN;
@@ -118,11 +122,24 @@ fn recvmsg(
     }
 
     let source = match libc::c_int::from(name.ss_family) {
-        libc::AF_INET => unsafe {
-            SocketAddr::V4(std::ptr::read(&name as *const _ as _))
+        libc::AF_INET => {
+            let addr =
+                unsafe { &*(&name as *const _ as *const libc::sockaddr_in) };
+            let ip = Ipv4Addr::from(addr.sin_addr.s_addr.to_ne_bytes());
+            let port = u16::from_be(addr.sin_port);
+            SocketAddr::V4(SocketAddrV4::new(ip, port))
         },
-        libc::AF_INET6 => unsafe {
-            SocketAddr::V6(std::ptr::read(&name as *const _ as _))
+        libc::AF_INET6 => {
+            let addr =
+                unsafe { &*(&name as *const _ as *const libc::sockaddr_in6) };
+            let ip = Ipv6Addr::from(addr.sin6_addr.s6_addr);
+            let port = u16::from_be(addr.sin6_port);
+            SocketAddr::V6(SocketAddrV6::new(
+                ip,
+                port,
+                addr.sin6_flowinfo,
+                addr.sin6_scope_id,
+            ))
         },
         _ => unreachable!(),
     };
