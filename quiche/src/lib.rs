@@ -5572,9 +5572,11 @@ impl Connection {
     /// sent to the peer. Otherwise a normal connection close is sent.
     ///
     /// If `app` is true but the connection is not in a state that is safe to
-    /// send an application error (not established nor in early data), the error
-    /// is details are cleared in accordance with [RFC
-    /// 9000](https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.3-3).
+    /// send an application error (not established nor in early data), in
+    /// accordance with [RFC
+    /// 9000](https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.3-3), the
+    /// error code is changed to APPLICATION_ERROR and the reason phrase is
+    /// cleared.
     ///
     /// Returns [`Done`] if the connection had already been closed.
     ///
