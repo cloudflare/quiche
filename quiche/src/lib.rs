@@ -5571,6 +5571,13 @@ impl Connection {
     /// The `app` parameter specifies whether an application close should be
     /// sent to the peer. Otherwise a normal connection close is sent.
     ///
+    /// If `app` is true but the connection is not in a state that is safe to
+    /// send an application error (not established nor in early data), in
+    /// accordance with [RFC
+    /// 9000](https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.3-3), the
+    /// error code is changed to APPLICATION_ERROR and the reason phrase is
+    /// cleared.
+    ///
     /// Returns [`Done`] if the connection had already been closed.
     ///
     /// Note that the connection will not be closed immediately. An application
@@ -5593,11 +5600,23 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        self.local_error = Some(ConnectionError {
-            is_app: app,
-            error_code: err,
-            reason: reason.to_vec(),
-        });
+        let is_safe_to_send_app_data =
+            self.is_established() || self.is_in_early_data();
+
+        if app && !is_safe_to_send_app_data {
+            // Clear error information.
+            self.local_error = Some(ConnectionError {
+                is_app: false,
+                error_code: 0x0c,
+                reason: vec![],
+            });
+        } else {
+            self.local_error = Some(ConnectionError {
+                is_app: app,
+                error_code: err,
+                reason: reason.to_vec(),
+            });
+        }
 
         // When no packet was successfully processed close connection immediately.
         if self.recv_count == 0 {
@@ -12980,7 +12999,57 @@ mod tests {
     }
 
     #[test]
-    fn app_close_by_server_during_handshake() {
+    fn app_close_by_server_during_handshake_not_established() {
+        let mut pipe = testing::Pipe::default().unwrap();
+
+        // Client sends initial flight.
+        let flight = testing::emit_flight(&mut pipe.client).unwrap();
+        testing::process_flight(&mut pipe.server, flight).unwrap();
+
+        let flight = testing::emit_flight(&mut pipe.server).unwrap();
+
+        // Both connections are not established.
+        assert!(!pipe.client.is_established() && !pipe.server.is_established());
+
+        // Server closes before connection is established.
+        pipe.server.close(true, 123, b"fail whale").unwrap();
+
+        testing::process_flight(&mut pipe.client, flight).unwrap();
+
+        // Connection is established on the client.
+        assert!(pipe.client.is_established());
+
+        // Client sends after connection is established.
+        pipe.client.stream_send(0, b"badauthtoken", true).unwrap();
+
+        let flight = testing::emit_flight(&mut pipe.client).unwrap();
+        testing::process_flight(&mut pipe.server, flight).unwrap();
+
+        // Connection is not established on the server (and never will be)
+        assert!(!pipe.server.is_established());
+
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert_eq!(
+            pipe.server.local_error(),
+            Some(&ConnectionError {
+                is_app: false,
+                error_code: 0x0c,
+                reason: vec![],
+            })
+        );
+        assert_eq!(
+            pipe.client.peer_error(),
+            Some(&ConnectionError {
+                is_app: false,
+                error_code: 0x0c,
+                reason: vec![],
+            })
+        );
+    }
+
+    #[test]
+    fn app_close_by_server_during_handshake_established() {
         let mut pipe = testing::Pipe::default().unwrap();
 
         // Client sends initial flight.
