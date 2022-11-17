@@ -695,6 +695,8 @@ pub struct ExData<'a> {
 
     pub recovery_config: crate::recovery::RecoveryConfig,
 
+    pub tx_cap_factor: f64,
+
     pub is_server: bool,
 }
 
