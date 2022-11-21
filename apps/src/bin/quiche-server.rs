@@ -548,16 +548,24 @@ fn main() {
                     client.max_datagram_size *
                     client.max_datagram_size;
             let mut total_write = 0;
-            let mut dst_info = None;
+            let mut dst_info: Option<quiche::SendInfo> = None;
 
             while total_write < max_send_burst {
-                let (write, send_info) = match client
-                    .conn
-                    .send(&mut out[total_write..max_send_burst])
-                {
+                let res = match dst_info {
+                    Some(info) => client.conn.send_on_path(
+                        &mut out[total_write..max_send_burst],
+                        Some(info.from),
+                        Some(info.to),
+                    ),
+                    None =>
+                        client.conn.send(&mut out[total_write..max_send_burst]),
+                };
+
+                let (write, send_info) = match res {
                     Ok(v) => v,
 
                     Err(quiche::Error::Done) => {
+                        continue_write = dst_info.is_some();
                         trace!("{} done writing", client.conn.trace_id());
                         break;
                     },
@@ -602,6 +610,14 @@ fn main() {
             }
 
             trace!("{} written {} bytes", client.conn.trace_id(), total_write);
+
+            if continue_write {
+                trace!(
+                    "{} pause writing and consider another path",
+                    client.conn.trace_id()
+                );
+                break;
+            }
 
             if total_write >= max_send_burst {
                 trace!("{} pause writing", client.conn.trace_id(),);
