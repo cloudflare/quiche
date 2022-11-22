@@ -627,6 +627,14 @@ ssize_t quiche_conn_dgram_send(quiche_conn *conn, const uint8_t *buf,
 void quiche_conn_dgram_purge_outgoing(quiche_conn *conn,
                                       bool (*f)(uint8_t *, size_t));
 
+// Schedule an ack-eliciting packet on the active path.
+ssize_t quiche_conn_send_ack_eliciting(quiche_conn *conn);
+
+// Schedule an ack-eliciting packet on the specified path.
+ssize_t quiche_conn_send_ack_eliciting_on_path(quiche_conn *conn,
+                           const struct sockaddr *local, size_t local_len,
+                           const struct sockaddr *peer, size_t peer_len);
+
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
 

@@ -3887,10 +3887,17 @@ impl Connection {
         // Alternate trying to send DATAGRAMs next time.
         self.emit_dgram = !dgram_emitted;
 
-        // Create PING for PTO probe if no other ack-eliciting frame is sent or if
-        // we've sent too many non ACK eliciting packets without having
-        // sent an ACK eliciting one
-        if ack_elicit_required && !ack_eliciting && left >= 1 && !is_closing {
+        // If no other ack-eliciting frame is sent, include a PING frame
+        // - if PTO probe needed; OR
+        // - if we've sent too many non ack-eliciting packets without having
+        // sent an ACK eliciting one; OR
+        // - the application requested an ack-eliciting frame be sent.
+        let path = self.paths.get_mut(send_pid)?;
+        if (ack_elicit_required || path.needs_ack_eliciting) &&
+            !ack_eliciting &&
+            left >= 1 &&
+            !is_closing
+        {
             let frame = frame::Frame::Ping;
 
             if push_frame_to_pkt!(b, frames, frame, left) {
@@ -3900,18 +3907,15 @@ impl Connection {
         }
 
         if ack_eliciting {
-            self.paths.get_mut(send_pid)?.recovery.loss_probes[epoch] =
-                self.paths.get(send_pid)?.recovery.loss_probes[epoch]
-                    .saturating_sub(1);
+            path.needs_ack_eliciting = false;
+            path.recovery.loss_probes[epoch] =
+                path.recovery.loss_probes[epoch].saturating_sub(1);
         }
 
         if frames.is_empty() {
             // When we reach this point we are not able to write more, so set
             // app_limited to false.
-            self.paths
-                .get_mut(send_pid)?
-                .recovery
-                .update_app_limited(false);
+            path.recovery.update_app_limited(false);
             return Err(Error::Done);
         }
 
@@ -3923,7 +3927,7 @@ impl Connection {
         // as Initial always requires padding.
         //
         // 2) this is a probing packet towards an unvalidated peer address.
-        if (has_initial || !self.paths.get(send_pid)?.validated()) &&
+        if (has_initial || !path.validated()) &&
             pkt_type == packet::Type::Short &&
             left >= 1
         {
@@ -3965,10 +3969,7 @@ impl Connection {
             hdr_trace.unwrap_or_default(),
             payload_len,
             pn,
-            AddrTupleFmt(
-                self.paths.get(send_pid)?.local_addr(),
-                self.paths.get(send_pid)?.peer_addr()
-            )
+            AddrTupleFmt(path.local_addr(), path.peer_addr())
         );
 
         #[cfg(feature = "qlog")]
@@ -4803,6 +4804,46 @@ impl Connection {
         // Allow for 1200 bytes (minimum QUIC packet size) during the
         // handshake.
         MIN_CLIENT_INITIAL_LEN
+    }
+
+    /// Schedule an ack-eliciting packet on the active path.
+    ///
+    /// QUIC packets might not contain ack-eliciting frames during normal
+    /// operating conditions. If the packet would already contain
+    /// ack-eliciting frames, this method does not change any behavior.
+    /// However, if the packet would not ordinarily contain ack-eliciting
+    /// frames, this method ensures that a PING frame sent.
+    ///
+    /// Calling this method multiple times before [`send()`] has no effect.
+    ///
+    /// [`send()`]: struct.Connection.html#method.send
+    pub fn send_ack_eliciting(&mut self) -> Result<()> {
+        if self.is_closed() || self.is_draining() {
+            return Ok(());
+        }
+        self.paths.get_active_mut()?.needs_ack_eliciting = true;
+        Ok(())
+    }
+
+    /// Schedule an ack-eliciting packet on the specified path.
+    ///
+    /// See [`send_ack_eliciting()`] for more detail. [`InvalidState`] is
+    /// returned if there is no record of the path.
+    ///
+    /// [`send_ack_eliciting()`]: struct.Connection.html#method.send_ack_eliciting
+    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    pub fn send_ack_eliciting_on_path(
+        &mut self, local: SocketAddr, peer: SocketAddr,
+    ) -> Result<()> {
+        if self.is_closed() || self.is_draining() {
+            return Ok(());
+        }
+        let path_id = self
+            .paths
+            .path_id_from_addrs(&(local, peer))
+            .ok_or(Error::InvalidState)?;
+        self.paths.get_mut(path_id)?.needs_ack_eliciting = true;
+        Ok(())
     }
 
     /// Reads the first received DATAGRAM.
@@ -6136,6 +6177,7 @@ impl Connection {
                 self.streams.has_stopped() ||
                 self.ids.has_new_scids() ||
                 self.ids.has_retire_dcids() ||
+                send_path.needs_ack_eliciting ||
                 send_path.probing_required())
         {
             // Only clients can send 0-RTT packets.
@@ -14827,6 +14869,57 @@ mod tests {
                 .any(|frame| matches!(frame, frame::Frame::Ping)),
             "found a PING"
         );
+    }
+
+    #[test]
+    fn send_ack_eliciting_causes_ping() {
+        // First establish a connection
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Queue a PING frame
+        pipe.server.send_ack_eliciting().unwrap();
+
+        // Make sure ping is sent
+        let mut buf = [0; 1500];
+        let (len, _) = pipe.server.send(&mut buf).unwrap();
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+        let mut iter = frames.iter();
+
+        assert_eq!(iter.next(), Some(&frame::Frame::Ping));
+    }
+
+    #[test]
+    fn send_ack_eliciting_no_ping() {
+        // First establish a connection
+        let mut pipe = testing::Pipe::default().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Queue a PING frame
+        pipe.server.send_ack_eliciting().unwrap();
+
+        // Send a stream frame, which is ACK-eliciting to make sure the ping is
+        // not sent
+        assert_eq!(pipe.server.stream_send(1, b"a", false), Ok(1));
+
+        // Make sure ping is not sent
+        let mut buf = [0; 1500];
+        let (len, _) = pipe.server.send(&mut buf).unwrap();
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+        let mut iter = frames.iter();
+
+        assert!(matches!(
+            iter.next(),
+            Some(&frame::Frame::Stream {
+                stream_id: 1,
+                data: _
+            })
+        ));
+        assert!(iter.next().is_none());
     }
 }
 
