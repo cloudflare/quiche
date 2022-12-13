@@ -94,7 +94,9 @@
 //! loop {
 //!     let (read, from) = socket.recv_from(&mut buf).unwrap();
 //!
-//!     let recv_info = quiche::RecvInfo { from, to };
+//!     let at = Some(std::time::Instant::now());
+//!
+//!     let recv_info = quiche::RecvInfo { from, to, at };
 //!
 //!     let read = match conn.recv(&mut buf[..read], recv_info) {
 //!         Ok(v) => v,
@@ -589,6 +591,8 @@ pub struct RecvInfo {
 
     /// The local address the packet was received on.
     pub to: SocketAddr,
+
+    pub at: Option<time::Instant>,
 }
 
 /// Ancillary information about outgoing packets.
@@ -1967,6 +1971,7 @@ impl Connection {
     ///     let recv_info = quiche::RecvInfo {
     ///         from,
     ///         to: local,
+    ///         at: Some(std::time::Instant::now()),
     ///     };
     ///
     ///     let read = match conn.recv(&mut buf[..read], recv_info) {
@@ -2088,7 +2093,7 @@ impl Connection {
     fn recv_single(
         &mut self, buf: &mut [u8], info: &RecvInfo, recv_pid: Option<usize>,
     ) -> Result<usize> {
-        let now = time::Instant::now();
+        let now = info.at.unwrap_or_else(time::Instant::now);
 
         if buf.is_empty() {
             return Err(Error::Done);
@@ -7820,6 +7825,7 @@ pub mod testing {
             let info = RecvInfo {
                 to: server_path.peer_addr(),
                 from: server_path.local_addr(),
+                at: None,
             };
 
             self.client.recv(buf, info)
@@ -7830,6 +7836,7 @@ pub mod testing {
             let info = RecvInfo {
                 to: client_path.peer_addr(),
                 from: client_path.local_addr(),
+                at: None,
             };
 
             self.server.recv(buf, info)
@@ -7851,6 +7858,7 @@ pub mod testing {
         let info = RecvInfo {
             to: active_path.local_addr(),
             from: active_path.peer_addr(),
+            at: None,
         };
 
         conn.recv(&mut buf[..len], info)?;
@@ -7875,6 +7883,7 @@ pub mod testing {
             let info = RecvInfo {
                 to: si.to,
                 from: si.from,
+                at: None,
             };
 
             conn.recv(&mut pkt, info)?;
