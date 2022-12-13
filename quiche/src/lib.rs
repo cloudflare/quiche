@@ -4775,6 +4775,21 @@ impl Connection {
         self.streams.readable()
     }
 
+    /// Returns an iterator over streams that have outstanding data to read.
+    ///
+    /// This is an edge-triggered variant of [`readable()`]: streams reported
+    /// by this method will be reported again only after being "re-armed".
+    ///
+    /// For example, while calling [`readable()`] multiple times in succession
+    /// will return the same list of readable streams, `readable_drain()` will
+    /// return streams only on the first call. The application will need to
+    /// read all of the pending data on the stream, and new data has to be
+    /// received before the stream is reported again.
+    #[inline]
+    pub fn readable_drain(&mut self) -> StreamIter {
+        self.streams.readable_drain()
+    }
+
     /// Returns an iterator over streams that can be written to.
     ///
     /// A "writable" stream is a stream that has enough flow control capacity to
@@ -4815,6 +4830,27 @@ impl Connection {
         }
 
         self.streams.writable()
+    }
+
+    /// Returns an iterator over streams that can be written to.
+    ///
+    /// This is an edge-triggered variant of [`writable()`]: streams reported
+    /// by this method will be reported again only after being "re-armed".
+    ///
+    /// For example, while calling [`writable()`] multiple times in succession
+    /// will return the same list of writable streams, `writable_drain()` will
+    /// return streams only on the first call. The application will need to
+    /// fill the stream's buffer and flush the data on the wire before the
+    /// stream is reported again.
+    #[inline]
+    pub fn writable_drain(&mut self) -> StreamIter {
+        // If there is not enough connection-level send capacity, none of the
+        // streams are writable, so return an empty iterator.
+        if self.tx_cap == 0 {
+            return StreamIter::default();
+        }
+
+        self.streams.writable_drain()
     }
 
     /// Returns the maximum possible size of egress UDP payloads.

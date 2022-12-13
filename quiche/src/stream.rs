@@ -549,9 +549,21 @@ impl StreamMap {
         StreamIter::from(&self.readable)
     }
 
+    /// Creates an iterator over streams that have outstanding data to read, and
+    /// clears the readable streams set.
+    pub fn readable_drain(&mut self) -> StreamIter {
+        StreamIter::drain(&mut self.readable)
+    }
+
     /// Creates an iterator over streams that can be written to.
     pub fn writable(&self) -> StreamIter {
         StreamIter::from(&self.writable)
+    }
+
+    /// Creates an iterator over streams that can be written to, and clears the
+    /// writable streams set.
+    pub fn writable_drain(&mut self) -> StreamIter {
+        StreamIter::drain(&mut self.writable)
     }
 
     /// Creates an iterator over streams that need to send MAX_STREAM_DATA.
@@ -746,6 +758,13 @@ impl StreamIter {
     fn from(streams: &StreamIdHashSet) -> Self {
         StreamIter {
             streams: streams.iter().copied().collect(),
+        }
+    }
+
+    #[inline]
+    fn drain(streams: &mut StreamIdHashSet) -> Self {
+        StreamIter {
+            streams: streams.drain().collect(),
         }
     }
 }

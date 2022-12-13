@@ -374,8 +374,14 @@ typedef struct quiche_stream_iter quiche_stream_iter;
 // Returns an iterator over streams that have outstanding data to read.
 quiche_stream_iter *quiche_conn_readable(const quiche_conn *conn);
 
+// Returns an iterator over streams that have outstanding data to read.
+quiche_stream_iter *quiche_conn_readable_drain(quiche_conn *conn);
+
 // Returns an iterator over streams that can be written to.
 quiche_stream_iter *quiche_conn_writable(const quiche_conn *conn);
+
+// Returns an iterator over streams that can be written to.
+quiche_stream_iter *quiche_conn_writable_drain(quiche_conn *conn);
 
 // Returns the maximum possible size of egress UDP payloads.
 size_t quiche_conn_max_send_udp_payload_size(const quiche_conn *conn);

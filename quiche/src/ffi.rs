@@ -858,8 +858,22 @@ pub extern fn quiche_conn_readable(conn: &Connection) -> *mut StreamIter {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_readable_drain(
+    conn: &mut Connection,
+) -> *mut StreamIter {
+    Box::into_raw(Box::new(conn.readable_drain()))
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_writable(conn: &Connection) -> *mut StreamIter {
     Box::into_raw(Box::new(conn.writable()))
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_writable_drain(
+    conn: &mut Connection,
+) -> *mut StreamIter {
+    Box::into_raw(Box::new(conn.writable_drain()))
 }
 
 #[no_mangle]
