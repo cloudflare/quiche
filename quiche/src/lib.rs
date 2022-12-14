@@ -5127,18 +5127,19 @@ impl Connection {
             .is_some()
     }
 
-    /// Returns the amount of time until the next timeout event.
+    /// Returns when the next timeout event will occur.
     ///
-    /// Once the given duration has elapsed, the [`on_timeout()`] method should
-    /// be called. A timeout of `None` means that the timer should be disarmed.
+    /// Once the timeout Instant has been reached, the [`on_timeout()`] method
+    /// should be called. A timeout of `None` means that the timer should be
+    /// disarmed.
     ///
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
-    pub fn timeout(&self) -> Option<time::Duration> {
+    pub fn timeout_instant(&self) -> Option<time::Instant> {
         if self.is_closed() {
             return None;
         }
 
-        let timeout = if self.is_draining() {
+        if self.is_draining() {
             // Draining timer takes precedence over all other timers. If it is
             // set it means the connection is closing so there's no point in
             // processing the other timers.
@@ -5156,19 +5157,25 @@ impl Connection {
             let timers = [self.idle_timer, path_timer];
 
             timers.iter().filter_map(|&x| x).min()
-        };
+        }
+    }
 
-        if let Some(timeout) = timeout {
+    /// Returns the amount of time until the next timeout event.
+    ///
+    /// Once the given duration has elapsed, the [`on_timeout()`] method should
+    /// be called. A timeout of `None` means that the timer should be disarmed.
+    ///
+    /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
+    pub fn timeout(&self) -> Option<time::Duration> {
+        self.timeout_instant().map(|timeout| {
             let now = time::Instant::now();
 
             if timeout <= now {
-                return Some(time::Duration::ZERO);
+                time::Duration::ZERO
+            } else {
+                timeout.duration_since(now)
             }
-
-            return Some(timeout.duration_since(now));
-        }
-
-        None
+        })
     }
 
     /// Processes a timeout event.
