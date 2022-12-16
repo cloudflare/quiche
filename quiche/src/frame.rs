@@ -426,7 +426,7 @@ impl Frame {
             },
 
             Frame::Crypto { data } => {
-                encode_crypto_header(data.off() as u64, data.len() as u64, b)?;
+                encode_crypto_header(data.off(), data.len() as u64, b)?;
 
                 b.put_bytes(data)?;
             },
@@ -443,7 +443,7 @@ impl Frame {
             Frame::Stream { stream_id, data } => {
                 encode_stream_header(
                     *stream_id,
-                    data.off() as u64,
+                    data.off(),
                     data.len() as u64,
                     data.fin(),
                     b,
@@ -639,7 +639,7 @@ impl Frame {
 
             Frame::Crypto { data } => {
                 1 + // frame type
-                octets::varint_len(data.off() as u64) + // offset
+                octets::varint_len(data.off()) + // offset
                 2 + // length, always encode as 2-byte varint
                 data.len() // data
             },
@@ -660,7 +660,7 @@ impl Frame {
             Frame::Stream { stream_id, data } => {
                 1 + // frame type
                 octets::varint_len(*stream_id) + // stream_id
-                octets::varint_len(data.off() as u64) + // offset
+                octets::varint_len(data.off()) + // offset
                 2 + // length, always encode as 2-byte varint
                 data.len() // data
             },
@@ -883,7 +883,7 @@ impl Frame {
 
             Frame::Stream { stream_id, data } => QuicFrame::Stream {
                 stream_id: *stream_id,
-                offset: data.off() as u64,
+                offset: data.off(),
                 length: data.len() as u64,
                 fin: data.fin().then(|| true),
                 raw: None,

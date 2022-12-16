@@ -219,27 +219,27 @@ impl Frame {
 
                 if let Some(val) = max_field_section_size {
                     b.put_varint(SETTINGS_MAX_FIELD_SECTION_SIZE)?;
-                    b.put_varint(*val as u64)?;
+                    b.put_varint(*val)?;
                 }
 
                 if let Some(val) = qpack_max_table_capacity {
                     b.put_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY)?;
-                    b.put_varint(*val as u64)?;
+                    b.put_varint(*val)?;
                 }
 
                 if let Some(val) = qpack_blocked_streams {
                     b.put_varint(SETTINGS_QPACK_BLOCKED_STREAMS)?;
-                    b.put_varint(*val as u64)?;
+                    b.put_varint(*val)?;
                 }
 
                 if let Some(val) = connect_protocol_enabled {
                     b.put_varint(SETTINGS_ENABLE_CONNECT_PROTOCOL)?;
-                    b.put_varint(*val as u64)?;
+                    b.put_varint(*val)?;
                 }
 
                 if let Some(val) = h3_datagram {
                     b.put_varint(SETTINGS_H3_DATAGRAM)?;
-                    b.put_varint(*val as u64)?;
+                    b.put_varint(*val)?;
                 }
 
                 if let Some(val) = grease {
@@ -284,7 +284,7 @@ impl Frame {
                 b.put_varint(PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID)?;
                 b.put_varint(len as u64)?;
 
-                b.put_varint(*prioritized_element_id as u64)?;
+                b.put_varint(*prioritized_element_id)?;
                 b.put_bytes(priority_field_value)?;
             },
 
@@ -298,7 +298,7 @@ impl Frame {
                 b.put_varint(PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID)?;
                 b.put_varint(len as u64)?;
 
-                b.put_varint(*prioritized_element_id as u64)?;
+                b.put_varint(*prioritized_element_id)?;
                 b.put_bytes(priority_field_value)?;
             },
 
