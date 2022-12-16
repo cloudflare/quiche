@@ -1354,7 +1354,7 @@ impl SendBuf {
             // Split the buffer into 2 if the retransmit range ends before the
             // buffer's final offset.
             let new_buf = if buf.off < max_off && max_off < buf.max_off() {
-                Some(buf.split_off((max_off - buf.off as u64) as usize))
+                Some(buf.split_off((max_off - buf.off) as usize))
             } else {
                 None
             };

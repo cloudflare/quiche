@@ -47,7 +47,7 @@ fn main() {
         return;
     }
 
-    let mut file = File::open(&args.next().unwrap()).unwrap();
+    let mut file = File::open(args.next().unwrap()).unwrap();
 
     let mut dec = qpack::Decoder::new();
 
@@ -61,7 +61,7 @@ fn main() {
         let _ = file.read(&mut len).unwrap();
         let len = u32::from_be_bytes(len) as usize;
 
-        let mut data = vec![0; len as usize];
+        let mut data = vec![0; len];
 
         let data_len = file.read(&mut data).unwrap();
 

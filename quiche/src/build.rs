@@ -177,7 +177,7 @@ fn write_pkg_config() {
     let target_dir = target_dir_path();
 
     let out_path = target_dir.as_path().join("quiche.pc");
-    let mut out_file = std::fs::File::create(&out_path).unwrap();
+    let mut out_file = std::fs::File::create(out_path).unwrap();
 
     let include_dir = format!("{}/include", manifest_dir);
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();

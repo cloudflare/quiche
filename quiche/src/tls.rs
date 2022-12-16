@@ -666,7 +666,7 @@ impl Handshake {
                 }
 
                 let out = CRYPTO_BUFFER_data(buffer);
-                let slice = slice::from_raw_parts(out, out_len as usize);
+                let slice = slice::from_raw_parts(out, out_len);
 
                 cert_chain.push(slice);
             }
@@ -695,7 +695,7 @@ impl Handshake {
             }
 
             let out = CRYPTO_BUFFER_data(buffer);
-            slice::from_raw_parts(out, out_len as usize)
+            slice::from_raw_parts(out, out_len)
         };
 
         Some(peer_cert)
