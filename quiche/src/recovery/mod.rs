@@ -378,6 +378,7 @@ impl Recovery {
 
         self.bytes_sent += sent_bytes;
         trace!("{} {:?}", trace_id, self);
+        println!("{} {:?}", trace_id, self);
     }
 
     fn on_packet_sent_cc(&mut self, sent_bytes: usize, now: Instant) {
@@ -526,6 +527,7 @@ impl Recovery {
                 });
 
                 trace!("{} packet newly acked {}", trace_id, unacked.pkt_num);
+                println!("{} packet newly acked {}", trace_id, unacked.pkt_num);
             }
         }
 
@@ -586,6 +588,7 @@ impl Recovery {
             self.set_loss_detection_timer(handshake_status, now);
 
             trace!("{} {:?}", trace_id, self);
+            println!("{} {:?}", trace_id, self);
             return (lost_packets, lost_bytes);
         }
 
@@ -634,6 +637,7 @@ impl Recovery {
         self.set_loss_detection_timer(handshake_status, now);
 
         trace!("{} {:?}", trace_id, self);
+        println!("{} {:?}", trace_id, self);
 
         (0, 0)
     }
@@ -897,7 +901,12 @@ impl Recovery {
                         unacked.pkt_num,
                         epoch
                     );
-                }
+                    println!(
+                        "{} packet {} lost on epoch {}",
+                        trace_id,
+                        unacked.pkt_num,
+                        epoch
+                    );}
 
                 lost_packets += 1;
                 self.lost_count += 1;
