@@ -127,8 +127,8 @@ pub struct Octets<'a> {
 impl<'a> Octets<'a> {
     /// Creates an `Octets` from the given slice, without copying.
     ///
-    /// Since there's no copy, the input slice needs to be mutable to allow
-    /// modifications.
+    /// Since the `Octets` is immutable, the input slice needs to be
+    /// immutable.
     pub fn with_slice(buf: &'a [u8]) -> Self {
         Octets { buf, off: 0 }
     }
