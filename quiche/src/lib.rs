@@ -2030,7 +2030,17 @@ impl Connection {
             ) {
                 Ok(v) => v,
 
-                Err(Error::Done) => left,
+                Err(Error::Done) => {
+                    // If the packet can't be processed or decrypted, check if it's a stateless
+                    // reset.
+                    if self.is_stateless_reset(&buf[len - left..len]) {
+                        trace!("{} packet is a stateless reset", self.trace_id);
+                        let now = time::Instant::now();
+                        let path = self.paths.get_active()?;
+                        self.draining_timer = Some(now + (path.recovery.pto() * 3));
+                    }
+                    left
+                },
 
                 Err(e) => {
                     // In case of error processing the incoming packet, close
@@ -2069,6 +2079,27 @@ impl Connection {
             }
         }
         Ok(())
+    }
+
+    /// Returns true if a QUIC packet is a stateless reset.
+    fn is_stateless_reset(&self, buf: &[u8]) -> bool {
+        // If the packet is too small, then we just throw it away
+        let buf_len = buf.len();
+        if buf_len < 21 {
+            return false;
+        }
+
+        match self.peer_transport_params.stateless_reset_token {
+            Some(token) => {
+                let token_len = 16;
+                if let Ok(token_from_buf) = buf[buf_len - token_len..buf_len].try_into() {
+                    return token == u128::from_be_bytes(token_from_buf)
+                }
+                // Failed to convert the slice to an array.
+                false
+            },
+            None => false,
+        }
     }
 
     /// Processes a single QUIC packet received from the peer.
