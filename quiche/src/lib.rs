@@ -3831,20 +3831,18 @@ impl Connection {
             self.paths.get(send_pid)?.active() &&
             !dgram_emitted
         {
-            while let Some(stream_id) = self.streams.pop_flushable() {
+            while let Some(stream_id) = self.streams.peek_flushable() {
                 let stream = match self.streams.get_mut(stream_id) {
-                    Some(v) => v,
-
-                    None => continue,
+                    // Avoid sending frames for streams that were already stopped.
+                    //
+                    // This might happen if stream data was buffered but not yet
+                    // flushed on the wire when a STOP_SENDING frame is received.
+                    Some(v) if !v.send.is_stopped() => v,
+                    _ => {
+                        self.streams.remove_flushable();
+                        continue;
+                    },
                 };
-
-                // Avoid sending frames for streams that were already stopped.
-                //
-                // This might happen if stream data was buffered but not yet
-                // flushed on the wire when a STOP_SENDING frame is received.
-                if stream.send.is_stopped() {
-                    continue;
-                }
 
                 let stream_off = stream.send.off_front();
 
@@ -3869,8 +3867,10 @@ impl Connection {
 
                 let max_len = match left.checked_sub(hdr_len) {
                     Some(v) => v,
-
-                    None => continue,
+                    None => {
+                        self.streams.remove_flushable();
+                        continue;
+                    },
                 };
 
                 let (mut stream_hdr, mut stream_payload) =
@@ -3912,19 +3912,9 @@ impl Connection {
                     has_data = true;
                 }
 
-                // If the stream is still flushable, push it to the back of the
-                // queue again.
-                if stream.is_flushable() {
-                    let urgency = stream.urgency;
-                    let incremental = stream.incremental;
-                    self.streams.push_flushable(stream_id, urgency, incremental);
-                }
-
-                // When fuzzing, try to coalesce multiple STREAM frames in the
-                // same packet, so it's easier to generate fuzz corpora.
-                if cfg!(feature = "fuzzing") && left > frame::MAX_STREAM_OVERHEAD
-                {
-                    continue;
+                // If the stream is no longer flushable, remove it from the queue
+                if !stream.is_flushable() {
+                    self.streams.remove_flushable();
                 }
 
                 break;
