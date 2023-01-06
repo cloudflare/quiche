@@ -122,6 +122,15 @@ impl RangeSet {
         self.fixup();
     }
 
+    #[inline]
+    pub fn remove(&mut self, item: Range<u64>) {
+        match self {
+            RangeSet::Inline(set) => set.remove(item),
+            RangeSet::BTree(set) => set.remove(item),
+        }
+        self.fixup();
+    }
+
     /// Iterate over the stored ranges in incrementing order
     pub fn iter(
         &self,
@@ -180,6 +189,51 @@ impl RangeSet {
 }
 
 impl InlineRangeSet {
+    fn remove(&mut self, item: Range<u64>) {
+        let start = item.start;
+        let end = item.end;
+        let mut pos = 0;
+
+        loop {
+            match self.inner.get_mut(pos) {
+                Some((s, e)) => {
+                    if start > *e {
+                        // Skip while start is greater than end
+                        pos += 1;
+                        continue;
+                    }
+                    if end < *s {
+                        // Removed range is entirely before this range. Nothing
+                        // more to do.
+                        return;
+                    }
+                    if start <= *s && end >= *e {
+                        // Range should be removed entirely
+                        self.inner.remove(pos);
+                        continue;
+                    }
+                    if start <= *s {
+                        *s = end;
+                        return;
+                    }
+                    if start >= *s && end < *e {
+                        // Should punch a hole in this range
+                        let new_range = (end, *e);
+                        *e = start;
+                        self.inner.insert(pos + 1, new_range);
+                        return;
+                    }
+                    if end >= *e {
+                        *e = start;
+                        pos += 1;
+                        continue;
+                    }
+                },
+                None => return,
+            }
+        }
+    }
+
     fn insert(&mut self, item: Range<u64>) {
         let start = item.start;
         let mut end = item.end;
@@ -258,6 +312,60 @@ impl InlineRangeSet {
 }
 
 impl BTreeRangeSet {
+    fn remove(&mut self, item: Range<u64>) {
+        let mut start = item.start;
+        let end = item.end;
+
+        'outer: loop {
+            let iter = self
+                .inner
+                .range(..start)
+                .next_back()
+                .into_iter()
+                .chain(self.inner.range(start..end));
+            for (&s, &e) in iter {
+                if start > e {
+                    // Skip while start is greater than end
+                    continue;
+                }
+                if end < s {
+                    // Removed range is entirely before this range. Nothing
+                    // more to do.
+                    return;
+                }
+                if start <= s && end >= e {
+                    // Range should be removed entirely
+                    self.inner.remove(&s);
+                    start = e + 1;
+                    if end == e {
+                        return;
+                    }
+                    continue 'outer;
+                }
+                if start <= s {
+                    self.inner.remove(&s);
+                    self.inner.insert(end, e);
+                    return;
+                }
+                if start >= s && end < e {
+                    // Should punch a hole in this range
+                    self.inner.insert(s, start);
+                    self.inner.insert(end, e);
+                    return;
+                }
+                if end >= e {
+                    self.inner.insert(s, start);
+                    start = e + 1;
+                    if end == e {
+                        return;
+                    }
+                    continue 'outer;
+                }
+            }
+            break;
+        }
+    }
+
     // TODO: use RangeInclusive
     fn insert(&mut self, item: Range<u64>) {
         let mut start = item.start;
@@ -730,5 +838,95 @@ mod tests {
         r.insert(4..17);
         assert_eq!(r.first(), Some(4));
         assert_eq!(r.last(), Some(19));
+    }
+
+    macro_rules! test_range_remove {
+        ($r: expr, $collect: tt) => {
+            let mut r = $r;
+
+            r.insert(6..100);
+            assert_eq!($collect(&r), [6..100]);
+
+            r.remove(10..20);
+            assert_eq!($collect(&r), [6..10, 20..100]);
+
+            r.remove(3..7);
+            assert_eq!($collect(&r), [7..10, 20..100]);
+
+            r.remove(98..100);
+            assert_eq!($collect(&r), [7..10, 20..98]);
+
+            r.remove(95..500);
+            assert_eq!($collect(&r), [7..10, 20..95]);
+
+            r.remove(0..30);
+            assert_eq!($collect(&r), [30..95]);
+
+            r.remove(35..40);
+            assert_eq!($collect(&r), [30..35, 40..95]);
+
+            r.remove(45..50);
+            assert_eq!($collect(&r), [30..35, 40..45, 50..95]);
+
+            r.remove(42..45);
+            assert_eq!($collect(&r), [30..35, 40..42, 50..95]);
+
+            r.remove(40..41);
+            assert_eq!($collect(&r), [30..35, 41..42, 50..95]);
+
+            r.remove(35..41);
+            assert_eq!($collect(&r), [30..35, 41..42, 50..95]);
+
+            r.remove(35..42);
+            assert_eq!($collect(&r), [30..35, 50..95]);
+
+            r.remove(30..51);
+            assert_eq!($collect(&r), [51..95]);
+
+            r.remove(55..58);
+            assert_eq!($collect(&r), [51..55, 58..95]);
+
+            r.remove(60..62);
+            assert_eq!($collect(&r), [51..55, 58..60, 62..95]);
+
+            r.remove(52..95);
+            assert_eq!($collect(&r), [51..52]);
+
+            r.remove(51..52);
+            assert_eq!($collect(&r), []);
+        };
+    }
+    #[test]
+    fn remove() {
+        test_range_remove!(
+            RangeSet::default(),
+            (|r: &RangeSet| { r.iter().collect::<Vec<_>>() })
+        );
+    }
+
+    #[test]
+    fn remove_inline() {
+        test_range_remove!(
+            InlineRangeSet {
+                inner: Default::default(),
+                capacity: usize::MAX,
+            },
+            (|r: &InlineRangeSet| {
+                r.inner.iter().map(|(s, e)| *s..*e).collect::<Vec<_>>()
+            })
+        );
+    }
+
+    #[test]
+    fn remove_btree() {
+        test_range_remove!(
+            BTreeRangeSet {
+                inner: Default::default(),
+                capacity: usize::MAX,
+            },
+            (|r: &BTreeRangeSet| {
+                r.inner.iter().map(|(k, v)| *k..*v).collect::<Vec<_>>()
+            })
+        );
     }
 }
