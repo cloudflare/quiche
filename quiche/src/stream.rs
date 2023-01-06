@@ -361,41 +361,42 @@ impl StreamMap {
         };
     }
 
-    /// Removes and returns the first stream ID from the flushable streams
-    /// queue with the specified urgency.
+    /// Returns the first stream ID from the flushable streams
+    /// queue with the highest urgency.
     ///
-    /// Note that if the stream is still flushable after sending some of its
-    /// outstanding data, it needs to be added back to the queue.
-    pub fn pop_flushable(&mut self) -> Option<u64> {
-        // Remove the first element from the queue corresponding to the lowest
-        // urgency that has elements.
-        let (node, clear) =
-            if let Some((urgency, queues)) = self.flushable.iter_mut().next() {
-                let node = if !queues.0.is_empty() {
-                    queues.0.pop().map(|x| x.0)
-                } else {
-                    queues.1.pop_front()
-                };
-
-                let clear = if queues.0.is_empty() && queues.1.is_empty() {
-                    Some(*urgency)
+    /// Note that if the stream is no longer flushable after sending some of its
+    /// outstanding data, it needs to be removed from the queue.
+    pub fn peek_flushable(&mut self) -> Option<u64> {
+        self.flushable.iter_mut().next().and_then(|(_, queues)| {
+            queues.0.peek().map(|x| x.0).or_else(|| {
+                // When peeking incremental streams, make sure to move the current
+                // stream to the end of the queue so they are pocesses in a round
+                // robin fashion
+                if let Some(current_incremental) = queues.1.pop_front() {
+                    queues.1.push_back(current_incremental);
+                    Some(current_incremental)
                 } else {
                     None
-                };
+                }
+            })
+        })
+    }
 
-                (node, clear)
-            } else {
-                (None, None)
-            };
+    /// Remove the last peeked stream
+    pub fn remove_flushable(&mut self) {
+        let mut top_urgency = self
+            .flushable
+            .first_entry()
+            .expect("Remove previously peeked stream");
 
+        let queues = top_urgency.get_mut();
+        queues.0.pop().map(|x| x.0).or_else(|| queues.1.pop_back());
         // Remove the queue from the list of queues if it is now empty, so that
         // the next time `pop_flushable()` is called the next queue with elements
         // is used.
-        if let Some(urgency) = &clear {
-            self.flushable.remove(urgency);
+        if queues.0.is_empty() && queues.1.is_empty() {
+            top_urgency.remove();
         }
-
-        node
     }
 
     /// Adds or removes the stream ID to/from the readable streams set.
