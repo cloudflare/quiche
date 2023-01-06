@@ -376,6 +376,8 @@ use std::str::FromStr;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
+use smallvec::SmallVec;
+
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
 
@@ -3288,7 +3290,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let mut frames: Vec<frame::Frame> = Vec::new();
+        let mut frames: SmallVec<[frame::Frame; 1]> = SmallVec::new();
 
         let mut ack_eliciting = false;
         let mut in_flight = false;
@@ -4010,7 +4012,9 @@ impl Connection {
         );
 
         #[cfg(feature = "qlog")]
-        let mut qlog_frames = Vec::with_capacity(frames.len());
+        let mut qlog_frames: SmallVec<
+            [qlog::events::quic::QuicFrame; 1],
+        > = SmallVec::with_capacity(frames.len());
 
         for frame in &mut frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);

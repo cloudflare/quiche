@@ -204,6 +204,8 @@ mod tests {
 
     use crate::recovery::*;
 
+    use smallvec::smallvec;
+
     #[test]
     fn rate_check() {
         let config = Config::new(0xbabababa).unwrap();
@@ -216,7 +218,7 @@ mod tests {
         for pn in 0..2 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -280,7 +282,7 @@ mod tests {
         for pn in 0..10 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -319,7 +321,7 @@ mod tests {
         for pn in 0..5 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
