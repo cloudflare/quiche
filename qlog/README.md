@@ -89,7 +89,7 @@ let raw = qlog::events::RawInfo {
 let event_data =
      qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
          header: pkt_hdr,
-         frames: Some(frames),
+         frames: Some(frames.into()),
          is_coalesced: None,
          retry_token: None,
          stateless_reset_token: None,

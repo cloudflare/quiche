@@ -438,6 +438,8 @@ mod tests {
     use super::*;
     use crate::recovery::hystart;
 
+    use smallvec::smallvec;
+
     #[test]
     fn cubic_init() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -471,7 +473,7 @@ mod tests {
 
         let p = recovery::Sent {
             pkt_num: 0,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -519,7 +521,7 @@ mod tests {
 
         let p = recovery::Sent {
             pkt_num: 0,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -717,7 +719,7 @@ mod tests {
 
         let p = recovery::Sent {
             pkt_num: 0,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -865,7 +867,7 @@ mod tests {
 
         let p = recovery::Sent {
             pkt_num: 0,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
