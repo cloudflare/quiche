@@ -786,7 +786,7 @@ void quiche_h3_config_enable_extended_connect(quiche_h3_config *config, bool ena
 // Frees the HTTP/3 config object.
 void quiche_h3_config_free(quiche_h3_config *config);
 
-// A QUIC connection.
+// An HTTP/3 connection.
 typedef struct quiche_h3_conn quiche_h3_conn;
 
 // Creates a new server-side connection.
