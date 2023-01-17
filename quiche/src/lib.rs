@@ -2031,14 +2031,14 @@ impl Connection {
                 Ok(v) => v,
 
                 Err(Error::Done) => {
-                    // If the packet can't be processed or decrypted, check if it's a stateless
-                    // reset.
+                    // If the packet can't be processed or decrypted, check if
+                    // it's a stateless reset.
                     if self.is_stateless_reset(&buf[len - left..len]) {
                         trace!("{} packet is a stateless reset", self.trace_id);
-                        let now = time::Instant::now();
-                        let path = self.paths.get_active()?;
-                        self.draining_timer = Some(now + (path.recovery.pto() * 3));
+
+                        self.closed = true;
                     }
+
                     left
                 },
 
@@ -2083,21 +2083,24 @@ impl Connection {
 
     /// Returns true if a QUIC packet is a stateless reset.
     fn is_stateless_reset(&self, buf: &[u8]) -> bool {
-        // If the packet is too small, then we just throw it away
+        // If the packet is too small, then we just throw it away.
         let buf_len = buf.len();
         if buf_len < 21 {
             return false;
         }
 
+        // TODO: we should iterate over all active destination connection IDs
+        // and check against their reset token.
         match self.peer_transport_params.stateless_reset_token {
             Some(token) => {
                 let token_len = 16;
-                if let Ok(token_from_buf) = buf[buf_len - token_len..buf_len].try_into() {
-                    return token == u128::from_be_bytes(token_from_buf)
-                }
-                // Failed to convert the slice to an array.
-                false
+                ring::constant_time::verify_slices_are_equal(
+                    &token.to_be_bytes(),
+                    &buf[buf_len - token_len..buf_len],
+                )
+                .is_ok()
             },
+
             None => false,
         }
     }
