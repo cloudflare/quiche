@@ -4409,7 +4409,7 @@ impl Connection {
 
         let empty_fin = buf.is_empty() && fin;
 
-        if sent < buf.len() {
+        if sent < buf.len() && !writable {
             let max_off = stream.send.max_off();
 
             if stream.send.blocked_at() != Some(max_off) {
