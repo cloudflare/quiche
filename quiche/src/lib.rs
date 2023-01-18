@@ -11851,7 +11851,10 @@ mod tests {
         let frames =
             testing::decode_pkt(&mut pipe.server, &mut buf, sent).unwrap();
         assert_eq!(1, frames.len());
-        assert!(matches!(frames[0], frame::Frame::ACK { .. }), "the packet sent by the client must be an ACK only packet");
+        assert!(
+            matches!(frames[0], frame::Frame::ACK { .. }),
+            "the packet sent by the client must be an ACK only packet"
+        );
     }
 
     #[test]
