@@ -1883,7 +1883,15 @@ impl Connection {
                 time_offset: Some(0.0),
                 original_uris: None,
             }),
-            None,
+            Some(qlog::CommonFields {
+                group_id: None,
+                protocol_type: None,
+                reference_time: Some(time::SystemTime::now()
+                .duration_since(time::UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs_f64()),
+                time_format: None,
+            }),
         );
 
         let mut streamer = qlog::streamer::QlogStreamer::new(
