@@ -605,7 +605,7 @@ pub struct CommonFields {
     pub group_id: Option<String>,
     pub protocol_type: Option<Vec<String>>,
 
-    pub reference_time: Option<f32>,
+    pub reference_time: Option<f64>,
     pub time_format: Option<String>,
     // TODO: additionalUserSpecifiedProperty
 }
