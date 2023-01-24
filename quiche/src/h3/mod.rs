@@ -4871,6 +4871,146 @@ mod tests {
     }
 
     #[test]
+    /// Ensure STREAM_DATA_BLOCKED is not emitted multiple times with the same
+    /// offset when trying to send large bodies.
+    fn send_body_truncation_stream_blocked() {
+        use crate::testing::decode_pkt;
+
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(10000); // large connection-level flow control
+        config.set_initial_max_stream_data_bidi_local(80);
+        config.set_initial_max_stream_data_bidi_remote(80);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let mut h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(true).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: false,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        let _ = s.send_response(stream, false).unwrap();
+
+        assert_eq!(s.pipe.server.streams.blocked().len(), 0);
+
+        // The body must be larger than the stream window would allow
+        let d = [42; 500];
+        let mut off = 0;
+
+        let sent = s
+            .server
+            .send_body(&mut s.pipe.server, stream, &d, true)
+            .unwrap();
+        assert_eq!(sent, 25);
+        off += sent;
+
+        // send_body wrote as much as it could (sent < size of buff). It
+        // right-sized the buffer to exactly match the flow control, which
+        // means it isn't technically blocked. Only *another* write at
+        // this stage will cause a stream data blocked condition.
+        assert_eq!(s.pipe.server.streams.blocked().len(), 0);
+        assert_eq!(
+            s.server
+                .send_body(&mut s.pipe.server, stream, &d[off..], true),
+            Err(Error::Done)
+        );
+        assert_eq!(s.pipe.server.streams.blocked().len(), 1);
+
+        // Now read raw frames to see what the QUIC layer did
+        let mut buf = [0; 65535];
+        let (len, _) = s.pipe.server.send(&mut buf).unwrap();
+
+        let frames = decode_pkt(&mut s.pipe.client, &mut buf, len).unwrap();
+
+        let mut iter = frames.iter();
+
+        assert_eq!(
+            iter.next(),
+            Some(&crate::frame::Frame::StreamDataBlocked {
+                stream_id: 0,
+                limit: 80,
+            })
+        );
+
+        // At the server, after sending the STREAM_DATA_BLOCKED frame, we clear
+        // the mark.
+        assert_eq!(s.pipe.server.streams.blocked().len(), 0);
+
+        // Don't read any data from the client, so stream flow control is never
+        // given back in the form of changing the stream's max offset.
+        // Subsequent body send operations will still fail but no more
+        // STREAM_DATA_BLOCKED frames should be submitted since the limit didn't
+        // change. No frames means no packet to send.
+        assert_eq!(
+            s.server
+                .send_body(&mut s.pipe.server, stream, &d[off..], true),
+            Err(Error::Done)
+        );
+        assert_eq!(s.pipe.server.streams.blocked().len(), 0);
+        assert_eq!(s.pipe.server.send(&mut buf), Err(crate::Error::Done));
+
+        // Now update the client's max offset manually.
+        let frames = [crate::frame::Frame::MaxStreamData {
+            stream_id: 0,
+            max: 100,
+        }];
+
+        let pkt_type = crate::packet::Type::Short;
+        assert_eq!(
+            s.pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
+            Ok(39),
+        );
+
+        let sent = s
+            .server
+            .send_body(&mut s.pipe.server, stream, &d[off..], true)
+            .unwrap();
+        assert_eq!(sent, 18);
+
+        // Same thing here, we need 2 writes to force the blocked state.
+        assert_eq!(s.pipe.server.streams.blocked().len(), 0);
+        assert_eq!(
+            s.server
+                .send_body(&mut s.pipe.server, stream, &d[off..], true),
+            Err(Error::Done)
+        );
+        assert_eq!(s.pipe.server.streams.blocked().len(), 1);
+
+        let (len, _) = s.pipe.server.send(&mut buf).unwrap();
+
+        let frames = decode_pkt(&mut s.pipe.client, &mut buf, len).unwrap();
+
+        let mut iter = frames.iter();
+
+        assert_eq!(
+            iter.next(),
+            Some(&crate::frame::Frame::StreamDataBlocked {
+                stream_id: 0,
+                limit: 100,
+            })
+        );
+    }
+
+    #[test]
     /// Test handling of 0-length DATA writes with and without fin.
     fn zero_length_data() {
         let mut s = Session::new().unwrap();
