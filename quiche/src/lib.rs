@@ -4630,7 +4630,7 @@ impl Connection {
             return Ok(true);
         }
 
-        let stream = match self.streams.get(stream_id) {
+        let stream = match self.streams.get_mut(stream_id) {
             Some(v) => v,
 
             None => return Err(Error::InvalidStreamState(stream_id)),
@@ -4642,7 +4642,10 @@ impl Connection {
 
         if stream.send.cap()? < len {
             let max_off = stream.send.max_off();
-            self.streams.mark_blocked(stream_id, true, max_off);
+            if stream.send.blocked_at() != Some(max_off) {
+                stream.send.update_blocked_at(Some(max_off));
+                self.streams.mark_blocked(stream_id, true, max_off);
+            }
         }
 
         Ok(false)
