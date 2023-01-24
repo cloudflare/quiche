@@ -775,7 +775,7 @@ impl ExactSizeIterator for StreamIter {
 pub struct RecvBuf {
     /// Chunks of data received from the peer that have not yet been read by
     /// the application, ordered by offset.
-    data: BinaryHeap<RangeBuf>,
+    data: BTreeMap<u64, RangeBuf>,
 
     /// The lowest data offset that has yet to be read by the application.
     off: u64,
@@ -890,22 +890,28 @@ impl RecvBuf {
             // flag set, which is the only kind of empty buffer that should
             // reach this point).
             if buf.off() < self.max_off() || buf.is_empty() {
-                for b in &self.data {
+                for (_, b) in self.data.range(buf.off()..) {
+                    let off = buf.off();
+
+                    // We are past the current buffer.
+                    if b.off() > buf.max_off() {
+                        break;
+                    }
+
                     // New buffer is fully contained in existing buffer.
-                    if buf.off() >= b.off() && buf.max_off() <= b.max_off() {
+                    if off >= b.off() && buf.max_off() <= b.max_off() {
                         continue 'tmp;
                     }
 
                     // New buffer's start overlaps existing buffer.
-                    if buf.off() >= b.off() && buf.off() < b.max_off() {
-                        buf = buf.split_off((b.max_off() - buf.off()) as usize);
+                    if off >= b.off() && off < b.max_off() {
+                        buf = buf.split_off((b.max_off() - off) as usize);
                     }
 
                     // New buffer's end overlaps existing buffer.
-                    if buf.off() < b.off() && buf.max_off() > b.off() {
-                        tmp_bufs.push_back(
-                            buf.split_off((b.off() - buf.off()) as usize),
-                        );
+                    if off < b.off() && buf.max_off() > b.off() {
+                        tmp_bufs
+                            .push_back(buf.split_off((b.off() - off) as usize));
                     }
                 }
             }
@@ -913,7 +919,7 @@ impl RecvBuf {
             self.len = cmp::max(self.len, buf.max_off());
 
             if !self.drain {
-                self.data.push(buf);
+                self.data.insert(buf.max_off(), buf);
             }
         }
 
@@ -943,11 +949,12 @@ impl RecvBuf {
         }
 
         while cap > 0 && self.ready() {
-            let mut buf = match self.data.peek_mut() {
-                Some(v) => v,
-
+            let mut entry = match self.data.first_entry() {
+                Some(entry) => entry,
                 None => break,
             };
+
+            let buf = entry.get_mut();
 
             let buf_len = cmp::min(buf.len(), cap);
 
@@ -965,7 +972,7 @@ impl RecvBuf {
                 break;
             }
 
-            std::collections::binary_heap::PeekMut::pop(buf);
+            entry.remove();
         }
 
         // Update consumed bytes for flow control.
@@ -1080,9 +1087,8 @@ impl RecvBuf {
 
     /// Returns true if the stream has data to be read.
     fn ready(&self) -> bool {
-        let buf = match self.data.peek() {
+        let (_, buf) = match self.data.first_key_value() {
             Some(v) => v,
-
             None => return false,
         };
 
