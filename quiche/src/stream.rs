@@ -29,7 +29,6 @@ use std::cmp;
 use std::sync::Arc;
 
 use std::collections::hash_map;
-
 use std::collections::BTreeMap;
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
@@ -37,6 +36,8 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use std::time;
+
+use smallvec::SmallVec;
 
 use crate::Error;
 use crate::Result;
@@ -737,7 +738,7 @@ pub fn is_bidi(stream_id: u64) -> bool {
 /// An iterator over QUIC streams.
 #[derive(Default)]
 pub struct StreamIter {
-    streams: VecDeque<u64>,
+    streams: SmallVec<[u64; 8]>,
 }
 
 impl StreamIter {
@@ -754,7 +755,7 @@ impl Iterator for StreamIter {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.streams.pop_front()
+        self.streams.pop()
     }
 }
 
