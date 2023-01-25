@@ -711,6 +711,9 @@ pub enum Event {
 
     /// GOAWAY was received.
     GoAway,
+
+    /// Unknown frame type, skip
+    Unknown,
 }
 
 /// Extensible Priorities parameters.
@@ -2801,7 +2804,7 @@ impl Connection {
                 // TODO: we only implement this if we implement server push
             },
 
-            frame::Frame::Unknown { .. } => (),
+            frame::Frame::Unknown { .. } => return Ok((0, Event::Unknown)),
         }
 
         Err(Error::Done)

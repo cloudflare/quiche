@@ -1501,6 +1501,8 @@ impl HttpConn for Http3Conn {
                     );
                 },
 
+                Ok((_unkn_id, quiche::h3::Event::Unknown)) => {},
+
                 Err(quiche::h3::Error::Done) => {
                     break;
                 },
@@ -1716,6 +1718,8 @@ impl HttpConn for Http3Conn {
                     self.h3_conn
                         .send_goaway(conn, self.largest_processed_request)?;
                 },
+
+                Ok((_unkn_id, quiche::h3::Event::Unknown)) => {},
 
                 Err(quiche::h3::Error::Done) => {
                     break;
