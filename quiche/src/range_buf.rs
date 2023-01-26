@@ -25,6 +25,9 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::cmp;
+use std::fmt::Debug;
+use std::marker::PhantomData;
+use std::ops::Deref;
 use std::sync::Arc;
 
 /// Buffer holding data at a specific offset.
@@ -41,14 +44,17 @@ use std::sync::Arc;
 ///
 /// Finally, `off` is the starting offset for the specific `RangeBuf` within the
 /// stream the buffer belongs to.
-#[derive(Clone, Debug, Default, Eq)]
-pub struct RangeBuf {
+#[derive(Clone, Debug, Default)]
+pub struct RangeBuf<F = DefaultBufFactory>
+where
+    F: BufFactory,
+{
     /// The internal buffer holding the data.
     ///
-    /// To avoid needless allocations when a RangeBuf is split, this field is
-    /// reference-counted and can be shared between multiple RangeBuf objects,
-    /// and sliced using the `start` and `len` values.
-    pub(crate) data: Arc<Vec<u8>>,
+    /// To avoid needless allocations when a RangeBuf is split, this field
+    /// should be reference-counted so it can be shared between multiple
+    /// RangeBuf objects, and sliced using the `start` and `len` values.
+    pub(crate) data: F::Buf,
 
     /// The initial offset within the internal buffer.
     pub(crate) start: usize,
@@ -64,18 +70,59 @@ pub struct RangeBuf {
 
     /// Whether this contains the final byte in the stream.
     pub(crate) fin: bool,
+
+    _bf: PhantomData<F>,
 }
 
-impl RangeBuf {
+/// A trait for providing internal storage buffers for [`RangeBuf`].
+/// The associated type [`Buf`] can be any type that dereferences to
+/// a slice, but should be fast to clone, eg. by wrapping it into an
+/// [`Arc`].
+pub trait BufFactory: Clone + Default + Debug {
+    /// The type of the generated buffer.
+    type Buf: Clone + Debug + AsRef<[u8]>;
+
+    /// Generate a new buffer from a given slice, the buffer must contain the
+    /// same data as the original slice.
+    fn buf_from_slice(buf: &[u8]) -> Self::Buf;
+}
+
+/// The default [`BufFactory`] allocates buffers on the heap on demand.
+#[derive(Debug, Clone, Default)]
+pub struct DefaultBufFactory;
+
+/// The default [`BufFactory::Buf`] is a boxes slices wrapped in an [`Arc`].
+#[derive(Debug, Clone, Default)]
+pub struct DefaultBuf(Arc<Box<[u8]>>);
+
+impl BufFactory for DefaultBufFactory {
+    type Buf = DefaultBuf;
+
+    fn buf_from_slice(buf: &[u8]) -> Self::Buf {
+        DefaultBuf(Arc::new(buf.into()))
+    }
+}
+
+impl AsRef<[u8]> for DefaultBuf {
+    fn as_ref(&self) -> &[u8] {
+        &self.0[..]
+    }
+}
+
+impl<F: BufFactory> RangeBuf<F>
+where
+    F::Buf: Clone,
+{
     /// Creates a new `RangeBuf` from the given slice.
-    pub fn from(buf: &[u8], off: u64, fin: bool) -> RangeBuf {
+    pub fn from(buf: &[u8], off: u64, fin: bool) -> RangeBuf<F> {
         RangeBuf {
-            data: Arc::new(Vec::from(buf)),
+            data: F::buf_from_slice(buf),
             start: 0,
             pos: 0,
             len: buf.len(),
             off,
             fin,
+            _bf: Default::default(),
         }
     }
 
@@ -110,7 +157,10 @@ impl RangeBuf {
     }
 
     /// Splits the buffer into two at the given index.
-    pub fn split_off(&mut self, at: usize) -> RangeBuf {
+    pub fn split_off(&mut self, at: usize) -> RangeBuf<F>
+    where
+        F::Buf: Clone + AsRef<[u8]>,
+    {
         assert!(
             at <= self.len,
             "`at` split index (is {}) should be <= len (is {})",
@@ -124,6 +174,7 @@ impl RangeBuf {
             pos: cmp::max(self.pos, self.start + at),
             len: self.len - at,
             off: self.off + at as u64,
+            _bf: Default::default(),
             fin: self.fin,
         };
 
@@ -135,29 +186,31 @@ impl RangeBuf {
     }
 }
 
-impl std::ops::Deref for RangeBuf {
+impl<F: BufFactory> Deref for RangeBuf<F> {
     type Target = [u8];
 
     fn deref(&self) -> &[u8] {
-        &self.data[self.pos..self.start + self.len]
+        &self.data.as_ref()[self.pos..self.start + self.len]
     }
 }
 
-impl Ord for RangeBuf {
-    fn cmp(&self, other: &RangeBuf) -> cmp::Ordering {
+impl<F: BufFactory> Ord for RangeBuf<F> {
+    fn cmp(&self, other: &RangeBuf<F>) -> cmp::Ordering {
         // Invert ordering to implement min-heap.
         self.off.cmp(&other.off).reverse()
     }
 }
 
-impl PartialOrd for RangeBuf {
-    fn partial_cmp(&self, other: &RangeBuf) -> Option<cmp::Ordering> {
+impl<F: BufFactory> PartialOrd for RangeBuf<F> {
+    fn partial_cmp(&self, other: &RangeBuf<F>) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl PartialEq for RangeBuf {
-    fn eq(&self, other: &RangeBuf) -> bool {
+impl<F: BufFactory> Eq for RangeBuf<F> {}
+
+impl<F: BufFactory> PartialEq for RangeBuf<F> {
+    fn eq(&self, other: &RangeBuf<F>) -> bool {
         self.off == other.off
     }
 }
