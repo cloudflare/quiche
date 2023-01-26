@@ -3177,7 +3177,7 @@ impl Connection {
             }
         }
 
-        let mut buffer_capacity = b.cap();
+        let mut left = b.cap();
 
         let pn = self.pkt_num_spaces[epoch].next_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
@@ -3261,8 +3261,8 @@ impl Connection {
         }
 
         // Make sure we have enough space left for the packet overhead.
-        match buffer_capacity.checked_sub(overhead) {
-            Some(v) => buffer_capacity = v,
+        match left.checked_sub(overhead) {
+            Some(v) => left = v,
 
             None => {
                 // We can't send more because there isn't enough space available
@@ -3280,23 +3280,13 @@ impl Connection {
         }
 
         // Make sure there is enough space for the minimum payload length.
-        if buffer_capacity < PAYLOAD_MIN_LEN {
+        if left < PAYLOAD_MIN_LEN {
             self.paths
                 .get_mut(send_pid)?
                 .recovery
                 .update_app_limited(false);
             return Err(Error::Done);
         }
-
-        // Limit output packet size by congestion window size.
-        let mut left_for_congestion_controlled_packets = cmp::min(
-            buffer_capacity,
-            self.paths
-                .get(send_pid)?
-                .recovery
-                .cwnd_available()
-                .saturating_sub(overhead),
-        );
 
         let mut frames: Vec<frame::Frame> = Vec::new();
 
@@ -3322,6 +3312,8 @@ impl Connection {
         packet::encode_pkt_num(pn, &mut b)?;
 
         let payload_offset = b.off();
+
+        let left_before_packing_ack_frame = left;
 
         // Create ACK frame.
         //
@@ -3349,22 +3341,24 @@ impl Connection {
                 ecn_counts: None, // sending ECN is not supported at this time
             };
 
-            let mut buf_cap_for_acks = buffer_capacity;
             // ACK-only packets are not congestion controlled so ACKs must be
             // bundled considering the buffer capacity only, and not
             // the available cwnd.
-            if push_frame_to_pkt!(b, frames, frame, buf_cap_for_acks) {
+            if push_frame_to_pkt!(b, frames, frame, left) {
                 self.pkt_num_spaces[epoch].ack_elicited = false;
-                let consumed_by_acks = buffer_capacity - buf_cap_for_acks;
-                // The ACK frame was successfully bundled, so reduce the available
-                // space for congestion controlled frames.
-                // left_for_congestion_controlled_packets could be smaller than
-                // consumed_by_acks.
-                left_for_congestion_controlled_packets =
-                    left_for_congestion_controlled_packets
-                        .saturating_sub(consumed_by_acks);
             }
         }
+
+        // Limit output packet size by congestion window size.
+        left = cmp::min(
+            left,
+            self.paths
+                .get(send_pid)?
+                .recovery
+                .cwnd_available()
+                .saturating_sub(overhead)
+                .saturating_sub(left_before_packing_ack_frame - left), /* bytes consumed by ACK frames */
+        );
 
         let mut challenge_data = None;
 
@@ -3376,12 +3370,7 @@ impl Connection {
             {
                 let frame = frame::Frame::PathResponse { data: challenge };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     ack_eliciting = true;
                     in_flight = true;
                 } else {
@@ -3398,12 +3387,7 @@ impl Connection {
 
                 let frame = frame::Frame::PathChallenge { data };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     // Let's notify the path once we know the packet size.
                     challenge_data = Some(data);
 
@@ -3418,12 +3402,7 @@ impl Connection {
             while let Some(seq_num) = self.ids.next_advertise_new_scid_seq() {
                 let frame = self.ids.get_new_connection_id_frame_for(seq_num)?;
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     self.ids.mark_advertise_new_scid_seq(seq_num, false);
 
                     ack_eliciting = true;
@@ -3442,12 +3421,7 @@ impl Connection {
             if self.should_send_handshake_done() {
                 let frame = frame::Frame::HandshakeDone;
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     self.handshake_done_sent = true;
 
                     ack_eliciting = true;
@@ -3461,12 +3435,7 @@ impl Connection {
                     max: self.streams.max_streams_bidi_next(),
                 };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     self.streams.update_max_streams_bidi();
 
                     ack_eliciting = true;
@@ -3480,12 +3449,7 @@ impl Connection {
                     max: self.streams.max_streams_uni_next(),
                 };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     self.streams.update_max_streams_uni();
 
                     ack_eliciting = true;
@@ -3497,12 +3461,7 @@ impl Connection {
             if let Some(limit) = self.blocked_limit {
                 let frame = frame::Frame::DataBlocked { limit };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     self.blocked_limit = None;
 
                     ack_eliciting = true;
@@ -3534,12 +3493,7 @@ impl Connection {
                     max: stream.recv.max_data_next(),
                 };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     let recv_win = stream.recv.window();
 
                     stream.recv.update_max_data(now);
@@ -3573,12 +3527,7 @@ impl Connection {
                     max: self.max_rx_data_next(),
                 };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     self.almost_full = false;
 
                     // Commits the new max_rx_data limit.
@@ -3601,12 +3550,7 @@ impl Connection {
                     error_code,
                 };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     self.streams.mark_stopped(stream_id, false, 0);
 
                     ack_eliciting = true;
@@ -3627,12 +3571,7 @@ impl Connection {
                     final_size,
                 };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     self.streams.mark_reset(stream_id, false, 0, 0);
 
                     ack_eliciting = true;
@@ -3649,12 +3588,7 @@ impl Connection {
             {
                 let frame = frame::Frame::StreamDataBlocked { stream_id, limit };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     self.streams.mark_blocked(stream_id, false, 0);
 
                     ack_eliciting = true;
@@ -3679,12 +3613,7 @@ impl Connection {
 
                 let frame = frame::Frame::RetireConnectionId { seq_num };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     self.ids.mark_retire_dcid_seq(seq_num, false);
 
                     ack_eliciting = true;
@@ -3707,12 +3636,7 @@ impl Connection {
                             reason: conn_err.reason.clone(),
                         };
 
-                        if push_frame_to_pkt!(
-                            b,
-                            frames,
-                            frame,
-                            left_for_congestion_controlled_packets
-                        ) {
+                        if push_frame_to_pkt!(b, frames, frame, left) {
                             let pto = self.paths.get(send_pid)?.recovery.pto();
                             self.draining_timer = Some(now + (pto * 3));
 
@@ -3728,12 +3652,7 @@ impl Connection {
                         reason: conn_err.reason.clone(),
                     };
 
-                    if push_frame_to_pkt!(
-                        b,
-                        frames,
-                        frame,
-                        left_for_congestion_controlled_packets
-                    ) {
+                    if push_frame_to_pkt!(b, frames, frame, left) {
                         let pto = self.paths.get(send_pid)?.recovery.pto();
                         self.draining_timer = Some(now + (pto * 3));
 
@@ -3746,7 +3665,7 @@ impl Connection {
 
         // Create CRYPTO frame.
         if self.pkt_num_spaces[epoch].crypto_stream.is_flushable() &&
-            left_for_congestion_controlled_packets > frame::MAX_CRYPTO_OVERHEAD &&
+            left > frame::MAX_CRYPTO_OVERHEAD &&
             !is_closing &&
             self.paths.get(send_pid)?.active()
         {
@@ -3771,9 +3690,7 @@ impl Connection {
                 octets::varint_len(crypto_off) + // offset
                 2; // length, always encode as 2-byte varint
 
-            if let Some(max_len) =
-                left_for_congestion_controlled_packets.checked_sub(hdr_len)
-            {
+            if let Some(max_len) = left.checked_sub(hdr_len) {
                 let (mut crypto_hdr, mut crypto_payload) =
                     b.split_at(hdr_off + hdr_len)?;
 
@@ -3805,12 +3722,7 @@ impl Connection {
                     length: len,
                 };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     ack_eliciting = true;
                     in_flight = true;
                     has_data = true;
@@ -3836,7 +3748,7 @@ impl Connection {
 
         // Create DATAGRAM frame.
         if (pkt_type == packet::Type::Short || pkt_type == packet::Type::ZeroRTT) &&
-            left_for_congestion_controlled_packets > frame::MAX_DGRAM_OVERHEAD &&
+            left > frame::MAX_DGRAM_OVERHEAD &&
             !is_closing &&
             self.paths.get(send_pid)?.active() &&
             do_dgram
@@ -3847,7 +3759,7 @@ impl Connection {
                     let hdr_len = 1 + // frame type
                         2; // length, always encode as 2-byte varint
 
-                    if (hdr_len + len) <= left_for_congestion_controlled_packets {
+                    if (hdr_len + len) <= left {
                         // Front of the queue fits this packet, send it.
                         match self.dgram_send_queue.pop() {
                             Some(data) => {
@@ -3893,12 +3805,7 @@ impl Connection {
                                 let frame =
                                     frame::Frame::DatagramHeader { length: len };
 
-                                if push_frame_to_pkt!(
-                                    b,
-                                    frames,
-                                    frame,
-                                    left_for_congestion_controlled_packets
-                                ) {
+                                if push_frame_to_pkt!(b, frames, frame, left) {
                                     ack_eliciting = true;
                                     in_flight = true;
                                     dgram_emitted = true;
@@ -3919,7 +3826,7 @@ impl Connection {
 
         // Create a single STREAM frame for the first stream that is flushable.
         if (pkt_type == packet::Type::Short || pkt_type == packet::Type::ZeroRTT) &&
-            left_for_congestion_controlled_packets > frame::MAX_STREAM_OVERHEAD &&
+            left > frame::MAX_STREAM_OVERHEAD &&
             !is_closing &&
             self.paths.get(send_pid)?.active() &&
             !dgram_emitted
@@ -3960,9 +3867,7 @@ impl Connection {
                     octets::varint_len(stream_off) + // offset
                     2; // length, always encode as 2-byte varint
 
-                let max_len = match left_for_congestion_controlled_packets
-                    .checked_sub(hdr_len)
-                {
+                let max_len = match left.checked_sub(hdr_len) {
                     Some(v) => v,
 
                     None => continue,
@@ -4001,12 +3906,7 @@ impl Connection {
                     fin,
                 };
 
-                if push_frame_to_pkt!(
-                    b,
-                    frames,
-                    frame,
-                    left_for_congestion_controlled_packets
-                ) {
+                if push_frame_to_pkt!(b, frames, frame, left) {
                     ack_eliciting = true;
                     in_flight = true;
                     has_data = true;
@@ -4022,9 +3922,7 @@ impl Connection {
 
                 // When fuzzing, try to coalesce multiple STREAM frames in the
                 // same packet, so it's easier to generate fuzz corpora.
-                if cfg!(feature = "fuzzing") &&
-                    left_for_congestion_controlled_packets >
-                        frame::MAX_STREAM_OVERHEAD
+                if cfg!(feature = "fuzzing") && left > frame::MAX_STREAM_OVERHEAD
                 {
                     continue;
                 }
@@ -4044,17 +3942,12 @@ impl Connection {
         let path = self.paths.get_mut(send_pid)?;
         if (ack_elicit_required || path.needs_ack_eliciting) &&
             !ack_eliciting &&
-            left_for_congestion_controlled_packets >= 1 &&
+            left >= 1 &&
             !is_closing
         {
             let frame = frame::Frame::Ping;
 
-            if push_frame_to_pkt!(
-                b,
-                frames,
-                frame,
-                left_for_congestion_controlled_packets
-            ) {
+            if push_frame_to_pkt!(b, frames, frame, left) {
                 ack_eliciting = true;
                 in_flight = true;
             }
@@ -4083,18 +3976,11 @@ impl Connection {
         // 2) this is a probing packet towards an unvalidated peer address.
         if (has_initial || !path.validated()) &&
             pkt_type == packet::Type::Short &&
-            left_for_congestion_controlled_packets >= 1
+            left >= 1
         {
-            let frame = frame::Frame::Padding {
-                len: left_for_congestion_controlled_packets,
-            };
+            let frame = frame::Frame::Padding { len: left };
 
-            if push_frame_to_pkt!(
-                b,
-                frames,
-                frame,
-                left_for_congestion_controlled_packets
-            ) {
+            if push_frame_to_pkt!(b, frames, frame, left) {
                 in_flight = true;
             }
         }
@@ -4108,12 +3994,7 @@ impl Connection {
             };
 
             #[allow(unused_assignments)]
-            if push_frame_to_pkt!(
-                b,
-                frames,
-                frame,
-                left_for_congestion_controlled_packets
-            ) {
+            if push_frame_to_pkt!(b, frames, frame, left) {
                 in_flight = true;
             }
         }
