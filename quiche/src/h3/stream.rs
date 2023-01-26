@@ -24,6 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::range_buf::BufFactory;
+
 use super::Error;
 use super::Result;
 
@@ -431,8 +433,8 @@ impl Stream {
     ///
     /// When not enough data can be read to complete the state, this returns
     /// `Error::Done`.
-    pub fn try_fill_buffer(
-        &mut self, conn: &mut crate::Connection,
+    pub fn try_fill_buffer<F: BufFactory>(
+        &mut self, conn: &mut crate::Connection<F>,
     ) -> Result<()> {
         // If no bytes are required to be read, return early.
         if self.state_buffer_complete() {
@@ -593,8 +595,8 @@ impl Stream {
     }
 
     /// Tries to read DATA payload from the transport stream.
-    pub fn try_consume_data(
-        &mut self, conn: &mut crate::Connection, out: &mut [u8],
+    pub fn try_consume_data<F: BufFactory>(
+        &mut self, conn: &mut crate::Connection<F>, out: &mut [u8],
     ) -> Result<(usize, bool)> {
         let left = std::cmp::min(out.len(), self.state_len - self.state_off);
 
@@ -723,7 +725,7 @@ mod tests {
     use super::*;
 
     fn open_uni(b: &mut octets::OctetsMut, ty: u64) -> Result<Stream> {
-        let stream = Stream::new(2, false);
+        let stream = <Stream>::new(2, false);
         assert_eq!(stream.state, State::StreamType);
 
         b.put_varint(ty)?;
@@ -1042,7 +1044,7 @@ mod tests {
 
     #[test]
     fn request_no_data() {
-        let mut stream = Stream::new(0, false);
+        let mut stream = <Stream>::new(0, false);
 
         assert_eq!(stream.ty, Some(Type::Request));
         assert_eq!(stream.state, State::FrameType);
@@ -1052,7 +1054,7 @@ mod tests {
 
     #[test]
     fn request_good() {
-        let mut stream = Stream::new(0, false);
+        let mut stream = <Stream>::new(0, false);
 
         let mut d = vec![42; 128];
         let mut b = octets::OctetsMut::with_slice(&mut d);
@@ -1228,7 +1230,7 @@ mod tests {
 
     #[test]
     fn data_before_headers() {
-        let mut stream = Stream::new(0, false);
+        let mut stream = <Stream>::new(0, false);
 
         let mut d = vec![42; 128];
         let mut b = octets::OctetsMut::with_slice(&mut d);
@@ -1431,7 +1433,7 @@ mod tests {
         let mut d = vec![42; 128];
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
-        let mut stream = Stream::new(0, false);
+        let mut stream = <Stream>::new(0, false);
 
         assert_eq!(stream.ty, Some(Type::Request));
         assert_eq!(stream.state, State::FrameType);
