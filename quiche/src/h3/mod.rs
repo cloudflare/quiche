@@ -2370,7 +2370,15 @@ impl Connection {
                     {
                         Ok(ev) => return Ok(ev),
 
-                        Err(Error::Done) => (),
+                        Err(Error::Done) => {
+                            // This might be a frame that is processed internally
+                            // without needing to bubble up to the user as an
+                            // event. Check whether the frame has FIN'd by QUIC
+                            // to prevent trying to read again on a closed stream.
+                            if conn.stream_finished(stream_id) {
+                                break;
+                            }
+                        },
 
                         Err(e) => return Err(e),
                     };
@@ -3532,6 +3540,54 @@ mod tests {
         assert_eq!(s.pipe.server.stream_send(stream, &[], true), Ok(0));
         s.advance().ok();
 
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Send a request with no body, get a response with no body followed by
+    /// GREASE that is STREAM frame with a FIN.
+    fn request_no_body_response_no_body_with_grease() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(true).unwrap();
+
+        assert_eq!(stream, 0);
+
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: false,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        let resp = s.send_response(stream, false).unwrap();
+
+        // Note that "has_body" is a misnomer, there will never be a body in
+        // this test. There's other work that will fix this, once it lands
+        // remove this comment.
+        let ev_headers = Event::Headers {
+            list: resp,
+            has_body: true,
+        };
+
+        // Inject a GREASE frame
+        let mut d = [42; 10];
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+
+        let frame_type = b.put_varint(148_764_065_110_560_899).unwrap();
+        s.pipe.server.stream_send(0, frame_type, false).unwrap();
+
+        let frame_len = b.put_varint(10).unwrap();
+        s.pipe.server.stream_send(0, frame_len, false).unwrap();
+
+        s.pipe.server.stream_send(0, &d, true).unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
         assert_eq!(s.poll_client(), Err(Error::Done));
     }
