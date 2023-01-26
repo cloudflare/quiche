@@ -188,7 +188,7 @@ pub fn connect(
     #[cfg(feature = "qlog")]
     {
         if let Some(dir) = std::env::var_os("QLOGDIR") {
-            let id = format!("{:?}", scid);
+            let id = format!("{scid:?}");
             let writer = make_qlog_writer(&dir, "client", &id);
 
             conn.set_qlog(
@@ -224,7 +224,7 @@ pub fn connect(
             continue;
         }
 
-        return Err(ClientError::Other(format!("send() failed: {:?}", e)));
+        return Err(ClientError::Other(format!("send() failed: {e:?}")));
     }
 
     trace!("written {}", write);
@@ -276,8 +276,7 @@ pub fn connect(
                         }
 
                         return Err(ClientError::Other(format!(
-                            "{}: recv() failed: {:?}",
-                            local_addr, e
+                            "{local_addr}: recv() failed: {e:?}"
                         )));
                     },
                 };
@@ -285,7 +284,7 @@ pub fn connect(
                 trace!("{}: got {} bytes", local_addr, len);
 
                 if let Some(target_path) = conn_args.dump_packet_path.as_ref() {
-                    let path = format!("{}/{}.pkt", target_path, pkt_count);
+                    let path = format!("{target_path}/{pkt_count}.pkt");
 
                     if let Ok(f) = std::fs::File::create(path) {
                         let mut f = std::io::BufWriter::new(f);

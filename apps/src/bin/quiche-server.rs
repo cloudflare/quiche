@@ -215,7 +215,7 @@ fn main() {
             let pkt_buf = &mut buf[..len];
 
             if let Some(target_path) = conn_args.dump_packet_path.as_ref() {
-                let path = format!("{}/{}.pkt", target_path, pkt_count);
+                let path = format!("{target_path}/{pkt_count}.pkt");
 
                 if let Ok(f) = std::fs::File::create(path) {
                     let mut f = std::io::BufWriter::new(f);
@@ -430,6 +430,7 @@ fn main() {
                 // is not much anyone can do to recover.
                 let app_proto = client.conn.application_proto();
 
+                #[allow(clippy::box_default)]
                 if alpns::HTTP_09.contains(&app_proto) {
                     client.http_conn = Some(Box::<Http09Conn>::default());
 
