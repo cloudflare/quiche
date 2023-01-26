@@ -289,7 +289,7 @@ Options:
   --enable-active-migration   Enable active connection migration.
   --perform-migration      Perform connection migration on another source port.
   --multipath              Enable multipath support.
-  -A --address ADDR ...    Additional client addresses to use.
+  -A --address ADDR ...    Specify addresses to be used instead of the unspecified address. Non-routable addresses will lead to connectivity issues.
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
   --send-priority-update   Send HTTP/3 priority updates if the query string params 'u' or 'i' are present in URLs
