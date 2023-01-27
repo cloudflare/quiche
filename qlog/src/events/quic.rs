@@ -105,7 +105,7 @@ impl PacketHeader {
             None => (None, None),
         };
 
-        let version = version.map(|v| format!("{:x?}", v));
+        let version = version.map(|v| format!("{v:x?}"));
 
         PacketHeader {
             packet_type,

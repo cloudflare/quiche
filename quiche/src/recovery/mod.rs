@@ -858,7 +858,7 @@ impl Recovery {
         let loss_delay = cmp::max(loss_delay, GRANULARITY);
 
         // Packets sent before this time are deemed lost.
-        let lost_send_time = now - loss_delay;
+        let lost_send_time = now.checked_sub(loss_delay).unwrap();
 
         let mut lost_packets = 0;
         let mut lost_bytes = 0;

@@ -52,7 +52,7 @@ use quiche::h3::NameValue;
 use quiche::h3::Priority;
 
 pub fn stdout_sink(out: String) {
-    print!("{}", out);
+    print!("{out}");
 }
 
 const H3_MESSAGE_ERROR: u64 = 0x10E;
@@ -122,7 +122,7 @@ fn make_resource_writer(
         let mut path = format!("{}/{}", tp, resource.iter().last().unwrap());
 
         if cardinal > 1 {
-            path = format!("{}.{}", path, cardinal);
+            path = format!("{path}.{cardinal}");
         }
 
         match std::fs::File::create(&path) {
@@ -141,7 +141,7 @@ fn make_resource_writer(
 fn autoindex(path: path::PathBuf, index: &str) -> path::PathBuf {
     if let Some(path_str) = path.to_str() {
         if path_str.ends_with('/') {
-            let path_str = format!("{}{}", path_str, index);
+            let path_str = format!("{path_str}{index}");
             return path::PathBuf::from(&path_str);
         }
     }
@@ -154,7 +154,7 @@ pub fn make_qlog_writer(
     dir: &std::ffi::OsStr, role: &str, id: &str,
 ) -> std::io::BufWriter<std::fs::File> {
     let mut path = std::path::PathBuf::from(dir);
-    let filename = format!("{}-{}.sqlog", role, id);
+    let filename = format!("{role}-{id}.sqlog");
     path.push(filename);
 
     match std::fs::File::create(&path) {
@@ -403,13 +403,13 @@ impl SiDuckConn {
                         break;
                     }
 
-                    match conn.dgram_send(format!("{}-ack", data).as_bytes()) {
+                    match conn.dgram_send(format!("{data}-ack").as_bytes()) {
                         Ok(v) => v,
 
                         Err(quiche::Error::Done) => (),
 
                         Err(e) => {
-                            error!("failed to send quack ack {:?}", e);
+                            error!("failed to send quack ack {e:?}");
                             return Err(From::from(e));
                         },
                     }
@@ -1204,8 +1204,7 @@ impl Http3Conn {
             Some(path) => path,
         };
 
-        let url =
-            format!("{}://{}{}", decided_scheme, decided_host, decided_path);
+        let url = format!("{decided_scheme}://{decided_host}{decided_path}");
         let url = url::Url::parse(&url).unwrap();
 
         let pathbuf = path::PathBuf::from(url.path());
