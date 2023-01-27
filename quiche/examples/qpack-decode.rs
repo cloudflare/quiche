@@ -43,7 +43,7 @@ fn main() {
     let cmd = &args.next().unwrap();
 
     if args.len() != 1 {
-        println!("Usage: {} FILE", cmd);
+        println!("Usage: {cmd} FILE");
         return;
     }
 
@@ -79,7 +79,7 @@ fn main() {
         for hdr in dec.decode(&data[..len], std::u64::MAX).unwrap() {
             let name = std::str::from_utf8(hdr.name()).unwrap();
             let value = std::str::from_utf8(hdr.value()).unwrap();
-            println!("{}\t{}", name, value);
+            println!("{name}\t{value}");
         }
 
         println!();

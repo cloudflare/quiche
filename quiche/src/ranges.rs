@@ -190,7 +190,7 @@ impl std::fmt::Debug for RangeSet {
             })
             .collect();
 
-        write!(f, "{:?}", ranges)
+        write!(f, "{ranges:?}")
     }
 }
 

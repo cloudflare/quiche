@@ -440,7 +440,7 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::CancelPush { push_id } => {
-                write!(f, "CANCEL_PUSH push_id={}", push_id)?;
+                write!(f, "CANCEL_PUSH push_id={push_id}")?;
             },
 
             Frame::Settings {
@@ -450,7 +450,7 @@ impl std::fmt::Debug for Frame {
                 raw,
                 ..
             } => {
-                write!(f, "SETTINGS max_field_section={:?}, qpack_max_table={:?}, qpack_blocked={:?} raw={:?}", max_field_section_size, qpack_max_table_capacity, qpack_blocked_streams, raw)?;
+                write!(f, "SETTINGS max_field_section={max_field_section_size:?}, qpack_max_table={qpack_max_table_capacity:?}, qpack_blocked={qpack_blocked_streams:?} raw={raw:?}")?;
             },
 
             Frame::PushPromise {
@@ -466,11 +466,11 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::GoAway { id } => {
-                write!(f, "GOAWAY id={}", id)?;
+                write!(f, "GOAWAY id={id}")?;
             },
 
             Frame::MaxPushId { push_id } => {
-                write!(f, "MAX_PUSH_ID push_id={}", push_id)?;
+                write!(f, "MAX_PUSH_ID push_id={push_id}")?;
             },
 
             Frame::PriorityUpdateRequest {
@@ -498,7 +498,7 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::Unknown { raw_type, .. } => {
-                write!(f, "UNKNOWN raw_type={}", raw_type,)?;
+                write!(f, "UNKNOWN raw_type={raw_type}",)?;
             },
         }
 

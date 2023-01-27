@@ -274,7 +274,7 @@ impl<'a> std::fmt::Debug for ConnectionId<'a> {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         for c in self.as_ref() {
-            write!(f, "{:02x}", c)?;
+            write!(f, "{c:02x}")?;
         }
 
         Ok(())
@@ -539,12 +539,12 @@ impl<'a> std::fmt::Debug for Header<'a> {
         if let Some(ref token) = self.token {
             write!(f, " token=")?;
             for b in token {
-                write!(f, "{:02x}", b)?;
+                write!(f, "{b:02x}")?;
             }
         }
 
         if let Some(ref versions) = self.versions {
-            write!(f, " versions={:x?}", versions)?;
+            write!(f, " versions={versions:x?}")?;
         }
 
         if self.ty == Type::Short {

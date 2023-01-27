@@ -567,7 +567,7 @@ impl Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -1604,7 +1604,7 @@ impl Connection {
         let max_rx_data = config.local_transport_params.initial_max_data;
 
         let scid_as_hex: Vec<String> =
-            scid.iter().map(|b| format!("{:02x}", b)).collect();
+            scid.iter().map(|b| format!("{b:02x}")).collect();
 
         let reset_token = if is_server {
             config.local_transport_params.stateless_reset_token
@@ -3234,7 +3234,7 @@ impl Connection {
         hdr.to_bytes(&mut b)?;
 
         let hdr_trace = if log::max_level() == log::LevelFilter::Trace {
-            Some(format!("{:?}", hdr))
+            Some(format!("{hdr:?}"))
         } else {
             None
         };
@@ -7083,7 +7083,7 @@ impl std::fmt::Display for AddrTupleFmt {
             return Ok(());
         }
 
-        f.write_fmt(format_args!("src:{} dst:{}", src, dst))
+        f.write_fmt(format_args!("src:{src} dst:{dst}"))
     }
 }
 
@@ -7621,7 +7621,7 @@ impl TransportParams {
                 owner: Some(owner),
                 resumption_allowed: None,
                 early_data_enabled: None,
-                tls_cipher: Some(format!("{:?}", cipher)),
+                tls_cipher: Some(format!("{cipher:?}")),
                 aead_tag_length: None,
                 original_destination_connection_id,
                 initial_source_connection_id: None,
