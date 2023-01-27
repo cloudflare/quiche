@@ -253,7 +253,7 @@ mod tests {
                 rtt,
                 delivered: 0,
                 delivered_time: now,
-                first_sent_time: now - rtt,
+                first_sent_time: now.checked_sub(rtt).unwrap(),
                 is_app_limited: false,
             };
 

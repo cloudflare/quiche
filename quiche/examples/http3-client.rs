@@ -44,7 +44,7 @@ fn main() {
     let cmd = &args.next().unwrap();
 
     if args.len() != 1 {
-        println!("Usage: {} URL", cmd);
+        println!("Usage: {cmd} URL");
         println!("\nSee tools/apps/ for more complete implementations.");
         return;
     }
@@ -340,7 +340,7 @@ fn main() {
 }
 
 fn hex_dump(buf: &[u8]) -> String {
-    let vec: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
+    let vec: Vec<String> = buf.iter().map(|b| format!("{b:02x}")).collect();
 
     vec.join("")
 }

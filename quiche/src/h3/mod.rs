@@ -483,7 +483,7 @@ impl Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -593,7 +593,7 @@ pub struct Header(Vec<u8>, Vec<u8>);
 fn try_print_as_readable(hdr: &[u8], f: &mut fmt::Formatter) -> fmt::Result {
     match std::str::from_utf8(hdr) {
         Ok(s) => f.write_str(&s.escape_default().to_string()),
-        Err(_) => write!(f, "{:?}", hdr),
+        Err(_) => write!(f, "{hdr:?}"),
     }
 }
 
@@ -1508,7 +1508,7 @@ impl Connection {
             .urgency
             .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND);
 
-        let mut field_value = format!("u={}", urgency);
+        let mut field_value = format!("u={urgency}");
 
         if priority.incremental {
             field_value.push_str(",i");
@@ -2277,7 +2277,7 @@ impl Connection {
 
                     match stream.set_frame_type(varint) {
                         Err(Error::FrameUnexpected) => {
-                            let msg = format!("Unexpected frame type {}", varint);
+                            let msg = format!("Unexpected frame type {varint}");
 
                             conn.close(
                                 true,

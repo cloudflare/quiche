@@ -1133,7 +1133,7 @@ impl std::fmt::Debug for Recovery {
 
                 if v > now {
                     let d = v.duration_since(now);
-                    write!(f, "timer={:?} ", d)?;
+                    write!(f, "timer={d:?} ")?;
                 } else {
                     write!(f, "timer=exp ")?;
                 }
