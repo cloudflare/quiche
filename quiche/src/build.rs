@@ -235,13 +235,13 @@ fn main() {
         let build_dir = format!("{bssl_dir}/build/{build_path}");
         println!("cargo:rustc-link-search=native={build_dir}");
 
-        println!("cargo:rustc-link-lib=static=ssl");
-        println!("cargo:rustc-link-lib=static=crypto");
+        println!("cargo:rustc-link-lib=static:+whole-archive=ssl");
+        println!("cargo:rustc-link-lib=static:+whole-archive=crypto");
     }
 
     if cfg!(feature = "boringssl-boring-crate") {
-        println!("cargo:rustc-link-lib=static=ssl");
-        println!("cargo:rustc-link-lib=static=crypto");
+        println!("cargo:rustc-link-lib=static:+whole-archive=ssl");
+        println!("cargo:rustc-link-lib=static:+whole-archive=crypto");
     }
 
     // MacOS: Allow cdylib to link with undefined symbols
