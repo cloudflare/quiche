@@ -536,10 +536,8 @@ fn main() {
                 client.loss_rate = loss_rate;
             }
 
-            let max_send_burst =
-                client.conn.send_quantum().min(client.max_send_burst) /
-                    client.max_datagram_size *
-                    client.max_datagram_size;
+            let max_send_burst = client.max_send_burst / client.max_datagram_size *
+                client.max_datagram_size;
             let mut total_write = 0;
             let mut dst_info = None;
 

@@ -59,6 +59,7 @@ fn send_to_gso_pacing(
     use nix::sys::socket::SockaddrStorage;
     use std::io::IoSlice;
     use std::os::unix::io::AsRawFd;
+    use std::time::Instant;
 
     let iov = [IoSlice::new(buf)];
     let segment_size = segment_size as u16;
@@ -69,7 +70,8 @@ fn send_to_gso_pacing(
     let cmsg_gso = ControlMessage::UdpGsoSegments(&segment_size);
 
     // Pacing option.
-    let send_time = std_time_to_u64(&send_info.at);
+    let now = Instant::now();
+    let send_time = std_time_to_u64(&send_info.release.time(now).unwrap_or(now));
     let cmsg_txtime = ControlMessage::TxTime(&send_time);
 
     match sendmsg(

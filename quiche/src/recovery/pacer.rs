@@ -1,4 +1,8 @@
-// Copyright (C) 2022, Cloudflare, Inc.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+// Copyright (C) 2023, Cloudflare, Inc.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -24,304 +28,307 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//! Pacer provides the timestamp for the next packet to be sent based on the
-//! current send_quantum, pacing rate and last updated time.
-//!
-//! It's a kind of leaky bucket algorithm (RFC9002, 7.7 Pacing) but it considers
-//! max burst (send_quantum, in bytes) and provide the same timestamp for the
-//! same sized packets (except last one) to be GSO friendly, assuming we send
-//! packets using multiple sendmsg(), a sendmmsg(), or sendmsg() with GSO
-//! without waiting for new I/O events.
-//!
-//! After sending a burst of packets, the next timestamp will be updated based
-//! on the current pacing rate. It will make actual timestamp sent and recorded
-//! timestamp (Sent.time_sent) as close as possible. If GSO is not used, it will
-//! still try to provide close timestamp if the send burst is implemented.
-
 use std::time::Duration;
 use std::time::Instant;
 
+use super::bandwidth::Bandwidth;
+use super::congestion::Congestion;
+use super::congestion::CongestionControl;
+use super::congestion::Lost;
+use super::congestion::RttStats;
+use super::Acked;
+
+/// Congestion window fraction that the pacing sender allows in bursts during
+/// pacing.
+const LUMPY_PACING_CWND_FRACTION: f64 = 0.25;
+
+/// Number of packets that the pacing sender allows in bursts during pacing.
+/// This is ignored if a flow's estimated bandwidth is lower than 1200 kbps.
+const LUMPY_PACING_SIZE: usize = 2;
+
+/// The minimum estimated client bandwidth below which the pacing sender will
+/// not allow bursts.
+const LUMPY_PACING_MIN_BANDWIDTH_KBPS: Bandwidth =
+    Bandwidth::from_kbits_per_second(1_200);
+
+/// Configured maximum size of the burst coming out of quiescence.  The burst is
+/// never larger than the current CWND in packets.
+const INITIAL_UNPACED_BURST: usize = 10;
+
+/// When the pacer thinks is a good time to release the next packet
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseTime {
+    Immediate,
+    At(Instant),
+}
+
+/// When the next packet should be release and if it can be part of a burst
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReleaseDecision {
+    time: ReleaseTime,
+    allow_burst: bool,
+}
+
+impl ReleaseTime {
+    /// Add the specific delay to the current time
+    fn inc(&mut self, delay: Duration) {
+        match self {
+            ReleaseTime::Immediate => {},
+            ReleaseTime::At(time) => *time += delay,
+        }
+    }
+
+    /// Set the time to the later of two times
+    fn set_max(&mut self, other: Instant) {
+        match self {
+            ReleaseTime::Immediate => *self = ReleaseTime::At(other),
+            ReleaseTime::At(time) => *self = ReleaseTime::At(other.max(*time)),
+        }
+    }
+}
+
+impl ReleaseDecision {
+    /// Get the [`Instant`] the next packet should be released. It will never be
+    /// in the past.
+    pub fn time(&self, now: Instant) -> Option<Instant> {
+        match self.time {
+            ReleaseTime::Immediate => None,
+            ReleaseTime::At(other) => other.gt(&now).then_some(other),
+        }
+    }
+
+    /// Can this packet be appended to a previous burst
+    pub fn can_burst(&self) -> bool {
+        self.allow_burst
+    }
+
+    /// Check if the two packets can be released at the same time
+    pub fn time_eq(&self, other: &Self, now: Instant) -> bool {
+        self.time(now) == other.time(now)
+    }
+}
 #[derive(Debug)]
 pub struct Pacer {
-    /// Whether pacing is enabled.
+    /// Should this [`Pacer`] be making any release decisions?
     enabled: bool,
-
-    /// Bucket capacity (bytes).
-    capacity: usize,
-
-    /// Bucket used (bytes).
-    used: usize,
-
-    /// Sending pacing rate (bytes/sec).
-    rate: u64,
-
-    /// Timestamp of the last packet sent time update.
-    last_update: Instant,
-
-    /// Timestamp of the next packet to be sent.
-    next_time: Instant,
-
-    /// Current MSS.
-    max_datagram_size: usize,
-
-    /// Last packet size.
-    last_packet_size: Option<usize>,
-
-    /// Interval to be added in next burst.
-    iv: Duration,
-
-    /// Max pacing rate (bytes/sec).
-    max_pacing_rate: Option<u64>,
+    /// Underlying sender
+    sender: Congestion,
+    /// The maximum rate the [`Pacer`] will use.
+    max_pacing_rate: Option<Bandwidth>,
+    /// Number of unpaced packets to be sent before packets are delayed.
+    burst_tokens: usize,
+    /// When can the next packet be sent.
+    ideal_next_packet_send_time: ReleaseTime,
+    initial_burst_size: usize,
+    /// Number of unpaced packets to be sent before packets are delayed. This
+    /// token is consumed after [`burst_tokens`] ran out.
+    lumpy_tokens: usize,
+    /// Indicates whether pacing throttles the sending. If true, make up for
+    /// lost time.
+    pacing_limited: bool,
 }
 
 impl Pacer {
-    pub fn new(
-        enabled: bool, capacity: usize, rate: u64, max_datagram_size: usize,
-        max_pacing_rate: Option<u64>,
+    /// Create a new [`Pacer`] with and underlying [`Congestion`]
+    /// implementation, and an optional throttling as specified by
+    /// [`max_pacing_rate`].
+    pub(crate) fn new(
+        enabled: bool, congestion: Congestion, max_pacing_rate: Option<Bandwidth>,
     ) -> Self {
-        // Round capacity to MSS.
-        let capacity = capacity / max_datagram_size * max_datagram_size;
-        let pacing_rate = if let Some(max_rate) = max_pacing_rate {
-            max_rate.min(rate)
-        } else {
-            rate
-        };
-
         Pacer {
             enabled,
-
-            capacity,
-
-            used: 0,
-
-            rate: pacing_rate,
-
-            last_update: Instant::now(),
-
-            next_time: Instant::now(),
-
-            max_datagram_size,
-
-            last_packet_size: None,
-
-            iv: Duration::ZERO,
-
+            sender: congestion,
             max_pacing_rate,
+            burst_tokens: INITIAL_UNPACED_BURST,
+            ideal_next_packet_send_time: ReleaseTime::Immediate,
+            initial_burst_size: INITIAL_UNPACED_BURST,
+            lumpy_tokens: 0,
+            pacing_limited: false,
         }
     }
 
-    /// Returns whether pacing is enabled.
-    pub fn enabled(&self) -> bool {
-        self.enabled
-    }
-
-    /// Returns the current pacing rate.
-    pub fn rate(&self) -> u64 {
-        self.rate
-    }
-
-    /// Returns max pacing rate.
-    pub fn max_pacing_rate(&self) -> Option<u64> {
-        self.max_pacing_rate
-    }
-
-    /// Updates the bucket capacity or pacing_rate.
-    pub fn update(&mut self, capacity: usize, rate: u64, now: Instant) {
-        let capacity = capacity / self.max_datagram_size * self.max_datagram_size;
-
-        if self.capacity != capacity {
-            self.reset(now);
+    pub fn get_next_release_time(&self) -> ReleaseDecision {
+        if !self.enabled {
+            return ReleaseDecision {
+                time: ReleaseTime::Immediate,
+                allow_burst: true,
+            };
         }
 
-        self.capacity = capacity;
-
-        self.rate = if let Some(max_rate) = self.max_pacing_rate {
-            max_rate.min(rate)
-        } else {
-            rate
-        };
-    }
-
-    /// Resets the pacer for the next burst.
-    fn reset(&mut self, now: Instant) {
-        self.used = 0;
-
-        self.last_update = now;
-
-        self.next_time = self.next_time.max(now);
-
-        self.last_packet_size = None;
-
-        self.iv = Duration::ZERO;
-    }
-
-    /// Updates the timestamp for the packet to send.
-    pub fn send(&mut self, packet_size: usize, now: Instant) {
-        if self.rate == 0 {
-            self.reset(now);
-
-            return;
+        let allow_burst = self.burst_tokens > 0 || self.lumpy_tokens > 0;
+        ReleaseDecision {
+            time: self.ideal_next_packet_send_time,
+            allow_burst,
         }
-
-        if !self.iv.is_zero() {
-            self.next_time = self.next_time.max(now) + self.iv;
-
-            self.iv = Duration::ZERO;
-        }
-
-        let interval =
-            Duration::from_secs_f64(self.capacity as f64 / self.rate as f64);
-
-        let elapsed = now.saturating_duration_since(self.last_update);
-
-        // If too old, reset it.
-        if elapsed > interval {
-            self.reset(now);
-        }
-
-        self.used += packet_size;
-
-        let same_size = if let Some(last_packet_size) = self.last_packet_size {
-            last_packet_size == packet_size
-        } else {
-            true
-        };
-
-        self.last_packet_size = Some(packet_size);
-
-        if self.used >= self.capacity || !same_size {
-            self.iv =
-                Duration::from_secs_f64(self.used as f64 / self.rate as f64);
-
-            self.used = 0;
-
-            self.last_update = now;
-
-            self.last_packet_size = None;
-        };
-    }
-
-    /// Returns the timestamp for the next packet.
-    pub fn next_time(&self) -> Instant {
-        self.next_time
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pacer_update() {
-        let datagram_size = 1200;
-        let max_burst = datagram_size * 10;
-        let pacing_rate = 100_000;
-
-        let mut p = Pacer::new(true, max_burst, pacing_rate, datagram_size, None);
-
-        let now = Instant::now();
-
-        // Send 6000 (half of max_burst) -> no timestamp change yet.
-        p.send(6000, now);
-
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
-
-        // Send 6000 bytes -> max_burst filled.
-        p.send(6000, now);
-
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
-
-        // Start of a new burst.
-        let now = now + Duration::from_millis(5);
-
-        // Send 1000 bytes and next_time is updated.
-        p.send(1000, now);
-
-        let interval = max_burst as f64 / pacing_rate as f64;
-
-        assert_eq!(p.next_time() - now, Duration::from_secs_f64(interval));
+impl CongestionControl for Pacer {
+    fn get_congestion_window(&self) -> usize {
+        self.sender.get_congestion_window()
     }
 
-    #[test]
-    /// Same as pacer_update() but adds some idle time between transfers to
-    /// trigger a reset.
-    fn pacer_idle() {
-        let datagram_size = 1200;
-        let max_burst = datagram_size * 10;
-        let pacing_rate = 100_000;
-
-        let mut p = Pacer::new(true, max_burst, pacing_rate, datagram_size, None);
-
-        let now = Instant::now();
-
-        // Send 6000 (half of max_burst) -> no timestamp change yet.
-        p.send(6000, now);
-
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
-
-        // Sleep 200ms to reset the idle pacer (at least 120ms).
-        let now = now + Duration::from_millis(200);
-
-        // Send 6000 bytes -> idle reset and a new burst  isstarted.
-        p.send(6000, now);
-
-        assert_eq!(p.next_time(), now);
+    fn get_congestion_window_in_packets(&self) -> usize {
+        self.sender.get_congestion_window_in_packets()
     }
 
-    #[test]
-    fn pacer_set_max_pacing_rate() {
-        let datagram_size = 1200;
-        let max_burst = datagram_size * 10;
-        let pacing_rate = 100_000;
-        let max_pacing_rate = 50_000;
+    fn can_send(&self, bytes_in_flight: usize) -> bool {
+        self.sender.can_send(bytes_in_flight)
+    }
 
-        // Use the max_pacing_rate.
-        let mut p = Pacer::new(
-            true,
-            max_burst,
-            pacing_rate,
-            datagram_size,
-            Some(max_pacing_rate),
+    fn on_packet_sent(
+        &mut self, sent_time: Instant, bytes_in_flight: usize,
+        packet_number: u64, bytes: usize, is_retransmissible: bool,
+        rtt_stats: &RttStats,
+    ) {
+        self.sender.on_packet_sent(
+            sent_time,
+            bytes_in_flight,
+            packet_number,
+            bytes,
+            is_retransmissible,
+            rtt_stats,
         );
 
-        let now = Instant::now();
+        if !self.enabled || !is_retransmissible {
+            return;
+        }
 
-        // Send 6000 (half of max_burst) -> no timestamp change yet.
-        p.send(6000, now);
+        // If in recovery, the connection is not coming out of quiescence.
+        if bytes_in_flight == 0 && !self.sender.is_in_recovery() {
+            // Add more burst tokens anytime the connection is leaving quiescence,
+            // but limit it to the equivalent of a single bulk write,
+            // not exceeding the current CWND in packets.
+            self.burst_tokens = self
+                .initial_burst_size
+                .min(self.sender.get_congestion_window_in_packets());
+        }
 
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
+        if self.burst_tokens > 0 {
+            self.burst_tokens -= 1;
+            self.ideal_next_packet_send_time = ReleaseTime::Immediate;
+            self.pacing_limited = false;
+            return;
+        }
 
-        // Send 6000 bytes -> max_burst filled.
-        p.send(6000, now);
+        // The next packet should be sent as soon as the current packet has been
+        // transferred. PacingRate is based on bytes in flight including this
+        // packet.
+        let delay = self
+            .pacing_rate(bytes_in_flight + bytes, rtt_stats)
+            .transfer_time(bytes);
 
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
+        if !self.pacing_limited || self.lumpy_tokens == 0 {
+            // Reset lumpy_tokens_ if either application or cwnd throttles sending
+            // or token runs out.
+            self.lumpy_tokens = 1.max(LUMPY_PACING_SIZE.min(
+                (self.sender.get_congestion_window_in_packets() as f64 *
+                    LUMPY_PACING_CWND_FRACTION) as usize,
+            ));
 
-        // Start of a second burst.
-        let now = now + Duration::from_millis(5);
-        p.send(12000, now);
+            if self.sender.bandwidth_estimate(rtt_stats) <
+                LUMPY_PACING_MIN_BANDWIDTH_KBPS
+            {
+                // Below 1.2Mbps, send 1 packet at once, because one full-sized
+                // packet is about 10ms of queueing.
+                self.lumpy_tokens = 1;
+            }
 
-        let second_burst_send_time = p.next_time();
+            if bytes_in_flight + bytes >= self.sender.get_congestion_window() {
+                // Don't add lumpy_tokens if the congestion controller is CWND
+                // limited.
+                self.lumpy_tokens = 1;
+            }
+        }
 
-        let interval = max_burst as f64 / max_pacing_rate as f64;
+        self.lumpy_tokens -= 1;
+        if self.pacing_limited {
+            // Make up for lost time since pacing throttles the sending.
+            self.ideal_next_packet_send_time.inc(delay)
+        } else {
+            self.ideal_next_packet_send_time.set_max(sent_time + delay);
+        }
 
-        assert_eq!(
-            second_burst_send_time - now,
-            Duration::from_secs_f64(interval)
+        // Stop making up for lost time if underlying sender prevents sending.
+        self.pacing_limited = self.sender.can_send(bytes_in_flight + bytes);
+    }
+
+    #[inline]
+    fn on_congestion_event(
+        &mut self, rtt_updated: bool, prior_in_flight: usize,
+        bytes_in_flight: usize, event_time: Instant, acked_packets: &[Acked],
+        lost_packets: &[Lost], least_unacked: u64, rtt_stats: &RttStats,
+    ) {
+        self.sender.on_congestion_event(
+            rtt_updated,
+            prior_in_flight,
+            bytes_in_flight,
+            event_time,
+            acked_packets,
+            lost_packets,
+            least_unacked,
+            rtt_stats,
         );
 
-        // Start of third burst
-        let now = now + Duration::from_millis(5);
+        if !self.enabled {
+            return;
+        }
 
-        // Update pacer rate.
-        p.update(max_burst, 75_000, now);
+        if !lost_packets.is_empty() {
+            // Clear any burst tokens when entering recovery.
+            self.burst_tokens = 0;
+        }
 
-        p.send(12000, now);
+        if let Some(max_pacing_rate) = self.max_pacing_rate {
+            if rtt_updated {
+                let max_rate = max_pacing_rate * 1.25f32;
+                let max_cwnd =
+                    max_rate.to_bytes_per_period(rtt_stats.smoothed_rtt);
+                self.sender.limit_cwnd(max_cwnd as usize);
+            }
+        }
+    }
 
-        let third_burst_send_time = p.next_time();
+    fn on_packet_neutered(&mut self, packet_number: u64) {
+        self.sender.on_packet_neutered(packet_number);
+    }
 
-        assert_eq!(
-            third_burst_send_time - second_burst_send_time,
-            Duration::from_secs_f64(interval)
-        );
+    fn on_retransmission_timeout(&mut self, packets_retransmitted: bool) {
+        self.sender.on_retransmission_timeout(packets_retransmitted)
+    }
+
+    fn on_connection_migration(&mut self) {
+        self.sender.on_connection_migration()
+    }
+
+    fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool {
+        !self.pacing_limited && self.sender.is_cwnd_limited(bytes_in_flight)
+    }
+
+    fn is_in_recovery(&self) -> bool {
+        self.sender.is_in_recovery()
+    }
+
+    fn pacing_rate(
+        &self, bytes_in_flight: usize, rtt_stats: &RttStats,
+    ) -> Bandwidth {
+        let sender_rate = self.sender.pacing_rate(bytes_in_flight, rtt_stats);
+        match self.max_pacing_rate {
+            Some(rate) if self.enabled => rate.min(sender_rate),
+            _ => sender_rate,
+        }
+    }
+
+    fn bandwidth_estimate(&self, rtt_stats: &RttStats) -> Bandwidth {
+        self.sender.bandwidth_estimate(rtt_stats)
+    }
+
+    fn on_app_limited(&mut self, bytes_in_flight: usize) {
+        self.pacing_limited = false;
+        self.sender.on_app_limited(bytes_in_flight);
+    }
+
+    fn update_mss(&mut self, new_mss: usize) {
+        self.sender.update_mss(new_mss)
     }
 }
