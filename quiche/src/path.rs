@@ -461,7 +461,6 @@ impl Path {
             lost_bytes: self.recovery.bytes_lost,
             stream_retrans_bytes: self.stream_retrans_bytes,
             pmtu: self.recovery.max_datagram_size(),
-            delivery_rate: self.recovery.delivery_rate(),
         }
     }
 }
@@ -842,16 +841,6 @@ pub struct PathStats {
 
     /// The current PMTU for the connection.
     pub pmtu: usize,
-
-    /// The most recent data delivery rate estimate in bytes/s.
-    ///
-    /// Note that this value could be inaccurate if the application does not
-    /// respect pacing hints (see [`SendInfo.at`] and [Pacing] for more
-    /// details).
-    ///
-    /// [`SendInfo.at`]: struct.SendInfo.html#structfield.at
-    /// [Pacing]: index.html#pacing
-    pub delivery_rate: u64,
 }
 
 impl std::fmt::Debug for PathStats {
@@ -881,8 +870,8 @@ impl std::fmt::Debug for PathStats {
 
         write!(
             f,
-            " stream_retrans_bytes={} pmtu={} delivery_rate={}",
-            self.stream_retrans_bytes, self.pmtu, self.delivery_rate,
+            " stream_retrans_bytes={} pmtu={}",
+            self.stream_retrans_bytes, self.pmtu,
         )
     }
 }
