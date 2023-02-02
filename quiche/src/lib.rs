@@ -376,6 +376,8 @@ use std::str::FromStr;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
+use smallvec::SmallVec;
+
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
 
@@ -565,7 +567,7 @@ impl Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -1602,7 +1604,7 @@ impl Connection {
         let max_rx_data = config.local_transport_params.initial_max_data;
 
         let scid_as_hex: Vec<String> =
-            scid.iter().map(|b| format!("{:02x}", b)).collect();
+            scid.iter().map(|b| format!("{b:02x}")).collect();
 
         let reset_token = if is_server {
             config.local_transport_params.stateless_reset_token
@@ -3179,10 +3181,6 @@ impl Connection {
 
         let mut left = b.cap();
 
-        // Limit output packet size by congestion window size.
-        left =
-            cmp::min(left, self.paths.get(send_pid)?.recovery.cwnd_available());
-
         let pn = self.pkt_num_spaces[epoch].next_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
 
@@ -3236,7 +3234,7 @@ impl Connection {
         hdr.to_bytes(&mut b)?;
 
         let hdr_trace = if log::max_level() == log::LevelFilter::Trace {
-            Some(format!("{:?}", hdr))
+            Some(format!("{hdr:?}"))
         } else {
             None
         };
@@ -3292,7 +3290,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let mut frames: Vec<frame::Frame> = Vec::new();
+        let mut frames: SmallVec<[frame::Frame; 1]> = SmallVec::new();
 
         let mut ack_eliciting = false;
         let mut in_flight = false;
@@ -3316,6 +3314,54 @@ impl Connection {
         packet::encode_pkt_num(pn, &mut b)?;
 
         let payload_offset = b.off();
+
+        let left_before_packing_ack_frame = left;
+
+        // Create ACK frame.
+        //
+        // If we think we may explicitly elicit an ACK via PING later, go ahead
+        // and generate an ACK (if there's anything to ACK) since we're going to
+        // send a packet with PING anyways - even if we haven't received
+        // anything ACK eliciting.
+        if self.pkt_num_spaces[epoch].recv_pkt_need_ack.len() > 0 &&
+            (self.pkt_num_spaces[epoch].ack_elicited || ack_elicit_required) &&
+            (!is_closing ||
+                (pkt_type == Type::Handshake &&
+                    self.local_error().map_or(false, |le| le.is_app))) &&
+            self.paths.get(send_pid)?.active()
+        {
+            let ack_delay =
+                self.pkt_num_spaces[epoch].largest_rx_pkt_time.elapsed();
+
+            let ack_delay = ack_delay.as_micros() as u64 /
+                2_u64
+                    .pow(self.local_transport_params.ack_delay_exponent as u32);
+
+            let frame = frame::Frame::ACK {
+                ack_delay,
+                ranges: self.pkt_num_spaces[epoch].recv_pkt_need_ack.clone(),
+                ecn_counts: None, // sending ECN is not supported at this time
+            };
+
+            // ACK-only packets are not congestion controlled so ACKs must be
+            // bundled considering the buffer capacity only, and not
+            // the available cwnd.
+            if push_frame_to_pkt!(b, frames, frame, left) {
+                self.pkt_num_spaces[epoch].ack_elicited = false;
+            }
+        }
+
+        // Limit output packet size by congestion window size.
+        left = cmp::min(
+            left,
+            self.paths
+                .get(send_pid)?
+                .recovery
+                .cwnd_available()
+                .saturating_sub(overhead)
+                .saturating_sub(left_before_packing_ack_frame - left), /* bytes consumed by ACK frames */
+        );
+
         let mut challenge_data = None;
 
         if pkt_type == packet::Type::Short {
@@ -3350,37 +3396,6 @@ impl Connection {
                     ack_eliciting = true;
                     in_flight = true;
                 }
-            }
-        }
-
-        // Create ACK frame.
-        //
-        // If we think we may explicitly elicit an ACK via PING later, go ahead
-        // and generate an ACK (if there's anything to ACK) since we're going to
-        // send a packet with PING anyways - even if we haven't received
-        // anything ACK eliciting.
-        if self.pkt_num_spaces[epoch].recv_pkt_need_ack.len() > 0 &&
-            (self.pkt_num_spaces[epoch].ack_elicited || ack_elicit_required) &&
-            (!is_closing ||
-                (pkt_type == Type::Handshake &&
-                    self.local_error().map_or(false, |le| le.is_app))) &&
-            self.paths.get(send_pid)?.active()
-        {
-            let ack_delay =
-                self.pkt_num_spaces[epoch].largest_rx_pkt_time.elapsed();
-
-            let ack_delay = ack_delay.as_micros() as u64 /
-                2_u64
-                    .pow(self.local_transport_params.ack_delay_exponent as u32);
-
-            let frame = frame::Frame::ACK {
-                ack_delay,
-                ranges: self.pkt_num_spaces[epoch].recv_pkt_need_ack.clone(),
-                ecn_counts: None, // sending ECN is not supported at this time
-            };
-
-            if push_frame_to_pkt!(b, frames, frame, left) {
-                self.pkt_num_spaces[epoch].ack_elicited = false;
             }
         }
 
@@ -3818,20 +3833,18 @@ impl Connection {
             self.paths.get(send_pid)?.active() &&
             !dgram_emitted
         {
-            while let Some(stream_id) = self.streams.pop_flushable() {
+            while let Some(stream_id) = self.streams.peek_flushable() {
                 let stream = match self.streams.get_mut(stream_id) {
-                    Some(v) => v,
-
-                    None => continue,
+                    // Avoid sending frames for streams that were already stopped.
+                    //
+                    // This might happen if stream data was buffered but not yet
+                    // flushed on the wire when a STOP_SENDING frame is received.
+                    Some(v) if !v.send.is_stopped() => v,
+                    _ => {
+                        self.streams.remove_flushable();
+                        continue;
+                    },
                 };
-
-                // Avoid sending frames for streams that were already stopped.
-                //
-                // This might happen if stream data was buffered but not yet
-                // flushed on the wire when a STOP_SENDING frame is received.
-                if stream.send.is_stopped() {
-                    continue;
-                }
 
                 let stream_off = stream.send.off_front();
 
@@ -3856,8 +3869,10 @@ impl Connection {
 
                 let max_len = match left.checked_sub(hdr_len) {
                     Some(v) => v,
-
-                    None => continue,
+                    None => {
+                        self.streams.remove_flushable();
+                        continue;
+                    },
                 };
 
                 let (mut stream_hdr, mut stream_payload) =
@@ -3899,19 +3914,9 @@ impl Connection {
                     has_data = true;
                 }
 
-                // If the stream is still flushable, push it to the back of the
-                // queue again.
-                if stream.is_flushable() {
-                    let urgency = stream.urgency;
-                    let incremental = stream.incremental;
-                    self.streams.push_flushable(stream_id, urgency, incremental);
-                }
-
-                // When fuzzing, try to coalesce multiple STREAM frames in the
-                // same packet, so it's easier to generate fuzz corpora.
-                if cfg!(feature = "fuzzing") && left > frame::MAX_STREAM_OVERHEAD
-                {
-                    continue;
+                // If the stream is no longer flushable, remove it from the queue
+                if !stream.is_flushable() {
+                    self.streams.remove_flushable();
                 }
 
                 break;
@@ -4007,7 +4012,9 @@ impl Connection {
         );
 
         #[cfg(feature = "qlog")]
-        let mut qlog_frames = Vec::with_capacity(frames.len());
+        let mut qlog_frames: SmallVec<
+            [qlog::events::quic::QuicFrame; 1],
+        > = SmallVec::with_capacity(frames.len());
 
         for frame in &mut frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);
@@ -4630,7 +4637,7 @@ impl Connection {
             return Ok(true);
         }
 
-        let stream = match self.streams.get(stream_id) {
+        let stream = match self.streams.get_mut(stream_id) {
             Some(v) => v,
 
             None => return Err(Error::InvalidStreamState(stream_id)),
@@ -4642,7 +4649,10 @@ impl Connection {
 
         if stream.send.cap()? < len {
             let max_off = stream.send.max_off();
-            self.streams.mark_blocked(stream_id, true, max_off);
+            if stream.send.blocked_at() != Some(max_off) {
+                stream.send.update_blocked_at(Some(max_off));
+                self.streams.mark_blocked(stream_id, true, max_off);
+            }
         }
 
         Ok(false)
@@ -7073,7 +7083,7 @@ impl std::fmt::Display for AddrTupleFmt {
             return Ok(());
         }
 
-        f.write_fmt(format_args!("src:{} dst:{}", src, dst))
+        f.write_fmt(format_args!("src:{src} dst:{dst}"))
     }
 }
 
@@ -7611,7 +7621,7 @@ impl TransportParams {
                 owner: Some(owner),
                 resumption_allowed: None,
                 early_data_enabled: None,
-                tls_cipher: Some(format!("{:?}", cipher)),
+                tls_cipher: Some(format!("{cipher:?}")),
                 aead_tag_length: None,
                 original_destination_connection_id,
                 initial_source_connection_id: None,
@@ -9684,13 +9694,13 @@ mod tests {
             testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
         let mut iter = frames.iter();
 
+        // Ignore ACK.
+        iter.next().unwrap();
+
         assert_eq!(
             iter.next(),
             Some(&frame::Frame::PathResponse { data: [0xba; 8] })
         );
-
-        // Ignore ACK.
-        iter.next().unwrap();
     }
 
     #[test]
@@ -11659,6 +11669,69 @@ mod tests {
                 .recovery
                 .app_limited(),
             false
+        );
+    }
+
+    #[test]
+    fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited() {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(50000);
+        config.set_initial_max_stream_data_bidi_local(50000);
+        config.set_initial_max_stream_data_bidi_remote(50000);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_max_recv_udp_payload_size(1200);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client sends stream data bigger than cwnd (it will never arrive to the
+        // server).
+        let send_buf1 = [0; 20000];
+        assert_eq!(pipe.client.stream_send(0, &send_buf1, false), Ok(12000));
+
+        testing::emit_flight(&mut pipe.client).ok();
+
+        // Server sends some stream data that will need ACKs.
+        assert_eq!(
+            pipe.server.stream_send(1, &send_buf1[..500], false),
+            Ok(500)
+        );
+
+        testing::process_flight(
+            &mut pipe.client,
+            testing::emit_flight(&mut pipe.server).unwrap(),
+        )
+        .unwrap();
+
+        let mut buf = [0; 2000];
+
+        let ret = pipe.client.send(&mut buf);
+
+        assert_eq!(pipe.client.tx_cap, 0);
+
+        assert!(matches!(ret, Ok((_, _))), "the client should at least send one packet to acknowledge the newly received data");
+
+        let (sent, _) = ret.unwrap();
+
+        assert_ne!(sent, 0, "the client should at least send a pure ACK packet");
+
+        let frames =
+            testing::decode_pkt(&mut pipe.server, &mut buf, sent).unwrap();
+        assert_eq!(1, frames.len());
+        assert!(
+            matches!(frames[0], frame::Frame::ACK { .. }),
+            "the packet sent by the client must be an ACK only packet"
         );
     }
 

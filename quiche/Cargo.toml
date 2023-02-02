@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["quic", "http3"]
 categories = ["network-programming"]
 license = "BSD-2-Clause"
-rust-version = "1.57"
+rust-version = "1.66"
 include = [
     "/*.md",
     "/*.toml",
@@ -65,6 +65,7 @@ boring = { version = "2.0.0", optional = true }
 foreign-types-shared = { version = "0.3.0", optional = true }
 qlog = { version = "0.8", path = "../qlog", optional = true }
 sfv = { version = "0.9", optional = true }
+smallvec = { version = "1.10", features = ["serde", "union"] }
 
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = ["wincrypt", "ws2def", "ws2ipdef", "ws2tcpip"] }

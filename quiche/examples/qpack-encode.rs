@@ -40,7 +40,7 @@ fn main() {
     let cmd = &args.next().unwrap();
 
     if args.len() != 1 {
-        println!("Usage: {} FILE", cmd);
+        println!("Usage: {cmd} FILE");
         return;
     }
 

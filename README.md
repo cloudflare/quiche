@@ -272,7 +272,7 @@ is disabled by default), by passing ``--features ffi`` to ``cargo``.
 Building
 --------
 
-quiche requires Rust 1.57 or later to build. The latest stable Rust release can
+quiche requires Rust 1.66 or later to build. The latest stable Rust release can
 be installed using [rustup](https://rustup.rs/).
 
 Once the Rust build environment is setup, the quiche source code can be fetched

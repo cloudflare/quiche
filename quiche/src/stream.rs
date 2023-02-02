@@ -29,7 +29,6 @@ use std::cmp;
 use std::sync::Arc;
 
 use std::collections::hash_map;
-
 use std::collections::BTreeMap;
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
@@ -37,6 +36,8 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use std::time;
+
+use smallvec::SmallVec;
 
 use crate::Error;
 use crate::Result;
@@ -361,41 +362,42 @@ impl StreamMap {
         };
     }
 
-    /// Removes and returns the first stream ID from the flushable streams
-    /// queue with the specified urgency.
+    /// Returns the first stream ID from the flushable streams
+    /// queue with the highest urgency.
     ///
-    /// Note that if the stream is still flushable after sending some of its
-    /// outstanding data, it needs to be added back to the queue.
-    pub fn pop_flushable(&mut self) -> Option<u64> {
-        // Remove the first element from the queue corresponding to the lowest
-        // urgency that has elements.
-        let (node, clear) =
-            if let Some((urgency, queues)) = self.flushable.iter_mut().next() {
-                let node = if !queues.0.is_empty() {
-                    queues.0.pop().map(|x| x.0)
-                } else {
-                    queues.1.pop_front()
-                };
-
-                let clear = if queues.0.is_empty() && queues.1.is_empty() {
-                    Some(*urgency)
+    /// Note that if the stream is no longer flushable after sending some of its
+    /// outstanding data, it needs to be removed from the queue.
+    pub fn peek_flushable(&mut self) -> Option<u64> {
+        self.flushable.iter_mut().next().and_then(|(_, queues)| {
+            queues.0.peek().map(|x| x.0).or_else(|| {
+                // When peeking incremental streams, make sure to move the current
+                // stream to the end of the queue so they are pocesses in a round
+                // robin fashion
+                if let Some(current_incremental) = queues.1.pop_front() {
+                    queues.1.push_back(current_incremental);
+                    Some(current_incremental)
                 } else {
                     None
-                };
+                }
+            })
+        })
+    }
 
-                (node, clear)
-            } else {
-                (None, None)
-            };
+    /// Remove the last peeked stream
+    pub fn remove_flushable(&mut self) {
+        let mut top_urgency = self
+            .flushable
+            .first_entry()
+            .expect("Remove previously peeked stream");
 
+        let queues = top_urgency.get_mut();
+        queues.0.pop().map(|x| x.0).or_else(|| queues.1.pop_back());
         // Remove the queue from the list of queues if it is now empty, so that
         // the next time `pop_flushable()` is called the next queue with elements
         // is used.
-        if let Some(urgency) = &clear {
-            self.flushable.remove(urgency);
+        if queues.0.is_empty() && queues.1.is_empty() {
+            top_urgency.remove();
         }
-
-        node
     }
 
     /// Adds or removes the stream ID to/from the readable streams set.
@@ -736,7 +738,7 @@ pub fn is_bidi(stream_id: u64) -> bool {
 /// An iterator over QUIC streams.
 #[derive(Default)]
 pub struct StreamIter {
-    streams: VecDeque<u64>,
+    streams: SmallVec<[u64; 8]>,
 }
 
 impl StreamIter {
@@ -753,7 +755,7 @@ impl Iterator for StreamIter {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.streams.pop_front()
+        self.streams.pop()
     }
 }
 
@@ -773,7 +775,7 @@ impl ExactSizeIterator for StreamIter {
 pub struct RecvBuf {
     /// Chunks of data received from the peer that have not yet been read by
     /// the application, ordered by offset.
-    data: BinaryHeap<RangeBuf>,
+    data: BTreeMap<u64, RangeBuf>,
 
     /// The lowest data offset that has yet to be read by the application.
     off: u64,
@@ -888,22 +890,28 @@ impl RecvBuf {
             // flag set, which is the only kind of empty buffer that should
             // reach this point).
             if buf.off() < self.max_off() || buf.is_empty() {
-                for b in &self.data {
+                for (_, b) in self.data.range(buf.off()..) {
+                    let off = buf.off();
+
+                    // We are past the current buffer.
+                    if b.off() > buf.max_off() {
+                        break;
+                    }
+
                     // New buffer is fully contained in existing buffer.
-                    if buf.off() >= b.off() && buf.max_off() <= b.max_off() {
+                    if off >= b.off() && buf.max_off() <= b.max_off() {
                         continue 'tmp;
                     }
 
                     // New buffer's start overlaps existing buffer.
-                    if buf.off() >= b.off() && buf.off() < b.max_off() {
-                        buf = buf.split_off((b.max_off() - buf.off()) as usize);
+                    if off >= b.off() && off < b.max_off() {
+                        buf = buf.split_off((b.max_off() - off) as usize);
                     }
 
                     // New buffer's end overlaps existing buffer.
-                    if buf.off() < b.off() && buf.max_off() > b.off() {
-                        tmp_bufs.push_back(
-                            buf.split_off((b.off() - buf.off()) as usize),
-                        );
+                    if off < b.off() && buf.max_off() > b.off() {
+                        tmp_bufs
+                            .push_back(buf.split_off((b.off() - off) as usize));
                     }
                 }
             }
@@ -911,7 +919,7 @@ impl RecvBuf {
             self.len = cmp::max(self.len, buf.max_off());
 
             if !self.drain {
-                self.data.push(buf);
+                self.data.insert(buf.max_off(), buf);
             }
         }
 
@@ -941,11 +949,12 @@ impl RecvBuf {
         }
 
         while cap > 0 && self.ready() {
-            let mut buf = match self.data.peek_mut() {
-                Some(v) => v,
-
+            let mut entry = match self.data.first_entry() {
+                Some(entry) => entry,
                 None => break,
             };
+
+            let buf = entry.get_mut();
 
             let buf_len = cmp::min(buf.len(), cap);
 
@@ -963,7 +972,7 @@ impl RecvBuf {
                 break;
             }
 
-            std::collections::binary_heap::PeekMut::pop(buf);
+            entry.remove();
         }
 
         // Update consumed bytes for flow control.
@@ -1078,9 +1087,8 @@ impl RecvBuf {
 
     /// Returns true if the stream has data to be read.
     fn ready(&self) -> bool {
-        let buf = match self.data.peek() {
+        let (_, buf) = match self.data.first_key_value() {
             Some(v) => v,
-
             None => return false,
         };
 

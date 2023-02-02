@@ -58,7 +58,7 @@ fn main() {
     let cmd = &args.next().unwrap();
 
     if args.len() != 0 {
-        println!("Usage: {}", cmd);
+        println!("Usage: {cmd}");
         println!("\nSee tools/apps/ for more complete implementations.");
         return;
     }

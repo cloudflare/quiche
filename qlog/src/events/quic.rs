@@ -27,6 +27,8 @@
 use serde::Deserialize;
 use serde::Serialize;
 
+use smallvec::SmallVec;
+
 use super::connectivity::TransportOwner;
 use super::Bytes;
 use super::DataRecipient;
@@ -105,7 +107,7 @@ impl PacketHeader {
             None => (None, None),
         };
 
-        let version = version.map(|v| format!("{:x?}", v));
+        let version = version.map(|v| format!("{v:x?}"));
 
         PacketHeader {
             packet_type,
@@ -649,7 +651,7 @@ pub struct PacketSent {
 
     pub send_at_time: Option<f32>,
 
-    pub frames: Option<Vec<QuicFrame>>,
+    pub frames: Option<SmallVec<[QuicFrame; 1]>>,
 }
 
 #[serde_with::skip_serializing_none]

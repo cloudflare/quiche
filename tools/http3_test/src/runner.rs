@@ -139,7 +139,7 @@ pub fn run(
             continue;
         }
 
-        return Err(Http3TestError::Other(format!("send() failed: {:?}", e)));
+        return Err(Http3TestError::Other(format!("send() failed: {e:?}")));
     }
 
     debug!("written {}", write);
@@ -177,8 +177,7 @@ pub fn run(
                     }
 
                     return Err(Http3TestError::Other(format!(
-                        "recv() failed: {:?}",
-                        e
+                        "recv() failed: {e:?}",
                     )));
                 },
             };
@@ -252,8 +251,7 @@ pub fn run(
 
                 Err(e) => {
                     return Err(Http3TestError::Other(format!(
-                        "error sending: {:?}",
-                        e
+                        "error sending: {e:?}"
                     )));
                 },
             };
@@ -310,8 +308,7 @@ pub fn run(
 
                                 Err(e) => {
                                     return Err(Http3TestError::Other(format!(
-                                        "error closing conn: {:?}",
-                                        e
+                                        "error closing conn: {e:?}"
                                     )));
                                 },
                             }
@@ -326,8 +323,7 @@ pub fn run(
                             Err(quiche::h3::Error::Done) => (),
                             Err(e) => {
                                 return Err(Http3TestError::Other(format!(
-                                    "error sending request: {:?}",
-                                    e
+                                    "error sending request: {e:?}"
                                 )));
                             },
                         }
@@ -353,8 +349,7 @@ pub fn run(
 
                                 Err(e) => {
                                     return Err(Http3TestError::Other(format!(
-                                        "error closing conn: {:?}",
-                                        e
+                                        "error closing conn: {e:?}"
                                     )));
                                 },
                             }
@@ -409,8 +404,7 @@ pub fn run(
                 }
 
                 return Err(Http3TestError::Other(format!(
-                    "send() failed: {:?}",
-                    e
+                    "send() failed: {e:?}",
                 )));
             }
 

@@ -288,7 +288,7 @@ impl std::fmt::Display for EventCategory {
             EventCategory::Simulation => "simulation",
         };
 
-        write!(f, "{}", v)
+        write!(f, "{v}",)
     }
 }
 

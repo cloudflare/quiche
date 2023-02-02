@@ -885,7 +885,7 @@ impl Frame {
                 stream_id: *stream_id,
                 offset: data.off(),
                 length: data.len() as u64,
-                fin: data.fin().then(|| true),
+                fin: data.fin().then_some(true),
                 raw: None,
             },
 
@@ -1001,7 +1001,7 @@ impl std::fmt::Debug for Frame {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Frame::Padding { len } => {
-                write!(f, "PADDING len={}", len)?;
+                write!(f, "PADDING len={len}")?;
             },
 
             Frame::Ping => {
@@ -1015,8 +1015,7 @@ impl std::fmt::Debug for Frame {
             } => {
                 write!(
                     f,
-                    "ACK delay={} blocks={:?} ecn_counts={:?}",
-                    ack_delay, ranges, ecn_counts
+                    "ACK delay={ack_delay} blocks={ranges:?} ecn_counts={ecn_counts:?}"
                 )?;
             },
 
@@ -1027,8 +1026,7 @@ impl std::fmt::Debug for Frame {
             } => {
                 write!(
                     f,
-                    "RESET_STREAM stream={} err={:x} size={}",
-                    stream_id, error_code, final_size
+                    "RESET_STREAM stream={stream_id} err={error_code:x} size={final_size}"
                 )?;
             },
 
@@ -1036,11 +1034,7 @@ impl std::fmt::Debug for Frame {
                 stream_id,
                 error_code,
             } => {
-                write!(
-                    f,
-                    "STOP_SENDING stream={} err={:x}",
-                    stream_id, error_code
-                )?;
+                write!(f, "STOP_SENDING stream={stream_id} err={error_code:x}")?;
             },
 
             Frame::Crypto { data } => {
@@ -1048,7 +1042,7 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::CryptoHeader { offset, length } => {
-                write!(f, "CRYPTO off={} len={}", offset, length)?;
+                write!(f, "CRYPTO off={offset} len={length}")?;
             },
 
             Frame::NewToken { .. } => {
@@ -1074,45 +1068,43 @@ impl std::fmt::Debug for Frame {
             } => {
                 write!(
                     f,
-                    "STREAM id={} off={} len={} fin={}",
-                    stream_id, offset, length, fin
+                    "STREAM id={stream_id} off={offset} len={length} fin={fin}"
                 )?;
             },
 
             Frame::MaxData { max } => {
-                write!(f, "MAX_DATA max={}", max)?;
+                write!(f, "MAX_DATA max={max}")?;
             },
 
             Frame::MaxStreamData { stream_id, max } => {
-                write!(f, "MAX_STREAM_DATA stream={} max={}", stream_id, max)?;
+                write!(f, "MAX_STREAM_DATA stream={stream_id} max={max}")?;
             },
 
             Frame::MaxStreamsBidi { max } => {
-                write!(f, "MAX_STREAMS type=bidi max={}", max)?;
+                write!(f, "MAX_STREAMS type=bidi max={max}")?;
             },
 
             Frame::MaxStreamsUni { max } => {
-                write!(f, "MAX_STREAMS type=uni max={}", max)?;
+                write!(f, "MAX_STREAMS type=uni max={max}")?;
             },
 
             Frame::DataBlocked { limit } => {
-                write!(f, "DATA_BLOCKED limit={}", limit)?;
+                write!(f, "DATA_BLOCKED limit={limit}")?;
             },
 
             Frame::StreamDataBlocked { stream_id, limit } => {
                 write!(
                     f,
-                    "STREAM_DATA_BLOCKED stream={} limit={}",
-                    stream_id, limit
+                    "STREAM_DATA_BLOCKED stream={stream_id} limit={limit}"
                 )?;
             },
 
             Frame::StreamsBlockedBidi { limit } => {
-                write!(f, "STREAMS_BLOCKED type=bidi limit={}", limit)?;
+                write!(f, "STREAMS_BLOCKED type=bidi limit={limit}")?;
             },
 
             Frame::StreamsBlockedUni { limit } => {
-                write!(f, "STREAMS_BLOCKED type=uni limit={}", limit)?;
+                write!(f, "STREAMS_BLOCKED type=uni limit={limit}")?;
             },
 
             Frame::NewConnectionId {
@@ -1123,21 +1115,20 @@ impl std::fmt::Debug for Frame {
             } => {
                 write!(
                     f,
-                    "NEW_CONNECTION_ID seq_num={} retire_prior_to={} conn_id={:02x?} reset_token={:02x?}",
-                    seq_num, retire_prior_to, conn_id, reset_token,
+                    "NEW_CONNECTION_ID seq_num={seq_num} retire_prior_to={retire_prior_to} conn_id={conn_id:02x?} reset_token={reset_token:02x?}",
                 )?;
             },
 
             Frame::RetireConnectionId { seq_num } => {
-                write!(f, "RETIRE_CONNECTION_ID seq_num={}", seq_num)?;
+                write!(f, "RETIRE_CONNECTION_ID seq_num={seq_num}")?;
             },
 
             Frame::PathChallenge { data } => {
-                write!(f, "PATH_CHALLENGE data={:02x?}", data)?;
+                write!(f, "PATH_CHALLENGE data={data:02x?}")?;
             },
 
             Frame::PathResponse { data } => {
-                write!(f, "PATH_RESPONSE data={:02x?}", data)?;
+                write!(f, "PATH_RESPONSE data={data:02x?}")?;
             },
 
             Frame::ConnectionClose {
@@ -1147,16 +1138,14 @@ impl std::fmt::Debug for Frame {
             } => {
                 write!(
                     f,
-                    "CONNECTION_CLOSE err={:x} frame={:x} reason={:x?}",
-                    error_code, frame_type, reason
+                    "CONNECTION_CLOSE err={error_code:x} frame={frame_type:x} reason={reason:x?}"
                 )?;
             },
 
             Frame::ApplicationClose { error_code, reason } => {
                 write!(
                     f,
-                    "APPLICATION_CLOSE err={:x} reason={:x?}",
-                    error_code, reason
+                    "APPLICATION_CLOSE err={error_code:x} reason={reason:x?}"
                 )?;
             },
 
@@ -1169,7 +1158,7 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::DatagramHeader { length } => {
-                write!(f, "DATAGRAM len={}", length)?;
+                write!(f, "DATAGRAM len={length}")?;
             },
         }
 
