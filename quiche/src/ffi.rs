@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::time;
 use std::ffi;
 use std::ptr;
 use std::slice;
@@ -44,7 +45,6 @@ use libc::c_void;
 use libc::size_t;
 use libc::sockaddr;
 use libc::ssize_t;
-use libc::timespec;
 
 #[cfg(not(windows))]
 use libc::AF_INET;
@@ -725,7 +725,7 @@ pub struct SendInfo {
     to: sockaddr_storage,
     to_len: socklen_t,
 
-    at: timespec,
+    in_nanos: u64,
 }
 
 #[no_mangle]
@@ -743,7 +743,7 @@ pub extern fn quiche_conn_send(
             out_info.from_len = std_addr_to_c(&info.from, &mut out_info.from);
             out_info.to_len = std_addr_to_c(&info.to, &mut out_info.to);
 
-            std_time_to_c(&info.at, &mut out_info.at);
+            out_info.in_nanos = info.at.duration_since(time::Instant::now()).as_nanos() as u64;
 
             v as ssize_t
         },
@@ -1465,20 +1465,6 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
             sa_len as socklen_t
         },
     }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
-fn std_time_to_c(time: &std::time::Instant, out: &mut timespec) {
-    unsafe {
-        ptr::copy_nonoverlapping(time as *const _ as *const timespec, out, 1)
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
-fn std_time_to_c(_time: &std::time::Instant, out: &mut timespec) {
-    // TODO: implement Instant conversion for systems that don't use timespec.
-    out.tv_sec = 0;
-    out.tv_nsec = 0;
 }
 
 #[cfg(test)]
