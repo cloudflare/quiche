@@ -24,29 +24,252 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::iter::FromIterator;
 use std::ops::Range;
 
-use std::collections::btree_map;
 use std::collections::BTreeMap;
 use std::collections::Bound;
 
-#[derive(Clone, PartialEq, Eq, PartialOrd)]
-pub struct RangeSet {
-    inner: BTreeMap<u64, u64>,
+use either::Either;
+use smallvec::SmallVec;
 
+const MAX_INLINE_CAPACITY: usize = 4;
+const MIN_TO_INLINE: usize = 2;
+
+/// A sorted collection of non overlapping [`u64`] ranges
+#[derive(Clone, PartialEq, Eq, PartialOrd)]
+pub enum RangeSet {
+    Inline(InlineRangeSet),
+    BTree(BTreeRangeSet),
+}
+
+/// A [`RangeSet`] variant backed by a [`SmallVec`] that is capable of storing
+/// [`MAX_INLINE_CAPACITY`] of ranges without allocation
+#[derive(Clone, PartialEq, Eq, PartialOrd)]
+pub struct InlineRangeSet {
+    inner: SmallVec<[(u64, u64); MAX_INLINE_CAPACITY]>,
+    capacity: usize,
+}
+
+/// A [`RangeSet`] variant backed by a [`BTreeMap`] that is capable of storing
+/// an arbitrary number of ranges
+#[derive(Clone, PartialEq, Eq, PartialOrd)]
+pub struct BTreeRangeSet {
+    inner: BTreeMap<u64, u64>,
     capacity: usize,
 }
 
 impl RangeSet {
+    /// Create a new [`RangeSet`].
+    ///
+    /// When the length of a [`RangeSet`] overflows `capacity` it will remove
+    /// the smallest range.
     pub fn new(capacity: usize) -> Self {
-        RangeSet {
-            inner: BTreeMap::default(),
+        RangeSet::Inline(InlineRangeSet {
+            inner: Default::default(),
             capacity,
+        })
+    }
+
+    /// The number of nonoverlapping ranges stored in this [`RangeSet`].
+    pub fn len(&self) -> usize {
+        match self {
+            RangeSet::Inline(set) => set.inner.len(),
+            RangeSet::BTree(set) => set.inner.len(),
         }
     }
 
-    // TODO: use RangeInclusive
+    /// Converts the inner representation from a BTree to Inline and vice versa
+    /// when the proper conditions are met. Keeps the stored data intact.
+    #[inline(always)]
+    fn fixup(&mut self) {
+        match self {
+            RangeSet::Inline(set) if set.inner.len() == MAX_INLINE_CAPACITY => {
+                let old_inner = std::mem::take(&mut set.inner);
+                *self = RangeSet::BTree(BTreeRangeSet {
+                    inner: old_inner.into_inner().expect("At capacity").into(),
+                    capacity: set.capacity,
+                });
+            },
+
+            RangeSet::BTree(set) if set.inner.len() <= MIN_TO_INLINE => {
+                let old_inner = std::mem::take(&mut set.inner);
+                *self = RangeSet::Inline(InlineRangeSet {
+                    inner: SmallVec::from_iter(old_inner.into_iter()),
+                    capacity: set.capacity,
+                })
+            },
+
+            _ => {},
+        }
+    }
+
+    /// Insert a new [`Range`] into the collection.
+    ///
+    /// If the [`Range`] overlaps with any existing range, it may be merged with
+    /// one or more other [`Range`]s. If following the insertion the number of
+    /// stored ranges overflows capacity, the smalles range will be removed.
+    #[inline]
     pub fn insert(&mut self, item: Range<u64>) {
+        match self {
+            RangeSet::Inline(set) => set.insert(item),
+            RangeSet::BTree(set) => set.insert(item),
+        }
+
+        self.fixup();
+    }
+
+    /// Iterate over the stored ranges in incremental order.
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = Range<u64>> + DoubleEndedIterator + ExactSizeIterator + '_
+    {
+        match self {
+            RangeSet::BTree(set) =>
+                Either::Left(set.inner.iter().map(|(k, v)| *k..*v)),
+
+            RangeSet::Inline(set) =>
+                Either::Right(set.inner.iter().map(|(s, e)| *s..*e)),
+        }
+    }
+
+    /// Iterate over every single [`u64`] value covered by the ranges in this
+    /// [`RangeSet`] in incremental order.
+    pub fn flatten(
+        &self,
+    ) -> impl Iterator<Item = u64> + DoubleEndedIterator + '_ {
+        match self {
+            RangeSet::BTree(set) =>
+                Either::Left(set.inner.iter().flat_map(|(k, v)| *k..*v)),
+
+            RangeSet::Inline(set) =>
+                Either::Right(set.inner.iter().flat_map(|(s, e)| *s..*e)),
+        }
+    }
+
+    /// The smallest value covered by ranges in this collection.
+    pub fn first(&self) -> Option<u64> {
+        match self {
+            RangeSet::Inline(set) => set.inner.first().map(|(s, _)| *s),
+
+            RangeSet::BTree(set) => set.inner.first_key_value().map(|(k, _)| *k),
+        }
+    }
+
+    /// The largest value covered by ranges in this collection.
+    pub fn last(&self) -> Option<u64> {
+        match self {
+            RangeSet::Inline(set) => set.inner.last().map(|(_, e)| *e - 1),
+
+            RangeSet::BTree(set) =>
+                set.inner.last_key_value().map(|(_, v)| *v - 1),
+        }
+    }
+
+    #[inline]
+    pub fn remove_until(&mut self, largest: u64) {
+        match self {
+            RangeSet::Inline(set) => set.remove_until(largest),
+            RangeSet::BTree(set) => set.remove_until(largest),
+        }
+
+        self.fixup();
+    }
+
+    pub fn push_item(&mut self, item: u64) {
+        self.insert(item..item + 1)
+    }
+}
+
+impl InlineRangeSet {
+    fn insert(&mut self, item: Range<u64>) {
+        let start = item.start;
+        let mut end = item.end;
+        let mut pos = 0;
+
+        loop {
+            match self.inner.get_mut(pos) {
+                Some((s, e)) => {
+                    if start > *e {
+                        // Skip while start is greater than end
+                        pos += 1;
+                        continue;
+                    }
+
+                    if end < *s {
+                        // Inserted range is entirely before this range. Insert
+                        // and return.
+                        if self.inner.len() == self.capacity {
+                            self.inner.remove(0);
+                            pos -= 1;
+                        }
+
+                        self.inner.insert(pos, (start, end));
+                        return;
+                    }
+
+                    // At this point we know (start <= *e)
+                    if start < *s {
+                        // We know we are completely past the previous range, so
+                        // we can simply adjust the lower bound
+                        *s = start;
+                    }
+
+                    if end > *e {
+                        // We adjusted the upper bound of an existing range, we
+                        // must now check it does not overlap with the next range
+                        *e = end;
+                        break;
+                    } else {
+                        return;
+                    }
+                },
+
+                None => {
+                    if self.inner.len() == self.capacity {
+                        self.inner.remove(0);
+                    }
+
+                    self.inner.push((start, end));
+                    return;
+                },
+            }
+        }
+
+        // Merge any newly overlaping ranges
+        while let Some((s, e)) = self.inner.get(pos + 1).copied() {
+            if end < s {
+                // We are done, since the next range is completely disjoint
+                break;
+            }
+
+            let new_e = e.max(end);
+            self.inner[pos].1 = new_e;
+            end = new_e;
+            self.inner.remove(pos + 1);
+        }
+    }
+
+    fn remove_until(&mut self, largest: u64) {
+        while let Some((s, e)) = self.inner.first_mut() {
+            if largest >= *e {
+                self.inner.remove(0);
+                continue;
+            }
+
+            *s = (largest + 1).max(*s);
+            if *s == *e {
+                self.inner.remove(0);
+            }
+
+            break;
+        }
+    }
+}
+
+impl BTreeRangeSet {
+    // TODO: use RangeInclusive
+    fn insert(&mut self, item: Range<u64>) {
         let mut start = item.start;
         let mut end = item.end;
 
@@ -88,7 +311,7 @@ impl RangeSet {
         self.inner.insert(start, end);
     }
 
-    pub fn remove_until(&mut self, largest: u64) {
+    fn remove_until(&mut self, largest: u64) {
         let ranges: Vec<Range<u64>> = self
             .inner
             .range((Bound::Unbounded, Bound::Included(&largest)))
@@ -102,36 +325,6 @@ impl RangeSet {
                 let start = largest + 1;
                 self.insert(start..r.end);
             }
-        }
-    }
-
-    pub fn push_item(&mut self, item: u64) {
-        self.insert(item..item + 1);
-    }
-
-    pub fn first(&self) -> Option<u64> {
-        self.flatten().next()
-    }
-
-    pub fn last(&self) -> Option<u64> {
-        self.flatten().next_back()
-    }
-
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    pub fn iter(&self) -> Iter {
-        Iter {
-            inner: self.inner.iter(),
-        }
-    }
-
-    pub fn flatten(&self) -> Flatten {
-        Flatten {
-            inner: self.inner.iter(),
-            next: 0,
-            end: 0,
         }
     }
 
@@ -152,29 +345,28 @@ impl RangeSet {
 
 impl Default for RangeSet {
     fn default() -> Self {
-        Self::new(usize::MAX)
+        RangeSet::Inline(InlineRangeSet {
+            inner: Default::default(),
+            capacity: usize::MAX,
+        })
     }
 }
 
-// This implements comparison between `RangeSet` and standard `Range`. The idea
-// is that a `RangeSet` with no gaps (i.e. that only contains a single range)
-// is basically equvalent to a normal `Range` so they should be comparable.
+// This implements comparison between `BTreeRangeSet` and standard `Range`. The
+// idea is that a `RangeSet` with no gaps (i.e. that only contains a single
+// range) is basically equvalent to a normal `Range` so they should be
+// comparable.
 impl PartialEq<Range<u64>> for RangeSet {
     fn eq(&self, other: &Range<u64>) -> bool {
         // If there is more than one range it means that the range set is not
         // contiguous, so can't be equal to a single range.
-        if self.inner.len() != 1 {
+        if self.len() != 1 {
             return false;
         }
 
         // Get the first and only range in the set.
-        let (first_start, first_end) = self.inner.iter().next().unwrap();
-
-        if (*first_start..*first_end) != *other {
-            return false;
-        }
-
-        true
+        let range = self.iter().next().unwrap();
+        range == *other
     }
 }
 
@@ -192,71 +384,6 @@ impl std::fmt::Debug for RangeSet {
     }
 }
 
-pub struct Iter<'a> {
-    inner: btree_map::Iter<'a, u64, u64>,
-}
-
-impl<'a> Iterator for Iter<'a> {
-    type Item = Range<u64>;
-
-    fn next(&mut self) -> Option<Range<u64>> {
-        let (&start, &end) = self.inner.next()?;
-        Some(start..end)
-    }
-}
-
-impl<'a> DoubleEndedIterator for Iter<'a> {
-    fn next_back(&mut self) -> Option<Range<u64>> {
-        let (&start, &end) = self.inner.next_back()?;
-        Some(start..end)
-    }
-}
-
-impl<'a> ExactSizeIterator for Iter<'a> {
-    fn len(&self) -> usize {
-        self.inner.len()
-    }
-}
-
-pub struct Flatten<'a> {
-    inner: btree_map::Iter<'a, u64, u64>,
-    next: u64,
-    end: u64,
-}
-
-impl<'a> Iterator for Flatten<'a> {
-    type Item = u64;
-
-    fn next(&mut self) -> Option<u64> {
-        if self.next == self.end {
-            let (&start, &end) = self.inner.next()?;
-
-            self.next = start;
-            self.end = end;
-        }
-
-        let next = self.next;
-        self.next += 1;
-
-        Some(next)
-    }
-}
-
-impl<'a> DoubleEndedIterator for Flatten<'a> {
-    fn next_back(&mut self) -> Option<u64> {
-        if self.next == self.end {
-            let (&start, &end) = self.inner.next_back()?;
-
-            self.next = start;
-            self.end = end;
-        }
-
-        self.end -= 1;
-
-        Some(self.end)
-    }
-}
-
 fn range_overlaps(r: &Range<u64>, other: &Range<u64>) -> bool {
     other.start >= r.start && other.start <= r.end ||
         other.end >= r.start && other.end <= r.end
@@ -269,16 +396,16 @@ mod tests {
     #[test]
     fn insert_non_overlapping() {
         let mut r = RangeSet::default();
-        assert_eq!(r.inner.len(), 0);
+        assert_eq!(r.len(), 0);
         let empty: &[u64] = &[];
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &empty);
 
         r.insert(4..7);
-        assert_eq!(r.inner.len(), 1);
+        assert_eq!(r.len(), 1);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6]);
 
         r.insert(9..12);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6, 9, 10, 11]);
     }
 
@@ -291,23 +418,23 @@ mod tests {
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6, 9, 10, 11]);
 
         r.insert(4..7);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6, 9, 10, 11]);
 
         r.insert(4..6);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6, 9, 10, 11]);
 
         r.insert(5..6);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6, 9, 10, 11]);
 
         r.insert(10..11);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6, 9, 10, 11]);
 
         r.insert(9..11);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6, 9, 10, 11]);
     }
 
@@ -320,29 +447,29 @@ mod tests {
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[3, 4, 5, 9, 10, 11]);
 
         r.insert(5..7);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[3, 4, 5, 6, 9, 10, 11]);
 
         r.insert(10..15);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             3, 4, 5, 6, 9, 10, 11, 12, 13, 14
         ]);
 
         r.insert(2..5);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14
         ]);
 
         r.insert(8..10);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14
         ]);
 
         r.insert(6..10);
-        assert_eq!(r.inner.len(), 1);
+        assert_eq!(r.len(), 1);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
         ]);
@@ -359,27 +486,38 @@ mod tests {
         ]);
 
         r.insert(10..11);
-        assert_eq!(r.inner.len(), 3);
+        assert_eq!(r.len(), 3);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             3, 4, 5, 10, 16, 17, 18, 19
         ]);
 
+        assert!(matches!(r, RangeSet::Inline(_)));
+
         r.insert(13..14);
-        assert_eq!(r.inner.len(), 4);
+        assert_eq!(r.len(), 4);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             3, 4, 5, 10, 13, 16, 17, 18, 19
         ]);
 
+        // Make sure it converted to a btree at capacity
+        assert!(matches!(r, RangeSet::BTree(_)));
+
         r.insert(4..17);
-        assert_eq!(r.inner.len(), 1);
+        assert_eq!(r.len(), 1);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
         ]);
+
+        // Make sure it converted back to inline
+        assert!(matches!(r, RangeSet::Inline(_)));
     }
 
     #[test]
     fn prev_to() {
-        let mut r = RangeSet::default();
+        let mut r = BTreeRangeSet {
+            inner: Default::default(),
+            capacity: usize::MAX,
+        };
 
         r.insert(4..7);
         r.insert(9..12);
@@ -393,7 +531,10 @@ mod tests {
 
     #[test]
     fn next_to() {
-        let mut r = RangeSet::default();
+        let mut r = BTreeRangeSet {
+            inner: Default::default(),
+            capacity: usize::MAX,
+        };
 
         r.insert(4..7);
         r.insert(9..12);
@@ -411,23 +552,23 @@ mod tests {
 
         r.insert(4..7);
         r.insert(9..12);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6, 9, 10, 11]);
 
         r.push_item(15);
-        assert_eq!(r.inner.len(), 3);
+        assert_eq!(r.len(), 3);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             4, 5, 6, 9, 10, 11, 15
         ]);
 
         r.push_item(15);
-        assert_eq!(r.inner.len(), 3);
+        assert_eq!(r.len(), 3);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             4, 5, 6, 9, 10, 11, 15
         ]);
 
         r.push_item(1);
-        assert_eq!(r.inner.len(), 4);
+        assert_eq!(r.len(), 4);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             1, 4, 5, 6, 9, 10, 11, 15
         ]);
@@ -435,21 +576,22 @@ mod tests {
         r.push_item(12);
         r.push_item(13);
         r.push_item(14);
-        assert_eq!(r.inner.len(), 3);
+
+        assert_eq!(r.len(), 3);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             1, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15
         ]);
 
         r.push_item(2);
         r.push_item(3);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15
         ]);
 
         r.push_item(8);
         r.push_item(7);
-        assert_eq!(r.inner.len(), 1);
+        assert_eq!(r.len(), 1);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
         ]);
@@ -458,18 +600,18 @@ mod tests {
     #[test]
     fn flatten_rev() {
         let mut r = RangeSet::default();
-        assert_eq!(r.inner.len(), 0);
+        assert_eq!(r.len(), 0);
 
         let empty: &[u64] = &[];
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &empty);
 
         r.insert(4..7);
-        assert_eq!(r.inner.len(), 1);
+        assert_eq!(r.len(), 1);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6]);
         assert_eq!(&r.flatten().rev().collect::<Vec<u64>>(), &[6, 5, 4]);
 
         r.insert(9..12);
-        assert_eq!(r.inner.len(), 2);
+        assert_eq!(r.len(), 2);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[4, 5, 6, 9, 10, 11]);
         assert_eq!(&r.flatten().rev().collect::<Vec<u64>>(), &[
             11, 10, 9, 6, 5, 4
@@ -479,13 +621,13 @@ mod tests {
     #[test]
     fn flatten_one() {
         let mut r = RangeSet::default();
-        assert_eq!(r.inner.len(), 0);
+        assert_eq!(r.len(), 0);
 
         let empty: &[u64] = &[];
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &empty);
 
         r.insert(0..1);
-        assert_eq!(r.inner.len(), 1);
+        assert_eq!(r.len(), 1);
         assert_eq!(&r.flatten().collect::<Vec<u64>>(), &[0]);
         assert_eq!(&r.flatten().rev().collect::<Vec<u64>>(), &[0]);
     }
@@ -552,6 +694,7 @@ mod tests {
         assert_ne!(r, expected);
 
         r.insert(4..17);
+
         assert_eq!(r, expected);
     }
 
