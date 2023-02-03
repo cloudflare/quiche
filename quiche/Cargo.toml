@@ -54,6 +54,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 cmake = "0.1"
 
 [dependencies]
+either = { version = "1.8", default-features = false }
 log = { version = "0.4", features = ["std"] }
 libc = "0.2"
 libm = "0.2"
