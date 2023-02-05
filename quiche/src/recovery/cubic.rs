@@ -54,6 +54,7 @@ pub static CUBIC: CongestionControlOps = CongestionControlOps {
     checkpoint,
     rollback,
     has_custom_pacing,
+    state_str,
     debug_fmt,
 };
 
@@ -423,6 +424,10 @@ fn rollback(r: &mut Recovery) -> bool {
 
 fn has_custom_pacing() -> bool {
     false
+}
+
+fn state_str(r: &Recovery, now: Instant) -> &'static str {
+    reno::state_str(r, now)
 }
 
 fn debug_fmt(r: &Recovery, f: &mut std::fmt::Formatter) -> std::fmt::Result {
