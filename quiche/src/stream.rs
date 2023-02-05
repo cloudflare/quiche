@@ -45,8 +45,6 @@ use crate::Result;
 use crate::flowcontrol;
 use crate::ranges;
 
-const DEFAULT_URGENCY: u8 = 127;
-
 #[cfg(test)]
 const SEND_BUFFER_SIZE: usize = 5;
 
@@ -626,6 +624,11 @@ impl StreamMap {
                 self.local_max_streams_uni - self.peer_opened_streams_uni
     }
 
+    /// Returns the urgency of the stream which has the highest priority.
+    pub fn highest_priority(&self) -> u8 {
+        self.flushable.iter().next().map(|(u, _)| *u).unwrap_or(crate::DEFAULT_URGENCY)
+    }
+
     /// Returns the number of active streams in the map.
     #[cfg(test)]
     pub fn len(&self) -> usize {
@@ -670,7 +673,7 @@ impl Stream {
             bidi,
             local,
             data: None,
-            urgency: DEFAULT_URGENCY,
+            urgency: crate::DEFAULT_URGENCY,
             incremental: true,
         }
     }
