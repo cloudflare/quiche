@@ -83,6 +83,18 @@ pub fn connect(
         }
     }
 
+    // Warn the user if there are more usable addresses than the advertised
+    // `active_connection_id_limit`.
+    if addrs.len() as u64 > conn_args.max_active_cids {
+        warn!(
+            "{} addresses provided, but configuration restricts to at most {} \
+               active CIDs; increase the --max-active-cids parameter to use all \
+               the provided addresses",
+            addrs.len(),
+            conn_args.max_active_cids
+        );
+    }
+
     // Create the configuration for the QUIC connection.
     let mut config = quiche::Config::new(args.version).unwrap();
 
