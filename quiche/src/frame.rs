@@ -1323,8 +1323,7 @@ impl std::fmt::Debug for Frame {
             } => {
                 write!(
                     f,
-                    "ACK_MP space_id={} delay={} blocks={:?} ecn_counts={:?}",
-                    space_identifier, ack_delay, ranges, ecn_counts
+                    "ACK_MP space_id={space_identifier} delay={ack_delay} blocks={ranges:?} ecn_counts={ecn_counts:?}",
                 )?;
             },
 
@@ -1336,8 +1335,7 @@ impl std::fmt::Debug for Frame {
             } => {
                 write!(
                     f,
-                    "PATH_ABANDON id_type={} path_id={:x?} err={:x} reason={:x?}",
-                    identifier_type, path_identifier, error_code, reason
+                    "PATH_ABANDON id_type={identifier_type} path_id={path_identifier:x?} err={error_code:x} reason={reason:x?}",
                 )?;
             },
 
@@ -1349,8 +1347,7 @@ impl std::fmt::Debug for Frame {
             } => {
                 write!(
                     f,
-                    "PATH_STATUS id_type={} path_id={:x?} seq_num={:x} status={:x}",
-                    identifier_type, path_identifier, seq_num, status,
+                    "PATH_STATUS id_type={identifier_type} path_id={path_identifier:x?} seq_num={seq_num:x} status={status:x}",
                 )?;
             },
         }
