@@ -373,7 +373,7 @@ impl Recovery {
 
         self.schedule_next_packet(epoch, now, sent_bytes);
 
-        pkt.time_sent = self.get_packet_send_time();
+        pkt.time_sent = now + self.get_packet_send_time();
 
         // bytes_in_flight is already updated. Use previous value.
         self.delivery_rate
@@ -393,7 +393,7 @@ impl Recovery {
         self.pacer.update(self.send_quantum, rate, now);
     }
 
-    pub fn get_packet_send_time(&self) -> Instant {
+    pub fn get_packet_send_time(&self) -> Duration {
         self.pacer.next_time()
     }
 
@@ -2037,7 +2037,7 @@ mod tests {
 
         // First packet will be sent out immediately.
         assert_eq!(r.pacer.rate(), 0);
-        assert_eq!(r.get_packet_send_time(), now);
+        assert_eq!(r.get_packet_send_time(), Duration::ZERO);
 
         // Wait 50ms for ACK.
         now += Duration::from_millis(50);
@@ -2094,7 +2094,7 @@ mod tests {
         assert_eq!(r.bytes_in_flight, 6000);
 
         // Pacing is not done during initial phase of connection.
-        assert_eq!(r.get_packet_send_time(), now);
+        assert_eq!(r.get_packet_send_time(), Duration::ZERO);
 
         // Send the third packet out.
         let p = Sent {
@@ -2160,7 +2160,7 @@ mod tests {
 
         assert_eq!(
             r.get_packet_send_time(),
-            now + Duration::from_secs_f64(12000.0 / pacing_rate as f64)
+            Duration::from_secs_f64(12000.0 / pacing_rate as f64)
         );
     }
 }

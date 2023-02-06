@@ -72,9 +72,12 @@ fn send_to_gso_pacing(
         tv_nsec: 0,
     };
 
+    let at = std::time::Instant::now() + send_info.after;
+
+    // TODO: timespec conversion like this is invalid
     unsafe {
         std::ptr::copy_nonoverlapping(
-            &send_info.at as *const _ as *const libc::timespec,
+            &at as *const _ as *const libc::timespec,
             &mut time_spec,
             1,
         )

@@ -58,8 +58,8 @@ pub struct Pacer {
     /// Timestamp of the last packet sent time update.
     last_update: Instant,
 
-    /// Timestamp of the next packet to be sent.
-    next_time: Instant,
+    /// Duration from now of the next packet to be sent.
+    next_time: Duration,
 
     /// Current MSS.
     max_datagram_size: usize,
@@ -98,7 +98,7 @@ impl Pacer {
 
             last_update: Instant::now(),
 
-            next_time: Instant::now(),
+            next_time: Duration::ZERO,
 
             max_datagram_size,
 
@@ -148,7 +148,7 @@ impl Pacer {
 
         self.last_update = now;
 
-        self.next_time = self.next_time.max(now);
+        self.next_time = Duration::ZERO;
 
         self.last_packet_size = None;
 
@@ -164,7 +164,7 @@ impl Pacer {
         }
 
         if !self.iv.is_zero() {
-            self.next_time = self.next_time.max(now) + self.iv;
+            self.next_time = self.iv;
 
             self.iv = Duration::ZERO;
         }
@@ -201,8 +201,8 @@ impl Pacer {
         };
     }
 
-    /// Returns the timestamp for the next packet.
-    pub fn next_time(&self) -> Instant {
+    /// Returns the duration from now for the next packet.
+    pub fn next_time(&self) -> Duration {
         self.next_time
     }
 }
@@ -224,12 +224,12 @@ mod tests {
         // Send 6000 (half of max_burst) -> no timestamp change yet.
         p.send(6000, now);
 
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
+        assert_eq!(p.next_time(), Duration::ZERO);
 
         // Send 6000 bytes -> max_burst filled.
         p.send(6000, now);
 
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
+        assert_eq!(p.next_time(), Duration::ZERO);
 
         // Start of a new burst.
         let now = now + Duration::from_millis(5);
@@ -239,7 +239,7 @@ mod tests {
 
         let interval = max_burst as f64 / pacing_rate as f64;
 
-        assert_eq!(p.next_time() - now, Duration::from_secs_f64(interval));
+        assert_eq!(p.next_time(), Duration::from_secs_f64(interval));
     }
 
     #[test]
@@ -257,7 +257,7 @@ mod tests {
         // Send 6000 (half of max_burst) -> no timestamp change yet.
         p.send(6000, now);
 
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
+        assert_eq!(p.next_time(), Duration::ZERO);
 
         // Sleep 200ms to reset the idle pacer (at least 120ms).
         let now = now + Duration::from_millis(200);
@@ -265,7 +265,7 @@ mod tests {
         // Send 6000 bytes -> idle reset and a new burst  isstarted.
         p.send(6000, now);
 
-        assert_eq!(p.next_time(), now);
+        assert_eq!(p.next_time(), Duration::ZERO);
     }
 
     #[test]

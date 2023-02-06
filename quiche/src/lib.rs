@@ -648,7 +648,7 @@ pub struct SendInfo {
     /// See [Pacing] for more details.
     ///
     /// [Pacing]: index.html#pacing
-    pub at: time::Instant,
+    pub after: time::Duration,
 }
 
 /// Represents information carried by `CONNECTION_CLOSE` frames.
@@ -3235,7 +3235,7 @@ impl Connection {
             from: send_path.local_addr(),
             to: send_path.peer_addr(),
 
-            at: send_path.recovery.get_packet_send_time(),
+            after: send_path.recovery.get_packet_send_time(),
         };
 
         Ok((done, info))
