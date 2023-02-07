@@ -623,7 +623,7 @@ pub struct ConnectionError {
     pub reason: Vec<u8>,
 }
 
-/// The stream's side to shutdown.
+/// The side of the stream to be shut down.
 ///
 /// This should be used when calling [`stream_shutdown()`].
 ///
