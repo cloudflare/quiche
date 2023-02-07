@@ -331,7 +331,7 @@ ssize_t quiche_conn_send(quiche_conn *conn, uint8_t *out, size_t out_len,
                          quiche_send_info *out_info);
 
 // Returns the size of the send quantum, in bytes.
-size_t quiche_conn_send_quantum(quiche_conn *conn);
+size_t quiche_conn_send_quantum(const quiche_conn *conn);
 
 // Reads contiguous data from a stream.
 ssize_t quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
@@ -341,6 +341,7 @@ ssize_t quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
 ssize_t quiche_conn_stream_send(quiche_conn *conn, uint64_t stream_id,
                                 const uint8_t *buf, size_t buf_len, bool fin);
 
+// The side of the stream to be shut down.
 enum quiche_shutdown {
     QUICHE_SHUTDOWN_READ = 0,
     QUICHE_SHUTDOWN_WRITE = 1,
@@ -354,29 +355,36 @@ int quiche_conn_stream_priority(quiche_conn *conn, uint64_t stream_id,
 int quiche_conn_stream_shutdown(quiche_conn *conn, uint64_t stream_id,
                                 enum quiche_shutdown direction, uint64_t err);
 
-ssize_t quiche_conn_stream_capacity(quiche_conn *conn, uint64_t stream_id);
+// Returns the stream's send capacity in bytes.
+ssize_t quiche_conn_stream_capacity(const quiche_conn *conn, uint64_t stream_id);
 
-bool quiche_conn_stream_readable(quiche_conn *conn, uint64_t stream_id);
+// Returns true if the stream has data that can be read.
+bool quiche_conn_stream_readable(const quiche_conn *conn, uint64_t stream_id);
+
+// Returns true if the stream has enough send capacity.
+//
+// On error a value lower than 0 is returned.
+int quiche_conn_stream_writable(quiche_conn *conn, uint64_t stream_id, size_t len);
 
 // Returns true if all the data has been read from the specified stream.
-bool quiche_conn_stream_finished(quiche_conn *conn, uint64_t stream_id);
+bool quiche_conn_stream_finished(const quiche_conn *conn, uint64_t stream_id);
 
 typedef struct quiche_stream_iter quiche_stream_iter;
 
 // Returns an iterator over streams that have outstanding data to read.
-quiche_stream_iter *quiche_conn_readable(quiche_conn *conn);
+quiche_stream_iter *quiche_conn_readable(const quiche_conn *conn);
 
 // Returns an iterator over streams that can be written to.
-quiche_stream_iter *quiche_conn_writable(quiche_conn *conn);
+quiche_stream_iter *quiche_conn_writable(const quiche_conn *conn);
 
 // Returns the maximum possible size of egress UDP payloads.
-size_t quiche_conn_max_send_udp_payload_size(quiche_conn *conn);
+size_t quiche_conn_max_send_udp_payload_size(const quiche_conn *conn);
 
 // Returns the amount of time until the next timeout event, in nanoseconds.
-uint64_t quiche_conn_timeout_as_nanos(quiche_conn *conn);
+uint64_t quiche_conn_timeout_as_nanos(const quiche_conn *conn);
 
 // Returns the amount of time until the next timeout event, in milliseconds.
-uint64_t quiche_conn_timeout_as_millis(quiche_conn *conn);
+uint64_t quiche_conn_timeout_as_millis(const quiche_conn *conn);
 
 // Processes a timeout event.
 void quiche_conn_on_timeout(quiche_conn *conn);
@@ -386,23 +394,23 @@ int quiche_conn_close(quiche_conn *conn, bool app, uint64_t err,
                       const uint8_t *reason, size_t reason_len);
 
 // Returns a string uniquely representing the connection.
-void quiche_conn_trace_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
+void quiche_conn_trace_id(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns the source connection ID.
-void quiche_conn_source_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
+void quiche_conn_source_id(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns the destination connection ID.
-void quiche_conn_destination_id(quiche_conn *conn, const uint8_t **out, size_t *out_len);
+void quiche_conn_destination_id(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns the negotiated ALPN protocol.
-void quiche_conn_application_proto(quiche_conn *conn, const uint8_t **out,
+void quiche_conn_application_proto(const quiche_conn *conn, const uint8_t **out,
                                    size_t *out_len);
 
 // Returns the peer's leaf certificate (if any) as a DER-encoded buffer.
-void quiche_conn_peer_cert(quiche_conn *conn, const uint8_t **out, size_t *out_len);
+void quiche_conn_peer_cert(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns the serialized cryptographic session for the connection.
-void quiche_conn_session(quiche_conn *conn, const uint8_t **out, size_t *out_len);
+void quiche_conn_session(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns true if the connection handshake is complete.
 bool quiche_conn_is_established(const quiche_conn *conn);
@@ -419,11 +427,11 @@ bool quiche_conn_is_draining(const quiche_conn *conn);
 
 // Returns the number of bidirectional streams that can be created
 // before the peer's stream count limit is reached.
-uint64_t quiche_conn_peer_streams_left_bidi(quiche_conn *conn);
+uint64_t quiche_conn_peer_streams_left_bidi(const quiche_conn *conn);
 
 // Returns the number of unidirectional streams that can be created
 // before the peer's stream count limit is reached.
-uint64_t quiche_conn_peer_streams_left_uni(quiche_conn *conn);
+uint64_t quiche_conn_peer_streams_left_uni(const quiche_conn *conn);
 
 // Returns true if the connection is closed.
 bool quiche_conn_is_closed(const quiche_conn *conn);
@@ -433,7 +441,7 @@ bool quiche_conn_is_timed_out(const quiche_conn *conn);
 
 // Returns true if a connection error was received, and updates the provided
 // parameters accordingly.
-bool quiche_conn_peer_error(quiche_conn *conn,
+bool quiche_conn_peer_error(const quiche_conn *conn,
                             bool *is_app,
                             uint64_t *error_code,
                             const uint8_t **reason,
@@ -441,11 +449,11 @@ bool quiche_conn_peer_error(quiche_conn *conn,
 
 // Returns true if a connection error was queued or sent, and updates the provided
 // parameters accordingly.
-bool quiche_conn_local_error(quiche_conn *conn,
-                            bool *is_app,
-                            uint64_t *error_code,
-                            const uint8_t **reason,
-                            size_t *reason_len);
+bool quiche_conn_local_error(const quiche_conn *conn,
+                             bool *is_app,
+                             uint64_t *error_code,
+                             const uint8_t **reason,
+                             size_t *reason_len);
 
 // Initializes the stream's application data.
 //
@@ -536,7 +544,7 @@ typedef struct {
 } quiche_stats;
 
 // Collects and returns statistics about the connection.
-void quiche_conn_stats(quiche_conn *conn, quiche_stats *out);
+void quiche_conn_stats(const quiche_conn *conn, quiche_stats *out);
 
 typedef struct {
     // The local address used by this path.
@@ -595,25 +603,25 @@ typedef struct {
 //
 // The `idx` argument represent the path's index (also see the `paths_count`
 // field of `quiche_stats`).
-int quiche_conn_path_stats(quiche_conn *conn, size_t idx, quiche_path_stats *out);
+int quiche_conn_path_stats(const quiche_conn *conn, size_t idx, quiche_path_stats *out);
 
 // Returns the maximum DATAGRAM payload that can be sent.
-ssize_t quiche_conn_dgram_max_writable_len(quiche_conn *conn);
+ssize_t quiche_conn_dgram_max_writable_len(const quiche_conn *conn);
 
 // Returns the length of the first stored DATAGRAM.
-ssize_t quiche_conn_dgram_recv_front_len(quiche_conn *conn);
+ssize_t quiche_conn_dgram_recv_front_len(const quiche_conn *conn);
 
 // Returns the number of items in the DATAGRAM receive queue.
-ssize_t quiche_conn_dgram_recv_queue_len(quiche_conn *conn);
+ssize_t quiche_conn_dgram_recv_queue_len(const quiche_conn *conn);
 
 // Returns the total size of all items in the DATAGRAM receive queue.
-ssize_t quiche_conn_dgram_recv_queue_byte_size(quiche_conn *conn);
+ssize_t quiche_conn_dgram_recv_queue_byte_size(const quiche_conn *conn);
 
 // Returns the number of items in the DATAGRAM send queue.
-ssize_t quiche_conn_dgram_send_queue_len(quiche_conn *conn);
+ssize_t quiche_conn_dgram_send_queue_len(const quiche_conn *conn);
 
 // Returns the total size of all items in the DATAGRAM send queue.
-ssize_t quiche_conn_dgram_send_queue_byte_size(quiche_conn *conn);
+ssize_t quiche_conn_dgram_send_queue_byte_size(const quiche_conn *conn);
 
 // Reads the first received DATAGRAM.
 ssize_t quiche_conn_dgram_recv(quiche_conn *conn, uint8_t *buf,

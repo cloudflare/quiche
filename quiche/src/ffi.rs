@@ -816,7 +816,7 @@ pub extern fn quiche_conn_stream_shutdown(
 
 #[no_mangle]
 pub extern fn quiche_conn_stream_capacity(
-    conn: &mut Connection, stream_id: u64,
+    conn: &Connection, stream_id: u64,
 ) -> ssize_t {
     match conn.stream_capacity(stream_id) {
         Ok(v) => v as ssize_t,
@@ -827,14 +827,27 @@ pub extern fn quiche_conn_stream_capacity(
 
 #[no_mangle]
 pub extern fn quiche_conn_stream_readable(
-    conn: &mut Connection, stream_id: u64,
+    conn: &Connection, stream_id: u64,
 ) -> bool {
     conn.stream_readable(stream_id)
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_stream_writable(
+    conn: &mut Connection, stream_id: u64, len: usize,
+) -> c_int {
+    match conn.stream_writable(stream_id, len) {
+        Ok(true) => 1,
+
+        Ok(false) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_stream_finished(
-    conn: &mut Connection, stream_id: u64,
+    conn: &Connection, stream_id: u64,
 ) -> bool {
     conn.stream_finished(stream_id)
 }
@@ -900,7 +913,7 @@ pub extern fn quiche_conn_close(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_timeout_as_nanos(conn: &mut Connection) -> u64 {
+pub extern fn quiche_conn_timeout_as_nanos(conn: &Connection) -> u64 {
     match conn.timeout() {
         Some(timeout) => timeout.as_nanos() as u64,
 
@@ -909,7 +922,7 @@ pub extern fn quiche_conn_timeout_as_nanos(conn: &mut Connection) -> u64 {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_timeout_as_millis(conn: &mut Connection) -> u64 {
+pub extern fn quiche_conn_timeout_as_millis(conn: &Connection) -> u64 {
     match conn.timeout() {
         Some(timeout) => timeout.as_millis() as u64,
 
@@ -924,7 +937,7 @@ pub extern fn quiche_conn_on_timeout(conn: &mut Connection) {
 
 #[no_mangle]
 pub extern fn quiche_conn_trace_id(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+    conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let trace_id = conn.trace_id();
 
@@ -934,7 +947,7 @@ pub extern fn quiche_conn_trace_id(
 
 #[no_mangle]
 pub extern fn quiche_conn_source_id(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+    conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let conn_id = conn.source_id();
     let id = conn_id.as_ref();
@@ -944,7 +957,7 @@ pub extern fn quiche_conn_source_id(
 
 #[no_mangle]
 pub extern fn quiche_conn_destination_id(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+    conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let conn_id = conn.destination_id();
     let id = conn_id.as_ref();
@@ -955,7 +968,7 @@ pub extern fn quiche_conn_destination_id(
 
 #[no_mangle]
 pub extern fn quiche_conn_application_proto(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+    conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let proto = conn.application_proto();
 
@@ -965,7 +978,7 @@ pub extern fn quiche_conn_application_proto(
 
 #[no_mangle]
 pub extern fn quiche_conn_peer_cert(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+    conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     match conn.peer_cert() {
         Some(peer_cert) => {
@@ -979,7 +992,7 @@ pub extern fn quiche_conn_peer_cert(
 
 #[no_mangle]
 pub extern fn quiche_conn_session(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+    conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     match conn.session() {
         Some(session) => {
@@ -1018,7 +1031,7 @@ pub extern fn quiche_conn_is_timed_out(conn: &Connection) -> bool {
 
 #[no_mangle]
 pub extern fn quiche_conn_peer_error(
-    conn: &mut Connection, is_app: *mut bool, error_code: *mut u64,
+    conn: &Connection, is_app: *mut bool, error_code: *mut u64,
     reason: &mut *const u8, reason_len: &mut size_t,
 ) -> bool {
     match &conn.peer_error {
@@ -1037,7 +1050,7 @@ pub extern fn quiche_conn_peer_error(
 
 #[no_mangle]
 pub extern fn quiche_conn_local_error(
-    conn: &mut Connection, is_app: *mut bool, error_code: *mut u64,
+    conn: &Connection, is_app: *mut bool, error_code: *mut u64,
     reason: &mut *const u8, reason_len: &mut size_t,
 ) -> bool {
     match &conn.local_error {
@@ -1300,17 +1313,17 @@ pub extern fn quiche_conn_free(conn: *mut Connection) {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_peer_streams_left_bidi(conn: &mut Connection) -> u64 {
+pub extern fn quiche_conn_peer_streams_left_bidi(conn: &Connection) -> u64 {
     conn.peer_streams_left_bidi()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_peer_streams_left_uni(conn: &mut Connection) -> u64 {
+pub extern fn quiche_conn_peer_streams_left_uni(conn: &Connection) -> u64 {
     conn.peer_streams_left_uni()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_send_quantum(conn: &mut Connection) -> size_t {
+pub extern fn quiche_conn_send_quantum(conn: &Connection) -> size_t {
     conn.send_quantum() as size_t
 }
 
