@@ -73,6 +73,7 @@ pub struct PartialRequest {
 
 pub struct PartialResponse {
     pub headers: Option<Vec<quiche::h3::Header>>,
+    pub priority: Option<quiche::h3::Priority>,
 
     pub body: Vec<u8>,
 
@@ -795,6 +796,7 @@ impl HttpConn for Http09Conn {
                     if written < body.len() {
                         let response = PartialResponse {
                             headers: None,
+                            priority: None,
                             body,
                             written,
                         };
@@ -1621,6 +1623,7 @@ impl HttpConn for Http3Conn {
                         Err(quiche::h3::Error::StreamBlocked) => {
                             let response = PartialResponse {
                                 headers: Some(headers),
+                                priority: Some(priority),
                                 body,
                                 written: 0,
                             };
@@ -1662,6 +1665,7 @@ impl HttpConn for Http3Conn {
                     if written < body.len() {
                         let response = PartialResponse {
                             headers: None,
+                            priority: None,
                             body,
                             written,
                         };
@@ -1772,8 +1776,10 @@ impl HttpConn for Http3Conn {
 
         let resp = partial_responses.get_mut(&stream_id).unwrap();
 
-        if let Some(ref headers) = resp.headers {
-            match self.h3_conn.send_response(conn, stream_id, headers, false) {
+        if let (Some(headers), Some(priority)) = (&resp.headers, &resp.priority) {
+            match self.h3_conn.send_response_with_priority(
+                conn, stream_id, headers, priority, false,
+            ) {
                 Ok(_) => (),
 
                 Err(quiche::h3::Error::StreamBlocked) => {
@@ -1788,6 +1794,7 @@ impl HttpConn for Http3Conn {
         }
 
         resp.headers = None;
+        resp.priority = None;
 
         let body = &resp.body[resp.written..];
 
