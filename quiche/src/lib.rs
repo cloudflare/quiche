@@ -7936,7 +7936,7 @@ impl Connection {
         }
 
         let mut consider_standby = false;
-        let dgrams_to_emit = self.dgram_max_writable_len().is_some();
+        let dgrams_to_emit = self.dgram_send_queue.has_pending();
         let stream_to_emit = self.streams.has_flushable();
         // When using aggregate mode, favour lowest-latency path on which CWIN
         // is open. This should only be used when data need to be sent.
@@ -17059,6 +17059,8 @@ mod tests {
         config.set_initial_max_stream_data_bidi_local(100000);
         config.set_initial_max_stream_data_bidi_remote(100000);
         config.set_initial_max_streams_bidi(2);
+        // To test with enabled datagrams.
+        config.enable_dgram(true, 10, 10);
         config.set_multipath(true);
 
         let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
