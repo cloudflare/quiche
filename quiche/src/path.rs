@@ -322,6 +322,15 @@ impl Path {
         self.challenge_requested = false;
     }
 
+    /// Handles the sending of PATH_CHALLENGE.
+    pub fn add_challenge_sent(
+        &mut self, data: [u8; 8], pkt_size: usize, sent_time: time::Instant,
+    ) {
+        self.on_challenge_sent();
+        self.in_flight_challenges
+            .push_back((data, pkt_size, sent_time));
+    }
+
     pub fn on_challenge_received(&mut self, data: [u8; 8]) {
         self.received_challenges.push_back(data);
         self.peer_verified_local_address = true;
@@ -698,20 +707,6 @@ impl PathMap {
             .map(|(pid, _)| pid)
     }
 
-    /// Handles the sending of PATH_CHALLENGE.
-    pub fn on_challenge_sent(
-        &mut self, path_id: usize, data: [u8; 8], pkt_size: usize,
-        sent_time: time::Instant,
-    ) -> Result<()> {
-        let path = self.get_mut(path_id)?;
-
-        path.on_challenge_sent();
-        path.in_flight_challenges
-            .push_back((data, pkt_size, sent_time));
-
-        Ok(())
-    }
-
     /// Handles incoming PATH_RESPONSE data.
     pub fn on_response_received(&mut self, data: [u8; 8]) -> Result<()> {
         let active_pid = self.get_active_path_id()?;
@@ -936,14 +931,11 @@ mod tests {
         // Fake sending of PathChallenge in a packet of MIN_CLIENT_INITIAL_LEN - 1
         // bytes.
         let data = rand::rand_u64().to_be_bytes();
-        path_mgr
-            .on_challenge_sent(
-                pid,
-                data,
-                MIN_CLIENT_INITIAL_LEN - 1,
-                time::Instant::now(),
-            )
-            .unwrap();
+        path_mgr.get_mut(pid).unwrap().add_challenge_sent(
+            data,
+            MIN_CLIENT_INITIAL_LEN - 1,
+            time::Instant::now(),
+        );
 
         assert_eq!(path_mgr.get_mut(pid).unwrap().validation_requested(), false);
         assert_eq!(path_mgr.get_mut(pid).unwrap().probing_required(), false);
@@ -969,14 +961,11 @@ mod tests {
         // Fake sending of PathChallenge in a packet of MIN_CLIENT_INITIAL_LEN
         // bytes.
         let data = rand::rand_u64().to_be_bytes();
-        path_mgr
-            .on_challenge_sent(
-                pid,
-                data,
-                MIN_CLIENT_INITIAL_LEN,
-                time::Instant::now(),
-            )
-            .unwrap();
+        path_mgr.get_mut(pid).unwrap().add_challenge_sent(
+            data,
+            MIN_CLIENT_INITIAL_LEN,
+            time::Instant::now(),
+        );
 
         path_mgr.on_response_received(data).unwrap();
 
@@ -1010,26 +999,27 @@ mod tests {
 
         // First probe.
         let data = rand::rand_u64().to_be_bytes();
+
         client_path_mgr
-            .on_challenge_sent(
-                client_pid,
+            .get_mut(client_pid)
+            .unwrap()
+            .add_challenge_sent(
                 data,
                 MIN_CLIENT_INITIAL_LEN,
                 time::Instant::now(),
-            )
-            .unwrap();
+            );
 
         // Second probe.
         let data_2 = rand::rand_u64().to_be_bytes();
+
         client_path_mgr
-            .on_challenge_sent(
-                client_pid,
+            .get_mut(client_pid)
+            .unwrap()
+            .add_challenge_sent(
                 data_2,
                 MIN_CLIENT_INITIAL_LEN,
                 time::Instant::now(),
-            )
-            .unwrap();
-
+            );
         assert_eq!(
             client_path_mgr
                 .get(client_pid)

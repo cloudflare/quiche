@@ -3073,17 +3073,17 @@ impl Connection {
 
         let pkt_type = self.write_pkt_type(send_pid)?;
 
+        let max_dgram_len = self.dgram_max_writable_len();
+
         let epoch = pkt_type.to_epoch()?;
+        let pkt_space = &mut self.pkt_num_spaces[epoch];
 
         // Process lost frames. There might be several paths having lost frames.
         for (_, p) in self.paths.iter_mut() {
             for lost in p.recovery.lost[epoch].drain(..) {
                 match lost {
                     frame::Frame::CryptoHeader { offset, length } => {
-                        self.pkt_num_spaces[epoch]
-                            .crypto_stream
-                            .send
-                            .retransmit(offset, length);
+                        pkt_space.crypto_stream.send.retransmit(offset, length);
 
                         self.stream_retrans_bytes += length as u64;
                         p.stream_retrans_bytes += length as u64;
@@ -3136,7 +3136,7 @@ impl Connection {
                     },
 
                     frame::Frame::ACK { .. } => {
-                        self.pkt_num_spaces[epoch].ack_elicited = true;
+                        pkt_space.ack_elicited = true;
                     },
 
                     frame::Frame::ResetStream {
@@ -3179,33 +3179,32 @@ impl Connection {
             }
         }
 
+        let is_app_limited = self.delivery_rate_check_if_app_limited();
+        let n_paths = self.paths.len();
+        let path = self.paths.get_mut(send_pid)?;
+        let flow_control = &mut self.flow_control;
+        let pkt_space = &mut self.pkt_num_spaces[epoch];
+
         let mut left = b.cap();
 
-        let pn = self.pkt_num_spaces[epoch].next_pkt_num;
+        let pn = pkt_space.next_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
 
         // The AEAD overhead at the current encryption level.
-        let crypto_overhead = self.pkt_num_spaces[epoch]
-            .crypto_overhead()
-            .ok_or(Error::Done)?;
+        let crypto_overhead = pkt_space.crypto_overhead().ok_or(Error::Done)?;
 
-        let dcid_seq = self
-            .paths
-            .get(send_pid)?
-            .active_dcid_seq
-            .ok_or(Error::OutOfIdentifiers)?;
+        let dcid_seq = path.active_dcid_seq.ok_or(Error::OutOfIdentifiers)?;
 
         let dcid =
             ConnectionId::from_ref(self.ids.get_dcid(dcid_seq)?.cid.as_ref());
 
-        let scid =
-            if let Some(scid_seq) = self.paths.get(send_pid)?.active_scid_seq {
-                ConnectionId::from_ref(self.ids.get_scid(scid_seq)?.cid.as_ref())
-            } else if pkt_type == packet::Type::Short {
-                ConnectionId::default()
-            } else {
-                return Err(Error::InvalidState);
-            };
+        let scid = if let Some(scid_seq) = path.active_scid_seq {
+            ConnectionId::from_ref(self.ids.get_scid(scid_seq)?.cid.as_ref())
+        } else if pkt_type == packet::Type::Short {
+            ConnectionId::default()
+        } else {
+            return Err(Error::InvalidState);
+        };
 
         let hdr = Header {
             ty: pkt_type,
@@ -3273,20 +3272,14 @@ impl Connection {
                 // This usually happens when we try to send a new packet but
                 // failed because cwnd is almost full. In such case app_limited
                 // is set to false here to make cwnd grow when ACK is received.
-                self.paths
-                    .get_mut(send_pid)?
-                    .recovery
-                    .update_app_limited(false);
+                path.recovery.update_app_limited(false);
                 return Err(Error::Done);
             },
         }
 
         // Make sure there is enough space for the minimum payload length.
         if left < PAYLOAD_MIN_LEN {
-            self.paths
-                .get_mut(send_pid)?
-                .recovery
-                .update_app_limited(false);
+            path.recovery.update_app_limited(false);
             return Err(Error::Done);
         }
 
@@ -3298,8 +3291,7 @@ impl Connection {
 
         // Whether or not we should explicitly elicit an ACK via PING frame if we
         // implicitly elicit one otherwise.
-        let ack_elicit_required =
-            self.paths.get(send_pid)?.recovery.should_elicit_ack(epoch);
+        let ack_elicit_required = path.recovery.should_elicit_ack(epoch);
 
         let header_offset = b.off();
 
@@ -3323,15 +3315,16 @@ impl Connection {
         // and generate an ACK (if there's anything to ACK) since we're going to
         // send a packet with PING anyways - even if we haven't received
         // anything ACK eliciting.
-        if self.pkt_num_spaces[epoch].recv_pkt_need_ack.len() > 0 &&
-            (self.pkt_num_spaces[epoch].ack_elicited || ack_elicit_required) &&
+        if pkt_space.recv_pkt_need_ack.len() > 0 &&
+            (pkt_space.ack_elicited || ack_elicit_required) &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
-                    self.local_error().map_or(false, |le| le.is_app))) &&
-            self.paths.get(send_pid)?.active()
+                    self.local_error
+                        .as_ref()
+                        .map_or(false, |le| le.is_app))) &&
+            path.active()
         {
-            let ack_delay =
-                self.pkt_num_spaces[epoch].largest_rx_pkt_time.elapsed();
+            let ack_delay = pkt_space.largest_rx_pkt_time.elapsed();
 
             let ack_delay = ack_delay.as_micros() as u64 /
                 2_u64
@@ -3339,7 +3332,7 @@ impl Connection {
 
             let frame = frame::Frame::ACK {
                 ack_delay,
-                ranges: self.pkt_num_spaces[epoch].recv_pkt_need_ack.clone(),
+                ranges: pkt_space.recv_pkt_need_ack.clone(),
                 ecn_counts: None, // sending ECN is not supported at this time
             };
 
@@ -3347,16 +3340,14 @@ impl Connection {
             // bundled considering the buffer capacity only, and not
             // the available cwnd.
             if push_frame_to_pkt!(b, frames, frame, left) {
-                self.pkt_num_spaces[epoch].ack_elicited = false;
+                pkt_space.ack_elicited = false;
             }
         }
 
         // Limit output packet size by congestion window size.
         left = cmp::min(
             left,
-            self.paths
-                .get(send_pid)?
-                .recovery
+            path.recovery
                 .cwnd_available()
                 .saturating_sub(overhead)
                 .saturating_sub(left_before_packing_ack_frame - left), /* bytes consumed by ACK frames */
@@ -3367,9 +3358,7 @@ impl Connection {
         if pkt_type == packet::Type::Short {
             // Create PATH_RESPONSE frame if needed.
             // We do not try to ensure that these are really sent.
-            while let Some(challenge) =
-                self.paths.get_mut(send_pid)?.pop_received_challenge()
-            {
+            while let Some(challenge) = path.pop_received_challenge() {
                 let frame = frame::Frame::PathResponse { data: challenge };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
@@ -3383,7 +3372,7 @@ impl Connection {
             }
 
             // Create PATH_CHALLENGE frame if needed.
-            if self.paths.get(send_pid)?.validation_requested() {
+            if path.validation_requested() {
                 // TODO: ensure that data is unique over paths.
                 let data = rand::rand_u64().to_be_bytes();
 
@@ -3415,12 +3404,13 @@ impl Connection {
             }
         }
 
-        if pkt_type == packet::Type::Short &&
-            !is_closing &&
-            self.paths.get(send_pid)?.active()
-        {
+        if pkt_type == packet::Type::Short && !is_closing && path.active() {
             // Create HANDSHAKE_DONE frame.
-            if self.should_send_handshake_done() {
+            // self.should_send_handshake_done() but without the need to borrow
+            if self.handshake_completed &&
+                !self.handshake_done_sent &&
+                self.is_server
+            {
                 let frame = frame::Frame::HandshakeDone;
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
@@ -3485,10 +3475,7 @@ impl Connection {
                 };
 
                 // Autotune the stream window size.
-                stream.recv.autotune_window(
-                    now,
-                    self.paths.get(send_pid)?.recovery.rtt(),
-                );
+                stream.recv.autotune_window(now, path.recovery.rtt());
 
                 let frame = frame::Frame::MaxStreamData {
                     stream_id,
@@ -3507,7 +3494,7 @@ impl Connection {
 
                     // Make sure the connection window always has some
                     // room compared to the stream window.
-                    self.flow_control.ensure_window_lower_bound(
+                    flow_control.ensure_window_lower_bound(
                         (recv_win as f64 * CONNECTION_WINDOW_FACTOR) as u64,
                     );
 
@@ -3518,22 +3505,21 @@ impl Connection {
             }
 
             // Create MAX_DATA frame as needed.
-            if self.almost_full && self.max_rx_data() < self.max_rx_data_next() {
+            if self.almost_full &&
+                flow_control.max_data() < flow_control.max_data_next()
+            {
                 // Autotune the connection window size.
-                self.flow_control.autotune_window(
-                    now,
-                    self.paths.get(send_pid)?.recovery.rtt(),
-                );
+                flow_control.autotune_window(now, path.recovery.rtt());
 
                 let frame = frame::Frame::MaxData {
-                    max: self.max_rx_data_next(),
+                    max: flow_control.max_data_next(),
                 };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     self.almost_full = false;
 
                     // Commits the new max_rx_data limit.
-                    self.flow_control.update_max_data(now);
+                    flow_control.update_max_data(now);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -3603,11 +3589,7 @@ impl Connection {
                 // The sequence number specified in a RETIRE_CONNECTION_ID frame
                 // MUST NOT refer to the Destination Connection ID field of the
                 // packet in which the frame is contained.
-                let dcid_seq = self
-                    .paths
-                    .get(send_pid)?
-                    .active_dcid_seq
-                    .ok_or(Error::InvalidState)?;
+                let dcid_seq = path.active_dcid_seq.ok_or(Error::InvalidState)?;
 
                 if seq_num == dcid_seq {
                     continue;
@@ -3628,7 +3610,7 @@ impl Connection {
 
         // Create CONNECTION_CLOSE frame. Try to send this only on the active
         // path, unless it is the last one available.
-        if self.paths.get(send_pid)?.active() || self.paths.len() == 1 {
+        if path.active() || n_paths == 1 {
             if let Some(conn_err) = self.local_error.as_ref() {
                 if conn_err.is_app {
                     // Create ApplicationClose frame.
@@ -3639,7 +3621,7 @@ impl Connection {
                         };
 
                         if push_frame_to_pkt!(b, frames, frame, left) {
-                            let pto = self.paths.get(send_pid)?.recovery.pto();
+                            let pto = path.recovery.pto();
                             self.draining_timer = Some(now + (pto * 3));
 
                             ack_eliciting = true;
@@ -3655,7 +3637,7 @@ impl Connection {
                     };
 
                     if push_frame_to_pkt!(b, frames, frame, left) {
-                        let pto = self.paths.get(send_pid)?.recovery.pto();
+                        let pto = path.recovery.pto();
                         self.draining_timer = Some(now + (pto * 3));
 
                         ack_eliciting = true;
@@ -3666,13 +3648,12 @@ impl Connection {
         }
 
         // Create CRYPTO frame.
-        if self.pkt_num_spaces[epoch].crypto_stream.is_flushable() &&
+        if pkt_space.crypto_stream.is_flushable() &&
             left > frame::MAX_CRYPTO_OVERHEAD &&
             !is_closing &&
-            self.paths.get(send_pid)?.active()
+            path.active()
         {
-            let crypto_off =
-                self.pkt_num_spaces[epoch].crypto_stream.send.off_front();
+            let crypto_off = pkt_space.crypto_stream.send.off_front();
 
             // Encode the frame.
             //
@@ -3697,7 +3678,7 @@ impl Connection {
                     b.split_at(hdr_off + hdr_len)?;
 
                 // Write stream data into the packet buffer.
-                let (len, _) = self.pkt_num_spaces[epoch]
+                let (len, _) = pkt_space
                     .crypto_stream
                     .send
                     .emit(&mut crypto_payload.as_mut()[..max_len])?;
@@ -3738,7 +3719,7 @@ impl Connection {
         // where one type is preferred but its buffer is empty, fall back
         // to the other type in order not to waste this function call.
         let mut dgram_emitted = false;
-        let dgrams_to_emit = self.dgram_max_writable_len().is_some();
+        let dgrams_to_emit = max_dgram_len.is_some();
         let stream_to_emit = self.streams.has_flushable();
 
         let mut do_dgram = self.emit_dgram && dgrams_to_emit;
@@ -3752,10 +3733,10 @@ impl Connection {
         if (pkt_type == packet::Type::Short || pkt_type == packet::Type::ZeroRTT) &&
             left > frame::MAX_DGRAM_OVERHEAD &&
             !is_closing &&
-            self.paths.get(send_pid)?.active() &&
+            path.active() &&
             do_dgram
         {
-            if let Some(max_dgram_payload) = self.dgram_max_writable_len() {
+            if let Some(max_dgram_payload) = max_dgram_len {
                 while let Some(len) = self.dgram_send_queue.peek_front_len() {
                     let hdr_off = b.off();
                     let hdr_len = 1 + // frame type
@@ -3830,7 +3811,7 @@ impl Connection {
         if (pkt_type == packet::Type::Short || pkt_type == packet::Type::ZeroRTT) &&
             left > frame::MAX_STREAM_OVERHEAD &&
             !is_closing &&
-            self.paths.get(send_pid)?.active() &&
+            path.active() &&
             !dgram_emitted
         {
             while let Some(stream_id) = self.streams.peek_flushable() {
@@ -3931,7 +3912,6 @@ impl Connection {
         // - if we've sent too many non ack-eliciting packets without having
         // sent an ACK eliciting one; OR
         // - the application requested an ack-eliciting frame be sent.
-        let path = self.paths.get_mut(send_pid)?;
         if (ack_elicit_required || path.needs_ack_eliciting) &&
             !ack_eliciting &&
             left >= 1 &&
@@ -4058,7 +4038,7 @@ impl Connection {
             }
         });
 
-        let aead = match self.pkt_num_spaces[epoch].crypto_seal {
+        let aead = match pkt_space.crypto_seal {
             Some(ref v) => v,
             None => return Err(Error::InvalidState),
         };
@@ -4089,16 +4069,20 @@ impl Connection {
             has_data,
         };
 
-        if in_flight && self.delivery_rate_check_if_app_limited() {
-            self.paths
-                .get_mut(send_pid)?
-                .recovery
-                .delivery_rate_update_app_limited(true);
+        if in_flight && is_app_limited {
+            path.recovery.delivery_rate_update_app_limited(true);
         }
 
-        let handshake_status = self.handshake_status();
+        pkt_space.next_pkt_num += 1;
 
-        self.paths.get_mut(send_pid)?.recovery.on_packet_sent(
+        let handshake_status = recovery::HandshakeStatus {
+            has_handshake_keys: self.pkt_num_spaces[packet::Epoch::Handshake]
+                .has_keys(),
+            peer_verified_address: self.peer_verified_initial_address,
+            completed: self.handshake_completed,
+        };
+
+        path.recovery.on_packet_sent(
             sent_pkt,
             epoch,
             handshake_status,
@@ -4107,44 +4091,31 @@ impl Connection {
         );
 
         qlog_with_type!(QLOG_METRICS, self.qlog, q, {
-            if let Some(ev_data) =
-                self.paths.get_mut(send_pid)?.recovery.maybe_qlog()
-            {
+            if let Some(ev_data) = path.recovery.maybe_qlog() {
                 q.add_event_data_with_instant(ev_data, now).ok();
             }
         });
 
         // Record sent packet size if we probe the path.
         if let Some(data) = challenge_data {
-            self.paths.on_challenge_sent(send_pid, data, written, now)?;
+            path.add_challenge_sent(data, written, now);
         }
-
-        self.pkt_num_spaces[epoch].next_pkt_num += 1;
 
         self.sent_count += 1;
         self.sent_bytes += written as u64;
-        self.paths.get_mut(send_pid)?.sent_count += 1;
-        self.paths.get_mut(send_pid)?.sent_bytes += written as u64;
+        path.sent_count += 1;
+        path.sent_bytes += written as u64;
 
-        if self.dgram_send_queue.byte_size() >
-            self.paths.get(send_pid)?.recovery.cwnd_available()
-        {
-            self.paths
-                .get_mut(send_pid)?
-                .recovery
-                .update_app_limited(false);
+        if self.dgram_send_queue.byte_size() > path.recovery.cwnd_available() {
+            path.recovery.update_app_limited(false);
         }
+
+        path.max_send_bytes = path.max_send_bytes.saturating_sub(written);
 
         // On the client, drop initial state after sending an Handshake packet.
         if !self.is_server && hdr_ty == packet::Type::Handshake {
             self.drop_epoch_state(packet::Epoch::Initial, now);
         }
-
-        self.paths.get_mut(send_pid)?.max_send_bytes = self
-            .paths
-            .get(send_pid)?
-            .max_send_bytes
-            .saturating_sub(written);
 
         // (Re)start the idle timer if we are sending the first ack-eliciting
         // packet since last receiving a packet.
@@ -6747,11 +6718,6 @@ impl Connection {
     /// Returns the connection level flow control limit.
     fn max_rx_data(&self) -> u64 {
         self.flow_control.max_data()
-    }
-
-    /// Returns the updated connection level flow control limit.
-    fn max_rx_data_next(&self) -> u64 {
-        self.flow_control.max_data_next()
     }
 
     /// Returns true if the HANDSHAKE_DONE frame needs to be sent.
