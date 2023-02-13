@@ -688,7 +688,7 @@ pub struct PathMap {
 
     /// Whether a connection-wide PATH_STATUS frame should be sent.
     path_status_to_advertise: VecDeque<(usize, u64, u64)>,
-    /// The sequence number for the next PATH_ABANDON.
+    /// The sequence number for the next PATH_STATUS.
     next_path_status_seq_num: u64,
 }
 
