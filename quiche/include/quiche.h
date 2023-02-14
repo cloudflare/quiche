@@ -361,10 +361,18 @@ ssize_t quiche_conn_stream_capacity(const quiche_conn *conn, uint64_t stream_id)
 // Returns true if the stream has data that can be read.
 bool quiche_conn_stream_readable(const quiche_conn *conn, uint64_t stream_id);
 
+// Returns the next stream that has data to read, or -1 if no such stream is
+// available.
+int64_t quiche_conn_stream_readable_next(quiche_conn *conn);
+
 // Returns true if the stream has enough send capacity.
 //
 // On error a value lower than 0 is returned.
 int quiche_conn_stream_writable(quiche_conn *conn, uint64_t stream_id, size_t len);
+
+// Returns the next stream that can be written to, or -1 if no such stream is
+// available.
+int64_t quiche_conn_stream_writable_next(quiche_conn *conn);
 
 // Returns true if all the data has been read from the specified stream.
 bool quiche_conn_stream_finished(const quiche_conn *conn, uint64_t stream_id);

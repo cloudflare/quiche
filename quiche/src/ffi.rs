@@ -833,6 +833,11 @@ pub extern fn quiche_conn_stream_readable(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_stream_readable_next(conn: &mut Connection) -> i64 {
+    conn.stream_readable_next().map(|v| v as i64).unwrap_or(-1)
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_stream_writable(
     conn: &mut Connection, stream_id: u64, len: usize,
 ) -> c_int {
@@ -843,6 +848,11 @@ pub extern fn quiche_conn_stream_writable(
 
         Err(e) => e.to_c() as c_int,
     }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_stream_writable_next(conn: &mut Connection) -> i64 {
+    conn.stream_writable_next().map(|v| v as i64).unwrap_or(-1)
 }
 
 #[no_mangle]
