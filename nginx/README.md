@@ -159,6 +159,26 @@ Sets the per-stream incoming flow control limit.
 
 Sets the timeout of inactivity after which the connection is closed.
 
+### http3_congestion_control
+
+**syntax:** **http3_congestion_control** *name*;
+
+**default:** *http3_congestion_control cubic;*
+
+**context:** *http*, *server*
+
+Sets the congestion control algorithm used.
+
+### http3_pacing
+
+**syntax:** **http3_pacing** *on/off*;
+
+**default:** *http3_pacing off;*
+
+**context:** *http*, *server*
+
+Enables or disables the use of pacing.
+
 List of variables
 -----------------
 
