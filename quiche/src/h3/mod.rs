@@ -1246,14 +1246,9 @@ impl Connection {
             },
         };
 
-        if stream_cap < overhead + body.len() {
-            // Ensure the peer is notified that the connection or stream is
-            // blocked when the stream's capacity is limited by flow control.
-            let _ = conn.stream_writable(stream_id, overhead + body.len());
-        }
-
         // Make sure there is enough capacity to send the DATA frame header.
         if stream_cap < overhead {
+            let _ = conn.stream_writable(stream_id, overhead);
             return Err(Error::Done);
         }
 
@@ -1297,6 +1292,12 @@ impl Connection {
 
             q.add_event_data_now(ev_data).ok();
         });
+
+        if written < body.len() {
+            // Ensure the peer is notified that the connection or stream is
+            // blocked when the stream's capacity is limited by flow control.
+            let _ = conn.stream_writable(stream_id, body.len() - written);
+        }
 
         if fin && written == body.len() && conn.stream_finished(stream_id) {
             self.streams.remove(&stream_id);
@@ -4864,10 +4865,17 @@ mod tests {
             Err(Error::StreamBlocked)
         );
 
+        // Clear the writable stream queue.
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(10));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(2));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(6));
+        assert_eq!(s.pipe.client.stream_writable_next(), None);
+
         s.advance().ok();
 
         // Once the server gives flow control credits back, we can send the
         // request.
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(4));
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(4));
     }
 
@@ -4915,6 +4923,7 @@ mod tests {
             s.client.send_request(&mut s.pipe.client, &req, true),
             Err(Error::StreamBlocked)
         );
+        assert_eq!(s.pipe.client.stream_writable_next(), None);
 
         // Emit the control stream data and drain it at the server via poll() to
         // consumes it via poll() and gives back flow control.
@@ -4923,6 +4932,7 @@ mod tests {
         s.advance().ok();
 
         // Now we can send the request.
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(0));
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
     }
 
@@ -4979,11 +4989,8 @@ mod tests {
         assert_eq!(sent, 25);
         off += sent;
 
-        // send_body wrote as much as it could (sent < size of buff). It
-        // right-sized the buffer to exactly match the flow control, which
-        // means it isn't technically blocked. Only *another* write at
-        // this stage will cause a stream data blocked condition.
-        assert_eq!(s.pipe.server.streams.blocked().len(), 0);
+        // send_body wrote as much as it could (sent < size of buff).
+        assert_eq!(s.pipe.server.streams.blocked().len(), 1);
         assert_eq!(
             s.server
                 .send_body(&mut s.pipe.server, stream, &d[off..], true),
@@ -5042,8 +5049,8 @@ mod tests {
             .unwrap();
         assert_eq!(sent, 18);
 
-        // Same thing here, we need 2 writes to force the blocked state.
-        assert_eq!(s.pipe.server.streams.blocked().len(), 0);
+        // Same thing here...
+        assert_eq!(s.pipe.server.streams.blocked().len(), 1);
         assert_eq!(
             s.server
                 .send_body(&mut s.pipe.server, stream, &d[off..], true),
@@ -5163,9 +5170,16 @@ mod tests {
             Err(Error::Done)
         );
 
+        // Clear the writable stream queue.
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(10));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(2));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(6));
+        assert_eq!(s.pipe.client.stream_writable_next(), None);
+
         s.advance().ok();
 
         // Once the server gives flow control credits back, we can send the body.
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(0));
         assert_eq!(s.client.send_body(&mut s.pipe.client, 0, b"", true), Ok(0));
     }
 

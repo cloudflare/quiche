@@ -147,13 +147,13 @@ pub struct StreamMap {
     /// Set of stream IDs corresponding to streams that have outstanding data
     /// to read. This is used to generate a `StreamIter` of streams without
     /// having to iterate over the full list of streams.
-    readable: StreamIdHashSet,
+    pub readable: StreamIdHashSet,
 
     /// Set of stream IDs corresponding to streams that have enough flow control
     /// capacity to be written to, and is not finished. This is used to generate
     /// a `StreamIter` of streams without having to iterate over the full list
     /// of streams.
-    writable: StreamIdHashSet,
+    pub writable: StreamIdHashSet,
 
     /// Set of stream IDs corresponding to streams that are almost out of flow
     /// control credit and need to send MAX_STREAM_DATA. This is used to
@@ -645,6 +645,8 @@ pub struct Stream {
     /// Send-side stream buffer.
     pub send: SendBuf,
 
+    pub send_lowat: usize,
+
     /// Whether the stream is bidirectional.
     pub bidi: bool,
 
@@ -670,6 +672,7 @@ impl Stream {
         Stream {
             recv: RecvBuf::new(max_rx_data, max_window),
             send: SendBuf::new(max_tx_data),
+            send_lowat: 1,
             bidi,
             local,
             data: None,
@@ -688,7 +691,7 @@ impl Stream {
     pub fn is_writable(&self) -> bool {
         !self.send.shutdown &&
             !self.send.is_fin() &&
-            self.send.off < self.send.max_data
+            (self.send.off + self.send_lowat as u64) < self.send.max_data
     }
 
     /// Returns true if the stream has data to send and is allowed to send at
