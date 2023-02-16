@@ -540,6 +540,9 @@ impl StreamMap {
             }
         }
 
+        self.mark_readable(stream_id, false);
+        self.mark_writable(stream_id, false);
+
         self.streams.remove(&stream_id);
         self.collected.insert(stream_id);
     }

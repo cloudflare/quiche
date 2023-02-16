@@ -15087,6 +15087,198 @@ mod tests {
         ));
         assert!(iter.next().is_none());
     }
+
+    /// Tests that streams do not keep being "writable" after being collected
+    /// on reset.
+    #[test]
+    fn stop_sending_stream_send_after_reset_stream_ack() {
+        let mut b = [0; 15];
+
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(999999999);
+        config.set_initial_max_stream_data_bidi_local(30);
+        config.set_initial_max_stream_data_bidi_remote(30);
+        config.set_initial_max_stream_data_uni(30);
+        config.set_initial_max_streams_bidi(1000);
+        config.set_initial_max_streams_uni(0);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(pipe.server.streams.len(), 0);
+        assert_eq!(pipe.server.readable().len(), 0);
+        assert_eq!(pipe.server.writable().len(), 0);
+
+        // Client opens a load of streams
+        assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
+        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+        assert_eq!(pipe.client.stream_send(8, b"hello", true), Ok(5));
+        assert_eq!(pipe.client.stream_send(12, b"hello", true), Ok(5));
+        assert_eq!(pipe.client.stream_send(16, b"hello", true), Ok(5));
+        assert_eq!(pipe.client.stream_send(20, b"hello", true), Ok(5));
+        assert_eq!(pipe.client.stream_send(24, b"hello", true), Ok(5));
+        assert_eq!(pipe.client.stream_send(28, b"hello", true), Ok(5));
+        assert_eq!(pipe.client.stream_send(32, b"hello", true), Ok(5));
+        assert_eq!(pipe.client.stream_send(36, b"hello", true), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server iterators are populated
+        let mut r = pipe.server.readable();
+        assert_eq!(r.len(), 10);
+        assert_eq!(r.next(), Some(28));
+        assert_eq!(r.next(), Some(12));
+        assert_eq!(r.next(), Some(24));
+        assert_eq!(r.next(), Some(8));
+        assert_eq!(r.next(), Some(36));
+        assert_eq!(r.next(), Some(20));
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(32));
+        assert_eq!(r.next(), Some(16));
+        assert_eq!(r.next(), Some(0));
+        assert_eq!(r.next(), None);
+
+        let mut w = pipe.server.writable();
+        assert_eq!(w.len(), 10);
+        assert_eq!(w.next(), Some(28));
+        assert_eq!(w.next(), Some(12));
+        assert_eq!(w.next(), Some(24));
+        assert_eq!(w.next(), Some(8));
+        assert_eq!(w.next(), Some(36));
+        assert_eq!(w.next(), Some(20));
+        assert_eq!(w.next(), Some(4));
+        assert_eq!(w.next(), Some(32));
+        assert_eq!(w.next(), Some(16));
+        assert_eq!(w.next(), Some(0));
+        assert_eq!(w.next(), None);
+
+        // Read one stream
+        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, true)));
+        assert!(pipe.server.stream_finished(0));
+
+        assert_eq!(pipe.server.readable().len(), 9);
+        assert_eq!(pipe.server.writable().len(), 10);
+
+        assert_eq!(pipe.server.stream_writable(0, 0), Ok(true));
+
+        // Server sends data on stream 0, until blocked.
+        loop {
+            if pipe.server.stream_send(0, b"world", false) == Err(Error::Done) {
+                break;
+            }
+
+            assert_eq!(pipe.advance(), Ok(()));
+        }
+
+        assert_eq!(pipe.server.writable().len(), 9);
+        assert_eq!(pipe.server.stream_writable(0, 0), Ok(true));
+
+        // Client sends STOP_SENDING.
+        let frames = [frame::Frame::StopSending {
+            stream_id: 0,
+            error_code: 42,
+        }];
+
+        let pkt_type = packet::Type::Short;
+        let len = pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        // Server sent a RESET_STREAM frame in response.
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+
+        let mut iter = frames.iter();
+
+        // Skip ACK frame.
+        iter.next();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::ResetStream {
+                stream_id: 0,
+                error_code: 42,
+                final_size: 30,
+            })
+        );
+
+        // Stream 0 is now writable in order to make apps aware of STOP_SENDING
+        // via returning an error.
+        let mut w = pipe.server.writable();
+        assert_eq!(w.len(), 10);
+
+        assert!(w.find(|&s| s == 0).is_some());
+        assert_eq!(
+            pipe.server.stream_writable(0, 1),
+            Err(Error::StreamStopped(42))
+        );
+
+        assert_eq!(pipe.server.writable().len(), 10);
+        assert_eq!(pipe.server.streams.len(), 10);
+
+        // Client acks RESET_STREAM frame.
+        let mut ranges = ranges::RangeSet::default();
+        ranges.insert(0..12);
+
+        let frames = [frame::Frame::ACK {
+            ack_delay: 15,
+            ranges,
+            ecn_counts: None,
+        }];
+
+        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
+
+        // Stream is collected on the server after RESET_STREAM is acked.
+        assert_eq!(pipe.server.streams.len(), 9);
+
+        // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
+        let frames = [frame::Frame::StopSending {
+            stream_id: 0,
+            error_code: 42,
+        }];
+
+        let len = pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+
+        assert_eq!(frames.len(), 1);
+
+        match frames.first() {
+            Some(frame::Frame::ACK { .. }) => (),
+
+            f => panic!("expected ACK frame, got {:?}", f),
+        };
+
+        assert_eq!(pipe.server.streams.len(), 9);
+
+        // Stream 0 has been collected and must not be writable anymore.
+        let mut w = pipe.server.writable();
+        assert_eq!(w.len(), 9);
+        assert!(w.find(|&s| s == 0).is_none());
+
+        // If we called send before the client ACK of reset stream, it would
+        // have failed with StreamStopped.
+        assert_eq!(pipe.server.stream_send(0, b"world", true), Err(Error::Done),);
+
+        // Stream 0 is still not writable.
+        let mut w = pipe.server.writable();
+        assert_eq!(w.len(), 9);
+        assert!(w.find(|&s| s == 0).is_none());
+    }
 }
 
 pub use crate::packet::ConnectionId;
