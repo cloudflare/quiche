@@ -2723,8 +2723,7 @@ impl Connection {
 
         self.pkt_num_spaces[epoch].recv_pkt_need_ack.push_item(pn);
 
-        self.pkt_num_spaces[epoch].ack_elicited =
-            cmp::max(self.pkt_num_spaces[epoch].ack_elicited, ack_elicited);
+        self.pkt_num_spaces[epoch].ack_elicited |= ack_elicited;
 
         self.pkt_num_spaces[epoch].largest_rx_pkt_num =
             cmp::max(self.pkt_num_spaces[epoch].largest_rx_pkt_num, pn);
@@ -3324,7 +3323,7 @@ impl Connection {
         // send a packet with PING anyways - even if we haven't received
         // anything ACK eliciting.
         if self.pkt_num_spaces[epoch].recv_pkt_need_ack.len() > 0 &&
-            (self.pkt_num_spaces[epoch].ack_elicited || ack_elicit_required) &&
+            self.pkt_num_spaces[epoch].ack_elicited &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
                     self.local_error().map_or(false, |le| le.is_app))) &&
