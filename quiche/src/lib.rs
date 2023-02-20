@@ -3318,13 +3318,9 @@ impl Connection {
         let left_before_packing_ack_frame = left;
 
         // Create ACK frame.
-        //
-        // If we think we may explicitly elicit an ACK via PING later, go ahead
-        // and generate an ACK (if there's anything to ACK) since we're going to
-        // send a packet with PING anyways - even if we haven't received
-        // anything ACK eliciting.
         if self.pkt_num_spaces[epoch].recv_pkt_need_ack.len() > 0 &&
-            (self.pkt_num_spaces[epoch].ack_elicited || ack_elicit_required) &&
+            (self.pkt_num_spaces[epoch].ack_elicited ||
+                self.paths.get(send_pid)?.recovery.loss_probes[epoch] > 0) &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
                     self.local_error().map_or(false, |le| le.is_app))) &&
@@ -11732,6 +11728,84 @@ mod tests {
         assert!(
             matches!(frames[0], frame::Frame::ACK { .. }),
             "the packet sent by the client must be an ACK only packet"
+        );
+    }
+
+    /// sends_ack_only_pkt_when_full_cwnd_and_ack_elicited, but when
+    /// ack_eliciting is explicitly requested.
+    #[test]
+    fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledging(
+    ) {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(50000);
+        config.set_initial_max_stream_data_bidi_local(50000);
+        config.set_initial_max_stream_data_bidi_remote(50000);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_max_recv_udp_payload_size(1200);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client sends stream data bigger than cwnd (it will never arrive to the
+        // server). This exhausts the congestion window.
+        let send_buf1 = [0; 20000];
+        assert_eq!(pipe.client.stream_send(0, &send_buf1, false), Ok(12000));
+
+        testing::emit_flight(&mut pipe.client).ok();
+
+        // Client gets PING frames from server, which elicit ACK
+        let mut buf = [0; 2000];
+        for _ in 0..recovery::MAX_OUTSTANDING_NON_ACK_ELICITING {
+            let written = testing::encode_pkt(
+                &mut pipe.server,
+                packet::Type::Short,
+                &[frame::Frame::Ping],
+                &mut buf,
+            )
+            .unwrap();
+
+            pipe.client_recv(&mut buf[..written])
+                .expect("client recv ping");
+
+            // Client acknowledges despite a full congestion window
+            let ret = pipe.client.send(&mut buf);
+
+            assert!(matches!(ret, Ok((_, _))), "the client should at least send one packet to acknowledge the newly received data");
+
+            let (sent, _) = ret.unwrap();
+
+            assert_ne!(
+                sent, 0,
+                "the client should at least send a pure ACK packet"
+            );
+
+            let frames =
+                testing::decode_pkt(&mut pipe.server, &mut buf, sent).unwrap();
+            println!("frames: {frames:?}");
+            assert_eq!(1, frames.len());
+            assert!(
+                matches!(frames[0], frame::Frame::ACK { .. }),
+                "the packet sent by the client must be an ACK only packet"
+            );
+        }
+
+        // The client shouldn't need to send any more packets after the ACK only
+        // packet it just sent.
+        assert_eq!(
+            pipe.client.send(&mut buf),
+            Err(Error::Done),
+            "nothing for client to send after ACK-only packet"
         );
     }
 
