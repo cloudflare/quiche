@@ -74,7 +74,7 @@ const PACING_MULTIPLIER: f64 = 1.25;
 
 // How many non ACK eliciting packets we send before including a PING to solicit
 // an ACK.
-const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
+pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 
 pub struct Recovery {
     loss_detection_timer: Option<Instant>,

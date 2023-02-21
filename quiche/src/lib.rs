@@ -3307,14 +3307,17 @@ impl Connection {
 
         let payload_offset = b.off();
 
+        let cwnd_available =
+            path.recovery.cwnd_available().saturating_sub(overhead);
+
         let left_before_packing_ack_frame = left;
 
         // Create ACK frame.
         //
-        // If we think we may explicitly elicit an ACK via PING later, go ahead
-        // and generate an ACK (if there's anything to ACK) since we're going to
-        // send a packet with PING anyways - even if we haven't received
-        // anything ACK eliciting.
+        // When we need to explicitly elicit an ACK via PING later, go ahead and
+        // generate an ACK (if there's anything to ACK) since we're going to
+        // send a packet with PING anyways, even if we haven't received anything
+        // ACK eliciting.
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
             (pkt_space.ack_elicited || ack_elicit_required) &&
             (!is_closing ||
@@ -3336,21 +3339,25 @@ impl Connection {
                 ecn_counts: None, // sending ECN is not supported at this time
             };
 
-            // ACK-only packets are not congestion controlled so ACKs must be
-            // bundled considering the buffer capacity only, and not
-            // the available cwnd.
-            if push_frame_to_pkt!(b, frames, frame, left) {
-                pkt_space.ack_elicited = false;
+            // When a PING frame needs to be sent, avoid sending the ACK if
+            // there is not enough cwnd available for both (note that PING
+            // frames are always 1 byte, so we just need to check that the
+            // ACK's length is lower than cwnd).
+            if pkt_space.ack_elicited || frame.wire_len() < cwnd_available {
+                // ACK-only packets are not congestion controlled so ACKs must
+                // be bundled considering the buffer capacity only, and not the
+                // available cwnd.
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    pkt_space.ack_elicited = false;
+                }
             }
         }
 
         // Limit output packet size by congestion window size.
         left = cmp::min(
             left,
-            path.recovery
-                .cwnd_available()
-                .saturating_sub(overhead)
-                .saturating_sub(left_before_packing_ack_frame - left), /* bytes consumed by ACK frames */
+            // Bytes consumed by ACK frames.
+            cwnd_available.saturating_sub(left_before_packing_ack_frame - left),
         );
 
         let mut challenge_data = None;
@@ -11698,6 +11705,85 @@ mod tests {
         assert!(
             matches!(frames[0], frame::Frame::ACK { .. }),
             "the packet sent by the client must be an ACK only packet"
+        );
+    }
+
+    /// Like sends_ack_only_pkt_when_full_cwnd_and_ack_elicited, but when
+    /// ack_eliciting is explicitly requested.
+    #[test]
+    fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledging(
+    ) {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(50000);
+        config.set_initial_max_stream_data_bidi_local(50000);
+        config.set_initial_max_stream_data_bidi_remote(50000);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_max_recv_udp_payload_size(1200);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client sends stream data bigger than cwnd (it will never arrive to the
+        // server). This exhausts the congestion window.
+        let send_buf1 = [0; 20000];
+        assert_eq!(pipe.client.stream_send(0, &send_buf1, false), Ok(12000));
+
+        testing::emit_flight(&mut pipe.client).ok();
+
+        // Client gets PING frames from server, which elicit ACK
+        let mut buf = [0; 2000];
+        for _ in 0..recovery::MAX_OUTSTANDING_NON_ACK_ELICITING {
+            let written = testing::encode_pkt(
+                &mut pipe.server,
+                packet::Type::Short,
+                &[frame::Frame::Ping],
+                &mut buf,
+            )
+            .unwrap();
+
+            pipe.client_recv(&mut buf[..written])
+                .expect("client recv ping");
+
+            // Client acknowledges despite a full congestion window
+            let ret = pipe.client.send(&mut buf);
+
+            assert!(matches!(ret, Ok((_, _))), "the client should at least send one packet to acknowledge the newly received data");
+
+            let (sent, _) = ret.unwrap();
+
+            assert_ne!(
+                sent, 0,
+                "the client should at least send a pure ACK packet"
+            );
+
+            let frames =
+                testing::decode_pkt(&mut pipe.server, &mut buf, sent).unwrap();
+
+            assert_eq!(1, frames.len());
+
+            assert!(
+                matches!(frames[0], frame::Frame::ACK { .. }),
+                "the packet sent by the client must be an ACK only packet"
+            );
+        }
+
+        // The client shouldn't need to send any more packets after the ACK only
+        // packet it just sent.
+        assert_eq!(
+            pipe.client.send(&mut buf),
+            Err(Error::Done),
+            "nothing for client to send after ACK-only packet"
         );
     }
 
