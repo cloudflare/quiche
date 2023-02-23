@@ -20,9 +20,14 @@ fuzz_target!(|data: &[u8]| {
         Err(_) => return,
         Ok(hdrs) => hdrs,
     };
+    let lookups: Vec<quiche::h3::qpack::encoder::StaticLookup> = hdrs
+        .iter()
+        .map(|h| quiche::h3::qpack::encoder::lookup_static(h))
+        .collect();
 
     let mut encoded_hdrs = vec![0; data.len() * 10 + 1000];
-    let encoded_size = encoder.encode(&hdrs, &mut encoded_hdrs).unwrap();
+    let encoded_size =
+        encoder.encode(&hdrs, &lookups, &mut encoded_hdrs).unwrap();
 
     let decoded_hdrs = decoder
         .decode(&encoded_hdrs[..encoded_size], std::u64::MAX)

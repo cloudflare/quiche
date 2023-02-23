@@ -98,8 +98,11 @@ mod tests {
             h3::Header::new(b":method", b"GET"),
         ];
 
+        let lookups: Vec<encoder::StaticLookup> =
+            headers.iter().map(|h| encoder::lookup_static(h)).collect();
+
         let mut enc = Encoder::new();
-        assert_eq!(enc.encode(&headers, &mut encoded), Ok(240));
+        assert_eq!(enc.encode(&headers, &lookups, &mut encoded), Ok(240));
 
         let mut dec = Decoder::new();
         assert_eq!(dec.decode(&mut encoded, std::u64::MAX), Ok(headers));
@@ -126,8 +129,13 @@ mod tests {
             crate::h3::Header::new(b"fOo", b"BaR"),
         ];
 
+        let lookups: Vec<encoder::StaticLookup> = headers_in
+            .iter()
+            .map(|h| encoder::lookup_static(h))
+            .collect();
+
         let mut enc = Encoder::new();
-        assert_eq!(enc.encode(&headers_in, &mut encoded), Ok(35));
+        assert_eq!(enc.encode(&headers_in, &lookups, &mut encoded), Ok(35));
 
         let mut dec = Decoder::new();
         let headers_out = dec.decode(&mut encoded, std::u64::MAX).unwrap();
@@ -143,13 +151,66 @@ mod tests {
             crate::h3::HeaderRef::new(b"fOo", b"BaR"),
         ];
 
+        let lookups: Vec<encoder::StaticLookup> = headers_in
+            .iter()
+            .map(|h| encoder::lookup_static(h))
+            .collect();
+
         let mut enc = Encoder::new();
-        assert_eq!(enc.encode(&headers_in, &mut encoded), Ok(35));
+        assert_eq!(enc.encode(&headers_in, &lookups, &mut encoded), Ok(35));
 
         let mut dec = Decoder::new();
         let headers_out = dec.decode(&mut encoded, std::u64::MAX).unwrap();
 
         assert_eq!(headers_expected, headers_out);
+    }
+
+    #[test]
+    fn lower_ascii_range() {
+        let mut encoded = [0u8; 100];
+
+        // Indexed name with literal value
+        let headers = vec![crate::h3::Header::new(b"location", b"															")];
+
+        let lookups: Vec<encoder::StaticLookup> =
+            headers.iter().map(|h| encoder::lookup_static(h)).collect();
+
+        let mut enc = Encoder::new();
+        assert_eq!(enc.encode(&headers, &lookups, &mut encoded), Ok(49));
+
+        // Literal name and value
+        let headers = vec![crate::h3::Header::new(b"a", b"")];
+
+        let lookups: Vec<encoder::StaticLookup> =
+            headers.iter().map(|h| encoder::lookup_static(h)).collect();
+
+        let mut enc = Encoder::new();
+        assert_eq!(enc.encode(&headers, &lookups, &mut encoded), Ok(58));
+    }
+
+    #[test]
+    fn extended_ascii_range() {
+        let mut encoded = [0u8; 100];
+
+        let value = "£££££££££££££££";
+
+        // Indexed name with literal value
+        let headers = vec![crate::h3::Header::new(b"location", value.as_bytes())];
+
+        let lookups: Vec<encoder::StaticLookup> =
+            headers.iter().map(|h| encoder::lookup_static(h)).collect();
+
+        let mut enc = Encoder::new();
+        assert_eq!(enc.encode(&headers, &lookups, &mut encoded), Ok(83));
+
+        // Literal name and value
+        let headers = vec![crate::h3::Header::new(b"a", b"~~~~~~~~~~~~~~~")];
+
+        let lookups: Vec<encoder::StaticLookup> =
+            headers.iter().map(|h| encoder::lookup_static(h)).collect();
+
+        let mut enc = Encoder::new();
+        assert_eq!(enc.encode(&headers, &lookups, &mut encoded), Ok(30));
     }
 }
 
@@ -157,6 +218,6 @@ pub use decoder::Decoder;
 pub use encoder::Encoder;
 
 mod decoder;
-mod encoder;
-mod huffman;
+pub mod encoder;
+pub mod huffman;
 mod static_table;

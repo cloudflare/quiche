@@ -316,6 +316,10 @@ use qlog::events::EventImportance;
 #[cfg(feature = "qlog")]
 use qlog::events::EventType;
 
+use crate::h3::qpack::encoder;
+use crate::h3::qpack::encoder::StaticLookup;
+use crate::h3::qpack::huffman::encode_output_length;
+
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
 /// This can be passed directly to the [`Config::set_application_protos()`]
@@ -1092,14 +1096,40 @@ impl Connection {
     fn encode_header_block<T: NameValue>(
         &mut self, headers: &[T],
     ) -> Result<Vec<u8>> {
-        let headers_len = headers
-            .iter()
-            .fold(0, |acc, h| acc + h.value().len() + h.name().len() + 32);
+        let mut headers_len = 0;
+        let mut static_lookups: Vec<StaticLookup> =
+            Vec::with_capacity(headers.len());
+
+        // Check the static table to see what type of encoding the header will
+        // use. Use this to inform the worst-case maximum length of the encoded
+        // output, and store the type to pass on to the encode function to avoid
+        // a duplicate lookup.
+        for h in headers {
+            let lookup = encoder::lookup_static(h);
+
+            // Calculate worst-case maximum length
+            let len = match lookup {
+                StaticLookup::Indexed(_) => 8,
+
+                StaticLookup::LiteralWithNameRef(_) =>
+                    8 + encode_output_length(h.value(), false)
+                        .map_err(|_| Error::InternalError)?,
+
+                StaticLookup::Literal =>
+                    8 + encode_output_length(h.name(), true)
+                        .map_err(|_| Error::InternalError)? +
+                        encode_output_length(h.value(), false)
+                            .map_err(|_| Error::InternalError)?,
+            };
+
+            headers_len += len;
+            static_lookups.push(lookup);
+        }
 
         let mut header_block = vec![0; headers_len];
         let len = self
             .qpack_encoder
-            .encode(headers, &mut header_block)
+            .encode(headers, &static_lookups, &mut header_block)
             .map_err(|_| Error::InternalError)?;
 
         header_block.truncate(len);

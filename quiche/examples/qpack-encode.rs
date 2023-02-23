@@ -33,6 +33,7 @@ use std::io::prelude::*;
 use std::io::BufReader;
 
 use quiche::h3;
+use quiche::h3::qpack::encoder::StaticLookup;
 
 fn main() {
     let mut args = std::env::args();
@@ -50,6 +51,7 @@ fn main() {
     let mut enc = h3::qpack::Encoder::new();
 
     let mut headers: Vec<h3::Header> = Vec::new();
+    let mut lookups: Vec<StaticLookup> = Vec::new();
 
     let mut stream_id = 1u64;
 
@@ -61,7 +63,7 @@ fn main() {
         if line.is_empty() {
             let mut out = [0u8; 65535];
 
-            let len = enc.encode(&headers, &mut out).unwrap();
+            let len = enc.encode(&headers, &lookups, &mut out).unwrap();
 
             debug!("Writing header block stream={} len={}", stream_id, len);
 
@@ -83,6 +85,8 @@ fn main() {
         let name = line.split('\t').next().unwrap();
         let value = line.split('\t').last().unwrap();
 
-        headers.push(h3::Header::new(name.as_bytes(), value.as_bytes()));
+        let header = h3::Header::new(name.as_bytes(), value.as_bytes());
+        lookups.push(h3::qpack::encoder::lookup_static(&header));
+        headers.push(header);
     }
 }

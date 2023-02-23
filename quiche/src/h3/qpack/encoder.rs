@@ -36,6 +36,12 @@ use super::LITERAL_WITH_NAME_REF;
 #[derive(Default)]
 pub struct Encoder {}
 
+pub enum StaticLookup {
+    Indexed(u64),
+    LiteralWithNameRef(u64),
+    Literal,
+}
+
 impl Encoder {
     /// Creates a new QPACK encoder.
     pub fn new() -> Encoder {
@@ -44,7 +50,7 @@ impl Encoder {
 
     /// Encodes a list of headers into a QPACK header block.
     pub fn encode<T: NameValue>(
-        &mut self, headers: &[T], out: &mut [u8],
+        &mut self, headers: &[T], static_lookup: &[StaticLookup], out: &mut [u8],
     ) -> Result<usize> {
         let mut b = octets::OctetsMut::with_slice(out);
 
@@ -54,25 +60,23 @@ impl Encoder {
         // Base.
         encode_int(0, 0, 7, &mut b)?;
 
-        for h in headers {
-            match lookup_static(h) {
-                Some((idx, true)) => {
+        let iter = headers.iter().zip(static_lookup.iter());
+        for (h, sl) in iter {
+            match sl {
+                StaticLookup::Indexed(idx) => {
                     const STATIC: u8 = 0x40;
 
-                    // Encode as statically indexed.
-                    encode_int(idx, INDEXED | STATIC, 6, &mut b)?;
+                    encode_int(*idx, INDEXED | STATIC, 6, &mut b)?;
                 },
 
-                Some((idx, false)) => {
+                StaticLookup::LiteralWithNameRef(idx) => {
                     const STATIC: u8 = 0x10;
 
-                    // Encode value as literal with static name reference.
-                    encode_int(idx, LITERAL_WITH_NAME_REF | STATIC, 4, &mut b)?;
+                    encode_int(*idx, LITERAL_WITH_NAME_REF | STATIC, 4, &mut b)?;
                     encode_str(h.value(), 7, &mut b)?;
                 },
 
-                None => {
-                    // Encode as fully literal.
+                StaticLookup::Literal => {
                     let name_len =
                         super::huffman::encode_output_length(h.name(), true)?;
 
@@ -89,7 +93,7 @@ impl Encoder {
     }
 }
 
-fn lookup_static<T: NameValue>(h: &T) -> Option<(u64, bool)> {
+pub fn lookup_static<T: NameValue>(h: &T) -> StaticLookup {
     let mut name_match = None;
 
     for (i, e) in super::static_table::STATIC_TABLE.iter().enumerate() {
@@ -97,12 +101,12 @@ fn lookup_static<T: NameValue>(h: &T) -> Option<(u64, bool)> {
         if h.name().len() == e.0.len() && h.name().eq_ignore_ascii_case(e.0) {
             // No header value to match, return early.
             if e.1.is_empty() {
-                return Some((i as u64, false));
+                return StaticLookup::LiteralWithNameRef(i as u64);
             }
 
             // Match header value.
             if h.value().len() == e.1.len() && h.value() == e.1 {
-                return Some((i as u64, true));
+                return StaticLookup::Indexed(i as u64);
             }
 
             // Remember name-only match for later, but keep searching.
@@ -110,7 +114,13 @@ fn lookup_static<T: NameValue>(h: &T) -> Option<(u64, bool)> {
         }
     }
 
-    name_match
+    match name_match {
+        Some((i, true)) => StaticLookup::Indexed(i),
+
+        Some((i, false)) => StaticLookup::LiteralWithNameRef(i),
+
+        None => StaticLookup::Literal,
+    }
 }
 
 fn encode_int(
