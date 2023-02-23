@@ -6224,10 +6224,22 @@ impl Connection {
                 crypto::Level::OneRTT => packet::Epoch::Application,
             };
 
-            if epoch == packet::Epoch::Application && !self.is_established() {
-                // Downgrade the epoch to handshake as the handshake is not
-                // completed yet.
-                return Ok(packet::Type::Handshake);
+            if !self.is_established() {
+                match epoch {
+                    // Downgrade the epoch to Handshake as the handshake is not
+                    // completed yet.
+                    packet::Epoch::Application =>
+                        return Ok(packet::Type::Handshake),
+
+                    // Downgrade the epoch to Initial as the remote peer might
+                    // not be able to decrypt handshake packets yet.
+                    packet::Epoch::Handshake
+                        if self.pkt_num_spaces[packet::Epoch::Initial]
+                            .has_keys() =>
+                        return Ok(packet::Type::Initial),
+
+                    _ => (),
+                };
             }
 
             return Ok(packet::Type::from_epoch(epoch));
@@ -13275,6 +13287,63 @@ mod tests {
             Some(&frame::Frame::ApplicationClose {
                 error_code: 0x1234,
                 reason: b"hello!".to_vec(),
+            })
+        );
+    }
+
+    #[test]
+    fn app_close_by_server_during_handshake_private_key_failure() {
+        let mut pipe = testing::Pipe::new().unwrap();
+        pipe.server.handshake.set_failing_private_key_method();
+
+        // Client sends initial flight.
+        let flight = testing::emit_flight(&mut pipe.client).unwrap();
+        assert_eq!(
+            testing::process_flight(&mut pipe.server, flight),
+            Err(Error::TlsFail)
+        );
+
+        let flight = testing::emit_flight(&mut pipe.server).unwrap();
+
+        // Both connections are not established.
+        assert!(!pipe.server.is_established());
+        assert!(!pipe.client.is_established());
+
+        // Connection should already be closed due the failure during key signing.
+        assert_eq!(
+            pipe.server.close(true, 123, b"fail whale"),
+            Err(Error::Done)
+        );
+
+        testing::process_flight(&mut pipe.client, flight).unwrap();
+
+        // Connection should already be closed due the failure during key signing.
+        assert_eq!(
+            pipe.client.close(true, 123, b"fail whale"),
+            Err(Error::Done)
+        );
+
+        // Connection is not established on the server / client (and never
+        // will be)
+        assert!(!pipe.server.is_established());
+        assert!(!pipe.client.is_established());
+
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert_eq!(
+            pipe.server.local_error(),
+            Some(&ConnectionError {
+                is_app: false,
+                error_code: 0x01,
+                reason: vec![],
+            })
+        );
+        assert_eq!(
+            pipe.client.peer_error(),
+            Some(&ConnectionError {
+                is_app: false,
+                error_code: 0x01,
+                reason: vec![],
             })
         );
     }
