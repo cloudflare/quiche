@@ -101,6 +101,10 @@ pub fn encode_output_length(src: &[u8], low: bool) -> Result<usize> {
         len += 1;
     }
 
+    if len > src.len() {
+        return Err(Error::InflatedHuffmanEncoding);
+    }
+
     Ok(len)
 }
 
