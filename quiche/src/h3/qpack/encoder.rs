@@ -73,12 +73,27 @@ impl Encoder {
 
                 None => {
                     // Encode as fully literal.
-                    let name_len =
-                        super::huffman::encode_output_length(h.name(), true)?;
 
-                    encode_int(name_len as u64, LITERAL | 0x08, 3, &mut b)?;
+                    // Huffman-encoding generally saves space but in some cases
+                    // it doesn't, for those just encode the literal string.
+                    match super::huffman::encode_output_length(h.name(), true) {
+                        Ok(len) => {
+                            encode_int(len as u64, LITERAL | 0x08, 3, &mut b)?;
+                            super::huffman::encode(h.name(), &mut b, true)?;
+                        },
 
-                    super::huffman::encode(h.name(), &mut b, true)?;
+                        Err(super::Error::InflatedHuffmanEncoding) => {
+                            encode_int(
+                                h.name().len() as u64,
+                                LITERAL,
+                                3,
+                                &mut b,
+                            )?;
+                            b.put_bytes(&h.name().to_ascii_lowercase())?;
+                        },
+
+                        Err(e) => return Err(e),
+                    }
 
                     encode_str(h.value(), 7, &mut b)?;
                 },
@@ -143,11 +158,21 @@ fn encode_int(
 }
 
 fn encode_str(v: &[u8], prefix: usize, b: &mut octets::OctetsMut) -> Result<()> {
-    let len = super::huffman::encode_output_length(v, false)?;
+    // Huffman-encoding generally saves space but in some cases it doesn't, for
+    // those just encode the literal string.
+    match super::huffman::encode_output_length(v, false) {
+        Ok(len) => {
+            encode_int(len as u64, 0x80, prefix, b)?;
+            super::huffman::encode(v, b, false)?;
+        },
 
-    encode_int(len as u64, 0x80, prefix, b)?;
+        Err(super::Error::InflatedHuffmanEncoding) => {
+            encode_int(v.len() as u64, 0, prefix, b)?;
+            b.put_bytes(v)?;
+        },
 
-    super::huffman::encode(v, b, false)?;
+        Err(e) => return Err(e),
+    }
 
     Ok(())
 }
