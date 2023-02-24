@@ -3289,9 +3289,10 @@ impl Connection {
         let mut in_flight = false;
         let mut has_data = false;
 
-        // Whether or not we should explicitly elicit an ACK via PING frame if we
-        // implicitly elicit one otherwise.
-        let ack_elicit_required = path.recovery.should_elicit_ack(epoch);
+        // Whether or not we should explicitly elicit an ACK via PING frame if
+        // we implicitly elicit one otherwise.
+        let ack_elicit_required =
+            path.recovery.should_elicit_ack(epoch) && !is_closing;
 
         let header_offset = b.off();
 
