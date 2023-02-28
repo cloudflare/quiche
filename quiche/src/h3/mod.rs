@@ -1248,7 +1248,7 @@ impl Connection {
 
         // Make sure there is enough capacity to send the DATA frame header.
         if stream_cap < overhead {
-            let _ = conn.stream_writable(stream_id, overhead);
+            let _ = conn.stream_writable(stream_id, overhead + 1);
             return Err(Error::Done);
         }
 
@@ -1296,7 +1296,11 @@ impl Connection {
         if written < body.len() {
             // Ensure the peer is notified that the connection or stream is
             // blocked when the stream's capacity is limited by flow control.
-            let _ = conn.stream_writable(stream_id, body.len() - written);
+            //
+            // We only need enough capacity to send a few bytes, to make sure
+            // the stream doesn't hang due to congestion window not growing
+            // enough.
+            let _ = conn.stream_writable(stream_id, overhead + 1);
         }
 
         if fin && written == body.len() && conn.stream_finished(stream_id) {
@@ -5071,6 +5075,78 @@ mod tests {
                 limit: 100,
             })
         );
+    }
+
+    #[test]
+    /// Ensure stream doesn't hang due to small cwnd.
+    fn send_body_stream_blocked_by_small_cwnd() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(100000); // large connection-level flow control
+        config.set_initial_max_stream_data_bidi_local(100000);
+        config.set_initial_max_stream_data_bidi_remote(50000);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let mut h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(true).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: false,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        let _ = s.send_response(stream, false).unwrap();
+
+        // Clear the writable stream queue.
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(stream));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(11));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(3));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(7));
+        assert_eq!(s.pipe.server.stream_writable_next(), None);
+
+        // The body must be larger than the cwnd would allow.
+        let send_buf = [42; 80000];
+
+        let sent = s
+            .server
+            .send_body(&mut s.pipe.server, stream, &send_buf, true)
+            .unwrap();
+
+        // send_body wrote as much as it could (sent < size of buff).
+        assert_eq!(sent, 11995);
+
+        s.advance().ok();
+
+        // Client reads received headers and body.
+        let mut recv_buf = [42; 80000];
+        assert!(s.poll_client().is_ok());
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_client(stream, &mut recv_buf), Ok(11995));
+
+        s.advance().ok();
+
+        // Server send cap is smaller than remaining body buffer.
+        assert!(s.pipe.server.tx_cap < send_buf.len() - sent);
+
+        // Once the server cwnd opens up, we can send more body.
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(0));
     }
 
     #[test]
