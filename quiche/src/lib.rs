@@ -6727,6 +6727,13 @@ impl Connection {
         self.is_server
     }
 
+    /// Returns the sequence number of the provided source Connection ID, or
+    /// `None` if the provided Connection ID does not match any known source
+    /// Connection ID.
+    pub fn find_scid_seq(&self, scid: &ConnectionId) -> Option<u64> {
+        self.ids.find_scid_seq(scid).map(|(seq, _)| seq)
+    }
+
     fn encode_transport_params(&mut self) -> Result<()> {
         let mut raw_params = [0; 128];
 
@@ -9254,13 +9261,15 @@ pub mod testing {
             hdr.pkt_num_len,
         );
 
-        // We don't support multipath in this method.
-        assert!(!conn.is_multipath_enabled());
-        let path_seq = packet::INITIAL_PACKET_NUMBER_SPACE_ID as u32;
+        let space_seq = if conn.is_multipath_enabled() {
+            conn.find_scid_seq(&hdr.dcid).unwrap() as u32
+        } else {
+            packet::INITIAL_PACKET_NUMBER_SPACE_ID as u32
+        };
 
         let mut payload = packet::decrypt_pkt(
             &mut b,
-            path_seq,
+            space_seq,
             pn,
             hdr.pkt_num_len,
             payload_len,
@@ -12237,10 +12246,10 @@ mod tests {
             frame.to_bytes(&mut b).unwrap();
         }
 
-        let path_seq = if pipe.client.is_multipath_enabled() {
-            todo!()
+        let space_seq = if pipe.client.is_multipath_enabled() {
+            pipe.client.find_scid_seq(&hdr.dcid).unwrap() as u32
         } else {
-            0
+            packet::INITIAL_PACKET_NUMBER_SPACE_ID as u32
         };
 
         let crypto = pipe.client.pkt_num_spaces.crypto.get(epoch);
@@ -12252,7 +12261,7 @@ mod tests {
 
         let written = packet::encrypt_pkt(
             &mut b,
-            path_seq,
+            space_seq,
             pn,
             pn_len,
             payload_len,
