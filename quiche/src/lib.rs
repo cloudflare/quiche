@@ -6727,13 +6727,6 @@ impl Connection {
         self.is_server
     }
 
-    /// Returns the sequence number of the provided source Connection ID, or
-    /// `None` if the provided Connection ID does not match any known source
-    /// Connection ID.
-    pub fn find_scid_seq(&self, scid: &ConnectionId) -> Option<u64> {
-        self.ids.find_scid_seq(scid).map(|(seq, _)| seq)
-    }
-
     fn encode_transport_params(&mut self) -> Result<()> {
         let mut raw_params = [0; 128];
 
@@ -9262,7 +9255,10 @@ pub mod testing {
         );
 
         let space_seq = if conn.is_multipath_enabled() {
-            conn.find_scid_seq(&hdr.dcid).unwrap() as u32
+            conn.ids
+                .find_scid_seq(&hdr.dcid)
+                .map(|(seq, _)| seq)
+                .unwrap() as u32
         } else {
             packet::INITIAL_PACKET_NUMBER_SPACE_ID as u32
         };
@@ -12247,7 +12243,11 @@ mod tests {
         }
 
         let space_seq = if pipe.client.is_multipath_enabled() {
-            pipe.client.find_scid_seq(&hdr.dcid).unwrap() as u32
+            pipe.client
+                .ids
+                .find_scid_seq(&hdr.dcid)
+                .map(|(seq, _)| seq)
+                .unwrap() as u32
         } else {
             packet::INITIAL_PACKET_NUMBER_SPACE_ID as u32
         };
