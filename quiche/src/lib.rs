@@ -931,10 +931,14 @@ impl Config {
 
     /// Sets the `initial_max_data` transport parameter.
     ///
-    /// When set to a non-zero value quiche will only allow at most `v` bytes
-    /// of incoming stream data to be buffered for the whole connection (that
-    /// is, data that is not yet read by the application) and will allow more
-    /// data to be received as the buffer is consumed by the application.
+    /// When set to a non-zero value quiche will only allow at most `v` bytes of
+    /// incoming stream data to be buffered for the whole connection (that is,
+    /// data that is not yet read by the application) and will allow more data
+    /// to be received as the buffer is consumed by the application.
+    ///
+    /// When set to zero, either explicitly or via the default, quiche will not
+    /// give any flow control to the peer, preventing if from sending any stream
+    /// data.
     ///
     /// The default value is `0`.
     pub fn set_initial_max_data(&mut self, v: u64) {
@@ -948,6 +952,10 @@ impl Config {
     /// bidirectional stream (that is, data that is not yet read by the
     /// application) and will allow more data to be received as the buffer is
     /// consumed by the application.
+    ///
+    /// When set to zero, either explicitly or via the default, quiche will not
+    /// give any flow control to the peer, preventing if from sending any stream
+    /// data.
     ///
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_bidi_local(&mut self, v: u64) {
@@ -963,6 +971,10 @@ impl Config {
     /// application) and will allow more data to be received as the buffer is
     /// consumed by the application.
     ///
+    /// When set to zero, either explicitly or via the default, quiche will not
+    /// give any flow control to the peer, preventing if from sending any stream
+    /// data.
+    ///
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_bidi_remote(&mut self, v: u64) {
         self.local_transport_params
@@ -976,6 +988,10 @@ impl Config {
     /// (that is, data that is not yet read by the application) and will allow
     /// more data to be received as the buffer is consumed by the application.
     ///
+    /// When set to zero, either explicitly or via the default, quiche will not
+    /// give any flow control to the peer, preventing if from sending any stream
+    /// data.
+    ///
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_uni(&mut self, v: u64) {
         self.local_transport_params.initial_max_stream_data_uni = v;
@@ -987,6 +1003,9 @@ impl Config {
     /// concurrent remotely-initiated bidirectional streams to be open at any
     /// given time and will increase the limit automatically as streams are
     /// completed.
+    ///
+    /// When set to zero, either explicitly or via the default, quiche will not
+    /// not allow the peer to open any bidirectional streams.
     ///
     /// A bidirectional stream is considered completed when all incoming data
     /// has been read by the application (up to the `fin` offset) or the
@@ -1005,6 +1024,9 @@ impl Config {
     /// concurrent remotely-initiated unidirectional streams to be open at any
     /// given time and will increase the limit automatically as streams are
     /// completed.
+    ///
+    /// When set to zero, either explicitly or via the default, quiche will not
+    /// not allow the peer to open any unidirectional streams.
     ///
     /// A unidirectional stream is considered completed when all incoming data
     /// has been read by the application (up to the `fin` offset) or the
