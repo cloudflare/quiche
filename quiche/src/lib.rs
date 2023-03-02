@@ -937,7 +937,7 @@ impl Config {
     /// to be received as the buffer is consumed by the application.
     ///
     /// When set to zero, either explicitly or via the default, quiche will not
-    /// give any flow control to the peer, preventing if from sending any stream
+    /// give any flow control to the peer, preventing it from sending any stream
     /// data.
     ///
     /// The default value is `0`.
@@ -954,7 +954,7 @@ impl Config {
     /// consumed by the application.
     ///
     /// When set to zero, either explicitly or via the default, quiche will not
-    /// give any flow control to the peer, preventing if from sending any stream
+    /// give any flow control to the peer, preventing it from sending any stream
     /// data.
     ///
     /// The default value is `0`.
@@ -972,7 +972,7 @@ impl Config {
     /// consumed by the application.
     ///
     /// When set to zero, either explicitly or via the default, quiche will not
-    /// give any flow control to the peer, preventing if from sending any stream
+    /// give any flow control to the peer, preventing it from sending any stream
     /// data.
     ///
     /// The default value is `0`.
@@ -989,7 +989,7 @@ impl Config {
     /// more data to be received as the buffer is consumed by the application.
     ///
     /// When set to zero, either explicitly or via the default, quiche will not
-    /// give any flow control to the peer, preventing if from sending any stream
+    /// give any flow control to the peer, preventing it from sending any stream
     /// data.
     ///
     /// The default value is `0`.
