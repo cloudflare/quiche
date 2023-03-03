@@ -48,14 +48,15 @@
 //! # Ok::<(), quiche::Error>(())
 //! ```
 //!
-//! The [`Config`] object controls important aspects of the QUIC connection such as
-//! QUIC version, ALPN IDs, flow control, congestion control, idle timeout and other
-//! properties or features.
+//! The [`Config`] object controls important aspects of the QUIC connection such
+//! as QUIC version, ALPN IDs, flow control, congestion control, idle timeout
+//! and other properties or features.
 //!
-//! QUIC is a general-purpose transport protocol and there are several configuration
-//! properties where there is no reasonable default value. For example, the
-//! permitted number of concurrent streams of any particular type is dependent on
-//! the application running over QUIC, and other use-case specific concerns.
+//! QUIC is a general-purpose transport protocol and there are several
+//! configuration properties where there is no reasonable default value. For
+//! example, the permitted number of concurrent streams of any particular type
+//! is dependent on the application running over QUIC, and other use-case
+//! specific concerns.
 //!
 //! quiche defaults several properties to zero, applications most likely need
 //! to set these to something else to satisfy their needs using the following:
@@ -67,9 +68,9 @@
 //! - [`set_initial_max_stream_data_bidi_remote()`]
 //! - [`set_initial_max_stream_data_uni()`]
 //!
-//! [`Config`] also holds TLS configuration. This can be changed by mutators on the
-//! an existing object, or by constructing a TLS context manually and creating a
-//! configuration using [`with_boring_ssl_ctx()`].
+//! [`Config`] also holds TLS configuration. This can be changed by mutators on
+//! the an existing object, or by constructing a TLS context manually and
+//! creating a configuration using [`with_boring_ssl_ctx()`].
 //!
 //! A configuration object can be shared among multiple connections.
 //!
