@@ -82,9 +82,7 @@ impl RangeSet {
         }
 
         if self.inner.len() >= self.capacity {
-            if let Some(first) = self.inner.keys().next().copied() {
-                self.inner.remove(&first);
-            }
+            self.inner.pop_first();
         }
 
         self.inner.insert(start, end);
