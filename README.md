@@ -76,7 +76,7 @@ The first step in establishing a QUIC connection using quiche is creating a
 
 ```rust
 let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-config.set_application_protos(&[b"h3"]);
+config.set_application_protos(&[b"example-proto"]);
 
 // Additional configuration specific to application and use case...
 ```
