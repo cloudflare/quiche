@@ -35,18 +35,46 @@
 //! [quiche]: https://github.com/cloudflare/quiche/
 //! [ietf]: https://quicwg.org/
 //!
-//! ## Connection setup
+//! ## Configuring connections
 //!
 //! The first step in establishing a QUIC connection using quiche is creating a
-//! configuration object:
+//! [`Config`] object:
 //!
 //! ```
-//! let config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+//! let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+//! config.set_application_protos(&[b"example-proto"]);
+//!
+//! // Additional configuration specific to application and use case...
 //! # Ok::<(), quiche::Error>(())
 //! ```
 //!
-//! This is shared among multiple connections and can be used to configure a
-//! QUIC endpoint.
+//! The [`Config`] object controls important aspects of the QUIC connection such
+//! as QUIC version, ALPN IDs, flow control, congestion control, idle timeout
+//! and other properties or features.
+//!
+//! QUIC is a general-purpose transport protocol and there are several
+//! configuration properties where there is no reasonable default value. For
+//! example, the permitted number of concurrent streams of any particular type
+//! is dependent on the application running over QUIC, and other use-case
+//! specific concerns.
+//!
+//! quiche defaults several properties to zero, applications most likely need
+//! to set these to something else to satisfy their needs using the following:
+//!
+//! - [`set_initial_max_streams_bidi()`]
+//! - [`set_initial_max_streams_uni()`]
+//! - [`set_initial_max_data()`]
+//! - [`set_initial_max_stream_data_bidi_local()`]
+//! - [`set_initial_max_stream_data_bidi_remote()`]
+//! - [`set_initial_max_stream_data_uni()`]
+//!
+//! [`Config`] also holds TLS configuration. This can be changed by mutators on
+//! the an existing object, or by constructing a TLS context manually and
+//! creating a configuration using [`with_boring_ssl_ctx()`].
+//!
+//! A configuration object can be shared among multiple connections.
+//!
+//! ### Connection setup
 //!
 //! On the client-side the [`connect()`] utility function can be used to create
 //! a new connection, while [`accept()`] is for servers:
@@ -275,6 +303,14 @@
 //! The quiche [HTTP/3 module] provides a high level API for sending and
 //! receiving HTTP requests and responses on top of the QUIC transport protocol.
 //!
+//! [`Config`]: https://docs.quic.tech/quiche/struct.Config.html
+//! [`set_initial_max_streams_bidi()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_streams_bidi
+//! [`set_initial_max_streams_uni()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_streams_uni
+//! [`set_initial_max_data()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_data
+//! [`set_initial_max_stream_data_bidi_local()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_stream_data_bidi_local
+//! [`set_initial_max_stream_data_bidi_remote()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_stream_data_bidi_remote
+//! [`set_initial_max_stream_data_uni()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_stream_data_uni
+//! [`with_boring_ssl_ctx()`]: https://docs.quic.tech/quiche/struct.Config.html#method.with_boring_ssl_ctx
 //! [`connect()`]: fn.connect.html
 //! [`accept()`]: fn.accept.html
 //! [`recv()`]: struct.Connection.html#method.recv
@@ -931,10 +967,14 @@ impl Config {
 
     /// Sets the `initial_max_data` transport parameter.
     ///
-    /// When set to a non-zero value quiche will only allow at most `v` bytes
-    /// of incoming stream data to be buffered for the whole connection (that
-    /// is, data that is not yet read by the application) and will allow more
-    /// data to be received as the buffer is consumed by the application.
+    /// When set to a non-zero value quiche will only allow at most `v` bytes of
+    /// incoming stream data to be buffered for the whole connection (that is,
+    /// data that is not yet read by the application) and will allow more data
+    /// to be received as the buffer is consumed by the application.
+    ///
+    /// When set to zero, either explicitly or via the default, quiche will not
+    /// give any flow control to the peer, preventing it from sending any stream
+    /// data.
     ///
     /// The default value is `0`.
     pub fn set_initial_max_data(&mut self, v: u64) {
@@ -948,6 +988,10 @@ impl Config {
     /// bidirectional stream (that is, data that is not yet read by the
     /// application) and will allow more data to be received as the buffer is
     /// consumed by the application.
+    ///
+    /// When set to zero, either explicitly or via the default, quiche will not
+    /// give any flow control to the peer, preventing it from sending any stream
+    /// data.
     ///
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_bidi_local(&mut self, v: u64) {
@@ -963,6 +1007,10 @@ impl Config {
     /// application) and will allow more data to be received as the buffer is
     /// consumed by the application.
     ///
+    /// When set to zero, either explicitly or via the default, quiche will not
+    /// give any flow control to the peer, preventing it from sending any stream
+    /// data.
+    ///
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_bidi_remote(&mut self, v: u64) {
         self.local_transport_params
@@ -976,6 +1024,10 @@ impl Config {
     /// (that is, data that is not yet read by the application) and will allow
     /// more data to be received as the buffer is consumed by the application.
     ///
+    /// When set to zero, either explicitly or via the default, quiche will not
+    /// give any flow control to the peer, preventing it from sending any stream
+    /// data.
+    ///
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_uni(&mut self, v: u64) {
         self.local_transport_params.initial_max_stream_data_uni = v;
@@ -987,6 +1039,9 @@ impl Config {
     /// concurrent remotely-initiated bidirectional streams to be open at any
     /// given time and will increase the limit automatically as streams are
     /// completed.
+    ///
+    /// When set to zero, either explicitly or via the default, quiche will not
+    /// not allow the peer to open any bidirectional streams.
     ///
     /// A bidirectional stream is considered completed when all incoming data
     /// has been read by the application (up to the `fin` offset) or the
@@ -1005,6 +1060,9 @@ impl Config {
     /// concurrent remotely-initiated unidirectional streams to be open at any
     /// given time and will increase the limit automatically as streams are
     /// completed.
+    ///
+    /// When set to zero, either explicitly or via the default, quiche will not
+    /// not allow the peer to open any unidirectional streams.
     ///
     /// A unidirectional stream is considered completed when all incoming data
     /// has been read by the application (up to the `fin` offset) or the
