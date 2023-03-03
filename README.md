@@ -78,8 +78,7 @@ The first step in establishing a QUIC connection using quiche is creating a
 let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
 config.set_application_protos(&[b"h3"]);
 
-// additional configuration for application or use case
-
+// Additional configuration specific to application and use case...
 ```
 
 The [`Config`] object controls important aspects of the QUIC connection such as
