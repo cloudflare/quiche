@@ -35,7 +35,7 @@ use connectivity::ConnectivityEventType;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(untagged)]
 pub enum EventType {
     ConnectivityEventType(ConnectivityEventType),
@@ -52,13 +52,8 @@ pub enum EventType {
 
     GenericEventType(GenericEventType),
 
+    #[default]
     None,
-}
-
-impl Default for EventType {
-    fn default() -> Self {
-        EventType::None
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
