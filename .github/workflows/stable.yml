@@ -288,7 +288,7 @@ jobs:
   android_ndk_lts:
     runs-on: ubuntu-latest
     env:
-      NDK_LTS_VER: "21"
+      NDK_LTS_VER: "23"
     strategy:
       matrix:
         target: ["aarch64-linux-android","armv7-linux-androideabi","x86_64-linux-android","i686-linux-android"]
