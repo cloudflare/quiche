@@ -2999,7 +2999,7 @@ impl Connection {
         }
 
         if self.local_error.is_none() {
-            self.do_handshake()?;
+            self.do_handshake(time::Instant::now())?;
         }
 
         // Forwarding the error value here could confuse
@@ -6219,7 +6219,7 @@ impl Connection {
     /// Continues the handshake.
     ///
     /// If the connection is already established, it does nothing.
-    fn do_handshake(&mut self) -> Result<()> {
+    fn do_handshake(&mut self, now: time::Instant) -> Result<()> {
         let mut ex_data = tls::ExData {
             application_protos: &self.application_protos,
 
@@ -6278,20 +6278,29 @@ impl Connection {
             self.parse_peer_transport_params(peer_params)?;
         }
 
-        // Once the handshake is completed there's no point in processing 0-RTT
-        // packets anymore, so clear the buffer now.
         if self.handshake_completed {
-            self.undecryptable_pkts.clear();
-        }
+            // The handshake is considered confirmed at the server when the
+            // handshake completes, at which point we can also drop the
+            // handshake epoch.
+            if self.is_server {
+                self.handshake_confirmed = true;
 
-        trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
-               &self.trace_id,
-               std::str::from_utf8(self.application_proto()),
-               self.handshake.cipher(),
-               self.handshake.curve(),
-               self.handshake.sigalg(),
-               self.handshake.is_resumed(),
-               self.peer_transport_params);
+                self.drop_epoch_state(packet::Epoch::Handshake, now);
+            }
+
+            // Once the handshake is completed there's no point in processing
+            // 0-RTT packets anymore, so clear the buffer now.
+            self.undecryptable_pkts.clear();
+
+            trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
+                   &self.trace_id,
+                   std::str::from_utf8(self.application_proto()),
+                   self.handshake.cipher(),
+                   self.handshake.curve(),
+                   self.handshake.sigalg(),
+                   self.handshake.is_resumed(),
+                   self.peer_transport_params);
+        }
 
         Ok(())
     }
@@ -6428,16 +6437,11 @@ impl Connection {
                     ))
                     .ok_or(Error::InvalidFrame)?;
 
-                if epoch == packet::Epoch::Handshake {
+                if epoch == packet::Epoch::Handshake ||
+                    (epoch == packet::Epoch::Application &&
+                        self.is_established())
+                {
                     self.peer_verified_initial_address = true;
-                }
-
-                // When we receive an ACK for a 1-RTT packet after handshake
-                // completion, it means the handshake has been confirmed.
-                if epoch == packet::Epoch::Application && self.is_established() {
-                    self.peer_verified_initial_address = true;
-
-                    self.handshake_confirmed = true;
                 }
 
                 let handshake_status = self.handshake_status();
@@ -6460,10 +6464,6 @@ impl Connection {
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
-                }
-
-                if self.handshake_confirmed {
-                    self.drop_epoch_state(packet::Epoch::Handshake, now);
                 }
             },
 
@@ -6582,7 +6582,7 @@ impl Connection {
                     self.handshake.provide_data(level, recv_buf)?;
                 }
 
-                self.do_handshake()?;
+                self.do_handshake(now)?;
             },
 
             frame::Frame::CryptoHeader { .. } => unreachable!(),
@@ -8511,14 +8511,14 @@ mod tests {
 
         testing::process_flight(&mut pipe.server, flight).unwrap();
 
-        // Server completes handshake and sends HANDSHAKE_DONE.
+        // Server completes and confirms handshake, and sends HANDSHAKE_DONE.
         let flight = testing::emit_flight(&mut pipe.server).unwrap();
 
         assert!(pipe.client.is_established());
         assert!(!pipe.client.handshake_confirmed);
 
         assert!(pipe.server.is_established());
-        assert!(!pipe.server.handshake_confirmed);
+        assert!(pipe.server.handshake_confirmed);
 
         testing::process_flight(&mut pipe.client, flight).unwrap();
 
@@ -8529,11 +8529,10 @@ mod tests {
         assert!(pipe.client.handshake_confirmed);
 
         assert!(pipe.server.is_established());
-        assert!(!pipe.server.handshake_confirmed);
+        assert!(pipe.server.handshake_confirmed);
 
         testing::process_flight(&mut pipe.server, flight).unwrap();
 
-        // Server handshake is confirmed.
         assert!(pipe.client.is_established());
         assert!(pipe.client.handshake_confirmed);
 
