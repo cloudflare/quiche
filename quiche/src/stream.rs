@@ -223,7 +223,7 @@ impl StreamMap {
         &mut self, id: u64, local_params: &crate::TransportParams,
         peer_params: &crate::TransportParams, local: bool, is_server: bool,
     ) -> Result<&mut Stream> {
-        let stream = match self.streams.entry(id) {
+        let (stream, is_new_and_writable) = match self.streams.entry(id) {
             hash_map::Entry::Vacant(v) => {
                 // Stream has already been closed and garbage collected.
                 if self.collected.contains(&id) {
@@ -322,14 +322,18 @@ impl StreamMap {
                     local,
                     self.max_stream_window,
                 );
-                v.insert(s)
+
+                let is_writable = s.is_writable();
+
+                (v.insert(s), is_writable)
             },
 
-            hash_map::Entry::Occupied(v) => v.into_mut(),
+            hash_map::Entry::Occupied(v) => (v.into_mut(), false),
         };
 
-        // Stream might already be writable due to initial flow control limits.
-        if stream.is_writable() {
+        // Newly created stream might already be writable due to initial flow
+        // control limits.
+        if is_new_and_writable {
             self.writable.insert(id);
         }
 
