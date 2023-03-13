@@ -556,11 +556,11 @@ impl<'a> std::fmt::Debug for Header<'a> {
 }
 
 pub fn pkt_num_len(pn: u64) -> Result<usize> {
-    let len = if pn < u64::from(std::u8::MAX) {
+    let len = if pn < u64::from(u8::MAX) {
         1
-    } else if pn < u64::from(std::u16::MAX) {
+    } else if pn < u64::from(u16::MAX) {
         2
-    } else if pn < u64::from(std::u32::MAX) {
+    } else if pn < u64::from(u32::MAX) {
         4
     } else {
         return Err(Error::InvalidPacket);
@@ -907,8 +907,8 @@ impl PktNumSpace {
             crypto_0rtt_seal: None,
 
             crypto_stream: stream::Stream::new(
-                std::u64::MAX,
-                std::u64::MAX,
+                u64::MAX,
+                u64::MAX,
                 true,
                 true,
                 stream::MAX_STREAM_WINDOW,
@@ -918,8 +918,8 @@ impl PktNumSpace {
 
     pub fn clear(&mut self) {
         self.crypto_stream = stream::Stream::new(
-            std::u64::MAX,
-            std::u64::MAX,
+            u64::MAX,
+            u64::MAX,
             true,
             true,
             stream::MAX_STREAM_WINDOW,
@@ -1262,7 +1262,7 @@ mod tests {
         assert!(!win.contains(1025));
         assert!(!win.contains(1026));
 
-        win.insert(std::u64::MAX - 1);
+        win.insert(u64::MAX - 1);
         assert!(win.contains(0));
         assert!(win.contains(1));
         assert!(win.contains(2));
@@ -1284,8 +1284,8 @@ mod tests {
         assert!(win.contains(1024));
         assert!(win.contains(1025));
         assert!(win.contains(1026));
-        assert!(!win.contains(std::u64::MAX - 2));
-        assert!(win.contains(std::u64::MAX - 1));
+        assert!(!win.contains(u64::MAX - 2));
+        assert!(win.contains(u64::MAX - 1));
     }
 
     fn assert_decrypt_initial_pkt(
