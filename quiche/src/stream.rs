@@ -1662,7 +1662,7 @@ mod tests {
 
     #[test]
     fn empty_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1728,7 +1728,7 @@ mod tests {
 
     #[test]
     fn ordered_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1765,7 +1765,7 @@ mod tests {
 
     #[test]
     fn split_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1805,7 +1805,7 @@ mod tests {
 
     #[test]
     fn incomplete_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1833,7 +1833,7 @@ mod tests {
 
     #[test]
     fn zero_len_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1861,7 +1861,7 @@ mod tests {
 
     #[test]
     fn past_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1900,7 +1900,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1931,7 +1931,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read2() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1962,7 +1962,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read3() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1993,7 +1993,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read_multi() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2030,7 +2030,7 @@ mod tests {
 
     #[test]
     fn overlapping_start_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2060,7 +2060,7 @@ mod tests {
 
     #[test]
     fn overlapping_end_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2090,7 +2090,7 @@ mod tests {
 
     #[test]
     fn overlapping_end_twice_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2132,7 +2132,7 @@ mod tests {
 
     #[test]
     fn overlapping_end_twice_and_contained_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2174,7 +2174,7 @@ mod tests {
 
     #[test]
     fn partially_multi_overlapping_reordered_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2211,7 +2211,7 @@ mod tests {
 
     #[test]
     fn partially_multi_overlapping_reordered_read2() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2268,7 +2268,7 @@ mod tests {
     fn empty_write() {
         let mut buf = [0; 5];
 
-        let mut send = SendBuf::new(std::u64::MAX);
+        let mut send = SendBuf::new(u64::MAX);
         assert_eq!(send.len, 0);
 
         let (written, fin) = send.emit(&mut buf).unwrap();
@@ -2280,7 +2280,7 @@ mod tests {
     fn multi_write() {
         let mut buf = [0; 128];
 
-        let mut send = SendBuf::new(std::u64::MAX);
+        let mut send = SendBuf::new(u64::MAX);
         assert_eq!(send.len, 0);
 
         let first = b"something";
@@ -2303,7 +2303,7 @@ mod tests {
     fn split_write() {
         let mut buf = [0; 10];
 
-        let mut send = SendBuf::new(std::u64::MAX);
+        let mut send = SendBuf::new(u64::MAX);
         assert_eq!(send.len, 0);
 
         let first = b"something";
@@ -2346,7 +2346,7 @@ mod tests {
     fn resend() {
         let mut buf = [0; 15];
 
-        let mut send = SendBuf::new(std::u64::MAX);
+        let mut send = SendBuf::new(u64::MAX);
         assert_eq!(send.len, 0);
         assert_eq!(send.off_front(), 0);
 
@@ -2479,7 +2479,7 @@ mod tests {
     fn zero_len_write() {
         let mut buf = [0; 10];
 
-        let mut send = SendBuf::new(std::u64::MAX);
+        let mut send = SendBuf::new(u64::MAX);
         assert_eq!(send.len, 0);
 
         let first = b"something";
@@ -3338,7 +3338,7 @@ mod tests {
     fn send_buf_len_on_retransmit() {
         let mut buf = [0; 15];
 
-        let mut send = SendBuf::new(std::u64::MAX);
+        let mut send = SendBuf::new(u64::MAX);
         assert_eq!(send.len, 0);
         assert_eq!(send.off_front(), 0);
 

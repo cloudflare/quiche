@@ -927,7 +927,7 @@ pub extern fn quiche_conn_timeout_as_nanos(conn: &Connection) -> u64 {
     match conn.timeout() {
         Some(timeout) => timeout.as_nanos() as u64,
 
-        None => std::u64::MAX,
+        None => u64::MAX,
     }
 }
 
@@ -936,7 +936,7 @@ pub extern fn quiche_conn_timeout_as_millis(conn: &Connection) -> u64 {
     match conn.timeout() {
         Some(timeout) => timeout.as_millis() as u64,
 
-        None => std::u64::MAX,
+        None => u64::MAX,
     }
 }
 

@@ -152,7 +152,7 @@ impl RangeSet {
 
 impl Default for RangeSet {
     fn default() -> Self {
-        Self::new(std::usize::MAX)
+        Self::new(usize::MAX)
     }
 }
 

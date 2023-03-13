@@ -2527,7 +2527,7 @@ impl Connection {
                 let max_size = self
                     .local_settings
                     .max_field_section_size
-                    .unwrap_or(std::u64::MAX);
+                    .unwrap_or(u64::MAX);
 
                 let headers = match self
                     .qpack_decoder
