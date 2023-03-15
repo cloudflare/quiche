@@ -1120,6 +1120,10 @@ pub struct SendBuf {
     /// The maximum offset of data buffered in the stream.
     off: u64,
 
+    /// The maximum offset of data sent to the peer, regardless of
+    /// retransmissions.
+    emit_off: u64,
+
     /// The amount of data currently buffered.
     len: u64,
 
@@ -1274,6 +1278,10 @@ impl SendBuf {
         // propagate the final size.
         let fin = self.fin_off == Some(next_off);
 
+        // Record the largest offset that has been sent so we can accurately
+        // report final_size
+        self.emit_off = cmp::max(self.emit_off, next_off);
+
         Ok((out.len() - out_len, fin))
     }
 
@@ -1393,8 +1401,8 @@ impl SendBuf {
 
     /// Resets the stream at the current offset and clears all buffered data.
     pub fn reset(&mut self) -> Result<(u64, u64)> {
-        let unsent_off = self.off_front();
-        let unsent_len = self.off_back() - unsent_off;
+        let unsent_off = cmp::max(self.off_front(), self.emit_off);
+        let unsent_len = self.off_back().saturating_sub(unsent_off);
 
         self.fin_off = Some(unsent_off);
 
@@ -1408,7 +1416,7 @@ impl SendBuf {
         self.len = 0;
         self.off = unsent_off;
 
-        Ok((self.fin_off.unwrap(), unsent_len))
+        Ok((self.emit_off, unsent_len))
     }
 
     /// Resets the streams and records the received error code.
@@ -1419,11 +1427,11 @@ impl SendBuf {
             return Err(Error::Done);
         }
 
-        let (fin_off, unsent) = self.reset()?;
+        let (max_off, unsent) = self.reset()?;
 
         self.error = Some(error_code);
 
-        Ok((fin_off, unsent))
+        Ok((max_off, unsent))
     }
 
     /// Shuts down sending data.
@@ -3359,5 +3367,30 @@ mod tests {
         send.retransmit(3, 5);
         assert_eq!(send.len, 6);
         assert_eq!(send.off_front(), 3);
+    }
+
+    #[test]
+    fn send_buf_final_size_retransmit() {
+        let mut buf = [0; 50];
+        let mut send = SendBuf::new(u64::MAX);
+
+        send.write(&buf, false).unwrap();
+        assert_eq!(send.off_front(), 0);
+
+        // Emit the whole buffer
+        let (written, _fin) = send.emit(&mut buf).unwrap();
+        assert_eq!(written, buf.len());
+        assert_eq!(send.off_front(), buf.len() as u64);
+
+        // Server decides to retransmit the last 10 bytes. It's possible
+        // it's not actually lost and that the client did receive it.
+        send.retransmit(40, 10);
+
+        // Server receives STOP_SENDING from client. The final_size we
+        // send in the RESET_STREAM should be 50. If we send anything less,
+        // it's a FINAL_SIZE_ERROR.
+        let (fin_off, unsent) = send.stop(0).unwrap();
+        assert_eq!(fin_off, 50);
+        assert_eq!(unsent, 0);
     }
 }
