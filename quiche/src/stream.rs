@@ -1400,7 +1400,7 @@ impl SendBuf {
     }
 
     /// Resets the stream at the current offset and clears all buffered data.
-    pub fn reset(&mut self) -> Result<(u64, u64)> {
+    pub fn reset(&mut self) -> (u64, u64) {
         let unsent_off = cmp::max(self.off_front(), self.emit_off);
         let unsent_len = self.off_back().saturating_sub(unsent_off);
 
@@ -1416,7 +1416,7 @@ impl SendBuf {
         self.len = 0;
         self.off = unsent_off;
 
-        Ok((self.emit_off, unsent_len))
+        (self.emit_off, unsent_len)
     }
 
     /// Resets the streams and records the received error code.
@@ -1427,7 +1427,7 @@ impl SendBuf {
             return Err(Error::Done);
         }
 
-        let (max_off, unsent) = self.reset()?;
+        let (max_off, unsent) = self.reset();
 
         self.error = Some(error_code);
 
@@ -1442,7 +1442,7 @@ impl SendBuf {
 
         self.shutdown = true;
 
-        self.reset()
+        Ok(self.reset())
     }
 
     /// Returns the largest offset of data buffered.
