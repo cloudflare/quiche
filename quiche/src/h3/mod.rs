@@ -3089,6 +3089,7 @@ mod tests {
         assert!(grease_value() < 2u64.pow(62) - 1);
     }
 
+    #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
     #[test]
     fn h3_handshake_0rtt() {
         let mut buf = [0; 65535];

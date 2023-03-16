@@ -345,7 +345,13 @@ the BoringSSL directory with the ``QUICHE_BSSL_PATH`` environment variable:
  $ QUICHE_BSSL_PATH="/path/to/boringssl" cargo build --examples
 ```
 
+Alternatively you can use [OpenSSL/quictls]. To enable quiche to use this vendor
+the ``openssl`` feature can be added to the ``--feature`` list. Be aware that
+``0-RTT`` is not supported if this vendor is used.
+
 [BoringSSL]: https://boringssl.googlesource.com/boringssl/
+
+[OpenSSL/quictls]: https://github.com/quictls/openssl
 
 ### Building for Android
 
