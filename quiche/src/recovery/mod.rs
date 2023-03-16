@@ -202,7 +202,7 @@ impl Recovery {
 
             time_of_last_sent_ack_eliciting_pkt: [None; packet::Epoch::count()],
 
-            largest_acked_pkt: [std::u64::MAX; packet::Epoch::count()],
+            largest_acked_pkt: [u64::MAX; packet::Epoch::count()],
 
             largest_sent_pkt: [0; packet::Epoch::count()],
 
@@ -245,7 +245,7 @@ impl Recovery {
 
             bytes_in_flight: 0,
 
-            ssthresh: std::usize::MAX,
+            ssthresh: usize::MAX,
 
             bytes_acked_sl: 0,
 
@@ -301,7 +301,7 @@ impl Recovery {
         self.congestion_window = self.max_datagram_size * INITIAL_WINDOW_PACKETS;
         self.in_flight_count = [0; packet::Epoch::count()];
         self.congestion_recovery_start_time = None;
-        self.ssthresh = std::usize::MAX;
+        self.ssthresh = usize::MAX;
         (self.cc_ops.reset)(self);
         self.hystart.reset();
         self.prr = prr::PRR::default();
@@ -430,7 +430,7 @@ impl Recovery {
         // a validating path, then receives an acknowledgment for that packet on
         // the active one.
 
-        if self.largest_acked_pkt[epoch] == std::u64::MAX {
+        if self.largest_acked_pkt[epoch] == u64::MAX {
             self.largest_acked_pkt[epoch] = largest_acked;
         } else {
             self.largest_acked_pkt[epoch] =
@@ -676,7 +676,7 @@ impl Recovery {
     pub fn cwnd_available(&self) -> usize {
         // Ignore cwnd when sending probe packets.
         if self.loss_probes.iter().any(|&x| x > 0) {
-            return std::usize::MAX;
+            return usize::MAX;
         }
 
         // Open more space (snd_cnt) for PRR when allowed.

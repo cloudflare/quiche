@@ -2999,7 +2999,7 @@ impl Connection {
         }
 
         if self.local_error.is_none() {
-            self.do_handshake()?;
+            self.do_handshake(time::Instant::now())?;
         }
 
         // Forwarding the error value here could confuse
@@ -4412,28 +4412,40 @@ impl Connection {
 
         let cap = self.tx_cap;
 
-        // Truncate the input buffer based on the connection's send capacity if
-        // necessary.
-        //
-        // When the cap is zero, the method returns Ok(0) *only* when the passed
-        // buffer is empty. We return Error::Done otherwise.
-        if cap == 0 && !buf.is_empty() {
-            return Err(Error::Done);
-        }
-
-        let (buf, fin) = if cap < buf.len() {
-            (&buf[..cap], false)
-        } else {
-            (buf, fin)
-        };
-
         // Get existing stream or create a new one.
         let stream = self.get_or_create_stream(stream_id, true)?;
 
         #[cfg(feature = "qlog")]
         let offset = stream.send.off_back();
 
+        let was_writable = stream.is_flushable();
+
         let was_flushable = stream.is_flushable();
+
+        // Truncate the input buffer based on the connection's send capacity if
+        // necessary.
+        //
+        // When the cap is zero, the method returns Ok(0) *only* when the passed
+        // buffer is empty. We return Error::Done otherwise.
+        if cap == 0 && !buf.is_empty() {
+            if was_writable {
+                // When `stream_writable_next()` returns a stream, the writable
+                // mark is removed, but because the stream is blocked by the
+                // connection-level send capacity it won't be marked as writable
+                // again once the capacity increases.
+                //
+                // Since the stream is writable already, mark it here instead.
+                self.streams.mark_writable(stream_id, true);
+            }
+
+            return Err(Error::Done);
+        }
+
+        let (buf, fin, blocked_by_cap) = if cap < buf.len() {
+            (&buf[..cap], false, true)
+        } else {
+            (buf, fin, false)
+        };
 
         let sent = match stream.send.write(buf, fin) {
             Ok(v) => v,
@@ -4476,6 +4488,14 @@ impl Connection {
 
         if !writable {
             self.streams.mark_writable(stream_id, false);
+        } else if was_writable && blocked_by_cap {
+            // When `stream_writable_next()` returns a stream, the writable
+            // mark is removed, but because the stream is blocked by the
+            // connection-level send capacity it won't be marked as writable
+            // again once the capacity increases.
+            //
+            // Since the stream is writable already, mark it here instead.
+            self.streams.mark_writable(stream_id, true);
         }
 
         self.tx_cap -= sent;
@@ -4752,6 +4772,8 @@ impl Connection {
 
         stream.send_lowat = cmp::max(1, len);
 
+        let is_writable = stream.is_writable();
+
         if self.max_tx_data - self.tx_data < len as u64 {
             self.blocked_limit = Some(self.max_tx_data);
         }
@@ -4762,6 +4784,14 @@ impl Connection {
                 stream.send.update_blocked_at(Some(max_off));
                 self.streams.mark_blocked(stream_id, true, max_off);
             }
+        } else if is_writable {
+            // When `stream_writable_next()` returns a stream, the writable
+            // mark is removed, but because the stream is blocked by the
+            // connection-level send capacity it won't be marked as writable
+            // again once the capacity increases.
+            //
+            // Since the stream is writable already, mark it here instead.
+            self.streams.mark_writable(stream_id, true);
         }
 
         Ok(false)
@@ -6189,7 +6219,7 @@ impl Connection {
     /// Continues the handshake.
     ///
     /// If the connection is already established, it does nothing.
-    fn do_handshake(&mut self) -> Result<()> {
+    fn do_handshake(&mut self, now: time::Instant) -> Result<()> {
         let mut ex_data = tls::ExData {
             application_protos: &self.application_protos,
 
@@ -6248,20 +6278,29 @@ impl Connection {
             self.parse_peer_transport_params(peer_params)?;
         }
 
-        // Once the handshake is completed there's no point in processing 0-RTT
-        // packets anymore, so clear the buffer now.
         if self.handshake_completed {
-            self.undecryptable_pkts.clear();
-        }
+            // The handshake is considered confirmed at the server when the
+            // handshake completes, at which point we can also drop the
+            // handshake epoch.
+            if self.is_server {
+                self.handshake_confirmed = true;
 
-        trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
-               &self.trace_id,
-               std::str::from_utf8(self.application_proto()),
-               self.handshake.cipher(),
-               self.handshake.curve(),
-               self.handshake.sigalg(),
-               self.handshake.is_resumed(),
-               self.peer_transport_params);
+                self.drop_epoch_state(packet::Epoch::Handshake, now);
+            }
+
+            // Once the handshake is completed there's no point in processing
+            // 0-RTT packets anymore, so clear the buffer now.
+            self.undecryptable_pkts.clear();
+
+            trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
+                   &self.trace_id,
+                   std::str::from_utf8(self.application_proto()),
+                   self.handshake.cipher(),
+                   self.handshake.curve(),
+                   self.handshake.sigalg(),
+                   self.handshake.is_resumed(),
+                   self.peer_transport_params);
+        }
 
         Ok(())
     }
@@ -6398,16 +6437,11 @@ impl Connection {
                     ))
                     .ok_or(Error::InvalidFrame)?;
 
-                if epoch == packet::Epoch::Handshake {
+                if epoch == packet::Epoch::Handshake ||
+                    (epoch == packet::Epoch::Application &&
+                        self.is_established())
+                {
                     self.peer_verified_initial_address = true;
-                }
-
-                // When we receive an ACK for a 1-RTT packet after handshake
-                // completion, it means the handshake has been confirmed.
-                if epoch == packet::Epoch::Application && self.is_established() {
-                    self.peer_verified_initial_address = true;
-
-                    self.handshake_confirmed = true;
                 }
 
                 let handshake_status = self.handshake_status();
@@ -6430,10 +6464,6 @@ impl Connection {
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
-                }
-
-                if self.handshake_confirmed {
-                    self.drop_epoch_state(packet::Epoch::Handshake, now);
                 }
             },
 
@@ -6552,7 +6582,7 @@ impl Connection {
                     self.handshake.provide_data(level, recv_buf)?;
                 }
 
-                self.do_handshake()?;
+                self.do_handshake(now)?;
             },
 
             frame::Frame::CryptoHeader { .. } => unreachable!(),
@@ -8481,14 +8511,14 @@ mod tests {
 
         testing::process_flight(&mut pipe.server, flight).unwrap();
 
-        // Server completes handshake and sends HANDSHAKE_DONE.
+        // Server completes and confirms handshake, and sends HANDSHAKE_DONE.
         let flight = testing::emit_flight(&mut pipe.server).unwrap();
 
         assert!(pipe.client.is_established());
         assert!(!pipe.client.handshake_confirmed);
 
         assert!(pipe.server.is_established());
-        assert!(!pipe.server.handshake_confirmed);
+        assert!(pipe.server.handshake_confirmed);
 
         testing::process_flight(&mut pipe.client, flight).unwrap();
 
@@ -8499,11 +8529,10 @@ mod tests {
         assert!(pipe.client.handshake_confirmed);
 
         assert!(pipe.server.is_established());
-        assert!(!pipe.server.handshake_confirmed);
+        assert!(pipe.server.handshake_confirmed);
 
         testing::process_flight(&mut pipe.server, flight).unwrap();
 
-        // Server handshake is confirmed.
         assert!(pipe.client.is_established());
         assert!(pipe.client.handshake_confirmed);
 
@@ -10132,10 +10161,6 @@ mod tests {
             pipe.server.stream_send(4, b"hello", false),
             Err(Error::Done)
         );
-        assert_eq!(
-            pipe.server.stream_send(8, b"hello", false),
-            Err(Error::Done)
-        );
 
         // Client sends STOP_SENDING.
         let frames = [frame::Frame::StopSending {
@@ -10496,10 +10521,6 @@ mod tests {
             pipe.server.stream_send(4, b"hello", false),
             Err(Error::Done)
         );
-        assert_eq!(
-            pipe.server.stream_send(8, b"hello", false),
-            Err(Error::Done)
-        );
 
         // Client shouldn't update flow control.
         assert_eq!(pipe.client.should_update_max_data(), false);
@@ -10722,6 +10743,59 @@ mod tests {
         let mut w = pipe.server.writable();
         assert_eq!(w.next(), Some(4));
         assert_eq!(w.next(), None);
+    }
+
+    #[test]
+    fn stream_writable_blocked() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150000);
+        config.set_initial_max_stream_data_bidi_remote(150000);
+        config.set_initial_max_stream_data_uni(150000);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client creates stream and sends some data.
+        let send_buf = [0; 35];
+        assert_eq!(pipe.client.stream_send(0, &send_buf, false), Ok(35));
+
+        // Stream is still writable as it still has capacity.
+        assert_eq!(pipe.client.stream_writable_next(), Some(0));
+        assert_eq!(pipe.client.stream_writable_next(), None);
+
+        // Client fills stream, which becomes unwritable due to connection
+        // capacity.
+        let send_buf = [0; 36];
+        assert_eq!(pipe.client.stream_send(0, &send_buf, false), Ok(35));
+
+        assert_eq!(pipe.client.stream_writable_next(), None);
+
+        assert_eq!(pipe.client.tx_cap, 0);
+
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let mut b = [0; 70];
+        pipe.server.stream_recv(0, &mut b).unwrap();
+
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // The connection capacity has increased and the stream is now writable
+        // again.
+        assert_ne!(pipe.client.tx_cap, 0);
+
+        assert_eq!(pipe.client.stream_writable_next(), Some(0));
+        assert_eq!(pipe.client.stream_writable_next(), None);
     }
 
     #[test]
