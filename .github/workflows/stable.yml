@@ -14,6 +14,7 @@ jobs:
         tls-feature:
           - "" # default, boringssl-vendored
           - "boringssl-boring-crate"
+          - "openssl"
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -30,6 +31,17 @@ jobs:
           toolchain: ${{ env.TOOLCHAIN }}
           components: clippy
           override: true
+
+      - name: Build OpenSSL
+        if: ${{ matrix.tls-feature == 'openssl' }}
+        run: |
+          git clone https://github.com/quictls/openssl
+          cd openssl
+          ./Configure --prefix="$PWD/install"
+          make -j"$(nproc)"
+          make install -j"$(nproc)"
+          echo "PKG_CONFIG_PATH=$PWD" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$PWD" >> "$GITHUB_ENV"
 
       - name: Run cargo test
         uses: actions-rs/cargo@v1
