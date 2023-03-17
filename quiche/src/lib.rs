@@ -4426,7 +4426,7 @@ impl Connection {
         #[cfg(feature = "qlog")]
         let offset = stream.send.off_back();
 
-        let was_writable = stream.is_flushable();
+        let was_writable = stream.is_writable();
 
         let was_flushable = stream.is_flushable();
 
