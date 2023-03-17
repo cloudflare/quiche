@@ -75,13 +75,15 @@ fn main() {
 
     // Set SO_TXTIME socket option on the listening UDP socket for pacing
     // outgoing packets.
-    match set_txtime_sockopt(&socket) {
-        Ok(_) => {
-            pacing = true;
-            debug!("successfully set SO_TXTIME socket option");
-        },
-        Err(e) => debug!("setsockopt failed {:?}", e),
-    };
+    if !args.disable_pacing {
+        match set_txtime_sockopt(&socket) {
+            Ok(_) => {
+                pacing = true;
+                debug!("successfully set SO_TXTIME socket option");
+            },
+            Err(e) => debug!("setsockopt failed {:?}", e),
+        };
+    }
 
     info!("listening on {:}", socket.local_addr().unwrap());
 
@@ -120,6 +122,8 @@ fn main() {
 
     config.set_max_connection_window(conn_args.max_window);
     config.set_max_stream_window(conn_args.max_stream_window);
+
+    config.enable_pacing(pacing);
 
     let mut keylog = None;
 
