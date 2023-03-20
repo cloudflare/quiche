@@ -1261,6 +1261,9 @@ pub struct Connection {
     /// Number of stream data bytes that can be buffered.
     tx_cap: usize,
 
+    // Number of bytes buffered in the send buffer.
+    tx_buffered: usize,
+
     /// Total number of bytes sent to the peer.
     tx_data: u64,
 
@@ -1738,6 +1741,8 @@ impl Connection {
             almost_full: false,
 
             tx_cap: 0,
+
+            tx_buffered: 0,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -2694,6 +2699,9 @@ impl Connection {
                         };
 
                         stream.send.ack_and_drop(offset, length);
+
+                        self.tx_buffered =
+                            self.tx_buffered.saturating_sub(length);
 
                         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
                             let ev_data = EventData::DataMoved(
@@ -4502,6 +4510,8 @@ impl Connection {
 
         self.tx_data += sent as u64;
 
+        self.tx_buffered += sent;
+
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
             let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
                 stream_id: Some(stream_id),
@@ -4621,6 +4631,9 @@ impl Connection {
                 // Claw back some flow control allowance from data that was
                 // buffered but not actually sent before the stream was reset.
                 self.tx_data = self.tx_data.saturating_sub(unsent);
+
+                self.tx_buffered =
+                    self.tx_buffered.saturating_sub(unsent as usize);
 
                 // Update send capacity.
                 self.update_tx_cap();
@@ -6556,6 +6569,9 @@ impl Connection {
                     // to touch it here.
                     self.tx_data = self.tx_data.saturating_sub(unsent);
 
+                    self.tx_buffered =
+                        self.tx_buffered.saturating_sub(unsent as usize);
+
                     self.streams
                         .mark_reset(stream_id, true, error_code, final_size);
 
@@ -6987,7 +7003,7 @@ impl Connection {
             .filter_map(|(_, p)| p.active().then(|| p.recovery.cwnd_available()))
             .sum();
 
-        self.tx_cap >= cwin_available &&
+        ((self.tx_buffered + self.dgram_send_queue_len()) < cwin_available) &&
             (self.tx_data.saturating_sub(self.last_tx_data)) <
                 cwin_available as u64 &&
             cwin_available > 0
