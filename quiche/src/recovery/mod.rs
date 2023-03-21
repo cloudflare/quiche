@@ -370,8 +370,6 @@ impl Recovery {
 
         self.schedule_next_packet(epoch, now, sent_bytes);
 
-        pkt.time_sent = self.get_packet_send_time();
-
         // bytes_in_flight is already updated. Use previous value.
         self.delivery_rate
             .on_packet_sent(&mut pkt, self.bytes_in_flight - sent_bytes);
