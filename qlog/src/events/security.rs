@@ -71,7 +71,7 @@ pub struct KeyUpdated {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct KeyRetired {
+pub struct KeyDiscarded {
     pub key_type: KeyType,
     pub key: Option<Bytes>,
 
