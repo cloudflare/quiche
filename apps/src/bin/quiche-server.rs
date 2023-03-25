@@ -588,6 +588,7 @@ fn main() {
                 let _ = dst_info.get_or_insert(send_info);
 
                 if write < client.max_datagram_size {
+                    continue_write = true;
                     break;
                 }
             }
