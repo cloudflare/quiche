@@ -299,7 +299,7 @@ pub enum PacketBufferedTrigger {
 #[serde(rename_all = "snake_case")]
 pub enum SecurityEventType {
     KeyUpdated,
-    KeyRetired,
+    KeyDiscarded,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]

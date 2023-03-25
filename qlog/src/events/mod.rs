@@ -172,7 +172,7 @@ impl From<EventType> for EventImportance {
 
             EventType::SecurityEventType(SecurityEventType::KeyUpdated) =>
                 EventImportance::Base,
-            EventType::SecurityEventType(SecurityEventType::KeyRetired) =>
+            EventType::SecurityEventType(SecurityEventType::KeyDiscarded) =>
                 EventImportance::Base,
 
             EventType::TransportEventType(TransportEventType::ParametersSet) =>
@@ -331,8 +331,8 @@ impl From<&EventData> for EventType {
 
             EventData::KeyUpdated { .. } =>
                 EventType::SecurityEventType(SecurityEventType::KeyUpdated),
-            EventData::KeyRetired { .. } =>
-                EventType::SecurityEventType(SecurityEventType::KeyRetired),
+            EventData::KeyDiscarded { .. } =>
+                EventType::SecurityEventType(SecurityEventType::KeyDiscarded),
 
             EventData::VersionInformation { .. } =>
                 EventType::TransportEventType(
@@ -481,7 +481,7 @@ pub enum EventData {
     KeyUpdated(security::KeyUpdated),
 
     #[serde(rename = "security:key_retired")]
-    KeyRetired(security::KeyRetired),
+    KeyDiscarded(security::KeyDiscarded),
 
     // Transport
     #[serde(rename = "transport:version_information")]
