@@ -115,6 +115,15 @@ enum quiche_error {
 
     // Error in congestion control.
     QUICHE_ERR_CONGESTION_CONTROL = -14,
+
+    // Too many identifiers were provided.
+    QUICHE_ERR_ID_LIMIT = -17,
+
+    // Not enough available identifiers.
+    QUICHE_ERR_OUT_OF_IDENTIFIERS = -18,
+
+    // Error in key update.
+    QUICHE_ERR_KEY_UPDATE = -19,
 };
 
 // Returns a human readable string with the quiche version number.
@@ -779,6 +788,15 @@ enum quiche_h3_error {
 
     // See QUICHE_ERR_CONGESTION_CONTROL.
     QUICHE_H3_TRANSPORT_ERR_CONGESTION_CONTROL = QUICHE_ERR_CONGESTION_CONTROL - 1000,
+
+    // See QUICHE_ERR_ID_LIMIT.
+    QUICHE_H3_TRANSPORT_ERR_ID_LIMIT = QUICHE_ERR_ID_LIMIT - 1000,
+
+    // See QUICHE_ERR_OUT_OF_IDENTIFIERS.
+    QUICHE_H3_TRANSPORT_ERR_OUT_OF_IDENTIFIERS = QUICHE_ERR_OUT_OF_IDENTIFIERS - 1000,
+
+    // See QUICHE_ERR_KEY_UPDATE.
+    QUICHE_H3_TRANSPORT_ERR_KEY_UPDATE = QUICHE_ERR_KEY_UPDATE - 1000,
 };
 
 // Stores configuration shared between multiple connections.
