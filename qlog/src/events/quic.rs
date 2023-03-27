@@ -214,7 +214,7 @@ pub enum ErrorSpace {
 pub enum TransportError {
     NoError,
     InternalError,
-    ConnectionError,
+    ConnectionRefused,
     FlowControlError,
     StreamLimitError,
     StreamStateError,
@@ -226,7 +226,9 @@ pub enum TransportError {
     InvalidToken,
     ApplicationError,
     CryptoBufferExceeded,
-    Unknown,
+    KeyUpdateError,
+    AeadLimitReached,
+    NoViablePath,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
