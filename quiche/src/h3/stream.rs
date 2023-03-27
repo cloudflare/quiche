@@ -51,7 +51,7 @@ impl Type {
     pub fn to_qlog(self) -> qlog::events::h3::H3StreamType {
         match self {
             Type::Control => qlog::events::h3::H3StreamType::Control,
-            Type::Request => qlog::events::h3::H3StreamType::Data,
+            Type::Request => qlog::events::h3::H3StreamType::Request,
             Type::Push => qlog::events::h3::H3StreamType::Push,
             Type::QpackEncoder => qlog::events::h3::H3StreamType::QpackEncode,
             Type::QpackDecoder => qlog::events::h3::H3StreamType::QpackDecode,
