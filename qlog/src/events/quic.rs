@@ -428,7 +428,7 @@ pub enum QuicFrame {
         length: u64,
         fin: Option<bool>,
 
-        raw: Option<Bytes>,
+        raw: Option<RawInfo>,
     },
 
     MaxData {
@@ -482,7 +482,7 @@ pub enum QuicFrame {
     ConnectionClose {
         error_space: Option<ErrorSpace>,
         error_code: Option<u64>,
-        raw_error_code: Option<u64>,
+        error_code_value: Option<u64>,
         reason: Option<String>,
 
         trigger_frame_type: Option<u64>,
@@ -498,8 +498,8 @@ pub enum QuicFrame {
 
     Unknown {
         raw_frame_type: u64,
-        raw_length: Option<u32>,
-        raw: Option<Bytes>,
+        frame_type_value: Option<u64>,
+        raw: Option<RawInfo>,
     },
 }
 
@@ -713,7 +713,7 @@ pub struct DataMoved {
     pub from: Option<DataRecipient>,
     pub to: Option<DataRecipient>,
 
-    pub data: Option<Bytes>,
+    pub raw: Option<RawInfo>,
 }
 
 #[serde_with::skip_serializing_none]

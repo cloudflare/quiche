@@ -2822,7 +2822,7 @@ impl Connection {
                                     length: Some(length as u64),
                                     from: Some(DataRecipient::Transport),
                                     to: Some(DataRecipient::Dropped),
-                                    data: None,
+                                    raw: None,
                                 },
                             );
 
@@ -4453,7 +4453,7 @@ impl Connection {
                 length: Some(read as u64),
                 from: Some(DataRecipient::Transport),
                 to: Some(DataRecipient::Application),
-                data: None,
+                raw: None,
             });
 
             let now = time::Instant::now();
@@ -4634,7 +4634,7 @@ impl Connection {
                 length: Some(sent as u64),
                 from: Some(DataRecipient::Application),
                 to: Some(DataRecipient::Transport),
-                data: None,
+                raw: None,
             });
 
             let now = time::Instant::now();

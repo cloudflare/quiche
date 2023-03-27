@@ -310,6 +310,8 @@ impl Frame {
 
     #[cfg(feature = "qlog")]
     pub fn to_qlog(&self) -> Http3Frame {
+        use qlog::events::RawInfo;
+
         match self {
             Frame::Data { .. } => Http3Frame::Data { raw: None },
 
@@ -420,9 +422,12 @@ impl Frame {
                 raw_type,
                 payload_length,
             } => Http3Frame::Unknown {
-                raw_frame_type: *raw_type,
-                raw_length: Some(*payload_length as u32),
-                raw: None,
+                frame_type_value: *raw_type,
+                raw: Some(RawInfo {
+                    data: None,
+                    payload_length: Some(*payload_length),
+                    length: None,
+                }),
             },
         }
     }

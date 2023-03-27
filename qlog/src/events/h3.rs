@@ -28,7 +28,6 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::RawInfo;
-use crate::Bytes;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -134,7 +133,7 @@ pub enum Http3FrameTypeName {
 // also works automatically.
 pub enum Http3Frame {
     Data {
-        raw: Option<Bytes>,
+        raw: Option<RawInfo>,
     },
 
     Headers {
@@ -173,9 +172,8 @@ pub enum Http3Frame {
     },
 
     Unknown {
-        raw_frame_type: u64,
-        raw_length: Option<u32>,
-        raw: Option<Bytes>,
+        frame_type_value: u64,
+        raw: Option<RawInfo>,
     },
 }
 
