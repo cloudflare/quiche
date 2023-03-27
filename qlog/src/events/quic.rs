@@ -274,18 +274,13 @@ pub enum PacketReceivedTrigger {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum PacketDroppedTrigger {
-    KeysUnavailable,
-    UnknownConnectionId,
-    HeaderParserError,
-    PayloadDecryptError,
-    ProtocolViolation,
-    DosPrevention,
-    UnsupportedVersion,
-    UnexpectedPacket,
-    UnexpectedSourceConnectionId,
-    UnexpectedVersion,
-    Duplicate,
-    InvalidInitial,
+    InternalError,
+    Rejected,
+    Unsupported,
+    Invalid,
+    ConnectionUnknown,
+    DecryptionFailure,
+    General,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -661,6 +656,8 @@ pub struct PacketDropped {
 
     pub raw: Option<RawInfo>,
     pub datagram_id: Option<u32>,
+
+    pub details: Option<String>,
 
     pub trigger: Option<PacketDroppedTrigger>,
 }
