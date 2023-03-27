@@ -28,7 +28,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::h3::HttpHeader;
-use super::Bytes;
+use super::RawInfo;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -243,8 +243,7 @@ pub struct QpackHeadersEncoded {
     pub block_prefix: QpackHeaderBlockPrefix,
     pub header_block: Vec<QpackHeaderBlockRepresentation>,
 
-    pub length: Option<u32>,
-    pub raw: Option<Bytes>,
+    pub raw: Option<RawInfo>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -257,8 +256,7 @@ pub struct QpackHeadersDecoded {
     pub block_prefix: QpackHeaderBlockPrefix,
     pub header_block: Vec<QpackHeaderBlockRepresentation>,
 
-    pub length: Option<u32>,
-    pub raw: Option<Bytes>,
+    pub raw: Option<RawInfo>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -266,8 +264,7 @@ pub struct QpackHeadersDecoded {
 pub struct QpackInstructionCreated {
     pub instruction: QPackInstruction,
 
-    pub length: Option<u32>,
-    pub raw: Option<Bytes>,
+    pub raw: Option<RawInfo>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -275,6 +272,5 @@ pub struct QpackInstructionCreated {
 pub struct QpackInstructionParsed {
     pub instruction: QPackInstruction,
 
-    pub length: Option<u32>,
-    pub raw: Option<Bytes>,
+    pub raw: Option<RawInfo>,
 }
