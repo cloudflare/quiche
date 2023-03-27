@@ -1858,8 +1858,7 @@ impl Connection {
             let ev_data = EventData::H3StreamTypeSet(H3StreamTypeSet {
                 stream_id,
                 owner: Some(H3Owner::Local),
-                old: None,
-                new: H3StreamType::QpackEncode,
+                stream_type: H3StreamType::QpackEncode,
                 associated_push_id: None,
             });
 
@@ -1881,8 +1880,7 @@ impl Connection {
             let ev_data = EventData::H3StreamTypeSet(H3StreamTypeSet {
                 stream_id,
                 owner: Some(H3Owner::Local),
-                old: None,
-                new: H3StreamType::QpackDecode,
+                stream_type: H3StreamType::QpackDecode,
                 associated_push_id: None,
             });
 
@@ -1997,8 +1995,7 @@ impl Connection {
                     let ev_data = EventData::H3StreamTypeSet(H3StreamTypeSet {
                         stream_id,
                         owner: Some(H3Owner::Local),
-                        old: None,
-                        new: H3StreamType::Unknown,
+                        stream_type: H3StreamType::Unknown,
                         associated_push_id: None,
                     });
 
@@ -2042,8 +2039,7 @@ impl Connection {
             let ev_data = EventData::H3StreamTypeSet(H3StreamTypeSet {
                 stream_id,
                 owner: Some(H3Owner::Local),
-                old: None,
-                new: H3StreamType::Control,
+                stream_type: H3StreamType::Control,
                 associated_push_id: None,
             });
 
@@ -2171,8 +2167,7 @@ impl Connection {
                             EventData::H3StreamTypeSet(H3StreamTypeSet {
                                 stream_id,
                                 owner: Some(H3Owner::Remote),
-                                old: None,
-                                new: ty.to_qlog(),
+                                stream_type: ty.to_qlog(),
                                 associated_push_id: None,
                             });
 

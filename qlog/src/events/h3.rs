@@ -40,13 +40,13 @@ pub enum H3Owner {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum H3StreamType {
-    Data,
+    Request,
     Control,
     Push,
-    QpackEncode,
-    QpackDecode,
     Reserved,
     Unknown,
+    QpackEncode,
+    QpackDecode,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -209,11 +209,10 @@ pub struct H3ParametersRestored {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct H3StreamTypeSet {
-    pub stream_id: u64,
     pub owner: Option<H3Owner>,
+    pub stream_id: u64,
 
-    pub old: Option<H3StreamType>,
-    pub new: H3StreamType,
+    pub stream_type: H3StreamType,
 
     pub associated_push_id: Option<u64>,
 }
