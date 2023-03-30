@@ -835,10 +835,10 @@ pub struct PathStats {
     /// The estimated round-trip time of the connection.
     pub rtt: time::Duration,
 
-    /// The minimmum round-trip time observed.
+    /// The minimum round-trip time observed.
     pub min_rtt: Option<time::Duration>,
 
-    /// The stimated round-trip time variation in samples using a mean
+    /// The estimated round-trip time variation in samples using a mean
     /// variation.
     pub rttvar: time::Duration,
 
