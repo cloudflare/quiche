@@ -560,6 +560,8 @@ pub fn pkt_num_len(pn: u64) -> Result<usize> {
         1
     } else if pn < u64::from(u16::MAX) {
         2
+    } else if pn < 16_777_215u64 {
+        3
     } else if pn < u64::from(u32::MAX) {
         4
     } else {
