@@ -55,41 +55,71 @@ pub fn decode(b: &mut octets::Octets) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-pub fn encode(src: &[u8], out: &mut octets::OctetsMut, low: bool) -> Result<()> {
+pub fn encode<const LOWER_CASE: bool>(
+    src: &[u8], out: &mut octets::OctetsMut,
+) -> Result<()> {
     let mut bits: u64 = 0;
-    let mut bits_left = 40;
+    let mut pending = 0;
 
     for &b in src {
-        let b = if low { b.to_ascii_lowercase() } else { b };
-
+        let b = if LOWER_CASE {
+            b.to_ascii_lowercase()
+        } else {
+            b
+        };
         let (nbits, code) = ENCODE_TABLE[b as usize];
 
-        bits |= code << (bits_left - nbits);
-        bits_left -= nbits;
+        pending += nbits;
 
-        while bits_left <= 32 {
-            out.put_u8((bits >> 32) as u8)?;
-
-            bits <<= 8;
-            bits_left += 8;
+        if pending < 64 {
+            // Have room for the new token
+            bits |= code << (64 - pending);
+            continue;
         }
+
+        pending -= 64;
+        // Take only the bits that fit
+        bits |= code >> pending;
+        out.put_u64(bits)?;
+
+        bits = if pending == 0 {
+            0
+        } else {
+            code << (64 - pending)
+        };
     }
 
-    if bits_left != 40 {
-        // This writes the EOS token
-        bits |= (1 << bits_left) - 1;
+    if pending == 0 {
+        return Ok(());
+    }
 
-        out.put_u8((bits >> 32) as u8)?;
+    bits |= u64::MAX >> pending;
+    // TODO: replace with `next_multiple_of(8)` when stable
+    pending = (pending + 7) & !7; // Round up to a byte
+    bits >>= 64 - pending;
+
+    if pending >= 32 {
+        pending -= 32;
+        out.put_u32((bits >> pending) as u32)?;
+    }
+
+    while pending > 0 {
+        pending -= 8;
+        out.put_u8((bits >> pending) as u8)?;
     }
 
     Ok(())
 }
 
-pub fn encode_output_length(src: &[u8], low: bool) -> Result<usize> {
+pub fn encode_output_length<const LOWER_CASE: bool>(src: &[u8]) -> Result<usize> {
     let mut bits: usize = 0;
 
     for &b in src {
-        let b = if low { b.to_ascii_lowercase() } else { b };
+        let b = if LOWER_CASE {
+            b.to_ascii_lowercase()
+        } else {
+            b
+        };
 
         let (nbits, _) = ENCODE_TABLE[b as usize];
         bits += nbits;
