@@ -103,9 +103,6 @@ impl Args for CommonArgs {
                 false,
             ),
 
-            // SiDuck is it's own application protocol.
-            (_, "siduck") => (alpns::SIDUCK.to_vec(), true),
-
             (..) => panic!("Unsupported HTTP version and DATAGRAM protocol."),
         };
 
