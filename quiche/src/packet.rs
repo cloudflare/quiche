@@ -274,7 +274,7 @@ impl<'a> std::fmt::Debug for ConnectionId<'a> {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         for c in self.as_ref() {
-            write!(f, "{:02x}", c)?;
+            write!(f, "{c:02x}")?;
         }
 
         Ok(())
@@ -539,12 +539,12 @@ impl<'a> std::fmt::Debug for Header<'a> {
         if let Some(ref token) = self.token {
             write!(f, " token=")?;
             for b in token {
-                write!(f, "{:02x}", b)?;
+                write!(f, "{b:02x}")?;
             }
         }
 
         if let Some(ref versions) = self.versions {
-            write!(f, " versions={:x?}", versions)?;
+            write!(f, " versions={versions:x?}")?;
         }
 
         if self.ty == Type::Short {
@@ -556,11 +556,13 @@ impl<'a> std::fmt::Debug for Header<'a> {
 }
 
 pub fn pkt_num_len(pn: u64) -> Result<usize> {
-    let len = if pn < u64::from(std::u8::MAX) {
+    let len = if pn < u64::from(u8::MAX) {
         1
-    } else if pn < u64::from(std::u16::MAX) {
+    } else if pn < u64::from(u16::MAX) {
         2
-    } else if pn < u64::from(std::u32::MAX) {
+    } else if pn < 16_777_215u64 {
+        3
+    } else if pn < u64::from(u32::MAX) {
         4
     } else {
         return Err(Error::InvalidPacket);
@@ -859,6 +861,22 @@ fn compute_retry_integrity_tag(
         .map_err(|_| Error::CryptoFail)
 }
 
+pub struct KeyUpdate {
+    /// 1-RTT key used prior to a key update.
+    pub crypto_open: crypto::Open,
+
+    /// The packet number triggered the latest key-update.
+    ///
+    /// Incoming packets with lower pn should use this (prev) crypto key.
+    pub pn_on_update: u64,
+
+    /// Whether ACK frame for key-update has been sent.
+    pub update_acked: bool,
+
+    /// When the old key should be discarded.
+    pub timer: time::Instant,
+}
+
 pub struct PktNumSpace {
     pub largest_rx_pkt_num: u64,
 
@@ -873,6 +891,8 @@ pub struct PktNumSpace {
     pub recv_pkt_num: PktNumWindow,
 
     pub ack_elicited: bool,
+
+    pub key_update: Option<KeyUpdate>,
 
     pub crypto_open: Option<crypto::Open>,
     pub crypto_seal: Option<crypto::Seal>,
@@ -900,6 +920,8 @@ impl PktNumSpace {
 
             ack_elicited: false,
 
+            key_update: None,
+
             crypto_open: None,
             crypto_seal: None,
 
@@ -907,8 +929,8 @@ impl PktNumSpace {
             crypto_0rtt_seal: None,
 
             crypto_stream: stream::Stream::new(
-                std::u64::MAX,
-                std::u64::MAX,
+                u64::MAX,
+                u64::MAX,
                 true,
                 true,
                 stream::MAX_STREAM_WINDOW,
@@ -918,8 +940,8 @@ impl PktNumSpace {
 
     pub fn clear(&mut self) {
         self.crypto_stream = stream::Stream::new(
-            std::u64::MAX,
-            std::u64::MAX,
+            u64::MAX,
+            u64::MAX,
             true,
             true,
             stream::MAX_STREAM_WINDOW,
@@ -1262,7 +1284,7 @@ mod tests {
         assert!(!win.contains(1025));
         assert!(!win.contains(1026));
 
-        win.insert(std::u64::MAX - 1);
+        win.insert(u64::MAX - 1);
         assert!(win.contains(0));
         assert!(win.contains(1));
         assert!(win.contains(2));
@@ -1284,8 +1306,8 @@ mod tests {
         assert!(win.contains(1024));
         assert!(win.contains(1025));
         assert!(win.contains(1026));
-        assert!(!win.contains(std::u64::MAX - 2));
-        assert!(win.contains(std::u64::MAX - 1));
+        assert!(!win.contains(u64::MAX - 2));
+        assert!(win.contains(u64::MAX - 1));
     }
 
     fn assert_decrypt_initial_pkt(

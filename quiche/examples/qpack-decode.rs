@@ -43,11 +43,11 @@ fn main() {
     let cmd = &args.next().unwrap();
 
     if args.len() != 1 {
-        println!("Usage: {} FILE", cmd);
+        println!("Usage: {cmd} FILE");
         return;
     }
 
-    let mut file = File::open(&args.next().unwrap()).unwrap();
+    let mut file = File::open(args.next().unwrap()).unwrap();
 
     let mut dec = qpack::Decoder::new();
 
@@ -61,7 +61,7 @@ fn main() {
         let _ = file.read(&mut len).unwrap();
         let len = u32::from_be_bytes(len) as usize;
 
-        let mut data = vec![0; len as usize];
+        let mut data = vec![0; len];
 
         let data_len = file.read(&mut data).unwrap();
 
@@ -76,10 +76,10 @@ fn main() {
             continue;
         }
 
-        for hdr in dec.decode(&data[..len], std::u64::MAX).unwrap() {
+        for hdr in dec.decode(&data[..len], u64::MAX).unwrap() {
             let name = std::str::from_utf8(hdr.name()).unwrap();
             let value = std::str::from_utf8(hdr.value()).unwrap();
-            println!("{}\t{}", name, value);
+            println!("{name}\t{value}");
         }
 
         println!();

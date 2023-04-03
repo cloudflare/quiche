@@ -163,6 +163,7 @@ fn debug_fmt(_r: &Recovery, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
 mod tests {
     use super::*;
 
+    use smallvec::smallvec;
     use std::time::Duration;
 
     #[test]
@@ -201,7 +202,7 @@ mod tests {
 
         let p = recovery::Sent {
             pkt_num: 0,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -250,7 +251,7 @@ mod tests {
 
         let p = recovery::Sent {
             pkt_num: 0,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,

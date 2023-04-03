@@ -40,11 +40,11 @@ fn main() {
     let cmd = &args.next().unwrap();
 
     if args.len() != 1 {
-        println!("Usage: {} FILE", cmd);
+        println!("Usage: {cmd} FILE");
         return;
     }
 
-    let file = File::open(&args.next().unwrap()).unwrap();
+    let file = File::open(args.next().unwrap()).unwrap();
     let file = BufReader::new(&file);
 
     let mut enc = h3::qpack::Encoder::new();

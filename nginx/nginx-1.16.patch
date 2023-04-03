@@ -1618,7 +1618,7 @@ new file mode 100644
 index 000000000..1a05d4e01
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2234 @@
+@@ -0,0 +1,2230 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -1931,13 +1931,11 @@ index 000000000..1a05d4e01
 +ngx_http_v3_process_blocked_streams(ngx_http_v3_connection_t *h3c)
 +{
 +    ngx_event_t               *wev;
-+    quiche_stream_iter        *writable;
 +    ngx_http_v3_stream_t      *stream;
-+    uint64_t                   stream_id;
++    ngx_quic_connection_t     *quic = h3c->connection->quic;
++    int64_t                    stream_id;
 +
-+    writable = quiche_conn_writable(h3c->connection->quic->conn);
-+
-+    while (quiche_stream_iter_next(writable, &stream_id)) {
++    while ((stream_id = quiche_conn_stream_writable_next(quic->conn)) >= 0) {
 +        stream = ngx_http_v3_stream_lookup(h3c, stream_id);
 +
 +        if (stream == NULL) {
@@ -1966,8 +1964,6 @@ index 000000000..1a05d4e01
 +            wev->handler(wev);
 +        }
 +    }
-+
-+    quiche_stream_iter_free(writable);
 +}
 +
 +

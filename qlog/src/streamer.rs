@@ -235,6 +235,7 @@ mod tests {
     use crate::events::quic;
     use crate::events::quic::QuicFrame;
     use crate::events::RawInfo;
+    use smallvec::smallvec;
     use testing::*;
 
     #[test]
@@ -261,7 +262,7 @@ mod tests {
 
         let event_data1 = EventData::PacketSent(quic::PacketSent {
             header: pkt_hdr.clone(),
-            frames: Some(vec![frame1]),
+            frames: Some(smallvec![frame1]),
             is_coalesced: None,
             retry_token: None,
             stateless_reset_token: None,
@@ -292,7 +293,7 @@ mod tests {
 
         let event_data2 = EventData::PacketSent(quic::PacketSent {
             header: pkt_hdr.clone(),
-            frames: Some(vec![frame2]),
+            frames: Some(smallvec![frame2]),
             is_coalesced: None,
             retry_token: None,
             stateless_reset_token: None,
@@ -307,7 +308,7 @@ mod tests {
 
         let event_data3 = EventData::PacketSent(quic::PacketSent {
             header: pkt_hdr,
-            frames: Some(vec![frame3]),
+            frames: Some(smallvec![frame3]),
             is_coalesced: None,
             retry_token: None,
             stateless_reset_token: Some("reset_token".to_string()),

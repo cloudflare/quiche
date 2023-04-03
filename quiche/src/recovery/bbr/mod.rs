@@ -364,6 +364,8 @@ mod tests {
 
     use crate::recovery;
 
+    use smallvec::smallvec;
+
     #[test]
     fn bbr_init() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -410,7 +412,7 @@ mod tests {
         for pn in 0..5 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -477,7 +479,7 @@ mod tests {
         for pn in 0..5 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -543,7 +545,7 @@ mod tests {
         for _ in 0..3 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -591,7 +593,7 @@ mod tests {
         for _ in 0..5 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -662,7 +664,7 @@ mod tests {
         for _ in 0..4 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -732,7 +734,7 @@ mod tests {
         for _ in 0..4 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -783,7 +785,7 @@ mod tests {
 
         let pkt = Sent {
             pkt_num: pn,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,

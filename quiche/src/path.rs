@@ -187,6 +187,9 @@ pub struct Path {
     /// Whether the connection tries to migrate to this path, but it still needs
     /// to be validated.
     migrating: bool,
+
+    /// Whether or not we should force eliciting of an ACK (e.g. via PING frame)
+    pub needs_ack_eliciting: bool,
 }
 
 impl Path {
@@ -227,6 +230,7 @@ impl Path {
             challenge_requested: false,
             failure_notified: false,
             migrating: false,
+            needs_ack_eliciting: false,
         }
     }
 
@@ -316,6 +320,15 @@ impl Path {
     pub fn on_challenge_sent(&mut self) {
         self.promote_to(PathState::Validating);
         self.challenge_requested = false;
+    }
+
+    /// Handles the sending of PATH_CHALLENGE.
+    pub fn add_challenge_sent(
+        &mut self, data: [u8; 8], pkt_size: usize, sent_time: time::Instant,
+    ) {
+        self.on_challenge_sent();
+        self.in_flight_challenges
+            .push_back((data, pkt_size, sent_time));
     }
 
     pub fn on_challenge_received(&mut self, data: [u8; 8]) {
@@ -438,6 +451,8 @@ impl Path {
             lost: self.recovery.lost_count,
             retrans: self.retrans_count,
             rtt: self.recovery.rtt(),
+            min_rtt: self.recovery.min_rtt(),
+            rttvar: self.recovery.rttvar(),
             cwnd: self.recovery.cwnd(),
             sent_bytes: self.sent_bytes,
             recv_bytes: self.recv_bytes,
@@ -694,20 +709,6 @@ impl PathMap {
             .map(|(pid, _)| pid)
     }
 
-    /// Handles the sending of PATH_CHALLENGE.
-    pub fn on_challenge_sent(
-        &mut self, path_id: usize, data: [u8; 8], pkt_size: usize,
-        sent_time: time::Instant,
-    ) -> Result<()> {
-        let path = self.get_mut(path_id)?;
-
-        path.on_challenge_sent();
-        path.in_flight_challenges
-            .push_back((data, pkt_size, sent_time));
-
-        Ok(())
-    }
-
     /// Handles incoming PATH_RESPONSE data.
     pub fn on_response_received(&mut self, data: [u8; 8]) -> Result<()> {
         let active_pid = self.get_active_path_id()?;
@@ -834,6 +835,13 @@ pub struct PathStats {
     /// The estimated round-trip time of the connection.
     pub rtt: time::Duration,
 
+    /// The minimum round-trip time observed.
+    pub min_rtt: Option<time::Duration>,
+
+    /// The estimated round-trip time variation in samples using a mean
+    /// variation.
+    pub rttvar: time::Duration,
+
     /// The size of the connection's congestion window in bytes.
     pub cwnd: usize,
 
@@ -878,8 +886,8 @@ impl std::fmt::Debug for PathStats {
         )?;
         write!(
             f,
-            "recv={} sent={} lost={} retrans={} rtt={:?} cwnd={}",
-            self.recv, self.sent, self.lost, self.retrans, self.rtt, self.cwnd,
+            "recv={} sent={} lost={} retrans={} rtt={:?} min_rtt={:?} rttvar={:?} cwnd={}",
+            self.recv, self.sent, self.lost, self.retrans, self.rtt, self.min_rtt, self.rttvar, self.cwnd,
         )?;
 
         write!(
@@ -932,14 +940,11 @@ mod tests {
         // Fake sending of PathChallenge in a packet of MIN_CLIENT_INITIAL_LEN - 1
         // bytes.
         let data = rand::rand_u64().to_be_bytes();
-        path_mgr
-            .on_challenge_sent(
-                pid,
-                data,
-                MIN_CLIENT_INITIAL_LEN - 1,
-                time::Instant::now(),
-            )
-            .unwrap();
+        path_mgr.get_mut(pid).unwrap().add_challenge_sent(
+            data,
+            MIN_CLIENT_INITIAL_LEN - 1,
+            time::Instant::now(),
+        );
 
         assert_eq!(path_mgr.get_mut(pid).unwrap().validation_requested(), false);
         assert_eq!(path_mgr.get_mut(pid).unwrap().probing_required(), false);
@@ -965,14 +970,11 @@ mod tests {
         // Fake sending of PathChallenge in a packet of MIN_CLIENT_INITIAL_LEN
         // bytes.
         let data = rand::rand_u64().to_be_bytes();
-        path_mgr
-            .on_challenge_sent(
-                pid,
-                data,
-                MIN_CLIENT_INITIAL_LEN,
-                time::Instant::now(),
-            )
-            .unwrap();
+        path_mgr.get_mut(pid).unwrap().add_challenge_sent(
+            data,
+            MIN_CLIENT_INITIAL_LEN,
+            time::Instant::now(),
+        );
 
         path_mgr.on_response_received(data).unwrap();
 
@@ -1006,26 +1008,27 @@ mod tests {
 
         // First probe.
         let data = rand::rand_u64().to_be_bytes();
+
         client_path_mgr
-            .on_challenge_sent(
-                client_pid,
+            .get_mut(client_pid)
+            .unwrap()
+            .add_challenge_sent(
                 data,
                 MIN_CLIENT_INITIAL_LEN,
                 time::Instant::now(),
-            )
-            .unwrap();
+            );
 
         // Second probe.
         let data_2 = rand::rand_u64().to_be_bytes();
+
         client_path_mgr
-            .on_challenge_sent(
-                client_pid,
+            .get_mut(client_pid)
+            .unwrap()
+            .add_challenge_sent(
                 data_2,
                 MIN_CLIENT_INITIAL_LEN,
                 time::Instant::now(),
-            )
-            .unwrap();
-
+            );
         assert_eq!(
             client_path_mgr
                 .get(client_pid)

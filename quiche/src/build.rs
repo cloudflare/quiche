@@ -119,7 +119,7 @@ fn get_boringssl_cmake_config() -> cmake::Config {
                 ""
             };
 
-            let cflag = format!("{} {}", bitcode_cflag, target_cflag);
+            let cflag = format!("{bitcode_cflag} {target_cflag}");
 
             boringssl_cmake.define("CMAKE_ASM_FLAGS", &cflag);
             boringssl_cmake.cflag(&cflag);
@@ -177,27 +177,26 @@ fn write_pkg_config() {
     let target_dir = target_dir_path();
 
     let out_path = target_dir.as_path().join("quiche.pc");
-    let mut out_file = std::fs::File::create(&out_path).unwrap();
+    let mut out_file = std::fs::File::create(out_path).unwrap();
 
-    let include_dir = format!("{}/include", manifest_dir);
+    let include_dir = format!("{manifest_dir}/include");
+
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();
 
     let output = format!(
         "# quiche
 
-includedir={}
+includedir={include_dir}
 libdir={}
 
 Name: quiche
 Description: quiche library
 URL: https://github.com/cloudflare/quiche
-Version: {}
+Version: {version}
 Libs: -Wl,-rpath,${{libdir}} -L${{libdir}} -lquiche
 Cflags: -I${{includedir}}
 ",
-        include_dir,
         target_dir.to_str().unwrap(),
-        version
     );
 
     out_file.write_all(output.as_bytes()).unwrap();
@@ -233,11 +232,19 @@ fn main() {
         });
 
         let build_path = get_boringssl_platform_output_path();
-        let build_dir = format!("{}/build/{}", bssl_dir, build_path);
-        println!("cargo:rustc-link-search=native={}", build_dir);
+        let mut build_dir = format!("{bssl_dir}/build/{build_path}");
 
-        println!("cargo:rustc-link-lib=static=ssl");
-        println!("cargo:rustc-link-lib=static=crypto");
+        // If build directory doesn't exist, use the specified path as is.
+        if !std::path::Path::new(&build_dir).is_dir() {
+            build_dir = bssl_dir;
+        }
+
+        println!("cargo:rustc-link-search=native={build_dir}");
+
+        let bssl_link_kind = std::env::var("QUICHE_BSSL_LINK_KIND")
+            .unwrap_or("static".to_string());
+        println!("cargo:rustc-link-lib={bssl_link_kind}=ssl");
+        println!("cargo:rustc-link-lib={bssl_link_kind}=crypto");
     }
 
     if cfg!(feature = "boringssl-boring-crate") {

@@ -123,6 +123,47 @@ struct SSL_QUIC_METHOD {
         extern fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int,
 }
 
+#[cfg(test)]
+#[repr(C)]
+#[allow(non_camel_case_types)]
+#[allow(dead_code)]
+enum ssl_private_key_result_t {
+    ssl_private_key_success,
+    ssl_private_key_retry,
+    ssl_private_key_failure,
+}
+
+#[cfg(test)]
+#[repr(C)]
+#[allow(non_camel_case_types)]
+struct SSL_PRIVATE_KEY_METHOD {
+    sign: extern fn(
+        ssl: *mut SSL,
+        out: *mut u8,
+        out_len: *mut usize,
+        max_out: usize,
+        signature_algorithm: u16,
+        r#in: *const u8,
+        in_len: usize,
+    ) -> ssl_private_key_result_t,
+
+    decrypt: extern fn(
+        ssl: *mut SSL,
+        out: *mut u8,
+        out_len: *mut usize,
+        max_out: usize,
+        r#in: *const u8,
+        in_len: usize,
+    ) -> ssl_private_key_result_t,
+
+    complete: extern fn(
+        ssl: *mut SSL,
+        out: *mut u8,
+        out_len: *mut usize,
+        max_out: usize,
+    ) -> ssl_private_key_result_t,
+}
+
 lazy_static::lazy_static! {
     /// BoringSSL Extra Data Index for Quiche Connections
     pub static ref QUICHE_EX_DATA_INDEX: c_int = unsafe {
@@ -278,11 +319,9 @@ impl Context {
     }
 
     pub fn set_verify(&mut self, verify: bool) {
-        let mode = if verify {
-            0x01 // SSL_VERIFY_PEER
-        } else {
-            0x00 // SSL_VERIFY_NONE
-        };
+        // true  -> 0x01 SSL_VERIFY_PEER
+        // false -> 0x00 SSL_VERIFY_NONE
+        let mode = i32::from(verify);
 
         unsafe {
             SSL_CTX_set_verify(self.as_mut_ptr(), mode, ptr::null());
@@ -333,7 +372,7 @@ impl Context {
     }
 
     pub fn set_early_data_enabled(&mut self, enabled: bool) {
-        let enabled = if enabled { 1 } else { 0 };
+        let enabled = i32::from(enabled);
 
         unsafe {
             SSL_CTX_set_early_data_enabled(self.as_mut_ptr(), enabled);
@@ -452,9 +491,7 @@ impl Handshake {
     }
 
     pub fn set_quiet_shutdown(&mut self, mode: bool) {
-        unsafe {
-            SSL_set_quiet_shutdown(self.as_mut_ptr(), if mode { 1 } else { 0 })
-        }
+        unsafe { SSL_set_quiet_shutdown(self.as_mut_ptr(), i32::from(mode)) }
     }
 
     pub fn set_host_name(&mut self, name: &str) -> Result<()> {
@@ -479,13 +516,6 @@ impl Handshake {
             )
         };
         self.map_result_ssl(rc)
-    }
-
-    #[cfg(test)]
-    pub fn set_options(&mut self, opts: u32) {
-        unsafe {
-            SSL_set_options(self.as_mut_ptr(), opts);
-        }
     }
 
     pub fn quic_transport_params(&self) -> &[u8] {
@@ -670,7 +700,7 @@ impl Handshake {
                 }
 
                 let out = CRYPTO_BUFFER_data(buffer);
-                let slice = slice::from_raw_parts(out, out_len as usize);
+                let slice = slice::from_raw_parts(out, out_len);
 
                 cert_chain.push(slice);
             }
@@ -699,10 +729,55 @@ impl Handshake {
             }
 
             let out = CRYPTO_BUFFER_data(buffer);
-            slice::from_raw_parts(out, out_len as usize)
+            slice::from_raw_parts(out, out_len)
         };
 
         Some(peer_cert)
+    }
+
+    #[cfg(test)]
+    pub fn set_options(&mut self, opts: u32) {
+        unsafe {
+            SSL_set_options(self.as_mut_ptr(), opts);
+        }
+    }
+
+    // Only used for testing handling of failure during key signing.
+    #[cfg(test)]
+    pub fn set_failing_private_key_method(&mut self) {
+        extern fn failing_sign(
+            _ssl: *mut SSL, _out: *mut u8, _out_len: *mut usize, _max_out: usize,
+            _signature_algorithm: u16, _in: *const u8, _in_len: usize,
+        ) -> ssl_private_key_result_t {
+            ssl_private_key_result_t::ssl_private_key_failure
+        }
+
+        extern fn failing_decrypt(
+            _ssl: *mut SSL, _out: *mut u8, _out_len: *mut usize, _max_out: usize,
+            _in: *const u8, _in_len: usize,
+        ) -> ssl_private_key_result_t {
+            ssl_private_key_result_t::ssl_private_key_failure
+        }
+
+        extern fn failing_complete(
+            _ssl: *mut SSL, _out: *mut u8, _out_len: *mut usize, _max_out: usize,
+        ) -> ssl_private_key_result_t {
+            ssl_private_key_result_t::ssl_private_key_failure
+        }
+
+        static QUICHE_PRIVATE_KEY_METHOD: SSL_PRIVATE_KEY_METHOD =
+            SSL_PRIVATE_KEY_METHOD {
+                decrypt: failing_decrypt,
+                sign: failing_sign,
+                complete: failing_complete,
+            };
+
+        unsafe {
+            SSL_set_private_key_method(
+                self.as_mut_ptr(),
+                &QUICHE_PRIVATE_KEY_METHOD,
+            );
+        }
     }
 
     pub fn is_completed(&self) -> bool {
@@ -1283,9 +1358,6 @@ extern {
         ssl: *mut SSL, params: *const u8, params_len: usize,
     ) -> c_int;
 
-    #[cfg(test)]
-    fn SSL_set_options(ssl: *mut SSL, opts: u32) -> u32;
-
     fn SSL_set_quic_method(
         ssl: *mut SSL, quic_method: *const SSL_QUIC_METHOD,
     ) -> c_int;
@@ -1295,6 +1367,14 @@ extern {
     fn SSL_set_quic_early_data_context(
         ssl: *mut SSL, context: *const u8, context_len: usize,
     ) -> c_int;
+
+    #[cfg(test)]
+    fn SSL_set_options(ssl: *mut SSL, opts: u32) -> u32;
+
+    #[cfg(test)]
+    fn SSL_set_private_key_method(
+        ssl: *mut SSL, key_method: *const SSL_PRIVATE_KEY_METHOD,
+    );
 
     fn SSL_get_peer_quic_transport_params(
         ssl: *const SSL, out_params: *mut *const u8, out_params_len: *mut usize,

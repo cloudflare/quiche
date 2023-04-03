@@ -127,8 +127,8 @@ pub struct Octets<'a> {
 impl<'a> Octets<'a> {
     /// Creates an `Octets` from the given slice, without copying.
     ///
-    /// Since there's no copy, the input slice needs to be mutable to allow
-    /// modifications.
+    /// Since the `Octets` is immutable, the input slice needs to be
+    /// immutable.
     pub fn with_slice(buf: &'a [u8]) -> Self {
         Octets { buf, off: 0 }
     }
@@ -1023,7 +1023,7 @@ mod tests {
     fn varint_too_large() {
         let mut d = [0; 3];
         let mut b = OctetsMut::with_slice(&mut d);
-        assert!(b.put_varint(std::u64::MAX).is_err());
+        assert!(b.put_varint(u64::MAX).is_err());
     }
 
     #[test]

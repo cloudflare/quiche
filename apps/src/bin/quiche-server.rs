@@ -75,13 +75,15 @@ fn main() {
 
     // Set SO_TXTIME socket option on the listening UDP socket for pacing
     // outgoing packets.
-    match set_txtime_sockopt(&socket) {
-        Ok(_) => {
-            pacing = true;
-            debug!("successfully set SO_TXTIME socket option");
-        },
-        Err(e) => debug!("setsockopt failed {:?}", e),
-    };
+    if !args.disable_pacing {
+        match set_txtime_sockopt(&socket) {
+            Ok(_) => {
+                pacing = true;
+                debug!("successfully set SO_TXTIME socket option");
+            },
+            Err(e) => debug!("setsockopt failed {:?}", e),
+        };
+    }
 
     info!("listening on {:}", socket.local_addr().unwrap());
 
@@ -120,6 +122,8 @@ fn main() {
 
     config.set_max_connection_window(conn_args.max_window);
     config.set_max_stream_window(conn_args.max_stream_window);
+
+    config.enable_pacing(pacing);
 
     let mut keylog = None;
 
@@ -215,9 +219,9 @@ fn main() {
             let pkt_buf = &mut buf[..len];
 
             if let Some(target_path) = conn_args.dump_packet_path.as_ref() {
-                let path = format!("{}/{}.pkt", target_path, pkt_count);
+                let path = format!("{target_path}/{pkt_count}.pkt");
 
-                if let Ok(f) = std::fs::File::create(&path) {
+                if let Ok(f) = std::fs::File::create(path) {
                     let mut f = std::io::BufWriter::new(f);
                     f.write_all(pkt_buf).ok();
                 }
@@ -430,8 +434,9 @@ fn main() {
                 // is not much anyone can do to recover.
                 let app_proto = client.conn.application_proto();
 
+                #[allow(clippy::box_default)]
                 if alpns::HTTP_09.contains(&app_proto) {
-                    client.http_conn = Some(Box::new(Http09Conn::default()));
+                    client.http_conn = Some(Box::<Http09Conn>::default());
 
                     client.app_proto_selected = true;
                 } else if alpns::HTTP_3.contains(&app_proto) {
@@ -583,6 +588,7 @@ fn main() {
                 let _ = dst_info.get_or_insert(send_info);
 
                 if write < client.max_datagram_size {
+                    continue_write = true;
                     break;
                 }
             }

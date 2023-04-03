@@ -219,27 +219,27 @@ impl Frame {
 
                 if let Some(val) = max_field_section_size {
                     b.put_varint(SETTINGS_MAX_FIELD_SECTION_SIZE)?;
-                    b.put_varint(*val as u64)?;
+                    b.put_varint(*val)?;
                 }
 
                 if let Some(val) = qpack_max_table_capacity {
                     b.put_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY)?;
-                    b.put_varint(*val as u64)?;
+                    b.put_varint(*val)?;
                 }
 
                 if let Some(val) = qpack_blocked_streams {
                     b.put_varint(SETTINGS_QPACK_BLOCKED_STREAMS)?;
-                    b.put_varint(*val as u64)?;
+                    b.put_varint(*val)?;
                 }
 
                 if let Some(val) = connect_protocol_enabled {
                     b.put_varint(SETTINGS_ENABLE_CONNECT_PROTOCOL)?;
-                    b.put_varint(*val as u64)?;
+                    b.put_varint(*val)?;
                 }
 
                 if let Some(val) = h3_datagram {
                     b.put_varint(SETTINGS_H3_DATAGRAM)?;
-                    b.put_varint(*val as u64)?;
+                    b.put_varint(*val)?;
                 }
 
                 if let Some(val) = grease {
@@ -284,7 +284,7 @@ impl Frame {
                 b.put_varint(PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID)?;
                 b.put_varint(len as u64)?;
 
-                b.put_varint(*prioritized_element_id as u64)?;
+                b.put_varint(*prioritized_element_id)?;
                 b.put_bytes(priority_field_value)?;
             },
 
@@ -298,7 +298,7 @@ impl Frame {
                 b.put_varint(PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID)?;
                 b.put_varint(len as u64)?;
 
-                b.put_varint(*prioritized_element_id as u64)?;
+                b.put_varint(*prioritized_element_id)?;
                 b.put_bytes(priority_field_value)?;
             },
 
@@ -310,6 +310,8 @@ impl Frame {
 
     #[cfg(feature = "qlog")]
     pub fn to_qlog(&self) -> Http3Frame {
+        use qlog::events::RawInfo;
+
         match self {
             Frame::Data { .. } => Http3Frame::Data { raw: None },
 
@@ -420,9 +422,12 @@ impl Frame {
                 raw_type,
                 payload_length,
             } => Http3Frame::Unknown {
-                raw_frame_type: *raw_type,
-                raw_length: Some(*payload_length as u32),
-                raw: None,
+                frame_type_value: *raw_type,
+                raw: Some(RawInfo {
+                    data: None,
+                    payload_length: Some(*payload_length),
+                    length: None,
+                }),
             },
         }
     }
@@ -440,7 +445,7 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::CancelPush { push_id } => {
-                write!(f, "CANCEL_PUSH push_id={}", push_id)?;
+                write!(f, "CANCEL_PUSH push_id={push_id}")?;
             },
 
             Frame::Settings {
@@ -450,7 +455,7 @@ impl std::fmt::Debug for Frame {
                 raw,
                 ..
             } => {
-                write!(f, "SETTINGS max_field_section={:?}, qpack_max_table={:?}, qpack_blocked={:?} raw={:?}", max_field_section_size, qpack_max_table_capacity, qpack_blocked_streams, raw)?;
+                write!(f, "SETTINGS max_field_section={max_field_section_size:?}, qpack_max_table={qpack_max_table_capacity:?}, qpack_blocked={qpack_blocked_streams:?} raw={raw:?}")?;
             },
 
             Frame::PushPromise {
@@ -466,11 +471,11 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::GoAway { id } => {
-                write!(f, "GOAWAY id={}", id)?;
+                write!(f, "GOAWAY id={id}")?;
             },
 
             Frame::MaxPushId { push_id } => {
-                write!(f, "MAX_PUSH_ID push_id={}", push_id)?;
+                write!(f, "MAX_PUSH_ID push_id={push_id}")?;
             },
 
             Frame::PriorityUpdateRequest {
@@ -498,7 +503,7 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::Unknown { raw_type, .. } => {
-                write!(f, "UNKNOWN raw_type={}", raw_type,)?;
+                write!(f, "UNKNOWN raw_type={raw_type}",)?;
             },
         }
 

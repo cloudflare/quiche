@@ -3,7 +3,7 @@
 [![crates.io](https://img.shields.io/crates/v/quiche.svg)](https://crates.io/crates/quiche)
 [![docs.rs](https://docs.rs/quiche/badge.svg)](https://docs.rs/quiche)
 [![license](https://img.shields.io/github/license/cloudflare/quiche.svg)](https://opensource.org/licenses/BSD-2-Clause)
-![build](https://img.shields.io/github/workflow/status/cloudflare/quiche/Stable)
+![build](https://img.shields.io/github/actions/workflow/status/cloudflare/quiche/stable.yml?branch=master)
 
 [quiche] is an implementation of the QUIC transport protocol and HTTP/3 as
 specified by the [IETF]. It provides a low level API for processing QUIC packets
@@ -26,6 +26,10 @@ quiche powers Cloudflare edge network's [HTTP/3 support][cloudflare-http3]. The
 [cloudflare-quic.com](https://cloudflare-quic.com) website can be used for
 testing and experimentation.
 
+### Android
+
+Android's DNS resolver uses quiche to [implement DNS over HTTP/3][android-http3].
+
 ### curl
 
 quiche can be [integrated into curl][curl-http3] to provide support for HTTP/3.
@@ -36,6 +40,7 @@ quiche can be [integrated into NGINX](nginx/) using an unofficial patch to
 provide support for HTTP/3.
 
 [cloudflare-http3]: https://blog.cloudflare.com/http3-the-past-present-and-future/
+[android-http3]: https://security.googleblog.com/2022/07/dns-over-http3-in-android.html
 [curl-http3]: https://github.com/curl/curl/blob/master/docs/HTTP3.md#quiche-version
 
 Getting Started
@@ -64,17 +69,45 @@ production)
 Use the `--help` command-line flag to get a more detailed description of each
 tool's options.
 
-### Connection setup
+### Configuring connections
 
 The first step in establishing a QUIC connection using quiche is creating a
-configuration object:
+[`Config`] object:
 
 ```rust
-let config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+config.set_application_protos(&[b"example-proto"]);
+
+// Additional configuration specific to application and use case...
 ```
 
-This is shared among multiple connections and can be used to configure a
-QUIC endpoint.
+The [`Config`] object controls important aspects of the QUIC connection such
+as QUIC version, ALPN IDs, flow control, congestion control, idle timeout
+and other properties or features.
+
+QUIC is a general-purpose transport protocol and there are several
+configuration properties where there is no reasonable default value. For
+example, the permitted number of concurrent streams of any particular type
+is dependent on the application running over QUIC, and other use-case
+specific concerns.
+
+quiche defaults several properties to zero, applications most likely need
+to set these to something else to satisfy their needs using the following:
+
+- [`set_initial_max_streams_bidi()`]
+- [`set_initial_max_streams_uni()`]
+- [`set_initial_max_data()`]
+- [`set_initial_max_stream_data_bidi_local()`]
+- [`set_initial_max_stream_data_bidi_remote()`]
+- [`set_initial_max_stream_data_uni()`]
+
+[`Config`] also holds TLS configuration. This can be changed by mutators on
+the an existing object, or by constructing a TLS context manually and
+creating a configuration using [`with_boring_ssl_ctx()`].
+
+A configuration object can be shared among multiple connections.
+
+### Connection setup
 
 On the client-side the [`connect()`] utility function can be used to create
 a new connection, while [`accept()`] is for servers:
@@ -230,6 +263,14 @@ if conn.is_established() {
 The quiche [HTTP/3 module] provides a high level API for sending and
 receiving HTTP requests and responses on top of the QUIC transport protocol.
 
+[`Config`]: https://docs.quic.tech/quiche/struct.Config.html
+[`set_initial_max_streams_bidi()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_streams_bidi
+[`set_initial_max_streams_uni()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_streams_uni
+[`set_initial_max_data()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_data
+[`set_initial_max_stream_data_bidi_local()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_stream_data_bidi_local
+[`set_initial_max_stream_data_bidi_remote()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_stream_data_bidi_remote
+[`set_initial_max_stream_data_uni()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_stream_data_uni
+[`with_boring_ssl_ctx()`]: https://docs.quic.tech/quiche/struct.Config.html#method.with_boring_ssl_ctx
 [`connect()`]: https://docs.quic.tech/quiche/fn.connect.html
 [`accept()`]: https://docs.quic.tech/quiche/fn.accept.html
 [`recv()`]: https://docs.quic.tech/quiche/struct.Connection.html#method.recv
@@ -267,7 +308,7 @@ is disabled by default), by passing ``--features ffi`` to ``cargo``.
 Building
 --------
 
-quiche requires Rust 1.57 or later to build. The latest stable Rust release can
+quiche requires Rust 1.66 or later to build. The latest stable Rust release can
 be installed using [rustup](https://rustup.rs/).
 
 Once the Rust build environment is setup, the quiche source code can be fetched

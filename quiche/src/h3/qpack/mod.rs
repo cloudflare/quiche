@@ -45,6 +45,9 @@ pub enum Error {
     /// The provided buffer is too short.
     BufferTooShort,
 
+    /// The provided string would be larger after huffman encoding.
+    InflatedHuffmanEncoding,
+
     /// The QPACK header block's huffman encoding is invalid.
     InvalidHuffmanEncoding,
 
@@ -60,7 +63,7 @@ pub enum Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -102,7 +105,7 @@ mod tests {
         assert_eq!(enc.encode(&headers, &mut encoded), Ok(240));
 
         let mut dec = Decoder::new();
-        assert_eq!(dec.decode(&mut encoded, std::u64::MAX), Ok(headers));
+        assert_eq!(dec.decode(&mut encoded, u64::MAX), Ok(headers));
     }
 
     #[test]
@@ -130,7 +133,7 @@ mod tests {
         assert_eq!(enc.encode(&headers_in, &mut encoded), Ok(35));
 
         let mut dec = Decoder::new();
-        let headers_out = dec.decode(&mut encoded, std::u64::MAX).unwrap();
+        let headers_out = dec.decode(&mut encoded, u64::MAX).unwrap();
 
         assert_eq!(headers_expected, headers_out);
 
@@ -147,9 +150,47 @@ mod tests {
         assert_eq!(enc.encode(&headers_in, &mut encoded), Ok(35));
 
         let mut dec = Decoder::new();
-        let headers_out = dec.decode(&mut encoded, std::u64::MAX).unwrap();
+        let headers_out = dec.decode(&mut encoded, u64::MAX).unwrap();
 
         assert_eq!(headers_expected, headers_out);
+    }
+
+    #[test]
+    fn lower_ascii_range() {
+        let mut encoded = [0u8; 50];
+        let mut enc = Encoder::new();
+
+        // Indexed name with literal value
+        let headers1 = vec![crate::h3::Header::new(b"location", b"															")];
+        assert_eq!(enc.encode(&headers1, &mut encoded), Ok(19));
+
+        // Literal name and value
+        let headers2 = vec![crate::h3::Header::new(b"a", b"")];
+        assert_eq!(enc.encode(&headers2, &mut encoded), Ok(20));
+
+        let headers3 = vec![crate::h3::Header::new(b"															", b"hello")];
+        assert_eq!(enc.encode(&headers3, &mut encoded), Ok(24));
+    }
+
+    #[test]
+    fn extended_ascii_range() {
+        let mut encoded = [0u8; 50];
+        let mut enc = Encoder::new();
+
+        let name = b"location";
+        let value = "£££££££££££££££";
+
+        // Indexed name with literal value
+        let headers1 = vec![crate::h3::Header::new(name, value.as_bytes())];
+        assert_eq!(enc.encode(&headers1, &mut encoded), Ok(34));
+
+        // Literal name and value
+        let value = "ððððððððððððððð";
+        let headers2 = vec![crate::h3::Header::new(b"a", value.as_bytes())];
+        assert_eq!(enc.encode(&headers2, &mut encoded), Ok(35));
+
+        let headers3 = vec![crate::h3::Header::new(value.as_bytes(), b"hello")];
+        assert_eq!(enc.encode(&headers3, &mut encoded), Ok(39));
     }
 }
 
