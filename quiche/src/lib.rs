@@ -2950,10 +2950,6 @@ impl Connection {
 
         self.ack_eliciting_sent = false;
 
-        // Reset pacer and start a new burst when a valid
-        // packet is received.
-        self.paths.get_mut(recv_pid)?.recovery.pacer.reset(now);
-
         Ok(read)
     }
 
