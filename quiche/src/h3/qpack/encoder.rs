@@ -105,27 +105,36 @@ impl Encoder {
 }
 
 fn lookup_static<T: NameValue>(h: &T) -> Option<(u64, bool)> {
-    let mut name_match = None;
+    // Fetch the right encoding table for this header length.
+    let table_for_len =
+        super::static_table::STATIC_ENCODE_TABLE.get(h.name().len())?;
 
-    for (i, e) in super::static_table::STATIC_TABLE.iter().enumerate() {
+    // Similar to [`eq_ignore_ascii_case`], but only lowercases the second
+    // operand, as the entries in the table are already lower cased.
+    let cmp_lowercase = |a: &[u8], b: &[u8]| {
+        std::iter::zip(a, b).all(|(a, b)| a.eq(&b.to_ascii_lowercase()))
+    };
+
+    for (name, values) in table_for_len.iter() {
         // Match header name first.
-        if h.name().len() == e.0.len() && h.name().eq_ignore_ascii_case(e.0) {
-            // No header value to match, return early.
-            if e.1.is_empty() {
-                return Some((i as u64, false));
-            }
+        if cmp_lowercase(name, h.name()) {
+            // Second iterate over possible values for the header.
+            for (value, enc) in values.iter() {
+                // Match header value.
+                if value.is_empty() {
+                    return Some((*enc, false));
+                }
 
-            // Match header value.
-            if h.value().len() == e.1.len() && h.value() == e.1 {
-                return Some((i as u64, true));
+                if h.value() == *value {
+                    return Some((*enc, true));
+                }
             }
-
-            // Remember name-only match for later, but keep searching.
-            name_match = Some((i as u64, false));
+            // Only matched the header, not the value.
+            return Some((values.first()?.1, false));
         }
     }
 
-    name_match
+    None
 }
 
 fn encode_int(
@@ -212,5 +221,30 @@ mod tests {
         assert!(encode_int(42, 0, 8, &mut b).is_ok());
 
         assert_eq!(expected, encoded);
+    }
+
+    #[test]
+    fn encode_static_header() {
+        let mut encoded = [0; 3];
+        Encoder::default()
+            .encode(&[(b":method", b"GET")], &mut encoded)
+            .unwrap();
+        assert_eq!(encoded, [0, 0, INDEXED | 0x40 | 17]);
+    }
+
+    #[test]
+    fn encode_static_header_name_only() {
+        let mut encoded = [0; 11];
+        let mut expected = [0; 11];
+        let mut buf = octets::OctetsMut::with_slice(&mut expected[..]);
+        buf.put_u16(0).unwrap();
+        buf.put_u8(LITERAL_WITH_NAME_REF | 0x10 | 15).unwrap();
+        buf.put_u8(0).unwrap();
+        encode_str(b"FORGET", 7, &mut buf).unwrap();
+
+        Encoder::default()
+            .encode(&[(b":method", b"FORGET")], &mut encoded)
+            .unwrap();
+        assert_eq!(encoded, expected);
     }
 }

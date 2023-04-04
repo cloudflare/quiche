@@ -207,11 +207,11 @@ impl Decoder {
 }
 
 fn lookup_static(idx: u64) -> Result<(&'static [u8], &'static [u8])> {
-    if idx >= super::static_table::STATIC_TABLE.len() as u64 {
+    if idx >= super::static_table::STATIC_DECODE_TABLE.len() as u64 {
         return Err(Error::InvalidStaticTableIndex);
     }
 
-    Ok(super::static_table::STATIC_TABLE[idx as usize])
+    Ok(super::static_table::STATIC_DECODE_TABLE[idx as usize])
 }
 
 fn decode_int(b: &mut octets::Octets, prefix: usize) -> Result<u64> {
