@@ -416,10 +416,11 @@ impl Recovery {
         self.pacer.send(sent_bytes, now);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn on_ack_received(
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
         epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
-        trace_id: &str,
+        trace_id: &str, newly_acked: &mut Vec<Acked>,
     ) -> Result<(usize, usize)> {
         let largest_acked = ranges.last().unwrap();
 
@@ -441,8 +442,6 @@ impl Recovery {
 
         let mut largest_newly_acked_pkt_num = 0;
         let mut largest_newly_acked_sent_time = now;
-
-        let mut newly_acked = Vec::new();
 
         let mut undo_cwnd = false;
 
@@ -970,10 +969,10 @@ impl Recovery {
     }
 
     fn on_packets_acked(
-        &mut self, acked: Vec<Acked>, epoch: packet::Epoch, now: Instant,
+        &mut self, acked: &mut Vec<Acked>, epoch: packet::Epoch, now: Instant,
     ) {
         // Update delivery rate sample per acked packet.
-        for pkt in &acked {
+        for pkt in acked.iter() {
             self.delivery_rate.update_rate_sample(pkt, now);
         }
 
@@ -981,7 +980,7 @@ impl Recovery {
         self.delivery_rate.generate_rate_sample(self.min_rtt);
 
         // Call congestion control hooks.
-        (self.cc_ops.on_packets_acked)(self, &acked, epoch, now);
+        (self.cc_ops.on_packets_acked)(self, acked, epoch, now);
     }
 
     fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
@@ -1102,7 +1101,7 @@ pub struct CongestionControlOps {
 
     pub on_packets_acked: fn(
         r: &mut Recovery,
-        packets: &[Acked],
+        packets: &mut Vec<Acked>,
         epoch: packet::Epoch,
         now: Instant,
     ),
@@ -1553,7 +1552,8 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
-                ""
+                "",
+                &mut Vec::new(),
             ),
             Ok((0, 0))
         );
@@ -1638,7 +1638,8 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
-                ""
+                "",
+                &mut Vec::new(),
             ),
             Ok((2, 2000))
         );
@@ -1787,7 +1788,8 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
-                ""
+                "",
+                &mut Vec::new(),
             ),
             Ok((0, 0))
         );
@@ -1946,7 +1948,8 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
-                ""
+                "",
+                &mut Vec::new(),
             ),
             Ok((1, 1000))
         );
@@ -1965,7 +1968,8 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
-                ""
+                "",
+                &mut Vec::new(),
             ),
             Ok((0, 0))
         );
@@ -2044,7 +2048,8 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
-                ""
+                "",
+                &mut Vec::new(),
             ),
             Ok((0, 0))
         );
