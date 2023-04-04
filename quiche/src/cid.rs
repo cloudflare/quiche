@@ -326,15 +326,15 @@ impl ConnectionIdentifiers {
     /// Gets the destination Connection ID associated with the provided sequence
     /// number.
     #[inline]
-    pub fn get_dcid(&self, seq_num: u64) -> Result<&ConnectionIdEntry> {
-        self.dcids.get(seq_num).ok_or(Error::InvalidState)
+    pub fn get_dcid(&self, seq_num: u64) -> Option<&ConnectionIdEntry> {
+        self.dcids.get(seq_num)
     }
 
     /// Gets the source Connection ID associated with the provided sequence
     /// number.
     #[inline]
-    pub fn get_scid(&self, seq_num: u64) -> Result<&ConnectionIdEntry> {
-        self.scids.get(seq_num).ok_or(Error::InvalidState)
+    pub fn get_scid(&self, seq_num: u64) -> Option<&ConnectionIdEntry> {
+        self.scids.get(seq_num)
     }
 
     /// Adds a new source identifier, and indicates whether it should be

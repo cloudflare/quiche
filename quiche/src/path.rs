@@ -533,24 +533,16 @@ impl PathMap {
         }
     }
 
-    /// Gets an immutable reference to the path identified by `path_id`. If the
-    /// provided `path_id` does not identify any current `Path`, returns an
-    /// [`InvalidState`].
-    ///
-    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// Gets an immutable reference to the path identified by `path_id`.
     #[inline]
-    pub fn get(&self, path_id: usize) -> Result<&Path> {
-        self.paths.get(path_id).ok_or(Error::InvalidState)
+    pub fn get(&self, path_id: usize) -> Option<&Path> {
+        self.paths.get(path_id)
     }
 
-    /// Gets a mutable reference to the path identified by `path_id`. If the
-    /// provided `path_id` does not identify any current `Path`, returns an
-    /// [`InvalidState`].
-    ///
-    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// Gets a mutable reference to the path identified by `path_id`.
     #[inline]
-    pub fn get_mut(&mut self, path_id: usize) -> Result<&mut Path> {
-        self.paths.get_mut(path_id).ok_or(Error::InvalidState)
+    pub fn get_mut(&mut self, path_id: usize) -> Option<&mut Path> {
+        self.paths.get_mut(path_id)
     }
 
     #[inline]
@@ -561,38 +553,22 @@ impl PathMap {
     }
 
     /// Gets an immutable reference to the active path with the lowest
-    /// identifier. If there is no active path, returns an [`InvalidState`].
-    ///
-    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// identifier.
     #[inline]
-    pub fn get_active(&self) -> Result<&Path> {
-        self.get_active_with_pid()
-            .map(|(_, p)| p)
-            .ok_or(Error::InvalidState)
+    pub fn get_active(&self) -> Option<&Path> {
+        self.get_active_with_pid().map(|(_, p)| p)
     }
 
-    /// Gets the lowest active path identifier. If there is no active path,
-    /// returns an [`InvalidState`].
-    ///
-    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// Gets the lowest active path identifier
     #[inline]
-    pub fn get_active_path_id(&self) -> Result<usize> {
-        self.get_active_with_pid()
-            .map(|(pid, _)| pid)
-            .ok_or(Error::InvalidState)
+    pub fn get_active_path_id(&self) -> Option<usize> {
+        self.get_active_with_pid().map(|(pid, _)| pid)
     }
 
     /// Gets an mutable reference to the active path with the lowest identifier.
-    /// If there is no active path, returns an [`InvalidState`].
-    ///
-    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
     #[inline]
-    pub fn get_active_mut(&mut self) -> Result<&mut Path> {
-        self.paths
-            .iter_mut()
-            .map(|(_, p)| p)
-            .find(|p| p.active())
-            .ok_or(Error::InvalidState)
+    pub fn get_active_mut(&mut self) -> Option<&mut Path> {
+        self.paths.iter_mut().map(|(_, p)| p).find(|p| p.active())
     }
 
     /// Returns an iterator over all existing paths.
@@ -711,7 +687,7 @@ impl PathMap {
 
     /// Handles incoming PATH_RESPONSE data.
     pub fn on_response_received(&mut self, data: [u8; 8]) -> Result<()> {
-        let active_pid = self.get_active_path_id()?;
+        let active_pid = self.get_active_path_id().ok_or(Error::InvalidState)?;
 
         let challenge_pending =
             self.iter_mut().find(|(_, p)| p.has_pending_challenge(data));
@@ -752,11 +728,11 @@ impl PathMap {
     pub fn set_active_path(&mut self, path_id: usize) -> Result<()> {
         let is_server = self.is_server;
 
-        if let Ok(old_active_path) = self.get_active_mut() {
+        if let Some(old_active_path) = self.get_active_mut() {
             old_active_path.active = false;
         }
 
-        let new_active_path = self.get_mut(path_id)?;
+        let new_active_path = self.get_mut(path_id).ok_or(Error::InvalidState)?;
         new_active_path.active = true;
 
         if is_server {
@@ -782,7 +758,8 @@ impl PathMap {
     pub fn on_peer_migrated(
         &mut self, new_pid: usize, disable_dcid_reuse: bool,
     ) -> Result<()> {
-        let active_path_id = self.get_active_path_id()?;
+        let active_path_id =
+            self.get_active_path_id().ok_or(Error::InvalidState)?;
 
         if active_path_id == new_pid {
             return Ok(());
@@ -790,11 +767,19 @@ impl PathMap {
 
         self.set_active_path(new_pid)?;
 
-        let no_spare_dcid = self.get_mut(new_pid)?.active_dcid_seq.is_none();
+        let no_spare_dcid = self
+            .get_mut(new_pid)
+            .ok_or(Error::InvalidState)?
+            .active_dcid_seq
+            .is_none();
 
         if no_spare_dcid && !disable_dcid_reuse {
-            self.get_mut(new_pid)?.active_dcid_seq =
-                self.get_mut(active_path_id)?.active_dcid_seq;
+            self.get_mut(new_pid)
+                .ok_or(Error::InvalidState)?
+                .active_dcid_seq = self
+                .get_mut(active_path_id)
+                .ok_or(Error::InvalidState)?
+                .active_dcid_seq;
         }
 
         Ok(())
