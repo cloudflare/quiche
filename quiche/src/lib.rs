@@ -1394,6 +1394,9 @@ pub struct Connection {
     /// Whether the connection should prevent from reusing destination
     /// Connection IDs when the peer migrates.
     disable_dcid_reuse: bool,
+
+    /// A resusable buffer used by Recovery
+    newly_acked: Vec<recovery::Acked>,
 }
 
 /// Creates a new server-side connection.
@@ -1832,6 +1835,8 @@ impl Connection {
             emit_dgram: true,
 
             disable_dcid_reuse: config.disable_dcid_reuse,
+
+            newly_acked: Vec::new(),
         };
 
         if let Some(odcid) = odcid {
@@ -6608,6 +6613,7 @@ impl Connection {
                         handshake_status,
                         now,
                         &self.trace_id,
+                        &mut self.newly_acked,
                     )?;
 
                     self.lost_count += lost_packets;
