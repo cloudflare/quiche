@@ -68,34 +68,14 @@ impl Encoder {
 
                     // Encode value as literal with static name reference.
                     encode_int(idx, LITERAL_WITH_NAME_REF | STATIC, 4, &mut b)?;
-                    encode_str(h.value(), 7, &mut b)?;
+                    encode_str::<false>(h.value(), 0, 7, &mut b)?;
                 },
 
                 None => {
                     // Encode as fully literal.
 
-                    // Huffman-encoding generally saves space but in some cases
-                    // it doesn't, for those just encode the literal string.
-                    match super::huffman::encode_output_length(h.name(), true) {
-                        Ok(len) => {
-                            encode_int(len as u64, LITERAL | 0x08, 3, &mut b)?;
-                            super::huffman::encode(h.name(), &mut b, true)?;
-                        },
-
-                        Err(super::Error::InflatedHuffmanEncoding) => {
-                            encode_int(
-                                h.name().len() as u64,
-                                LITERAL,
-                                3,
-                                &mut b,
-                            )?;
-                            b.put_bytes(&h.name().to_ascii_lowercase())?;
-                        },
-
-                        Err(e) => return Err(e),
-                    }
-
-                    encode_str(h.value(), 7, &mut b)?;
+                    encode_str::<true>(h.name(), LITERAL, 3, &mut b)?;
+                    encode_str::<false>(h.value(), 0, 7, &mut b)?;
                 },
             };
         }
@@ -166,18 +146,25 @@ fn encode_int(
     Ok(())
 }
 
-fn encode_str(v: &[u8], prefix: usize, b: &mut octets::OctetsMut) -> Result<()> {
+#[inline]
+fn encode_str<const LOWER_CASE: bool>(
+    v: &[u8], first: u8, prefix: usize, b: &mut octets::OctetsMut,
+) -> Result<()> {
     // Huffman-encoding generally saves space but in some cases it doesn't, for
     // those just encode the literal string.
-    match super::huffman::encode_output_length(v, false) {
+    match super::huffman::encode_output_length::<LOWER_CASE>(v) {
         Ok(len) => {
-            encode_int(len as u64, 0x80, prefix, b)?;
-            super::huffman::encode(v, b, false)?;
+            encode_int(len as u64, first | 1 << prefix, prefix, b)?;
+            super::huffman::encode::<LOWER_CASE>(v, b)?;
         },
 
         Err(super::Error::InflatedHuffmanEncoding) => {
-            encode_int(v.len() as u64, 0, prefix, b)?;
-            b.put_bytes(v)?;
+            encode_int(v.len() as u64, first, prefix, b)?;
+            if LOWER_CASE {
+                b.put_bytes(&v.to_ascii_lowercase())?;
+            } else {
+                b.put_bytes(v)?;
+            }
         },
 
         Err(e) => return Err(e),
@@ -240,7 +227,7 @@ mod tests {
         buf.put_u16(0).unwrap();
         buf.put_u8(LITERAL_WITH_NAME_REF | 0x10 | 15).unwrap();
         buf.put_u8(0).unwrap();
-        encode_str(b"FORGET", 7, &mut buf).unwrap();
+        encode_str::<false>(b"FORGET", 0, 7, &mut buf).unwrap();
 
         Encoder::default()
             .encode(&[(b":method", b"FORGET")], &mut encoded)
