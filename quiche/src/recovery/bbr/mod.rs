@@ -255,12 +255,13 @@ impl State {
 fn bbr_enter_recovery(r: &mut Recovery, now: Instant) {
     r.bbr_state.prior_cwnd = per_ack::bbr_save_cwnd(r);
 
-    r.congestion_window = r.bytes_in_flight +
-        r.bbr_state.newly_acked_bytes.max(r.max_datagram_size);
+    r.congestion_window = r.bytes_in_flight.max(r.max_datagram_size);
     r.congestion_recovery_start_time = Some(now);
 
     r.bbr_state.packet_conservation = true;
     r.bbr_state.in_recovery = true;
+
+    r.bbr_state.newly_lost_bytes = 0;
 
     // Start round now.
     r.bbr_state.next_round_delivered = r.delivery_rate.delivered();
@@ -310,7 +311,7 @@ fn on_packets_acked(
         });
 
     if let Some(pkt) = packets.last() {
-        if !r.in_congestion_recovery(pkt.time_sent) {
+        if !r.in_congestion_recovery(pkt.time_sent) && r.bbr_state.in_recovery {
             // Upon exiting loss recovery.
             bbr_exit_recovery(r);
         }
