@@ -711,6 +711,7 @@ pub struct Config {
     hystart: bool,
 
     pacing: bool,
+    max_pacing_rate: Option<u64>,
 
     dgram_recv_max_queue_len: usize,
     dgram_send_max_queue_len: usize,
@@ -769,6 +770,7 @@ impl Config {
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
             hystart: true,
             pacing: true,
+            max_pacing_rate: None,
 
             dgram_recv_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
             dgram_send_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
@@ -1145,6 +1147,13 @@ impl Config {
     /// The default value is `true`.
     pub fn enable_pacing(&mut self, v: bool) {
         self.pacing = v;
+    }
+
+    /// Sets the max value for pacing rate.
+    ///
+    /// By default pacing rate is not limited.
+    pub fn set_max_pacing_rate(&mut self, v: u64) {
+        self.max_pacing_rate = Some(v);
     }
 
     /// Configures whether to enable receiving DATAGRAM frames.

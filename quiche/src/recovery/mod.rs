@@ -176,6 +176,7 @@ pub struct RecoveryConfig {
     cc_ops: &'static CongestionControlOps,
     hystart: bool,
     pacing: bool,
+    max_pacing_rate: Option<u64>,
 }
 
 impl RecoveryConfig {
@@ -186,6 +187,7 @@ impl RecoveryConfig {
             cc_ops: config.cc_algorithm.into(),
             hystart: config.hystart,
             pacing: config.pacing,
+            max_pacing_rate: config.max_pacing_rate,
         }
     }
 }
@@ -274,6 +276,7 @@ impl Recovery {
                 initial_congestion_window,
                 0,
                 recovery_config.max_send_udp_payload_size,
+                recovery_config.max_pacing_rate,
             ),
 
             prr: prr::PRR::default(),
@@ -727,6 +730,7 @@ impl Recovery {
             self.congestion_window,
             0,
             max_datagram_size,
+            self.pacer.max_pacing_rate(),
         );
 
         self.max_datagram_size = max_datagram_size;

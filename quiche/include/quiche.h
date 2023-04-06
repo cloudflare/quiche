@@ -224,6 +224,9 @@ void quiche_config_enable_hystart(quiche_config *config, bool v);
 // Configures whether to enable pacing (enabled by default).
 void quiche_config_enable_pacing(quiche_config *config, bool v);
 
+// Configures max pacing rate to be used.
+void quiche_config_set_max_pacing_rate(quiche_config *config, uint64_t v);
+
 // Configures whether to enable receiving DATAGRAM frames.
 void quiche_config_enable_dgram(quiche_config *config, bool enabled,
                                 size_t recv_queue_len,
