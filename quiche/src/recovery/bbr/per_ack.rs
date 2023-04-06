@@ -172,8 +172,9 @@ fn bbr_modulate_cwnd_for_recovery(r: &mut Recovery) {
     }
 
     if r.bbr_state.packet_conservation {
-        r.congestion_window =
-            r.congestion_window.max(r.bytes_in_flight + acked_bytes);
+        r.congestion_window = r
+            .congestion_window
+            .max(r.bytes_in_flight + acked_bytes.max(r.max_datagram_size));
     }
 }
 
