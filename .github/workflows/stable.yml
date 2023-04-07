@@ -95,8 +95,7 @@ jobs:
 
       - name: Build C examples
         run: |
-          brew install libev
-          curl -o quiche/examples/uthash.h https://raw.githubusercontent.com/troydhanson/uthash/master/src/uthash.h
+          brew install libev uthash
           make -C quiche/examples
 
   quiche_ios:
