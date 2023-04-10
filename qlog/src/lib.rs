@@ -628,20 +628,6 @@ pub struct Token {
     pub raw: Option<events::RawInfo>,
 }
 
-impl Token {
-    pub fn new(
-        ty: Option<TokenType>, length: Option<u32>,
-        stateless_reset_token: Option<Vec<u8>>, details: Option<String>,
-    ) -> Self {
-        Token {
-            ty,
-            length,
-            data: HexSlice::maybe_string(stateless_reset_token.as_ref()),
-            details,
-        }
-    }
-}
-
 pub struct HexSlice<'a>(&'a [u8]);
 
 impl<'a> HexSlice<'a> {
