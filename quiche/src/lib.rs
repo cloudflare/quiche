@@ -6262,7 +6262,7 @@ impl Connection {
 
     /// Returns whether or not this is a server-side connection
     pub fn is_server(&self) -> bool {
-        return self.is_server;
+        self.is_server
     }
 
     fn encode_transport_params(&mut self) -> Result<()> {

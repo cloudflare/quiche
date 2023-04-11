@@ -1212,7 +1212,7 @@ pub extern fn quiche_conn_path_stats(
 }
 
 #[no_mangle]
-pub extern fn is_server(conn: &Connection) -> bool {
+pub extern fn quiche_conn_is_server(conn: &Connection) -> bool {
     conn.is_server()
 }
 
