@@ -6260,7 +6260,7 @@ impl Connection {
         self.paths.iter().map(|(_, p)| p.stats())
     }
 
-    /// Returns whether or not this is a server-side connection
+    /// Returns whether or not this is a server-side connection.
     pub fn is_server(&self) -> bool {
         self.is_server
     }
