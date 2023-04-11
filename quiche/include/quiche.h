@@ -625,6 +625,9 @@ typedef struct {
 // field of `quiche_stats`).
 int quiche_conn_path_stats(const quiche_conn *conn, size_t idx, quiche_path_stats *out);
 
+// Returns whether or not this is a server-side connection.
+bool quiche_conn_is_server(const quiche_conn *conn);
+
 // Returns the maximum DATAGRAM payload that can be sent.
 ssize_t quiche_conn_dgram_max_writable_len(const quiche_conn *conn);
 

@@ -6260,6 +6260,11 @@ impl Connection {
         self.paths.iter().map(|(_, p)| p.stats())
     }
 
+    /// Returns whether or not this is a server-side connection.
+    pub fn is_server(&self) -> bool {
+        self.is_server
+    }
+
     fn encode_transport_params(&mut self) -> Result<()> {
         let mut raw_params = [0; 128];
 

@@ -1212,6 +1212,11 @@ pub extern fn quiche_conn_path_stats(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_is_server(conn: &Connection) -> bool {
+    conn.is_server()
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_dgram_max_writable_len(conn: &Connection) -> ssize_t {
     match conn.dgram_max_writable_len() {
         None => Error::Done.to_c(),
