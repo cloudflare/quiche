@@ -1500,11 +1500,29 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
+#[cfg(all(
+    not(any(target_os = "macos", target_os = "ios", target_os = "windows")),
+    target_arch = "x86_64"
+))]
 fn std_time_to_c(time: &std::time::Instant, out: &mut timespec) {
-    unsafe {
-        ptr::copy_nonoverlapping(time as *const _ as *const timespec, out, 1)
-    }
+    const NANOS_PER_SEC: u128 = 1_000_000_000;
+
+    const INSTANT_ZERO: std::time::Instant =
+        unsafe { std::mem::transmute(0u128) };
+
+    let raw_time = time.duration_since(INSTANT_ZERO).as_nanos();
+
+    out.tv_sec = (raw_time / NANOS_PER_SEC) as i64;
+    out.tv_nsec = (raw_time % NANOS_PER_SEC) as i64;
+}
+
+#[cfg(all(
+    not(any(target_os = "macos", target_os = "ios", target_os = "windows")),
+    not(target_arch = "x86_64")
+))]
+fn std_time_to_c(_time: &std::time::Instant, out: &mut timespec) {
+    out.tv_sec = 0;
+    out.tv_nsec = 0;
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
