@@ -28,6 +28,24 @@ use std::cmp;
 
 use std::io;
 
+#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
+fn std_time_to_c(time: &std::time::Instant, out: &mut libc::timespec) {
+    const INSTANT_ZERO: std::time::Instant =
+        unsafe { std::mem::transmute(std::time::UNIX_EPOCH) };
+
+    let raw_time = time.duration_since(INSTANT_ZERO);
+
+    out.tv_sec = raw_time.as_secs() as libc::time_t;
+    out.tv_nsec = raw_time.subsec_nanos() as libc::c_long;
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
+fn std_time_to_c(_time: &std::time::Instant, out: &mut libc::timespec) {
+    // TODO: implement Instant conversion for systems that don't use timespec.
+    out.tv_sec = 0;
+    out.tv_nsec = 0;
+}
+
 /// For Linux, try to detect GSO is available.
 #[cfg(target_os = "linux")]
 pub fn detect_gso(socket: &mio::net::UdpSocket, segment_size: usize) -> bool {
@@ -73,15 +91,7 @@ fn send_to_gso_pacing(
     };
 
     let at = std::time::Instant::now() + send_info.after;
-
-    // TODO: timespec conversion like this is invalid
-    unsafe {
-        std::ptr::copy_nonoverlapping(
-            &at as *const _ as *const libc::timespec,
-            &mut time_spec,
-            1,
-        )
-    };
+    std_time_to_c(&at, &mut time_spec);
 
     let send_time =
         time_spec.tv_sec as u64 * nanos_per_sec + time_spec.tv_nsec as u64;
