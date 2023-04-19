@@ -289,12 +289,12 @@ mod tests {
         // Send 6000 (half of max_burst) -> no timestamp change yet.
         p.send(6000, now);
 
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
+        assert!(p.next_time() < Duration::from_millis(1));
 
         // Send 6000 bytes -> max_burst filled.
         p.send(6000, now);
 
-        assert!(now.duration_since(p.next_time()) < Duration::from_millis(1));
+        assert!(p.next_time() < Duration::from_millis(1));
 
         // Start of a second burst.
         let now = now + Duration::from_millis(5);
@@ -304,10 +304,7 @@ mod tests {
 
         let interval = max_burst as f64 / max_pacing_rate as f64;
 
-        assert_eq!(
-            second_burst_send_time - now,
-            Duration::from_secs_f64(interval)
-        );
+        assert_eq!(second_burst_send_time, Duration::from_secs_f64(interval));
 
         // Start of third burst
         let now = now + Duration::from_millis(5);
