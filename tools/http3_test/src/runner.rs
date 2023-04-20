@@ -302,7 +302,7 @@ pub fn run(
                                 req_start.elapsed()
                             );
 
-                            match conn.close(true, 0x00, b"kthxbye") {
+                            match conn.close(true, 0x100, b"kthxbye") {
                                 // Already closed.
                                 Ok(_) | Err(quiche::Error::Done) => (),
 
@@ -343,7 +343,7 @@ pub fn run(
                                 req_start.elapsed()
                             );
 
-                            match conn.close(true, 0x00, b"kthxbye") {
+                            match conn.close(true, 0x100, b"kthxbye") {
                                 // Already closed.
                                 Ok(_) | Err(quiche::Error::Done) => (),
 
