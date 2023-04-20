@@ -1288,7 +1288,7 @@ impl HttpConn for Http3Conn {
                             );
                         }
 
-                        match conn.close(true, 0x00, b"kthxbye") {
+                        match conn.close(true, 0x100, b"kthxbye") {
                             // Already closed.
                             Ok(_) | Err(quiche::Error::Done) => (),
 
@@ -1302,7 +1302,7 @@ impl HttpConn for Http3Conn {
                 Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
                     error!("request was reset by peer with {}, closing...", e);
 
-                    match conn.close(true, 0x00, b"kthxbye") {
+                    match conn.close(true, 0x100, b"kthxbye") {
                         // Already closed.
                         Ok(_) | Err(quiche::Error::Done) => (),
 
