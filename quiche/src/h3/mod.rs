@@ -4715,7 +4715,7 @@ mod tests {
         let mut h3_config = Config::new().unwrap();
         h3_config.set_max_field_section_size(65);
 
-        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
 
         s.handshake().unwrap();
 
@@ -4849,9 +4849,9 @@ mod tests {
         config.set_initial_max_streams_uni(5);
         config.verify_peer(false);
 
-        let mut h3_config = Config::new().unwrap();
+        let h3_config = Config::new().unwrap();
 
-        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
 
         s.handshake().unwrap();
 
@@ -4902,9 +4902,9 @@ mod tests {
         config.set_initial_max_streams_uni(5);
         config.verify_peer(false);
 
-        let mut h3_config = Config::new().unwrap();
+        let h3_config = Config::new().unwrap();
 
-        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
 
         s.handshake().unwrap();
 
@@ -4962,9 +4962,9 @@ mod tests {
         config.set_initial_max_streams_uni(5);
         config.verify_peer(false);
 
-        let mut h3_config = Config::new().unwrap();
+        let h3_config = Config::new().unwrap();
 
-        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
 
         s.handshake().unwrap();
 
@@ -5096,9 +5096,9 @@ mod tests {
         config.set_initial_max_streams_uni(5);
         config.verify_peer(false);
 
-        let mut h3_config = Config::new().unwrap();
+        let h3_config = Config::new().unwrap();
 
-        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
 
         s.handshake().unwrap();
 
@@ -5168,9 +5168,9 @@ mod tests {
         config.set_initial_max_streams_uni(5);
         config.verify_peer(false);
 
-        let mut h3_config = Config::new().unwrap();
+        let h3_config = Config::new().unwrap();
 
-        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
 
         s.handshake().unwrap();
 
@@ -5301,9 +5301,9 @@ mod tests {
         config.set_initial_max_streams_uni(5);
         config.verify_peer(false);
 
-        let mut h3_config = Config::new().unwrap();
+        let h3_config = Config::new().unwrap();
 
-        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
 
         s.handshake().unwrap();
 
@@ -5645,8 +5645,8 @@ mod tests {
         config.verify_peer(false);
         config.enable_dgram(true, 100, 100);
 
-        let mut h3_config = Config::new().unwrap();
-        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        let h3_config = Config::new().unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
         s.handshake().unwrap();
 
         // Send request followed by DATAGRAM on client side.
@@ -5693,8 +5693,8 @@ mod tests {
         config.verify_peer(false);
         config.enable_dgram(true, 100, 100);
 
-        let mut h3_config = Config::new().unwrap();
-        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        let h3_config = Config::new().unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
         s.handshake().unwrap();
 
         // We'll send default data of 10 bytes on flow ID 0.
@@ -5785,8 +5785,8 @@ mod tests {
         config.verify_peer(false);
         config.enable_dgram(true, 100, 100);
 
-        let mut h3_config = Config::new().unwrap();
-        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        let h3_config = Config::new().unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
         s.handshake().unwrap();
 
         // 10 bytes on flow ID 0 and 2.
@@ -6137,8 +6137,8 @@ mod tests {
         config.verify_peer(false);
         config.enable_dgram(true, 100, 100);
 
-        let mut h3_config = Config::new().unwrap();
-        let mut s = Session::with_configs(&mut config, &mut h3_config).unwrap();
+        let h3_config = Config::new().unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
         s.handshake().unwrap();
 
         // 10 bytes on flow ID 0 and 2.
