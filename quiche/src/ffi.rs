@@ -335,6 +335,11 @@ pub extern fn quiche_config_enable_pacing(config: &mut Config, v: bool) {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_max_pacing_rate(config: &mut Config, v: u64) {
+    config.set_max_pacing_rate(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_enable_dgram(
     config: &mut Config, enabled: bool, recv_queue_len: size_t,
     send_queue_len: size_t,
@@ -816,7 +821,7 @@ pub extern fn quiche_conn_stream_shutdown(
 
 #[no_mangle]
 pub extern fn quiche_conn_stream_capacity(
-    conn: &mut Connection, stream_id: u64,
+    conn: &Connection, stream_id: u64,
 ) -> ssize_t {
     match conn.stream_capacity(stream_id) {
         Ok(v) => v as ssize_t,
@@ -827,14 +832,37 @@ pub extern fn quiche_conn_stream_capacity(
 
 #[no_mangle]
 pub extern fn quiche_conn_stream_readable(
-    conn: &mut Connection, stream_id: u64,
+    conn: &Connection, stream_id: u64,
 ) -> bool {
     conn.stream_readable(stream_id)
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_stream_readable_next(conn: &mut Connection) -> i64 {
+    conn.stream_readable_next().map(|v| v as i64).unwrap_or(-1)
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_stream_writable(
+    conn: &mut Connection, stream_id: u64, len: usize,
+) -> c_int {
+    match conn.stream_writable(stream_id, len) {
+        Ok(true) => 1,
+
+        Ok(false) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_stream_writable_next(conn: &mut Connection) -> i64 {
+    conn.stream_writable_next().map(|v| v as i64).unwrap_or(-1)
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_stream_finished(
-    conn: &mut Connection, stream_id: u64,
+    conn: &Connection, stream_id: u64,
 ) -> bool {
     conn.stream_finished(stream_id)
 }
@@ -900,20 +928,20 @@ pub extern fn quiche_conn_close(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_timeout_as_nanos(conn: &mut Connection) -> u64 {
+pub extern fn quiche_conn_timeout_as_nanos(conn: &Connection) -> u64 {
     match conn.timeout() {
         Some(timeout) => timeout.as_nanos() as u64,
 
-        None => std::u64::MAX,
+        None => u64::MAX,
     }
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_timeout_as_millis(conn: &mut Connection) -> u64 {
+pub extern fn quiche_conn_timeout_as_millis(conn: &Connection) -> u64 {
     match conn.timeout() {
         Some(timeout) => timeout.as_millis() as u64,
 
-        None => std::u64::MAX,
+        None => u64::MAX,
     }
 }
 
@@ -924,7 +952,7 @@ pub extern fn quiche_conn_on_timeout(conn: &mut Connection) {
 
 #[no_mangle]
 pub extern fn quiche_conn_trace_id(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+    conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let trace_id = conn.trace_id();
 
@@ -934,7 +962,7 @@ pub extern fn quiche_conn_trace_id(
 
 #[no_mangle]
 pub extern fn quiche_conn_source_id(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+    conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let conn_id = conn.source_id();
     let id = conn_id.as_ref();
@@ -944,7 +972,7 @@ pub extern fn quiche_conn_source_id(
 
 #[no_mangle]
 pub extern fn quiche_conn_destination_id(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+    conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let conn_id = conn.destination_id();
     let id = conn_id.as_ref();
@@ -955,7 +983,7 @@ pub extern fn quiche_conn_destination_id(
 
 #[no_mangle]
 pub extern fn quiche_conn_application_proto(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+    conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let proto = conn.application_proto();
 
@@ -965,7 +993,7 @@ pub extern fn quiche_conn_application_proto(
 
 #[no_mangle]
 pub extern fn quiche_conn_peer_cert(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+    conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     match conn.peer_cert() {
         Some(peer_cert) => {
@@ -979,7 +1007,7 @@ pub extern fn quiche_conn_peer_cert(
 
 #[no_mangle]
 pub extern fn quiche_conn_session(
-    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+    conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     match conn.session() {
         Some(session) => {
@@ -1018,7 +1046,7 @@ pub extern fn quiche_conn_is_timed_out(conn: &Connection) -> bool {
 
 #[no_mangle]
 pub extern fn quiche_conn_peer_error(
-    conn: &mut Connection, is_app: *mut bool, error_code: *mut u64,
+    conn: &Connection, is_app: *mut bool, error_code: *mut u64,
     reason: &mut *const u8, reason_len: &mut size_t,
 ) -> bool {
     match &conn.peer_error {
@@ -1037,7 +1065,7 @@ pub extern fn quiche_conn_peer_error(
 
 #[no_mangle]
 pub extern fn quiche_conn_local_error(
-    conn: &mut Connection, is_app: *mut bool, error_code: *mut u64,
+    conn: &Connection, is_app: *mut bool, error_code: *mut u64,
     reason: &mut *const u8, reason_len: &mut size_t,
 ) -> bool {
     match &conn.local_error {
@@ -1184,6 +1212,11 @@ pub extern fn quiche_conn_path_stats(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_is_server(conn: &Connection) -> bool {
+    conn.is_server()
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_dgram_max_writable_len(conn: &Connection) -> ssize_t {
     match conn.dgram_max_writable_len() {
         None => Error::Done.to_c(),
@@ -1300,17 +1333,17 @@ pub extern fn quiche_conn_free(conn: *mut Connection) {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_peer_streams_left_bidi(conn: &mut Connection) -> u64 {
+pub extern fn quiche_conn_peer_streams_left_bidi(conn: &Connection) -> u64 {
     conn.peer_streams_left_bidi()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_peer_streams_left_uni(conn: &mut Connection) -> u64 {
+pub extern fn quiche_conn_peer_streams_left_uni(conn: &Connection) -> u64 {
     conn.peer_streams_left_uni()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_send_quantum(conn: &mut Connection) -> size_t {
+pub extern fn quiche_conn_send_quantum(conn: &Connection) -> size_t {
     conn.send_quantum() as size_t
 }
 
@@ -1469,9 +1502,13 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
 fn std_time_to_c(time: &std::time::Instant, out: &mut timespec) {
-    unsafe {
-        ptr::copy_nonoverlapping(time as *const _ as *const timespec, out, 1)
-    }
+    const INSTANT_ZERO: std::time::Instant =
+        unsafe { std::mem::transmute(std::time::UNIX_EPOCH) };
+
+    let raw_time = time.duration_since(INSTANT_ZERO);
+
+    out.tv_sec = raw_time.as_secs() as libc::time_t;
+    out.tv_nsec = raw_time.subsec_nanos() as libc::c_long;
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]

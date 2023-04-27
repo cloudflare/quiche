@@ -74,7 +74,7 @@ const PACING_MULTIPLIER: f64 = 1.25;
 
 // How many non ACK eliciting packets we send before including a PING to solicit
 // an ACK.
-const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
+pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 
 pub struct Recovery {
     loss_detection_timer: Option<Instant>,
@@ -176,6 +176,7 @@ pub struct RecoveryConfig {
     cc_ops: &'static CongestionControlOps,
     hystart: bool,
     pacing: bool,
+    max_pacing_rate: Option<u64>,
 }
 
 impl RecoveryConfig {
@@ -186,6 +187,7 @@ impl RecoveryConfig {
             cc_ops: config.cc_algorithm.into(),
             hystart: config.hystart,
             pacing: config.pacing,
+            max_pacing_rate: config.max_pacing_rate,
         }
     }
 }
@@ -202,7 +204,7 @@ impl Recovery {
 
             time_of_last_sent_ack_eliciting_pkt: [None; packet::Epoch::count()],
 
-            largest_acked_pkt: [std::u64::MAX; packet::Epoch::count()],
+            largest_acked_pkt: [u64::MAX; packet::Epoch::count()],
 
             largest_sent_pkt: [0; packet::Epoch::count()],
 
@@ -245,7 +247,7 @@ impl Recovery {
 
             bytes_in_flight: 0,
 
-            ssthresh: std::usize::MAX,
+            ssthresh: usize::MAX,
 
             bytes_acked_sl: 0,
 
@@ -274,6 +276,7 @@ impl Recovery {
                 initial_congestion_window,
                 0,
                 recovery_config.max_send_udp_payload_size,
+                recovery_config.max_pacing_rate,
             ),
 
             prr: prr::PRR::default(),
@@ -301,7 +304,7 @@ impl Recovery {
         self.congestion_window = self.max_datagram_size * INITIAL_WINDOW_PACKETS;
         self.in_flight_count = [0; packet::Epoch::count()];
         self.congestion_recovery_start_time = None;
-        self.ssthresh = std::usize::MAX;
+        self.ssthresh = usize::MAX;
         (self.cc_ops.reset)(self);
         self.hystart.reset();
         self.prr = prr::PRR::default();
@@ -416,10 +419,11 @@ impl Recovery {
         self.pacer.send(sent_bytes, now);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn on_ack_received(
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
         epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
-        trace_id: &str,
+        trace_id: &str, newly_acked: &mut Vec<Acked>,
     ) -> Result<(usize, usize)> {
         let largest_acked = ranges.last().unwrap();
 
@@ -430,7 +434,7 @@ impl Recovery {
         // a validating path, then receives an acknowledgment for that packet on
         // the active one.
 
-        if self.largest_acked_pkt[epoch] == std::u64::MAX {
+        if self.largest_acked_pkt[epoch] == u64::MAX {
             self.largest_acked_pkt[epoch] = largest_acked;
         } else {
             self.largest_acked_pkt[epoch] =
@@ -441,8 +445,6 @@ impl Recovery {
 
         let mut largest_newly_acked_pkt_num = 0;
         let mut largest_newly_acked_sent_time = now;
-
-        let mut newly_acked = Vec::new();
 
         let mut undo_cwnd = false;
 
@@ -676,7 +678,7 @@ impl Recovery {
     pub fn cwnd_available(&self) -> usize {
         // Ignore cwnd when sending probe packets.
         if self.loss_probes.iter().any(|&x| x > 0) {
-            return std::usize::MAX;
+            return usize::MAX;
         }
 
         // Open more space (snd_cnt) for PRR when allowed.
@@ -686,6 +688,18 @@ impl Recovery {
 
     pub fn rtt(&self) -> Duration {
         self.smoothed_rtt.unwrap_or(INITIAL_RTT)
+    }
+
+    pub fn min_rtt(&self) -> Option<Duration> {
+        if self.min_rtt == Duration::ZERO {
+            return None;
+        }
+
+        Some(self.min_rtt)
+    }
+
+    pub fn rttvar(&self) -> Duration {
+        self.rttvar
     }
 
     pub fn pto(&self) -> Duration {
@@ -716,6 +730,7 @@ impl Recovery {
             self.congestion_window,
             0,
             max_datagram_size,
+            self.pacer.max_pacing_rate(),
         );
 
         self.max_datagram_size = max_datagram_size;
@@ -958,10 +973,10 @@ impl Recovery {
     }
 
     fn on_packets_acked(
-        &mut self, acked: Vec<Acked>, epoch: packet::Epoch, now: Instant,
+        &mut self, acked: &mut Vec<Acked>, epoch: packet::Epoch, now: Instant,
     ) {
         // Update delivery rate sample per acked packet.
-        for pkt in &acked {
+        for pkt in acked.iter() {
             self.delivery_rate.update_rate_sample(pkt, now);
         }
 
@@ -969,7 +984,7 @@ impl Recovery {
         self.delivery_rate.generate_rate_sample(self.min_rtt);
 
         // Call congestion control hooks.
-        (self.cc_ops.on_packets_acked)(self, &acked, epoch, now);
+        (self.cc_ops.on_packets_acked)(self, acked, epoch, now);
     }
 
     fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
@@ -1090,7 +1105,7 @@ pub struct CongestionControlOps {
 
     pub on_packets_acked: fn(
         r: &mut Recovery,
-        packets: &[Acked],
+        packets: &mut Vec<Acked>,
         epoch: packet::Epoch,
         now: Instant,
     ),
@@ -1541,7 +1556,8 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
-                ""
+                "",
+                &mut Vec::new(),
             ),
             Ok((0, 0))
         );
@@ -1626,7 +1642,8 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
-                ""
+                "",
+                &mut Vec::new(),
             ),
             Ok((2, 2000))
         );
@@ -1775,7 +1792,8 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
-                ""
+                "",
+                &mut Vec::new(),
             ),
             Ok((0, 0))
         );
@@ -1934,7 +1952,8 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
-                ""
+                "",
+                &mut Vec::new(),
             ),
             Ok((1, 1000))
         );
@@ -1953,7 +1972,8 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
-                ""
+                "",
+                &mut Vec::new(),
             ),
             Ok((0, 0))
         );
@@ -2032,7 +2052,8 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
-                ""
+                "",
+                &mut Vec::new(),
             ),
             Ok((0, 0))
         );

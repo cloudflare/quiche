@@ -103,9 +103,6 @@ impl Args for CommonArgs {
                 false,
             ),
 
-            // SiDuck is it's own application protocol.
-            (_, "siduck") => (alpns::SIDUCK.to_vec(), true),
-
             (..) => panic!("Unsupported HTTP version and DATAGRAM protocol."),
         };
 
@@ -444,6 +441,7 @@ Options:
   --qpack-max-table-capacity BYTES  Max capacity of QPACK dynamic table decoding. Any value other that 0 is currently unsupported.
   --qpack-blocked-streams STREAMS   Limit of streams that can be blocked while decoding. Any value other that 0 is currently unsupported.
   --disable-gso               Disable GSO (linux only).
+  --disable-pacing            Disable pacing (linux only).
   -h --help                   Show this screen.
 ";
 
@@ -456,6 +454,7 @@ pub struct ServerArgs {
     pub cert: String,
     pub key: String,
     pub disable_gso: bool,
+    pub disable_pacing: bool,
 }
 
 impl Args for ServerArgs {
@@ -469,6 +468,7 @@ impl Args for ServerArgs {
         let cert = args.get_str("--cert").to_string();
         let key = args.get_str("--key").to_string();
         let disable_gso = args.get_bool("--disable-gso");
+        let disable_pacing = args.get_bool("--disable-pacing");
 
         ServerArgs {
             listen,
@@ -478,6 +478,7 @@ impl Args for ServerArgs {
             cert,
             key,
             disable_gso,
+            disable_pacing,
         }
     }
 }

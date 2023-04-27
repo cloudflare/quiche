@@ -147,13 +147,13 @@ pub struct StreamMap {
     /// Set of stream IDs corresponding to streams that have outstanding data
     /// to read. This is used to generate a `StreamIter` of streams without
     /// having to iterate over the full list of streams.
-    readable: StreamIdHashSet,
+    pub readable: StreamIdHashSet,
 
     /// Set of stream IDs corresponding to streams that have enough flow control
     /// capacity to be written to, and is not finished. This is used to generate
     /// a `StreamIter` of streams without having to iterate over the full list
     /// of streams.
-    writable: StreamIdHashSet,
+    pub writable: StreamIdHashSet,
 
     /// Set of stream IDs corresponding to streams that are almost out of flow
     /// control credit and need to send MAX_STREAM_DATA. This is used to
@@ -223,7 +223,7 @@ impl StreamMap {
         &mut self, id: u64, local_params: &crate::TransportParams,
         peer_params: &crate::TransportParams, local: bool, is_server: bool,
     ) -> Result<&mut Stream> {
-        let stream = match self.streams.entry(id) {
+        let (stream, is_new_and_writable) = match self.streams.entry(id) {
             hash_map::Entry::Vacant(v) => {
                 // Stream has already been closed and garbage collected.
                 if self.collected.contains(&id) {
@@ -322,14 +322,18 @@ impl StreamMap {
                     local,
                     self.max_stream_window,
                 );
-                v.insert(s)
+
+                let is_writable = s.is_writable();
+
+                (v.insert(s), is_writable)
             },
 
-            hash_map::Entry::Occupied(v) => v.into_mut(),
+            hash_map::Entry::Occupied(v) => (v.into_mut(), false),
         };
 
-        // Stream might already be writable due to initial flow control limits.
-        if stream.is_writable() {
+        // Newly created stream might already be writable due to initial flow
+        // control limits.
+        if is_new_and_writable {
             self.writable.insert(id);
         }
 
@@ -540,6 +544,9 @@ impl StreamMap {
             }
         }
 
+        self.mark_readable(stream_id, false);
+        self.mark_writable(stream_id, false);
+
         self.streams.remove(&stream_id);
         self.collected.insert(stream_id);
     }
@@ -642,6 +649,8 @@ pub struct Stream {
     /// Send-side stream buffer.
     pub send: SendBuf,
 
+    pub send_lowat: usize,
+
     /// Whether the stream is bidirectional.
     pub bidi: bool,
 
@@ -667,6 +676,7 @@ impl Stream {
         Stream {
             recv: RecvBuf::new(max_rx_data, max_window),
             send: SendBuf::new(max_tx_data),
+            send_lowat: 1,
             bidi,
             local,
             data: None,
@@ -685,7 +695,7 @@ impl Stream {
     pub fn is_writable(&self) -> bool {
         !self.send.shutdown &&
             !self.send.is_fin() &&
-            self.send.off < self.send.max_data
+            (self.send.off + self.send_lowat as u64) < self.send.max_data
     }
 
     /// Returns true if the stream has data to send and is allowed to send at
@@ -839,12 +849,6 @@ impl RecvBuf {
         // We already saved the final offset, so there's nothing else we
         // need to keep from the RangeBuf if it's empty.
         if self.fin_off.is_some() && buf.is_empty() {
-            return Ok(());
-        }
-
-        // No need to process an empty buffer with the fin flag, if we already
-        // know the final size.
-        if buf.fin() && buf.is_empty() && self.fin_off.is_some() {
             return Ok(());
         }
 
@@ -1116,6 +1120,10 @@ pub struct SendBuf {
     /// The maximum offset of data buffered in the stream.
     off: u64,
 
+    /// The maximum offset of data sent to the peer, regardless of
+    /// retransmissions.
+    emit_off: u64,
+
     /// The amount of data currently buffered.
     len: u64,
 
@@ -1270,6 +1278,10 @@ impl SendBuf {
         // propagate the final size.
         let fin = self.fin_off == Some(next_off);
 
+        // Record the largest offset that has been sent so we can accurately
+        // report final_size
+        self.emit_off = cmp::max(self.emit_off, next_off);
+
         Ok((out.len() - out_len, fin))
     }
 
@@ -1388,9 +1400,9 @@ impl SendBuf {
     }
 
     /// Resets the stream at the current offset and clears all buffered data.
-    pub fn reset(&mut self) -> Result<(u64, u64)> {
-        let unsent_off = self.off_front();
-        let unsent_len = self.off_back() - unsent_off;
+    pub fn reset(&mut self) -> (u64, u64) {
+        let unsent_off = cmp::max(self.off_front(), self.emit_off);
+        let unsent_len = self.off_back().saturating_sub(unsent_off);
 
         self.fin_off = Some(unsent_off);
 
@@ -1404,7 +1416,7 @@ impl SendBuf {
         self.len = 0;
         self.off = unsent_off;
 
-        Ok((self.fin_off.unwrap(), unsent_len))
+        (self.emit_off, unsent_len)
     }
 
     /// Resets the streams and records the received error code.
@@ -1415,11 +1427,11 @@ impl SendBuf {
             return Err(Error::Done);
         }
 
-        let (fin_off, unsent) = self.reset()?;
+        let (max_off, unsent) = self.reset();
 
         self.error = Some(error_code);
 
-        Ok((fin_off, unsent))
+        Ok((max_off, unsent))
     }
 
     /// Shuts down sending data.
@@ -1430,7 +1442,7 @@ impl SendBuf {
 
         self.shutdown = true;
 
-        self.reset()
+        Ok(self.reset())
     }
 
     /// Returns the largest offset of data buffered.
@@ -1658,7 +1670,7 @@ mod tests {
 
     #[test]
     fn empty_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1724,7 +1736,7 @@ mod tests {
 
     #[test]
     fn ordered_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1761,7 +1773,7 @@ mod tests {
 
     #[test]
     fn split_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1801,7 +1813,7 @@ mod tests {
 
     #[test]
     fn incomplete_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1829,7 +1841,7 @@ mod tests {
 
     #[test]
     fn zero_len_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1857,7 +1869,7 @@ mod tests {
 
     #[test]
     fn past_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1896,7 +1908,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1927,7 +1939,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read2() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1958,7 +1970,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read3() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -1989,7 +2001,7 @@ mod tests {
 
     #[test]
     fn fully_overlapping_read_multi() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2026,7 +2038,7 @@ mod tests {
 
     #[test]
     fn overlapping_start_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2056,7 +2068,7 @@ mod tests {
 
     #[test]
     fn overlapping_end_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2086,7 +2098,7 @@ mod tests {
 
     #[test]
     fn overlapping_end_twice_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2128,7 +2140,7 @@ mod tests {
 
     #[test]
     fn overlapping_end_twice_and_contained_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2170,7 +2182,7 @@ mod tests {
 
     #[test]
     fn partially_multi_overlapping_reordered_read() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2207,7 +2219,7 @@ mod tests {
 
     #[test]
     fn partially_multi_overlapping_reordered_read2() {
-        let mut recv = RecvBuf::new(std::u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let mut buf = [0; 32];
@@ -2264,7 +2276,7 @@ mod tests {
     fn empty_write() {
         let mut buf = [0; 5];
 
-        let mut send = SendBuf::new(std::u64::MAX);
+        let mut send = SendBuf::new(u64::MAX);
         assert_eq!(send.len, 0);
 
         let (written, fin) = send.emit(&mut buf).unwrap();
@@ -2276,7 +2288,7 @@ mod tests {
     fn multi_write() {
         let mut buf = [0; 128];
 
-        let mut send = SendBuf::new(std::u64::MAX);
+        let mut send = SendBuf::new(u64::MAX);
         assert_eq!(send.len, 0);
 
         let first = b"something";
@@ -2299,7 +2311,7 @@ mod tests {
     fn split_write() {
         let mut buf = [0; 10];
 
-        let mut send = SendBuf::new(std::u64::MAX);
+        let mut send = SendBuf::new(u64::MAX);
         assert_eq!(send.len, 0);
 
         let first = b"something";
@@ -2342,7 +2354,7 @@ mod tests {
     fn resend() {
         let mut buf = [0; 15];
 
-        let mut send = SendBuf::new(std::u64::MAX);
+        let mut send = SendBuf::new(u64::MAX);
         assert_eq!(send.len, 0);
         assert_eq!(send.off_front(), 0);
 
@@ -2475,7 +2487,7 @@ mod tests {
     fn zero_len_write() {
         let mut buf = [0; 10];
 
-        let mut send = SendBuf::new(std::u64::MAX);
+        let mut send = SendBuf::new(u64::MAX);
         assert_eq!(send.len, 0);
 
         let first = b"something";
@@ -3334,7 +3346,7 @@ mod tests {
     fn send_buf_len_on_retransmit() {
         let mut buf = [0; 15];
 
-        let mut send = SendBuf::new(std::u64::MAX);
+        let mut send = SendBuf::new(u64::MAX);
         assert_eq!(send.len, 0);
         assert_eq!(send.off_front(), 0);
 
@@ -3355,5 +3367,30 @@ mod tests {
         send.retransmit(3, 5);
         assert_eq!(send.len, 6);
         assert_eq!(send.off_front(), 3);
+    }
+
+    #[test]
+    fn send_buf_final_size_retransmit() {
+        let mut buf = [0; 50];
+        let mut send = SendBuf::new(u64::MAX);
+
+        send.write(&buf, false).unwrap();
+        assert_eq!(send.off_front(), 0);
+
+        // Emit the whole buffer
+        let (written, _fin) = send.emit(&mut buf).unwrap();
+        assert_eq!(written, buf.len());
+        assert_eq!(send.off_front(), buf.len() as u64);
+
+        // Server decides to retransmit the last 10 bytes. It's possible
+        // it's not actually lost and that the client did receive it.
+        send.retransmit(40, 10);
+
+        // Server receives STOP_SENDING from client. The final_size we
+        // send in the RESET_STREAM should be 50. If we send anything less,
+        // it's a FINAL_SIZE_ERROR.
+        let (fin_off, unsent) = send.stop(0).unwrap();
+        assert_eq!(fin_off, 50);
+        assert_eq!(unsent, 0);
     }
 }

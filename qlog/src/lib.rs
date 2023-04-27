@@ -623,10 +623,9 @@ pub struct Token {
     #[serde(rename(serialize = "type"))]
     pub ty: Option<TokenType>,
 
-    pub length: Option<u32>,
-    pub data: Option<Bytes>,
-
     pub details: Option<String>,
+
+    pub raw: Option<events::RawInfo>,
 }
 
 pub struct HexSlice<'a>(&'a [u8]);

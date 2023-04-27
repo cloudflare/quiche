@@ -875,8 +875,11 @@ impl Frame {
                 token: qlog::Token {
                     // TODO: pick the token type some how
                     ty: Some(qlog::TokenType::Retry),
-                    length: Some(token.len() as u32),
-                    data: qlog::HexSlice::maybe_string(Some(token)),
+                    raw: Some(qlog::events::RawInfo {
+                        data: qlog::HexSlice::maybe_string(Some(token)),
+                        length: Some(token.len() as u64),
+                        payload_length: None,
+                    }),
                     details: None,
                 },
             },
@@ -968,7 +971,7 @@ impl Frame {
             } => QuicFrame::ConnectionClose {
                 error_space: Some(ErrorSpace::TransportError),
                 error_code: Some(*error_code),
-                raw_error_code: None, // raw error is no different for us
+                error_code_value: None, // raw error is no different for us
                 reason: Some(String::from_utf8_lossy(reason).into_owned()),
                 trigger_frame_type: None, // don't know trigger type
             },
@@ -977,7 +980,7 @@ impl Frame {
                 QuicFrame::ConnectionClose {
                     error_space: Some(ErrorSpace::ApplicationError),
                     error_code: Some(*error_code),
-                    raw_error_code: None, // raw error is no different for us
+                    error_code_value: None, // raw error is no different for us
                     reason: Some(String::from_utf8_lossy(reason).into_owned()),
                     trigger_frame_type: None, // don't know trigger type
                 },

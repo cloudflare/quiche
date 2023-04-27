@@ -64,7 +64,6 @@ pub mod alpns {
     pub const HTTP_09: [&[u8]; 5] =
         [b"hq-interop", b"hq-29", b"hq-28", b"hq-27", b"http/0.9"];
     pub const HTTP_3: [&[u8]; 4] = [b"h3", b"h3-29", b"h3-28", b"h3-27"];
-    pub const SIDUCK: [&[u8]; 2] = [b"siduck", b"siduck-00"];
 }
 
 pub struct PartialRequest {
@@ -73,6 +72,7 @@ pub struct PartialRequest {
 
 pub struct PartialResponse {
     pub headers: Option<Vec<quiche::h3::Header>>,
+    pub priority: Option<quiche::h3::Priority>,
 
     pub body: Vec<u8>,
 
@@ -87,8 +87,6 @@ pub struct Client {
     pub http_conn: Option<Box<dyn HttpConn>>,
 
     pub client_id: ClientId,
-
-    pub siduck_conn: Option<SiDuckConn>,
 
     pub app_proto_selected: bool,
 
@@ -339,161 +337,6 @@ pub trait HttpConn {
         &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     );
-}
-
-pub struct SiDuckConn {
-    quacks_to_make: u64,
-    quack_contents: String,
-    quacks_sent: u64,
-    quacks_acked: u64,
-}
-
-impl SiDuckConn {
-    pub fn new(quacks_to_make: u64, quack_contents: String) -> Self {
-        Self {
-            quacks_to_make,
-            quack_contents,
-            quacks_sent: 0,
-            quacks_acked: 0,
-        }
-    }
-
-    pub fn send_quacks(&mut self, conn: &mut quiche::Connection) {
-        trace!("sending quacks");
-        let mut quacks_done = 0;
-
-        for _ in self.quacks_sent..self.quacks_to_make {
-            info!("sending QUIC DATAGRAM with data {:?}", self.quack_contents);
-
-            match conn.dgram_send(self.quack_contents.as_bytes()) {
-                Ok(v) => v,
-
-                Err(e) => {
-                    error!("failed to send dgram {:?}", e);
-
-                    break;
-                },
-            }
-
-            quacks_done += 1;
-        }
-
-        self.quacks_sent += quacks_done;
-    }
-
-    pub fn handle_quacks(
-        &mut self, conn: &mut quiche::Connection, buf: &mut [u8],
-    ) -> quiche::h3::Result<()> {
-        loop {
-            match conn.dgram_recv(buf) {
-                Ok(len) => {
-                    let data =
-                        unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
-                    info!("Received DATAGRAM data {:?}", data);
-
-                    // TODO
-                    if data != "quack" {
-                        match conn.close(true, 0x101, b"only quacks echo") {
-                            // Already closed.
-                            Ok(_) | Err(quiche::Error::Done) => (),
-
-                            Err(e) => panic!("error closing conn: {:?}", e),
-                        }
-
-                        break;
-                    }
-
-                    match conn.dgram_send(format!("{data}-ack").as_bytes()) {
-                        Ok(v) => v,
-
-                        Err(quiche::Error::Done) => (),
-
-                        Err(e) => {
-                            error!("failed to send quack ack {e:?}");
-                            return Err(From::from(e));
-                        },
-                    }
-                },
-
-                Err(quiche::Error::Done) => break,
-
-                Err(e) => {
-                    error!("failure receiving DATAGRAM failure {:?}", e);
-
-                    return Err(From::from(e));
-                },
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn handle_quack_acks(
-        &mut self, conn: &mut quiche::Connection, buf: &mut [u8],
-        start: &std::time::Instant,
-    ) {
-        trace!("handle_quack_acks");
-
-        loop {
-            match conn.dgram_recv(buf) {
-                Ok(len) => {
-                    let data =
-                        unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
-
-                    info!("Received DATAGRAM data {:?}", data);
-                    self.quacks_acked += 1;
-
-                    debug!(
-                        "{}/{} quacks acked",
-                        self.quacks_acked, self.quacks_to_make
-                    );
-
-                    if self.quacks_acked == self.quacks_to_make {
-                        info!(
-                            "{}/{} dgrams(s) received in {:?}, closing...",
-                            self.quacks_acked,
-                            self.quacks_to_make,
-                            start.elapsed()
-                        );
-
-                        match conn.close(true, 0x00, b"kthxbye") {
-                            // Already closed.
-                            Ok(_) | Err(quiche::Error::Done) => (),
-
-                            Err(e) => panic!("error closing conn: {:?}", e),
-                        }
-
-                        break;
-                    }
-                },
-
-                Err(quiche::Error::Done) => {
-                    break;
-                },
-
-                Err(e) => {
-                    error!("failure receiving DATAGRAM failure {:?}", e);
-
-                    break;
-                },
-            }
-        }
-    }
-
-    pub fn report_incomplete(&self, start: &std::time::Instant) -> bool {
-        if self.quacks_acked != self.quacks_to_make {
-            error!(
-                "connection timed out after {:?} and only received {}/{} quack-acks",
-                start.elapsed(),
-                self.quacks_acked,
-                self.quacks_to_make
-            );
-
-            return true;
-        }
-
-        false
-    }
 }
 
 /// Represents an HTTP/0.9 formatted request.
@@ -795,6 +638,7 @@ impl HttpConn for Http09Conn {
                     if written < body.len() {
                         let response = PartialResponse {
                             headers: None,
+                            priority: None,
                             body,
                             written,
                         };
@@ -1444,7 +1288,7 @@ impl HttpConn for Http3Conn {
                             );
                         }
 
-                        match conn.close(true, 0x00, b"kthxbye") {
+                        match conn.close(true, 0x100, b"kthxbye") {
                             // Already closed.
                             Ok(_) | Err(quiche::Error::Done) => (),
 
@@ -1458,7 +1302,7 @@ impl HttpConn for Http3Conn {
                 Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
                     error!("request was reset by peer with {}, closing...", e);
 
-                    match conn.close(true, 0x00, b"kthxbye") {
+                    match conn.close(true, 0x100, b"kthxbye") {
                         // Already closed.
                         Ok(_) | Err(quiche::Error::Done) => (),
 
@@ -1621,6 +1465,7 @@ impl HttpConn for Http3Conn {
                         Err(quiche::h3::Error::StreamBlocked) => {
                             let response = PartialResponse {
                                 headers: Some(headers),
+                                priority: Some(priority),
                                 body,
                                 written: 0,
                             };
@@ -1662,6 +1507,7 @@ impl HttpConn for Http3Conn {
                     if written < body.len() {
                         let response = PartialResponse {
                             headers: None,
+                            priority: None,
                             body,
                             written,
                         };
@@ -1772,8 +1618,10 @@ impl HttpConn for Http3Conn {
 
         let resp = partial_responses.get_mut(&stream_id).unwrap();
 
-        if let Some(ref headers) = resp.headers {
-            match self.h3_conn.send_response(conn, stream_id, headers, false) {
+        if let (Some(headers), Some(priority)) = (&resp.headers, &resp.priority) {
+            match self.h3_conn.send_response_with_priority(
+                conn, stream_id, headers, priority, false,
+            ) {
                 Ok(_) => (),
 
                 Err(quiche::h3::Error::StreamBlocked) => {
@@ -1788,6 +1636,7 @@ impl HttpConn for Http3Conn {
         }
 
         resp.headers = None;
+        resp.priority = None;
 
         let body = &resp.body[resp.written..];
 

@@ -28,7 +28,6 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::RawInfo;
-use crate::Bytes;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -40,13 +39,13 @@ pub enum H3Owner {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum H3StreamType {
-    Data,
+    Request,
     Control,
     Push,
-    QpackEncode,
-    QpackDecode,
     Reserved,
     Unknown,
+    QpackEncode,
+    QpackDecode,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -134,7 +133,7 @@ pub enum Http3FrameTypeName {
 // also works automatically.
 pub enum Http3Frame {
     Data {
-        raw: Option<Bytes>,
+        raw: Option<RawInfo>,
     },
 
     Headers {
@@ -173,9 +172,8 @@ pub enum Http3Frame {
     },
 
     Unknown {
-        raw_frame_type: u64,
-        raw_length: Option<u32>,
-        raw: Option<Bytes>,
+        frame_type_value: u64,
+        raw: Option<RawInfo>,
     },
 }
 
@@ -184,9 +182,12 @@ pub enum Http3Frame {
 pub struct H3ParametersSet {
     pub owner: Option<H3Owner>,
 
-    pub max_header_list_size: Option<u64>,
+    #[serde(alias = "max_header_list_size")]
+    pub max_field_section_size: Option<u64>,
     pub max_table_capacity: Option<u64>,
     pub blocked_streams_count: Option<u64>,
+    pub enable_connect_protocol: Option<u64>,
+    pub h3_datagram: Option<u64>,
 
     // qlog-defined
     pub waits_for_settings: Option<bool>,
@@ -195,19 +196,21 @@ pub struct H3ParametersSet {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct H3ParametersRestored {
-    pub max_header_list_size: Option<u64>,
+    #[serde(alias = "max_header_list_size")]
+    pub max_field_section_size: Option<u64>,
     pub max_table_capacity: Option<u64>,
     pub blocked_streams_count: Option<u64>,
+    pub enable_connect_protocol: Option<u64>,
+    pub h3_datagram: Option<u64>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct H3StreamTypeSet {
-    pub stream_id: u64,
     pub owner: Option<H3Owner>,
+    pub stream_id: u64,
 
-    pub old: Option<H3StreamType>,
-    pub new: H3StreamType,
+    pub stream_type: H3StreamType,
 
     pub associated_push_id: Option<u64>,
 }

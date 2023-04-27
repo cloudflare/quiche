@@ -214,7 +214,7 @@ pub enum ErrorSpace {
 pub enum TransportError {
     NoError,
     InternalError,
-    ConnectionError,
+    ConnectionRefused,
     FlowControlError,
     StreamLimitError,
     StreamStateError,
@@ -226,7 +226,9 @@ pub enum TransportError {
     InvalidToken,
     ApplicationError,
     CryptoBufferExceeded,
-    Unknown,
+    KeyUpdateError,
+    AeadLimitReached,
+    NoViablePath,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -274,18 +276,13 @@ pub enum PacketReceivedTrigger {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum PacketDroppedTrigger {
-    KeysUnavailable,
-    UnknownConnectionId,
-    HeaderParserError,
-    PayloadDecryptError,
-    ProtocolViolation,
-    DosPrevention,
-    UnsupportedVersion,
-    UnexpectedPacket,
-    UnexpectedSourceConnectionId,
-    UnexpectedVersion,
-    Duplicate,
-    InvalidInitial,
+    InternalError,
+    Rejected,
+    Unsupported,
+    Invalid,
+    ConnectionUnknown,
+    DecryptionFailure,
+    General,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -299,7 +296,7 @@ pub enum PacketBufferedTrigger {
 #[serde(rename_all = "snake_case")]
 pub enum SecurityEventType {
     KeyUpdated,
-    KeyRetired,
+    KeyDiscarded,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -428,7 +425,7 @@ pub enum QuicFrame {
         length: u64,
         fin: Option<bool>,
 
-        raw: Option<Bytes>,
+        raw: Option<RawInfo>,
     },
 
     MaxData {
@@ -482,7 +479,7 @@ pub enum QuicFrame {
     ConnectionClose {
         error_space: Option<ErrorSpace>,
         error_code: Option<u64>,
-        raw_error_code: Option<u64>,
+        error_code_value: Option<u64>,
         reason: Option<String>,
 
         trigger_frame_type: Option<u64>,
@@ -498,8 +495,8 @@ pub enum QuicFrame {
 
     Unknown {
         raw_frame_type: u64,
-        raw_length: Option<u32>,
-        raw: Option<Bytes>,
+        frame_type_value: Option<u64>,
+        raw: Option<RawInfo>,
     },
 }
 
@@ -662,6 +659,8 @@ pub struct PacketDropped {
     pub raw: Option<RawInfo>,
     pub datagram_id: Option<u32>,
 
+    pub details: Option<String>,
+
     pub trigger: Option<PacketDroppedTrigger>,
 }
 
@@ -713,7 +712,7 @@ pub struct DataMoved {
     pub from: Option<DataRecipient>,
     pub to: Option<DataRecipient>,
 
-    pub data: Option<Bytes>,
+    pub raw: Option<RawInfo>,
 }
 
 #[serde_with::skip_serializing_none]

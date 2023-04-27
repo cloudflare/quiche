@@ -1023,7 +1023,7 @@ mod tests {
     fn varint_too_large() {
         let mut d = [0; 3];
         let mut b = OctetsMut::with_slice(&mut d);
-        assert!(b.put_varint(std::u64::MAX).is_err());
+        assert!(b.put_varint(u64::MAX).is_err());
     }
 
     #[test]
