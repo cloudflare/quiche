@@ -2933,8 +2933,11 @@ impl Connection {
                 recv_pid != active_path_id &&
                 self.pkt_num_spaces[epoch].largest_rx_non_probing_pkt_num == pn
             {
-                self.paths
-                    .on_peer_migrated(recv_pid, self.disable_dcid_reuse)?;
+                self.paths.on_peer_migrated(
+                    recv_pid,
+                    self.disable_dcid_reuse,
+                    &self.trace_id,
+                )?;
             }
         }
 
@@ -5591,7 +5594,7 @@ impl Connection {
         if self.paths.get_active_path_id().is_err() {
             match self.paths.find_candidate_path() {
                 Some(pid) =>
-                    if self.paths.set_active_path(pid).is_err() {
+                    if self.paths.set_active_path(pid, &self.trace_id).is_err() {
                         // The connection cannot continue.
                         self.closed = true;
                     },
@@ -5731,7 +5734,7 @@ impl Connection {
         };
 
         // Change the active path.
-        self.paths.set_active_path(pid)?;
+        self.paths.set_active_path(pid, &self.trace_id)?;
 
         Ok(dcid_seq)
     }

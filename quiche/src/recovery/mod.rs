@@ -861,7 +861,7 @@ impl Recovery {
         self.loss_detection_timer = timeout;
     }
 
-    fn detect_lost_packets(
+    pub fn detect_lost_packets(
         &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
     ) -> (usize, usize) {
         let largest_acked = self.largest_acked_pkt[epoch];
