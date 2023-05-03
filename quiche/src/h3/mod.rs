@@ -1374,7 +1374,12 @@ impl Connection {
     pub fn recv_dgram(
         &mut self, conn: &mut super::Connection, buf: &mut [u8],
     ) -> Result<(usize, u64, usize)> {
-        let len = conn.dgram_recv(buf)?;
+        let len = conn.dgram_recv(buf).map_err(|err| {
+            if matches!(err, super::Error::Done) {
+                self.dgram_event_triggered = false;
+            }
+            err
+        })?;
         let mut b = octets::Octets::with_slice(buf);
         let flow_id = b.get_varint()?;
         Ok((len, flow_id, b.off()))
