@@ -154,13 +154,16 @@ jobs:
 
       - name: Set up MinGW for 64 bit
         if: matrix.target == 'x86_64-pc-windows-gnu'
-        uses: bwoodsend/setup-winlibs-action@v1
+        uses: bwoodsend/setup-winlibs-action@v1.10
+        with:
+          tag: 12.2.0-16.0.0-10.0.0-msvcrt-r5
 
       - name: Set up MinGW for 32 bit
         if: matrix.target == 'i686-pc-windows-gnu'
-        uses: bwoodsend/setup-winlibs-action@v1
+        uses: bwoodsend/setup-winlibs-action@v1.10
         with:
           architecture: i686
+          tag: 12.2.0-16.0.0-10.0.0-msvcrt-r5
 
       - name: Install dependencies
         uses: crazy-max/ghaction-chocolatey@v2
