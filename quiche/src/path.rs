@@ -1,4 +1,3 @@
-// Copyright (C) 2022, Cloudflare, Inc.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -760,7 +759,7 @@ impl PathMap {
             old_active_path.active = false;
             let now = Instant::now();
 
-            /// Detect lost packets over all epochs
+            // Detect lost packets over all epochs
             for &e in packet::Epoch::epochs(
                 packet::Epoch::Initial..=packet::Epoch::Application,
             ) {
