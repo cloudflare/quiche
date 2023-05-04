@@ -1106,6 +1106,7 @@ extern fn keylog(ssl: *mut SSL, line: *const c_char) {
         full_line.push(b'\n');
 
         keylog.write_all(&full_line[..]).ok();
+        keylog.flush().ok();
     }
 }
 

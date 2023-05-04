@@ -335,6 +335,11 @@ pub extern fn quiche_config_enable_pacing(config: &mut Config, v: bool) {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_max_pacing_rate(config: &mut Config, v: u64) {
+    config.set_max_pacing_rate(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_enable_dgram(
     config: &mut Config, enabled: bool, recv_queue_len: size_t,
     send_queue_len: size_t,
@@ -1207,6 +1212,11 @@ pub extern fn quiche_conn_path_stats(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_is_server(conn: &Connection) -> bool {
+    conn.is_server()
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_dgram_max_writable_len(conn: &Connection) -> ssize_t {
     match conn.dgram_max_writable_len() {
         None => Error::Done.to_c(),
@@ -1492,9 +1502,13 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
 fn std_time_to_c(time: &std::time::Instant, out: &mut timespec) {
-    unsafe {
-        ptr::copy_nonoverlapping(time as *const _ as *const timespec, out, 1)
-    }
+    const INSTANT_ZERO: std::time::Instant =
+        unsafe { std::mem::transmute(std::time::UNIX_EPOCH) };
+
+    let raw_time = time.duration_since(INSTANT_ZERO);
+
+    out.tv_sec = raw_time.as_secs() as libc::time_t;
+    out.tv_nsec = raw_time.subsec_nanos() as libc::c_long;
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
