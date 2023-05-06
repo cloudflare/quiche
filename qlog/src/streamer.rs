@@ -354,6 +354,7 @@ mod tests {
         assert!(matches!(s.finish_log(), Ok(())));
 
         let r = s.writer();
+        #[allow(clippy::borrowed_box)]
         let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
 
         let log_string = r#"{"qlog_version":"version","qlog_format":"JSON-SEQ","title":"title","description":"description","trace":{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0}}}

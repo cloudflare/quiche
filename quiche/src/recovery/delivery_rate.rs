@@ -305,8 +305,8 @@ mod tests {
             );
         }
 
-        assert_eq!(r.app_limited(), false);
-        assert_eq!(r.delivery_rate.sample_is_app_limited(), false);
+        assert!(!r.app_limited());
+        assert!(!r.delivery_rate.sample_is_app_limited());
     }
 
     #[test]
@@ -363,9 +363,9 @@ mod tests {
             Ok((0, 0)),
         );
 
-        assert_eq!(r.app_limited(), true);
+        assert!(r.app_limited());
         // Rate sample is not app limited (all acked).
-        assert_eq!(r.delivery_rate.sample_is_app_limited(), false);
+        assert!(!r.delivery_rate.sample_is_app_limited());
         assert_eq!(r.delivery_rate.sample_rtt(), rtt);
     }
 }

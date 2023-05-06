@@ -808,16 +808,14 @@ mod tests {
 
         let pkt_hdr = make_pkt_hdr(PacketType::Initial);
 
-        let mut frames = Vec::new();
-        frames.push(QuicFrame::Padding);
-        frames.push(QuicFrame::Ping);
-        frames.push(QuicFrame::Stream {
-            stream_id: 0,
-            offset: 0,
-            length: 100,
-            fin: Some(true),
-            raw: None,
-        });
+        let frames =
+            vec![QuicFrame::Padding, QuicFrame::Ping, QuicFrame::Stream {
+                stream_id: 0,
+                offset: 0,
+                length: 100,
+                fin: Some(true),
+                raw: None,
+            }];
 
         let ev_data = EventData::PacketSent(PacketSent {
             header: pkt_hdr,

@@ -647,7 +647,7 @@ mod tests {
         );
 
         // Now we are in Drain state.
-        assert_eq!(r.bbr_state.filled_pipe, true);
+        assert!(r.bbr_state.filled_pipe);
         assert_eq!(r.bbr_state.state, BBRStateMachine::Drain);
         assert!(r.bbr_state.pacing_gain < 1.0);
     }
@@ -663,14 +663,12 @@ mod tests {
 
         r.on_init();
 
-        let mut pn = 0;
-
         // At 4th roundtrip, filled_pipe=true and switch to Drain,
         // but move to ProbeBW immediately because bytes_in_flight is
         // smaller than BBRInFlight(1).
-        for _ in 0..4 {
+        for (pn, _) in (0..4).enumerate() {
             let pkt = Sent {
-                pkt_num: pn,
+                pkt_num: pn as u64,
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
@@ -693,13 +691,11 @@ mod tests {
                 "",
             );
 
-            pn += 1;
-
             let rtt = Duration::from_millis(50);
             let now = now + rtt;
 
             let mut acked = ranges::RangeSet::default();
-            acked.insert(0..pn);
+            acked.insert(0..pn as u64 + 1);
 
             assert_eq!(
                 r.on_ack_received(
@@ -716,7 +712,7 @@ mod tests {
         }
 
         // Now we are in ProbeBW state.
-        assert_eq!(r.bbr_state.filled_pipe, true);
+        assert!(r.bbr_state.filled_pipe);
         assert_eq!(r.bbr_state.state, BBRStateMachine::ProbeBW);
 
         // In the first ProbeBW cycle, pacing_gain should be >= 1.0.
