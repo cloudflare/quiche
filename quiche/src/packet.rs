@@ -2827,7 +2827,7 @@ mod tests {
         let pn = 654_360_564;
         let pn_len = 3;
 
-        let frames = [01];
+        let frames = [0x01];
 
         let payload_len = frames.len();
 

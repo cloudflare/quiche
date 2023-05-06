@@ -934,8 +934,8 @@ mod tests {
             .path_id_from_addrs(&(client_addr_2, server_addr))
             .unwrap();
         path_mgr.get_mut(pid).unwrap().request_validation();
-        assert_eq!(path_mgr.get_mut(pid).unwrap().validation_requested(), true);
-        assert_eq!(path_mgr.get_mut(pid).unwrap().probing_required(), true);
+        assert!(path_mgr.get_mut(pid).unwrap().validation_requested());
+        assert!(path_mgr.get_mut(pid).unwrap().probing_required());
 
         // Fake sending of PathChallenge in a packet of MIN_CLIENT_INITIAL_LEN - 1
         // bytes.
@@ -946,10 +946,10 @@ mod tests {
             time::Instant::now(),
         );
 
-        assert_eq!(path_mgr.get_mut(pid).unwrap().validation_requested(), false);
-        assert_eq!(path_mgr.get_mut(pid).unwrap().probing_required(), false);
-        assert_eq!(path_mgr.get_mut(pid).unwrap().under_validation(), true);
-        assert_eq!(path_mgr.get_mut(pid).unwrap().validated(), false);
+        assert!(!path_mgr.get_mut(pid).unwrap().validation_requested());
+        assert!(!path_mgr.get_mut(pid).unwrap().probing_required());
+        assert!(path_mgr.get_mut(pid).unwrap().under_validation());
+        assert!(!path_mgr.get_mut(pid).unwrap().validated());
         assert_eq!(path_mgr.get_mut(pid).unwrap().state, PathState::Validating);
         assert_eq!(path_mgr.pop_event(), None);
 
@@ -957,10 +957,10 @@ mod tests {
         // validated yet.
         path_mgr.on_response_received(data).unwrap();
 
-        assert_eq!(path_mgr.get_mut(pid).unwrap().validation_requested(), true);
-        assert_eq!(path_mgr.get_mut(pid).unwrap().probing_required(), true);
-        assert_eq!(path_mgr.get_mut(pid).unwrap().under_validation(), true);
-        assert_eq!(path_mgr.get_mut(pid).unwrap().validated(), false);
+        assert!(path_mgr.get_mut(pid).unwrap().validation_requested());
+        assert!(path_mgr.get_mut(pid).unwrap().probing_required());
+        assert!(path_mgr.get_mut(pid).unwrap().under_validation());
+        assert!(!path_mgr.get_mut(pid).unwrap().validated());
         assert_eq!(
             path_mgr.get_mut(pid).unwrap().state,
             PathState::ValidatingMTU
@@ -978,10 +978,10 @@ mod tests {
 
         path_mgr.on_response_received(data).unwrap();
 
-        assert_eq!(path_mgr.get_mut(pid).unwrap().validation_requested(), false);
-        assert_eq!(path_mgr.get_mut(pid).unwrap().probing_required(), false);
-        assert_eq!(path_mgr.get_mut(pid).unwrap().under_validation(), false);
-        assert_eq!(path_mgr.get_mut(pid).unwrap().validated(), true);
+        assert!(!path_mgr.get_mut(pid).unwrap().validation_requested());
+        assert!(!path_mgr.get_mut(pid).unwrap().probing_required());
+        assert!(!path_mgr.get_mut(pid).unwrap().under_validation());
+        assert!(path_mgr.get_mut(pid).unwrap().validated());
         assert_eq!(path_mgr.get_mut(pid).unwrap().state, PathState::Validated);
         assert_eq!(
             path_mgr.pop_event(),

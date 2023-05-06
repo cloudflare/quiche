@@ -142,10 +142,10 @@ mod tests {
         let mut fc = FlowControl::new(100, 20, 100);
 
         fc.add_consumed(85);
-        assert_eq!(fc.should_update_max_data(), false);
+        assert!(!fc.should_update_max_data());
 
         fc.add_consumed(10);
-        assert_eq!(fc.should_update_max_data(), true);
+        assert!(fc.should_update_max_data());
     }
 
     #[test]
@@ -155,7 +155,7 @@ mod tests {
         let consumed = 95;
 
         fc.add_consumed(consumed);
-        assert_eq!(fc.should_update_max_data(), true);
+        assert!(fc.should_update_max_data());
         assert_eq!(fc.max_data_next(), consumed + 20);
     }
 
@@ -166,7 +166,7 @@ mod tests {
         let consumed = 95;
 
         fc.add_consumed(consumed);
-        assert_eq!(fc.should_update_max_data(), true);
+        assert!(fc.should_update_max_data());
 
         let max_data_next = fc.max_data_next();
         assert_eq!(fc.max_data_next(), consumed + 20);
@@ -183,7 +183,7 @@ mod tests {
         let consumed = 95;
 
         fc.add_consumed(consumed);
-        assert_eq!(fc.should_update_max_data(), true);
+        assert!(fc.should_update_max_data());
 
         let max_data_next = fc.max_data_next();
         assert_eq!(max_data_next, consumed + w);
@@ -198,7 +198,7 @@ mod tests {
         let consumed_inc = 15;
 
         fc.add_consumed(consumed_inc);
-        assert_eq!(fc.should_update_max_data(), true);
+        assert!(fc.should_update_max_data());
 
         let max_data_next = fc.max_data_next();
         assert_eq!(max_data_next, consumed + consumed_inc + w);

@@ -770,7 +770,7 @@ mod tests {
         }
 
         // Not in CSS yet.
-        assert_eq!(r.hystart.css_start_time().is_some(), false);
+        assert!(r.hystart.css_start_time().is_none());
 
         // 2nd round.
         let mut rtt_2nd = Duration::from_millis(100);
@@ -810,7 +810,7 @@ mod tests {
         }
 
         // Now we are in CSS.
-        assert_eq!(r.hystart.css_start_time().is_some(), true);
+        assert!(r.hystart.css_start_time().is_some());
         assert_eq!(r.cwnd(), cwnd_prev + r.max_datagram_size);
 
         // 3rd round, which RTT is less than previous round to
@@ -847,7 +847,7 @@ mod tests {
         }
 
         // Now we are back in Slow Start.
-        assert_eq!(r.hystart.css_start_time().is_some(), false);
+        assert!(r.hystart.css_start_time().is_none());
         assert_eq!(
             r.cwnd(),
             cwnd_prev +
@@ -918,7 +918,7 @@ mod tests {
         }
 
         // Not in CSS yet.
-        assert_eq!(r.hystart.css_start_time().is_some(), false);
+        assert!(r.hystart.css_start_time().is_none());
 
         // 2nd round.
         let mut rtt_2nd = Duration::from_millis(100);
@@ -958,7 +958,7 @@ mod tests {
         }
 
         // Now we are in CSS.
-        assert_eq!(r.hystart.css_start_time().is_some(), true);
+        assert!(r.hystart.css_start_time().is_some());
         assert_eq!(r.cwnd(), cwnd_prev + r.max_datagram_size);
 
         // Run 5 (CSS_ROUNDS) in CSS, to exit to congestion avoidance.

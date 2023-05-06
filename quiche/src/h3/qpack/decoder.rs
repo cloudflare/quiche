@@ -269,24 +269,24 @@ mod tests {
 
     #[test]
     fn decode_int1() {
-        let mut encoded = [0b01010, 0x02];
-        let mut b = octets::Octets::with_slice(&mut encoded);
+        let encoded = [0b01010, 0x02];
+        let mut b = octets::Octets::with_slice(&encoded);
 
         assert_eq!(decode_int(&mut b, 5), Ok(10));
     }
 
     #[test]
     fn decode_int2() {
-        let mut encoded = [0b11111, 0b10011010, 0b00001010];
-        let mut b = octets::Octets::with_slice(&mut encoded);
+        let encoded = [0b11111, 0b10011010, 0b00001010];
+        let mut b = octets::Octets::with_slice(&encoded);
 
         assert_eq!(decode_int(&mut b, 5), Ok(1337));
     }
 
     #[test]
     fn decode_int3() {
-        let mut encoded = [0b101010];
-        let mut b = octets::Octets::with_slice(&mut encoded);
+        let encoded = [0b101010];
+        let mut b = octets::Octets::with_slice(&encoded);
 
         assert_eq!(decode_int(&mut b, 8), Ok(42));
     }

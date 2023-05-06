@@ -105,7 +105,7 @@ mod tests {
         assert_eq!(enc.encode(&headers, &mut encoded), Ok(240));
 
         let mut dec = Decoder::new();
-        assert_eq!(dec.decode(&mut encoded, u64::MAX), Ok(headers));
+        assert_eq!(dec.decode(&encoded, u64::MAX), Ok(headers));
     }
 
     #[test]
@@ -133,7 +133,7 @@ mod tests {
         assert_eq!(enc.encode(&headers_in, &mut encoded), Ok(35));
 
         let mut dec = Decoder::new();
-        let headers_out = dec.decode(&mut encoded, u64::MAX).unwrap();
+        let headers_out = dec.decode(&encoded, u64::MAX).unwrap();
 
         assert_eq!(headers_expected, headers_out);
 
@@ -150,7 +150,7 @@ mod tests {
         assert_eq!(enc.encode(&headers_in, &mut encoded), Ok(35));
 
         let mut dec = Decoder::new();
-        let headers_out = dec.decode(&mut encoded, u64::MAX).unwrap();
+        let headers_out = dec.decode(&encoded, u64::MAX).unwrap();
 
         assert_eq!(headers_expected, headers_out);
     }
