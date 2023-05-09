@@ -3127,8 +3127,10 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        let now = time::Instant::now();
+
         if self.local_error.is_none() {
-            self.do_handshake(time::Instant::now())?;
+            self.do_handshake(now)?;
         }
 
         // Forwarding the error value here could confuse
@@ -3176,6 +3178,7 @@ impl Connection {
                 &mut out[done..done + left],
                 send_pid,
                 has_initial,
+                now,
             ) {
                 Ok(v) => v,
 
@@ -3243,9 +3246,8 @@ impl Connection {
 
     fn send_single(
         &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
+        now: time::Instant,
     ) -> Result<(packet::Type, usize)> {
-        let now = time::Instant::now();
-
         if out.is_empty() {
             return Err(Error::BufferTooShort);
         }
@@ -13193,7 +13195,7 @@ mod tests {
             pipe.client.paths.get_active_path_id().expect("no active");
         let (ty, len) = pipe
             .client
-            .send_single(&mut buf, active_pid, false)
+            .send_single(&mut buf, active_pid, false, time::Instant::now())
             .unwrap();
         assert_eq!(ty, Type::Initial);
 
@@ -13202,7 +13204,7 @@ mod tests {
         // Client sends Handshake packet.
         let (ty, len) = pipe
             .client
-            .send_single(&mut buf, active_pid, false)
+            .send_single(&mut buf, active_pid, false, time::Instant::now())
             .unwrap();
         assert_eq!(ty, Type::Handshake);
 
