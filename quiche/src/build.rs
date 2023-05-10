@@ -231,6 +231,8 @@ fn main() {
             cfg.build_target("crypto").build().display().to_string()
         });
 
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", bssl_dir);
+
         let build_path = get_boringssl_platform_output_path();
         let mut build_dir = format!("{bssl_dir}/build/{build_path}");
 
