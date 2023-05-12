@@ -207,11 +207,11 @@ impl Decoder {
 }
 
 fn lookup_static(idx: u64) -> Result<(&'static [u8], &'static [u8])> {
-    if idx >= super::static_table::STATIC_TABLE.len() as u64 {
+    if idx >= super::static_table::STATIC_DECODE_TABLE.len() as u64 {
         return Err(Error::InvalidStaticTableIndex);
     }
 
-    Ok(super::static_table::STATIC_TABLE[idx as usize])
+    Ok(super::static_table::STATIC_DECODE_TABLE[idx as usize])
 }
 
 fn decode_int(b: &mut octets::Octets, prefix: usize) -> Result<u64> {
@@ -269,24 +269,24 @@ mod tests {
 
     #[test]
     fn decode_int1() {
-        let mut encoded = [0b01010, 0x02];
-        let mut b = octets::Octets::with_slice(&mut encoded);
+        let encoded = [0b01010, 0x02];
+        let mut b = octets::Octets::with_slice(&encoded);
 
         assert_eq!(decode_int(&mut b, 5), Ok(10));
     }
 
     #[test]
     fn decode_int2() {
-        let mut encoded = [0b11111, 0b10011010, 0b00001010];
-        let mut b = octets::Octets::with_slice(&mut encoded);
+        let encoded = [0b11111, 0b10011010, 0b00001010];
+        let mut b = octets::Octets::with_slice(&encoded);
 
         assert_eq!(decode_int(&mut b, 5), Ok(1337));
     }
 
     #[test]
     fn decode_int3() {
-        let mut encoded = [0b101010];
-        let mut b = octets::Octets::with_slice(&mut encoded);
+        let encoded = [0b101010];
+        let mut b = octets::Octets::with_slice(&encoded);
 
         assert_eq!(decode_int(&mut b, 8), Ok(42));
     }

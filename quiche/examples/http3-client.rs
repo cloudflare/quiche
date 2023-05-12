@@ -268,7 +268,7 @@ fn main() {
                             req_start.elapsed()
                         );
 
-                        conn.close(true, 0x00, b"kthxbye").unwrap();
+                        conn.close(true, 0x100, b"kthxbye").unwrap();
                     },
 
                     Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
@@ -277,7 +277,7 @@ fn main() {
                             e
                         );
 
-                        conn.close(true, 0x00, b"kthxbye").unwrap();
+                        conn.close(true, 0x100, b"kthxbye").unwrap();
                     },
 
                     Ok((_flow_id, quiche::h3::Event::Datagram)) => (),

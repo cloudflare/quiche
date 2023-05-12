@@ -812,7 +812,7 @@ mod tests {
 
         assert_eq!(ids.available_dcids(), 0);
         assert_eq!(ids.available_scids(), 0);
-        assert_eq!(ids.has_new_scids(), false);
+        assert!(!ids.has_new_scids());
         assert_eq!(ids.next_advertise_new_scid_seq(), None);
 
         let (scid2, rt2) = create_cid_and_reset_token(16);
@@ -820,7 +820,7 @@ mod tests {
         assert_eq!(ids.new_scid(scid2, Some(rt2), true, None, false), Ok(1));
         assert_eq!(ids.available_dcids(), 0);
         assert_eq!(ids.available_scids(), 1);
-        assert_eq!(ids.has_new_scids(), true);
+        assert!(ids.has_new_scids());
         assert_eq!(ids.next_advertise_new_scid_seq(), Some(1));
 
         let (scid3, rt3) = create_cid_and_reset_token(16);
@@ -828,7 +828,7 @@ mod tests {
         assert_eq!(ids.new_scid(scid3, Some(rt3), true, None, false), Ok(2));
         assert_eq!(ids.available_dcids(), 0);
         assert_eq!(ids.available_scids(), 2);
-        assert_eq!(ids.has_new_scids(), true);
+        assert!(ids.has_new_scids());
         assert_eq!(ids.next_advertise_new_scid_seq(), Some(1));
 
         // If now we give another CID, it reports an error since it exceeds the
@@ -841,14 +841,14 @@ mod tests {
         );
         assert_eq!(ids.available_dcids(), 0);
         assert_eq!(ids.available_scids(), 2);
-        assert_eq!(ids.has_new_scids(), true);
+        assert!(ids.has_new_scids());
         assert_eq!(ids.next_advertise_new_scid_seq(), Some(1));
 
         // Assume we sent one of them.
         ids.mark_advertise_new_scid_seq(1, false);
         assert_eq!(ids.available_dcids(), 0);
         assert_eq!(ids.available_scids(), 2);
-        assert_eq!(ids.has_new_scids(), true);
+        assert!(ids.has_new_scids());
         assert_eq!(ids.next_advertise_new_scid_seq(), Some(2));
 
         // Send the other.
@@ -856,7 +856,7 @@ mod tests {
 
         assert_eq!(ids.available_dcids(), 0);
         assert_eq!(ids.available_scids(), 2);
-        assert_eq!(ids.has_new_scids(), false);
+        assert!(!ids.has_new_scids());
         assert_eq!(ids.next_advertise_new_scid_seq(), None);
     }
 
@@ -890,19 +890,19 @@ mod tests {
         ids.link_dcid_to_path_id(1, 0).unwrap();
         assert_eq!(ids.available_dcids(), 1);
         assert_eq!(ids.dcids.len(), 2);
-        assert_eq!(ids.has_retire_dcids(), true);
+        assert!(ids.has_retire_dcids());
         assert_eq!(ids.next_retire_dcid_seq(), Some(0));
 
         // Fake RETIRE_CONNECTION_ID sending.
         ids.mark_retire_dcid_seq(0, false);
-        assert_eq!(ids.has_retire_dcids(), false);
+        assert!(!ids.has_retire_dcids());
         assert_eq!(ids.next_retire_dcid_seq(), None);
 
         // Now tries to experience CID retirement. If the server tries to remove
         // non-existing DCIDs, it fails.
         assert_eq!(ids.retire_dcid(0), Err(Error::InvalidState));
         assert_eq!(ids.retire_dcid(3), Err(Error::InvalidState));
-        assert_eq!(ids.has_retire_dcids(), false);
+        assert!(!ids.has_retire_dcids());
         assert_eq!(ids.dcids.len(), 2);
 
         // Now it removes DCID with sequence 1.
@@ -910,19 +910,19 @@ mod tests {
         // The CID module does not handle path replacing. Fake it now.
         ids.link_dcid_to_path_id(2, 0).unwrap();
         assert_eq!(ids.available_dcids(), 0);
-        assert_eq!(ids.has_retire_dcids(), true);
+        assert!(ids.has_retire_dcids());
         assert_eq!(ids.next_retire_dcid_seq(), Some(1));
         assert_eq!(ids.dcids.len(), 1);
 
         // Fake RETIRE_CONNECTION_ID sending.
         ids.mark_retire_dcid_seq(1, false);
-        assert_eq!(ids.has_retire_dcids(), false);
+        assert!(!ids.has_retire_dcids());
         assert_eq!(ids.next_retire_dcid_seq(), None);
 
         // Trying to remove the last DCID triggers an error.
         assert_eq!(ids.retire_dcid(2), Err(Error::OutOfIdentifiers));
         assert_eq!(ids.available_dcids(), 0);
-        assert_eq!(ids.has_retire_dcids(), false);
+        assert!(!ids.has_retire_dcids());
         assert_eq!(ids.dcids.len(), 1);
     }
 

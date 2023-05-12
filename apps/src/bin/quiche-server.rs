@@ -379,7 +379,6 @@ fn main() {
                     client_id,
                     partial_requests: HashMap::new(),
                     partial_responses: HashMap::new(),
-                    siduck_conn: None,
                     app_proto_selected: false,
                     max_datagram_size,
                     loss_rate: 0.0,
@@ -467,13 +466,6 @@ fn main() {
                     };
 
                     client.app_proto_selected = true;
-                } else if alpns::SIDUCK.contains(&app_proto) {
-                    client.siduck_conn = Some(SiDuckConn::new(
-                        conn_args.dgram_count,
-                        conn_args.dgram_data.clone(),
-                    ));
-
-                    client.app_proto_selected = true;
                 }
 
                 // Update max_datagram_size after connection established.
@@ -502,16 +494,6 @@ fn main() {
                     )
                     .is_err()
                 {
-                    continue 'read;
-                }
-            }
-
-            // If we have a siduck connection, handle the quacks.
-            if client.siduck_conn.is_some() {
-                let conn = &mut client.conn;
-                let si_conn = client.siduck_conn.as_mut().unwrap();
-
-                if si_conn.handle_quacks(conn, &mut buf).is_err() {
                     continue 'read;
                 }
             }

@@ -60,10 +60,11 @@ pub fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
 }
 
 fn on_packets_acked(
-    r: &mut Recovery, packets: &[Acked], epoch: packet::Epoch, now: Instant,
+    r: &mut Recovery, packets: &mut Vec<Acked>, epoch: packet::Epoch,
+    now: Instant,
 ) {
-    for pkt in packets {
-        on_packet_acked(r, pkt, epoch, now);
+    for pkt in packets.drain(..) {
+        on_packet_acked(r, &pkt, epoch, now);
     }
 }
 
@@ -223,7 +224,7 @@ mod tests {
 
         let cwnd_prev = r.cwnd();
 
-        let acked = vec![Acked {
+        let mut acked = vec![Acked {
             pkt_num: p.pkt_num,
             time_sent: p.time_sent,
             size: p.size,
@@ -234,7 +235,7 @@ mod tests {
             rtt: Duration::ZERO,
         }];
 
-        r.on_packets_acked(acked, packet::Epoch::Application, now);
+        r.on_packets_acked(&mut acked, packet::Epoch::Application, now);
 
         // Check if cwnd increased by packet size (slow start).
         assert_eq!(r.cwnd(), cwnd_prev + p.size);
@@ -272,7 +273,7 @@ mod tests {
 
         let cwnd_prev = r.cwnd();
 
-        let acked = vec![
+        let mut acked = vec![
             Acked {
                 pkt_num: p.pkt_num,
                 time_sent: p.time_sent,
@@ -305,7 +306,7 @@ mod tests {
             },
         ];
 
-        r.on_packets_acked(acked, packet::Epoch::Application, now);
+        r.on_packets_acked(&mut acked, packet::Epoch::Application, now);
 
         // Acked 3 packets.
         assert_eq!(r.cwnd(), cwnd_prev + p.size * 3);
@@ -360,7 +361,7 @@ mod tests {
 
         let rtt = Duration::from_millis(100);
 
-        let acked = vec![Acked {
+        let mut acked = vec![Acked {
             pkt_num: 0,
             // To exit from recovery
             time_sent: now + rtt,
@@ -375,7 +376,7 @@ mod tests {
 
         // Ack more than cwnd bytes with rtt=100ms
         r.update_rtt(rtt, Duration::from_millis(0), now);
-        r.on_packets_acked(acked, packet::Epoch::Application, now + rtt * 2);
+        r.on_packets_acked(&mut acked, packet::Epoch::Application, now + rtt * 2);
 
         // After acking more than cwnd, expect cwnd increased by MSS
         assert_eq!(r.cwnd(), cur_cwnd + r.max_datagram_size);

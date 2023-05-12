@@ -1763,7 +1763,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 19);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..len], b"helloworldsomething");
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 19);
@@ -1791,21 +1791,21 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf[..10]).unwrap();
         assert_eq!(len, 10);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..len], b"somethingh");
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 10);
 
         let (len, fin) = recv.emit(&mut buf[..5]).unwrap();
         assert_eq!(len, 5);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..len], b"ellow");
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 15);
 
         let (len, fin) = recv.emit(&mut buf[..10]).unwrap();
         assert_eq!(len, 4);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..len], b"orld");
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 19);
@@ -1833,7 +1833,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 19);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..len], b"somethinghelloworld");
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 19);
@@ -1861,7 +1861,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 9);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..len], b"something");
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
@@ -1886,7 +1886,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 9);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..len], b"something");
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
@@ -1928,7 +1928,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 9);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..len], b"something");
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
@@ -1959,7 +1959,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 9);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..len], b"somehello");
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
@@ -1990,7 +1990,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 9);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..len], b"somhellog");
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
@@ -2027,7 +2027,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 18);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..len], b"somhellogsomhellog");
         assert_eq!(recv.len, 18);
         assert_eq!(recv.off, 18);
@@ -2058,7 +2058,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 13);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..len], b"somethingello");
         assert_eq!(recv.len, 13);
         assert_eq!(recv.off, 13);
@@ -2088,7 +2088,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 12);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..len], b"helsomething");
         assert_eq!(recv.len, 12);
         assert_eq!(recv.off, 12);
@@ -2130,7 +2130,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 10);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..len], b"helloworld");
         assert_eq!(recv.len, 10);
         assert_eq!(recv.off, 10);
@@ -2172,7 +2172,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 16);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..len], b"helloworldbarfoo");
         assert_eq!(recv.len, 16);
         assert_eq!(recv.off, 16);
@@ -2208,7 +2208,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 15);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..len], b"somethinhelloar");
         assert_eq!(recv.len, 15);
         assert_eq!(recv.off, 15);
@@ -2263,7 +2263,7 @@ mod tests {
 
         let (len, fin) = recv.emit(&mut buf).unwrap();
         assert_eq!(len, 14);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..len], b"aabbbcdddeefff");
         assert_eq!(recv.len, 14);
         assert_eq!(recv.off, 14);
@@ -2281,7 +2281,7 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf).unwrap();
         assert_eq!(written, 0);
-        assert_eq!(fin, false);
+        assert!(!fin);
     }
 
     #[test]
@@ -2302,7 +2302,7 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf[..128]).unwrap();
         assert_eq!(written, 19);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..written], b"somethinghelloworld");
         assert_eq!(send.len, 0);
     }
@@ -2327,7 +2327,7 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf[..10]).unwrap();
         assert_eq!(written, 10);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"somethingh");
         assert_eq!(send.len, 9);
 
@@ -2335,7 +2335,7 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf[..5]).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"ellow");
         assert_eq!(send.len, 4);
 
@@ -2343,7 +2343,7 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf[..10]).unwrap();
         assert_eq!(written, 4);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..written], b"orld");
         assert_eq!(send.len, 0);
 
@@ -2371,21 +2371,21 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf[..4]).unwrap();
         assert_eq!(written, 4);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"some");
         assert_eq!(send.len, 15);
         assert_eq!(send.off_front(), 4);
 
         let (written, fin) = send.emit(&mut buf[..5]).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"thing");
         assert_eq!(send.len, 10);
         assert_eq!(send.off_front(), 9);
 
         let (written, fin) = send.emit(&mut buf[..5]).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"hello");
         assert_eq!(send.len, 5);
         assert_eq!(send.off_front(), 14);
@@ -2400,14 +2400,14 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf[..11]).unwrap();
         assert_eq!(written, 9);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"something");
         assert_eq!(send.len, 5);
         assert_eq!(send.off_front(), 14);
 
         let (written, fin) = send.emit(&mut buf[..11]).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..written], b"world");
         assert_eq!(send.len, 0);
         assert_eq!(send.off_front(), 19);
@@ -2441,7 +2441,7 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf[..10]).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"somet");
         assert_eq!(send.len, 0);
 
@@ -2449,7 +2449,7 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf[..10]).unwrap();
         assert_eq!(written, 0);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"");
         assert_eq!(send.len, 0);
 
@@ -2465,7 +2465,7 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf[..10]).unwrap();
         assert_eq!(written, 10);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..10], b"hinghellow");
         assert_eq!(send.len, 0);
 
@@ -2478,7 +2478,7 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf[..10]).unwrap();
         assert_eq!(written, 4);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..written], b"orld");
         assert_eq!(send.len, 0);
     }
@@ -2502,7 +2502,7 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf[..10]).unwrap();
         assert_eq!(written, 9);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..written], b"something");
         assert_eq!(send.len, 0);
     }
@@ -2526,7 +2526,7 @@ mod tests {
 
         let (len, fin) = stream.recv.emit(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"helloworld");
-        assert_eq!(fin, false);
+        assert!(!fin);
 
         assert!(stream.recv.almost_full());
 
@@ -2565,7 +2565,7 @@ mod tests {
 
         let (len, fin) = stream.recv.emit(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"hello");
-        assert_eq!(fin, true);
+        assert!(fin);
     }
 
     #[test]
@@ -2607,7 +2607,7 @@ mod tests {
 
         let (len, fin) = stream.recv.emit(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"helloworld");
-        assert_eq!(fin, true);
+        assert!(fin);
 
         assert!(!stream.recv.almost_full());
     }
@@ -2676,14 +2676,14 @@ mod tests {
 
         let (written, fin) = stream.send.emit(&mut buf[..25]).unwrap();
         assert_eq!(written, 15);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"helloworldsomet");
 
         assert_eq!(stream.send.off_front(), 15);
 
         let (written, fin) = stream.send.emit(&mut buf[..25]).unwrap();
         assert_eq!(written, 0);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"");
 
         stream.send.retransmit(0, 15);
@@ -2692,14 +2692,14 @@ mod tests {
 
         let (written, fin) = stream.send.emit(&mut buf[..10]).unwrap();
         assert_eq!(written, 10);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"helloworld");
 
         assert_eq!(stream.send.off_front(), 10);
 
         let (written, fin) = stream.send.emit(&mut buf[..10]).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"somet");
     }
 
@@ -2755,7 +2755,7 @@ mod tests {
 
         let (written, fin) = stream.send.emit(&mut buf[..15]).unwrap();
         assert_eq!(written, 15);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..written], slice);
     }
 
@@ -2771,7 +2771,7 @@ mod tests {
 
         let (written, fin) = stream.send.emit(&mut buf[..5]).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..written], b"hello");
     }
 
@@ -2790,7 +2790,7 @@ mod tests {
 
         let (written, fin) = stream.send.emit(&mut buf[..5]).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"hello");
 
         stream.send.ack_and_drop(0, 5);
@@ -2801,7 +2801,7 @@ mod tests {
 
         let (written, fin) = stream.send.emit(&mut buf[..5]).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..written], b"world");
     }
 
@@ -2820,14 +2820,14 @@ mod tests {
 
         let (written, fin) = stream.send.emit(&mut buf[..5]).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"hello");
 
         assert_eq!(stream.send.off_front(), 5);
 
         let (written, fin) = stream.send.emit(&mut buf[..1]).unwrap();
         assert_eq!(written, 1);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"w");
 
         stream.send.ack_and_drop(5, 1);
@@ -2840,7 +2840,7 @@ mod tests {
 
         let (written, fin) = stream.send.emit(&mut buf[..5]).unwrap();
         assert_eq!(written, 4);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..written], b"orld");
     }
 
@@ -2856,14 +2856,14 @@ mod tests {
 
         let (len, fin) = stream.recv.emit(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"hello");
-        assert_eq!(fin, false);
+        assert!(!fin);
 
         let first = RangeBuf::from(b"elloworld", 1, true);
         assert_eq!(stream.recv.write(first), Ok(()));
 
         let (len, fin) = stream.recv.emit(&mut buf).unwrap();
         assert_eq!(&buf[..len], b"world");
-        assert_eq!(fin, true);
+        assert!(fin);
     }
 
     #[test]
@@ -2919,7 +2919,7 @@ mod tests {
 
         let (written, fin) = stream.send.emit(&mut buf).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"hello");
 
         assert_eq!(stream.send.write(b"", true), Ok(0));
@@ -2928,7 +2928,7 @@ mod tests {
 
         let (written, fin) = stream.send.emit(&mut buf).unwrap();
         assert_eq!(written, 0);
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(&buf[..written], b"");
     }
 
@@ -3170,11 +3170,11 @@ mod tests {
         assert_eq!(buf.pos, 0);
         assert_eq!(buf.len, 10);
         assert_eq!(buf.off, 5);
-        assert_eq!(buf.fin, true);
+        assert!(buf.fin);
 
         assert_eq!(buf.len(), 10);
         assert_eq!(buf.off(), 5);
-        assert_eq!(buf.fin(), true);
+        assert!(buf.fin());
 
         assert_eq!(&buf[..], b"helloworld");
 
@@ -3185,11 +3185,11 @@ mod tests {
         assert_eq!(buf.pos, 5);
         assert_eq!(buf.len, 10);
         assert_eq!(buf.off, 5);
-        assert_eq!(buf.fin, true);
+        assert!(buf.fin);
 
         assert_eq!(buf.len(), 5);
         assert_eq!(buf.off(), 10);
-        assert_eq!(buf.fin(), true);
+        assert!(buf.fin());
 
         assert_eq!(&buf[..], b"world");
 
@@ -3200,11 +3200,11 @@ mod tests {
         assert_eq!(buf.pos, 3);
         assert_eq!(buf.len, 3);
         assert_eq!(buf.off, 5);
-        assert_eq!(buf.fin, false);
+        assert!(!buf.fin);
 
         assert_eq!(buf.len(), 0);
         assert_eq!(buf.off(), 8);
-        assert_eq!(buf.fin(), false);
+        assert!(!buf.fin());
 
         assert_eq!(&buf[..], b"");
 
@@ -3212,11 +3212,11 @@ mod tests {
         assert_eq!(new_buf.pos, 5);
         assert_eq!(new_buf.len, 7);
         assert_eq!(new_buf.off, 8);
-        assert_eq!(new_buf.fin, true);
+        assert!(new_buf.fin);
 
         assert_eq!(new_buf.len(), 5);
         assert_eq!(new_buf.off(), 10);
-        assert_eq!(new_buf.fin(), true);
+        assert!(new_buf.fin());
 
         assert_eq!(&new_buf[..], b"world");
 
@@ -3227,11 +3227,11 @@ mod tests {
         assert_eq!(new_buf.pos, 7);
         assert_eq!(new_buf.len, 7);
         assert_eq!(new_buf.off, 8);
-        assert_eq!(new_buf.fin, true);
+        assert!(new_buf.fin);
 
         assert_eq!(new_buf.len(), 3);
         assert_eq!(new_buf.off(), 12);
-        assert_eq!(new_buf.fin(), true);
+        assert!(new_buf.fin());
 
         assert_eq!(&new_buf[..], b"rld");
 
@@ -3242,11 +3242,11 @@ mod tests {
         assert_eq!(new_buf.pos, 7);
         assert_eq!(new_buf.len, 5);
         assert_eq!(new_buf.off, 8);
-        assert_eq!(new_buf.fin, false);
+        assert!(!new_buf.fin);
 
         assert_eq!(new_buf.len(), 1);
         assert_eq!(new_buf.off(), 12);
-        assert_eq!(new_buf.fin(), false);
+        assert!(!new_buf.fin());
 
         assert_eq!(&new_buf[..], b"r");
 
@@ -3254,11 +3254,11 @@ mod tests {
         assert_eq!(new_new_buf.pos, 8);
         assert_eq!(new_new_buf.len, 2);
         assert_eq!(new_new_buf.off, 13);
-        assert_eq!(new_new_buf.fin, true);
+        assert!(new_new_buf.fin);
 
         assert_eq!(new_new_buf.len(), 2);
         assert_eq!(new_new_buf.off(), 13);
-        assert_eq!(new_new_buf.fin(), true);
+        assert!(new_new_buf.fin());
 
         assert_eq!(&new_new_buf[..], b"ld");
 
@@ -3269,11 +3269,11 @@ mod tests {
         assert_eq!(new_new_buf.pos, 10);
         assert_eq!(new_new_buf.len, 2);
         assert_eq!(new_new_buf.off, 13);
-        assert_eq!(new_new_buf.fin, true);
+        assert!(new_new_buf.fin);
 
         assert_eq!(new_new_buf.len(), 0);
         assert_eq!(new_new_buf.off(), 15);
-        assert_eq!(new_new_buf.fin(), true);
+        assert!(new_new_buf.fin());
 
         assert_eq!(&new_new_buf[..], b"");
     }
@@ -3359,7 +3359,7 @@ mod tests {
 
         let (written, fin) = send.emit(&mut buf[..4]).unwrap();
         assert_eq!(written, 4);
-        assert_eq!(fin, false);
+        assert!(!fin);
         assert_eq!(&buf[..written], b"some");
         assert_eq!(send.len, 5);
         assert_eq!(send.off_front(), 4);

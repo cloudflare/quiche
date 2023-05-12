@@ -1,6 +1,6 @@
 [package]
 name = "quiche"
-version = "0.17.1"
+version = "0.17.2"
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
 edition = "2018"
 build = "src/build.rs"

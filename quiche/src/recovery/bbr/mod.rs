@@ -255,12 +255,13 @@ impl State {
 fn bbr_enter_recovery(r: &mut Recovery, now: Instant) {
     r.bbr_state.prior_cwnd = per_ack::bbr_save_cwnd(r);
 
-    r.congestion_window = r.bytes_in_flight +
-        r.bbr_state.newly_acked_bytes.max(r.max_datagram_size);
+    r.congestion_window = r.bytes_in_flight.max(r.max_datagram_size);
     r.congestion_recovery_start_time = Some(now);
 
     r.bbr_state.packet_conservation = true;
     r.bbr_state.in_recovery = true;
+
+    r.bbr_state.newly_lost_bytes = 0;
 
     // Start round now.
     r.bbr_state.next_round_delivered = r.delivery_rate.delivered();
@@ -295,20 +296,22 @@ fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
 }
 
 fn on_packets_acked(
-    r: &mut Recovery, packets: &[Acked], _epoch: packet::Epoch, now: Instant,
+    r: &mut Recovery, packets: &mut Vec<Acked>, _epoch: packet::Epoch,
+    now: Instant,
 ) {
-    r.bbr_state.newly_acked_bytes = packets.iter().fold(0, |acked_bytes, p| {
-        r.bbr_state.prior_bytes_in_flight = r.bytes_in_flight;
+    r.bbr_state.newly_acked_bytes =
+        packets.drain(..).fold(0, |acked_bytes, p| {
+            r.bbr_state.prior_bytes_in_flight = r.bytes_in_flight;
 
-        per_ack::bbr_update_model_and_state(r, p, now);
+            per_ack::bbr_update_model_and_state(r, &p, now);
 
-        r.bytes_in_flight = r.bytes_in_flight.saturating_sub(p.size);
+            r.bytes_in_flight = r.bytes_in_flight.saturating_sub(p.size);
 
-        acked_bytes + p.size
-    });
+            acked_bytes + p.size
+        });
 
     if let Some(pkt) = packets.last() {
-        if !r.in_congestion_recovery(pkt.time_sent) {
+        if !r.in_congestion_recovery(pkt.time_sent) && r.bbr_state.in_recovery {
             // Upon exiting loss recovery.
             bbr_exit_recovery(r);
         }
@@ -450,6 +453,7 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
+                &mut Vec::new(),
             ),
             Ok((0, 0)),
         );
@@ -518,6 +522,7 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
+                &mut Vec::new(),
             ),
             Ok((2, 2400)),
         );
@@ -584,6 +589,7 @@ mod tests {
                     HandshakeStatus::default(),
                     now,
                     "",
+                    &mut Vec::new(),
                 ),
                 Ok((0, 0)),
             );
@@ -635,12 +641,13 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
+                &mut Vec::new(),
             ),
             Ok((0, 0)),
         );
 
         // Now we are in Drain state.
-        assert_eq!(r.bbr_state.filled_pipe, true);
+        assert!(r.bbr_state.filled_pipe);
         assert_eq!(r.bbr_state.state, BBRStateMachine::Drain);
         assert!(r.bbr_state.pacing_gain < 1.0);
     }
@@ -656,14 +663,12 @@ mod tests {
 
         r.on_init();
 
-        let mut pn = 0;
-
         // At 4th roundtrip, filled_pipe=true and switch to Drain,
         // but move to ProbeBW immediately because bytes_in_flight is
         // smaller than BBRInFlight(1).
-        for _ in 0..4 {
+        for (pn, _) in (0..4).enumerate() {
             let pkt = Sent {
-                pkt_num: pn,
+                pkt_num: pn as u64,
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
@@ -686,13 +691,11 @@ mod tests {
                 "",
             );
 
-            pn += 1;
-
             let rtt = Duration::from_millis(50);
             let now = now + rtt;
 
             let mut acked = ranges::RangeSet::default();
-            acked.insert(0..pn);
+            acked.insert(0..pn as u64 + 1);
 
             assert_eq!(
                 r.on_ack_received(
@@ -702,13 +705,14 @@ mod tests {
                     HandshakeStatus::default(),
                     now,
                     "",
+                    &mut Vec::new(),
                 ),
                 Ok((0, 0)),
             );
         }
 
         // Now we are in ProbeBW state.
-        assert_eq!(r.bbr_state.filled_pipe, true);
+        assert!(r.bbr_state.filled_pipe);
         assert_eq!(r.bbr_state.state, BBRStateMachine::ProbeBW);
 
         // In the first ProbeBW cycle, pacing_gain should be >= 1.0.
@@ -772,6 +776,7 @@ mod tests {
                     HandshakeStatus::default(),
                     now,
                     "",
+                    &mut Vec::new(),
                 ),
                 Ok((0, 0)),
             );
@@ -825,6 +830,7 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
+                &mut Vec::new(),
             ),
             Ok((0, 0)),
         );

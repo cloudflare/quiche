@@ -711,6 +711,7 @@ pub struct Config {
     hystart: bool,
 
     pacing: bool,
+    max_pacing_rate: Option<u64>,
 
     dgram_recv_max_queue_len: usize,
     dgram_send_max_queue_len: usize,
@@ -769,6 +770,7 @@ impl Config {
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
             hystart: true,
             pacing: true,
+            max_pacing_rate: None,
 
             dgram_recv_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
             dgram_send_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
@@ -1147,6 +1149,13 @@ impl Config {
         self.pacing = v;
     }
 
+    /// Sets the max value for pacing rate.
+    ///
+    /// By default pacing rate is not limited.
+    pub fn set_max_pacing_rate(&mut self, v: u64) {
+        self.max_pacing_rate = Some(v);
+    }
+
     /// Configures whether to enable receiving DATAGRAM frames.
     ///
     /// When enabled, the `max_datagram_frame_size` transport parameter is set
@@ -1394,6 +1403,9 @@ pub struct Connection {
     /// Whether the connection should prevent from reusing destination
     /// Connection IDs when the peer migrates.
     disable_dcid_reuse: bool,
+
+    /// A resusable buffer used by Recovery
+    newly_acked: Vec<recovery::Acked>,
 }
 
 /// Creates a new server-side connection.
@@ -1832,6 +1844,8 @@ impl Connection {
             emit_dgram: true,
 
             disable_dcid_reuse: config.disable_dcid_reuse,
+
+            newly_acked: Vec::new(),
         };
 
         if let Some(odcid) = odcid {
@@ -2950,10 +2964,6 @@ impl Connection {
 
         self.ack_eliciting_sent = false;
 
-        // Reset pacer and start a new burst when a valid
-        // packet is received.
-        self.paths.get_mut(recv_pid)?.recovery.pacer.reset(now);
-
         Ok(read)
     }
 
@@ -3117,8 +3127,10 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        let now = time::Instant::now();
+
         if self.local_error.is_none() {
-            self.do_handshake(time::Instant::now())?;
+            self.do_handshake(now)?;
         }
 
         // Forwarding the error value here could confuse
@@ -3166,6 +3178,7 @@ impl Connection {
                 &mut out[done..done + left],
                 send_pid,
                 has_initial,
+                now,
             ) {
                 Ok(v) => v,
 
@@ -3233,9 +3246,8 @@ impl Connection {
 
     fn send_single(
         &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
+        now: time::Instant,
     ) -> Result<(packet::Type, usize)> {
-        let now = time::Instant::now();
-
         if out.is_empty() {
             return Err(Error::BufferTooShort);
         }
@@ -6250,6 +6262,11 @@ impl Connection {
         self.paths.iter().map(|(_, p)| p.stats())
     }
 
+    /// Returns whether or not this is a server-side connection.
+    pub fn is_server(&self) -> bool {
+        self.is_server
+    }
+
     fn encode_transport_params(&mut self) -> Result<()> {
         let mut raw_params = [0; 128];
 
@@ -6608,6 +6625,7 @@ impl Connection {
                         handshake_status,
                         now,
                         &self.trace_id,
+                        &mut self.newly_acked,
                     )?;
 
                     self.lost_count += lost_packets;
@@ -8747,11 +8765,11 @@ mod tests {
         let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
-        assert_eq!(pipe.client.is_established(), true);
-        assert_eq!(pipe.server.is_established(), true);
+        assert!(pipe.client.is_established());
+        assert!(pipe.server.is_established());
 
-        assert_eq!(pipe.client.is_resumed(), false);
-        assert_eq!(pipe.server.is_resumed(), false);
+        assert!(!pipe.client.is_resumed());
+        assert!(!pipe.server.is_resumed());
 
         // Extract session,
         let session = pipe.client.session().unwrap();
@@ -8778,11 +8796,11 @@ mod tests {
         assert_eq!(pipe.client.set_session(session), Ok(()));
         assert_eq!(pipe.handshake(), Ok(()));
 
-        assert_eq!(pipe.client.is_established(), true);
-        assert_eq!(pipe.server.is_established(), true);
+        assert!(pipe.client.is_established());
+        assert!(pipe.server.is_established());
 
-        assert_eq!(pipe.client.is_resumed(), true);
-        assert_eq!(pipe.server.is_resumed(), true);
+        assert!(pipe.client.is_resumed());
+        assert!(pipe.server.is_resumed());
     }
 
     #[test]
@@ -9098,7 +9116,7 @@ mod tests {
         let (len, _) = pipe.client.send(&mut buf).unwrap();
         let mut initial = buf[..len].to_vec();
 
-        assert_eq!(pipe.client.is_in_early_data(), true);
+        assert!(pipe.client.is_in_early_data());
 
         // Client sends 0-RTT data.
         assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
@@ -9108,7 +9126,7 @@ mod tests {
 
         // Server receives packets.
         assert_eq!(pipe.server_recv(&mut initial), Ok(initial.len()));
-        assert_eq!(pipe.server.is_in_early_data(), true);
+        assert!(pipe.server.is_in_early_data());
 
         assert_eq!(pipe.server_recv(&mut zrtt), Ok(zrtt.len()));
 
@@ -10618,7 +10636,7 @@ mod tests {
         );
         assert_eq!(pipe.advance(), Ok(()));
 
-        assert_eq!(pipe.server.stream_readable(0), false); // nothing can be consumed
+        assert!(!pipe.server.stream_readable(0)); // nothing can be consumed
 
         // The client has increased its tx_data, and server has received it, so
         // it increases flow control accordingly.
@@ -10789,7 +10807,7 @@ mod tests {
         );
 
         // Client shouldn't update flow control.
-        assert_eq!(pipe.client.should_update_max_data(), false);
+        assert!(!pipe.client.should_update_max_data());
 
         // Server shuts down stream.
         assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
@@ -11154,7 +11172,7 @@ mod tests {
         assert_eq!(pipe.client_recv(&mut buf[..written]), Ok(71));
 
         // The connection should be alive...
-        assert_eq!(pipe.client.is_closed(), false);
+        assert!(!pipe.client.is_closed());
 
         // ...and the idle timeout should be armed.
         assert!(pipe.client.idle_timer.is_some());
@@ -12074,15 +12092,13 @@ mod tests {
         assert_eq!(pipe.advance(), Ok(()));
 
         // app_limited should be true because we send less than cwnd.
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .app_limited(),
-            true
-        );
+        assert!(pipe
+            .server
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .app_limited());
     }
 
     #[test]
@@ -12117,15 +12133,13 @@ mod tests {
 
         // We can't create a new packet header because there is no room by cwnd.
         // app_limited should be false because we can't send more by cwnd.
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .app_limited(),
-            false
-        );
+        assert!(!pipe
+            .server
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .app_limited());
     }
 
     #[test]
@@ -12302,15 +12316,13 @@ mod tests {
 
         // We can't create a new packet header because there is no room by cwnd.
         // app_limited should be false because we can't send more by cwnd.
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .app_limited(),
-            false
-        );
+        assert!(!pipe
+            .server
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .app_limited());
     }
 
     #[test]
@@ -12345,15 +12357,13 @@ mod tests {
 
         // We can't create a new frame because there is no room by cwnd.
         // app_limited should be false because we can't send more by cwnd.
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .app_limited(),
-            false
-        );
+        assert!(!pipe
+            .server
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .app_limited());
     }
 
     #[test]
@@ -12382,29 +12392,25 @@ mod tests {
 
         // Client's app_limited is true because its bytes-in-flight
         // is much smaller than the current cwnd.
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .app_limited(),
-            true
-        );
+        assert!(pipe
+            .client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .app_limited());
 
         // Client has no new frames to send - returns Done.
         assert_eq!(testing::emit_flight(&mut pipe.client), Err(Error::Done));
 
         // Client's app_limited should remain the same.
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .app_limited(),
-            true
-        );
+        assert!(pipe
+            .client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .app_limited());
     }
 
     #[test]
@@ -13102,7 +13108,7 @@ mod tests {
         assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
         // Client sends stream data.
-        assert_eq!(pipe.client.is_established(), true);
+        assert!(pipe.client.is_established());
         assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
 
         // Client sends second flight.
@@ -13133,10 +13139,10 @@ mod tests {
 
         let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
 
-        assert_eq!(pipe.client.handshake_status().has_handshake_keys, false);
-        assert_eq!(pipe.client.handshake_status().peer_verified_address, false);
-        assert_eq!(pipe.server.handshake_status().has_handshake_keys, false);
-        assert_eq!(pipe.server.handshake_status().peer_verified_address, true);
+        assert!(!pipe.client.handshake_status().has_handshake_keys);
+        assert!(!pipe.client.handshake_status().peer_verified_address);
+        assert!(!pipe.server.handshake_status().has_handshake_keys);
+        assert!(pipe.server.handshake_status().peer_verified_address);
 
         // Client sends padded Initial.
         let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -13147,20 +13153,20 @@ mod tests {
         assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
         let flight = testing::emit_flight(&mut pipe.server).unwrap();
 
-        assert_eq!(pipe.client.handshake_status().has_handshake_keys, false);
-        assert_eq!(pipe.client.handshake_status().peer_verified_address, false);
-        assert_eq!(pipe.server.handshake_status().has_handshake_keys, true);
-        assert_eq!(pipe.server.handshake_status().peer_verified_address, true);
+        assert!(!pipe.client.handshake_status().has_handshake_keys);
+        assert!(!pipe.client.handshake_status().peer_verified_address);
+        assert!(pipe.server.handshake_status().has_handshake_keys);
+        assert!(pipe.server.handshake_status().peer_verified_address);
 
         // Client receives the server flight and sends Handshake ACK, but it is
         // lost.
         testing::process_flight(&mut pipe.client, flight).unwrap();
         testing::emit_flight(&mut pipe.client).unwrap();
 
-        assert_eq!(pipe.client.handshake_status().has_handshake_keys, true);
-        assert_eq!(pipe.client.handshake_status().peer_verified_address, false);
-        assert_eq!(pipe.server.handshake_status().has_handshake_keys, true);
-        assert_eq!(pipe.server.handshake_status().peer_verified_address, true);
+        assert!(pipe.client.handshake_status().has_handshake_keys);
+        assert!(!pipe.client.handshake_status().peer_verified_address);
+        assert!(pipe.server.handshake_status().has_handshake_keys);
+        assert!(pipe.server.handshake_status().peer_verified_address);
 
         // Make sure client's PTO timer is armed.
         assert!(pipe.client.timeout().is_some());
@@ -13189,7 +13195,7 @@ mod tests {
             pipe.client.paths.get_active_path_id().expect("no active");
         let (ty, len) = pipe
             .client
-            .send_single(&mut buf, active_pid, false)
+            .send_single(&mut buf, active_pid, false, time::Instant::now())
             .unwrap();
         assert_eq!(ty, Type::Initial);
 
@@ -13198,7 +13204,7 @@ mod tests {
         // Client sends Handshake packet.
         let (ty, len) = pipe
             .client
-            .send_single(&mut buf, active_pid, false)
+            .send_single(&mut buf, active_pid, false, time::Instant::now())
             .unwrap();
         assert_eq!(ty, Type::Handshake);
 
@@ -13579,15 +13585,15 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
 
         // No readable data.
-        assert_eq!(pipe.client.is_readable(), false);
-        assert_eq!(pipe.server.is_readable(), false);
+        assert!(!pipe.client.is_readable());
+        assert!(!pipe.server.is_readable());
 
         assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
         assert_eq!(pipe.advance(), Ok(()));
 
         // Server received stream.
-        assert_eq!(pipe.client.is_readable(), false);
-        assert_eq!(pipe.server.is_readable(), true);
+        assert!(!pipe.client.is_readable());
+        assert!(pipe.server.is_readable());
 
         assert_eq!(
             pipe.server.stream_send(4, b"aaaaaaaaaaaaaaa", false),
@@ -13596,43 +13602,43 @@ mod tests {
         assert_eq!(pipe.advance(), Ok(()));
 
         // Client received stream.
-        assert_eq!(pipe.client.is_readable(), true);
-        assert_eq!(pipe.server.is_readable(), true);
+        assert!(pipe.client.is_readable());
+        assert!(pipe.server.is_readable());
 
         // Client drains stream.
         let mut b = [0; 15];
         pipe.client.stream_recv(4, &mut b).unwrap();
         assert_eq!(pipe.advance(), Ok(()));
 
-        assert_eq!(pipe.client.is_readable(), false);
-        assert_eq!(pipe.server.is_readable(), true);
+        assert!(!pipe.client.is_readable());
+        assert!(pipe.server.is_readable());
 
         // Server shuts down stream.
         assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 0), Ok(()));
-        assert_eq!(pipe.server.is_readable(), false);
+        assert!(!pipe.server.is_readable());
 
         // Server received dgram.
         assert_eq!(pipe.client.dgram_send(b"dddddddddddddd"), Ok(()));
         assert_eq!(pipe.advance(), Ok(()));
 
-        assert_eq!(pipe.client.is_readable(), false);
-        assert_eq!(pipe.server.is_readable(), true);
+        assert!(!pipe.client.is_readable());
+        assert!(pipe.server.is_readable());
 
         // Client received dgram.
         assert_eq!(pipe.server.dgram_send(b"dddddddddddddd"), Ok(()));
         assert_eq!(pipe.advance(), Ok(()));
 
-        assert_eq!(pipe.client.is_readable(), true);
-        assert_eq!(pipe.server.is_readable(), true);
+        assert!(pipe.client.is_readable());
+        assert!(pipe.server.is_readable());
 
         // Drain the dgram queues.
         let r = pipe.server.dgram_recv(&mut buf);
         assert_eq!(r, Ok(14));
-        assert_eq!(pipe.server.is_readable(), false);
+        assert!(!pipe.server.is_readable());
 
         let r = pipe.client.dgram_recv(&mut buf);
         assert_eq!(r, Ok(14));
-        assert_eq!(pipe.client.is_readable(), false);
+        assert!(!pipe.client.is_readable());
     }
 
     #[test]
@@ -14452,7 +14458,7 @@ mod tests {
             pipe.client.new_source_cid(&scid_1, reset_token_1, false),
             Ok(1)
         );
-        assert_eq!(pipe.client.ids.has_new_scids(), false);
+        assert!(!pipe.client.ids.has_new_scids());
 
         // Now retire this new CID.
         assert_eq!(pipe.server.retire_destination_cid(1), Ok(()));
@@ -14812,14 +14818,11 @@ mod tests {
             .paths
             .path_id_from_addrs(&(client_addr_2, server_addr))
             .unwrap();
-        assert_eq!(
-            pipe.client.paths.get(probed_pid).unwrap().validated(),
-            false,
-        );
+        assert!(!pipe.client.paths.get(probed_pid).unwrap().validated(),);
         assert_eq!(pipe.client.path_event_next(), None);
         // Now let the client probe at its MTU.
         assert_eq!(pipe.advance(), Ok(()));
-        assert_eq!(pipe.client.paths.get(probed_pid).unwrap().validated(), true);
+        assert!(pipe.client.paths.get(probed_pid).unwrap().validated());
         assert_eq!(
             pipe.client.path_event_next(),
             Some(PathEvent::Validated(client_addr_2, server_addr))
@@ -15530,7 +15533,7 @@ mod tests {
         assert_eq!(pipe.advance(), Ok(()));
         let (rcv_data_2, fin) =
             pipe.client.stream_recv(1, &mut recv_buf).unwrap();
-        assert_eq!(fin, true);
+        assert!(fin);
         assert_eq!(rcv_data_1 + rcv_data_2, DATA_BYTES);
     }
 
@@ -15758,7 +15761,7 @@ mod tests {
         let mut w = pipe.server.writable();
         assert_eq!(w.len(), 10);
 
-        assert!(w.find(|&s| s == 0).is_some());
+        assert!(w.any(|s| s == 0));
         assert_eq!(
             pipe.server.stream_writable(0, 1),
             Err(Error::StreamStopped(42))
@@ -15808,7 +15811,7 @@ mod tests {
         // Stream 0 has been collected and must not be writable anymore.
         let mut w = pipe.server.writable();
         assert_eq!(w.len(), 9);
-        assert!(w.find(|&s| s == 0).is_none());
+        assert!(!w.any(|s| s == 0));
 
         // If we called send before the client ACK of reset stream, it would
         // have failed with StreamStopped.
@@ -15817,7 +15820,7 @@ mod tests {
         // Stream 0 is still not writable.
         let mut w = pipe.server.writable();
         assert_eq!(w.len(), 9);
-        assert!(w.find(|&s| s == 0).is_none());
+        assert!(!w.any(|s| s == 0));
     }
 }
 

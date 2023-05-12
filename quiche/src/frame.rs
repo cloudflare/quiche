@@ -2059,19 +2059,19 @@ mod tests {
 
         assert_eq!(wire_len, 15);
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::Octets::with_slice(&d);
         assert_eq!(
             Frame::from_bytes(&mut b, packet::Type::Short),
             Ok(frame.clone())
         );
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::Octets::with_slice(&d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::Octets::with_slice(&d);
         assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_ok());
 
-        let mut b = octets::Octets::with_slice(&mut d);
+        let mut b = octets::Octets::with_slice(&d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
 
         let frame_data = match &frame {
