@@ -181,6 +181,17 @@ static QUICHE_STREAM_METHOD: SSL_QUIC_METHOD = SSL_QUIC_METHOD {
 
 pub struct Context(*mut SSL_CTX);
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+struct CBS {
+    data: *const u8,
+    len: libc::size_t,
+}
+
+extern "C" {
+    fn CBS_init(cbs: *mut CBS, data: *const u8, len: libc::size_t);
+}
+
 impl Context {
     pub fn new() -> Result<Context> {
         unsafe {
@@ -248,6 +259,16 @@ impl Context {
         let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
         map_result(unsafe {
             SSL_CTX_use_PrivateKey_file(self.as_mut_ptr(), cstr.as_ptr(), 1)
+        })
+    }
+
+
+    pub fn use_privkey(&mut self, key: *const u8, key_len: libc::size_t) -> Result<()> {
+        map_result(unsafe {
+            let mut cbs = CBS {data: std::ptr::null(), len: 0};
+            CBS_init(&mut cbs, key, key_len);
+            let parsed = EVP_parse_private_key(&mut cbs);
+            SSL_CTX_use_PrivateKey(self.as_mut_ptr(), parsed)
         })
     }
 
@@ -1262,6 +1283,14 @@ extern {
 
     fn SSL_CTX_use_certificate_chain_file(
         ctx: *mut SSL_CTX, file: *const c_char,
+    ) -> c_int;
+
+    fn EVP_parse_private_key(
+        cbs: *mut CBS,
+    ) -> *const u8;
+
+    fn SSL_CTX_use_PrivateKey(
+        ctx: *mut SSL_CTX, key: *const u8,
     ) -> c_int;
 
     fn SSL_CTX_use_PrivateKey_file(

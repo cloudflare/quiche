@@ -815,6 +815,13 @@ impl Config {
         self.tls_ctx.use_privkey_file(file)
     }
 
+    /// Configures the given private key.
+    ///
+    /// The content of `key` is a binary private key.
+    pub fn load_priv_key(&mut self, key: *const u8, key_len: libc::size_t) -> Result<()> {
+        self.tls_ctx.use_privkey(key, key_len)
+    }
+
     /// Specifies a file where trusted CA certificates are stored for the
     /// purposes of certificate verification.
     ///
