@@ -800,6 +800,13 @@ impl Config {
         self.tls_ctx.use_certificate_chain_file(file)
     }
 
+    /// Configures the given certificate.
+    ///
+    /// The content of `cert` is a certificate encoded as ASN.1 DER.
+    pub fn load_cert(&mut self, cert: *const u8, cert_len: libc::size_t) -> Result<()> {
+        self.tls_ctx.use_cert(cert, cert_len)
+    }
+
     /// Configures the given private key.
     ///
     /// The content of `file` is parsed as a PEM-encoded private key.
@@ -817,7 +824,7 @@ impl Config {
 
     /// Configures the given private key.
     ///
-    /// The content of `key` is a binary private key.
+    /// The content of `key` is a private key encoded as PKCS-8 BER.
     pub fn load_priv_key(&mut self, key: *const u8, key_len: libc::size_t) -> Result<()> {
         self.tls_ctx.use_privkey(key, key_len)
     }
