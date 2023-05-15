@@ -527,7 +527,7 @@ fn handle_request(
     match http3_conn.send_response(conn, stream_id, &headers, false) {
         Ok(v) => v,
 
-        Err(quiche::h3::Error::StreamBlocked) => {
+        Err(quiche::h3::Error::StreamBlocked(_)) => {
             let response = PartialResponse {
                 headers: Some(headers),
                 body,
@@ -635,7 +635,7 @@ fn handle_writable(client: &mut Client, stream_id: u64) {
         match http3_conn.send_response(conn, stream_id, headers, false) {
             Ok(_) => (),
 
-            Err(quiche::h3::Error::StreamBlocked) => {
+            Err(quiche::h3::Error::StreamBlocked(_)) => {
                 return;
             },
 
