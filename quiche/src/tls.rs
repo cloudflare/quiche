@@ -164,6 +164,13 @@ struct SSL_PRIVATE_KEY_METHOD {
     ) -> ssl_private_key_result_t,
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+struct CBS {
+    data: *const u8,
+    len: libc::size_t,
+}
+
 lazy_static::lazy_static! {
     /// BoringSSL Extra Data Index for Quiche Connections
     pub static ref QUICHE_EX_DATA_INDEX: c_int = unsafe {
@@ -180,17 +187,6 @@ static QUICHE_STREAM_METHOD: SSL_QUIC_METHOD = SSL_QUIC_METHOD {
 };
 
 pub struct Context(*mut SSL_CTX);
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-struct CBS {
-    data: *const u8,
-    len: libc::size_t,
-}
-
-extern "C" {
-    fn CBS_init(cbs: *mut CBS, data: *const u8, len: libc::size_t);
-}
 
 impl Context {
     pub fn new() -> Result<Context> {
@@ -265,9 +261,8 @@ impl Context {
 
     pub fn use_privkey(&mut self, key: *const u8, key_len: libc::size_t) -> Result<()> {
         map_result(unsafe {
-            let mut cbs = CBS {data: std::ptr::null(), len: 0};
-            CBS_init(&mut cbs, key, key_len);
-            let parsed = EVP_parse_private_key(&mut cbs);
+            let cbs = CBS {data: key, len: key_len};
+            let parsed = EVP_parse_private_key(&cbs);
             SSL_CTX_use_PrivateKey(self.as_mut_ptr(), parsed)
         })
     }
@@ -1286,7 +1281,7 @@ extern {
     ) -> c_int;
 
     fn EVP_parse_private_key(
-        cbs: *mut CBS,
+        cbs: *const CBS,
     ) -> *const u8;
 
     fn SSL_CTX_use_PrivateKey(
