@@ -270,7 +270,7 @@ fn bbr_enter_probe_bw(r: &mut Recovery, now: Instant) {
 
     bbr.state = BBRStateMachine::ProbeBW;
     bbr.pacing_gain = 1.0;
-    bbr.cwnd_gain = 2.0;
+    bbr.cwnd_gain = 1.25;
 
     // cycle_index will be one of (1, 2, 3, 4, 5, 6, 7). Since
     // bbr_advance_cycle_phase() is called right next and it will
