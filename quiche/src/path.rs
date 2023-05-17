@@ -765,7 +765,7 @@ impl PathMap {
             ) {
                 let (..) = old_active_path
                     .recovery
-                    .detect_lost_packets(e, now, trace_id);
+                    .recover_lost_packets(e, now, trace_id);
             }
         }
 

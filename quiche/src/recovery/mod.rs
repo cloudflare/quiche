@@ -861,7 +861,7 @@ impl Recovery {
         self.loss_detection_timer = timeout;
     }
 
-    pub fn detect_lost_packets(
+    fn detect_lost_packets(
         &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
     ) -> (usize, usize) {
         let largest_acked = self.largest_acked_pkt[epoch];
@@ -939,6 +939,12 @@ impl Recovery {
         self.drain_packets(epoch, now);
 
         (lost_packets, lost_bytes)
+    }
+
+    pub fn recover_lost_packets(
+        &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
+    ) {
+        self.detect_lost_packets(epoch, now, trace_id);
     }
 
     fn drain_packets(&mut self, epoch: packet::Epoch, now: Instant) {
