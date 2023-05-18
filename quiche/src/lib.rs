@@ -2933,8 +2933,7 @@ impl Connection {
                 recv_pid != active_path_id &&
                 self.pkt_num_spaces[epoch].largest_rx_non_probing_pkt_num == pn
             {
-                self.paths
-                    .on_peer_migrated(recv_pid, self.disable_dcid_reuse)?;
+                self.on_peer_migrated(recv_pid, self.disable_dcid_reuse, now)?;
             }
         }
 
@@ -5591,7 +5590,7 @@ impl Connection {
         if self.paths.get_active_path_id().is_err() {
             match self.paths.find_candidate_path() {
                 Some(pid) =>
-                    if self.paths.set_active_path(pid).is_err() {
+                    if self.set_active_path(pid, now).is_err() {
                         // The connection cannot continue.
                         self.closed = true;
                     },
@@ -5731,7 +5730,7 @@ impl Connection {
         };
 
         // Change the active path.
-        self.paths.set_active_path(pid)?;
+        self.set_active_path(pid, time::Instant::now())?;
 
         Ok(dcid_seq)
     }
@@ -7312,6 +7311,49 @@ impl Connection {
         };
 
         Err(Error::InvalidState)
+    }
+
+    /// Sets the path with identifier 'path_id' to be active.
+    fn set_active_path(
+        &mut self, path_id: usize, now: time::Instant,
+    ) -> Result<()> {
+        if let Ok(old_active_path) = self.paths.get_active_mut() {
+            for &e in packet::Epoch::epochs(
+                packet::Epoch::Initial..=packet::Epoch::Application,
+            ) {
+                let (lost_packets, lost_bytes) = old_active_path
+                    .recovery
+                    .on_path_change(e, now, &self.trace_id);
+
+                self.lost_count += lost_packets;
+                self.lost_bytes += lost_bytes as u64;
+            }
+        }
+
+        self.paths.set_active_path(path_id)
+    }
+
+    /// Handles potential connection migration.
+    fn on_peer_migrated(
+        &mut self, new_pid: usize, disable_dcid_reuse: bool, now: time::Instant,
+    ) -> Result<()> {
+        let active_path_id = self.paths.get_active_path_id()?;
+
+        if active_path_id == new_pid {
+            return Ok(());
+        }
+
+        self.set_active_path(new_pid, now)?;
+
+        let no_spare_dcid =
+            self.paths.get_mut(new_pid)?.active_dcid_seq.is_none();
+
+        if no_spare_dcid && !disable_dcid_reuse {
+            self.paths.get_mut(new_pid)?.active_dcid_seq =
+                self.paths.get_mut(active_path_id)?.active_dcid_seq;
+        }
+
+        Ok(())
     }
 
     /// Creates a new client-side path.
