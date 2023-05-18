@@ -29,11 +29,9 @@ use std::time;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
-use std::time::Instant;
 
 use slab::Slab;
 
-use crate::packet;
 use crate::Error;
 use crate::Result;
 
@@ -751,23 +749,11 @@ impl PathMap {
     /// is already the case, it notifies the application that the connection
     /// migrated. Otherwise, it triggers a path validation and defers the
     /// notification once it is actually validated.
-    pub fn set_active_path(
-        &mut self, path_id: usize, trace_id: &str,
-    ) -> Result<()> {
+    pub fn set_active_path(&mut self, path_id: usize) -> Result<()> {
         let is_server = self.is_server;
 
         if let Ok(old_active_path) = self.get_active_mut() {
             old_active_path.active = false;
-            let now = Instant::now();
-
-            // Detect lost packets over all epochs
-            for &e in packet::Epoch::epochs(
-                packet::Epoch::Initial..=packet::Epoch::Application,
-            ) {
-                let (..) = old_active_path
-                    .recovery
-                    .recover_lost_packets(e, now, trace_id);
-            }
         }
 
         let new_active_path = self.get_mut(path_id)?;
@@ -787,28 +773,6 @@ impl PathMap {
                     new_active_path.request_validation();
                 }
             }
-        }
-
-        Ok(())
-    }
-
-    /// Handles potential connection migration.
-    pub fn on_peer_migrated(
-        &mut self, new_pid: usize, disable_dcid_reuse: bool, trace_id: &str,
-    ) -> Result<()> {
-        let active_path_id = self.get_active_path_id()?;
-
-        if active_path_id == new_pid {
-            return Ok(());
-        }
-
-        self.set_active_path(new_pid, trace_id)?;
-
-        let no_spare_dcid = self.get_mut(new_pid)?.active_dcid_seq.is_none();
-
-        if no_spare_dcid && !disable_dcid_reuse {
-            self.get_mut(new_pid)?.active_dcid_seq =
-                self.get_mut(active_path_id)?.active_dcid_seq;
         }
 
         Ok(())

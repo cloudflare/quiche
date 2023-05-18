@@ -667,6 +667,12 @@ impl Recovery {
         self.set_loss_detection_timer(handshake_status, now);
     }
 
+    pub fn on_path_change(
+        &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
+    ) -> (usize, usize) {
+        self.detect_lost_packets(epoch, now, trace_id)
+    }
+
     pub fn loss_detection_timer(&self) -> Option<Instant> {
         self.loss_detection_timer
     }
@@ -939,12 +945,6 @@ impl Recovery {
         self.drain_packets(epoch, now);
 
         (lost_packets, lost_bytes)
-    }
-
-    pub fn recover_lost_packets(
-        &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
-    ) {
-        self.detect_lost_packets(epoch, now, trace_id);
     }
 
     fn drain_packets(&mut self, epoch: packet::Epoch, now: Instant) {
