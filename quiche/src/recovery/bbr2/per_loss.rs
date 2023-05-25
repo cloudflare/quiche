@@ -50,7 +50,7 @@ pub fn bbr2_check_inflight_too_high(r: &mut Recovery, now: Instant) -> bool {
     false
 }
 
-fn bbr2_is_inflight_too_high(r: &mut Recovery) -> bool {
+pub fn bbr2_is_inflight_too_high(r: &mut Recovery) -> bool {
     r.bbr2_state.lost > (r.bbr2_state.tx_in_flight as f64 * LOSS_THRESH) as usize
 }
 

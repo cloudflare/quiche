@@ -82,6 +82,9 @@ const CWND_GAIN: f64 = 2.0;
 /// when probing for bandwidth (the default is 2%).
 const LOSS_THRESH: f64 = 0.02;
 
+/// Exit startup if the number of loss marking events is >=FULL_LOSS_COUNT
+const FULL_LOSS_COUNT: u32 = 8;
+
 /// The default multiplicative decrease to make upon each round
 /// trip during which the connection detects packet loss (the value is
 /// 0.7).
@@ -427,7 +430,7 @@ impl State {
 
             bw_hi: u64::MAX,
 
-            bw_hi: u64::MAX,
+            bw_lo: u64::MAX,
 
             bw: 0,
 
@@ -711,7 +714,7 @@ mod tests {
         // Send 5 packets.
         for pn in 0..5 {
             let pkt = Sent {
-                pkt_num: SpacedPktNum(0, pn),
+                pkt_num: pn,
                 frames: vec![],
                 time_sent: now,
                 time_acked: None,
@@ -726,13 +729,11 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
-                pmtud: false,
-                ecn_marked: false,
             };
 
             r.on_packet_sent(
                 pkt,
-                packet::Epoch::Application,
+                packet::EPOCH_APPLICATION,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -748,16 +749,14 @@ mod tests {
 
         assert_eq!(
             r.on_ack_received(
-                0,
                 &acked,
                 25,
-                None,
-                packet::Epoch::Application,
+                packet::EPOCH_APPLICATION,
                 HandshakeStatus::default(),
                 now,
                 "",
             ),
-            Ok((0, 0)),
+            Ok(()),
         );
 
         assert_eq!(r.bbr2_state.state, BBR2StateMachine::Startup);
@@ -784,7 +783,7 @@ mod tests {
         // Send 5 packets.
         for pn in 0..5 {
             let pkt = Sent {
-                pkt_num: SpacedPktNum(0, pn),
+                pkt_num: pn,
                 frames: vec![],
                 time_sent: now,
                 time_acked: None,
@@ -799,13 +798,11 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
-                pmtud: false,
-                ecn_marked: false,
             };
 
             r.on_packet_sent(
                 pkt,
-                packet::Epoch::Application,
+                packet::EPOCH_APPLICATION,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -822,16 +819,14 @@ mod tests {
         // 2 acked, 2 x MSS lost.
         assert_eq!(
             r.on_ack_received(
-                0,
                 &acked,
                 25,
-                None,
-                packet::Epoch::Application,
+                packet::EPOCH_APPLICATION,
                 HandshakeStatus::default(),
                 now,
                 "",
             ),
-            Ok((2, 2400)),
+            Ok(()),
         );
 
         assert_eq!(r.bbr2_state.in_recovery, true);
@@ -860,7 +855,7 @@ mod tests {
         // Stop right before filled_pipe=true.
         for _ in 0..3 {
             let pkt = Sent {
-                pkt_num: SpacedPktNum(0, pn),
+                pkt_num: pn,
                 frames: vec![],
                 time_sent: now,
                 time_acked: None,
@@ -875,13 +870,11 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
-                pmtud: false,
-                ecn_marked: false,
             };
 
             r.on_packet_sent(
                 pkt,
-                packet::Epoch::Application,
+                packet::EPOCH_APPLICATION,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -898,23 +891,21 @@ mod tests {
 
             assert_eq!(
                 r.on_ack_received(
-                    0,
                     &acked,
                     25,
-                    None,
-                    packet::Epoch::Application,
+                    packet::EPOCH_APPLICATION,
                     HandshakeStatus::default(),
                     now,
                     "",
                 ),
-                Ok((0, 0)),
+                Ok(()),
             );
         }
 
         // Stop at right before filled_pipe=true.
         for _ in 0..5 {
             let pkt = Sent {
-                pkt_num: SpacedPktNum(0, pn),
+                pkt_num: pn,
                 frames: vec![],
                 time_sent: now,
                 time_acked: None,
@@ -929,13 +920,11 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
-                pmtud: false,
-                ecn_marked: false,
             };
 
             r.on_packet_sent(
                 pkt,
-                packet::Epoch::Application,
+                packet::EPOCH_APPLICATION,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -955,16 +944,14 @@ mod tests {
 
         assert_eq!(
             r.on_ack_received(
-                0,
                 &acked,
                 25,
-                None,
-                packet::Epoch::Application,
+                packet::EPOCH_APPLICATION,
                 HandshakeStatus::default(),
                 now,
                 "",
             ),
-            Ok((0, 0)),
+            Ok(()),
         );
 
         assert_eq!(r.bbr2_state.state, BBR2StateMachine::Drain);
@@ -990,7 +977,7 @@ mod tests {
         // smaller than BBRInFlight(1).
         for _ in 0..4 {
             let pkt = Sent {
-                pkt_num: SpacedPktNum(0, pn),
+                pkt_num: pn,
                 frames: vec![],
                 time_sent: now,
                 time_acked: None,
@@ -1005,13 +992,11 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
-                pmtud: false,
-                ecn_marked: false,
             };
 
             r.on_packet_sent(
                 pkt,
-                packet::Epoch::Application,
+                packet::EPOCH_APPLICATION,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -1027,16 +1012,14 @@ mod tests {
 
             assert_eq!(
                 r.on_ack_received(
-                    0,
                     &acked,
                     25,
-                    None,
-                    packet::Epoch::Application,
+                    packet::EPOCH_APPLICATION,
                     HandshakeStatus::default(),
                     now,
                     "",
                 ),
-                Ok((0, 0)),
+                Ok(()),
             );
         }
 
@@ -1047,7 +1030,7 @@ mod tests {
         let now = now + PROBE_RTT_INTERVAL;
 
         let pkt = Sent {
-            pkt_num: SpacedPktNum(0, pn),
+            pkt_num: pn,
             frames: vec![],
             time_sent: now,
             time_acked: None,
@@ -1062,13 +1045,11 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
-            ecn_marked: false,
         };
 
         r.on_packet_sent(
             pkt,
-            packet::Epoch::Application,
+            packet::EPOCH_APPLICATION,
             HandshakeStatus::default(),
             now,
             "",
@@ -1086,127 +1067,18 @@ mod tests {
 
         assert_eq!(
             r.on_ack_received(
-                0,
                 &acked,
                 25,
-                None,
-                packet::Epoch::Application,
+                packet::EPOCH_APPLICATION,
                 HandshakeStatus::default(),
                 now,
                 "",
             ),
-            Ok((0, 0)),
+            Ok(()),
         );
 
         assert_eq!(r.bbr2_state.state, BBR2StateMachine::ProbeRTT);
         assert_eq!(r.bbr2_state.pacing_gain, 1.0);
-    }
-    // To do: Add tests for packet loss events
-    #[test]
-    fn bbr2_ece_congestion_event() {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
-        cfg.ecn_enabled = true;
-        cfg.ecn_use_ect1 = true;
-
-        let mut r = Recovery::new(&cfg);
-        let now = Instant::now();
-        let mss = r.max_datagram_size;
-
-        r.on_init();
-        let mut total_sent = 0;
-        let p = Sent {
-            pkt_num: SpacedPktNum(0, 5),
-            frames: vec![],
-            time_sent: now,
-            time_acked: None,
-            time_lost: None,
-            size: r.max_datagram_size,
-            ack_eliciting: true,
-            in_flight: true,
-            delivered: 0,
-            delivered_time: std::time::Instant::now(),
-            first_sent_time: std::time::Instant::now(),
-            tx_in_flight: 0,
-            lost: 0,
-            is_app_limited: false,
-            has_data: false,
-            pmtud: false,
-            ecn_marked: true,
-        };
-        // Send 5 packets.
-        for pn in 0..5 {
-            let pkt = Sent {
-                pkt_num: SpacedPktNum(0, pn),
-                frames: vec![],
-                time_sent: now,
-                time_acked: None,
-                time_lost: None,
-                size: mss,
-                ack_eliciting: true,
-                in_flight: true,
-                delivered: 0,
-                delivered_time: now,
-                first_sent_time: now,
-                is_app_limited: false,
-                tx_in_flight: 0,
-                lost: 0,
-                has_data: false,
-                pmtud: false,
-                ecn_marked: true,
-            };
-            total_sent += pkt.size;
-            r.on_packet_sent(
-                pkt,
-                packet::Epoch::Application,
-                HandshakeStatus::default(),
-                now,
-                "",
-            );
-        }
-
-        let rtt = Duration::from_millis(50);
-        let mut now = now + rtt;
-        let tot_ect1 = INITIAL_WINDOW_PACKETS as u64 - 1 + 5 as u64;
-
-        for pn in 0..5 {
-            let acked = vec![Acked {
-                pkt_num: recovery::SpacedPktNum(0, 5),
-                time_sent: now,
-                size: r.max_datagram_size,
-                delivered: 0,
-                delivered_time: now,
-                first_sent_time: now,
-                is_app_limited: false,
-                rtt: Duration::ZERO,
-                tx_in_flight: 0,
-                lost: 0,
-                ecn_marked: true,
-            }];
-
-            if pn == 4 {
-                r.process_ecn(
-                    5,
-                    Some(EcnCounts {
-                        ect0_count: 0,
-                        ect1_count: tot_ect1,
-                        ecn_ce_count: 2,
-                    }),
-                    total_sent,
-                    &p,
-                    packet::Epoch::Application,
-                    now,
-                );
-            } else {
-                r.on_packets_acked(acked, packet::Epoch::Application, now)
-            }
-
-            now += rtt;
-        }
-        assert_eq!(r.bbr2_state.ecn_ce_marked, mss * 2);
-        assert_eq!(r.bbr2_state.ecn_in_round, true);
-        assert_eq!(r.delivery_rate.delivered(), 4 * mss);
-        assert_eq!(r.bbr2_state.delivered_ce, 2 * mss);
     }
 }
 

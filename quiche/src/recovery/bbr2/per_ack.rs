@@ -111,7 +111,7 @@ fn bbr2_check_startup_full_bandwidth(r: &mut Recovery) {
 }
 
 // 4.3.1.3.  Exiting Startup Based on Packet Loss
-fn bbr2_check_startup_high_loss(_r: &mut Recovery) {
+fn bbr2_check_startup_high_loss(r: &mut Recovery) {
     // TODO: this is not implemented (not in the draft)
     if r.bbr2_state.loss_round_start &&
         r.bbr2_state.in_recovery &&
