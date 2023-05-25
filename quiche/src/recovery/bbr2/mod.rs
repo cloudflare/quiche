@@ -55,18 +55,35 @@ const PACING_MARGIN_PERCENT: f64 = 0.01;
 
 /// A constant specifying the minimum gain value
 /// for calculating the pacing rate that will allow the sending rate to
-/// double each round (4*ln(2) ~= 2.77) [BBRStartupPacingGain]; used in
+/// double each round (4*ln(2) ~=2.77 ) [BBRStartupPacingGain]; used in
 /// Startup mode for BBR.pacing_gain.
 const STARTUP_PACING_GAIN: f64 = 2.77;
 
+/// A constant specifying the pacing gain value for Probe Down mode.
+const PROBE_DOWN_PACING_GAIN: f64 = 3_f64 / 4_f64;
+
+/// A constant specifying the pacing gain value for Probe Up mode.
+const PROBE_UP_PACING_GAIN: f64 = 5_f64 / 4_f64;
+
+/// A constant specifying the pacing gain value for Probe Refill, Probe RTT,
+/// Cruise mode.
+const PACING_GAIN: f64 = 1.0;
+
+/// A constant specifying the minimum gain value for the cwnd in the Startup
+/// phase
+const STARTUP_CWND_GAIN: f64 = 2.77;
+
 /// A constant specifying the minimum gain value for
 /// calculating the cwnd that will allow the sending rate to double each
-/// round (2.0); used in Startup mode for BBR.cwnd_gain.
-const STARTUP_CWND_GAIN: f64 = 2.0;
+/// round (2.0); used in Probe and Drain mode for BBR.cwnd_gain.
+const CWND_GAIN: f64 = 2.0;
 
 /// The maximum tolerated per-round-trip packet loss rate
 /// when probing for bandwidth (the default is 2%).
 const LOSS_THRESH: f64 = 0.02;
+
+/// Exit startup if the number of loss marking events is >=FULL_LOSS_COUNT
+const FULL_LOSS_COUNT: u32 = 8;
 
 /// The default multiplicative decrease to make upon each round
 /// trip during which the connection detects packet loss (the value is
@@ -84,17 +101,19 @@ const HEADROOM: f64 = 0.85;
 /// delayed-ACK policy: 4 * SMSS.
 const MIN_PIPE_CWND_PKTS: usize = 4;
 
-/// The filter window length for BBR.MaxBwFilter = 2 (representing up to 2
-/// ProbeBW cycles, the current cycle and the previous full cycle).
-const MAX_BW_FILTER_LEN: Duration = Duration::from_secs(2);
+// To do: Tune window for expiry of Max BW measurement
+// The filter window length for BBR.MaxBwFilter = 2 (representing up to 2
+// ProbeBW cycles, the current cycle and the previous full cycle).
+// const MAX_BW_FILTER_LEN: Duration = Duration::from_secs(2);
 
-/// The window length of the BBR.ExtraACKedFilter max filter window: 10 (in
-/// units of packet-timed round trips).
-const EXTRA_ACKED_FILTER_LEN: Duration = Duration::from_secs(10);
+// To do: Tune window for expiry of ACK aggregation measurement
+// The window length of the BBR.ExtraACKedFilter max filter window: 10 (in
+// units of packet-timed round trips).
+// const EXTRA_ACKED_FILTER_LEN: Duration = Duration::from_secs(10);
 
 /// A constant specifying the length of the BBR.min_rtt min filter window,
 /// MinRTTFilterLen is 10 secs.
-const MIN_RTT_FILTER_LEN: Duration = Duration::from_secs(10);
+const MIN_RTT_FILTER_LEN: u32 = 1;
 
 /// A constant specifying the gain value for calculating the cwnd during
 /// ProbeRTT: 0.5 (meaning that ProbeRTT attempts to reduce in-flight data to
@@ -106,11 +125,15 @@ const PROBE_RTT_CWND_GAIN: f64 = 0.5;
 const PROBE_RTT_DURATION: Duration = Duration::from_millis(200);
 
 /// ProbeRTTInterval: A constant specifying the minimum time interval between
-/// ProbeRTT states: 5 secs.
-const PROBE_RTT_INTERVAL: Duration = Duration::from_secs(5);
+/// ProbeRTT states. To do: investigate probe duration. Set arbirarily high for
+/// now.
+const PROBE_RTT_INTERVAL: Duration = Duration::from_secs(86400);
 
 /// Threshold for checking a full bandwidth growth during Startup.
 const MAX_BW_GROWTH_THRESHOLD: f64 = 1.25;
+
+/// Threshold for determining maximum bandwidth of network during Startup.
+const MAX_BW_COUNT: usize = 3;
 
 /// BBR2 Internal State Machine.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -161,6 +184,10 @@ pub struct State {
     // The current pacing rate for a BBR2 flow, which controls inter-packet
     // spacing.
     pacing_rate: u64,
+
+    // Save initial pacing rate so we can update when more reliable bytes
+    // delivered and RTT samples are available
+    init_pacing_rate: u64,
 
     // 2.5.  Pacing State and Parameters
     // The dynamic gain factor used to scale BBR.bw to
@@ -365,6 +392,8 @@ pub struct State {
     loss_round_delivered: usize,
 
     loss_in_round: bool,
+
+    loss_events_in_round: usize,
 }
 
 impl State {
@@ -381,6 +410,8 @@ impl State {
             newly_lost_bytes: 0,
 
             pacing_rate: 0,
+
+            init_pacing_rate: 0,
 
             pacing_gain: 0.0,
 
@@ -400,9 +431,9 @@ impl State {
 
             max_bw: 0,
 
-            bw_hi: 0,
+            bw_hi: u64::MAX,
 
-            bw_lo: 0,
+            bw_lo: u64::MAX,
 
             bw: 0,
 
@@ -416,9 +447,9 @@ impl State {
 
             max_inflight: 0,
 
-            inflight_hi: 0,
+            inflight_hi: usize::MAX,
 
-            inflight_lo: 0,
+            inflight_lo: usize::MAX,
 
             bw_latest: 0,
 
@@ -481,6 +512,8 @@ impl State {
             loss_round_delivered: 0,
 
             loss_in_round: false,
+
+            loss_events_in_round: 0,
         }
     }
 }
@@ -532,19 +565,26 @@ fn on_packets_acked(
     r: &mut Recovery, packets: &mut Vec<Acked>, _epoch: packet::Epoch,
     now: Instant,
 ) {
-    r.bbr2_state.newly_acked_bytes =
-        packets.drain(..).fold(0, |acked_bytes, p| {
-            r.bbr2_state.prior_bytes_in_flight = r.bytes_in_flight;
+    r.bbr2_state.newly_acked_bytes = 0;
 
-            per_ack::bbr2_update_model_and_state(r, &p, now);
+    let time_sent = packets.last().map(|pkt| pkt.time_sent);
 
-            r.bytes_in_flight = r.bytes_in_flight.saturating_sub(p.size);
+    for p in packets.drain(..) {
+        r.bbr2_state.prior_bytes_in_flight = r.bytes_in_flight;
 
-            acked_bytes + p.size
-        });
+        per_ack::bbr2_update_model_and_state(r, &p, now);
 
-    if let Some(pkt) = packets.last() {
-        if !r.in_congestion_recovery(pkt.time_sent) {
+        if r.bytes_in_flight < p.size {
+            trace!("BBR2 on_packets_acked subtraction overflow");
+            r.bytes_in_flight = 0;
+        } else {
+            r.bytes_in_flight -= p.size
+        }
+        r.bbr2_state.newly_acked_bytes += p.size;
+    }
+
+    if let Some(ts) = time_sent {
+        if !r.in_congestion_recovery(ts) {
             // Upon exiting loss recovery.
             bbr2_exit_recovery(r);
         }
@@ -602,8 +642,8 @@ fn debug_fmt(r: &Recovery, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     write!(f, "bbr2={{ ")?;
     write!(
         f,
-        "state={:?} in_recovery={} ack_phase={:?} filled_pipe={} ",
-        bbr.state, bbr.in_recovery, bbr.ack_phase, bbr.filled_pipe
+        "state={:?} in_recovery={} ack_phase={:?} filled_pipe={} full_bw_count={} loss_events_in_round={} ",
+        bbr.state, bbr.in_recovery, bbr.ack_phase, bbr.filled_pipe, bbr.full_bw_count, bbr.loss_events_in_round
     )?;
     write!(
         f,
@@ -612,16 +652,17 @@ fn debug_fmt(r: &Recovery, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     )?;
     write!(
         f,
-        "max_bw={}kbps bw_lo={}kbps bw={}kbps bw_hi={}kbps ",
+        "max_bw={}kbps bw_lo={}kbps bw={}kbps bw_hi={}kbps full_bw={}kbps ",
         rate_kbps(bbr.max_bw),
         rate_kbps(bbr.bw_lo),
         rate_kbps(bbr.bw),
-        rate_kbps(bbr.bw_hi)
+        rate_kbps(bbr.bw_hi),
+        rate_kbps(bbr.full_bw)
     )?;
     write!(
         f,
-        "inflight_lo={} inflight_hi={} ",
-        bbr.inflight_lo, bbr.inflight_hi
+        "inflight_lo={} inflight_hi={} max_inflight={} ",
+        bbr.inflight_lo, bbr.inflight_hi, bbr.max_inflight
     )?;
     write!(
         f,
@@ -635,6 +676,8 @@ fn debug_fmt(r: &Recovery, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use smallvec::smallvec;
 
     use crate::recovery;
 
@@ -656,6 +699,401 @@ mod tests {
         assert_eq!(r.bytes_in_flight, 0);
 
         assert_eq!(r.bbr2_state.state, BBR2StateMachine::Startup);
+    }
+
+    #[test]
+    fn bbr2_send() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+
+        r.on_init();
+        r.on_packet_sent_cc(1000, now);
+
+        assert_eq!(r.bytes_in_flight, 1000);
+    }
+
+    #[test]
+    fn bbr2_startup() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+        let mss = r.max_datagram_size;
+
+        r.on_init();
+
+        // Send 5 packets.
+        for pn in 0..5 {
+            let pkt = Sent {
+                pkt_num: pn,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: mss,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: false,
+            };
+
+            r.on_packet_sent(
+                pkt,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        let rtt = Duration::from_millis(50);
+        let now = now + rtt;
+        let cwnd_prev = r.cwnd();
+
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..5);
+
+        assert!(r
+            .on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+                &mut Vec::new(),
+            )
+            .is_ok());
+
+        assert_eq!(r.bbr2_state.state, BBR2StateMachine::Startup);
+        assert_eq!(r.cwnd(), cwnd_prev + mss * 5);
+        assert_eq!(r.bytes_in_flight, 0);
+        assert_eq!(
+            r.delivery_rate(),
+            ((mss * 5) as f64 / rtt.as_secs_f64()) as u64
+        );
+        assert_eq!(r.bbr2_state.full_bw, r.delivery_rate());
+    }
+
+    #[test]
+    fn bbr2_congestion_event() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+        let mss = r.max_datagram_size;
+
+        r.on_init();
+
+        // Send 5 packets.
+        for pn in 0..5 {
+            let pkt = Sent {
+                pkt_num: pn,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: mss,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: false,
+            };
+
+            r.on_packet_sent(
+                pkt,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        let rtt = Duration::from_millis(50);
+        let now = now + rtt;
+
+        // Make a packet loss to trigger a congestion event.
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(4..5);
+
+        // 2 acked, 2 x MSS lost.
+        assert!(r
+            .on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+                &mut Vec::new(),
+            )
+            .is_ok());
+
+        assert_eq!(r.bbr2_state.in_recovery, true);
+
+        // Stil in flight: 2, 3.
+        assert_eq!(r.bytes_in_flight, mss * 2);
+
+        assert_eq!(r.bbr2_state.newly_acked_bytes, mss * 1);
+
+        assert_eq!(r.cwnd(), mss * 3);
+    }
+
+    #[test]
+    fn bbr2_probe_bw() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+        let mss = r.max_datagram_size;
+
+        r.on_init();
+
+        let mut pn = 0;
+
+        // Stop right before filled_pipe=true.
+        for _ in 0..3 {
+            let pkt = Sent {
+                pkt_num: pn,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: mss,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: r.delivery_rate.delivered(),
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: false,
+            };
+
+            r.on_packet_sent(
+                pkt,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+
+            pn += 1;
+
+            let rtt = Duration::from_millis(50);
+
+            let now = now + rtt;
+
+            let mut acked = ranges::RangeSet::default();
+            acked.insert(0..pn);
+
+            assert!(r
+                .on_ack_received(
+                    &acked,
+                    25,
+                    packet::Epoch::Application,
+                    HandshakeStatus::default(),
+                    now,
+                    "",
+                    &mut Vec::new(),
+                )
+                .is_ok());
+        }
+
+        // Stop at right before filled_pipe=true.
+        for _ in 0..5 {
+            let pkt = Sent {
+                pkt_num: pn,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: mss,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: r.delivery_rate.delivered(),
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: false,
+            };
+
+            r.on_packet_sent(
+                pkt,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+
+            pn += 1;
+        }
+
+        let rtt = Duration::from_millis(50);
+        let now = now + rtt;
+
+        let mut acked = ranges::RangeSet::default();
+
+        // We sent 5 packets, but ack only one, to stay
+        // in Drain state.
+        acked.insert(0..pn - 4);
+
+        assert!(r
+            .on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+                &mut Vec::new(),
+            )
+            .is_ok());
+
+        assert_eq!(r.bbr2_state.state, BBR2StateMachine::Drain);
+        assert_eq!(r.bbr2_state.filled_pipe, true);
+        assert!(r.bbr2_state.pacing_gain < 1.0);
+    }
+
+    #[test]
+    fn bbr2_probe_rtt() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+        let mss = r.max_datagram_size;
+
+        r.on_init();
+
+        let mut pn = 0;
+
+        // At 4th roundtrip, filled_pipe=true and switch to Drain,
+        // but move to ProbeBW immediately because bytes_in_flight is
+        // smaller than BBRInFlight(1).
+        for _ in 0..4 {
+            let pkt = Sent {
+                pkt_num: pn,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: mss,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: r.delivery_rate.delivered(),
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: false,
+            };
+
+            r.on_packet_sent(
+                pkt,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+
+            pn += 1;
+
+            let rtt = Duration::from_millis(50);
+            let now = now + rtt;
+
+            let mut acked = ranges::RangeSet::default();
+            acked.insert(0..pn);
+
+            assert!(r
+                .on_ack_received(
+                    &acked,
+                    25,
+                    packet::Epoch::Application,
+                    HandshakeStatus::default(),
+                    now,
+                    "",
+                    &mut Vec::new(),
+                )
+                .is_ok());
+        }
+
+        // Now we are in ProbeBW state.
+        assert_eq!(r.bbr2_state.state, BBR2StateMachine::ProbeBWCRUISE);
+
+        // After RTPROP_FILTER_LEN (10s), switch to ProbeRTT.
+        let now = now + PROBE_RTT_INTERVAL;
+
+        let pkt = Sent {
+            pkt_num: pn,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: mss,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: r.delivery_rate.delivered(),
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+        };
+
+        r.on_packet_sent(
+            pkt,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        pn += 1;
+
+        // Don't update rtprop by giving larger rtt than before.
+        // If rtprop is updated, rtprop expiry check is reset.
+        let rtt = Duration::from_millis(100);
+        let now = now + rtt;
+
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..pn);
+
+        assert!(r
+            .on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+                &mut Vec::new(),
+            )
+            .is_ok());
+
+        assert_eq!(r.bbr2_state.state, BBR2StateMachine::ProbeRTT);
+        assert_eq!(r.bbr2_state.pacing_gain, 1.0);
     }
 }
 

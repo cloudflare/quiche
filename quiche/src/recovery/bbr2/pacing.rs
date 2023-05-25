@@ -46,6 +46,7 @@ pub fn bbr2_init_pacing_rate(r: &mut Recovery) {
     let nominal_bandwidth = r.congestion_window as f64 / srtt;
 
     bbr.pacing_rate = (STARTUP_PACING_GAIN * nominal_bandwidth) as u64;
+    bbr.init_pacing_rate = (STARTUP_PACING_GAIN * nominal_bandwidth) as u64;
 }
 
 pub fn bbr2_set_pacing_rate_with_gain(r: &mut Recovery, pacing_gain: f64) {
@@ -53,7 +54,10 @@ pub fn bbr2_set_pacing_rate_with_gain(r: &mut Recovery, pacing_gain: f64) {
         r.bbr2_state.bw as f64 *
         (1.0 - PACING_MARGIN_PERCENT)) as u64;
 
-    if r.bbr2_state.filled_pipe || rate > r.bbr2_state.pacing_rate {
+    if r.bbr2_state.filled_pipe ||
+        rate > r.bbr2_state.pacing_rate ||
+        r.bbr2_state.pacing_rate == r.bbr2_state.init_pacing_rate
+    {
         r.bbr2_state.pacing_rate = rate;
     }
 }
