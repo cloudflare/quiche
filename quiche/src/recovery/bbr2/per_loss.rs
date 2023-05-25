@@ -50,7 +50,7 @@ pub fn bbr2_check_inflight_too_high(r: &mut Recovery, now: Instant) -> bool {
     false
 }
 
-fn bbr2_is_inflight_too_high(r: &mut Recovery) -> bool {
+pub fn bbr2_is_inflight_too_high(r: &mut Recovery) -> bool {
     r.bbr2_state.lost > (r.bbr2_state.tx_in_flight as f64 * LOSS_THRESH) as usize
 }
 
@@ -127,6 +127,7 @@ pub fn bbr2_reset_congestion_signals(r: &mut Recovery) {
     let bbr = &mut r.bbr2_state;
 
     bbr.loss_in_round = false;
+    bbr.loss_events_in_round = 0;
     bbr.bw_latest = 0;
     bbr.inflight_latest = 0;
 }
@@ -137,6 +138,7 @@ pub fn bbr2_update_congestion_signals(r: &mut Recovery, packet: &Acked) {
 
     if r.bbr2_state.lost > 0 {
         r.bbr2_state.loss_in_round = true;
+        r.bbr2_state.loss_events_in_round += 1;
     }
 
     if !r.bbr2_state.loss_round_start {
@@ -147,6 +149,7 @@ pub fn bbr2_update_congestion_signals(r: &mut Recovery, packet: &Acked) {
     bbr2_adapt_lower_bounds_from_congestion(r);
 
     r.bbr2_state.loss_in_round = false;
+    r.bbr2_state.loss_events_in_round = 0;
 }
 
 fn bbr2_adapt_lower_bounds_from_congestion(r: &mut Recovery) {

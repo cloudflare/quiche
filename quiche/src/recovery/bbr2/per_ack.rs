@@ -105,14 +105,29 @@ fn bbr2_check_startup_full_bandwidth(r: &mut Recovery) {
     // Another round w/o much growth
     r.bbr2_state.full_bw_count += 1;
 
-    if r.bbr2_state.full_bw_count >= 3 {
+    if r.bbr2_state.full_bw_count >= MAX_BW_COUNT {
         r.bbr2_state.filled_pipe = true;
     }
 }
 
 // 4.3.1.3.  Exiting Startup Based on Packet Loss
-fn bbr2_check_startup_high_loss(_r: &mut Recovery) {
+fn bbr2_check_startup_high_loss(r: &mut Recovery) {
     // TODO: this is not implemented (not in the draft)
+    if r.bbr2_state.loss_round_start &&
+        r.bbr2_state.in_recovery &&
+        r.bbr2_state.loss_events_in_round >= FULL_LOSS_COUNT as usize &&
+        per_loss::bbr2_is_inflight_too_high(r)
+    {
+        bbr2_handle_queue_too_high_in_startup(r);
+    }
+    if r.bbr2_state.loss_round_start {
+        r.bbr2_state.loss_events_in_round = 0
+    }
+}
+
+fn bbr2_handle_queue_too_high_in_startup(r: &mut Recovery) {
+    r.bbr2_state.filled_pipe = true;
+    r.bbr2_state.inflight_hi = bbr2_inflight(r, r.bbr2_state.max_bw, 1.0);
 }
 
 // 4.3.2.  Drain
@@ -122,7 +137,7 @@ fn bbr2_enter_drain(r: &mut Recovery) {
     bbr.state = BBR2StateMachine::Drain;
 
     // pace slowly
-    bbr.pacing_gain = 1.0 / STARTUP_CWND_GAIN;
+    bbr.pacing_gain = PACING_GAIN / STARTUP_CWND_GAIN;
 
     // maintain cwnd
     bbr.cwnd_gain = STARTUP_CWND_GAIN;
@@ -130,7 +145,7 @@ fn bbr2_enter_drain(r: &mut Recovery) {
 
 fn bbr2_check_drain(r: &mut Recovery, now: Instant) {
     if r.bbr2_state.state == BBR2StateMachine::Drain &&
-        r.bytes_in_flight <= bbr2_inflight(r, r.bbr2_state.bw, 1.0)
+        r.bytes_in_flight <= bbr2_inflight(r, r.bbr2_state.max_bw, 1.0)
     {
         // BBR estimates the queue was drained
         bbr2_enter_probe_bw(r, now);
@@ -199,12 +214,16 @@ pub fn bbr2_start_probe_bw_down(r: &mut Recovery, now: Instant) {
     bbr2_start_round(r);
 
     r.bbr2_state.state = BBR2StateMachine::ProbeBWDOWN;
+    r.bbr2_state.pacing_gain = PROBE_DOWN_PACING_GAIN;
+    r.bbr2_state.cwnd_gain = CWND_GAIN
 }
 
 fn bbr2_start_probe_bw_cruise(r: &mut Recovery) {
     let bbr = &mut r.bbr2_state;
 
     bbr.state = BBR2StateMachine::ProbeBWCRUISE;
+    bbr.pacing_gain = PACING_GAIN;
+    bbr.cwnd_gain = CWND_GAIN;
 }
 
 fn bbr2_start_probe_bw_refill(r: &mut Recovery) {
@@ -217,6 +236,8 @@ fn bbr2_start_probe_bw_refill(r: &mut Recovery) {
     bbr2_start_round(r);
 
     r.bbr2_state.state = BBR2StateMachine::ProbeBWREFILL;
+    r.bbr2_state.pacing_gain = PACING_GAIN;
+    r.bbr2_state.cwnd_gain = CWND_GAIN;
 }
 
 fn bbr2_start_probe_bw_up(r: &mut Recovery, now: Instant) {
@@ -227,6 +248,8 @@ fn bbr2_start_probe_bw_up(r: &mut Recovery, now: Instant) {
     // Start wall clock.
     r.bbr2_state.cycle_stamp = now;
     r.bbr2_state.state = BBR2StateMachine::ProbeBWUP;
+    r.bbr2_state.pacing_gain = PROBE_UP_PACING_GAIN;
+    r.bbr2_state.cwnd_gain = CWND_GAIN;
 
     bbr2_raise_inflight_hi_slope(r);
 }
@@ -428,11 +451,17 @@ fn bbr2_update_min_rtt(r: &mut Recovery, now: Instant) {
         bbr.probe_rtt_min_stamp = now;
     }
 
-    let min_rtt_expired = now > bbr.min_rtt_stamp + MIN_RTT_FILTER_LEN;
+    let min_rtt_expired =
+        now > bbr.min_rtt_stamp + rs_rtt.saturating_mul(MIN_RTT_FILTER_LEN);
 
-    if bbr.probe_rtt_min_delay < bbr.min_rtt || min_rtt_expired {
-        bbr.min_rtt = bbr.probe_rtt_min_delay;
-        bbr.min_rtt_stamp = bbr.probe_rtt_min_stamp;
+    // To do: Figure out Probe RTT logic
+    // if bbr.probe_rtt_min_delay < bbr.min_rtt ||  bbr.min_rtt == INITIAL_RTT ||
+    // min_rtt_expired {
+    if bbr.min_rtt == INITIAL_RTT || min_rtt_expired {
+        // bbr.min_rtt = bbr.probe_rtt_min_delay;
+        // bbr.min_rtt_stamp = bbr.probe_rtt_min_stamp;
+        bbr.min_rtt = rs_rtt;
+        bbr.min_rtt_stamp = now;
     }
 }
 
@@ -463,7 +492,7 @@ fn bbr2_enter_probe_rtt(r: &mut Recovery) {
     let bbr = &mut r.bbr2_state;
 
     bbr.state = BBR2StateMachine::ProbeRTT;
-    bbr.pacing_gain = 1.0;
+    bbr.pacing_gain = PACING_GAIN;
     bbr.cwnd_gain = PROBE_RTT_CWND_GAIN;
 }
 
@@ -540,8 +569,13 @@ pub fn bbr2_update_max_bw(r: &mut Recovery, packet: &Acked) {
     if r.delivery_rate() >= r.bbr2_state.max_bw ||
         !r.delivery_rate.sample_is_app_limited()
     {
+        let max_bw_filter_len = r
+            .delivery_rate
+            .sample_rtt()
+            .saturating_mul(MIN_RTT_FILTER_LEN);
+
         r.bbr2_state.max_bw = r.bbr2_state.max_bw_filter.running_max(
-            MAX_BW_FILTER_LEN,
+            max_bw_filter_len,
             r.bbr2_state.start_time +
                 Duration::from_secs(r.bbr2_state.cycle_count),
             r.delivery_rate(),
@@ -580,8 +614,13 @@ fn bbr2_update_ack_aggregation(r: &mut Recovery, packet: &Acked, now: Instant) {
     let extra = bbr.extra_acked_delivered.saturating_sub(expected_delivered);
     let extra = extra.min(r.congestion_window);
 
+    let extra_acked_filter_len = r
+        .delivery_rate
+        .sample_rtt()
+        .saturating_mul(MIN_RTT_FILTER_LEN);
+
     bbr.extra_acked = bbr.extra_acked_filter.running_max(
-        EXTRA_ACKED_FILTER_LEN,
+        extra_acked_filter_len,
         bbr.start_time + Duration::from_secs(bbr.round_count),
         extra,
     );
@@ -598,7 +637,7 @@ fn bbr2_set_send_quantum(r: &mut Recovery) {
         2 * r.max_datagram_size
     };
 
-    r.send_quantum = cmp::min((rate / 1000_u64) as usize, 64 * 1024);
+    r.send_quantum = cmp::min((rate / 1000_u64) as usize, 64 * 1024); // Assumes send buffer is limited to 64KB
     r.send_quantum = r.send_quantum.max(floor);
 }
 
@@ -641,7 +680,8 @@ fn bbr2_update_max_inflight(r: &mut Recovery) {
     // TODO: not implemented (not in the draft)
     // bbr2_update_aggregation_budget(r);
 
-    let inflight = bbr2_bdp_multiple(r, r.bbr2_state.bw, r.bbr2_state.cwnd_gain);
+    let inflight =
+        bbr2_bdp_multiple(r, r.bbr2_state.max_bw, r.bbr2_state.cwnd_gain);
     let inflight = inflight + r.bbr2_state.extra_acked;
 
     r.bbr2_state.max_inflight = bbr2_quantization_budget(r, inflight);
