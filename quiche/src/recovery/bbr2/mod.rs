@@ -98,14 +98,14 @@ const HEADROOM: f64 = 0.85;
 /// delayed-ACK policy: 4 * SMSS.
 const MIN_PIPE_CWND_PKTS: usize = 4;
 
+// To do: Tune window for expiry of Max BW measurement
 // The filter window length for BBR.MaxBwFilter = 2 (representing up to 2
-/// ProbeBW cycles, the current cycle and the previous full cycle).
-/// To do: Tune window for expiry of Max BW measurement
+// ProbeBW cycles, the current cycle and the previous full cycle).
 // const MAX_BW_FILTER_LEN: Duration = Duration::from_secs(2);
 
-/// The window length of the BBR.ExtraACKedFilter max filter window: 10 (in
-/// units of packet-timed round trips).
-/// To do: Tune window for expiry of ACK aggregation measurement
+// To do: Tune window for expiry of ACK aggregation measurement
+// The window length of the BBR.ExtraACKedFilter max filter window: 10 (in
+// units of packet-timed round trips).
 // const EXTRA_ACKED_FILTER_LEN: Duration = Duration::from_secs(10);
 
 /// A constant specifying the length of the BBR.min_rtt min filter window,
