@@ -55,8 +55,6 @@ const INITIAL_TIME_THRESHOLD: f64 = 9.0 / 8.0;
 
 const GRANULARITY: Duration = Duration::from_millis(1);
 
-const INITIAL_RTT: Duration = Duration::from_millis(333);
-
 const PERSISTENT_CONGESTION_THRESHOLD: u32 = 3;
 
 const RTT_WINDOW: Duration = Duration::from_secs(300);
@@ -95,6 +93,8 @@ pub struct Recovery {
     rttvar: Duration,
 
     minmax_filter: minmax::Minmax<Duration>,
+
+    initial_rtt: Duration,
 
     min_rtt: Duration,
 
@@ -174,6 +174,7 @@ pub struct RecoveryConfig {
     max_send_udp_payload_size: usize,
     pub max_ack_delay: Duration,
     cc_ops: &'static CongestionControlOps,
+    initial_rtt: Duration,
     hystart: bool,
     pacing: bool,
     max_pacing_rate: Option<u64>,
@@ -184,6 +185,7 @@ impl RecoveryConfig {
         Self {
             max_send_udp_payload_size: config.max_send_udp_payload_size,
             max_ack_delay: Duration::ZERO,
+            initial_rtt: config.initial_rtt,
             cc_ops: config.cc_algorithm.into(),
             hystart: config.hystart,
             pacing: config.pacing,
@@ -210,7 +212,7 @@ impl Recovery {
 
             latest_rtt: Duration::ZERO,
 
-            // This field should be initialized to `INITIAL_RTT` for the initial
+            // This field should be initialized to `initial_rtt` for the initial
             // PTO calculation, but it also needs to be an `Option` to track
             // whether any RTT sample was received, so the initial value is
             // handled by the `rtt()` method instead.
@@ -218,9 +220,11 @@ impl Recovery {
 
             minmax_filter: minmax::Minmax::new(Duration::ZERO),
 
+            initial_rtt: recovery_config.initial_rtt,
+
             min_rtt: Duration::ZERO,
 
-            rttvar: INITIAL_RTT / 2,
+            rttvar: recovery_config.initial_rtt / 2,
 
             max_ack_delay: recovery_config.max_ack_delay,
 
@@ -693,7 +697,7 @@ impl Recovery {
     }
 
     pub fn rtt(&self) -> Duration {
-        self.smoothed_rtt.unwrap_or(INITIAL_RTT)
+        self.smoothed_rtt.unwrap_or(self.initial_rtt)
     }
 
     pub fn min_rtt(&self) -> Option<Duration> {

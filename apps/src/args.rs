@@ -43,6 +43,7 @@ pub struct CommonArgs {
     pub early_data: bool,
     pub dump_packet_path: Option<String>,
     pub no_grease: bool,
+    pub initial_rtt: Option<std::time::Duration>,
     pub cc_algorithm: String,
     pub disable_hystart: bool,
     pub dgrams_enabled: bool,
@@ -68,6 +69,7 @@ pub struct CommonArgs {
 /// --max-streams-uni STREAMS   Number of allowed concurrent streams.
 /// --dump-packets PATH         Dump the incoming packets in PATH.
 /// --no-grease                 Don't send GREASE.
+/// --initial-rtt               The initial RTT estimate in ms.
 /// --cc-algorithm NAME         Set a congestion control algorithm.
 /// --disable-hystart           Disable HyStart++.
 /// --dgram-proto PROTO         DATAGRAM application protocol.
@@ -142,6 +144,16 @@ impl Args for CommonArgs {
 
         let no_grease = args.get_bool("--no-grease");
 
+        let initial_rtt = if args.get_str("--initial-rtt") != "" {
+            let initial_rtt = args.get_str("--initial-rtt");
+            let initial_rtt = initial_rtt.parse::<u64>().unwrap();
+            let initial_rtt = std::time::Duration::from_millis(initial_rtt);
+
+            Some(initial_rtt)
+        } else {
+            None
+        };
+
         let cc_algorithm = args.get_str("--cc-algorithm");
 
         let disable_hystart = args.get_bool("--disable-hystart");
@@ -196,6 +208,7 @@ impl Args for CommonArgs {
             early_data,
             dump_packet_path,
             no_grease,
+            initial_rtt,
             cc_algorithm: cc_algorithm.to_string(),
             disable_hystart,
             dgrams_enabled,
@@ -224,6 +237,7 @@ impl Default for CommonArgs {
             early_data: false,
             dump_packet_path: None,
             no_grease: false,
+            initial_rtt: None,
             cc_algorithm: "cubic".to_string(),
             disable_hystart: false,
             dgrams_enabled: false,

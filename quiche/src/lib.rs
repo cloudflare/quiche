@@ -485,6 +485,8 @@ const CONNECTION_WINDOW_FACTOR: f64 = 1.5;
 // validation as failed.
 const MAX_PROBING_TIMEOUTS: usize = 3;
 
+const INITIAL_RTT: time::Duration = time::Duration::from_millis(333);
+
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -706,6 +708,8 @@ pub struct Config {
 
     grease: bool,
 
+    initial_rtt: time::Duration,
+
     cc_algorithm: CongestionControlAlgorithm,
 
     hystart: bool,
@@ -767,6 +771,7 @@ impl Config {
             tls_ctx,
             application_protos: Vec::new(),
             grease: true,
+            initial_rtt: INITIAL_RTT,
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
             hystart: true,
             pacing: true,
@@ -1133,6 +1138,13 @@ impl Config {
     /// The default value is `CongestionControlAlgorithm::CUBIC`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
+    }
+
+    /// Configures the initial RTT estimate.
+    ///
+    /// The default value is 333 ms.
+    pub fn set_initial_rtt(&mut self, v: time::Duration) {
+        self.initial_rtt = v;
     }
 
     /// Configures whether to enable HyStart++.

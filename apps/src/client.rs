@@ -142,6 +142,10 @@ pub fn connect(
         config.enable_early_data();
     }
 
+    if let Some(initial_rtt) = conn_args.initial_rtt {
+        config.set_initial_rtt(initial_rtt);
+    }
+
     config
         .set_cc_algorithm_name(&conn_args.cc_algorithm)
         .unwrap();
