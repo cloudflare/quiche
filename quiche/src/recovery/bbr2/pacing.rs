@@ -25,9 +25,10 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use super::*;
-use crate::recovery::Recovery;
 
 use std::time::Duration;
+
+use crate::recovery::Recovery;
 
 // BBR2 Transmit Packet Pacing Functions
 //
@@ -54,9 +55,6 @@ pub fn bbr2_set_pacing_rate_with_gain(r: &mut Recovery, pacing_gain: f64) {
 
     if r.bbr2_state.filled_pipe || rate > r.bbr2_state.pacing_rate {
         r.bbr2_state.pacing_rate = rate;
-
-        // Set outgoing packet pacing rate.
-        r.set_pacing_rate(rate);
     }
 }
 

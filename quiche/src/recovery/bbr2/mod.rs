@@ -38,6 +38,7 @@ use std::time::Instant;
 
 pub static BBR2: CongestionControlOps = CongestionControlOps {
     on_init,
+    reset,
     on_packet_sent,
     on_packets_acked,
     congestion_event,
@@ -515,6 +516,12 @@ fn on_init(r: &mut Recovery) {
     init::bbr2_init(r);
 }
 
+fn reset(r: &mut Recovery) {
+    r.bbr2_state = State::new();
+
+    init::bbr2_init(r);
+}
+
 fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, now: Instant) {
     r.bytes_in_flight += sent_bytes;
 
@@ -522,17 +529,19 @@ fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, now: Instant) {
 }
 
 fn on_packets_acked(
-    r: &mut Recovery, packets: &[Acked], _epoch: packet::Epoch, now: Instant,
+    r: &mut Recovery, packets: &mut Vec<Acked>, _epoch: packet::Epoch,
+    now: Instant,
 ) {
-    r.bbr2_state.newly_acked_bytes = packets.iter().fold(0, |acked_bytes, p| {
-        r.bbr2_state.prior_bytes_in_flight = r.bytes_in_flight;
+    r.bbr2_state.newly_acked_bytes =
+        packets.drain(..).fold(0, |acked_bytes, p| {
+            r.bbr2_state.prior_bytes_in_flight = r.bytes_in_flight;
 
-        per_ack::bbr2_update_model_and_state(r, p, now);
+            per_ack::bbr2_update_model_and_state(r, &p, now);
 
-        r.bytes_in_flight = r.bytes_in_flight.saturating_sub(p.size);
+            r.bytes_in_flight = r.bytes_in_flight.saturating_sub(p.size);
 
-        acked_bytes + p.size
-    });
+            acked_bytes + p.size
+        });
 
     if let Some(pkt) = packets.last() {
         if !r.in_congestion_recovery(pkt.time_sent) {
@@ -541,7 +550,7 @@ fn on_packets_acked(
         }
     }
 
-    per_ack::bbr2_update_control_parameters(r);
+    per_ack::bbr2_update_control_parameters(r, now);
 
     r.bbr2_state.newly_lost_bytes = 0;
 }
