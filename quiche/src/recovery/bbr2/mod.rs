@@ -669,6 +669,8 @@ mod tests {
 
     use crate::recovery;
 
+    use smallvec::smallvec;
+
     #[test]
     fn bbr_init() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -715,7 +717,7 @@ mod tests {
         for pn in 0..5 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -733,7 +735,7 @@ mod tests {
 
             r.on_packet_sent(
                 pkt,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -747,17 +749,19 @@ mod tests {
         let mut acked = ranges::RangeSet::default();
         acked.insert(0..5);
 
-        assert_eq!(
-            r.on_ack_received(
+        let mut newly_acked = vec![];
+
+        assert!(r
+            .on_ack_received(
                 &acked,
                 25,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
-            ),
-            Ok(()),
-        );
+                &mut newly_acked,
+            )
+            .is_ok(),);
 
         assert_eq!(r.bbr2_state.state, BBR2StateMachine::Startup);
         assert_eq!(r.cwnd(), cwnd_prev + mss * 5);
@@ -784,7 +788,7 @@ mod tests {
         for pn in 0..5 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -802,7 +806,7 @@ mod tests {
 
             r.on_packet_sent(
                 pkt,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -816,18 +820,20 @@ mod tests {
         let mut acked = ranges::RangeSet::default();
         acked.insert(4..5);
 
+        let mut newly_acked = vec![];
+
         // 2 acked, 2 x MSS lost.
-        assert_eq!(
-            r.on_ack_received(
+        assert!(r
+            .on_ack_received(
                 &acked,
                 25,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
-            ),
-            Ok(()),
-        );
+                &mut newly_acked,
+            )
+            .is_ok(),);
 
         assert_eq!(r.bbr2_state.in_recovery, true);
 
@@ -856,7 +862,7 @@ mod tests {
         for _ in 0..3 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -874,7 +880,7 @@ mod tests {
 
             r.on_packet_sent(
                 pkt,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -889,24 +895,26 @@ mod tests {
             let mut acked = ranges::RangeSet::default();
             acked.insert(0..pn);
 
-            assert_eq!(
-                r.on_ack_received(
+            let mut newly_acked = vec![];
+
+            assert!(r
+                .on_ack_received(
                     &acked,
                     25,
-                    packet::EPOCH_APPLICATION,
+                    packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
                     "",
-                ),
-                Ok(()),
-            );
+                    &mut newly_acked,
+                )
+                .is_ok(),);
         }
 
         // Stop at right before filled_pipe=true.
         for _ in 0..5 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -924,7 +932,7 @@ mod tests {
 
             r.on_packet_sent(
                 pkt,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -942,17 +950,19 @@ mod tests {
         // in Drain state.
         acked.insert(0..pn - 4);
 
-        assert_eq!(
-            r.on_ack_received(
+        let mut newly_acked = vec![];
+
+        assert!(r
+            .on_ack_received(
                 &acked,
                 25,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
-            ),
-            Ok(()),
-        );
+                &mut newly_acked,
+            )
+            .is_ok(),);
 
         assert_eq!(r.bbr2_state.state, BBR2StateMachine::Drain);
         assert_eq!(r.bbr2_state.filled_pipe, true);
@@ -978,7 +988,7 @@ mod tests {
         for _ in 0..4 {
             let pkt = Sent {
                 pkt_num: pn,
-                frames: vec![],
+                frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
@@ -996,7 +1006,7 @@ mod tests {
 
             r.on_packet_sent(
                 pkt,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
@@ -1010,17 +1020,19 @@ mod tests {
             let mut acked = ranges::RangeSet::default();
             acked.insert(0..pn);
 
-            assert_eq!(
-                r.on_ack_received(
+            let mut newly_acked = vec![];
+
+            assert!(r
+                .on_ack_received(
                     &acked,
                     25,
-                    packet::EPOCH_APPLICATION,
+                    packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
                     "",
-                ),
-                Ok(()),
-            );
+                    &mut newly_acked,
+                )
+                .is_ok(),);
         }
 
         // Now we are in ProbeBW state.
@@ -1031,7 +1043,7 @@ mod tests {
 
         let pkt = Sent {
             pkt_num: pn,
-            frames: vec![],
+            frames: smallvec![],
             time_sent: now,
             time_acked: None,
             time_lost: None,
@@ -1049,7 +1061,7 @@ mod tests {
 
         r.on_packet_sent(
             pkt,
-            packet::EPOCH_APPLICATION,
+            packet::Epoch::Application,
             HandshakeStatus::default(),
             now,
             "",
@@ -1065,17 +1077,19 @@ mod tests {
         let mut acked = ranges::RangeSet::default();
         acked.insert(0..pn);
 
-        assert_eq!(
-            r.on_ack_received(
+        let mut newly_acked = vec![];
+
+        assert!(r
+            .on_ack_received(
                 &acked,
                 25,
-                packet::EPOCH_APPLICATION,
+                packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
-            ),
-            Ok(()),
-        );
+                &mut newly_acked,
+            )
+            .is_ok(),);
 
         assert_eq!(r.bbr2_state.state, BBR2StateMachine::ProbeRTT);
         assert_eq!(r.bbr2_state.pacing_gain, 1.0);
