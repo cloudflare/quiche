@@ -57,9 +57,14 @@ pub fn bbr2_update_model_and_state(
     per_loss::bbr2_bound_bw_for_model(r);
 }
 
-pub fn bbr2_update_control_parameters(r: &mut Recovery) {
+pub fn bbr2_update_control_parameters(r: &mut Recovery, now: Instant) {
     pacing::bbr2_set_pacing_rate(r);
     bbr2_set_send_quantum(r);
+
+    // Set outgoing packet pacing rate
+    // It is called here because send_quantum may be updated too.
+    r.set_pacing_rate(r.bbr2_state.pacing_rate, now);
+
     bbr2_set_cwnd(r);
 }
 
