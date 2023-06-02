@@ -615,12 +615,15 @@ fn main() {
                     c.conn.stats(),
                     c.conn.path_stats().collect::<Vec<quiche::PathStats>>()
                 );
+
+                for id in c.conn.source_ids() {
+                    let id_owned = id.clone().into_owned();
+                    clients_ids.remove(&id_owned);
+                }
             }
 
             !c.conn.is_closed()
         });
-
-        clients_ids.retain(|_, client_id| clients.contains_key(client_id));
     }
 }
 
