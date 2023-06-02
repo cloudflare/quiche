@@ -585,6 +585,11 @@ impl ConnectionIdentifiers {
         Ok(e.path_id)
     }
 
+    /// Returns an iterator over the source connection IDs.
+    pub fn scids_iter(&self) -> impl Iterator<Item = &ConnectionId> {
+        self.scids.iter().map(|e| &e.cid)
+    }
+
     /// Updates the Source Connection ID entry with the provided sequence number
     /// to indicate that it is now linked to the provided path ID.
     pub fn link_scid_to_path_id(

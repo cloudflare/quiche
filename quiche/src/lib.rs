@@ -6069,6 +6069,9 @@ impl Connection {
 
     /// Returns the source connection ID.
     ///
+    /// When there are multiple IDs, and if there is an active path, the ID used
+    /// on that path is returned. Otherwise the oldest ID is returned.
+    ///
     /// Note that the value returned can change throughout the connection's
     /// lifetime.
     #[inline]
@@ -6083,6 +6086,15 @@ impl Connection {
 
         let e = self.ids.oldest_scid();
         ConnectionId::from_ref(e.cid.as_ref())
+    }
+
+    /// Returns all active source connection IDs.
+    ///
+    /// An iterator is returned for all active IDs (i.e. ones that have not
+    /// been explicitly retired yet).
+    #[inline]
+    pub fn source_ids(&self) -> impl Iterator<Item = &ConnectionId> {
+        self.ids.scids_iter()
     }
 
     /// Returns the destination connection ID.
