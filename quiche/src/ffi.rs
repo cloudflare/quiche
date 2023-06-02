@@ -44,7 +44,6 @@ use libc::c_void;
 use libc::size_t;
 use libc::sockaddr;
 use libc::ssize_t;
-use libc::timespec;
 
 #[cfg(not(windows))]
 use libc::AF_INET;
@@ -730,7 +729,8 @@ pub struct SendInfo {
     to: sockaddr_storage,
     to_len: socklen_t,
 
-    at: timespec,
+    // nanos
+    after: u64,
 }
 
 #[no_mangle]
@@ -747,8 +747,7 @@ pub extern fn quiche_conn_send(
         Ok((v, info)) => {
             out_info.from_len = std_addr_to_c(&info.from, &mut out_info.from);
             out_info.to_len = std_addr_to_c(&info.to, &mut out_info.to);
-
-            std_time_to_c(&info.at, &mut out_info.at);
+            out_info.after = info.after.as_nanos() as u64;
 
             v as ssize_t
         },
@@ -1498,24 +1497,6 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
             sa_len as socklen_t
         },
     }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
-fn std_time_to_c(time: &std::time::Instant, out: &mut timespec) {
-    const INSTANT_ZERO: std::time::Instant =
-        unsafe { std::mem::transmute(std::time::UNIX_EPOCH) };
-
-    let raw_time = time.duration_since(INSTANT_ZERO);
-
-    out.tv_sec = raw_time.as_secs() as libc::time_t;
-    out.tv_nsec = raw_time.subsec_nanos() as libc::c_long;
-}
-
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
-fn std_time_to_c(_time: &std::time::Instant, out: &mut timespec) {
-    // TODO: implement Instant conversion for systems that don't use timespec.
-    out.tv_sec = 0;
-    out.tv_nsec = 0;
 }
 
 #[cfg(test)]
