@@ -947,6 +947,7 @@ impl Recovery {
                 };
 
                 self.loss_time[epoch] = Some(loss_time);
+                break;
             }
         }
 
