@@ -5876,6 +5876,11 @@ impl Connection {
         self.paths.pop_event()
     }
 
+    /// Returns the number of source Connection IDs that are retired.
+    pub fn retired_scids(&self) -> usize {
+        self.ids.retired_source_cids()
+    }
+
     /// Returns a source `ConnectionId` that has been retired.
     ///
     /// On success it returns a [`ConnectionId`], or `None` when there are no

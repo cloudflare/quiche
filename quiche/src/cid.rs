@@ -796,6 +796,13 @@ impl ConnectionIdentifiers {
         self.scids.len()
     }
 
+    /// Returns the number of source Connection IDs that are retired. This is
+    /// only meaningful if the host uses non-zero length Source Connection IDs.
+    #[inline]
+    pub fn retired_source_cids(&self) -> usize {
+        self.retired_scids.len()
+    }
+
     pub fn pop_retired_scid(&mut self) -> Option<ConnectionId<'static>> {
         self.retired_scids.pop_front()
     }
