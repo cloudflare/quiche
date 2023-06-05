@@ -478,8 +478,23 @@ fn main() {
                 let http_conn = client.http_conn.as_mut().unwrap();
                 let partial_responses = &mut client.partial_responses;
 
-                // Handle writable streams.
+                // TODO LP print prioritized streams
+                for stream_id in conn.writable_prioritized() {
+                    trace!("prioritized stream ID={}", stream_id);
+                }
+
                 for stream_id in conn.writable() {
+                    trace!("writable stream ID={}", stream_id);
+                }
+
+                let writable = if args.writable_prioritized {
+                    conn.writable_prioritized()
+                } else {
+                    conn.writable()
+                };
+
+                // Handle writable streams.
+                for stream_id in writable {
                     http_conn.handle_writable(conn, partial_responses, stream_id);
                 }
 

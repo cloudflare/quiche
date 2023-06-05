@@ -403,6 +403,8 @@ use qlog::events::RawInfo;
 
 use std::cmp;
 use std::convert::TryInto;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time;
 
 use std::net::SocketAddr;
@@ -2794,6 +2796,8 @@ impl Connection {
                         self.pkt_num_spaces[epoch]
                             .crypto_stream
                             .send
+                            .lock()
+                            .unwrap()
                             .ack_and_drop(offset, length);
                     },
 
@@ -2803,13 +2807,13 @@ impl Connection {
                         length,
                         ..
                     } => {
-                        let stream = match self.streams.get_mut(stream_id) {
+                        let stream = match self.streams.get(stream_id) {
                             Some(v) => v,
 
                             None => continue,
                         };
 
-                        stream.send.ack_and_drop(offset, length);
+                        stream.send.lock().unwrap().ack_and_drop(offset, length);
 
                         self.tx_buffered =
                             self.tx_buffered.saturating_sub(length);
@@ -2847,7 +2851,7 @@ impl Connection {
                     },
 
                     frame::Frame::ResetStream { stream_id, .. } => {
-                        let stream = match self.streams.get_mut(stream_id) {
+                        let stream = match self.streams.get(stream_id) {
                             Some(v) => v,
 
                             None => continue,
@@ -3257,7 +3261,12 @@ impl Connection {
             for lost in p.recovery.lost[epoch].drain(..) {
                 match lost {
                     frame::Frame::CryptoHeader { offset, length } => {
-                        pkt_space.crypto_stream.send.retransmit(offset, length);
+                        pkt_space
+                            .crypto_stream
+                            .send
+                            .lock()
+                            .unwrap()
+                            .retransmit(offset, length);
 
                         self.stream_retrans_bytes += length as u64;
                         p.stream_retrans_bytes += length as u64;
@@ -3272,7 +3281,7 @@ impl Connection {
                         length,
                         fin,
                     } => {
-                        let stream = match self.streams.get_mut(stream_id) {
+                        let stream = match self.streams.get(stream_id) {
                             Some(v) => v,
 
                             None => continue,
@@ -3282,7 +3291,7 @@ impl Connection {
 
                         let empty_fin = length == 0 && fin;
 
-                        stream.send.retransmit(offset, length);
+                        stream.send.lock().unwrap().retransmit(offset, length);
 
                         // If the stream is now flushable push it to the
                         // flushable queue, but only if it wasn't already
@@ -3293,8 +3302,9 @@ impl Connection {
                         // set.
                         if (stream.is_flushable() || empty_fin) && !was_flushable
                         {
-                            let urgency = stream.urgency;
-                            let incremental = stream.incremental;
+                            let urgency = stream.urgency.load(Ordering::SeqCst);
+                            let incremental =
+                                stream.incremental.load(Ordering::SeqCst);
                             self.streams.push_flushable(
                                 stream_id,
                                 urgency,
@@ -3648,7 +3658,7 @@ impl Connection {
 
             // Create MAX_STREAM_DATA frames as needed.
             for stream_id in self.streams.almost_full() {
-                let stream = match self.streams.get_mut(stream_id) {
+                let stream = match self.streams.get(stream_id) {
                     Some(v) => v,
 
                     None => {
@@ -3660,17 +3670,21 @@ impl Connection {
                 };
 
                 // Autotune the stream window size.
-                stream.recv.autotune_window(now, path.recovery.rtt());
+                stream
+                    .recv
+                    .lock()
+                    .unwrap()
+                    .autotune_window(now, path.recovery.rtt());
 
                 let frame = frame::Frame::MaxStreamData {
                     stream_id,
-                    max: stream.recv.max_data_next(),
+                    max: stream.recv.lock().unwrap().max_data_next(),
                 };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
-                    let recv_win = stream.recv.window();
+                    let recv_win = stream.recv.lock().unwrap().window();
 
-                    stream.recv.update_max_data(now);
+                    stream.recv.lock().unwrap().update_max_data(now);
 
                     self.streams.mark_almost_full(stream_id, false);
 
@@ -3838,7 +3852,8 @@ impl Connection {
             !is_closing &&
             path.active()
         {
-            let crypto_off = pkt_space.crypto_stream.send.off_front();
+            let crypto_off =
+                pkt_space.crypto_stream.send.lock().unwrap().off_front();
 
             // Encode the frame.
             //
@@ -3866,6 +3881,8 @@ impl Connection {
                 let (len, _) = pkt_space
                     .crypto_stream
                     .send
+                    .lock()
+                    .unwrap()
                     .emit(&mut crypto_payload.as_mut()[..max_len])?;
 
                 // Encode the frame's header.
@@ -4000,19 +4017,19 @@ impl Connection {
             !dgram_emitted
         {
             while let Some(stream_id) = self.streams.peek_flushable() {
-                let stream = match self.streams.get_mut(stream_id) {
+                let stream = match self.streams.get(stream_id) {
                     // Avoid sending frames for streams that were already stopped.
                     //
                     // This might happen if stream data was buffered but not yet
                     // flushed on the wire when a STOP_SENDING frame is received.
-                    Some(v) if !v.send.is_stopped() => v,
+                    Some(v) if !v.send.lock().unwrap().is_stopped() => v,
                     _ => {
                         self.streams.remove_flushable();
                         continue;
                     },
                 };
 
-                let stream_off = stream.send.off_front();
+                let stream_off = stream.send.lock().unwrap().off_front();
 
                 // Encode the frame.
                 //
@@ -4045,8 +4062,11 @@ impl Connection {
                     b.split_at(hdr_off + hdr_len)?;
 
                 // Write stream data into the packet buffer.
-                let (len, fin) =
-                    stream.send.emit(&mut stream_payload.as_mut()[..max_len])?;
+                let (len, fin) = stream
+                    .send
+                    .lock()
+                    .unwrap()
+                    .emit(&mut stream_payload.as_mut()[..max_len])?;
 
                 // Encode the frame's header.
                 //
@@ -4396,7 +4416,7 @@ impl Connection {
 
         let stream = self
             .streams
-            .get_mut(stream_id)
+            .get(stream_id)
             .ok_or(Error::InvalidStreamState(stream_id))?;
 
         if !stream.is_readable() {
@@ -4406,9 +4426,10 @@ impl Connection {
         let local = stream.local;
 
         #[cfg(feature = "qlog")]
-        let offset = stream.recv.off_front();
+        let offset = stream.recv.lock().unwrap().off_front();
 
-        let (read, fin) = match stream.recv.emit(out) {
+        let res = stream.recv.lock().unwrap().emit(out);
+        let (read, fin) = match res {
             Ok(v) => v,
 
             Err(e) => {
@@ -4431,7 +4452,7 @@ impl Connection {
 
         let complete = stream.is_complete();
 
-        if stream.recv.almost_full() {
+        if stream.recv.lock().unwrap().almost_full() {
             self.streams.mark_almost_full(stream_id, true);
         }
 
@@ -4536,7 +4557,7 @@ impl Connection {
         let stream = self.get_or_create_stream(stream_id, true)?;
 
         #[cfg(feature = "qlog")]
-        let offset = stream.send.off_back();
+        let offset = stream.send.lock().unwrap().off_back();
 
         let was_writable = stream.is_writable();
 
@@ -4567,7 +4588,8 @@ impl Connection {
             (buf, fin, false)
         };
 
-        let sent = match stream.send.write(buf, fin) {
+        let sent = stream.send.lock().unwrap().write(buf, fin);
+        let sent = match sent {
             Ok(v) => v,
 
             Err(e) => {
@@ -4576,8 +4598,8 @@ impl Connection {
             },
         };
 
-        let urgency = stream.urgency;
-        let incremental = stream.incremental;
+        let urgency = stream.urgency.load(Ordering::SeqCst);
+        let incremental = stream.incremental.load(Ordering::SeqCst);
 
         let flushable = stream.is_flushable();
 
@@ -4586,14 +4608,14 @@ impl Connection {
         let empty_fin = buf.is_empty() && fin;
 
         if sent < buf.len() {
-            let max_off = stream.send.max_off();
+            let max_off = stream.send.lock().unwrap().max_off();
 
-            if stream.send.blocked_at() != Some(max_off) {
-                stream.send.update_blocked_at(Some(max_off));
+            if stream.send.lock().unwrap().blocked_at() != Some(max_off) {
+                stream.send.lock().unwrap().update_blocked_at(Some(max_off));
                 self.streams.mark_blocked(stream_id, true, max_off);
             }
         } else {
-            stream.send.update_blocked_at(None);
+            stream.send.lock().unwrap().update_blocked_at(None);
             self.streams.mark_blocked(stream_id, false, 0);
         }
 
@@ -4666,16 +4688,7 @@ impl Connection {
             Err(e) => return Err(e),
         };
 
-        if stream.urgency == urgency && stream.incremental == incremental {
-            return Ok(());
-        }
-
-        stream.urgency = urgency;
-        stream.incremental = incremental;
-
-        // TODO: reprioritization
-
-        Ok(())
+        self.streams.stream_priority(stream, urgency, incremental)
     }
 
     /// Shuts down reading or writing from/to the specified stream.
@@ -4723,13 +4736,13 @@ impl Connection {
         }
 
         // Get existing stream.
-        let stream = self.streams.get_mut(stream_id).ok_or(Error::Done)?;
+        let stream = self.streams.get(stream_id).ok_or(Error::Done)?;
 
         match direction {
             Shutdown::Read => {
-                stream.recv.shutdown()?;
+                stream.recv.lock().unwrap().shutdown()?;
 
-                if !stream.recv.is_fin() {
+                if !stream.recv.lock().unwrap().is_fin() {
                     self.streams.mark_stopped(stream_id, true, err);
                 }
 
@@ -4738,7 +4751,8 @@ impl Connection {
             },
 
             Shutdown::Write => {
-                let (final_size, unsent) = stream.send.shutdown()?;
+                let (final_size, unsent) =
+                    stream.send.lock().unwrap().shutdown()?;
 
                 // Claw back some flow control allowance from data that was
                 // buffered but not actually sent before the stream was reset.
@@ -4775,7 +4789,7 @@ impl Connection {
     #[inline]
     pub fn stream_capacity(&self, stream_id: u64) -> Result<usize> {
         if let Some(stream) = self.streams.get(stream_id) {
-            let cap = cmp::min(self.tx_cap, stream.send.cap()?);
+            let cap = cmp::min(self.tx_cap, stream.send.lock().unwrap().cap()?);
             return Ok(cap);
         };
 
@@ -4837,7 +4851,9 @@ impl Connection {
 
         for &stream_id in &self.streams.writable {
             if let Some(stream) = self.streams.get(stream_id) {
-                let cap = match stream.send.cap() {
+                // assign cap to avoid multiple references to self
+                let cap = stream.send.lock().unwrap().cap();
+                let cap = match cap {
                     Ok(v) => v,
 
                     // Return the stream to the application immediately if it's
@@ -4849,7 +4865,9 @@ impl Connection {
                         },
                 };
 
-                if cmp::min(self.tx_cap, cap) >= stream.send_lowat {
+                if cmp::min(self.tx_cap, cap) >=
+                    stream.send_lowat.load(Ordering::SeqCst)
+                {
                     self.streams.mark_writable(stream_id, false);
                     return Some(stream_id);
                 }
@@ -4889,13 +4907,13 @@ impl Connection {
             return Ok(true);
         }
 
-        let stream = match self.streams.get_mut(stream_id) {
+        let stream = match self.streams.get(stream_id) {
             Some(v) => v,
 
             None => return Err(Error::InvalidStreamState(stream_id)),
         };
 
-        stream.send_lowat = cmp::max(1, len);
+        stream.send_lowat.store(cmp::max(1, len), Ordering::SeqCst);
 
         let is_writable = stream.is_writable();
 
@@ -4903,10 +4921,10 @@ impl Connection {
             self.blocked_limit = Some(self.max_tx_data);
         }
 
-        if stream.send.cap()? < len {
-            let max_off = stream.send.max_off();
-            if stream.send.blocked_at() != Some(max_off) {
-                stream.send.update_blocked_at(Some(max_off));
+        if stream.send.lock().unwrap().cap()? < len {
+            let max_off = stream.send.lock().unwrap().max_off();
+            if stream.send.lock().unwrap().blocked_at() != Some(max_off) {
+                stream.send.lock().unwrap().update_blocked_at(Some(max_off));
                 self.streams.mark_blocked(stream_id, true, max_off);
             }
         } else if is_writable {
@@ -4938,7 +4956,7 @@ impl Connection {
             None => return true,
         };
 
-        stream.recv.is_fin()
+        stream.recv.lock().unwrap().is_fin()
     }
 
     /// Returns the number of bidirectional streams that can be created
@@ -5032,6 +5050,72 @@ impl Connection {
         }
 
         self.streams.writable()
+    }
+
+    /// Returns an iterator over streams that can be written in priority order.
+    ///
+    /// The priority order is based on RFC 9218 scheduling recommendations.
+    /// Stream priority can be controlled using [`stream_priority()`]. In order
+    /// to support fairness requirements, each time this method is called,
+    /// internal state is updated. Therefore the iterator ordering can change
+    /// between calls, even if no streams were added or removed.
+    ///
+    /// A "writable" stream is a stream that has enough flow control capacity to
+    /// send data to the peer. To avoid buffering an infinite amount of data,
+    /// streams are only allowed to buffer outgoing data up to the amount that
+    /// the peer allows to send.
+    ///
+    /// Note that the iterator will only include streams that were writable at
+    /// the time the iterator itself was created (i.e. when `writable()` was
+    /// called). To account for newly writable streams, the iterator needs to be
+    /// created again.
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut buf = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
+    /// # let local = socket.local_addr().unwrap();
+    /// # let peer = "127.0.0.1:1234".parse().unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
+    /// // Iterate over writable streams.
+    /// for stream_id in conn.writable_prioritized() {
+    ///     // Stream is writable, write some data.
+    ///     if let Ok(written) = conn.stream_send(stream_id, &buf, false) {
+    ///         println!("Written {} bytes on stream {}", written, stream_id);
+    ///     }
+    /// }
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    ///
+    /// [`stream_priority()`]: struct.Connection.html#method.stream_priority
+    #[inline]
+    pub fn writable_prioritized(&mut self) -> StreamIter {
+        if self.tx_cap == 0 {
+            return StreamIter::default();
+        }
+
+        self.streams.writable_prioritized()
+    }
+
+    /// Returns an iterator over streams that can be written in priority order.
+    ///
+    /// The priority order is based on RFC 9218 scheduling recommendations.
+    /// Stream priority can be controlled using [`stream_priority()`].
+    ///
+    /// This is a non-mutable equivalent to [`writable_prioritized()`]. Since
+    /// it does not change internal state, it may break fairness requirements.
+    ///
+    /// [`writable_prioritized()`]: struct.Connection.html#method.writable_prioritized
+    #[inline]
+    pub fn peek_writable_prioritized(&mut self) -> StreamIter {
+        if self.tx_cap == 0 {
+            return StreamIter::default();
+        }
+
+        self.streams.peek_writable_prioritized()
     }
 
     /// Returns the maximum possible size of egress UDP payloads.
@@ -6514,7 +6598,7 @@ impl Connection {
     /// a new one otherwise.
     fn get_or_create_stream(
         &mut self, id: u64, local: bool,
-    ) -> Result<&mut stream::Stream> {
+    ) -> Result<Arc<stream::Stream>> {
         self.streams.get_or_create(
             id,
             &self.local_transport_params,
@@ -6611,7 +6695,8 @@ impl Connection {
                 let was_readable = stream.is_readable();
 
                 let max_off_delta =
-                    stream.recv.reset(error_code, final_size)? as u64;
+                    stream.recv.lock().unwrap().reset(error_code, final_size)?
+                        as u64;
 
                 if max_off_delta > max_rx_data_left {
                     return Err(Error::FlowControl);
@@ -6656,7 +6741,8 @@ impl Connection {
                 let was_writable = stream.is_writable();
 
                 // Try stopping the stream.
-                if let Ok((final_size, unsent)) = stream.send.stop(error_code) {
+                let res = stream.send.lock().unwrap().stop(error_code);
+                if let Ok((final_size, unsent)) = res {
                     // Claw back some flow control allowance from data that was
                     // buffered but not actually sent before the stream was
                     // reset.
@@ -6679,7 +6765,12 @@ impl Connection {
 
             frame::Frame::Crypto { data } => {
                 // Push the data to the stream so it can be re-ordered.
-                self.pkt_num_spaces[epoch].crypto_stream.recv.write(data)?;
+                self.pkt_num_spaces[epoch]
+                    .crypto_stream
+                    .recv
+                    .lock()
+                    .unwrap()
+                    .write(data)?;
 
                 // Feed crypto data to the TLS state, if there's data
                 // available at the expected offset.
@@ -6689,7 +6780,9 @@ impl Connection {
 
                 let stream = &mut self.pkt_num_spaces[epoch].crypto_stream;
 
-                while let Ok((read, _)) = stream.recv.emit(&mut crypto_buf) {
+                while let Ok((read, _)) =
+                    stream.recv.lock().unwrap().emit(&mut crypto_buf)
+                {
                     let recv_buf = &crypto_buf[..read];
                     self.handshake.provide_data(level, recv_buf)?;
                 }
@@ -6731,8 +6824,9 @@ impl Connection {
                 };
 
                 // Check for the connection-level flow control limit.
-                let max_off_delta =
-                    data.max_off().saturating_sub(stream.recv.max_off());
+                let max_off_delta = data
+                    .max_off()
+                    .saturating_sub(stream.recv.lock().unwrap().max_off());
 
                 if max_off_delta > max_rx_data_left {
                     return Err(Error::FlowControl);
@@ -6742,7 +6836,7 @@ impl Connection {
 
                 let was_draining = stream.is_draining();
 
-                stream.recv.write(data)?;
+                stream.recv.lock().unwrap().write(data)?;
 
                 if !was_readable && stream.is_readable() {
                     self.streams.mark_readable(stream_id, true);
@@ -6797,15 +6891,15 @@ impl Connection {
 
                 let was_flushable = stream.is_flushable();
 
-                stream.send.update_max_data(max);
+                stream.send.lock().unwrap().update_max_data(max);
 
                 let writable = stream.is_writable();
 
                 // If the stream is now flushable push it to the flushable queue,
                 // but only if it wasn't already queued.
                 if stream.is_flushable() && !was_flushable {
-                    let urgency = stream.urgency;
-                    let incremental = stream.incremental;
+                    let urgency = stream.urgency.load(Ordering::SeqCst);
+                    let incremental = stream.incremental.load(Ordering::SeqCst);
                     self.streams.push_flushable(stream_id, urgency, incremental);
                 }
 
@@ -10804,6 +10898,9 @@ mod tests {
         let mut pipe = testing::Pipe::new().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
+        assert_eq!(pipe.client.stream_priority(8, 1, true), Ok(()));
+        assert_eq!(pipe.client.stream_priority(0, 1, true), Ok(()));
+        assert_eq!(pipe.client.stream_priority(4, 1, true), Ok(()));
         assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
         assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
         assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));

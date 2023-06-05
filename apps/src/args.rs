@@ -442,6 +442,7 @@ Options:
   --qpack-blocked-streams STREAMS   Limit of streams that can be blocked while decoding. Any value other that 0 is currently unsupported.
   --disable-gso               Disable GSO (linux only).
   --disable-pacing            Disable pacing (linux only).
+  --writable_prioritized      Use writable_prioritized StreamIter.
   -h --help                   Show this screen.
 ";
 
@@ -455,6 +456,7 @@ pub struct ServerArgs {
     pub key: String,
     pub disable_gso: bool,
     pub disable_pacing: bool,
+    pub writable_prioritized: bool,
 }
 
 impl Args for ServerArgs {
@@ -469,6 +471,7 @@ impl Args for ServerArgs {
         let key = args.get_str("--key").to_string();
         let disable_gso = args.get_bool("--disable-gso");
         let disable_pacing = args.get_bool("--disable-pacing");
+        let writable_prioritized = args.get_bool("--writable_prioritized");
 
         ServerArgs {
             listen,
@@ -479,6 +482,7 @@ impl Args for ServerArgs {
             key,
             disable_gso,
             disable_pacing,
+            writable_prioritized,
         }
     }
 }

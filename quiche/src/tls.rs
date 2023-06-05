@@ -1051,7 +1051,14 @@ extern fn add_handshake_data(
             &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
     };
 
-    if space.crypto_stream.send.write(buf, false).is_err() {
+    if space
+        .crypto_stream
+        .send
+        .lock()
+        .unwrap()
+        .write(buf, false)
+        .is_err()
+    {
         return 0;
     }
 

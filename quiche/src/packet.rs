@@ -910,6 +910,7 @@ impl PktNumSpace {
                 true,
                 true,
                 stream::MAX_STREAM_WINDOW,
+                0, // dummy
             ),
         }
     }
@@ -921,6 +922,7 @@ impl PktNumSpace {
             true,
             true,
             stream::MAX_STREAM_WINDOW,
+            0, // dummy
         );
 
         self.ack_elicited = false;
