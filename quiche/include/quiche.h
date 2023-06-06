@@ -674,7 +674,7 @@ void quiche_conn_free(quiche_conn *conn);
 //
 
 // List of ALPN tokens of supported HTTP/3 versions.
-#define QUICHE_H3_APPLICATION_PROTOCOL "\x02h3\x05h3-29\x05h3-28\x05h3-27"
+#define QUICHE_H3_APPLICATION_PROTOCOL "\x02h3"
 
 enum quiche_h3_error {
     // There is no error or no work to do
