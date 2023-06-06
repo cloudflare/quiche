@@ -682,7 +682,24 @@ pub extern fn quiche_conn_set_session(
 ) -> c_int {
     let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
 
+    #[allow(deprecated)]
     match conn.set_session(buf) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_set_session_and_params(
+    conn: &mut Connection, session_buf: *const u8, session_buf_len: size_t,
+    params_buf: *const u8, params_buf_len: size_t,
+) -> c_int {
+    let session_buf =
+        unsafe { slice::from_raw_parts(session_buf, session_buf_len) };
+    let params_buf = unsafe { slice::from_raw_parts(params_buf, params_buf_len) };
+
+    match conn.set_session_and_params((session_buf, params_buf)) {
         Ok(_) => 0,
 
         Err(e) => e.to_c() as c_int,
@@ -1009,6 +1026,7 @@ pub extern fn quiche_conn_peer_cert(
 pub extern fn quiche_conn_session(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
+    #[allow(deprecated)]
     match conn.session() {
         Some(session) => {
             *out = session.as_ptr();
@@ -1016,6 +1034,26 @@ pub extern fn quiche_conn_session(
         },
 
         None => *out_len = 0,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_session_and_params(
+    conn: &Connection, session_out: &mut *const u8, session_out_len: &mut size_t,
+    params_out: &mut *const u8, params_out_len: &mut size_t,
+) {
+    match conn.session_and_params() {
+        Some(session_and_params) => {
+            *session_out = session_and_params.0.as_ptr();
+            *session_out_len = session_and_params.0.len();
+            *params_out = session_and_params.1.as_ptr();
+            *params_out_len = session_and_params.1.len();
+        },
+
+        None => {
+            *session_out_len = 0;
+            *params_out_len = 0;
+        },
     }
 }
 

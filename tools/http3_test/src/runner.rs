@@ -127,6 +127,7 @@ pub fn run(
 
     if let Some(session_file) = &session_file {
         if let Ok(session) = std::fs::read(session_file) {
+            #[allow(deprecated)]
             conn.set_session(&session).ok();
         }
     }
@@ -223,6 +224,7 @@ pub fn run(
             }
 
             if let Some(session_file) = session_file {
+                #[allow(deprecated)]
                 if let Some(session) = conn.session() {
                     std::fs::write(session_file, session).ok();
                 }
@@ -421,6 +423,7 @@ pub fn run(
             }
 
             if let Some(session_file) = session_file {
+                #[allow(deprecated)]
                 if let Some(session) = conn.session() {
                     std::fs::write(session_file, session).ok();
                 }

@@ -896,6 +896,8 @@ pub struct ExData<'a> {
 
     pub session: &'a mut Option<Vec<u8>>,
 
+    pub session_and_params: &'a mut Option<(Vec<u8>, Vec<u8>)>,
+
     pub local_error: &'a mut Option<super::ConnectionError>,
 
     pub keylog: Option<&'a mut Box<dyn std::io::Write + Send + Sync>>,
@@ -1213,6 +1215,7 @@ extern fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
     }
 
     *ex_data.session = Some(buffer);
+    *ex_data.session_and_params = Some((session_bytes, peer_params.to_vec()));
 
     // Prevent handshake from being freed, as we still need it.
     std::mem::forget(handshake);

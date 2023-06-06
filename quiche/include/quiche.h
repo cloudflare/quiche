@@ -308,8 +308,11 @@ bool quiche_conn_set_qlog_path(quiche_conn *conn, const char *path,
 void quiche_conn_set_qlog_fd(quiche_conn *conn, int fd, const char *log_title,
                              const char *log_desc);
 
-// Configures the given session for resumption.
+// Configures the given session for resumption.This function is deprecated, use quiche_conn_set_session_and_params.
 int quiche_conn_set_session(quiche_conn *conn, const uint8_t *buf, size_t buf_len);
+
+// Configures the given session and params for resumption.
+int quiche_conn_set_session_and_params(quiche_conn *conn, const uint8_t *session_buf, size_t session_buf_len, const uint8_t *params_buf, size_t params_buf_len);
 
 typedef struct {
     // The remote address the packet was received from.
@@ -429,8 +432,11 @@ void quiche_conn_application_proto(const quiche_conn *conn, const uint8_t **out,
 // Returns the peer's leaf certificate (if any) as a DER-encoded buffer.
 void quiche_conn_peer_cert(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
-// Returns the serialized cryptographic session for the connection.
+// Returns the serialized cryptographic session for the connection. This function is deprecated, use quiche_conn_session_and_params.
 void quiche_conn_session(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
+
+// Returns the serialized cryptographic session and params for the connection.
+void quiche_conn_session_and_params(const quiche_conn *conn, const uint8_t **session_out, size_t *session_out_len, const uint8_t **params_out, size_t *params_out_len);
 
 // Returns true if the connection handshake is complete.
 bool quiche_conn_is_established(const quiche_conn *conn);

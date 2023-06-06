@@ -1236,11 +1236,18 @@ pub struct Connection {
     /// TLS handshake state.
     handshake: tls::Handshake,
 
-    /// Serialized TLS session buffer.
+    /// Serialized TLS session buffer that combines the session and transport
+    /// params.
     ///
     /// This field is populated when a new session ticket is processed on the
     /// client. On the server this is empty.
     session: Option<Vec<u8>>,
+
+    /// Serialized TLS session buffer.
+    ///
+    /// This field is populated when a new session ticket is processed on the
+    /// client. On the server this is empty.
+    session_and_params: Option<(Vec<u8>, Vec<u8>)>,
 
     /// The configuration for recovery.
     recovery_config: recovery::RecoveryConfig,
@@ -1738,6 +1745,8 @@ impl Connection {
 
             session: None,
 
+            session_and_params: None,
+
             recovery_config,
 
             paths,
@@ -1998,7 +2007,7 @@ impl Connection {
         self.qlog.streamer = Some(streamer);
     }
 
-    /// Configures the given session for resumption.
+    /// Configures the given session and transport params for resumption.
     ///
     /// On the client, this can be used to offer the given serialized session,
     /// as returned by [`session()`], for resumption.
@@ -2008,19 +2017,38 @@ impl Connection {
     ///
     /// [`session()`]: struct.Connection.html#method.session
     #[inline]
+    #[deprecated(note = "Use set_session_and_params()")]
     pub fn set_session(&mut self, session: &[u8]) -> Result<()> {
         let mut b = octets::Octets::with_slice(session);
 
         let session_len = b.get_u64()? as usize;
         let session_bytes = b.get_bytes(session_len)?;
 
-        self.handshake.set_session(session_bytes.as_ref())?;
-
         let raw_params_len = b.get_u64()? as usize;
         let raw_params_bytes = b.get_bytes(raw_params_len)?;
+        self.set_session_and_params((
+            session_bytes.as_ref(),
+            raw_params_bytes.as_ref(),
+        ))
+    }
+
+    /// Configures the given session and transport params for resumption.
+    ///
+    /// On the client, this can be used to offer the given serialized session,
+    /// as returned by [`session_and_params()`], for resumption.
+    ///
+    /// This must only be called immediately after creating a connection, that
+    /// is, before any packet is sent or received.
+    ///
+    /// [`session_and_params()`]: struct.Connection.html#method.session_and_params
+    #[inline]
+    pub fn set_session_and_params(
+        &mut self, session_and_params: (&[u8], &[u8]),
+    ) -> Result<()> {
+        self.handshake.set_session(session_and_params.0)?;
 
         let peer_params =
-            TransportParams::decode(raw_params_bytes.as_ref(), self.is_server)?;
+            TransportParams::decode(session_and_params.1, self.is_server)?;
 
         self.process_peer_transport_params(peer_params)?;
 
@@ -6063,8 +6091,24 @@ impl Connection {
     ///
     /// [`set_session()`]: struct.Connection.html#method.set_session
     #[inline]
+    #[deprecated(note = "Use session_and_params()")]
     pub fn session(&self) -> Option<&[u8]> {
         self.session.as_deref()
+    }
+
+    /// Returns the serialized cryptographic session and  transport params
+    /// for the connection.
+    ///
+    /// This can be used by a client to cache a connection's session and
+    /// transport params, and resume it later using the
+    /// [`set_session_and_params()`] method.
+    ///
+    /// [`set_session_and_params()`]: struct.Connection.html#method.set_session_and_params
+    #[inline]
+    pub fn session_and_params(&self) -> Option<(&[u8], &[u8])> {
+        self.session_and_params
+            .as_ref()
+            .map(|sp| (sp.0.as_slice(), sp.1.as_slice()))
     }
 
     /// Returns the source connection ID.
@@ -6390,6 +6434,8 @@ impl Connection {
             pkt_num_spaces: &mut self.pkt_num_spaces,
 
             session: &mut self.session,
+
+            session_and_params: &mut self.session_and_params,
 
             local_error: &mut self.local_error,
 
@@ -8814,7 +8860,7 @@ mod tests {
         assert!(!pipe.server.is_resumed());
 
         // Extract session,
-        let session = pipe.client.session().unwrap();
+        let session_and_params = pipe.client.session_and_params().unwrap();
 
         // Configure session on new connection and perform handshake.
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -8835,7 +8881,10 @@ mod tests {
 
         let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
 
-        assert_eq!(pipe.client.set_session(session), Ok(()));
+        assert_eq!(
+            pipe.client.set_session_and_params(session_and_params),
+            Ok(())
+        );
         assert_eq!(pipe.handshake(), Ok(()));
 
         assert!(pipe.client.is_established());
@@ -8895,11 +8944,14 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
 
         // Extract session,
-        let session = pipe.client.session().unwrap();
+        let session_and_params = pipe.client.session_and_params().unwrap();
 
         // Configure session on new connection.
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(session), Ok(()));
+        assert_eq!(
+            pipe.client.set_session_and_params(session_and_params),
+            Ok(())
+        );
 
         // Client sends initial flight.
         let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -8956,11 +9008,14 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
 
         // Extract session,
-        let session = pipe.client.session().unwrap();
+        let session_and_params = pipe.client.session_and_params().unwrap();
 
         // Configure session on new connection.
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(session), Ok(()));
+        assert_eq!(
+            pipe.client.set_session_and_params(session_and_params),
+            Ok(())
+        );
 
         // Client sends initial flight.
         let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -9027,11 +9082,14 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
 
         // Extract session,
-        let session = pipe.client.session().unwrap();
+        let session_and_params = pipe.client.session_and_params().unwrap();
 
         // Configure session on new connection.
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(session), Ok(()));
+        assert_eq!(
+            pipe.client.set_session_and_params(session_and_params),
+            Ok(())
+        );
 
         // Client sends initial flight.
         pipe.client.send(&mut buf).unwrap();
@@ -9148,11 +9206,14 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
 
         // Extract session,
-        let session = pipe.client.session().unwrap();
+        let session_and_params = pipe.client.session_and_params().unwrap();
 
         // Configure session on new connection.
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(session), Ok(()));
+        assert_eq!(
+            pipe.client.set_session_and_params(session_and_params),
+            Ok(())
+        );
 
         // Client sends initial flight.
         let (len, _) = pipe.client.send(&mut buf).unwrap();

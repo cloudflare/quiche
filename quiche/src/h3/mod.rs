@@ -3200,11 +3200,14 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
 
         // Extract session,
-        let session = pipe.client.session().unwrap();
+        let session_and_params = pipe.client.session_and_params().unwrap();
 
         // Configure session on new connection.
         let mut pipe = crate::testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(session), Ok(()));
+        assert_eq!(
+            pipe.client.set_session_and_params(session_and_params),
+            Ok(())
+        );
 
         // Can't create an H3 connection until the QUIC connection is determined
         // to have made sufficient early data progress.
