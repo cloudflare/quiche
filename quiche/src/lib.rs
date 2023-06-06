@@ -418,12 +418,7 @@ use smallvec::SmallVec;
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
 
 /// Supported QUIC versions.
-///
-/// Note that the older ones might not be fully supported.
 const PROTOCOL_VERSION_V1: u32 = 0x0000_0001;
-const PROTOCOL_VERSION_DRAFT27: u32 = 0xff00_001b;
-const PROTOCOL_VERSION_DRAFT28: u32 = 0xff00_001c;
-const PROTOCOL_VERSION_DRAFT29: u32 = 0xff00_001d;
 
 /// The maximum length of a connection ID.
 pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
@@ -1569,13 +1564,7 @@ pub fn retry(
 /// Returns true if the given protocol version is supported.
 #[inline]
 pub fn version_is_supported(version: u32) -> bool {
-    matches!(
-        version,
-        PROTOCOL_VERSION_V1 |
-            PROTOCOL_VERSION_DRAFT27 |
-            PROTOCOL_VERSION_DRAFT28 |
-            PROTOCOL_VERSION_DRAFT29
-    )
+    matches!(version, PROTOCOL_VERSION_V1)
 }
 
 /// Pushes a frame to the output packet if there is enough space.
@@ -2676,10 +2665,7 @@ impl Connection {
         if self.is_server && !self.got_peer_conn_id {
             self.set_initial_dcid(hdr.scid.clone(), None, recv_pid)?;
 
-            if !self.did_retry &&
-                (self.version >= PROTOCOL_VERSION_DRAFT28 ||
-                    self.version == PROTOCOL_VERSION_V1)
-            {
+            if !self.did_retry {
                 self.local_transport_params
                     .original_destination_connection_id =
                     Some(hdr.dcid.to_vec().into());
@@ -6300,58 +6286,46 @@ impl Connection {
     fn parse_peer_transport_params(
         &mut self, peer_params: TransportParams,
     ) -> Result<()> {
-        if self.version >= PROTOCOL_VERSION_DRAFT28 ||
-            self.version == PROTOCOL_VERSION_V1
-        {
-            // Validate initial_source_connection_id.
-            match &peer_params.initial_source_connection_id {
-                Some(v) if v != &self.destination_id() =>
+        // Validate initial_source_connection_id.
+        match &peer_params.initial_source_connection_id {
+            Some(v) if v != &self.destination_id() =>
+                return Err(Error::InvalidTransportParam),
+
+            Some(_) => (),
+
+            // initial_source_connection_id must be sent by
+            // both endpoints.
+            None => return Err(Error::InvalidTransportParam),
+        }
+
+        // Validate original_destination_connection_id.
+        if let Some(odcid) = &self.odcid {
+            match &peer_params.original_destination_connection_id {
+                Some(v) if v != odcid =>
                     return Err(Error::InvalidTransportParam),
 
                 Some(_) => (),
 
-                // initial_source_connection_id must be sent by
-                // both endpoints.
+                // original_destination_connection_id must be
+                // sent by the server.
+                None if !self.is_server =>
+                    return Err(Error::InvalidTransportParam),
+
+                None => (),
+            }
+        }
+
+        // Validate retry_source_connection_id.
+        if let Some(rscid) = &self.rscid {
+            match &peer_params.retry_source_connection_id {
+                Some(v) if v != rscid =>
+                    return Err(Error::InvalidTransportParam),
+
+                Some(_) => (),
+
+                // retry_source_connection_id must be sent by
+                // the server.
                 None => return Err(Error::InvalidTransportParam),
-            }
-
-            // Validate original_destination_connection_id.
-            if let Some(odcid) = &self.odcid {
-                match &peer_params.original_destination_connection_id {
-                    Some(v) if v != odcid =>
-                        return Err(Error::InvalidTransportParam),
-
-                    Some(_) => (),
-
-                    // original_destination_connection_id must be
-                    // sent by the server.
-                    None if !self.is_server =>
-                        return Err(Error::InvalidTransportParam),
-
-                    None => (),
-                }
-            }
-
-            // Validate retry_source_connection_id.
-            if let Some(rscid) = &self.rscid {
-                match &peer_params.retry_source_connection_id {
-                    Some(v) if v != rscid =>
-                        return Err(Error::InvalidTransportParam),
-
-                    Some(_) => (),
-
-                    // retry_source_connection_id must be sent by
-                    // the server.
-                    None => return Err(Error::InvalidTransportParam),
-                }
-            }
-        } else {
-            // Legacy validation of the original connection ID when
-            // stateless retry is performed, for drafts < 28.
-            if self.did_retry &&
-                peer_params.original_destination_connection_id != self.odcid
-            {
-                return Err(Error::InvalidTransportParam);
             }
         }
 
@@ -9074,23 +9048,6 @@ mod tests {
         assert_eq!(pipe.server.undecryptable_pkts.len(), 0);
 
         assert!(pipe.server.is_closed());
-    }
-
-    #[test]
-    /// Tests that a pre-v1 client can connect to a v1-enabled server, by making
-    /// the server downgrade to the pre-v1 version.
-    fn handshake_downgrade_v1() {
-        let mut config = Config::new(PROTOCOL_VERSION_DRAFT29).unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.version, PROTOCOL_VERSION_DRAFT29);
-        assert_eq!(pipe.server.version, PROTOCOL_VERSION_DRAFT29);
     }
 
     #[test]

@@ -61,9 +61,8 @@ const H3_MESSAGE_ERROR: u64 = 0x10E;
 ///
 /// This module contains constants and functions for working with ALPN.
 pub mod alpns {
-    pub const HTTP_09: [&[u8]; 5] =
-        [b"hq-interop", b"hq-29", b"hq-28", b"hq-27", b"http/0.9"];
-    pub const HTTP_3: [&[u8]; 4] = [b"h3", b"h3-29", b"h3-28", b"h3-27"];
+    pub const HTTP_09: [&[u8]; 2] = [b"hq-interop", b"http/0.9"];
+    pub const HTTP_3: [&[u8]; 1] = [b"h3"];
 }
 
 pub struct PartialRequest {
