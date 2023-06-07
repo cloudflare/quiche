@@ -666,6 +666,9 @@ ssize_t quiche_conn_send_ack_eliciting_on_path(quiche_conn *conn,
                            const struct sockaddr *local, size_t local_len,
                            const struct sockaddr *peer, size_t peer_len);
 
+// Returns the number of source Connection IDs that are retired.
+size_t quiche_conn_retired_scids(quiche_conn *conn);
+
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
 

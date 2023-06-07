@@ -1347,6 +1347,11 @@ pub extern fn quiche_conn_send_quantum(conn: &Connection) -> size_t {
     conn.send_quantum() as size_t
 }
 
+#[no_mangle]
+pub extern fn quiche_conn_retired_scids(conn: &Connection) -> size_t {
+    conn.retired_scids() as size_t
+}
+
 fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
     match addr.sa_family as i32 {
         AF_INET => {
