@@ -887,32 +887,6 @@ pub extern fn quiche_conn_is_readable(conn: &Connection) -> bool {
     conn.is_readable()
 }
 
-struct AppData(*mut c_void);
-unsafe impl Send for AppData {}
-unsafe impl Sync for AppData {}
-
-#[no_mangle]
-pub extern fn quiche_conn_stream_init_application_data(
-    conn: &mut Connection, stream_id: u64, data: *mut c_void,
-) -> c_int {
-    match conn.stream_init_application_data(stream_id, AppData(data)) {
-        Ok(_) => 0,
-
-        Err(e) => e.to_c() as c_int,
-    }
-}
-
-#[no_mangle]
-pub extern fn quiche_conn_stream_application_data(
-    conn: &mut Connection, stream_id: u64,
-) -> *mut c_void {
-    match conn.stream_application_data(stream_id) {
-        Some(v) => v.downcast_mut::<AppData>().unwrap().0,
-
-        None => ptr::null_mut(),
-    }
-}
-
 #[no_mangle]
 pub extern fn quiche_conn_close(
     conn: &mut Connection, app: bool, err: u64, reason: *const u8,

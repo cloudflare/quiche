@@ -475,19 +475,6 @@ bool quiche_conn_local_error(const quiche_conn *conn,
                              const uint8_t **reason,
                              size_t *reason_len);
 
-// Initializes the stream's application data.
-//
-// Stream data can only be initialized once. Additional calls to this method
-// will fail.
-//
-// Note that the application is responsible for freeing the data.
-int quiche_conn_stream_init_application_data(quiche_conn *conn,
-                                             uint64_t stream_id,
-                                             void *data);
-
-// Returns the stream's application data, if any was initialized.
-void *quiche_conn_stream_application_data(quiche_conn *conn, uint64_t stream_id);
-
 // Fetches the next stream from the given iterator. Returns false if there are
 // no more elements in the iterator.
 bool quiche_stream_iter_next(quiche_stream_iter *iter, uint64_t *stream_id);

@@ -657,9 +657,6 @@ pub struct Stream {
     /// Whether the stream was created by the local endpoint.
     pub local: bool,
 
-    /// Application data.
-    pub data: Option<Box<dyn std::any::Any + Send + Sync>>,
-
     /// The stream's urgency (lower is better). Default is `DEFAULT_URGENCY`.
     pub urgency: u8,
 
@@ -679,7 +676,6 @@ impl Stream {
             send_lowat: 1,
             bidi,
             local,
-            data: None,
             urgency: DEFAULT_URGENCY,
             incremental: true,
         }
