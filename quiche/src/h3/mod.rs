@@ -1831,7 +1831,7 @@ impl Connection {
             stream::HTTP3_CONTROL_STREAM_TYPE_ID |
             stream::QPACK_ENCODER_STREAM_TYPE_ID |
             stream::QPACK_DECODER_STREAM_TYPE_ID => {
-                conn.stream_priority(stream_id, 0, true)?;
+                conn.stream_priority(stream_id, 0, false)?;
             },
 
             // TODO: Server push
@@ -1839,7 +1839,7 @@ impl Connection {
 
             // Anything else is a GREASE stream, so make it the least important.
             _ => {
-                conn.stream_priority(stream_id, 255, true)?;
+                conn.stream_priority(stream_id, 255, false)?;
             },
         }
 
