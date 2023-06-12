@@ -745,6 +745,7 @@ pub fn is_bidi(stream_id: u64) -> bool {
 #[derive(Default)]
 pub struct StreamIter {
     streams: SmallVec<[u64; 8]>,
+    index: usize,
 }
 
 impl StreamIter {
@@ -752,6 +753,7 @@ impl StreamIter {
     fn from(streams: &StreamIdHashSet) -> Self {
         StreamIter {
             streams: streams.iter().copied().collect(),
+            index: 0,
         }
     }
 }
@@ -761,14 +763,16 @@ impl Iterator for StreamIter {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.streams.pop()
+        let v = self.streams.get(self.index)?;
+        self.index += 1;
+        Some(*v)
     }
 }
 
 impl ExactSizeIterator for StreamIter {
     #[inline]
     fn len(&self) -> usize {
-        self.streams.len()
+        self.streams.len() - self.index
     }
 }
 
