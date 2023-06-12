@@ -4875,9 +4875,9 @@ mod tests {
         );
 
         // Clear the writable stream queue.
-        assert_eq!(s.pipe.client.stream_writable_next(), Some(10));
         assert_eq!(s.pipe.client.stream_writable_next(), Some(2));
         assert_eq!(s.pipe.client.stream_writable_next(), Some(6));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(10));
         assert_eq!(s.pipe.client.stream_writable_next(), None);
 
         s.advance().ok();
@@ -4941,7 +4941,8 @@ mod tests {
         s.advance().ok();
 
         // Now we can send the request.
-        assert_eq!(s.pipe.client.stream_writable_next(), Some(0));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(2));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(6));
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
     }
 
@@ -5120,10 +5121,10 @@ mod tests {
         let _ = s.send_response(stream, false).unwrap();
 
         // Clear the writable stream queue.
-        assert_eq!(s.pipe.server.stream_writable_next(), Some(stream));
-        assert_eq!(s.pipe.server.stream_writable_next(), Some(11));
         assert_eq!(s.pipe.server.stream_writable_next(), Some(3));
         assert_eq!(s.pipe.server.stream_writable_next(), Some(7));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(11));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(stream));
         assert_eq!(s.pipe.server.stream_writable_next(), None);
 
         // The body must be larger than the cwnd would allow.
@@ -5192,10 +5193,10 @@ mod tests {
         let _ = s.send_response(stream, false).unwrap();
 
         // Clear the writable stream queue.
-        assert_eq!(s.pipe.server.stream_writable_next(), Some(stream));
-        assert_eq!(s.pipe.server.stream_writable_next(), Some(11));
         assert_eq!(s.pipe.server.stream_writable_next(), Some(3));
         assert_eq!(s.pipe.server.stream_writable_next(), Some(7));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(11));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(stream));
         assert_eq!(s.pipe.server.stream_writable_next(), None);
 
         // The body is large enough to fill the cwnd, except for enough bytes
@@ -5330,9 +5331,9 @@ mod tests {
         );
 
         // Clear the writable stream queue.
-        assert_eq!(s.pipe.client.stream_writable_next(), Some(10));
         assert_eq!(s.pipe.client.stream_writable_next(), Some(2));
         assert_eq!(s.pipe.client.stream_writable_next(), Some(6));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(10));
         assert_eq!(s.pipe.client.stream_writable_next(), None);
 
         s.advance().ok();
