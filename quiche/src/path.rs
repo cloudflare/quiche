@@ -1109,28 +1109,6 @@ impl PathMap {
         Ok(())
     }
 
-    /// Handles potential connection migration.
-    pub fn on_peer_migrated(
-        &mut self, new_pid: usize, disable_dcid_reuse: bool,
-    ) -> Result<()> {
-        let active_path_id = self.get_active_path_id()?;
-
-        if active_path_id == new_pid {
-            return Ok(());
-        }
-
-        self.set_active_path(new_pid)?;
-
-        let no_spare_dcid = self.get_mut(new_pid)?.active_dcid_seq.is_none();
-
-        if no_spare_dcid && !disable_dcid_reuse {
-            self.get_mut(new_pid)?.active_dcid_seq =
-                self.get_mut(active_path_id)?.active_dcid_seq;
-        }
-
-        Ok(())
-    }
-
     /// Sets the provided `status` on he path identified by `path_id`.
     pub fn set_path_status(
         &mut self, path_id: usize, status: PathStatus,
