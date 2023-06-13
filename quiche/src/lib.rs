@@ -565,7 +565,7 @@ pub enum Error {
     KeyUpdate,
 
     /// A client only operation
-    ClientOnlyOperation
+    ClientOnlyOperation,
 }
 
 impl Error {
@@ -1775,9 +1775,15 @@ impl Connection {
             }
         }
 
-        // Only servers support sending a preferred address in the transport paramters
-        if !is_server && config.local_transport_params.preferred_address_params.is_some() {
-            return Err(Error::InvalidTransportParam)
+        // Only servers support sending a preferred address in the transport
+        // paramters
+        if !is_server &&
+            config
+                .local_transport_params
+                .preferred_address_params
+                .is_some()
+        {
+            return Err(Error::InvalidTransportParam);
         }
 
         let mut conn = Connection {
@@ -5602,11 +5608,12 @@ impl Connection {
         // If the active path failed, try to find a new candidate.
         if self.paths.get_active_path_id().is_err() {
             match self.paths.find_candidate_path() {
-                Some(pid) =>
-                    if self.set_active_path(pid, now).is_err() {
+                Some(pid) => {
+                    if self.paths.set_active_path(pid).is_err() {
                         // The connection cannot continue.
                         self.closed = true;
-                    },
+                    }
+                },
 
                 // The connection cannot continue.
                 None => self.closed = true,
@@ -6295,14 +6302,15 @@ impl Connection {
     pub fn is_server(&self) -> bool {
         self.is_server
     }
-    
+
     /// Returns the server's preferred address which is a tuple with a
     /// V4 socket address, a connection ID and a stateless reset token.
     pub fn server_preferred_address_v4(
         &self,
     ) -> Result<Option<(SocketAddrV4, ConnectionId, u128)>> {
         if !self.is_server() {
-            Ok(self.peer_transport_params
+            Ok(self
+                .peer_transport_params
                 .preferred_address_params
                 .as_ref()
                 .map_or(None, |params| params.address_v4()))
@@ -6317,7 +6325,8 @@ impl Connection {
         &self,
     ) -> Result<Option<(SocketAddrV6, ConnectionId, u128)>> {
         if !self.is_server() {
-            Ok(self.peer_transport_params
+            Ok(self
+                .peer_transport_params
                 .preferred_address_params
                 .as_ref()
                 .map_or(None, |params| params.address_v6()))
@@ -6338,7 +6347,7 @@ impl Connection {
         {
             // Preferred address params should not be set if server is using
             // a zero-length connection ID, as these are incompatible.
-            return Err(Error::InvalidTransportParam)
+            return Err(Error::InvalidTransportParam);
         }
 
         let raw_params = TransportParams::encode(
@@ -6957,15 +6966,17 @@ impl Connection {
 
             frame::Frame::StreamDataBlocked { .. } => (),
 
-            frame::Frame::StreamsBlockedBidi { limit } =>
+            frame::Frame::StreamsBlockedBidi { limit } => {
                 if limit > MAX_STREAM_ID {
                     return Err(Error::InvalidFrame);
-                },
+                }
+            },
 
-            frame::Frame::StreamsBlockedUni { limit } =>
+            frame::Frame::StreamsBlockedUni { limit } => {
                 if limit > MAX_STREAM_ID {
                     return Err(Error::InvalidFrame);
-                },
+                }
+            },
 
             frame::Frame::NewConnectionId {
                 seq_num,
@@ -8002,15 +8013,13 @@ impl TransportParams {
                 /// ConnectionID: up to 20 bytes
                 /// Stateless Reset Token: 16 bytes
                 const PREFERRED_ADDRESS_PARAM_MAX_SIZE: usize = 61;
-        
+
                 let mut buffer = [0; PREFERRED_ADDRESS_PARAM_MAX_SIZE];
-                let written_to_buffer =
-                    PreferredAddressParams::encode(preferred_address_params, &mut buffer)?;
-                TransportParams::encode_param(
-                    &mut b,
-                    0x000d,
-                    written_to_buffer,
+                let written_to_buffer = PreferredAddressParams::encode(
+                    preferred_address_params,
+                    &mut buffer,
                 )?;
+                TransportParams::encode_param(&mut b, 0x000d, written_to_buffer)?;
                 b.put_bytes(&buffer[0..written_to_buffer])?;
             }
         }
@@ -8064,31 +8073,31 @@ impl TransportParams {
         );
 
         let preferred_address =
-        self.preferred_address_params.as_ref().map(|params| {
-            qlog::events::quic::PreferredAddress {
-                ip_v4: params
-                    .addr_v4
-                    .map(|sock_addr| sock_addr.ip().to_string())
+            self.preferred_address_params.as_ref().map(|params| {
+                qlog::events::quic::PreferredAddress {
+                    ip_v4: params
+                        .addr_v4
+                        .map(|sock_addr| sock_addr.ip().to_string())
+                        .unwrap_or_default(),
+                    ip_v6: params
+                        .addr_v6
+                        .map(|sock_addr| sock_addr.ip().to_string())
+                        .unwrap_or_default(),
+                    port_v4: params
+                        .addr_v4
+                        .map(|sock_addr| sock_addr.port())
+                        .unwrap_or(0),
+                    port_v6: params
+                        .addr_v6
+                        .map(|sock_addr| sock_addr.port())
+                        .unwrap_or(0),
+                    connection_id: format!("{:?}", params.connection_id),
+                    stateless_reset_token: qlog::HexSlice::maybe_string(
+                        self.original_destination_connection_id.as_ref(),
+                    )
                     .unwrap_or_default(),
-                ip_v6: params
-                    .addr_v6
-                    .map(|sock_addr| sock_addr.ip().to_string())
-                    .unwrap_or_default(),
-                port_v4: params
-                    .addr_v4
-                    .map(|sock_addr| sock_addr.port())
-                    .unwrap_or(0),
-                port_v6: params
-                    .addr_v6
-                    .map(|sock_addr| sock_addr.port())
-                    .unwrap_or(0),
-                connection_id: format!("{:?}", params.connection_id),
-                stateless_reset_token: qlog::HexSlice::maybe_string(
-                    self.original_destination_connection_id.as_ref(),
-                )
-                .unwrap_or_default(),
-            }
-        });
+                }
+            });
 
         EventData::TransportParametersSet(
             qlog::events::quic::TransportParametersSet {
@@ -8159,10 +8168,13 @@ impl PreferredAddressParams {
 
         let cid = b.get_bytes_with_varint_length()?.to_vec().into();
         let stateless_reset_token = u128::from_be_bytes(
-            b.get_bytes(16)?
-                .to_vec()
-                .try_into()
-                .unwrap(), // Since a 128 bit vector has just successfully been created above, this should never panic.
+            b.get_bytes(16)?.to_vec().try_into().unwrap(), /* Since a 128 bit
+                                                            * vector has just
+                                                            * successfully
+                                                            * been created
+                                                            * above, this
+                                                            * should never
+                                                            * panic. */
         );
 
         Ok(PreferredAddressParams::new(
@@ -8210,13 +8222,14 @@ impl PreferredAddressParams {
         Ok(addr_v6)
     }
 
-
     /// Encode the preferred address parameters into a buffer.
     ///
     /// # Arguments
     ///
-    /// * `preferred_address_params` - A reference to the preferred address parameters to be encoded.
-    /// * `buffer` - A reference to a buffer to encode the `preferred_address_params` into.
+    /// * `preferred_address_params` - A reference to the preferred address
+    ///   parameters to be encoded.
+    /// * `buffer` - A reference to a buffer to encode the
+    ///   `preferred_address_params` into.
     fn encode(
         preferred_address_params: &PreferredAddressParams, buffer: &mut [u8],
     ) -> Result<usize> {
@@ -8241,20 +8254,30 @@ impl PreferredAddressParams {
         b.put_varint(preferred_address_params.connection_id.len() as u64)?;
         b.put_bytes(&preferred_address_params.connection_id)?;
 
-        b.put_bytes(&preferred_address_params.stateless_reset_token.to_be_bytes())?;
+        b.put_bytes(
+            &preferred_address_params.stateless_reset_token.to_be_bytes(),
+        )?;
 
         Ok(b.off())
     }
 
     fn address_v4(&self) -> Option<(SocketAddrV4, ConnectionId, u128)> {
         self.addr_v4.map(|addr| {
-            (addr, ConnectionId::from_ref(self.connection_id.as_ref()), self.stateless_reset_token)
+            (
+                addr,
+                ConnectionId::from_ref(self.connection_id.as_ref()),
+                self.stateless_reset_token,
+            )
         })
     }
 
     fn address_v6(&self) -> Option<(SocketAddrV6, ConnectionId, u128)> {
         self.addr_v6.map(|addr| {
-            (addr, ConnectionId::from_ref(self.connection_id.as_ref()), self.stateless_reset_token)
+            (
+                addr,
+                ConnectionId::from_ref(self.connection_id.as_ref()),
+                self.stateless_reset_token,
+            )
         })
     }
 }
@@ -8269,7 +8292,8 @@ pub mod testing {
     }
 
     /// A utility to aid in `Pipe` creation.
-    /// This builder pattern is single use. Once the `PipeBuilder` is used to construct a `Pipe`, it cannot be built again.
+    /// This builder pattern is single use. Once the `PipeBuilder` is used to
+    /// construct a `Pipe`, it cannot be built again.
     #[derive(Default)]
     pub struct PipeBuilder {
         client_config: Option<Config>,
@@ -8297,31 +8321,38 @@ pub mod testing {
         }
 
         /// Set the client's source connection ID (SCID) length
-        pub fn client_scid_length(&mut self, client_scid_length: usize) -> &mut Self {
+        pub fn client_scid_length(
+            &mut self, client_scid_length: usize,
+        ) -> &mut Self {
             let _ = self.client_scid_length.insert(client_scid_length);
             self
         }
 
         /// Set the server's source connection ID (SCID) length
-        pub fn server_scid_length(&mut self, server_scid_length: usize) -> &mut Self {
+        pub fn server_scid_length(
+            &mut self, server_scid_length: usize,
+        ) -> &mut Self {
             let _ = self.server_scid_length.insert(server_scid_length);
             self
         }
 
-        /// Build a `Pipe` from the `PipeBuilder`. `build()` can only be executed once for every `PipeBuilder` instance.
-        /// Any values of the `PipeBuilder` struct that are set to None will be given default values.
-        /// Defaults:
+        /// Build a `Pipe` from the `PipeBuilder`. `build()` can only be
+        /// executed once for every `PipeBuilder` instance. Any values
+        /// of the `PipeBuilder` struct that are set to None will be given
+        /// default values. Defaults:
         /// - `client_scid_length`: 16
         /// - `server_scid_length`: 16
         /// - `client_config`: `Config::default()`
         /// - `server_config`: `Config::default()`
         pub fn build(&mut self) -> Result<Pipe> {
-            let mut client_scid = vec![0; self.client_scid_length.take().unwrap_or(16)];
+            let mut client_scid =
+                vec![0; self.client_scid_length.take().unwrap_or(16)];
             rand::rand_bytes(&mut client_scid[..]);
             let client_scid = ConnectionId::from_ref(&client_scid);
             let client_addr = Pipe::client_addr();
 
-            let mut server_scid = vec![0; self.server_scid_length.take().unwrap_or(16)];
+            let mut server_scid =
+                vec![0; self.server_scid_length.take().unwrap_or(16)];
             rand::rand_bytes(&mut server_scid[..]);
             let server_scid = ConnectionId::from_ref(&server_scid);
             let server_addr = Pipe::server_addr();
@@ -8401,7 +8432,8 @@ pub mod testing {
             })
         }
 
-        /// Creates 'pipe' using specified config for both client and server ends.
+        /// Creates 'pipe' using specified config for both client and server
+        /// ends.
         pub fn with_config_and_scid_lengths(
             config: &mut Config, client_scid_len: usize, server_scid_len: usize,
         ) -> Result<Pipe> {
@@ -8955,7 +8987,10 @@ mod tests {
             )
             .unwrap();
 
-        let mut pipe = testing::PipeBuilder::new().server_config(config).build().unwrap();
+        let mut pipe = testing::PipeBuilder::new()
+            .server_config(config)
+            .build()
+            .unwrap();
 
         assert_eq!(pipe.client.server_preferred_address_v4().unwrap(), None);
         assert_eq!(pipe.client.server_preferred_address_v6().unwrap(), None);
@@ -8979,8 +9014,14 @@ mod tests {
             ))
         );
 
-        assert_eq!(pipe.server.server_preferred_address_v4(), Err(Error::ClientOnlyOperation));
-        assert_eq!(pipe.server.server_preferred_address_v6(), Err(Error::ClientOnlyOperation));
+        assert_eq!(
+            pipe.server.server_preferred_address_v4(),
+            Err(Error::ClientOnlyOperation)
+        );
+        assert_eq!(
+            pipe.server.server_preferred_address_v6(),
+            Err(Error::ClientOnlyOperation)
+        );
     }
 
     #[test]
@@ -9036,7 +9077,8 @@ mod tests {
             testing::PipeBuilder::new()
                 .server_config(config)
                 .server_scid_length(0)
-                .build().err(),
+                .build()
+                .err(),
             Some(Error::InvalidTransportParam)
         );
     }
@@ -9056,7 +9098,7 @@ mod tests {
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
-        config.verify_peer(false); 
+        config.verify_peer(false);
         config.set_active_connection_id_limit(3);
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -9065,13 +9107,16 @@ mod tests {
         config.set_initial_max_streams_bidi(3);
 
         // Here is where we set the preferred addressing transport parameter
-        let preferred_addr_v4 = Some(SocketAddrV4::from_str("127.0.0.1:5678").unwrap());
+        let preferred_addr_v4 =
+            Some(SocketAddrV4::from_str("127.0.0.1:5678").unwrap());
         let preferred_addr_v6 = None;
-        // We need to make a pair of new connection IDs and reset tokens for the migration
-        // Connection ID/stateless-reset-token to be sent in the transport param from server -> client
+        // We need to make a pair of new connection IDs and reset tokens for the
+        // migration Connection ID/stateless-reset-token to be sent in the
+        // transport param from server -> client
         let (server_source_cid, server_source_token) =
             testing::create_cid_and_reset_token(16);
-        // Connection ID/stateless-reset-token to be sent separately using a NEW_CONNECTION_ID Frame from client -> server
+        // Connection ID/stateless-reset-token to be sent separately using a
+        // NEW_CONNECTION_ID Frame from client -> server
         let (client_source_cid, client_source_token) =
             testing::create_cid_and_reset_token(16);
         config
@@ -9083,74 +9128,122 @@ mod tests {
             )
             .unwrap();
 
-        // Create a pipe with default config for client, and custom config with preferred addressing for server
-        let mut pipe = testing::PipeBuilder::new().server_config(config).build().unwrap();
-        
+        // Create a pipe with default config for client, and custom config with
+        // preferred addressing for server
+        let mut pipe = testing::PipeBuilder::new()
+            .server_config(config)
+            .build()
+            .unwrap();
+
         assert_eq!(pipe.handshake(), Ok(()));
 
-        // Notify the client of its new source connection ID (SCID), this also advertises the ID to the server
-        // The server will automatically add it to its destination connection ID (DCID) list.
-        let _ = pipe.client.new_source_cid(&client_source_cid, client_source_token, true).unwrap();
+        // Notify the client of its new source connection ID (SCID), this also
+        // advertises the ID to the server The server will automatically
+        // add it to its destination connection ID (DCID) list.
+        let _ = pipe
+            .client
+            .new_source_cid(&client_source_cid, client_source_token, true)
+            .unwrap();
 
         // Forward the NEW_CONNECTION_ID Frame generated above over the pipe
         assert_eq!(pipe.advance(), Ok(()));
 
         // Get the values from the Preferred Address transport params
-        let preferred_address_params = pipe.client.peer_transport_params.preferred_address_params.clone().unwrap();
+        let preferred_address_params = pipe
+            .client
+            .peer_transport_params
+            .preferred_address_params
+            .clone()
+            .unwrap();
 
-        // Notify the client of its new DCID that came over the transport parameter for perferred addressing
-        let _ = pipe.client.ids.new_dcid(
-            preferred_address_params.connection_id,
-            1,
-            preferred_address_params.stateless_reset_token,
-            0,
-        ).unwrap();
+        // Notify the client of its new DCID that came over the transport
+        // parameter for perferred addressing
+        let _ = pipe
+            .client
+            .ids
+            .new_dcid(
+                preferred_address_params.connection_id,
+                1,
+                preferred_address_params.stateless_reset_token,
+                0,
+            )
+            .unwrap();
 
-        // Confirm that we have succesfully distributed a pair of Connection IDs to perform a connection migration
+        // Confirm that we have succesfully distributed a pair of Connection IDs
+        // to perform a connection migration
         assert_eq!(pipe.server.available_dcids(), 1);
         assert_eq!(pipe.client.available_dcids(), 1);
 
-        // Get the addresses of the new connection path. The server address will be changed to the server's preferred address, the client will stay the same
-        let preferred_server_address = std::net::SocketAddr::V4(preferred_address_params.addr_v4.unwrap());
+        // Get the addresses of the new connection path. The server address will
+        // be changed to the server's preferred address, the client will stay the
+        // same
+        let preferred_server_address =
+            std::net::SocketAddr::V4(preferred_address_params.addr_v4.unwrap());
         assert_eq!(preferred_address_params.addr_v6, None);
         let client_address_static = testing::Pipe::client_addr();
 
-        // The client and server probe the new path, the client then initiates migration over the new path
-        assert_eq!(pipe.client.probe_path(client_address_static, preferred_server_address), Ok(1));
+        // The client and server probe the new path, the client then initiates
+        // migration over the new path
+        assert_eq!(
+            pipe.client
+                .probe_path(client_address_static, preferred_server_address),
+            Ok(1)
+        );
         assert_eq!(pipe.advance(), Ok(()));
         assert_eq!(
             pipe.client.path_event_next(),
-            Some(PathEvent::Validated(client_address_static, preferred_server_address))
+            Some(PathEvent::Validated(
+                client_address_static,
+                preferred_server_address
+            ))
         );
         assert_eq!(pipe.client.path_event_next(), None);
         assert_eq!(
             pipe.server.path_event_next(),
-            Some(PathEvent::New(preferred_server_address, client_address_static))
+            Some(PathEvent::New(
+                preferred_server_address,
+                client_address_static
+            ))
         );
         assert_eq!(
             pipe.server.path_event_next(),
-            Some(PathEvent::Validated(preferred_server_address, client_address_static))
+            Some(PathEvent::Validated(
+                preferred_server_address,
+                client_address_static
+            ))
         );
         assert_eq!(
-            pipe.client.is_path_validated(client_address_static, preferred_server_address),
+            pipe.client.is_path_validated(
+                client_address_static,
+                preferred_server_address
+            ),
             Ok(true)
         );
         assert_eq!(
-            pipe.server.is_path_validated(preferred_server_address, client_address_static),
+            pipe.server.is_path_validated(
+                preferred_server_address,
+                client_address_static
+            ),
             Ok(true)
         );
         // The server can never initiates the connection migration.
         assert_eq!(
-            pipe.server.migrate(preferred_server_address, client_address_static),
+            pipe.server
+                .migrate(preferred_server_address, client_address_static),
             Err(Error::InvalidState)
         );
-        assert_eq!(pipe.client.migrate(client_address_static, preferred_server_address), Ok(1));
-        
+        assert_eq!(
+            pipe.client
+                .migrate(client_address_static, preferred_server_address),
+            Ok(1)
+        );
+
         // Queue data on stream 0
         assert_eq!(pipe.client.stream_send(0, b"data", false), Ok(4));
         // Send data
         assert_eq!(pipe.advance(), Ok(()));
-        // Confirm there is an unread stream, read from it, confirm there are no unread streams.
+        // Confirm there is an unread stream, read from it, confirm there are no
+        // unread streams.
         let mut buf = [0; "data".len()];
         assert_eq!(pipe.server.readable().next(), Some(0));
         assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((4, false)));
@@ -9159,51 +9252,74 @@ mod tests {
         // Check to ensure migration to the new preferred path has succeeded
         assert_eq!(
             pipe.server.path_event_next(),
-            Some(PathEvent::PeerMigrated(preferred_server_address, client_address_static))
+            Some(PathEvent::PeerMigrated(
+                preferred_server_address,
+                client_address_static
+            ))
         );
         assert_eq!(pipe.server.path_event_next(), None);
 
-        let server_active_path = pipe.server.paths.get_active().expect("No active paths");
+        let server_active_path =
+            pipe.server.paths.get_active().expect("No active paths");
         assert_eq!(server_active_path.local_addr(), preferred_server_address);
         assert_eq!(server_active_path.peer_addr(), client_address_static);
-        
-        let client_active_path = pipe.client.paths.get_active().expect("No active paths");
+
+        let client_active_path =
+            pipe.client.paths.get_active().expect("No active paths");
         assert_eq!(client_active_path.local_addr(), client_address_static);
         assert_eq!(client_active_path.peer_addr(), preferred_server_address);
-       
-        
+
         // Confirm that subsequent connection migrations are unaffected
 
-        // We need to make a pair of new connection IDs and reset tokens for the next migration
+        // We need to make a pair of new connection IDs and reset tokens for the
+        // next migration
         let (server_source_cid_2, server_source_token_2) =
             testing::create_cid_and_reset_token(16);
         let (client_source_cid_2, client_source_token_2) =
             testing::create_cid_and_reset_token(16);
 
         // Swap new Connection IDs to perform a new migration
-        // Notify the server of its new source connection ID (SCID), this also advertises the ID to the client
-        // The client will automatically add it to its destination connection ID (DCID) list.
-        let _ = pipe.server.new_source_cid(&server_source_cid_2, server_source_token_2, true).unwrap();
-        // Notify the client of its new source connection ID (SCID), this also advertises the ID to the server
-        // The server will automatically add it to its destination connection ID (DCID) list.
-        let _ = pipe.client.new_source_cid(&client_source_cid_2, client_source_token_2, true).unwrap();
+        // Notify the server of its new source connection ID (SCID), this also
+        // advertises the ID to the client The client will automatically
+        // add it to its destination connection ID (DCID) list.
+        let _ = pipe
+            .server
+            .new_source_cid(&server_source_cid_2, server_source_token_2, true)
+            .unwrap();
+        // Notify the client of its new source connection ID (SCID), this also
+        // advertises the ID to the server The server will automatically
+        // add it to its destination connection ID (DCID) list.
+        let _ = pipe
+            .client
+            .new_source_cid(&client_source_cid_2, client_source_token_2, true)
+            .unwrap();
 
         // Forward the NEW_CONNECTION_ID Frames generated above over the pipe
         assert_eq!(pipe.advance(), Ok(()));
 
-        // Confirm that we have succesfully distributed a pair of Connection IDs to perform a connection migration
+        // Confirm that we have succesfully distributed a pair of Connection IDs
+        // to perform a connection migration
         assert_eq!(pipe.server.available_dcids(), 1);
         assert_eq!(pipe.client.available_dcids(), 1);
 
-        // Get the client address of the new connection path. The client address will be changed, the server will stay the same.
+        // Get the client address of the new connection path. The client address
+        // will be changed, the server will stay the same.
         let new_client_address = "127.0.0.1:8908".parse().unwrap();
 
-        // The client and server probe the new path, the client then initiates migration over the new path
-        assert_eq!(pipe.client.probe_path(new_client_address, preferred_server_address), Ok(2));
+        // The client and server probe the new path, the client then initiates
+        // migration over the new path
+        assert_eq!(
+            pipe.client
+                .probe_path(new_client_address, preferred_server_address),
+            Ok(2)
+        );
         assert_eq!(pipe.advance(), Ok(()));
         assert_eq!(
             pipe.client.path_event_next(),
-            Some(PathEvent::Validated(new_client_address, preferred_server_address))
+            Some(PathEvent::Validated(
+                new_client_address,
+                preferred_server_address
+            ))
         );
         assert_eq!(pipe.client.path_event_next(), None);
         assert_eq!(
@@ -9212,28 +9328,39 @@ mod tests {
         );
         assert_eq!(
             pipe.server.path_event_next(),
-            Some(PathEvent::Validated(preferred_server_address, new_client_address))
+            Some(PathEvent::Validated(
+                preferred_server_address,
+                new_client_address
+            ))
         );
         assert_eq!(
-            pipe.client.is_path_validated(new_client_address, preferred_server_address),
+            pipe.client
+                .is_path_validated(new_client_address, preferred_server_address),
             Ok(true)
         );
         assert_eq!(
-            pipe.server.is_path_validated(preferred_server_address, new_client_address),
+            pipe.server
+                .is_path_validated(preferred_server_address, new_client_address),
             Ok(true)
         );
         // The server can never initiates the connection migration.
         assert_eq!(
-            pipe.server.migrate(preferred_server_address, new_client_address),
+            pipe.server
+                .migrate(preferred_server_address, new_client_address),
             Err(Error::InvalidState)
         );
-        assert_eq!(pipe.client.migrate(new_client_address, preferred_server_address), Ok(2));
-        
+        assert_eq!(
+            pipe.client
+                .migrate(new_client_address, preferred_server_address),
+            Ok(2)
+        );
+
         // Queue data on stream 0
         assert_eq!(pipe.client.stream_send(0, b"data", false), Ok(4));
         // Send data
         assert_eq!(pipe.advance(), Ok(()));
-        // Confirm there is an unread stream, read from it, confirm there are no unread streams.
+        // Confirm there is an unread stream, read from it, confirm there are no
+        // unread streams.
         let mut buf = [0; "data".len()];
         assert_eq!(pipe.server.readable().next(), Some(0));
         assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((4, false)));
@@ -9242,15 +9369,20 @@ mod tests {
         // Check to ensure migration to the new preferred path has succeeded
         assert_eq!(
             pipe.server.path_event_next(),
-            Some(PathEvent::PeerMigrated(preferred_server_address, new_client_address))
+            Some(PathEvent::PeerMigrated(
+                preferred_server_address,
+                new_client_address
+            ))
         );
         assert_eq!(pipe.server.path_event_next(), None);
 
-        let server_active_path = pipe.server.paths.get_active().expect("No active paths");
+        let server_active_path =
+            pipe.server.paths.get_active().expect("No active paths");
         assert_eq!(server_active_path.local_addr(), preferred_server_address);
         assert_eq!(server_active_path.peer_addr(), new_client_address);
-        
-        let client_active_path = pipe.client.paths.get_active().expect("No active paths");
+
+        let client_active_path =
+            pipe.client.paths.get_active().expect("No active paths");
         assert_eq!(client_active_path.local_addr(), new_client_address);
         assert_eq!(client_active_path.peer_addr(), preferred_server_address);
     }
@@ -13572,7 +13704,7 @@ mod tests {
             let mut frame_iter = frames.iter();
 
             assert_eq!(frame_iter.next().unwrap(), &frame::Frame::Datagram {
-                data: out.into(),
+                data: out.into()
             });
             assert_eq!(frame_iter.next(), None);
 
@@ -13606,7 +13738,7 @@ mod tests {
             let mut frame_iter = frames.iter();
 
             assert_eq!(frame_iter.next().unwrap(), &frame::Frame::Datagram {
-                data: out.into(),
+                data: out.into()
             });
             assert_eq!(frame_iter.next(), None);
 
