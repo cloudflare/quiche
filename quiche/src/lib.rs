@@ -746,26 +746,6 @@ impl Config {
         Self::with_tls_ctx(version, tls::Context::new()?)
     }
 
-    /// Creates a default config object using commonly used values
-    /// Useful in testing
-    pub fn default() -> Result<Self> {
-        let mut config = Config::new(crate::PROTOCOL_VERSION)?;
-        config.load_cert_chain_from_pem_file("examples/cert.crt")?;
-        config.load_priv_key_from_pem_file("examples/cert.key")?;
-        config.set_application_protos(&[b"proto1", b"proto2"])?;
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.set_max_idle_timeout(180_000);
-        config.verify_peer(false);
-        config.set_ack_delay_exponent(8);
-        config.set_active_connection_id_limit(3);
-        Ok(config)
-    }
-
     /// Creates a config object with the given version and [`SslContext`].
     ///
     /// This is useful for applications that wish to manually configure
@@ -8336,6 +8316,25 @@ pub mod testing {
             self
         }
 
+        /// A default test config
+        fn default_test_config() -> Result<Config> {
+            let mut config = Config::new(crate::PROTOCOL_VERSION)?;
+            config.load_cert_chain_from_pem_file("examples/cert.crt")?;
+            config.load_priv_key_from_pem_file("examples/cert.key")?;
+            config.set_application_protos(&[b"proto1", b"proto2"])?;
+            config.set_initial_max_data(30);
+            config.set_initial_max_stream_data_bidi_local(15);
+            config.set_initial_max_stream_data_bidi_remote(15);
+            config.set_initial_max_stream_data_uni(10);
+            config.set_initial_max_streams_bidi(3);
+            config.set_initial_max_streams_uni(3);
+            config.set_max_idle_timeout(180_000);
+            config.verify_peer(false);
+            config.set_ack_delay_exponent(8);
+            config.set_active_connection_id_limit(3);
+            Ok(config)
+        }
+
         /// Build a `Pipe` from the `PipeBuilder`. `build()` can only be
         /// executed once for every `PipeBuilder` instance. Any values
         /// of the `PipeBuilder` struct that are set to None will be given
@@ -8363,14 +8362,14 @@ pub mod testing {
                     &client_scid,
                     client_addr,
                     server_addr,
-                    &mut self.client_config.take().unwrap_or(Config::default()?),
+                    &mut self.client_config.take().unwrap_or(PipeBuilder::default_test_config()?),
                 )?,
                 server: accept(
                     &server_scid,
                     None,
                     server_addr,
                     client_addr,
-                    &mut self.server_config.take().unwrap_or(Config::default()?),
+                    &mut self.server_config.take().unwrap_or(PipeBuilder::default_test_config()?),
                 )?,
             })
         }
