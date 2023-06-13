@@ -382,6 +382,7 @@
 #[macro_use]
 extern crate log;
 
+use cid::ConnectionIdentifiers;
 #[cfg(feature = "qlog")]
 use qlog::events::connectivity::TransportOwner;
 #[cfg(feature = "qlog")]
@@ -1734,36 +1735,10 @@ impl Connection {
             reset_token,
         );
 
-        // If we aren't using zero length connection id
+        // If we aren't using zero length connection id assign an SCID to the preferred address
+        // transport argument if one is used.
         if !scid.is_empty() {
-            // Track the scid if we sent one in the preferred address transport
-            // params.
-            if let Some(preferred_address_params) =
-                &config.local_transport_params.preferred_address_params
-            {
-                let seq = ids.new_scid(
-                    preferred_address_params.connection_id.to_vec().into(),
-                    Some(preferred_address_params.stateless_reset_token),
-                    // Don't advertise this because it's in the transport params.
-                    false,
-                    None,
-                    false,
-                )?;
-
-                // This should be sequence number one by RFC
-                debug_assert_eq!(seq, 1);
-            }
-        }
-
-        // Only servers support sending a preferred address in the transport
-        // paramters
-        if !is_server &&
-            config
-                .local_transport_params
-                .preferred_address_params
-                .is_some()
-        {
-            return Err(Error::InvalidTransportParam);
+            Self::assign_new_scid_to_preferred_address(config, is_server, &mut ids)?;
         }
 
         let mut conn = Connection {
@@ -1947,6 +1922,38 @@ impl Connection {
         conn.paths.get_mut(active_path_id)?.recovery.on_init();
 
         Ok(conn)
+    }
+
+    /// Assign a new SCID to the preferred address transport argument
+    fn assign_new_scid_to_preferred_address(config: &mut Config, is_server: bool, ids: &mut ConnectionIdentifiers) -> Result<()> {
+        // Only servers support sending a preferred address in the transport
+        // paramters
+        if !is_server &&
+            config
+                .local_transport_params
+                .preferred_address_params
+                .is_some()
+        {
+            return Err(Error::InvalidTransportParam);
+        }
+
+        // Assign SCID to the preferred address transport argument
+        if let Some(preferred_address_params) =
+            &config.local_transport_params.preferred_address_params
+        {
+            let seq = ids.new_scid(
+                preferred_address_params.connection_id.to_vec().into(),
+                Some(preferred_address_params.stateless_reset_token),
+                // Don't advertise this because it's in the transport params.
+                false,
+                None,
+                false,
+            )?;
+
+            // This should be sequence number one by RFC
+            debug_assert_eq!(seq, 1);
+        }
+        return Ok(())
     }
 
     /// Sets keylog output to the designated [`Writer`].
