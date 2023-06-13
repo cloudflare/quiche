@@ -15649,30 +15649,31 @@ mod tests {
         // Server iterators are populated
         let mut r = pipe.server.readable();
         assert_eq!(r.len(), 10);
-        assert_eq!(r.next(), Some(28));
-        assert_eq!(r.next(), Some(12));
-        assert_eq!(r.next(), Some(24));
-        assert_eq!(r.next(), Some(8));
-        assert_eq!(r.next(), Some(36));
-        assert_eq!(r.next(), Some(20));
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), Some(32));
-        assert_eq!(r.next(), Some(16));
         assert_eq!(r.next(), Some(0));
+        assert_eq!(r.next(), Some(16));
+        assert_eq!(r.next(), Some(32));
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), Some(20));
+        assert_eq!(r.next(), Some(36));
+        assert_eq!(r.next(), Some(8));
+        assert_eq!(r.next(), Some(24));
+        assert_eq!(r.next(), Some(12));
+        assert_eq!(r.next(), Some(28));
+
         assert_eq!(r.next(), None);
 
         let mut w = pipe.server.writable();
         assert_eq!(w.len(), 10);
-        assert_eq!(w.next(), Some(28));
-        assert_eq!(w.next(), Some(12));
-        assert_eq!(w.next(), Some(24));
-        assert_eq!(w.next(), Some(8));
-        assert_eq!(w.next(), Some(36));
-        assert_eq!(w.next(), Some(20));
-        assert_eq!(w.next(), Some(4));
-        assert_eq!(w.next(), Some(32));
-        assert_eq!(w.next(), Some(16));
         assert_eq!(w.next(), Some(0));
+        assert_eq!(w.next(), Some(16));
+        assert_eq!(w.next(), Some(32));
+        assert_eq!(w.next(), Some(4));
+        assert_eq!(w.next(), Some(20));
+        assert_eq!(w.next(), Some(36));
+        assert_eq!(w.next(), Some(8));
+        assert_eq!(w.next(), Some(24));
+        assert_eq!(w.next(), Some(12));
+        assert_eq!(w.next(), Some(28));
         assert_eq!(w.next(), None);
 
         // Read one stream
