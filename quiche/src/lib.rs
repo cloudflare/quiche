@@ -8670,30 +8670,6 @@ impl PreferredAddressParams {
 
         Ok(b.off())
     }
-
-    /// Returns the server's preferred v4 address transport argument as a tuple 
-    /// with a v4 socket address, a connection ID and a stateless reset token.
-    pub fn address_v4(&self) -> Option<(SocketAddrV4, ConnectionId, u128)> {
-        self.addr_v4.map(|addr| {
-            (
-                addr,
-                ConnectionId::from_ref(self.connection_id.as_ref()),
-                self.stateless_reset_token,
-            )
-        })
-    }
-
-    /// Returns the server's preferred v6 ddress transport argument as a tuple 
-    /// with a v6 socket address, a connection ID and a stateless reset token.
-    pub fn address_v6(&self) -> Option<(SocketAddrV6, ConnectionId, u128)> {
-        self.addr_v6.map(|addr| {
-            (
-                addr,
-                ConnectionId::from_ref(self.connection_id.as_ref()),
-                self.stateless_reset_token,
-            )
-        })
-    }
 }
 
 #[doc(hidden)]
@@ -9468,22 +9444,11 @@ mod tests {
 
         assert_eq!(pipe.handshake(), Ok(()));
 
-        assert_eq!(
-            pipe.client.peer_transport_params.preferred_address_params.as_ref().unwrap().address_v4(),
-            Some((
-                preferred_addr_v4,
-                connection_id.clone(),
-                stateless_reset_token
-            ))
-        );
-        assert_eq!(
-            pipe.client.peer_transport_params.preferred_address_params.as_ref().unwrap().address_v6(),
-            Some((
-                preferred_addr_v6,
-                connection_id.clone(),
-                stateless_reset_token
-            ))
-        );
+        let preferred_address_params = pipe.client.peer_transport_params.preferred_address_params.as_ref().unwrap();
+        assert_eq!(preferred_address_params.addr_v4.unwrap(), preferred_addr_v4);
+        assert_eq!(preferred_address_params.addr_v6.unwrap(), preferred_addr_v6);
+        assert_eq!(ConnectionId::from_ref(preferred_address_params.connection_id.as_ref()), connection_id.clone());
+        assert_eq!(preferred_address_params.stateless_reset_token, stateless_reset_token);
 
         assert_eq!(
             pipe.server.peer_transport_params.preferred_address_params,
