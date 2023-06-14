@@ -1735,10 +1735,12 @@ impl Connection {
             reset_token,
         );
 
-        // If we aren't using zero length connection id assign an SCID to the preferred address
-        // transport argument if one is used.
+        // If we aren't using zero length connection id assign an SCID to the
+        // preferred address transport argument if one is used.
         if !scid.is_empty() {
-            Self::assign_new_scid_to_preferred_address(config, is_server, &mut ids)?;
+            Self::assign_new_scid_to_preferred_address(
+                config, is_server, &mut ids,
+            )?;
         }
 
         let mut conn = Connection {
@@ -1937,7 +1939,9 @@ impl Connection {
     }
 
     /// Assign a new SCID to the preferred address transport argument
-    fn assign_new_scid_to_preferred_address(config: &mut Config, is_server: bool, ids: &mut ConnectionIdentifiers) -> Result<()> {
+    fn assign_new_scid_to_preferred_address(
+        config: &mut Config, is_server: bool, ids: &mut ConnectionIdentifiers,
+    ) -> Result<()> {
         // Only servers support sending a preferred address in the transport
         // paramters
         if !is_server &&
@@ -1965,7 +1969,7 @@ impl Connection {
             // This should be sequence number one by RFC
             debug_assert_eq!(seq, 1);
         }
-        return Ok(())
+        return Ok(());
     }
 
     /// Sets keylog output to the designated [`Writer`].
@@ -6400,7 +6404,8 @@ impl Connection {
             .set_source_conn_id_limit(peer_params.active_conn_id_limit);
 
         if let Some(preferred_address) = &peer_params.preferred_address_params {
-            // Client should not send preferred address argument, zero-length connection ID must not be sent. 
+            // Client should not send preferred address argument, zero-length
+            // connection ID must not be sent.
             if self.is_server || preferred_address.connection_id.is_empty() {
                 return Err(Error::InvalidTransportParam);
             }
@@ -8320,14 +8325,20 @@ pub mod testing {
                     &client_scid,
                     client_addr,
                     server_addr,
-                    &mut self.client_config.take().unwrap_or(PipeBuilder::default_test_config()?),
+                    &mut self
+                        .client_config
+                        .take()
+                        .unwrap_or(PipeBuilder::default_test_config()?),
                 )?,
                 server: accept(
                     &server_scid,
                     None,
                     server_addr,
                     client_addr,
-                    &mut self.server_config.take().unwrap_or(PipeBuilder::default_test_config()?),
+                    &mut self
+                        .server_config
+                        .take()
+                        .unwrap_or(PipeBuilder::default_test_config()?),
                 )?,
             })
         }
@@ -8949,16 +8960,35 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(pipe.client.peer_transport_params.preferred_address_params, None);
-        assert_eq!(pipe.client.peer_transport_params.preferred_address_params, None);
+        assert_eq!(
+            pipe.client.peer_transport_params.preferred_address_params,
+            None
+        );
+        assert_eq!(
+            pipe.client.peer_transport_params.preferred_address_params,
+            None
+        );
 
         assert_eq!(pipe.handshake(), Ok(()));
 
-        let preferred_address_params = pipe.client.peer_transport_params.preferred_address_params.as_ref().unwrap();
+        let preferred_address_params = pipe
+            .client
+            .peer_transport_params
+            .preferred_address_params
+            .as_ref()
+            .unwrap();
         assert_eq!(preferred_address_params.addr_v4.unwrap(), preferred_addr_v4);
         assert_eq!(preferred_address_params.addr_v6.unwrap(), preferred_addr_v6);
-        assert_eq!(ConnectionId::from_ref(preferred_address_params.connection_id.as_ref()), connection_id.clone());
-        assert_eq!(preferred_address_params.stateless_reset_token, stateless_reset_token);
+        assert_eq!(
+            ConnectionId::from_ref(
+                preferred_address_params.connection_id.as_ref()
+            ),
+            connection_id.clone()
+        );
+        assert_eq!(
+            preferred_address_params.stateless_reset_token,
+            stateless_reset_token
+        );
 
         assert_eq!(
             pipe.server.peer_transport_params.preferred_address_params,
