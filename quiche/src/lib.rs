@@ -2056,6 +2056,18 @@ impl Connection {
         conn.handshake
             .use_legacy_codepoint(config.version != PROTOCOL_VERSION_V1);
 
+        // A server that chooses a zero-length connection ID MUST NOT provide a
+        // preferred address.
+        if conn.ids.zero_length_scid() &&
+            conn.local_transport_params
+                .preferred_address_params
+                .is_some()
+        {
+            // Preferred address params should not be set if server is using
+            // a zero-length connection ID, as these are incompatible.
+            return Err(Error::InvalidTransportParam);
+        }
+
         conn.encode_transport_params()?;
 
         // Derive initial secrets for the client. We can do this here because
@@ -6670,18 +6682,6 @@ impl Connection {
 
     fn encode_transport_params(&mut self) -> Result<()> {
         let mut raw_params = [0; 189];
-
-        // A server that chooses a zero-length connection ID MUST NOT provide a
-        // preferred address.
-        if self.ids.zero_length_scid() &&
-            self.local_transport_params
-                .preferred_address_params
-                .is_some()
-        {
-            // Preferred address params should not be set if server is using
-            // a zero-length connection ID, as these are incompatible.
-            return Err(Error::InvalidTransportParam);
-        }
 
         let raw_params = TransportParams::encode(
             &self.local_transport_params,
