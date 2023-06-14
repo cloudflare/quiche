@@ -6584,38 +6584,6 @@ impl Connection {
         self.is_server
     }
 
-    /// Returns the server's preferred address which is a tuple with a
-    /// V4 socket address, a connection ID and a stateless reset token.
-    pub fn server_preferred_address_v4(
-        &self,
-    ) -> Result<Option<(SocketAddrV4, ConnectionId, u128)>> {
-        if !self.is_server() {
-            Ok(self
-                .peer_transport_params
-                .preferred_address_params
-                .as_ref()
-                .map_or(None, |params| params.address_v4()))
-        } else {
-            Err(Error::ClientOnlyOperation)
-        }
-    }
-
-    /// Returns the server's preferred address which is a tuple with a
-    /// V6 socket address, a connection ID and a stateless reset token.
-    pub fn server_preferred_address_v6(
-        &self,
-    ) -> Result<Option<(SocketAddrV6, ConnectionId, u128)>> {
-        if !self.is_server() {
-            Ok(self
-                .peer_transport_params
-                .preferred_address_params
-                .as_ref()
-                .map_or(None, |params| params.address_v6()))
-        } else {
-            Err(Error::ClientOnlyOperation)
-        }
-    }
-
     fn encode_transport_params(&mut self) -> Result<()> {
         let mut raw_params = [0; 189];
 
@@ -8488,8 +8456,9 @@ impl TransportParams {
     }
 }
 
+/// Preferred Address Transport Parameters
 #[derive(Clone, Debug, PartialEq)]
-struct PreferredAddressParams {
+pub struct PreferredAddressParams {
     addr_v4: Option<SocketAddrV4>,
     addr_v6: Option<SocketAddrV6>,
     connection_id: ConnectionId<'static>,
@@ -8612,7 +8581,9 @@ impl PreferredAddressParams {
         Ok(b.off())
     }
 
-    fn address_v4(&self) -> Option<(SocketAddrV4, ConnectionId, u128)> {
+    /// Returns the server's preferred v4 address transport argument as a tuple 
+    /// with a v4 socket address, a connection ID and a stateless reset token.
+    pub fn address_v4(&self) -> Option<(SocketAddrV4, ConnectionId, u128)> {
         self.addr_v4.map(|addr| {
             (
                 addr,
@@ -8622,7 +8593,9 @@ impl PreferredAddressParams {
         })
     }
 
-    fn address_v6(&self) -> Option<(SocketAddrV6, ConnectionId, u128)> {
+    /// Returns the server's preferred v6 ddress transport argument as a tuple 
+    /// with a v6 socket address, a connection ID and a stateless reset token.
+    pub fn address_v6(&self) -> Option<(SocketAddrV6, ConnectionId, u128)> {
         self.addr_v6.map(|addr| {
             (
                 addr,
@@ -9400,13 +9373,13 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(pipe.client.server_preferred_address_v4().unwrap(), None);
-        assert_eq!(pipe.client.server_preferred_address_v6().unwrap(), None);
+        assert_eq!(pipe.client.peer_transport_params.preferred_address_params, None);
+        assert_eq!(pipe.client.peer_transport_params.preferred_address_params, None);
 
         assert_eq!(pipe.handshake(), Ok(()));
 
         assert_eq!(
-            pipe.client.server_preferred_address_v4().unwrap(),
+            pipe.client.peer_transport_params.preferred_address_params.as_ref().unwrap().address_v4(),
             Some((
                 preferred_addr_v4,
                 connection_id.clone(),
@@ -9414,7 +9387,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            pipe.client.server_preferred_address_v6().unwrap(),
+            pipe.client.peer_transport_params.preferred_address_params.as_ref().unwrap().address_v6(),
             Some((
                 preferred_addr_v6,
                 connection_id.clone(),
@@ -9423,12 +9396,8 @@ mod tests {
         );
 
         assert_eq!(
-            pipe.server.server_preferred_address_v4(),
-            Err(Error::ClientOnlyOperation)
-        );
-        assert_eq!(
-            pipe.server.server_preferred_address_v6(),
-            Err(Error::ClientOnlyOperation)
+            pipe.server.peer_transport_params.preferred_address_params,
+            None
         );
     }
 
