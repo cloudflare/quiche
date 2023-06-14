@@ -2133,7 +2133,7 @@ impl Connection {
             // This should be sequence number one by RFC
             debug_assert_eq!(seq, 1);
         }
-        return Ok(());
+        Ok(())
     }
 
     /// Sets keylog output to the designated [`Writer`].
@@ -8612,7 +8612,7 @@ impl PreferredAddressParams {
         }
 
         if !ip_v4.is_unspecified() {
-            addr_v4 = Some(SocketAddrV4::new(Ipv4Addr::from(ip_v4), port_v4));
+            addr_v4 = Some(SocketAddrV4::new(ip_v4, port_v4));
         }
 
         Ok(addr_v4)
