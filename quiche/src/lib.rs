@@ -6787,8 +6787,8 @@ impl Connection {
             .set_source_conn_id_limit(peer_params.active_conn_id_limit);
 
         if let Some(preferred_address) = &peer_params.preferred_address_params {
-            // Zero-length connection ID must not be sent, client should not send preferred address argument
-            if preferred_address.connection_id.is_empty() || !self.is_server {
+            // Client should not send preferred address argument, zero-length connection ID must not be sent. 
+            if self.is_server || preferred_address.connection_id.is_empty() {
                 return Err(Error::InvalidTransportParam);
             }
         }
