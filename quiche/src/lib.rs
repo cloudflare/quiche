@@ -8595,8 +8595,9 @@ impl PreferredAddressParams {
 
     fn decode_v4(b: &mut octets::Octets) -> Result<Option<SocketAddrV4>> {
         let mut addr_v4 = None;
-        let ip_v4_b = <[u8; 4]>::try_from(b.get_bytes(4)?.slice(4)?)
+        let ip_v4_b = <[u8; 4]>::try_from(b.slice(4)?)
             .map_err(|_| Error::InvalidTransportParam)?;
+        b.skip(4)?;
         let ip_v4 = Ipv4Addr::from(ip_v4_b);
 
         let port_v4 = b.get_u16()?;
@@ -8614,8 +8615,9 @@ impl PreferredAddressParams {
 
     fn decode_v6(b: &mut octets::Octets) -> Result<Option<SocketAddrV6>> {
         let mut addr_v6 = None;
-        let ip_v6_b = <[u8; 16]>::try_from(b.get_bytes(16)?.slice(16)?)
+        let ip_v6_b = <[u8; 16]>::try_from(b.slice(16)?)
             .map_err(|_| Error::InvalidTransportParam)?;
+        b.skip(16)?;
         let ip_v6 = Ipv6Addr::from(ip_v6_b);
         let port_v6 = b.get_u16()?;
 
