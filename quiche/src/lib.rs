@@ -5724,22 +5724,25 @@ impl Connection {
         self.ids.active_source_cids()
     }
 
-    /// Returns the maximum number of concurrently active source Connection IDs
-    /// that can be provided to the peer.
-    pub fn max_active_source_cids(&self) -> usize {
-        self.peer_transport_params.active_conn_id_limit as usize
-    }
-
-    /// Returns the number of source Connection IDs that can still be provided
+    /// Returns the number of source Connection IDs that should be provided
     /// to the peer without exceeding the limit it advertised.
     ///
-    /// The application should not issue the maximum number of permitted source
-    /// Connection IDs, but instead treat this as an untrusted upper bound.
-    /// Applications should limit how many outstanding source ConnectionIDs
-    /// are simultaneously issued to prevent issuing more than they can handle.
+    /// This will automatically limit the number of Connection IDs to the
+    /// minimum between the locally configured active connection ID limit,
+    /// and the one sent by the peer.
+    ///
+    /// To obtain the maximum possible value allowed by the peer an application
+    /// can instead inspect the [`peer_active_conn_id_limit`] value.
+    ///
+    /// [`peer_active_conn_id_limit`]: struct.Stats.html#structfield.peer_active_conn_id_limit
     #[inline]
     pub fn source_cids_left(&self) -> usize {
-        self.max_active_source_cids() - self.active_source_cids()
+        let max_active_source_cids = cmp::min(
+            self.peer_transport_params.active_conn_id_limit,
+            self.local_transport_params.active_conn_id_limit,
+        ) as usize;
+
+        max_active_source_cids - self.active_source_cids()
     }
 
     /// Requests the retirement of the destination Connection ID used by the
