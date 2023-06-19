@@ -5897,6 +5897,8 @@ impl Connection {
                 .filter(|(_, p)| p.local_addr() == from)
                 .map(|(_, p)| p.peer_addr())
                 .collect(),
+
+            index: 0,
         }
     }
 

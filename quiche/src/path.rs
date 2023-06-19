@@ -30,6 +30,8 @@ use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 
+use smallvec::SmallVec;
+
 use slab::Slab;
 
 use crate::Error;
@@ -467,7 +469,8 @@ impl Path {
 /// An iterator over SocketAddr.
 #[derive(Default)]
 pub struct SocketAddrIter {
-    pub(crate) sockaddrs: Vec<SocketAddr>,
+    pub(crate) sockaddrs: SmallVec<[SocketAddr; 8]>,
+    pub(crate) index: usize,
 }
 
 impl Iterator for SocketAddrIter {
@@ -475,14 +478,16 @@ impl Iterator for SocketAddrIter {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.sockaddrs.pop()
+        let v = self.sockaddrs.get(self.index)?;
+        self.index += 1;
+        Some(*v)
     }
 }
 
 impl ExactSizeIterator for SocketAddrIter {
     #[inline]
     fn len(&self) -> usize {
-        self.sockaddrs.len()
+        self.sockaddrs.len() - self.index
     }
 }
 
