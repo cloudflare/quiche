@@ -79,7 +79,7 @@ pub extern fn quiche_h3_config_enable_extended_connect(
 
 #[no_mangle]
 pub extern fn quiche_h3_config_free(config: *mut h3::Config) {
-    unsafe { Box::from_raw(config) };
+    drop(unsafe { Box::from_raw(config) });
 }
 
 #[no_mangle]
@@ -207,7 +207,7 @@ pub extern fn quiche_h3_extended_connect_enabled_by_peer(
 
 #[no_mangle]
 pub extern fn quiche_h3_event_free(ev: *mut h3::Event) {
-    unsafe { Box::from_raw(ev) };
+    drop(unsafe { Box::from_raw(ev) });
 }
 
 #[repr(C)]
@@ -407,7 +407,7 @@ pub extern fn quiche_h3_recv_dgram(
 
 #[no_mangle]
 pub extern fn quiche_h3_conn_free(conn: *mut h3::Connection) {
-    unsafe { Box::from_raw(conn) };
+    drop(unsafe { Box::from_raw(conn) });
 }
 
 fn headers_from_ptr<'a>(

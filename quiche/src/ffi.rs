@@ -388,7 +388,7 @@ pub extern fn quiche_config_set_stateless_reset_token(
 
 #[no_mangle]
 pub extern fn quiche_config_free(config: *mut Config) {
-    unsafe { Box::from_raw(config) };
+    drop(unsafe { Box::from_raw(config) });
 }
 
 #[no_mangle]
@@ -1070,7 +1070,7 @@ pub extern fn quiche_stream_iter_next(
 
 #[no_mangle]
 pub extern fn quiche_stream_iter_free(iter: *mut StreamIter) {
-    unsafe { Box::from_raw(iter) };
+    drop(unsafe { Box::from_raw(iter) });
 }
 
 #[repr(C)]
@@ -1303,7 +1303,7 @@ pub extern fn quiche_conn_send_ack_eliciting_on_path(
 
 #[no_mangle]
 pub extern fn quiche_conn_free(conn: *mut Connection) {
-    unsafe { Box::from_raw(conn) };
+    drop(unsafe { Box::from_raw(conn) });
 }
 
 #[no_mangle]
