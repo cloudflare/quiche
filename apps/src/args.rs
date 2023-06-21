@@ -407,38 +407,6 @@ impl Default for ClientArgs {
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 pub const SERVER_USAGE: &str = "Usage:
   quiche-server [options]
   quiche-server -h | --help
