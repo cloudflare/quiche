@@ -27,6 +27,7 @@
 use crate::args::*;
 use crate::common::*;
 
+use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 
 use std::io::prelude::*;
@@ -36,6 +37,8 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 use ring::rand::*;
+
+use smallvec::SmallVec;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
@@ -69,6 +72,9 @@ pub fn connect(
     } else {
         connect_url.to_socket_addrs().unwrap().next().unwrap()
     };
+    trace!("Peer addr: {:?}", peer_addr);
+
+    let mut migrated_peer_addr: Option<SocketAddr> = None;
 
     // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
     // server address. This is needed on macOS and BSD variants that don't
@@ -77,6 +83,7 @@ pub fn connect(
         std::net::SocketAddr::V4(_) => format!("0.0.0.0:{}", args.source_port),
         std::net::SocketAddr::V6(_) => format!("[::]:{}", args.source_port),
     };
+    trace!("Local addr: {:?}", bind_addr);
 
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
@@ -86,9 +93,18 @@ pub fn connect(
         .register(&mut socket, mio::Token(0), mio::Interest::READABLE)
         .unwrap();
 
+    // Bind a new UDP Socket to another open port on the localhost.
     let migrate_socket = if args.perform_migration {
+        // Default to whatever port is open. Should not reuse the original port
+        // specification.
+        let migrate_bind_addr = match bind_addr.parse().unwrap() {
+            std::net::SocketAddr::V4(_) => "0.0.0.0:0",
+            std::net::SocketAddr::V6(_) => "[::]:0",
+        };
+
         let mut socket =
-            mio::net::UdpSocket::bind(bind_addr.parse().unwrap()).unwrap();
+            mio::net::UdpSocket::bind(migrate_bind_addr.parse().unwrap())
+                .unwrap();
         poll.registry()
             .register(&mut socket, mio::Token(1), mio::Interest::READABLE)
             .unwrap();
@@ -217,8 +233,10 @@ pub fn connect(
         }
     }
 
+    // session resumption
     if let Some(session_file) = &args.session_file {
         if let Ok(session) = std::fs::read(session_file) {
+            trace!("Resuming session");
             conn.set_session(&session).ok();
         }
     }
@@ -230,8 +248,10 @@ pub fn connect(
         scid,
     );
 
+    // Write out a packet to the output buffer
     let (write, send_info) = conn.send(&mut out).expect("initial send failed");
 
+    // Sends the data to the target address
     while let Err(e) = socket.send_to(&out[..write], send_info.to) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
             trace!(
@@ -254,8 +274,11 @@ pub fn connect(
     let mut scid_sent = false;
     let mut new_path_probed = false;
     let mut migrated = false;
+    let mut server_preferred_address_probed = false;
 
+    // Main client loop
     loop {
+        trace!("Start of main client loop");
         if !conn.is_in_early_data() || app_proto_selected {
             poll.poll(&mut events, conn.timeout()).unwrap();
         }
@@ -264,7 +287,7 @@ pub fn connect(
         // has expired, so handle it without attempting to read packets. We
         // will then proceed with the send loop.
         if events.is_empty() {
-            trace!("timed out");
+            trace!("Event loop reporting no events - timed out.");
 
             conn.on_timeout();
         }
@@ -272,6 +295,9 @@ pub fn connect(
         // Read incoming UDP packets from the socket and feed them to quiche,
         // until there are no more packets to read.
         for event in &events {
+            trace!("Event occured: {:?}", event);
+
+            // Determine from which socket we are listening on received the event.
             let socket = match event.token() {
                 mio::Token(0) => &socket,
 
@@ -281,6 +307,8 @@ pub fn connect(
             };
 
             let local_addr = socket.local_addr().unwrap();
+
+            // Read in data from socket - write to file
             'read: loop {
                 let (len, from) = match socket.recv_from(&mut buf) {
                     Ok(v) => v,
@@ -301,6 +329,7 @@ pub fn connect(
 
                 trace!("{}: got {} bytes", local_addr, len);
 
+                // Write the packet buffer to a file.
                 if let Some(target_path) = conn_args.dump_packet_path.as_ref() {
                     let path = format!("{target_path}/{pkt_count}.pkt");
 
@@ -432,11 +461,17 @@ pub fn connect(
                 quiche::PathEvent::New(..) => unreachable!(),
 
                 quiche::PathEvent::Validated(local_addr, peer_addr) => {
+                    trace!("PathEvent::Validated");
                     info!(
                         "Path ({}, {}) is now validated",
                         local_addr, peer_addr
                     );
-                    conn.migrate(local_addr, peer_addr).unwrap();
+                    if migrated {
+                        conn.migrate_source(local_addr).unwrap();
+                    } else {
+                        conn.migrate(local_addr, peer_addr).unwrap();
+                    }
+                    migrated_peer_addr = Some(peer_addr);
                     migrated = true;
                 },
 
@@ -485,15 +520,81 @@ pub fn connect(
             scid_sent = true;
         }
 
+        // Performs server side migration - client kicks it off.
         if args.perform_migration &&
-            !new_path_probed &&
+            !server_preferred_address_probed &&
             scid_sent &&
             conn.available_dcids() > 0
         {
+            // Probe the transport parameter's server preferred address.
+            if let Ok(Some(preferred_address_params)) =
+                conn.server_preferred_address_params()
+            {
+                let preferred_address_params = preferred_address_params.clone();
+
+                // Manually track the new Destination Connection ID and reset
+                // token of the preferred address.
+                conn.new_destination_cid(
+                    preferred_address_params.connection_id,
+                    1,
+                    preferred_address_params.stateless_reset_token,
+                    0,
+                    &mut SmallVec::new(),
+                )
+                .unwrap();
+
+                // Probe the path. If it successfully validates then the event
+                // handler will see the `PathEvent::Validated`
+                // event occur and begin migration. The server will see
+                // `PathEvent::PeerMigrated` upon successful
+                // migration.
+                if let Some(addr_v4) = preferred_address_params.addr_v4 {
+                    info!("Performing server side connection migration - kicked off by client.");
+                    info!(
+                        "New path to be probed: {:?} -> {:?}",
+                        local_addr, addr_v4
+                    );
+                    conn.probe_path(
+                        local_addr,
+                        std::net::SocketAddr::V4(addr_v4),
+                    )
+                    .unwrap();
+                } else {
+                    if let Some(addr_v6) = preferred_address_params.addr_v6 {
+                        info!("Performing server side connection migration - kicked off by client.");
+                        info!(
+                            "New path to be probed: {:?} -> {:?}",
+                            local_addr, addr_v6
+                        );
+                        conn.probe_path(
+                            local_addr,
+                            std::net::SocketAddr::V6(addr_v6),
+                        )
+                        .unwrap();
+                    }
+                }
+
+                server_preferred_address_probed = true;
+            }
+        }
+
+        // Perform client side connection migration
+        if args.perform_migration &&
+            !new_path_probed &&
+            scid_sent &&
+            conn.available_dcids() > 0 &&
+            server_preferred_address_probed &&
+            migrated
+        {
+            info!("Performing client side connection migration.");
             let additional_local_addr =
                 migrate_socket.as_ref().unwrap().local_addr().unwrap();
-            conn.probe_path(additional_local_addr, peer_addr).unwrap();
-
+            info!(
+                "New path to be probed: {:?} -> {:?}",
+                additional_local_addr, migrated_peer_addr
+            );
+            conn.probe_path(additional_local_addr, migrated_peer_addr.unwrap())
+                .unwrap();
             new_path_probed = true;
         }
 

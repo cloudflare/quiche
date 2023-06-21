@@ -409,8 +409,12 @@ use std::cmp;
 use std::convert::TryInto;
 use std::time;
 
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
+use std::net::SocketAddr;
+use std::net::SocketAddrV4;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use std::str::FromStr;
 
@@ -2104,7 +2108,7 @@ impl Connection {
 
     /// Assign a new SCID to the preferred address transport argument
     fn assign_new_scid_to_preferred_address(
-        config: &mut Config, is_server: bool, ids: &mut ConnectionIdentifiers,
+        config: &Config, is_server: bool, ids: &mut ConnectionIdentifiers,
     ) -> Result<()> {
         // Only servers support sending a preferred address in the transport
         // paramters
@@ -6147,6 +6151,18 @@ impl Connection {
         Ok(dcid_seq)
     }
 
+    /// Returns the server's preferred address transport parameters which can be
+    /// used to perform a connection migration.
+    pub fn server_preferred_address_params(
+        &mut self,
+    ) -> Result<Option<&PreferredAddressParams>> {
+        if self.is_server {
+            return Err(Error::InvalidState);
+        }
+
+        Ok(self.peer_transport_params.preferred_address_params.as_ref())
+    }
+
     /// Provides additional source Connection IDs that the peer can use to reach
     /// this host.
     ///
@@ -6189,6 +6205,15 @@ impl Connection {
             None,
             retire_if_needed,
         )
+    }
+
+    /// Manually add a new destination connection ID. Most incoming DCIDs will
+    /// be automatically added.
+    pub fn new_destination_cid(
+        &mut self, dcid: ConnectionId<'static>, seq: u64, reset_token: u128,
+        retire_prior_to: u64, retired_path_ids: &mut SmallVec<[(u64, usize); 1]>
+    ) -> Result<()> {
+        self.ids.new_dcid(dcid, seq, reset_token, retire_prior_to, retired_path_ids)
     }
 
     /// Returns the number of source Connection IDs that are active. This is
@@ -8552,10 +8577,14 @@ impl TransportParams {
 /// Preferred Address Transport Parameters
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreferredAddressParams {
-    addr_v4: Option<SocketAddrV4>,
-    addr_v6: Option<SocketAddrV6>,
-    connection_id: ConnectionId<'static>,
-    stateless_reset_token: u128,
+    /// The server's preferred V4 address
+    pub addr_v4: Option<SocketAddrV4>,
+    /// The server's preferred V6 address
+    pub addr_v6: Option<SocketAddrV6>,
+    /// The preferred address connection ID
+    pub connection_id: ConnectionId<'static>,
+    /// The preferred address reset token
+    pub stateless_reset_token: u128,
 }
 
 impl PreferredAddressParams {

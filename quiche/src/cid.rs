@@ -429,6 +429,7 @@ impl ConnectionIdentifiers {
     /// Returns a list of tuples (DCID sequence number, Path ID), containing the
     /// sequence number of retired DCIDs that were linked to their respective
     /// Path ID.
+    /// KEELEDO: This comment became out of date, changes were made that broke my code, the comment needs to be updated.
     pub fn new_dcid(
         &mut self, cid: ConnectionId<'static>, seq: u64, reset_token: u128,
         retire_prior_to: u64, retired_path_ids: &mut SmallVec<[(u64, usize); 1]>,
