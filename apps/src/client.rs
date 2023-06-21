@@ -35,6 +35,7 @@ use std::rc::Rc;
 
 use std::cell::RefCell;
 
+use quiche::PreferredAddressParams;
 use ring::rand::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
@@ -69,6 +70,7 @@ pub fn connect(
     } else {
         connect_url.to_socket_addrs().unwrap().next().unwrap()
     };
+    trace!("Peer addr: {:?}", peer_addr);
 
     // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
     // server address. This is needed on macOS and BSD variants that don't
@@ -77,6 +79,7 @@ pub fn connect(
         std::net::SocketAddr::V4(_) => format!("0.0.0.0:{}", args.source_port),
         std::net::SocketAddr::V6(_) => format!("[::]:{}", args.source_port),
     };
+    trace!("Local addr: {:?}", bind_addr);
 
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
@@ -86,6 +89,9 @@ pub fn connect(
         .register(&mut socket, mio::Token(0), mio::Interest::READABLE)
         .unwrap();
 
+    // Bind a new UDP Socket to another open port on the localhost.
+    // TODO: This is an error waiting to happen. If bind_addr is initially set to a different port than its default (port: 0) this will cause this
+    // code to open another socket on the same addr/port.
     let migrate_socket = if args.perform_migration {
         let mut socket =
             mio::net::UdpSocket::bind(bind_addr.parse().unwrap()).unwrap();
@@ -198,8 +204,10 @@ pub fn connect(
         }
     }
 
+    // session resumption
     if let Some(session_file) = &args.session_file {
         if let Ok(session) = std::fs::read(session_file) {
+            trace!("Resuming session");
             conn.set_session(&session).ok();
         }
     }
@@ -211,8 +219,10 @@ pub fn connect(
         scid,
     );
 
+    // Write out a packet to the output buffer
     let (write, send_info) = conn.send(&mut out).expect("initial send failed");
 
+    // Sends the data to the target address
     while let Err(e) = socket.send_to(&out[..write], send_info.to) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
             trace!(
@@ -235,7 +245,9 @@ pub fn connect(
     let mut scid_sent = false;
     let mut new_path_probed = false;
     let mut migrated = false;
+    let mut migrated_to_server_preferred_address = false;
 
+    // Main client loop
     loop {
         if !conn.is_in_early_data() || app_proto_selected {
             poll.poll(&mut events, conn.timeout()).unwrap();
@@ -245,7 +257,7 @@ pub fn connect(
         // has expired, so handle it without attempting to read packets. We
         // will then proceed with the send loop.
         if events.is_empty() {
-            trace!("timed out");
+            trace!("Event loop reporting no events - timed out.");
 
             conn.on_timeout();
         }
@@ -253,6 +265,9 @@ pub fn connect(
         // Read incoming UDP packets from the socket and feed them to quiche,
         // until there are no more packets to read.
         for event in &events {
+            debug!("Event occured: {:?}", event);
+            
+            // Determine from which socket we are listening on received the event.
             let socket = match event.token() {
                 mio::Token(0) => &socket,
 
@@ -262,6 +277,8 @@ pub fn connect(
             };
 
             let local_addr = socket.local_addr().unwrap();
+
+            // Read in data from socket - write to file - trace logs - don't really do anything with it.
             'read: loop {
                 let (len, from) = match socket.recv_from(&mut buf) {
                     Ok(v) => v,
@@ -282,6 +299,7 @@ pub fn connect(
 
                 trace!("{}: got {} bytes", local_addr, len);
 
+                // Write the packet buffer to a file.
                 if let Some(target_path) = conn_args.dump_packet_path.as_ref() {
                     let path = format!("{target_path}/{pkt_count}.pkt");
 
@@ -466,6 +484,7 @@ pub fn connect(
             scid_sent = true;
         }
 
+        // Perform client side connection migration
         if args.perform_migration &&
             !new_path_probed &&
             scid_sent &&
@@ -476,6 +495,24 @@ pub fn connect(
             conn.probe_path(additional_local_addr, peer_addr).unwrap();
 
             new_path_probed = true;
+        }
+
+        if !migrated_to_server_preferred_address {
+            // Probe the transport parameter's server preferred address.
+            if let Ok(Some(preferred_address_params)) = conn.server_preferred_address_params() {
+                let preferred_address_params = preferred_address_params.clone();
+
+                // Manually track the new Destination Connection ID and reset token of the preferred address.
+                conn.new_destination_cid(preferred_address_params.connection_id, 1, preferred_address_params.stateless_reset_token, 0).unwrap();
+                
+                // Probe the path. If it successfully validates then the event handler will see the 
+                // `PathEvent::Validated` event occur and begin migration. The server will see `PathEvent::PeerMigrated`
+                // upon successful migration.
+                if let Some(addr_v4) = preferred_address_params.addr_v4 {
+                    conn.probe_path(local_addr, std::net::SocketAddr::V4(addr_v4)).unwrap();
+                }
+                migrated_to_server_preferred_address = true;
+            }
         }
 
         // Generate outgoing QUIC packets and send them on the UDP socket, until
