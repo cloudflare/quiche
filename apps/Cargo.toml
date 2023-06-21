@@ -31,6 +31,7 @@ ring = "0.17"
 quiche = { path = "../quiche" }
 libc = "0.2"
 nix = { version = "0.27", features = ["net", "socket", "uio"] }
+smallvec = { version = "1.10" }
 
 [lib]
 crate-type = ["lib"]
