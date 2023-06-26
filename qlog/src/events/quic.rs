@@ -510,15 +510,13 @@ pub enum QuicFrame {
     },
 
     PathAbandon {
-        identifier_type: u64,
-        path_identifier: Option<u64>,
+        dcid_seq_num: u64,
         error_code: u64,
         reason: Option<String>,
     },
 
     PathStatus {
-        identifier_type: u64,
-        path_identifier: Option<u64>,
+        dcid_seq_num: u64,
         seq_num: u64,
         status: u64,
     },

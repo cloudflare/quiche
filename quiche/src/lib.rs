@@ -1446,7 +1446,7 @@ pub struct Connection {
     newly_acked: Vec<recovery::Acked>,
 
     /// Structure used when coping with abandoned paths in multipath.
-    wire_pids_to_close: VecDeque<(u64, Option<u64>)>,
+    dcid_seq_to_abandon: VecDeque<u64>,
 }
 
 /// Creates a new server-side connection.
@@ -1877,7 +1877,7 @@ impl Connection {
 
             newly_acked: Vec::new(),
 
-            wire_pids_to_close: VecDeque::new(),
+            dcid_seq_to_abandon: VecDeque::new(),
         };
 
         // Don't support multipath with zero-length CIDs.
@@ -3010,13 +3010,8 @@ impl Connection {
                         }
                     },
 
-                    frame::Frame::PathAbandon {
-                        identifier_type,
-                        path_identifier,
-                        ..
-                    } => {
-                        self.wire_pids_to_close
-                            .push_back((identifier_type, path_identifier));
+                    frame::Frame::PathAbandon { dcid_seq_num, .. } => {
+                        self.dcid_seq_to_abandon.push_back(dcid_seq_num);
                     },
 
                     _ => (),
@@ -3024,19 +3019,21 @@ impl Connection {
             }
         }
 
-        for wpid in self.wire_pids_to_close.drain(..) {
+        for dcid_seq in self.dcid_seq_to_abandon.drain(..) {
             // The path might be already abandoned.
-            if let Ok(pid) = self.ids.path_id_from_wire(wpid, recv_pid, false) {
-                let (lost_packets, lost_bytes) = close_path(
-                    &mut self.ids,
-                    &mut self.pkt_num_spaces,
-                    &mut self.paths,
-                    pid,
-                    now,
-                    &self.trace_id,
-                )?;
-                self.lost_count += lost_packets;
-                self.lost_bytes += lost_bytes as u64;
+            if let Ok(e) = self.ids.get_dcid(dcid_seq) {
+                if let Some(pid) = e.path_id {
+                    let (lost_packets, lost_bytes) = close_path(
+                        &mut self.ids,
+                        &mut self.pkt_num_spaces,
+                        &mut self.paths,
+                        pid,
+                        now,
+                        &self.trace_id,
+                    )?;
+                    self.lost_count += lost_packets;
+                    self.lost_bytes += lost_bytes as u64;
+                }
             }
         }
 
@@ -4101,14 +4098,13 @@ impl Connection {
 
             // Create PATH_ABANDON frames as needed.
             while let Some(pid) = self.paths.path_abandon() {
-                let (identifier_type, path_identifier) =
-                    self.path_id_to_wire(pid, send_pid)?;
-                let abandoned_path = self.paths.get_mut(pid)?;
+                let abandoned_path = self.paths.get(pid)?;
+                let dcid_seq_num =
+                    abandoned_path.active_dcid_seq.ok_or(Error::InvalidState)?;
                 let (error_code, reason) =
                     abandoned_path.closing_error_code_and_reason()?;
                 let frame = frame::Frame::PathAbandon {
-                    identifier_type,
-                    path_identifier,
+                    dcid_seq_num,
                     error_code,
                     reason,
                 };
@@ -4125,11 +4121,11 @@ impl Connection {
             // Create PATH_STATUS frames as needed.
             while let Some((path_id, seq_num, status)) = self.paths.path_status()
             {
-                let (identifier_type, path_identifier) =
-                    self.path_id_to_wire(path_id, send_pid)?;
+                let status_path = self.paths.get(path_id)?;
+                let dcid_seq_num =
+                    status_path.active_dcid_seq.ok_or(Error::InvalidState)?;
                 let frame = frame::Frame::PathStatus {
-                    identifier_type,
-                    path_identifier,
+                    dcid_seq_num,
                     seq_num,
                     status,
                 };
@@ -7628,19 +7624,18 @@ impl Connection {
             },
 
             frame::Frame::PathAbandon {
-                identifier_type,
-                path_identifier,
+                dcid_seq_num,
                 error_code,
                 reason,
             } => {
                 if !self.use_path_pkt_num_space(epoch) {
                     return Err(Error::MultiPathViolation);
                 }
-                let abandon_pid = self.ids.path_id_from_wire(
-                    (identifier_type, path_identifier),
-                    recv_path_id,
-                    true,
-                )?;
+                let abandon_pid = self
+                    .ids
+                    .get_dcid(dcid_seq_num)?
+                    .path_id
+                    .ok_or(Error::InvalidFrame)?;
                 self.paths.on_path_abandon_received(
                     abandon_pid,
                     error_code,
@@ -7649,19 +7644,18 @@ impl Connection {
             },
 
             frame::Frame::PathStatus {
-                identifier_type,
-                path_identifier,
+                dcid_seq_num,
                 seq_num,
                 status,
             } => {
                 if !self.use_path_pkt_num_space(epoch) {
                     return Err(Error::MultiPathViolation);
                 }
-                let pid = self.ids.path_id_from_wire(
-                    (identifier_type, path_identifier),
-                    recv_path_id,
-                    true,
-                )?;
+                let pid = self
+                    .ids
+                    .get_dcid(dcid_seq_num)?
+                    .path_id
+                    .ok_or(Error::InvalidFrame)?;
                 self.paths.on_path_status_received(pid, seq_num, status);
             },
         };
@@ -8095,48 +8089,6 @@ impl Connection {
     fn use_path_pkt_num_space(&self, epoch: packet::Epoch) -> bool {
         self.is_multipath_enabled() && epoch == packet::Epoch::Application
     }
-
-    /// Translates the requested `pid` into the wire-format path identifier,
-    /// knowing that the bundling frame will be sent on the path `send_pid`.
-    ///
-    /// The wire-format path identifier is used in PATH_ABANDON and PATH_STATUS
-    /// frames. It consists in a tuple of two elements. The first indicates the
-    /// mode used. The meaning of the second depends on the first. There are
-    /// three possible values for the first integer.
-    ///
-    /// * 0: The second element is the sequence number of the source CID used by
-    ///   the path internally identified by `pid`.
-    ///
-    /// * 1: The second element is the sequence number of the destination CID
-    ///   used by the path internally identified by `pid`.
-    ///
-    /// * 2: The second element contains `pid` itself. This value is only
-    ///   returned when the related path `pid` is also the sending path
-    ///   `send_pid`. Note that in that mode, the frame bundling this
-    ///   wire-format path identifier MUST be sent on the path internally
-    ///   identified by `send_pid`.
-    fn path_id_to_wire(
-        &self, pid: usize, send_pid: usize,
-    ) -> Result<(u64, Option<u64>)> {
-        let path = self.paths.get(pid)?;
-
-        if pid == send_pid {
-            // Returns the short format. Note that we always return `Some` to
-            // keep track of the abandonned path when it got acknowledged. In
-            // that case, the path_identifier corresponds to the internal ID and
-            // MUST NOT be sent on the wire.
-            return Ok((0x02, Some(send_pid as u64)));
-        }
-
-        if !self.ids.zero_length_scid() {
-            Ok((0x00, Some(path.active_scid_seq.ok_or(Error::InvalidState)?)))
-        } else if !self.ids.zero_length_dcid() {
-            Ok((0x01, Some(path.active_dcid_seq.ok_or(Error::InvalidState)?)))
-        } else {
-            error!("Path ID conversion with zero-length CIDs");
-            Err(Error::InvalidState)
-        }
-    }
 }
 
 /// Maps an `Error` to `Error::Done`, or itself.
@@ -8515,7 +8467,7 @@ impl TransportParams {
                     tp.max_datagram_frame_size = Some(val.get_varint()?);
                 },
 
-                0xbabf => {
+                0x0f739bbc1b666d04 => {
                     tp.enable_multipath = Some(val.get_varint()?);
                 },
 
@@ -8684,7 +8636,7 @@ impl TransportParams {
         if let Some(enable_multipath) = tp.enable_multipath {
             TransportParams::encode_param(
                 &mut b,
-                0xbabf,
+                0x0f739bbc1b666d04,
                 octets::varint_len(enable_multipath),
             )?;
             b.put_varint(enable_multipath)?;
@@ -9329,7 +9281,7 @@ mod tests {
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 100);
+        assert_eq!(raw_params.len(), 104);
 
         let new_tp = TransportParams::decode(raw_params, false).unwrap();
 
@@ -9360,7 +9312,7 @@ mod tests {
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, false, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 75);
+        assert_eq!(raw_params.len(), 79);
 
         let new_tp = TransportParams::decode(raw_params, true).unwrap();
 

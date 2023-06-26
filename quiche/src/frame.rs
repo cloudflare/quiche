@@ -186,15 +186,13 @@ pub enum Frame {
     },
 
     PathAbandon {
-        identifier_type: u64,
-        path_identifier: Option<u64>,
+        dcid_seq_num: u64,
         error_code: u64,
         reason: Vec<u8>,
     },
 
     PathStatus {
-        identifier_type: u64,
-        path_identifier: Option<u64>,
+        dcid_seq_num: u64,
         seq_num: u64,
         status: u64,
     },
@@ -330,38 +328,16 @@ impl Frame {
 
             0xbaba00..=0xbaba01 => parse_ack_mp_frame(frame_type, b)?,
 
-            0xbaba05 => {
-                let identifier_type = b.get_varint()?;
-                let path_identifier = match identifier_type {
-                    0x00 | 0x01 => Some(b.get_varint()?),
-                    0x02 => None,
-                    _ => return Err(Error::InvalidFrame),
-                };
-
-                Frame::PathAbandon {
-                    identifier_type,
-                    path_identifier,
-                    error_code: b.get_varint()?,
-                    reason: b.get_bytes_with_varint_length()?.to_vec(),
-                }
+            0xbaba05 => Frame::PathAbandon {
+                dcid_seq_num: b.get_varint()?,
+                error_code: b.get_varint()?,
+                reason: b.get_bytes_with_varint_length()?.to_vec(),
             },
 
-            0xbaba06 => {
-                let identifier_type = b.get_varint()?;
-                let path_identifier = match identifier_type {
-                    0x00 | 0x01 => Some(b.get_varint()?),
-                    0x02 => None,
-                    _ => return Err(Error::InvalidFrame),
-                };
-                let seq_num = b.get_varint()?;
-                let status = b.get_varint()?;
-
-                Frame::PathStatus {
-                    identifier_type,
-                    path_identifier,
-                    seq_num,
-                    status,
-                }
+            0xbaba06 => Frame::PathStatus {
+                dcid_seq_num: b.get_varint()?,
+                seq_num: b.get_varint()?,
+                status: b.get_varint()?,
             },
 
             _ => return Err(Error::InvalidFrame),
@@ -620,34 +596,26 @@ impl Frame {
             },
 
             Frame::PathAbandon {
-                identifier_type,
-                path_identifier,
+                dcid_seq_num,
                 error_code,
                 reason,
             } => {
                 b.put_varint(0xbaba05)?;
 
-                b.put_varint(*identifier_type)?;
-                if let Some(path_identifier) = path_identifier {
-                    b.put_varint(*path_identifier)?;
-                }
+                b.put_varint(*dcid_seq_num)?;
                 b.put_varint(*error_code)?;
                 b.put_varint(reason.len() as u64)?;
                 b.put_bytes(reason.as_ref())?;
             },
 
             Frame::PathStatus {
-                identifier_type,
-                path_identifier,
+                dcid_seq_num,
                 seq_num,
                 status,
             } => {
                 b.put_varint(0xbaba06)?;
 
-                b.put_varint(*identifier_type)?;
-                if let Some(path_identifier) = path_identifier {
-                    b.put_varint(*path_identifier)?;
-                }
+                b.put_varint(*dcid_seq_num)?;
                 b.put_varint(*seq_num)?;
                 b.put_varint(*status)?;
             },
@@ -851,32 +819,24 @@ impl Frame {
             },
 
             Frame::PathAbandon {
-                path_identifier,
+                dcid_seq_num,
                 error_code,
                 reason,
-                ..
             } => {
-                let path_identifier_size =
-                    path_identifier.map(octets::varint_len).unwrap_or(0);
                 4 + // frame type
-                1 + // identifier type
-                path_identifier_size +
+                octets::varint_len(*dcid_seq_num) +
                 octets::varint_len(*error_code) +
                 octets::varint_len(reason.len() as u64) + // reason_len
                 reason.len()
             },
 
             Frame::PathStatus {
-                path_identifier,
+                dcid_seq_num,
                 seq_num,
                 status,
-                ..
             } => {
-                let path_identifier_size =
-                    path_identifier.map(octets::varint_len).unwrap_or(0);
                 4 + // frame size
-                1 + // identifier type
-                path_identifier_size +
+                octets::varint_len(*dcid_seq_num) +
                 octets::varint_len(*seq_num) +
                 octets::varint_len(*status)
             },
@@ -1125,25 +1085,21 @@ impl Frame {
             },
 
             Frame::PathAbandon {
-                identifier_type,
-                path_identifier,
+                dcid_seq_num,
                 error_code,
                 reason,
             } => QuicFrame::PathAbandon {
-                identifier_type: *identifier_type,
-                path_identifier: *path_identifier,
+                dcid_seq_num: *dcid_seq_num,
                 error_code: *error_code,
                 reason: Some(String::from_utf8_lossy(reason).into_owned()),
             },
 
             Frame::PathStatus {
-                identifier_type,
-                path_identifier,
+                dcid_seq_num,
                 seq_num,
                 status,
             } => QuicFrame::PathStatus {
-                identifier_type: *identifier_type,
-                path_identifier: *path_identifier,
+                dcid_seq_num: *dcid_seq_num,
                 seq_num: *seq_num,
                 status: *status,
             },
@@ -1328,26 +1284,24 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::PathAbandon {
-                identifier_type,
-                path_identifier,
+                dcid_seq_num,
                 error_code,
                 reason,
             } => {
                 write!(
                     f,
-                    "PATH_ABANDON id_type={identifier_type} path_id={path_identifier:x?} err={error_code:x} reason={reason:x?}",
+                    "PATH_ABANDON dcid_seq_num={dcid_seq_num:x} err={error_code:x} reason={reason:x?}",
                 )?;
             },
 
             Frame::PathStatus {
-                identifier_type,
-                path_identifier,
+                dcid_seq_num,
                 seq_num,
                 status,
             } => {
                 write!(
                     f,
-                    "PATH_STATUS id_type={identifier_type} path_id={path_identifier:x?} seq_num={seq_num:x} status={status:x}",
+                    "PATH_STATUS dcid_seq_num={dcid_seq_num:x} seq_num={seq_num:x} status={status:x}",
                 )?;
             },
         }
@@ -2365,8 +2319,7 @@ mod tests {
         let mut d = [42; 128];
 
         let frame = Frame::PathAbandon {
-            identifier_type: 1,
-            path_identifier: Some(421_124),
+            dcid_seq_num: 421_124,
             error_code: 0xbeef,
             reason: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         };
@@ -2376,41 +2329,7 @@ mod tests {
             frame.to_bytes(&mut b).unwrap()
         };
 
-        assert_eq!(wire_len, 26);
-
-        let mut b = octets::Octets::with_slice(&mut d);
-        assert_eq!(
-            Frame::from_bytes(&mut b, packet::Type::Short),
-            Ok(frame.clone())
-        );
-
-        let mut b = octets::Octets::with_slice(&mut d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
-
-        let mut b = octets::Octets::with_slice(&mut d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
-
-        let mut b = octets::Octets::with_slice(&mut d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
-    }
-
-    #[test]
-    fn path_abandon_no_path_identifier() {
-        let mut d = [42; 128];
-
-        let frame = Frame::PathAbandon {
-            identifier_type: 2,
-            path_identifier: None,
-            error_code: 0xbeef,
-            reason: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-        };
-
-        let wire_len = {
-            let mut b = octets::OctetsMut::with_slice(&mut d);
-            frame.to_bytes(&mut b).unwrap()
-        };
-
-        assert_eq!(wire_len, 22);
+        assert_eq!(wire_len, 25);
 
         let mut b = octets::Octets::with_slice(&mut d);
         assert_eq!(
@@ -2512,14 +2431,12 @@ mod tests {
     fn path_status() {
         let mut d = [42; 128];
 
-        let identifier_type = 1;
-        let path_identifier = Some(0xabcdef00);
+        let dcid_seq_num = 0xabcdef00;
         let seq_num = 0x42;
         let status = 1;
 
         let frame = Frame::PathStatus {
-            identifier_type,
-            path_identifier,
+            dcid_seq_num,
             seq_num,
             status,
         };
@@ -2530,7 +2447,7 @@ mod tests {
         };
 
         assert_eq!(frame.wire_len(), wire_len);
-        assert_eq!(wire_len, 16);
+        assert_eq!(wire_len, 15);
 
         let mut b = octets::Octets::with_slice(&d);
         assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
