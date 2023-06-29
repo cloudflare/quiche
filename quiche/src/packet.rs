@@ -28,6 +28,7 @@ use std::fmt::Display;
 use std::ops::Index;
 use std::ops::IndexMut;
 use std::ops::RangeInclusive;
+use std::sync::Arc;
 use std::time;
 
 use ring::aead;
@@ -174,103 +175,76 @@ impl Type {
 }
 
 /// A QUIC connection ID.
-pub struct ConnectionId<'a>(ConnectionIdInner<'a>);
+pub struct ConnectionId(Arc<Vec<u8>>);
 
-enum ConnectionIdInner<'a> {
-    Vec(Vec<u8>),
-    Ref(&'a [u8]),
-}
-
-impl<'a> ConnectionId<'a> {
+impl ConnectionId {
     /// Creates a new connection ID from the given vector.
     #[inline]
-    pub const fn from_vec(cid: Vec<u8>) -> Self {
-        Self(ConnectionIdInner::Vec(cid))
+    pub fn from_vec(cid: Vec<u8>) -> Self {
+        Self(Arc::new(cid))
     }
 
     /// Creates a new connection ID from the given slice.
     #[inline]
-    pub const fn from_ref(cid: &'a [u8]) -> Self {
-        Self(ConnectionIdInner::Ref(cid))
-    }
-
-    /// Returns a new owning connection ID from the given existing one.
-    #[inline]
-    pub fn into_owned(self) -> ConnectionId<'static> {
-        ConnectionId::from_vec(self.into())
+    pub fn from_ref(cid: &[u8]) -> Self {
+        Self::from_vec(cid.to_vec())
     }
 }
 
-impl<'a> Default for ConnectionId<'a> {
+impl Default for ConnectionId {
     #[inline]
     fn default() -> Self {
         Self::from_vec(Vec::new())
     }
 }
 
-impl<'a> From<Vec<u8>> for ConnectionId<'a> {
+impl From<Vec<u8>> for ConnectionId {
     #[inline]
     fn from(v: Vec<u8>) -> Self {
         Self::from_vec(v)
     }
 }
 
-impl<'a> From<ConnectionId<'a>> for Vec<u8> {
-    #[inline]
-    fn from(id: ConnectionId<'a>) -> Self {
-        match id.0 {
-            ConnectionIdInner::Vec(cid) => cid,
-            ConnectionIdInner::Ref(cid) => cid.to_vec(),
-        }
-    }
-}
-
-impl<'a> PartialEq for ConnectionId<'a> {
+impl PartialEq for ConnectionId {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.as_ref() == other.as_ref()
     }
 }
 
-impl<'a> Eq for ConnectionId<'a> {}
+impl Eq for ConnectionId {}
 
-impl<'a> AsRef<[u8]> for ConnectionId<'a> {
+impl AsRef<[u8]> for ConnectionId {
     #[inline]
     fn as_ref(&self) -> &[u8] {
-        match &self.0 {
-            ConnectionIdInner::Vec(v) => v.as_ref(),
-            ConnectionIdInner::Ref(v) => v,
-        }
+        self.0.as_ref()
     }
 }
 
-impl<'a> std::hash::Hash for ConnectionId<'a> {
+impl std::hash::Hash for ConnectionId {
     #[inline]
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.as_ref().hash(state);
     }
 }
 
-impl<'a> std::ops::Deref for ConnectionId<'a> {
+impl std::ops::Deref for ConnectionId {
     type Target = [u8];
 
     #[inline]
     fn deref(&self) -> &[u8] {
-        match &self.0 {
-            ConnectionIdInner::Vec(v) => v.as_ref(),
-            ConnectionIdInner::Ref(v) => v,
-        }
+        self.0.as_ref()
     }
 }
 
-impl<'a> Clone for ConnectionId<'a> {
+impl Clone for ConnectionId {
     #[inline]
     fn clone(&self) -> Self {
-        Self::from_vec(self.as_ref().to_vec())
+        Self(Arc::clone(&self.0))
     }
 }
 
-impl<'a> std::fmt::Debug for ConnectionId<'a> {
+impl std::fmt::Debug for ConnectionId {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         for c in self.as_ref() {
@@ -283,7 +257,7 @@ impl<'a> std::fmt::Debug for ConnectionId<'a> {
 
 /// A QUIC packet's header.
 #[derive(Clone, PartialEq, Eq)]
-pub struct Header<'a> {
+pub struct Header {
     /// The type of the packet.
     pub ty: Type,
 
@@ -291,10 +265,10 @@ pub struct Header<'a> {
     pub version: u32,
 
     /// The destination connection ID of the packet.
-    pub dcid: ConnectionId<'a>,
+    pub dcid: ConnectionId,
 
     /// The source connection ID of the packet.
-    pub scid: ConnectionId<'a>,
+    pub scid: ConnectionId,
 
     /// The packet number. It's only meaningful after the header protection is
     /// removed.
@@ -317,7 +291,7 @@ pub struct Header<'a> {
     pub(crate) key_phase: bool,
 }
 
-impl<'a> Header<'a> {
+impl Header {
     /// Parses a QUIC packet header from the given buffer.
     ///
     /// The `dcid_len` parameter is the length of the destination connection ID,
@@ -336,16 +310,14 @@ impl<'a> Header<'a> {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     #[inline]
-    pub fn from_slice<'b>(
-        buf: &'b mut [u8], dcid_len: usize,
-    ) -> Result<Header<'a>> {
+    pub fn from_slice(buf: &mut [u8], dcid_len: usize) -> Result<Header> {
         let mut b = octets::OctetsMut::with_slice(buf);
         Header::from_bytes(&mut b, dcid_len)
     }
 
-    pub(crate) fn from_bytes<'b>(
-        b: &'b mut octets::OctetsMut, dcid_len: usize,
-    ) -> Result<Header<'a>> {
+    pub(crate) fn from_bytes(
+        b: &mut octets::OctetsMut, dcid_len: usize,
+    ) -> Result<Header> {
         let first = b.get_u8()?;
 
         if !Header::is_long(first) {
@@ -522,7 +494,7 @@ impl<'a> Header<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for Header<'a> {
+impl std::fmt::Debug for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", self.ty)?;
 

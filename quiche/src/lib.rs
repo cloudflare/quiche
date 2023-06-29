@@ -1300,11 +1300,11 @@ pub struct Connection {
 
     /// Peer's original destination connection ID. Used by the client to
     /// validate the server's transport parameter.
-    odcid: Option<ConnectionId<'static>>,
+    odcid: Option<ConnectionId>,
 
     /// Peer's retry source connection ID. Used by the client during stateless
     /// retry to validate the server's transport parameter.
-    rscid: Option<ConnectionId<'static>>,
+    rscid: Option<ConnectionId>,
 
     /// Received address verification token.
     token: Option<Vec<u8>>,
@@ -1521,7 +1521,7 @@ pub fn negotiate_version(
 /// # fn mint_token(hdr: &quiche::Header, src: &std::net::SocketAddr) -> Vec<u8> {
 /// #     vec![]
 /// # }
-/// # fn validate_token<'a>(src: &std::net::SocketAddr, token: &'a [u8]) -> Option<quiche::ConnectionId<'a>> {
+/// # fn validate_token<'a>(src: &std::net::SocketAddr, token: &'a [u8]) -> Option<quiche::ConnectionId> {
 /// #     None
 /// # }
 /// let (len, peer) = socket.recv_from(&mut buf).unwrap();
@@ -2350,7 +2350,7 @@ impl Connection {
             self.did_retry = true;
 
             // Remember peer's new connection ID.
-            self.odcid = Some(self.destination_id().into_owned());
+            self.odcid = Some(self.destination_id());
 
             self.set_initial_dcid(
                 hdr.scid.clone(),
@@ -2358,7 +2358,7 @@ impl Connection {
                 self.paths.get_active_path_id()?,
             )?;
 
-            self.rscid = Some(self.destination_id().into_owned());
+            self.rscid = Some(self.destination_id());
 
             // Derive Initial secrets using the new connection ID.
             let (aead_open, aead_seal) = crypto::derive_initial_key_material(
@@ -2648,7 +2648,7 @@ impl Connection {
 
         if !self.is_server && !self.got_peer_conn_id {
             if self.odcid.is_none() {
-                self.odcid = Some(self.destination_id().into_owned());
+                self.odcid = Some(self.destination_id());
             }
 
             // Replace the randomly generated destination connection ID with
@@ -5829,7 +5829,7 @@ impl Connection {
     /// more retired connection IDs.
     ///
     /// [`ConnectionId`]: struct.ConnectionId.html
-    pub fn retired_scid_next(&mut self) -> Option<ConnectionId<'static>> {
+    pub fn retired_scid_next(&mut self) -> Option<ConnectionId> {
         self.ids.pop_retired_scid()
     }
 
@@ -7111,8 +7111,7 @@ impl Connection {
     }
 
     fn set_initial_dcid(
-        &mut self, cid: ConnectionId<'static>, reset_token: Option<u128>,
-        path_id: usize,
+        &mut self, cid: ConnectionId, reset_token: Option<u128>, path_id: usize,
     ) -> Result<()> {
         self.ids.set_initial_dcid(cid, reset_token, Some(path_id));
         self.paths.get_mut(path_id)?.active_dcid_seq = Some(0);
@@ -7552,7 +7551,7 @@ impl std::fmt::Debug for Stats {
 
 #[derive(Clone, Debug, PartialEq)]
 struct TransportParams {
-    pub original_destination_connection_id: Option<ConnectionId<'static>>,
+    pub original_destination_connection_id: Option<ConnectionId>,
     pub max_idle_timeout: u64,
     pub stateless_reset_token: Option<u128>,
     pub max_udp_payload_size: u64,
@@ -7567,8 +7566,8 @@ struct TransportParams {
     pub disable_active_migration: bool,
     // pub preferred_address: ...,
     pub active_conn_id_limit: u64,
-    pub initial_source_connection_id: Option<ConnectionId<'static>>,
-    pub retry_source_connection_id: Option<ConnectionId<'static>>,
+    pub initial_source_connection_id: Option<ConnectionId>,
+    pub retry_source_connection_id: Option<ConnectionId>,
     pub max_datagram_frame_size: Option<u64>,
 }
 
@@ -8420,12 +8419,10 @@ pub mod testing {
         Ok(frames)
     }
 
-    pub fn create_cid_and_reset_token(
-        cid_len: usize,
-    ) -> (ConnectionId<'static>, u128) {
+    pub fn create_cid_and_reset_token(cid_len: usize) -> (ConnectionId, u128) {
         let mut cid = vec![0; cid_len];
         rand::rand_bytes(&mut cid[..]);
-        let cid = ConnectionId::from_ref(&cid).into_owned();
+        let cid = ConnectionId::from_ref(&cid);
 
         let mut reset_token = [0; 16];
         rand::rand_bytes(&mut reset_token);
@@ -14256,7 +14253,7 @@ mod tests {
         assert_eq!(pipe.server.path_event_next(), None);
         assert_eq!(pipe.client.source_cids_left(), 1);
 
-        let scid = pipe.client.source_id().into_owned();
+        let scid = pipe.client.source_id();
 
         let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
         assert_eq!(
@@ -14351,7 +14348,7 @@ mod tests {
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
-        let scid = pipe.client.source_id().into_owned();
+        let scid = pipe.client.source_id();
 
         let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
         assert_eq!(

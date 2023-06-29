@@ -36,7 +36,7 @@ use std::collections::VecDeque;
 #[derive(Debug, Default)]
 pub struct ConnectionIdEntry {
     /// The Connection ID.
-    pub cid: ConnectionId<'static>,
+    pub cid: ConnectionId,
 
     /// Its associated sequence number.
     pub seq: u64,
@@ -193,11 +193,11 @@ impl BoundedNonEmptyConnectionIdVecDeque {
 
 /// An iterator over QUIC Connection IDs.
 pub struct ConnectionIdIter {
-    cids: VecDeque<ConnectionId<'static>>,
+    cids: VecDeque<ConnectionId>,
 }
 
 impl Iterator for ConnectionIdIter {
-    type Item = ConnectionId<'static>;
+    type Item = ConnectionId;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -228,7 +228,7 @@ pub struct ConnectionIdentifiers {
 
     /// Retired Source Connection IDs that should be notified to the
     /// application.
-    retired_scids: VecDeque<ConnectionId<'static>>,
+    retired_scids: VecDeque<ConnectionId>,
 
     /// Largest "Retire Prior To" we received from the peer.
     largest_peer_retire_prior_to: u64,
@@ -271,8 +271,7 @@ impl ConnectionIdentifiers {
         // Record the zero-length SCID status.
         let zero_length_scid = initial_scid.is_empty();
 
-        let initial_scid =
-            ConnectionId::from_ref(initial_scid.as_ref()).into_owned();
+        let initial_scid = ConnectionId::from_ref(initial_scid.as_ref());
 
         // We need to track up to (2 * source_conn_id_limit - 1) source
         // Connection IDs when the host wants to force their renewal.
@@ -366,8 +365,8 @@ impl ConnectionIdentifiers {
     /// [`InvalidState`]: enum.Error.html#InvalidState
     /// [`IdLimit`]: enum.Error.html#IdLimit
     pub fn new_scid(
-        &mut self, cid: ConnectionId<'static>, reset_token: Option<u128>,
-        advertise: bool, path_id: Option<usize>, retire_if_needed: bool,
+        &mut self, cid: ConnectionId, reset_token: Option<u128>, advertise: bool,
+        path_id: Option<usize>, retire_if_needed: bool,
     ) -> Result<u64> {
         if self.zero_length_scid {
             return Err(Error::InvalidState);
@@ -415,7 +414,7 @@ impl ConnectionIdentifiers {
 
     /// Sets the initial destination identifier.
     pub fn set_initial_dcid(
-        &mut self, cid: ConnectionId<'static>, reset_token: Option<u128>,
+        &mut self, cid: ConnectionId, reset_token: Option<u128>,
         path_id: Option<usize>,
     ) {
         // Record the zero-length DCID status.
@@ -438,7 +437,7 @@ impl ConnectionIdentifiers {
     /// sequence number of retired DCIDs that were linked to their respective
     /// Path ID.
     pub fn new_dcid(
-        &mut self, cid: ConnectionId<'static>, seq: u64, reset_token: u128,
+        &mut self, cid: ConnectionId, seq: u64, reset_token: u128,
         retire_prior_to: u64,
     ) -> Result<Vec<(u64, usize)>> {
         if self.zero_length_dcid {
@@ -488,7 +487,7 @@ impl ConnectionIdentifiers {
         }
 
         let new_entry = ConnectionIdEntry {
-            cid: cid.clone(),
+            cid,
             seq,
             reset_token: Some(reset_token),
             path_id: None,
@@ -803,7 +802,7 @@ impl ConnectionIdentifiers {
         self.retired_scids.len()
     }
 
-    pub fn pop_retired_scid(&mut self) -> Option<ConnectionId<'static>> {
+    pub fn pop_retired_scid(&mut self) -> Option<ConnectionId> {
         self.retired_scids.pop_front()
     }
 }

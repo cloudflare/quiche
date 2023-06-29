@@ -100,7 +100,7 @@ pub struct Client {
     pub max_send_burst: usize,
 }
 
-pub type ClientIdMap = HashMap<ConnectionId<'static>, ClientId>;
+pub type ClientIdMap = HashMap<ConnectionId, ClientId>;
 pub type ClientMap = HashMap<ClientId, Client>;
 
 /// Makes a buffered writer for a resource with a target URL.
@@ -255,7 +255,7 @@ pub fn hdrs_to_strings(hdrs: &[quiche::h3::Header]) -> Vec<(String, String)> {
 /// Generate a new pair of Source Connection ID and reset token.
 pub fn generate_cid_and_reset_token<T: SecureRandom>(
     rng: &T,
-) -> (quiche::ConnectionId<'static>, u128) {
+) -> (quiche::ConnectionId, u128) {
     let mut scid = [0; quiche::MAX_CONN_ID_LEN];
     rng.fill(&mut scid).unwrap();
     let scid = scid.to_vec().into();

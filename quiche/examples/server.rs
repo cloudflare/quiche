@@ -47,7 +47,7 @@ struct Client {
     partial_responses: HashMap<u64, PartialResponse>,
 }
 
-type ClientMap = HashMap<quiche::ConnectionId<'static>, Client>;
+type ClientMap = HashMap<quiche::ConnectionId, Client>;
 
 fn main() {
     let mut buf = [0; 65535];
@@ -418,9 +418,9 @@ fn mint_token(hdr: &quiche::Header, src: &net::SocketAddr) -> Vec<u8> {
 ///
 /// Note that this function is only an example and doesn't do any cryptographic
 /// authenticate of the token. *It should not be used in production system*.
-fn validate_token<'a>(
-    src: &net::SocketAddr, token: &'a [u8],
-) -> Option<quiche::ConnectionId<'a>> {
+fn validate_token(
+    src: &net::SocketAddr, token: &[u8],
+) -> Option<quiche::ConnectionId> {
     if token.len() < 6 {
         return None;
     }
