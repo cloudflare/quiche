@@ -3319,9 +3319,8 @@ impl Connection {
                         final_size,
                     } =>
                         if self.streams.get(stream_id).is_some() {
-                            self.streams.mark_reset(
-                                stream_id, true, error_code, final_size,
-                            );
+                            self.streams
+                                .insert_reset(stream_id, error_code, final_size);
                         },
 
                     // Retransmit HANDSHAKE_DONE only if it hasn't been acked at
@@ -3332,7 +3331,7 @@ impl Connection {
 
                     frame::Frame::MaxStreamData { stream_id, .. } => {
                         if self.streams.get(stream_id).is_some() {
-                            self.streams.mark_almost_full(stream_id, true);
+                            self.streams.insert_almost_full(stream_id);
                         }
                     },
 
@@ -3654,7 +3653,7 @@ impl Connection {
                     None => {
                         // The stream doesn't exist anymore, so remove it from
                         // the almost full set.
-                        self.streams.mark_almost_full(stream_id, false);
+                        self.streams.remove_almost_full(stream_id);
                         continue;
                     },
                 };
@@ -3672,7 +3671,7 @@ impl Connection {
 
                     stream.recv.update_max_data(now);
 
-                    self.streams.mark_almost_full(stream_id, false);
+                    self.streams.remove_almost_full(stream_id);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -3724,7 +3723,7 @@ impl Connection {
                 };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
-                    self.streams.mark_stopped(stream_id, false, 0);
+                    self.streams.remove_stopped(stream_id);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -3745,7 +3744,7 @@ impl Connection {
                 };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
-                    self.streams.mark_reset(stream_id, false, 0, 0);
+                    self.streams.remove_reset(stream_id);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -3762,7 +3761,7 @@ impl Connection {
                 let frame = frame::Frame::StreamDataBlocked { stream_id, limit };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
-                    self.streams.mark_blocked(stream_id, false, 0);
+                    self.streams.remove_blocked(stream_id);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -4420,7 +4419,7 @@ impl Connection {
                     self.streams.collect(stream_id, local);
                 }
 
-                self.streams.mark_readable(stream_id, false);
+                self.streams.remove_readable(stream_id);
                 return Err(e);
             },
         };
@@ -4432,11 +4431,11 @@ impl Connection {
         let complete = stream.is_complete();
 
         if stream.recv.almost_full() {
-            self.streams.mark_almost_full(stream_id, true);
+            self.streams.insert_almost_full(stream_id);
         }
 
         if !readable {
-            self.streams.mark_readable(stream_id, false);
+            self.streams.remove_readable(stream_id);
         }
 
         if complete {
@@ -4555,7 +4554,7 @@ impl Connection {
                 // again once the capacity increases.
                 //
                 // Since the stream is writable already, mark it here instead.
-                self.streams.mark_writable(stream_id, true);
+                self.streams.insert_writable(stream_id);
             }
 
             return Err(Error::Done);
@@ -4571,7 +4570,7 @@ impl Connection {
             Ok(v) => v,
 
             Err(e) => {
-                self.streams.mark_writable(stream_id, false);
+                self.streams.remove_writable(stream_id);
                 return Err(e);
             },
         };
@@ -4590,11 +4589,11 @@ impl Connection {
 
             if stream.send.blocked_at() != Some(max_off) {
                 stream.send.update_blocked_at(Some(max_off));
-                self.streams.mark_blocked(stream_id, true, max_off);
+                self.streams.insert_blocked(stream_id, max_off);
             }
         } else {
             stream.send.update_blocked_at(None);
-            self.streams.mark_blocked(stream_id, false, 0);
+            self.streams.remove_blocked(stream_id);
         }
 
         // If the stream is now flushable push it to the flushable queue, but
@@ -4607,7 +4606,7 @@ impl Connection {
         }
 
         if !writable {
-            self.streams.mark_writable(stream_id, false);
+            self.streams.remove_writable(stream_id);
         } else if was_writable && blocked_by_cap {
             // When `stream_writable_next()` returns a stream, the writable
             // mark is removed, but because the stream is blocked by the
@@ -4615,7 +4614,7 @@ impl Connection {
             // again once the capacity increases.
             //
             // Since the stream is writable already, mark it here instead.
-            self.streams.mark_writable(stream_id, true);
+            self.streams.insert_writable(stream_id);
         }
 
         self.tx_cap -= sent;
@@ -4730,11 +4729,11 @@ impl Connection {
                 stream.recv.shutdown()?;
 
                 if !stream.recv.is_fin() {
-                    self.streams.mark_stopped(stream_id, true, err);
+                    self.streams.insert_stopped(stream_id, err);
                 }
 
                 // Once shutdown, the stream is guaranteed to be non-readable.
-                self.streams.mark_readable(stream_id, false);
+                self.streams.remove_readable(stream_id);
             },
 
             Shutdown::Write => {
@@ -4750,10 +4749,10 @@ impl Connection {
                 // Update send capacity.
                 self.update_tx_cap();
 
-                self.streams.mark_reset(stream_id, true, err, final_size);
+                self.streams.insert_reset(stream_id, err, final_size);
 
                 // Once shutdown, the stream is guaranteed to be non-writable.
-                self.streams.mark_writable(stream_id, false);
+                self.streams.remove_writable(stream_id);
             },
         }
 
@@ -4797,7 +4796,7 @@ impl Connection {
     pub fn stream_readable_next(&mut self) -> Option<u64> {
         let &stream_id = self.streams.readable.iter().next()?;
 
-        self.streams.mark_readable(stream_id, false);
+        self.streams.remove_readable(stream_id);
 
         Some(stream_id)
     }
@@ -4844,13 +4843,13 @@ impl Connection {
                     // stopped.
                     Err(_) =>
                         return {
-                            self.streams.mark_writable(stream_id, false);
+                            self.streams.remove_writable(stream_id);
                             Some(stream_id)
                         },
                 };
 
                 if cmp::min(self.tx_cap, cap) >= stream.send_lowat {
-                    self.streams.mark_writable(stream_id, false);
+                    self.streams.remove_writable(stream_id);
                     return Some(stream_id);
                 }
             }
@@ -4907,7 +4906,7 @@ impl Connection {
             let max_off = stream.send.max_off();
             if stream.send.blocked_at() != Some(max_off) {
                 stream.send.update_blocked_at(Some(max_off));
-                self.streams.mark_blocked(stream_id, true, max_off);
+                self.streams.insert_blocked(stream_id, max_off);
             }
         } else if is_writable {
             // When `stream_writable_next()` returns a stream, the writable
@@ -4916,7 +4915,7 @@ impl Connection {
             // again once the capacity increases.
             //
             // Since the stream is writable already, mark it here instead.
-            self.streams.mark_writable(stream_id, true);
+            self.streams.insert_writable(stream_id);
         }
 
         Ok(false)
@@ -6623,7 +6622,7 @@ impl Connection {
                 }
 
                 if !was_readable && stream.is_readable() {
-                    self.streams.mark_readable(stream_id, true);
+                    self.streams.insert_readable(stream_id);
                 }
 
                 self.rx_data += max_off_delta;
@@ -6673,11 +6672,10 @@ impl Connection {
                     self.tx_buffered =
                         self.tx_buffered.saturating_sub(unsent as usize);
 
-                    self.streams
-                        .mark_reset(stream_id, true, error_code, final_size);
+                    self.streams.insert_reset(stream_id, error_code, final_size);
 
                     if !was_writable {
-                        self.streams.mark_writable(stream_id, true);
+                        self.streams.insert_writable(stream_id);
                     }
                 }
             },
@@ -6750,7 +6748,7 @@ impl Connection {
                 stream.recv.write(data)?;
 
                 if !was_readable && stream.is_readable() {
-                    self.streams.mark_readable(stream_id, true);
+                    self.streams.insert_readable(stream_id);
                 }
 
                 self.rx_data += max_off_delta;
@@ -6815,7 +6813,7 @@ impl Connection {
                 }
 
                 if writable {
-                    self.streams.mark_writable(stream_id, true);
+                    self.streams.insert_writable(stream_id);
                 }
             },
 

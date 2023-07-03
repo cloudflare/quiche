@@ -404,80 +404,87 @@ impl StreamMap {
         }
     }
 
-    /// Adds or removes the stream ID to/from the readable streams set.
+    /// Adds the stream ID to the readable streams set.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn mark_readable(&mut self, stream_id: u64, readable: bool) {
-        if readable {
-            self.readable.insert(stream_id);
-        } else {
-            self.readable.remove(&stream_id);
-        }
+    pub fn insert_readable(&mut self, stream_id: u64) {
+        self.readable.insert(stream_id);
     }
 
-    /// Adds or removes the stream ID to/from the writable streams set.
+    /// Removes the stream ID from the readable streams set.
+    pub fn remove_readable(&mut self, stream_id: u64) {
+        self.readable.remove(&stream_id);
+    }
+
+    /// Adds the stream ID to the writable streams set.
     ///
     /// This should also be called anytime a new stream is created, in addition
-    /// to when an existing stream becomes writable (or stops being writable).
+    /// to when an existing stream becomes writable.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn mark_writable(&mut self, stream_id: u64, writable: bool) {
-        if writable {
-            self.writable.insert(stream_id);
-        } else {
-            self.writable.remove(&stream_id);
-        }
+    pub fn insert_writable(&mut self, stream_id: u64) {
+        self.writable.insert(stream_id);
     }
 
-    /// Adds or removes the stream ID to/from the almost full streams set.
+    /// Removes the stream ID from the writable streams set.
+    ///
+    /// This should also be called anytime an existing stream stops being
+    /// writable.
+    pub fn remove_writable(&mut self, stream_id: u64) {
+        self.writable.remove(&stream_id);
+    }
+
+    /// Adds the stream ID to the almost full streams set.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn mark_almost_full(&mut self, stream_id: u64, almost_full: bool) {
-        if almost_full {
-            self.almost_full.insert(stream_id);
-        } else {
-            self.almost_full.remove(&stream_id);
-        }
+    pub fn insert_almost_full(&mut self, stream_id: u64) {
+        self.almost_full.insert(stream_id);
     }
 
-    /// Adds or removes the stream ID to/from the blocked streams set with the
+    /// Removes the stream ID from the almost full streams set.
+    pub fn remove_almost_full(&mut self, stream_id: u64) {
+        self.almost_full.remove(&stream_id);
+    }
+
+    /// Adds the stream ID to the blocked streams set with the
     /// given offset value.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn mark_blocked(&mut self, stream_id: u64, blocked: bool, off: u64) {
-        if blocked {
-            self.blocked.insert(stream_id, off);
-        } else {
-            self.blocked.remove(&stream_id);
-        }
+    pub fn insert_blocked(&mut self, stream_id: u64, off: u64) {
+        self.blocked.insert(stream_id, off);
     }
 
-    /// Adds or removes the stream ID to/from the reset streams set with the
+    /// Removes the stream ID from the blocked streams set.
+    pub fn remove_blocked(&mut self, stream_id: u64) {
+        self.blocked.remove(&stream_id);
+    }
+
+    /// Adds the stream ID to the reset streams set with the
     /// given error code and final size values.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn mark_reset(
-        &mut self, stream_id: u64, reset: bool, error_code: u64, final_size: u64,
+    pub fn insert_reset(
+        &mut self, stream_id: u64, error_code: u64, final_size: u64,
     ) {
-        if reset {
-            self.reset.insert(stream_id, (error_code, final_size));
-        } else {
-            self.reset.remove(&stream_id);
-        }
+        self.reset.insert(stream_id, (error_code, final_size));
     }
 
-    /// Adds or removes the stream ID to/from the stopped streams set with the
+    /// Removes the stream ID from the reset streams set.
+    pub fn remove_reset(&mut self, stream_id: u64) {
+        self.reset.remove(&stream_id);
+    }
+
+    /// Adds the stream ID to the stopped streams set with the
     /// given error code.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn mark_stopped(
-        &mut self, stream_id: u64, stopped: bool, error_code: u64,
-    ) {
-        if stopped {
-            self.stopped.insert(stream_id, error_code);
-        } else {
-            self.stopped.remove(&stream_id);
-        }
+    pub fn insert_stopped(&mut self, stream_id: u64, error_code: u64) {
+        self.stopped.insert(stream_id, error_code);
+    }
+
+    /// Removes the stream ID from the stopped streams set.
+    pub fn remove_stopped(&mut self, stream_id: u64) {
+        self.stopped.remove(&stream_id);
     }
 
     /// Updates the peer's maximum bidirectional stream count limit.
@@ -544,8 +551,8 @@ impl StreamMap {
             }
         }
 
-        self.mark_readable(stream_id, false);
-        self.mark_writable(stream_id, false);
+        self.remove_readable(stream_id);
+        self.remove_writable(stream_id);
 
         self.streams.remove(&stream_id);
         self.collected.insert(stream_id);
