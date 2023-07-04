@@ -575,7 +575,9 @@ impl Config {
     /// the method will return the [`Error::SettingsError`] error.
     ///
     /// [`Error::SettingsError`]: enum.Error.html#variant.SettingsError
-    pub fn set_additional_settings(&mut self, additional_settings: Vec<(u64, u64)>) -> Result<()> {
+    pub fn set_additional_settings(
+        &mut self, additional_settings: Vec<(u64, u64)>,
+    ) -> Result<()> {
         let explicit_settings = vec![
             frame::SETTINGS_QPACK_MAX_TABLE_CAPACITY,
             frame::SETTINGS_MAX_FIELD_SECTION_SIZE,
@@ -583,7 +585,10 @@ impl Config {
             frame::SETTINGS_ENABLE_CONNECT_PROTOCOL,
             frame::SETTINGS_H3_DATAGRAM,
         ];
-        if additional_settings.iter().any(|(identifier, _)| explicit_settings.contains(identifier)) {
+        if additional_settings
+            .iter()
+            .any(|(identifier, _)| explicit_settings.contains(identifier))
+        {
             return Err(Error::SettingsError);
         }
         self.additional_settings = Some(additional_settings);
@@ -5520,11 +5525,39 @@ mod tests {
     /// Tests that setting SETTINGS with prohibited values generates an error.
     fn set_prohibited_additional_settings() {
         let mut h3_config = Config::new().unwrap();
-        assert_eq!(h3_config.set_additional_settings(vec![(frame::SETTINGS_QPACK_MAX_TABLE_CAPACITY, 43)]), Err(Error::SettingsError));
-        assert_eq!(h3_config.set_additional_settings(vec![(frame::SETTINGS_MAX_FIELD_SECTION_SIZE, 43)]), Err(Error::SettingsError));
-        assert_eq!(h3_config.set_additional_settings(vec![(frame::SETTINGS_QPACK_BLOCKED_STREAMS, 43)]), Err(Error::SettingsError));
-        assert_eq!(h3_config.set_additional_settings(vec![(frame::SETTINGS_ENABLE_CONNECT_PROTOCOL, 43)]), Err(Error::SettingsError));
-        assert_eq!(h3_config.set_additional_settings(vec![(frame::SETTINGS_H3_DATAGRAM, 43)]), Err(Error::SettingsError));
+        assert_eq!(
+            h3_config.set_additional_settings(vec![(
+                frame::SETTINGS_QPACK_MAX_TABLE_CAPACITY,
+                43
+            )]),
+            Err(Error::SettingsError)
+        );
+        assert_eq!(
+            h3_config.set_additional_settings(vec![(
+                frame::SETTINGS_MAX_FIELD_SECTION_SIZE,
+                43
+            )]),
+            Err(Error::SettingsError)
+        );
+        assert_eq!(
+            h3_config.set_additional_settings(vec![(
+                frame::SETTINGS_QPACK_BLOCKED_STREAMS,
+                43
+            )]),
+            Err(Error::SettingsError)
+        );
+        assert_eq!(
+            h3_config.set_additional_settings(vec![(
+                frame::SETTINGS_ENABLE_CONNECT_PROTOCOL,
+                43
+            )]),
+            Err(Error::SettingsError)
+        );
+        assert_eq!(
+            h3_config
+                .set_additional_settings(vec![(frame::SETTINGS_H3_DATAGRAM, 43)]),
+            Err(Error::SettingsError)
+        );
     }
 
     #[test]
@@ -5548,7 +5581,9 @@ mod tests {
         config.grease(false);
 
         let mut h3_config = Config::new().unwrap();
-        h3_config.set_additional_settings(vec![(42, 43), (44, 45)]).unwrap();
+        h3_config
+            .set_additional_settings(vec![(42, 43), (44, 45)])
+            .unwrap();
 
         let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
         assert_eq!(s.pipe.handshake(), Ok(()));
@@ -5563,8 +5598,14 @@ mod tests {
         assert_eq!(s.pipe.advance(), Ok(()));
         assert_eq!(s.client.poll(&mut s.pipe.client), Err(Error::Done));
 
-        assert_eq!(s.server.peer_settings_raw(), Some(&[(42, 43), (44, 45)][..]));
-        assert_eq!(s.client.peer_settings_raw(), Some(&[(42, 43), (44, 45)][..]));
+        assert_eq!(
+            s.server.peer_settings_raw(),
+            Some(&[(42, 43), (44, 45)][..])
+        );
+        assert_eq!(
+            s.client.peer_settings_raw(),
+            Some(&[(42, 43), (44, 45)][..])
+        );
     }
 
     #[test]
