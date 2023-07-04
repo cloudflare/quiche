@@ -511,6 +511,9 @@ pub struct Config {
     qpack_max_table_capacity: Option<u64>,
     qpack_blocked_streams: Option<u64>,
     connect_protocol_enabled: Option<u64>,
+    /// additional settings are settings that are not part of the H3
+    /// settings explicitly handled above
+    additional_settings: Option<Vec<(u64, u64)>>,
 }
 
 impl Config {
@@ -521,6 +524,7 @@ impl Config {
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
             connect_protocol_enabled: None,
+            additional_settings: None,
         })
     }
 
@@ -560,6 +564,30 @@ impl Config {
         } else {
             self.connect_protocol_enabled = None;
         }
+    }
+
+    /// Sets H3 additional settings.
+    ///
+    /// The default value is no additional settings.
+    /// The `additional_settings` parameter must not contain settings already
+    /// handled by default in this library.
+    /// If such a setting is present in the `additional_settings`,
+    /// the method will return the [`Error::SettingsError`] error.
+    ///
+    /// [`Error::SettingsError`]: enum.Error.html#variant.SettingsError
+    pub fn set_additional_settings(&mut self, additional_settings: Vec<(u64, u64)>) -> Result<()> {
+        let explicit_settings = vec![
+            frame::SETTINGS_QPACK_MAX_TABLE_CAPACITY,
+            frame::SETTINGS_MAX_FIELD_SECTION_SIZE,
+            frame::SETTINGS_QPACK_BLOCKED_STREAMS,
+            frame::SETTINGS_ENABLE_CONNECT_PROTOCOL,
+            frame::SETTINGS_H3_DATAGRAM,
+        ];
+        if additional_settings.iter().any(|(identifier, _)| explicit_settings.contains(identifier)) {
+            return Err(Error::SettingsError);
+        }
+        self.additional_settings = Some(additional_settings);
+        Ok(())
     }
 }
 
@@ -804,6 +832,7 @@ struct ConnectionSettings {
     pub qpack_blocked_streams: Option<u64>,
     pub connect_protocol_enabled: Option<u64>,
     pub h3_datagram: Option<u64>,
+    pub additional_settings: Option<Vec<(u64, u64)>>,
     pub raw: Option<Vec<(u64, u64)>>,
 }
 
@@ -865,6 +894,7 @@ impl Connection {
                 qpack_blocked_streams: config.qpack_blocked_streams,
                 connect_protocol_enabled: config.connect_protocol_enabled,
                 h3_datagram,
+                additional_settings: config.additional_settings.clone(),
                 raw: Default::default(),
             },
 
@@ -874,6 +904,7 @@ impl Connection {
                 qpack_blocked_streams: None,
                 h3_datagram: None,
                 connect_protocol_enabled: None,
+                additional_settings: Default::default(),
                 raw: Default::default(),
             },
 
@@ -1966,6 +1997,7 @@ impl Connection {
                 .connect_protocol_enabled,
             h3_datagram: self.local_settings.h3_datagram,
             grease,
+            additional_settings: self.local_settings.additional_settings.clone(),
             raw: Default::default(),
         };
 
@@ -2391,6 +2423,7 @@ impl Connection {
                 qpack_blocked_streams,
                 connect_protocol_enabled,
                 h3_datagram,
+                additional_settings,
                 raw,
                 ..
             } => {
@@ -2400,6 +2433,7 @@ impl Connection {
                     qpack_blocked_streams,
                     connect_protocol_enabled,
                     h3_datagram,
+                    additional_settings,
                     raw,
                 };
 
@@ -5399,6 +5433,7 @@ mod tests {
             connect_protocol_enabled: None,
             h3_datagram: Some(1),
             grease: None,
+            additional_settings: Default::default(),
             raw: Default::default(),
         };
 
@@ -5479,6 +5514,57 @@ mod tests {
         assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::SettingsError));
 
         assert_eq!(s.client.poll(&mut s.pipe.client), Err(Error::SettingsError));
+    }
+
+    #[test]
+    /// Tests that setting SETTINGS with prohibited values generates an error.
+    fn set_prohibited_additional_settings() {
+        let mut h3_config = Config::new().unwrap();
+        assert_eq!(h3_config.set_additional_settings(vec![(frame::SETTINGS_QPACK_MAX_TABLE_CAPACITY, 43)]), Err(Error::SettingsError));
+        assert_eq!(h3_config.set_additional_settings(vec![(frame::SETTINGS_MAX_FIELD_SECTION_SIZE, 43)]), Err(Error::SettingsError));
+        assert_eq!(h3_config.set_additional_settings(vec![(frame::SETTINGS_QPACK_BLOCKED_STREAMS, 43)]), Err(Error::SettingsError));
+        assert_eq!(h3_config.set_additional_settings(vec![(frame::SETTINGS_ENABLE_CONNECT_PROTOCOL, 43)]), Err(Error::SettingsError));
+        assert_eq!(h3_config.set_additional_settings(vec![(frame::SETTINGS_H3_DATAGRAM, 43)]), Err(Error::SettingsError));
+    }
+
+    #[test]
+    /// Tests additional settings are actually exchanged by the peers.
+    fn set_additional_settings() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+        config.grease(false);
+
+        let mut h3_config = Config::new().unwrap();
+        h3_config.set_additional_settings(vec![(42, 43), (44, 45)]).unwrap();
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        assert_eq!(s.pipe.handshake(), Ok(()));
+
+        assert_eq!(s.pipe.advance(), Ok(()));
+
+        s.client.send_settings(&mut s.pipe.client).unwrap();
+        assert_eq!(s.pipe.advance(), Ok(()));
+        assert_eq!(s.server.poll(&mut s.pipe.server), Err(Error::Done));
+
+        s.server.send_settings(&mut s.pipe.server).unwrap();
+        assert_eq!(s.pipe.advance(), Ok(()));
+        assert_eq!(s.client.poll(&mut s.pipe.client), Err(Error::Done));
+
+        assert_eq!(s.server.peer_settings_raw(), Some(&[(42, 43), (44, 45)][..]));
+        assert_eq!(s.client.peer_settings_raw(), Some(&[(42, 43), (44, 45)][..]));
     }
 
     #[test]
