@@ -702,6 +702,7 @@ mod tests {
             connect_protocol_enabled: None,
             h3_datagram: None,
             grease: None,
+            additional_settings: None,
             raw: Some(raw_settings),
         };
 
@@ -751,6 +752,7 @@ mod tests {
             connect_protocol_enabled: None,
             h3_datagram: None,
             grease: None,
+            additional_settings: None,
             raw: Some(vec![]),
         };
 
@@ -806,6 +808,7 @@ mod tests {
             connect_protocol_enabled: None,
             h3_datagram: None,
             grease: None,
+            additional_settings: None,
             raw: Some(raw_settings),
         };
 
@@ -870,6 +873,7 @@ mod tests {
             connect_protocol_enabled: None,
             h3_datagram: None,
             grease: None,
+            additional_settings: None,
             raw: Some(raw_settings),
         };
 
@@ -913,6 +917,7 @@ mod tests {
             connect_protocol_enabled: None,
             h3_datagram: None,
             grease: None,
+            additional_settings: None,
             raw: Some(raw_settings),
         };
 
@@ -1170,6 +1175,7 @@ mod tests {
             connect_protocol_enabled: None,
             h3_datagram: None,
             grease: None,
+            additional_settings: None,
             raw: Some(vec![]),
         };
 
@@ -1250,6 +1256,7 @@ mod tests {
             connect_protocol_enabled: None,
             h3_datagram: None,
             grease: None,
+            additional_settings: None,
             raw: Some(vec![]),
         };
 
@@ -1297,6 +1304,7 @@ mod tests {
             connect_protocol_enabled: None,
             h3_datagram: None,
             grease: None,
+            additional_settings: None,
             raw: Some(vec![]),
         };
 
