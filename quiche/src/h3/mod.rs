@@ -569,8 +569,15 @@ impl Config {
     /// Sets additional HTTP/3 settings.
     ///
     /// The default value is no additional settings.
-    /// The `additional_settings` parameter must not contain settings already
-    /// handled by default in this library.
+    /// The `additional_settings` parameter must not the following
+    /// settings as they are already handled by this library:
+    ///
+    /// - SETTINGS_QPACK_MAX_TABLE_CAPACITY
+    /// - SETTINGS_MAX_FIELD_SECTION_SIZE
+    /// - SETTINGS_QPACK_BLOCKED_STREAMS
+    /// - SETTINGS_ENABLE_CONNECT_PROTOCOL
+    /// - SETTINGS_H3_DATAGRAM
+    ///
     /// If such a setting is present in the `additional_settings`,
     /// the method will return the [`Error::SettingsError`] error.
     ///
