@@ -566,7 +566,7 @@ impl Config {
         }
     }
 
-    /// Sets H3 additional settings.
+    /// Sets additional HTTP/3 settings.
     ///
     /// The default value is no additional settings.
     /// The `additional_settings` parameter must not contain settings already
