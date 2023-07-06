@@ -593,9 +593,10 @@ fn parse_settings_frame(
                 return Err(super::Error::SettingsError),
 
             // Unknown Settings parameters go into additional_settings.
-            _ => match &mut additional_settings {
-                Some(s) => s.push((identifier, value)),
-                None => additional_settings = Some(vec![(identifier, value)]),
+            _ => {
+                let s: &mut Vec<(u64, u64)> =
+                    additional_settings.get_or_insert(vec![]);
+                s.push((identifier, value));
             },
         }
     }
