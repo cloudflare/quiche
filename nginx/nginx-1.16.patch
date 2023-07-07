@@ -1921,7 +1921,7 @@ index 000000000..1a05d4e01
 +        return;
 +    }
 +
-+    stream->in_closed = !quiche_h3_event_headers_has_body(ev);
++    stream->in_closed = !quiche_h3_event_headers_has_more_frames(ev);
 +
 +    ngx_http_v3_run_request(stream->request);
 +}
