@@ -816,10 +816,6 @@ void quiche_h3_config_free(quiche_h3_config *config);
 // An HTTP/3 connection.
 typedef struct quiche_h3_conn quiche_h3_conn;
 
-// Creates a new server-side connection.
-quiche_h3_conn *quiche_h3_accept(quiche_conn *quiche_conn,
-                                 quiche_h3_config *config);
-
 // Creates a new HTTP/3 connection using the provided QUIC connection.
 quiche_h3_conn *quiche_h3_conn_new_with_transport(quiche_conn *quiche_conn,
                                                   quiche_h3_config *config);
