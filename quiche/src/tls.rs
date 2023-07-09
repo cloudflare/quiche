@@ -80,7 +80,6 @@ struct X509_STORE(c_void);
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-#[cfg(windows)]
 struct X509(c_void);
 
 #[allow(non_camel_case_types)]
@@ -162,6 +161,13 @@ struct SSL_PRIVATE_KEY_METHOD {
         out_len: *mut usize,
         max_out: usize,
     ) -> ssl_private_key_result_t,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+struct CBS {
+    data: *const u8,
+    len: libc::size_t,
 }
 
 lazy_static::lazy_static! {
@@ -248,6 +254,32 @@ impl Context {
         let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
         map_result(unsafe {
             SSL_CTX_use_PrivateKey_file(self.as_mut_ptr(), cstr.as_ptr(), 1)
+        })
+    }
+
+    pub fn use_privkey(&mut self, key: *const u8, key_len: libc::size_t) -> Result<()> {
+        map_result(unsafe {
+            let cbs = CBS {data: key, len: key_len};
+            let pkey = EVP_parse_private_key(&cbs);
+            let rc = SSL_CTX_use_PrivateKey(self.as_mut_ptr(), pkey);
+            EVP_PKEY_free(pkey);
+            rc
+        })
+    }
+
+    pub fn use_cert(&mut self, cert: *const u8, cert_len: libc::size_t) -> Result<()> {
+        map_result(unsafe {
+            let x = d2i_X509(
+                ptr::null_mut(),
+                &cert,
+                cert_len as i32,
+            );
+            if x.is_null() {
+                return Err(Error::TlsFail);
+            }
+            let rc = SSL_CTX_use_certificate(self.as_mut_ptr(), x);
+            X509_free(x);
+            rc
         })
     }
 
@@ -1260,8 +1292,24 @@ extern {
     fn SSL_CTX_new(method: *const SSL_METHOD) -> *mut SSL_CTX;
     fn SSL_CTX_free(ctx: *mut SSL_CTX);
 
+    fn SSL_CTX_use_certificate(
+        ctx: *mut SSL_CTX, key: *mut X509,
+    ) -> c_int;
+
     fn SSL_CTX_use_certificate_chain_file(
         ctx: *mut SSL_CTX, file: *const c_char,
+    ) -> c_int;
+
+    fn EVP_parse_private_key(
+        cbs: *const CBS,
+    ) -> *const u8;
+
+    fn EVP_PKEY_free(
+        pkey: *const u8,
+    );
+
+    fn SSL_CTX_use_PrivateKey(
+        ctx: *mut SSL_CTX, key: *const u8,
     ) -> c_int;
 
     fn SSL_CTX_use_PrivateKey_file(
@@ -1433,9 +1481,7 @@ extern {
     fn X509_STORE_add_cert(ctx: *mut X509_STORE, x: *mut X509) -> c_int;
 
     // X509
-    #[cfg(windows)]
     fn X509_free(x: *mut X509);
-    #[cfg(windows)]
     fn d2i_X509(px: *mut X509, input: *const *const u8, len: c_int) -> *mut X509;
 
     // STACK_OF

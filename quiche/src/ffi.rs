@@ -150,12 +150,34 @@ pub extern fn quiche_config_new(version: u32) -> *mut Config {
 }
 
 #[no_mangle]
+pub extern fn quiche_config_load_cert(
+    config: &mut Config, cert: *const u8, cert_len: size_t,
+) -> c_int {
+    match config.load_cert(cert, cert_len) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_config_load_cert_chain_from_pem_file(
     config: &mut Config, path: *const c_char,
 ) -> c_int {
     let path = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
 
     match config.load_cert_chain_from_pem_file(path) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_config_load_priv_key(
+    config: &mut Config, key: *const u8, key_len: size_t,
+) -> c_int {
+    match config.load_priv_key(key, key_len) {
         Ok(_) => 0,
 
         Err(e) => e.to_c() as c_int,
