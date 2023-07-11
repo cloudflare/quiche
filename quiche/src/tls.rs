@@ -705,7 +705,7 @@ impl Handshake {
                 map_result_ptr(SSL_get0_peer_certificates(self.as_ptr())).ok()?;
 
             let num = sk_num(chain);
-            if num <= 0 {
+            if num == 0 {
                 return None;
             }
 
@@ -736,7 +736,7 @@ impl Handshake {
         let peer_cert = unsafe {
             let chain =
                 map_result_ptr(SSL_get0_peer_certificates(self.as_ptr())).ok()?;
-            if sk_num(chain) <= 0 {
+            if sk_num(chain) == 0 {
                 return None;
             }
 
