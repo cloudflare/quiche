@@ -80,6 +80,10 @@ struct X509_STORE(c_void);
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
+struct X509_STORE_CTX(c_void);
+
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
 #[cfg(windows)]
 struct X509(c_void);
 
@@ -94,33 +98,40 @@ struct CRYPTO_BUFFER(c_void);
 #[repr(C)]
 #[allow(non_camel_case_types)]
 struct SSL_QUIC_METHOD {
-    set_read_secret: extern fn(
-        ssl: *mut SSL,
-        level: crypto::Level,
-        cipher: *const SSL_CIPHER,
-        secret: *const u8,
-        secret_len: usize,
-    ) -> c_int,
+    set_read_secret: Option<
+        unsafe extern fn(
+            ssl: *mut SSL,
+            level: crypto::Level,
+            cipher: *const SSL_CIPHER,
+            secret: *const u8,
+            secret_len: usize,
+        ) -> c_int,
+    >,
 
-    set_write_secret: extern fn(
-        ssl: *mut SSL,
-        level: crypto::Level,
-        cipher: *const SSL_CIPHER,
-        secret: *const u8,
-        secret_len: usize,
-    ) -> c_int,
+    set_write_secret: Option<
+        unsafe extern fn(
+            ssl: *mut SSL,
+            level: crypto::Level,
+            cipher: *const SSL_CIPHER,
+            secret: *const u8,
+            secret_len: usize,
+        ) -> c_int,
+    >,
 
-    add_handshake_data: extern fn(
-        ssl: *mut SSL,
-        level: crypto::Level,
-        data: *const u8,
-        len: usize,
-    ) -> c_int,
+    add_handshake_data: Option<
+        unsafe extern fn(
+            ssl: *mut SSL,
+            level: crypto::Level,
+            data: *const u8,
+            len: usize,
+        ) -> c_int,
+    >,
 
-    flush_flight: extern fn(ssl: *mut SSL) -> c_int,
+    flush_flight: Option<extern fn(ssl: *mut SSL) -> c_int>,
 
-    send_alert:
+    send_alert: Option<
         extern fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int,
+    >,
 }
 
 #[cfg(test)]
@@ -137,31 +148,37 @@ enum ssl_private_key_result_t {
 #[repr(C)]
 #[allow(non_camel_case_types)]
 struct SSL_PRIVATE_KEY_METHOD {
-    sign: extern fn(
-        ssl: *mut SSL,
-        out: *mut u8,
-        out_len: *mut usize,
-        max_out: usize,
-        signature_algorithm: u16,
-        r#in: *const u8,
-        in_len: usize,
-    ) -> ssl_private_key_result_t,
+    sign: Option<
+        unsafe extern fn(
+            ssl: *mut SSL,
+            out: *mut u8,
+            out_len: *mut usize,
+            max_out: usize,
+            signature_algorithm: u16,
+            r#in: *const u8,
+            in_len: usize,
+        ) -> ssl_private_key_result_t,
+    >,
 
-    decrypt: extern fn(
-        ssl: *mut SSL,
-        out: *mut u8,
-        out_len: *mut usize,
-        max_out: usize,
-        r#in: *const u8,
-        in_len: usize,
-    ) -> ssl_private_key_result_t,
+    decrypt: Option<
+        unsafe extern fn(
+            ssl: *mut SSL,
+            out: *mut u8,
+            out_len: *mut usize,
+            max_out: usize,
+            r#in: *const u8,
+            in_len: usize,
+        ) -> ssl_private_key_result_t,
+    >,
 
-    complete: extern fn(
-        ssl: *mut SSL,
-        out: *mut u8,
-        out_len: *mut usize,
-        max_out: usize,
-    ) -> ssl_private_key_result_t,
+    complete: Option<
+        unsafe extern fn(
+            ssl: *mut SSL,
+            out: *mut u8,
+            out_len: *mut usize,
+            max_out: usize,
+        ) -> ssl_private_key_result_t,
+    >,
 }
 
 lazy_static::lazy_static! {
@@ -172,11 +189,11 @@ lazy_static::lazy_static! {
 }
 
 static QUICHE_STREAM_METHOD: SSL_QUIC_METHOD = SSL_QUIC_METHOD {
-    set_read_secret,
-    set_write_secret,
-    add_handshake_data,
-    flush_flight,
-    send_alert,
+    set_read_secret: Some(set_read_secret),
+    set_write_secret: Some(set_write_secret),
+    add_handshake_data: Some(add_handshake_data),
+    flush_flight: Some(flush_flight),
+    send_alert: Some(send_alert),
 };
 
 pub struct Context(*mut SSL_CTX);
@@ -314,7 +331,7 @@ impl Context {
                 0x0001, // SSL_SESS_CACHE_CLIENT
             );
 
-            SSL_CTX_sess_set_new_cb(self.as_mut_ptr(), new_session);
+            SSL_CTX_sess_set_new_cb(self.as_mut_ptr(), Some(new_session));
         };
     }
 
@@ -324,13 +341,13 @@ impl Context {
         let mode = i32::from(verify);
 
         unsafe {
-            SSL_CTX_set_verify(self.as_mut_ptr(), mode, ptr::null());
+            SSL_CTX_set_verify(self.as_mut_ptr(), mode, None);
         }
     }
 
     pub fn enable_keylog(&mut self) {
         unsafe {
-            SSL_CTX_set_keylog_callback(self.as_mut_ptr(), keylog);
+            SSL_CTX_set_keylog_callback(self.as_mut_ptr(), Some(keylog));
         }
     }
 
@@ -346,7 +363,7 @@ impl Context {
         unsafe {
             SSL_CTX_set_alpn_select_cb(
                 self.as_mut_ptr(),
-                select_alpn,
+                Some(select_alpn),
                 ptr::null_mut(),
             );
         }
@@ -426,8 +443,8 @@ impl Handshake {
     pub fn init(&mut self, is_server: bool) -> Result<()> {
         self.set_state(is_server);
 
-        self.set_min_proto_version(TLS1_3_VERSION);
-        self.set_max_proto_version(TLS1_3_VERSION);
+        self.set_min_proto_version(TLS1_3_VERSION)?;
+        self.set_max_proto_version(TLS1_3_VERSION)?;
 
         self.set_quic_method()?;
 
@@ -461,7 +478,7 @@ impl Handshake {
 
     pub fn set_ex_data<T>(&mut self, idx: c_int, data: *const T) -> Result<()> {
         map_result(unsafe {
-            let ptr = data as *const c_void;
+            let ptr = data as *mut c_void;
             SSL_set_ex_data(self.as_mut_ptr(), idx, ptr)
         })
     }
@@ -482,12 +499,16 @@ impl Handshake {
         })
     }
 
-    pub fn set_min_proto_version(&mut self, version: u16) {
-        unsafe { SSL_set_min_proto_version(self.as_mut_ptr(), version) }
+    pub fn set_min_proto_version(&mut self, version: u16) -> Result<()> {
+        map_result(unsafe {
+            SSL_set_min_proto_version(self.as_mut_ptr(), version)
+        })
     }
 
-    pub fn set_max_proto_version(&mut self, version: u16) {
-        unsafe { SSL_set_max_proto_version(self.as_mut_ptr(), version) }
+    pub fn set_max_proto_version(&mut self, version: u16) -> Result<()> {
+        map_result(unsafe {
+            SSL_set_max_proto_version(self.as_mut_ptr(), version)
+        })
     }
 
     pub fn set_quiet_shutdown(&mut self, mode: bool) {
@@ -684,7 +705,7 @@ impl Handshake {
                 map_result_ptr(SSL_get0_peer_certificates(self.as_ptr())).ok()?;
 
             let num = sk_num(chain);
-            if num <= 0 {
+            if num == 0 {
                 return None;
             }
 
@@ -715,7 +736,7 @@ impl Handshake {
         let peer_cert = unsafe {
             let chain =
                 map_result_ptr(SSL_get0_peer_certificates(self.as_ptr())).ok()?;
-            if sk_num(chain) <= 0 {
+            if sk_num(chain) == 0 {
                 return None;
             }
 
@@ -767,9 +788,9 @@ impl Handshake {
 
         static QUICHE_PRIVATE_KEY_METHOD: SSL_PRIVATE_KEY_METHOD =
             SSL_PRIVATE_KEY_METHOD {
-                decrypt: failing_decrypt,
-                sign: failing_sign,
-                complete: failing_complete,
+                decrypt: Some(failing_decrypt),
+                sign: Some(failing_sign),
+                complete: Some(failing_complete),
             };
 
         unsafe {
@@ -905,7 +926,7 @@ pub struct ExData<'a> {
     pub is_server: bool,
 }
 
-fn get_ex_data_from_ptr<'a, T>(ptr: *mut SSL, idx: c_int) -> Option<&'a mut T> {
+fn get_ex_data_from_ptr<'a, T>(ptr: *const SSL, idx: c_int) -> Option<&'a mut T> {
     unsafe {
         let data = SSL_get_ex_data(ptr, idx) as *mut T;
         data.as_mut()
@@ -1090,7 +1111,7 @@ extern fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int {
     1
 }
 
-extern fn keylog(ssl: *mut SSL, line: *const c_char) {
+extern fn keylog(ssl: *const SSL, line: *const c_char) {
     let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
     {
         Some(v) => v,
@@ -1242,11 +1263,11 @@ fn map_result_ptr<'a, T>(bssl_result: *const T) -> Result<&'a T> {
 }
 
 fn log_ssl_error() {
-    let err = [0; 1024];
+    let mut err = [0u8; 1024];
 
     unsafe {
         let e = ERR_peek_error();
-        ERR_error_string_n(e, err.as_ptr(), err.len());
+        ERR_error_string_n(e, err.as_mut_ptr() as *mut c_char, err.len());
     }
 
     trace!("{}", std::str::from_utf8(&err).unwrap());
@@ -1278,10 +1299,16 @@ extern {
     #[cfg(windows)]
     fn SSL_CTX_get_cert_store(ctx: *mut SSL_CTX) -> *mut X509_STORE;
 
-    fn SSL_CTX_set_verify(ctx: *mut SSL_CTX, mode: c_int, cb: *const c_void);
+    fn SSL_CTX_set_verify(
+        ctx: *mut SSL_CTX, mode: c_int,
+        cb: Option<
+            unsafe extern fn(ok: c_int, store_ctx: *mut X509_STORE_CTX) -> c_int,
+        >,
+    );
 
     fn SSL_CTX_set_keylog_callback(
-        ctx: *mut SSL_CTX, cb: extern fn(ssl: *mut SSL, line: *const c_char),
+        ctx: *mut SSL_CTX,
+        cb: Option<unsafe extern fn(ssl: *const SSL, line: *const c_char)>,
     );
 
     fn SSL_CTX_set_tlsext_ticket_keys(
@@ -1294,14 +1321,16 @@ extern {
 
     fn SSL_CTX_set_alpn_select_cb(
         ctx: *mut SSL_CTX,
-        cb: extern fn(
-            ssl: *mut SSL,
-            out: *mut *const u8,
-            out_len: *mut u8,
-            inp: *mut u8,
-            in_len: c_uint,
-            arg: *mut c_void,
-        ) -> c_int,
+        cb: Option<
+            unsafe extern fn(
+                ssl: *mut SSL,
+                out: *mut *const u8,
+                out_len: *mut u8,
+                inp: *mut u8,
+                in_len: c_uint,
+                arg: *mut c_void,
+            ) -> c_int,
+        >,
         arg: *mut c_void,
     );
 
@@ -1311,7 +1340,9 @@ extern {
 
     fn SSL_CTX_sess_set_new_cb(
         ctx: *mut SSL_CTX,
-        cb: extern fn(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int,
+        cb: Option<
+            unsafe extern fn(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int,
+        >,
     );
 
     // SSL
@@ -1329,8 +1360,8 @@ extern {
 
     fn SSL_get0_param(ssl: *mut SSL) -> *mut X509_VERIFY_PARAM;
 
-    fn SSL_set_ex_data(ssl: *mut SSL, idx: c_int, ptr: *const c_void) -> c_int;
-    fn SSL_get_ex_data(ssl: *mut SSL, idx: c_int) -> *mut c_void;
+    fn SSL_set_ex_data(ssl: *mut SSL, idx: c_int, ptr: *mut c_void) -> c_int;
+    fn SSL_get_ex_data(ssl: *const SSL, idx: c_int) -> *mut c_void;
 
     fn SSL_get_current_cipher(ssl: *const SSL) -> *const SSL_CIPHER;
 
@@ -1348,8 +1379,8 @@ extern {
 
     fn SSL_get0_peer_certificates(ssl: *const SSL) -> *const STACK_OF;
 
-    fn SSL_set_min_proto_version(ssl: *mut SSL, version: u16);
-    fn SSL_set_max_proto_version(ssl: *mut SSL, version: u16);
+    fn SSL_set_min_proto_version(ssl: *mut SSL, version: u16) -> c_int;
+    fn SSL_set_max_proto_version(ssl: *mut SSL, version: u16) -> c_int;
 
     fn SSL_set_quiet_shutdown(ssl: *mut SSL, mode: c_int);
 
@@ -1439,8 +1470,8 @@ extern {
     fn d2i_X509(px: *mut X509, input: *const *const u8, len: c_int) -> *mut X509;
 
     // STACK_OF
-    fn sk_num(stack: *const STACK_OF) -> c_int;
-    fn sk_value(stack: *const STACK_OF, idx: c_int) -> *mut c_void;
+    fn sk_num(stack: *const STACK_OF) -> usize;
+    fn sk_value(stack: *const STACK_OF, idx: usize) -> *mut c_void;
 
     // CRYPTO_BUFFER
     fn CRYPTO_BUFFER_len(buffer: *const CRYPTO_BUFFER) -> usize;
@@ -1449,7 +1480,7 @@ extern {
     // ERR
     fn ERR_peek_error() -> c_uint;
 
-    fn ERR_error_string_n(err: c_uint, buf: *const u8, len: usize);
+    fn ERR_error_string_n(err: c_uint, buf: *mut c_char, len: usize);
 
     // OPENSSL
     fn OPENSSL_free(ptr: *mut c_void);
