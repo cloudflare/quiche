@@ -209,6 +209,9 @@ void quiche_config_set_max_ack_delay(quiche_config *config, uint64_t v);
 // Sets the `disable_active_migration` transport parameter.
 void quiche_config_set_disable_active_migration(quiche_config *config, bool v);
 
+// Sets the congestion control algorithm used by string.
+int quiche_config_set_cc_algorithm_name(quiche_config *config, const char *algo);
+
 enum quiche_cc_algorithm {
     QUICHE_CC_RENO = 0,
     QUICHE_CC_CUBIC = 1,
