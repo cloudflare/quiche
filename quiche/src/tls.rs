@@ -30,6 +30,8 @@ use std::slice;
 
 use std::io::Write;
 
+use once_cell::sync::Lazy;
+
 use libc::c_char;
 use libc::c_int;
 use libc::c_long;
@@ -181,12 +183,12 @@ struct SSL_PRIVATE_KEY_METHOD {
     >,
 }
 
-lazy_static::lazy_static! {
-    /// BoringSSL Extra Data Index for Quiche Connections
-    pub static ref QUICHE_EX_DATA_INDEX: c_int = unsafe {
-        SSL_get_ex_new_index(0, ptr::null(), ptr::null(), ptr::null(), ptr::null())
-    };
-}
+/// BoringSSL ex_data index for quiche connections.
+///
+/// TODO: replace with `std::sync::LazyLock` when stable.
+pub static QUICHE_EX_DATA_INDEX: Lazy<c_int> = Lazy::new(|| unsafe {
+    SSL_get_ex_new_index(0, ptr::null(), ptr::null(), ptr::null(), ptr::null())
+});
 
 static QUICHE_STREAM_METHOD: SSL_QUIC_METHOD = SSL_QUIC_METHOD {
     set_read_secret: Some(set_read_secret),
