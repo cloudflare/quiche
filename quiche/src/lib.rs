@@ -1132,13 +1132,20 @@ impl Config {
         self.local_transport_params.disable_active_migration = v;
     }
 
+    /// Sets whether the multipath extension follows v4 instead of v5.
+    ///
+    /// The default vale is `false`.
+    pub fn set_multipath_v4(&mut self, v: bool) {
+        self.local_transport_params.enable_multipath_v4 =
+            if v { Some(1) } else { None };
+    }
+
     /// Sets the `enable_multipath` transport parameter, negotiating the usage
     /// of the multipath extension over this connection.
     ///
     /// The default value is `false`.
     pub fn set_multipath(&mut self, v: bool) {
-        self.local_transport_params.enable_multipath =
-            if v { Some(1) } else { None };
+        self.local_transport_params.enable_multipath = v;
     }
 
     /// Sets the congestion control algorithm used by string.
@@ -1882,7 +1889,8 @@ impl Connection {
 
         // Don't support multipath with zero-length CIDs.
         if conn.ids.zero_length_scid() || conn.ids.zero_length_dcid() {
-            conn.local_transport_params.enable_multipath = None;
+            conn.local_transport_params.enable_multipath_v4 = None;
+            conn.local_transport_params.enable_multipath = false;
         }
 
         if let Some(odcid) = odcid {
@@ -3547,6 +3555,7 @@ impl Connection {
             }
         }
 
+        let v5 = self.paths.v5();
         let consider_standby_paths = self.paths.consider_standby_paths();
         let is_app_limited = self.delivery_rate_check_if_app_limited(send_pid);
         let n_paths = self.paths.len();
@@ -3763,6 +3772,7 @@ impl Connection {
                         ranges: pns.recv_pkt_need_ack.clone(),
                         ecn_counts: None, /* sending ECN is not supported at
                                            * this time */
+                        v5,
                     };
 
                     if push_frame_to_pkt!(b, frames, frame, left) {
@@ -3809,6 +3819,7 @@ impl Connection {
                                 ecn_counts: None, /* sending ECN is not
                                                    * supported at
                                                    * this time */
+                                v5,
                             };
 
                             if push_frame_to_pkt!(b, frames, frame, left) {
@@ -4107,6 +4118,7 @@ impl Connection {
                     dcid_seq_num,
                     error_code,
                     reason,
+                    v5,
                 };
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     self.paths.on_path_abandon_sent(pid, now)?;
@@ -4128,6 +4140,7 @@ impl Connection {
                     dcid_seq_num,
                     seq_num,
                     status,
+                    v5,
                 };
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     self.paths.on_path_status_sent();
@@ -6820,16 +6833,20 @@ impl Connection {
         self.ids
             .set_source_conn_id_limit(peer_params.active_conn_id_limit);
 
-        if let Some(mp) = self
+        if self.local_transport_params.enable_multipath &&
+            peer_params.enable_multipath
+        {
+            self.paths.set_multipath(true, true);
+        } else if let Some(mp) = self
             .local_transport_params
-            .enable_multipath
-            .zip(peer_params.enable_multipath)
+            .enable_multipath_v4
+            .zip(peer_params.enable_multipath_v4)
             .map(|(l, p)| l & p)
         {
             if mp > 1 {
                 return Err(Error::InvalidTransportParam);
             }
-            self.paths.set_multipath(mp == 1);
+            self.paths.set_multipath(mp == 1, false);
         }
 
         self.peer_transport_params = peer_params;
@@ -7627,6 +7644,7 @@ impl Connection {
                 dcid_seq_num,
                 error_code,
                 reason,
+                ..
             } => {
                 if !self.use_path_pkt_num_space(epoch) {
                     return Err(Error::MultiPathViolation);
@@ -7647,6 +7665,7 @@ impl Connection {
                 dcid_seq_num,
                 seq_num,
                 status,
+                ..
             } => {
                 if !self.use_path_pkt_num_space(epoch) {
                     return Err(Error::MultiPathViolation);
@@ -8291,9 +8310,9 @@ pub struct TransportParams {
     pub retry_source_connection_id: Option<ConnectionId<'static>>,
     /// DATAGRAM frame extension parameter, if any.
     pub max_datagram_frame_size: Option<u64>,
+    pub enable_multipath_v4: Option<u64>,   
     /// Multipath extension parameter, if any.
-    pub enable_multipath: Option<u64>,
-    // pub preferred_address: ...,
+    pub enable_multipath: bool,
 }
 
 impl Default for TransportParams {
@@ -8316,7 +8335,8 @@ impl Default for TransportParams {
             initial_source_connection_id: None,
             retry_source_connection_id: None,
             max_datagram_frame_size: None,
-            enable_multipath: None,
+            enable_multipath_v4: None,
+            enable_multipath: false,
         }
     }
 }
@@ -8468,7 +8488,11 @@ impl TransportParams {
                 },
 
                 0x0f739bbc1b666d04 => {
-                    tp.enable_multipath = Some(val.get_varint()?);
+                    tp.enable_multipath_v4 = Some(val.get_varint()?);
+                },
+
+                0x0f739bbc1b666d05 => {
+                    tp.enable_multipath = true;
                 },
 
                 // Ignore unknown parameters.
@@ -8633,13 +8657,17 @@ impl TransportParams {
             b.put_varint(max_datagram_frame_size)?;
         }
 
-        if let Some(enable_multipath) = tp.enable_multipath {
+        if let Some(enable_multipath) = tp.enable_multipath_v4 {
             TransportParams::encode_param(
                 &mut b,
                 0x0f739bbc1b666d04,
                 octets::varint_len(enable_multipath),
             )?;
             b.put_varint(enable_multipath)?;
+        }
+
+        if tp.enable_multipath {
+            TransportParams::encode_param(&mut b, 0x0f739bbc1b666d05, 0)?;
         }
 
         let out_len = b.off();
@@ -9275,13 +9303,14 @@ mod tests {
             initial_source_connection_id: Some(b"woot woot".to_vec().into()),
             retry_source_connection_id: Some(b"retry".to_vec().into()),
             max_datagram_frame_size: Some(32),
-            enable_multipath: Some(1),
+            enable_multipath_v4: Some(1),
+            enable_multipath: true,
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 104);
+        assert_eq!(raw_params.len(), 113);
 
         let new_tp = TransportParams::decode(raw_params, false).unwrap();
 
@@ -9306,13 +9335,14 @@ mod tests {
             initial_source_connection_id: Some(b"woot woot".to_vec().into()),
             retry_source_connection_id: None,
             max_datagram_frame_size: Some(32),
-            enable_multipath: Some(1),
+            enable_multipath_v4: Some(1),
+            enable_multipath: true,
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, false, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 79);
+        assert_eq!(raw_params.len(), 88);
 
         let new_tp = TransportParams::decode(raw_params, true).unwrap();
 
@@ -17225,6 +17255,206 @@ mod tests {
         let pipe = pipe_with_exchanged_cids(&mut config, 0, 16, 1);
 
         assert_eq!(pipe.client.is_multipath_enabled(), false);
+    }
+
+    #[test]
+    fn multipath_v4() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+        config.set_active_connection_id_limit(3);
+        config.set_initial_max_data(100000);
+        config.set_initial_max_stream_data_bidi_local(100000);
+        config.set_initial_max_stream_data_bidi_remote(100000);
+        config.set_initial_max_streams_bidi(2);
+        // To test with enabled datagrams.
+        config.enable_dgram(true, 10, 10);
+        config.set_multipath_v4(true);
+
+        let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
+
+        assert_eq!(pipe.client.is_multipath_enabled(), true);
+        assert_eq!(pipe.server.is_multipath_enabled(), true);
+
+        let client_addr = testing::Pipe::client_addr();
+        let server_addr = testing::Pipe::server_addr();
+        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
+
+        let cid_c2s_0 = pipe.client.destination_id().into_owned();
+        let cid_s2c_0 = pipe.server.destination_id().into_owned();
+
+        assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
+        assert_eq!(pipe.advance(), Ok(()));
+        assert_eq!(
+            pipe.client.path_event_next(),
+            Some(PathEvent::Validated(client_addr_2, server_addr))
+        );
+        assert_eq!(pipe.client.path_event_next(), None);
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::New(server_addr, client_addr_2))
+        );
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::Validated(server_addr, client_addr_2))
+        );
+        assert_eq!(pipe.server.path_event_next(), None);
+
+        let pid_c2s_0 = pipe
+            .client
+            .paths
+            .path_id_from_addrs(&(client_addr, server_addr))
+            .expect("no such path");
+        let pid_c2s_1 = pipe
+            .client
+            .paths
+            .path_id_from_addrs(&(client_addr_2, server_addr))
+            .expect("no such path");
+        let pid_s2c_0 = pipe
+            .server
+            .paths
+            .path_id_from_addrs(&(server_addr, client_addr))
+            .expect("no such path");
+        let pid_s2c_1 = pipe
+            .server
+            .paths
+            .path_id_from_addrs(&(server_addr, client_addr_2))
+            .expect("no such path");
+
+        let path_c2s_0 = pipe.client.paths.get(pid_c2s_0).expect("no such path");
+        let path_c2s_1 = pipe.client.paths.get(pid_c2s_1).expect("no such path");
+        let path_s2c_0 = pipe.server.paths.get(pid_s2c_0).expect("no such path");
+        let path_s2c_1 = pipe.server.paths.get(pid_s2c_1).expect("no such path");
+
+        assert_eq!(path_c2s_0.active(), true);
+        assert_eq!(path_c2s_1.active(), false);
+        assert_eq!(path_s2c_0.active(), true);
+        assert_eq!(path_s2c_1.active(), false);
+
+        assert_eq!(
+            pipe.client.set_active(client_addr_2, server_addr, true,),
+            Ok(())
+        );
+        assert_eq!(
+            pipe.server.set_active(server_addr, client_addr_2, true,),
+            Ok(())
+        );
+
+        let path_c2s_0 = pipe.client.paths.get(pid_c2s_0).expect("no such path");
+        let path_c2s_1 = pipe.client.paths.get(pid_c2s_1).expect("no such path");
+        let path_s2c_0 = pipe.server.paths.get(pid_s2c_0).expect("no such path");
+        let path_s2c_1 = pipe.server.paths.get(pid_s2c_1).expect("no such path");
+
+        assert_eq!(path_c2s_0.active(), true);
+        assert_eq!(path_c2s_1.active(), true);
+        assert_eq!(path_s2c_0.active(), true);
+        assert_eq!(path_s2c_1.active(), true);
+
+        // Flush the ACK_MP on the newly active path.
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Emit enough data to use both paths, but no more than their initial
+        // summed CWIN.
+        const DATA_BYTES: usize = 24000;
+        let buf = [42; DATA_BYTES];
+        let mut recv_buf = [0; DATA_BYTES];
+
+        assert_eq!(pipe.server.stream_send(1, &buf, true), Ok(DATA_BYTES));
+        assert_eq!(pipe.advance(), Ok(()));
+        let (rcv_data, fin) = pipe.client.stream_recv(1, &mut recv_buf).unwrap();
+        assert_eq!(fin, true);
+        assert_eq!(rcv_data, DATA_BYTES);
+
+        assert_eq!(pipe.server.path_event_next(), None);
+
+        let path_c2s_0 = pipe.client.paths.get(pid_c2s_0).expect("no such path");
+        let path_c2s_1 = pipe.client.paths.get(pid_c2s_1).expect("no such path");
+        let path_s2c_0 = pipe.server.paths.get(pid_s2c_0).expect("no such path");
+        let path_s2c_1 = pipe.server.paths.get(pid_s2c_1).expect("no such path");
+
+        assert_eq!(path_c2s_0.active(), true);
+        assert_eq!(path_c2s_1.active(), true);
+        assert_eq!(path_s2c_0.active(), true);
+        assert_eq!(path_s2c_1.active(), true);
+        assert!(path_s2c_0.recovery.bytes_sent >= DATA_BYTES / 2);
+        assert!(path_s2c_1.recovery.bytes_sent >= DATA_BYTES / 2);
+
+        // Now close the initial path.
+        assert_eq!(
+            pipe.client.abandon_path(
+                client_addr,
+                server_addr,
+                0,
+                "no error".into(),
+            ),
+            Ok(()),
+        );
+
+        let path_c2s_0 = pipe.client.paths.get(pid_c2s_0).expect("no such path");
+        let path_c2s_1 = pipe.client.paths.get(pid_c2s_1).expect("no such path");
+        let path_s2c_0 = pipe.server.paths.get(pid_s2c_0).expect("no such path");
+        let path_s2c_1 = pipe.server.paths.get(pid_s2c_1).expect("no such path");
+
+        assert_eq!(path_c2s_0.active(), false);
+        assert_eq!(path_c2s_1.active(), true);
+        assert_eq!(path_s2c_0.active(), true);
+        assert_eq!(path_s2c_1.active(), true);
+
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let path_c2s_0 = pipe.client.paths.get(pid_c2s_0).expect("no such path");
+        let path_c2s_1 = pipe.client.paths.get(pid_c2s_1).expect("no such path");
+        let path_s2c_0 = pipe.server.paths.get(pid_s2c_0).expect("no such path");
+        let path_s2c_1 = pipe.server.paths.get(pid_s2c_1).expect("no such path");
+
+        assert_eq!(path_c2s_0.active(), false);
+        assert_eq!(path_c2s_1.active(), true);
+        assert_eq!(path_s2c_0.active(), false);
+        assert_eq!(path_s2c_1.active(), true);
+
+        // No more in-flight packets on closed paths.
+        assert_eq!(
+            path_c2s_0.recovery.cwnd(),
+            path_c2s_0.recovery.cwnd_available()
+        );
+        assert_eq!(
+            path_s2c_0.recovery.cwnd(),
+            path_s2c_0.recovery.cwnd_available()
+        );
+
+        assert_eq!(pipe.server.retired_scid_next(), Some(cid_c2s_0));
+        assert_eq!(pipe.server.retired_scid_next(), None);
+
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::Closed(
+                server_addr,
+                client_addr,
+                0,
+                "no error".into(),
+            ))
+        );
+
+        assert_eq!(pipe.client.retired_scid_next(), Some(cid_s2c_0));
+        assert_eq!(pipe.client.retired_scid_next(), None);
+
+        assert_eq!(
+            pipe.client.path_event_next(),
+            Some(PathEvent::Closed(
+                client_addr,
+                server_addr,
+                0,
+                "no error".into(),
+            ))
+        );
     }
 }
 

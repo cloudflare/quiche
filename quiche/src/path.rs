@@ -683,6 +683,9 @@ pub struct PathMap {
     /// Whether the multipath extensions are enabled.
     multipath: bool,
 
+    /// Support version 5?
+    v5: bool,
+
     /// Path identifiers requiring sending PATH_ABANDON frames.
     path_abandon: VecDeque<usize>,
 
@@ -720,6 +723,7 @@ impl PathMap {
             path_abandon: VecDeque::new(),
             path_status_to_advertise: VecDeque::new(),
             next_path_status_seq_num: 0,
+            v5: false,
         }
     }
 
@@ -1034,9 +1038,15 @@ impl PathMap {
         self.multipath
     }
 
+    /// Return if supporting v5.
+    pub fn v5(&self) -> bool {
+        self.v5
+    }
+
     /// Sets whether multipath extension is enabled.
-    pub fn set_multipath(&mut self, v: bool) {
+    pub fn set_multipath(&mut self, v: bool, v5: bool) {
         self.multipath = v;
+        self.v5 = v5;
     }
 
     /// Changes the state of the path with the identifier `path_id` according to
