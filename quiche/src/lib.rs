@@ -4464,6 +4464,12 @@ impl Connection {
             self.almost_full = true;
         }
 
+        if priority_key.incremental && readable {
+            // Shuffle the incremental stream to the back of the the queue.
+            self.streams.remove_readable(&priority_key);
+            self.streams.insert_readable(&priority_key);
+        }
+
         Ok((read, fin))
     }
 

@@ -3473,20 +3473,44 @@ mod tests {
         s.send_body_client(stream2, true).unwrap();
         s.send_body_client(stream1, true).unwrap();
 
-        for _ in 0..reqs.len() {
-            let (stream, ev) = s.poll_server().unwrap();
-            let ev_headers = Event::Headers {
-                list: reqs[(stream / 4) as usize].clone(),
-                has_body: true,
-            };
-            assert_eq!(ev, ev_headers);
-            assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
-            assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
-            assert_eq!(s.poll_client(), Err(Error::Done));
+        let (_, ev) = s.poll_server().unwrap();
+        let ev_headers = Event::Headers {
+            list: reqs[(0 / 4) as usize].clone(),
+            has_body: true,
+        };
+        assert_eq!(ev, ev_headers);
 
-            assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
-            assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
-        }
+        let (_, ev) = s.poll_server().unwrap();
+        let ev_headers = Event::Headers {
+            list: reqs[(4 / 4) as usize].clone(),
+            has_body: true,
+        };
+        assert_eq!(ev, ev_headers);
+
+        let (_, ev) = s.poll_server().unwrap();
+        let ev_headers = Event::Headers {
+            list: reqs[(8 / 4) as usize].clone(),
+            has_body: true,
+        };
+        assert_eq!(ev, ev_headers);
+
+        assert_eq!(s.poll_server(), Ok((0, Event::Data)));
+        assert_eq!(s.recv_body_server(0, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.recv_body_server(0, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((0, Event::Finished)));
+
+        assert_eq!(s.poll_server(), Ok((4, Event::Data)));
+        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((4, Event::Finished)));
+
+        assert_eq!(s.poll_server(), Ok((8, Event::Data)));
+        assert_eq!(s.recv_body_server(8, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.recv_body_server(8, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((8, Event::Finished)));
 
         assert_eq!(s.poll_server(), Err(Error::Done));
 
