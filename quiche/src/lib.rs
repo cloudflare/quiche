@@ -5060,6 +5060,7 @@ impl Connection {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
+    /// [`stream_priority()`]: struct.Connection.html#method.stream_priority
     #[inline]
     pub fn writable(&self) -> StreamIter {
         // If there is not enough connection-level send capacity, none of the
