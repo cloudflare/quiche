@@ -37,6 +37,11 @@ use std::collections::VecDeque;
 
 use std::time;
 
+use intrusive_collections::intrusive_adapter;
+use intrusive_collections::KeyAdapter;
+use intrusive_collections::RBTree;
+use intrusive_collections::RBTreeAtomicLink;
+
 use smallvec::SmallVec;
 
 use crate::Error;
@@ -147,13 +152,13 @@ pub struct StreamMap {
     /// Set of stream IDs corresponding to streams that have outstanding data
     /// to read. This is used to generate a `StreamIter` of streams without
     /// having to iterate over the full list of streams.
-    pub readable: StreamIdHashSet,
+    pub readable: RBTree<StreamReadablePriorityAdapter>,
 
     /// Set of stream IDs corresponding to streams that have enough flow control
     /// capacity to be written to, and is not finished. This is used to generate
     /// a `StreamIter` of streams without having to iterate over the full list
     /// of streams.
-    pub writable: StreamIdHashSet,
+    pub writable: RBTree<StreamWritablePriorityAdapter>,
 
     /// Set of stream IDs corresponding to streams that are almost out of flow
     /// control credit and need to send MAX_STREAM_DATA. This is used to
@@ -316,6 +321,7 @@ impl StreamMap {
                 };
 
                 let s = Stream::new(
+                    id,
                     max_rx_data,
                     max_tx_data,
                     is_bidi(id),
@@ -334,7 +340,7 @@ impl StreamMap {
         // Newly created stream might already be writable due to initial flow
         // control limits.
         if is_new_and_writable {
-            self.writable.insert(id);
+            self.writable.insert(Arc::clone(&stream.priority_key));
         }
 
         Ok(stream)
@@ -407,13 +413,24 @@ impl StreamMap {
     /// Adds the stream ID to the readable streams set.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn insert_readable(&mut self, stream_id: u64) {
-        self.readable.insert(stream_id);
+    pub fn insert_readable(&mut self, priority_key: &Arc<StreamPriorityKey>) {
+        if !priority_key.readable.is_linked() {
+            self.readable.insert(Arc::clone(priority_key));
+        }
     }
 
     /// Removes the stream ID from the readable streams set.
-    pub fn remove_readable(&mut self, stream_id: u64) {
-        self.readable.remove(&stream_id);
+    pub fn remove_readable(&mut self, priority_key: &Arc<StreamPriorityKey>) {
+        if !priority_key.readable.is_linked() {
+            return;
+        }
+
+        let mut c = {
+            let ptr = Arc::as_ptr(priority_key);
+            unsafe { self.readable.cursor_mut_from_ptr(ptr) }
+        };
+
+        c.remove();
     }
 
     /// Adds the stream ID to the writable streams set.
@@ -422,16 +439,42 @@ impl StreamMap {
     /// to when an existing stream becomes writable.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn insert_writable(&mut self, stream_id: u64) {
-        self.writable.insert(stream_id);
+    pub fn insert_writable(&mut self, priority_key: &Arc<StreamPriorityKey>) {
+        if !priority_key.writable.is_linked() {
+            self.writable.insert(Arc::clone(priority_key));
+        }
     }
 
     /// Removes the stream ID from the writable streams set.
     ///
     /// This should also be called anytime an existing stream stops being
     /// writable.
-    pub fn remove_writable(&mut self, stream_id: u64) {
-        self.writable.remove(&stream_id);
+    pub fn remove_writable(&mut self, priority_key: &Arc<StreamPriorityKey>) {
+        if !priority_key.writable.is_linked() {
+            return;
+        }
+
+        let mut c = {
+            let ptr = Arc::as_ptr(priority_key);
+            unsafe { self.writable.cursor_mut_from_ptr(ptr) }
+        };
+
+        c.remove();
+    }
+
+    /// Updates the priorities of a stream.
+    pub fn update_priority(
+        &mut self, old: &Arc<StreamPriorityKey>, new: &Arc<StreamPriorityKey>,
+    ) {
+        if old.readable.is_linked() {
+            self.remove_readable(old);
+            self.readable.insert(Arc::clone(new));
+        }
+
+        if old.writable.is_linked() {
+            self.remove_writable(old);
+            self.writable.insert(Arc::clone(new));
+        }
     }
 
     /// Adds the stream ID to the almost full streams set.
@@ -551,21 +594,29 @@ impl StreamMap {
             }
         }
 
-        self.remove_readable(stream_id);
-        self.remove_writable(stream_id);
+        let s = self.streams.remove(&stream_id).unwrap();
 
-        self.streams.remove(&stream_id);
+        self.remove_readable(&s.priority_key);
+
+        self.remove_writable(&s.priority_key);
+
         self.collected.insert(stream_id);
     }
 
     /// Creates an iterator over streams that have outstanding data to read.
     pub fn readable(&self) -> StreamIter {
-        StreamIter::from(&self.readable)
+        StreamIter {
+            streams: self.readable.iter().map(|s| s.id).collect(),
+            index: 0,
+        }
     }
 
     /// Creates an iterator over streams that can be written to.
     pub fn writable(&self) -> StreamIter {
-        StreamIter::from(&self.writable)
+        StreamIter {
+            streams: self.writable.iter().map(|s| s.id).collect(),
+            index: 0,
+        }
     }
 
     /// Creates an iterator over streams that need to send MAX_STREAM_DATA.
@@ -648,7 +699,6 @@ impl StreamMap {
 }
 
 /// A QUIC stream.
-#[derive(Default)]
 pub struct Stream {
     /// Receive-side stream buffer.
     pub recv: RecvBuf,
@@ -669,22 +719,30 @@ pub struct Stream {
 
     /// Whether the stream can be flushed incrementally. Default is `true`.
     pub incremental: bool,
+
+    pub priority_key: Arc<StreamPriorityKey>,
 }
 
 impl Stream {
     /// Creates a new stream with the given flow control limits.
     pub fn new(
-        max_rx_data: u64, max_tx_data: u64, bidi: bool, local: bool,
+        id: u64, max_rx_data: u64, max_tx_data: u64, bidi: bool, local: bool,
         max_window: u64,
     ) -> Stream {
+        let priority_key = Arc::new(StreamPriorityKey {
+            id,
+            ..Default::default()
+        });
+
         Stream {
             recv: RecvBuf::new(max_rx_data, max_window),
             send: SendBuf::new(max_tx_data),
             send_lowat: 1,
             bidi,
             local,
-            urgency: DEFAULT_URGENCY,
-            incremental: true,
+            urgency: priority_key.urgency,
+            incremental: priority_key.incremental,
+            priority_key,
         }
     }
 
@@ -746,6 +804,96 @@ pub fn is_local(stream_id: u64, is_server: bool) -> bool {
 /// Returns true if the stream is bidirectional.
 pub fn is_bidi(stream_id: u64) -> bool {
     (stream_id & 0x2) == 0
+}
+
+#[derive(Clone, Debug)]
+pub struct StreamPriorityKey {
+    pub urgency: u8,
+    pub incremental: bool,
+    pub id: u64,
+
+    pub readable: RBTreeAtomicLink,
+    pub writable: RBTreeAtomicLink,
+}
+
+impl Default for StreamPriorityKey {
+    fn default() -> Self {
+        Self {
+            urgency: DEFAULT_URGENCY,
+            incremental: true,
+            id: Default::default(),
+            readable: Default::default(),
+            writable: Default::default(),
+        }
+    }
+}
+
+impl PartialEq for StreamPriorityKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for StreamPriorityKey {}
+
+impl PartialOrd for StreamPriorityKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        // Ignore priority if ID matches.
+        if self.id == other.id {
+            return Some(std::cmp::Ordering::Equal);
+        }
+
+        // First, order by urgency...
+        if self.urgency != other.urgency {
+            return self.urgency.partial_cmp(&other.urgency);
+        }
+
+        // ...when the urgency is the same, and both are not incremental, order
+        // by stream ID...
+        if !self.incremental && !other.incremental {
+            return self.id.partial_cmp(&other.id);
+        }
+
+        // ...non-incremental takes priority over incremental...
+        if self.incremental && !other.incremental {
+            return Some(std::cmp::Ordering::Greater);
+        }
+        if !self.incremental && other.incremental {
+            return Some(std::cmp::Ordering::Less);
+        }
+
+        // ...finally, when both are incremental, `other` takes precedence (so
+        // `self` is always sorted after other same-urgency incremental
+        // entries).
+        Some(std::cmp::Ordering::Greater)
+    }
+}
+
+impl Ord for StreamPriorityKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // `partial_cmp()` never returns `None`, so this should be safe.
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+intrusive_adapter!(pub StreamWritablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { writable: RBTreeAtomicLink });
+
+impl<'a> KeyAdapter<'a> for StreamWritablePriorityAdapter {
+    type Key = StreamPriorityKey;
+
+    fn get_key(&self, s: &StreamPriorityKey) -> Self::Key {
+        s.clone()
+    }
+}
+
+intrusive_adapter!(pub StreamReadablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { readable: RBTreeAtomicLink });
+
+impl<'a> KeyAdapter<'a> for StreamReadablePriorityAdapter {
+    type Key = StreamPriorityKey;
+
+    fn get_key(&self, s: &StreamPriorityKey) -> Self::Key {
+        s.clone()
+    }
 }
 
 /// An iterator over QUIC streams.
@@ -2516,7 +2664,7 @@ mod tests {
 
     #[test]
     fn recv_flow_control() {
-        let mut stream = Stream::new(15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let mut buf = [0; 32];
@@ -2547,7 +2695,7 @@ mod tests {
 
     #[test]
     fn recv_past_fin() {
-        let mut stream = Stream::new(15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -2559,7 +2707,7 @@ mod tests {
 
     #[test]
     fn recv_fin_dup() {
-        let mut stream = Stream::new(15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -2577,7 +2725,7 @@ mod tests {
 
     #[test]
     fn recv_fin_change() {
-        let mut stream = Stream::new(15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -2589,7 +2737,7 @@ mod tests {
 
     #[test]
     fn recv_fin_lower_than_received() {
-        let mut stream = Stream::new(15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -2601,7 +2749,7 @@ mod tests {
 
     #[test]
     fn recv_fin_flow_control() {
-        let mut stream = Stream::new(15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let mut buf = [0; 32];
@@ -2621,7 +2769,7 @@ mod tests {
 
     #[test]
     fn recv_fin_reset_mismatch() {
-        let mut stream = Stream::new(15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -2632,7 +2780,7 @@ mod tests {
 
     #[test]
     fn recv_reset_dup() {
-        let mut stream = Stream::new(15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, false);
@@ -2644,7 +2792,7 @@ mod tests {
 
     #[test]
     fn recv_reset_change() {
-        let mut stream = Stream::new(15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, false);
@@ -2656,7 +2804,7 @@ mod tests {
 
     #[test]
     fn recv_reset_lower_than_received() {
-        let mut stream = Stream::new(15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, false);
@@ -2669,7 +2817,7 @@ mod tests {
     fn send_flow_control() {
         let mut buf = [0; 25];
 
-        let mut stream = Stream::new(0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         let first = b"hello";
         let second = b"world";
@@ -2712,7 +2860,7 @@ mod tests {
 
     #[test]
     fn send_past_fin() {
-        let mut stream = Stream::new(0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         let first = b"hello";
         let second = b"world";
@@ -2728,7 +2876,7 @@ mod tests {
 
     #[test]
     fn send_fin_dup() {
-        let mut stream = Stream::new(0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", true), Ok(5));
         assert!(stream.send.is_fin());
@@ -2739,7 +2887,7 @@ mod tests {
 
     #[test]
     fn send_undo_fin() {
-        let mut stream = Stream::new(0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", true), Ok(5));
         assert!(stream.send.is_fin());
@@ -2754,7 +2902,7 @@ mod tests {
     fn send_fin_max_data_match() {
         let mut buf = [0; 15];
 
-        let mut stream = Stream::new(0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         let slice = b"hellohellohello";
 
@@ -2770,7 +2918,7 @@ mod tests {
     fn send_fin_zero_length() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"", true), Ok(0));
@@ -2786,7 +2934,7 @@ mod tests {
     fn send_ack() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -2816,7 +2964,7 @@ mod tests {
     fn send_ack_reordering() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -2853,7 +3001,7 @@ mod tests {
 
     #[test]
     fn recv_data_below_off() {
-        let mut stream = Stream::new(15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
 
         let first = RangeBuf::from(b"hello", 0, false);
 
@@ -2875,7 +3023,8 @@ mod tests {
 
     #[test]
     fn stream_complete() {
-        let mut stream = Stream::new(30, 30, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            Stream::new(0, 30, 30, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -2918,7 +3067,7 @@ mod tests {
     fn send_fin_zero_length_output() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.off_front(), 0);
@@ -2943,7 +3092,7 @@ mod tests {
     fn send_emit() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 20, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 0, 20, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -2995,7 +3144,7 @@ mod tests {
     fn send_emit_ack() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 20, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 0, 20, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -3062,7 +3211,7 @@ mod tests {
     fn send_emit_retransmit() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 20, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 0, 20, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -3399,5 +3548,345 @@ mod tests {
         let (fin_off, unsent) = send.stop(0).unwrap();
         assert_eq!(fin_off, 50);
         assert_eq!(unsent, 0);
+    }
+
+    fn cycle_stream_priority(stream_id: u64, streams: &mut StreamMap) {
+        let key = streams.get(stream_id).unwrap().priority_key.clone();
+        streams.update_priority(&key.clone(), &key);
+    }
+
+    #[test]
+    fn writable_prioritized_default_priority() {
+        let local_tp = crate::TransportParams::default();
+        let mut peer_tp = crate::TransportParams::default();
+
+        peer_tp.initial_max_stream_data_bidi_local = 100;
+        peer_tp.initial_max_stream_data_uni = 100;
+
+        let mut streams = StreamMap::new(100, 100, 100);
+
+        for id in [0, 4, 8, 12] {
+            assert!(streams
+                .get_or_create(id, &local_tp, &peer_tp, false, true)
+                .is_ok());
+        }
+
+        let walk_1: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(*walk_1.first().unwrap(), &mut streams);
+        let walk_2: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(*walk_2.first().unwrap(), &mut streams);
+        let walk_3: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(*walk_3.first().unwrap(), &mut streams);
+        let walk_4: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(*walk_4.first().unwrap(), &mut streams);
+        let walk_5: Vec<u64> = streams.writable().collect();
+
+        // All streams are non-incremental and same urgency by default. Multiple
+        // visits shuffle their order.
+        assert_eq!(walk_1, vec![0, 4, 8, 12]);
+        assert_eq!(walk_2, vec![4, 8, 12, 0]);
+        assert_eq!(walk_3, vec![8, 12, 0, 4]);
+        assert_eq!(walk_4, vec![12, 0, 4, 8,]);
+        assert_eq!(walk_5, vec![0, 4, 8, 12]);
+    }
+
+    #[test]
+    fn writable_prioritized_insert_order() {
+        let local_tp = crate::TransportParams::default();
+        let mut peer_tp = crate::TransportParams::default();
+
+        peer_tp.initial_max_stream_data_bidi_local = 100;
+        peer_tp.initial_max_stream_data_uni = 100;
+
+        let mut streams = StreamMap::new(100, 100, 100);
+
+        // Inserting same-urgency incremental streams in a "random" order yields
+        // same order to start with.
+        for id in [12, 4, 8, 0] {
+            assert!(streams
+                .get_or_create(id, &local_tp, &peer_tp, false, true)
+                .is_ok());
+        }
+
+        let walk_1: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(*walk_1.first().unwrap(), &mut streams);
+        let walk_2: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(*walk_2.first().unwrap(), &mut streams);
+        let walk_3: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(*walk_3.first().unwrap(), &mut streams);
+        let walk_4: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(*walk_4.first().unwrap(), &mut streams);
+        let walk_5: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_1, vec![12, 4, 8, 0]);
+        assert_eq!(walk_2, vec![4, 8, 0, 12]);
+        assert_eq!(walk_3, vec![8, 0, 12, 4,]);
+        assert_eq!(walk_4, vec![0, 12, 4, 8]);
+        assert_eq!(walk_5, vec![12, 4, 8, 0]);
+    }
+
+    #[test]
+    fn writable_prioritized_mixed_urgency() {
+        let local_tp = crate::TransportParams::default();
+        let mut peer_tp = crate::TransportParams::default();
+
+        peer_tp.initial_max_stream_data_bidi_local = 100;
+        peer_tp.initial_max_stream_data_uni = 100;
+
+        let mut streams = StreamMap::new(100, 100, 100);
+
+        // Streams where the urgency descends (becomes more important). No stream
+        // shares an urgency.
+        let input = vec![
+            (0, 100),
+            (4, 90),
+            (8, 80),
+            (12, 70),
+            (16, 60),
+            (20, 50),
+            (24, 40),
+            (28, 30),
+            (32, 20),
+            (36, 10),
+            (40, 0),
+        ];
+
+        for (id, urgency) in input.clone() {
+            // this duplicates some code from stream_priority in order to access
+            // streams and the collection they're in
+            let stream = streams
+                .get_or_create(id, &local_tp, &peer_tp, false, true)
+                .unwrap();
+
+            stream.urgency = urgency;
+
+            let new_priority_key = Arc::new(StreamPriorityKey {
+                urgency: stream.urgency,
+                incremental: stream.incremental,
+                id,
+                ..Default::default()
+            });
+
+            let old_priority_key = std::mem::replace(
+                &mut stream.priority_key,
+                new_priority_key.clone(),
+            );
+
+            streams.update_priority(&old_priority_key, &new_priority_key);
+        }
+
+        let walk_1: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_1, vec![40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0]);
+
+        // Re-applying priority to a stream does not cause duplication.
+        for (id, urgency) in input {
+            // this duplicates some code from stream_priority in order to access
+            // streams and the collection they're in
+            let stream = streams
+                .get_or_create(id, &local_tp, &peer_tp, false, true)
+                .unwrap();
+
+            stream.urgency = urgency;
+
+            let new_priority_key = Arc::new(StreamPriorityKey {
+                urgency: stream.urgency,
+                incremental: stream.incremental,
+                id,
+                ..Default::default()
+            });
+
+            let old_priority_key = std::mem::replace(
+                &mut stream.priority_key,
+                new_priority_key.clone(),
+            );
+
+            streams.update_priority(&old_priority_key, &new_priority_key);
+        }
+
+        let walk_2: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_2, vec![40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0]);
+
+        // Removing streams doesn't break expected ordering.
+        streams.collect(24, true);
+
+        let walk_3: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_3, vec![40, 36, 32, 28, 20, 16, 12, 8, 4, 0]);
+
+        streams.collect(40, true);
+        streams.collect(0, true);
+
+        let walk_4: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_4, vec![36, 32, 28, 20, 16, 12, 8, 4]);
+
+        // Adding streams doesn't break expected ordering.
+        streams
+            .get_or_create(44, &local_tp, &peer_tp, false, true)
+            .unwrap();
+
+        let walk_5: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_5, vec![36, 32, 28, 20, 16, 12, 8, 4, 44]);
+    }
+
+    #[test]
+    fn writable_prioritized_mixed_urgencies_incrementals() {
+        let local_tp = crate::TransportParams::default();
+        let mut peer_tp = crate::TransportParams::default();
+
+        peer_tp.initial_max_stream_data_bidi_local = 100;
+        peer_tp.initial_max_stream_data_uni = 100;
+
+        let mut streams = StreamMap::new(100, 100, 100);
+
+        // Streams that share some urgency level
+        let input = vec![
+            (0, 100),
+            (4, 20),
+            (8, 100),
+            (12, 20),
+            (16, 90),
+            (20, 25),
+            (24, 90),
+            (28, 30),
+            (32, 80),
+            (36, 20),
+            (40, 0),
+        ];
+
+        for (id, urgency) in input.clone() {
+            // this duplicates some code from stream_priority in order to access
+            // streams and the collection they're in
+            let stream = streams
+                .get_or_create(id, &local_tp, &peer_tp, false, true)
+                .unwrap();
+
+            stream.urgency = urgency;
+
+            let new_priority_key = Arc::new(StreamPriorityKey {
+                urgency: stream.urgency,
+                incremental: stream.incremental,
+                id,
+                ..Default::default()
+            });
+
+            let old_priority_key = std::mem::replace(
+                &mut stream.priority_key,
+                new_priority_key.clone(),
+            );
+
+            streams.update_priority(&old_priority_key, &new_priority_key);
+        }
+
+        let walk_1: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(4, &mut streams);
+        cycle_stream_priority(16, &mut streams);
+        cycle_stream_priority(0, &mut streams);
+        let walk_2: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(12, &mut streams);
+        cycle_stream_priority(24, &mut streams);
+        cycle_stream_priority(8, &mut streams);
+        let walk_3: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(36, &mut streams);
+        cycle_stream_priority(16, &mut streams);
+        cycle_stream_priority(0, &mut streams);
+        let walk_4: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(4, &mut streams);
+        cycle_stream_priority(24, &mut streams);
+        cycle_stream_priority(8, &mut streams);
+        let walk_5: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(12, &mut streams);
+        cycle_stream_priority(16, &mut streams);
+        cycle_stream_priority(0, &mut streams);
+        let walk_6: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(36, &mut streams);
+        cycle_stream_priority(24, &mut streams);
+        cycle_stream_priority(8, &mut streams);
+        let walk_7: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(4, &mut streams);
+        cycle_stream_priority(16, &mut streams);
+        cycle_stream_priority(0, &mut streams);
+        let walk_8: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(12, &mut streams);
+        cycle_stream_priority(24, &mut streams);
+        cycle_stream_priority(8, &mut streams);
+        let walk_9: Vec<u64> = streams.writable().collect();
+        cycle_stream_priority(36, &mut streams);
+        cycle_stream_priority(16, &mut streams);
+        cycle_stream_priority(0, &mut streams);
+
+        assert_eq!(walk_1, vec![40, 4, 12, 36, 20, 28, 32, 16, 24, 0, 8]);
+        assert_eq!(walk_2, vec![40, 12, 36, 4, 20, 28, 32, 24, 16, 8, 0]);
+        assert_eq!(walk_3, vec![40, 36, 4, 12, 20, 28, 32, 16, 24, 0, 8]);
+        assert_eq!(walk_4, vec![40, 4, 12, 36, 20, 28, 32, 24, 16, 8, 0]);
+        assert_eq!(walk_5, vec![40, 12, 36, 4, 20, 28, 32, 16, 24, 0, 8]);
+        assert_eq!(walk_6, vec![40, 36, 4, 12, 20, 28, 32, 24, 16, 8, 0]);
+        assert_eq!(walk_7, vec![40, 4, 12, 36, 20, 28, 32, 16, 24, 0, 8]);
+        assert_eq!(walk_8, vec![40, 12, 36, 4, 20, 28, 32, 24, 16, 8, 0]);
+        assert_eq!(walk_9, vec![40, 36, 4, 12, 20, 28, 32, 16, 24, 0, 8]);
+
+        // Removing streams doesn't break expected ordering.
+        streams.collect(20, true);
+
+        let walk_10: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_10, vec![40, 4, 12, 36, 28, 32, 24, 16, 8, 0]);
+
+        // Adding streams doesn't break expected ordering.
+        let stream = streams
+            .get_or_create(44, &local_tp, &peer_tp, false, true)
+            .unwrap();
+
+        stream.urgency = 20;
+        stream.incremental = true;
+
+        let new_priority_key = Arc::new(StreamPriorityKey {
+            urgency: stream.urgency,
+            incremental: stream.incremental,
+            id: 44,
+            ..Default::default()
+        });
+
+        let old_priority_key =
+            std::mem::replace(&mut stream.priority_key, new_priority_key.clone());
+
+        streams.update_priority(&old_priority_key, &new_priority_key);
+
+        let walk_11: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_11, vec![40, 4, 12, 36, 44, 28, 32, 24, 16, 8, 0]);
+    }
+
+    #[test]
+    fn priority_tree_dupes() {
+        let mut prioritized_writable: RBTree<StreamWritablePriorityAdapter> =
+            Default::default();
+
+        for id in [0, 4, 8, 12] {
+            let s = Arc::new(StreamPriorityKey {
+                urgency: 0,
+                incremental: false,
+                id,
+                ..Default::default()
+            });
+
+            prioritized_writable.insert(s);
+        }
+
+        let walk_1: Vec<u64> =
+            prioritized_writable.iter().map(|s| s.id).collect();
+        assert_eq!(walk_1, vec![0, 4, 8, 12]);
+
+        // Default keys could cause duplicate entries, this is normally protected
+        // against via StreamMap.
+        for id in [0, 4, 8, 12] {
+            let s = Arc::new(StreamPriorityKey {
+                urgency: 0,
+                incremental: false,
+                id,
+                ..Default::default()
+            });
+
+            prioritized_writable.insert(s);
+        }
+
+        let walk_2: Vec<u64> =
+            prioritized_writable.iter().map(|s| s.id).collect();
+        assert_eq!(walk_2, vec![0, 0, 4, 4, 8, 8, 12, 12]);
     }
 }

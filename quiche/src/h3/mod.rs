@@ -3473,20 +3473,44 @@ mod tests {
         s.send_body_client(stream2, true).unwrap();
         s.send_body_client(stream1, true).unwrap();
 
-        for _ in 0..reqs.len() {
-            let (stream, ev) = s.poll_server().unwrap();
-            let ev_headers = Event::Headers {
-                list: reqs[(stream / 4) as usize].clone(),
-                has_body: true,
-            };
-            assert_eq!(ev, ev_headers);
-            assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
-            assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
-            assert_eq!(s.poll_client(), Err(Error::Done));
+        let (_, ev) = s.poll_server().unwrap();
+        let ev_headers = Event::Headers {
+            list: reqs[(0 / 4) as usize].clone(),
+            has_body: true,
+        };
+        assert_eq!(ev, ev_headers);
 
-            assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
-            assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
-        }
+        let (_, ev) = s.poll_server().unwrap();
+        let ev_headers = Event::Headers {
+            list: reqs[(4 / 4) as usize].clone(),
+            has_body: true,
+        };
+        assert_eq!(ev, ev_headers);
+
+        let (_, ev) = s.poll_server().unwrap();
+        let ev_headers = Event::Headers {
+            list: reqs[(8 / 4) as usize].clone(),
+            has_body: true,
+        };
+        assert_eq!(ev, ev_headers);
+
+        assert_eq!(s.poll_server(), Ok((0, Event::Data)));
+        assert_eq!(s.recv_body_server(0, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.recv_body_server(0, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((0, Event::Finished)));
+
+        assert_eq!(s.poll_server(), Ok((4, Event::Data)));
+        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((4, Event::Finished)));
+
+        assert_eq!(s.poll_server(), Ok((8, Event::Data)));
+        assert_eq!(s.recv_body_server(8, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.recv_body_server(8, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((8, Event::Finished)));
 
         assert_eq!(s.poll_server(), Err(Error::Done));
 
@@ -4875,9 +4899,9 @@ mod tests {
         );
 
         // Clear the writable stream queue.
-        assert_eq!(s.pipe.client.stream_writable_next(), Some(10));
         assert_eq!(s.pipe.client.stream_writable_next(), Some(2));
         assert_eq!(s.pipe.client.stream_writable_next(), Some(6));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(10));
         assert_eq!(s.pipe.client.stream_writable_next(), None);
 
         s.advance().ok();
@@ -4941,7 +4965,8 @@ mod tests {
         s.advance().ok();
 
         // Now we can send the request.
-        assert_eq!(s.pipe.client.stream_writable_next(), Some(0));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(2));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(6));
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
     }
 
@@ -5120,10 +5145,10 @@ mod tests {
         let _ = s.send_response(stream, false).unwrap();
 
         // Clear the writable stream queue.
-        assert_eq!(s.pipe.server.stream_writable_next(), Some(stream));
-        assert_eq!(s.pipe.server.stream_writable_next(), Some(11));
         assert_eq!(s.pipe.server.stream_writable_next(), Some(3));
         assert_eq!(s.pipe.server.stream_writable_next(), Some(7));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(11));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(stream));
         assert_eq!(s.pipe.server.stream_writable_next(), None);
 
         // The body must be larger than the cwnd would allow.
@@ -5192,10 +5217,10 @@ mod tests {
         let _ = s.send_response(stream, false).unwrap();
 
         // Clear the writable stream queue.
-        assert_eq!(s.pipe.server.stream_writable_next(), Some(stream));
-        assert_eq!(s.pipe.server.stream_writable_next(), Some(11));
         assert_eq!(s.pipe.server.stream_writable_next(), Some(3));
         assert_eq!(s.pipe.server.stream_writable_next(), Some(7));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(11));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(stream));
         assert_eq!(s.pipe.server.stream_writable_next(), None);
 
         // The body is large enough to fill the cwnd, except for enough bytes
@@ -5330,9 +5355,9 @@ mod tests {
         );
 
         // Clear the writable stream queue.
-        assert_eq!(s.pipe.client.stream_writable_next(), Some(10));
         assert_eq!(s.pipe.client.stream_writable_next(), Some(2));
         assert_eq!(s.pipe.client.stream_writable_next(), Some(6));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(10));
         assert_eq!(s.pipe.client.stream_writable_next(), None);
 
         s.advance().ok();
