@@ -4681,8 +4681,6 @@ impl Connection {
             return Ok(());
         }
 
-        let is_writable = stream.is_writable();
-
         stream.urgency = urgency;
         stream.incremental = incremental;
 
@@ -4696,11 +4694,8 @@ impl Connection {
         let old_priority_key =
             std::mem::replace(&mut stream.priority_key, new_priority_key.clone());
 
-        self.streams.update_priority(
-            &old_priority_key,
-            &new_priority_key,
-            is_writable,
-        );
+        self.streams
+            .update_priority(&old_priority_key, &new_priority_key);
 
         Ok(())
     }

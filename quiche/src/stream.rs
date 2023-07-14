@@ -462,15 +462,17 @@ impl StreamMap {
         c.remove();
     }
 
+    /// Updates the priorities of a stream.
     pub fn update_priority(
         &mut self, old: &Arc<StreamPriorityKey>, new: &Arc<StreamPriorityKey>,
-        writable: bool,
     ) {
-        if old.writable.is_linked() {
-            self.remove_writable(old);
+        if old.readable.is_linked() {
+            self.remove_readable(old);
+            self.readable.insert(Arc::clone(new));
         }
 
-        if writable {
+        if old.writable.is_linked() {
+            self.remove_writable(old);
             self.writable.insert(Arc::clone(new));
         }
     }
@@ -3548,6 +3550,11 @@ mod tests {
         assert_eq!(unsent, 0);
     }
 
+    fn cycle_stream_priority(stream_id: u64, streams: &mut StreamMap) {
+        let key = streams.get(stream_id).unwrap().priority_key.clone();
+        streams.update_priority(&key.clone(), &key);
+    }
+
     #[test]
     fn writable_prioritized_default_priority() {
         let local_tp = crate::TransportParams::default();
@@ -3581,11 +3588,6 @@ mod tests {
         assert_eq!(walk_3, vec![8, 12, 0, 4]);
         assert_eq!(walk_4, vec![12, 0, 4, 8,]);
         assert_eq!(walk_5, vec![0, 4, 8, 12]);
-    }
-
-    fn cycle_stream_priority(stream_id: u64, streams: &mut StreamMap) {
-        let key = streams.get(stream_id).unwrap().priority_key.clone();
-        streams.update_priority(&key.clone(), &key, true);
     }
 
     #[test]
@@ -3669,7 +3671,7 @@ mod tests {
                 new_priority_key.clone(),
             );
 
-            streams.update_priority(&old_priority_key, &new_priority_key, true);
+            streams.update_priority(&old_priority_key, &new_priority_key);
         }
 
         let walk_1: Vec<u64> = streams.writable().collect();
@@ -3697,7 +3699,7 @@ mod tests {
                 new_priority_key.clone(),
             );
 
-            streams.update_priority(&old_priority_key, &new_priority_key, true);
+            streams.update_priority(&old_priority_key, &new_priority_key);
         }
 
         let walk_2: Vec<u64> = streams.writable().collect();
@@ -3770,7 +3772,7 @@ mod tests {
                 new_priority_key.clone(),
             );
 
-            streams.update_priority(&old_priority_key, &new_priority_key, true);
+            streams.update_priority(&old_priority_key, &new_priority_key);
         }
 
         let walk_1: Vec<u64> = streams.writable().collect();
@@ -3844,7 +3846,7 @@ mod tests {
         let old_priority_key =
             std::mem::replace(&mut stream.priority_key, new_priority_key.clone());
 
-        streams.update_priority(&old_priority_key, &new_priority_key, true);
+        streams.update_priority(&old_priority_key, &new_priority_key);
 
         let walk_11: Vec<u64> = streams.writable().collect();
         assert_eq!(walk_11, vec![40, 4, 12, 36, 44, 28, 32, 24, 16, 8, 0]);
