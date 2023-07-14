@@ -97,6 +97,16 @@ http {
 List of configuration directives
 --------------------------------
 
+### http3_cc_algorithm
+
+**syntax:** **http3_cc_algorithm** *cc_algorithm*;
+
+**default:** *http3_cc_algorithm reno;*
+
+**context:** *http*, *server*
+
+Sets the congestion control method. Allowed values are: reno(default), cubic
+
 ### http3_max_concurrent_streams
 
 **syntax:** **http3_max_concurrent_streams** *number*;
