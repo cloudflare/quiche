@@ -3296,13 +3296,8 @@ impl Connection {
                         // set.
                         if (stream.is_flushable() || empty_fin) && !was_flushable
                         {
-                            let urgency = stream.urgency;
-                            let incremental = stream.incremental;
-                            self.streams.push_flushable(
-                                stream_id,
-                                urgency,
-                                incremental,
-                            );
+                            let priority_key = Arc::clone(&stream.priority_key);
+                            self.streams.insert_flushable(&priority_key);
                         }
 
                         self.stream_retrans_bytes += length as u64;
@@ -4001,7 +3996,8 @@ impl Connection {
             path.active() &&
             !dgram_emitted
         {
-            while let Some(stream_id) = self.streams.peek_flushable() {
+            while let Some(priority_key) = self.streams.peek_flushable() {
+                let stream_id = priority_key.id;
                 let stream = match self.streams.get_mut(stream_id) {
                     // Avoid sending frames for streams that were already stopped.
                     //
@@ -4009,7 +4005,7 @@ impl Connection {
                     // flushed on the wire when a STOP_SENDING frame is received.
                     Some(v) if !v.send.is_stopped() => v,
                     _ => {
-                        self.streams.remove_flushable();
+                        self.streams.remove_flushable(&priority_key);
                         continue;
                     },
                 };
@@ -4038,7 +4034,9 @@ impl Connection {
                 let max_len = match left.checked_sub(hdr_len) {
                     Some(v) => v,
                     None => {
-                        self.streams.remove_flushable();
+                        let priority_key = Arc::clone(&stream.priority_key);
+                        self.streams.remove_flushable(&priority_key);
+
                         continue;
                     },
                 };
@@ -4082,9 +4080,15 @@ impl Connection {
                     has_data = true;
                 }
 
+                let priority_key = Arc::clone(&stream.priority_key);
                 // If the stream is no longer flushable, remove it from the queue
                 if !stream.is_flushable() {
-                    self.streams.remove_flushable();
+                    self.streams.remove_flushable(&priority_key);
+                } else if stream.incremental {
+                    // Shuffle the incremental stream to the back of the the
+                    // queue.
+                    self.streams.remove_flushable(&priority_key);
+                    self.streams.insert_flushable(&priority_key);
                 }
 
                 break;
@@ -4587,8 +4591,8 @@ impl Connection {
             },
         };
 
-        let urgency = stream.urgency;
         let incremental = stream.incremental;
+        let priority_key = Arc::clone(&stream.priority_key);
 
         let flushable = stream.is_flushable();
 
@@ -4614,7 +4618,7 @@ impl Connection {
         // Consider the stream flushable also when we are sending a zero-length
         // frame that has the fin flag set.
         if (flushable || empty_fin) && !was_flushable {
-            self.streams.push_flushable(stream_id, urgency, incremental);
+            self.streams.insert_flushable(&priority_key);
         }
 
         if !writable {
@@ -6858,9 +6862,8 @@ impl Connection {
                 // If the stream is now flushable push it to the flushable queue,
                 // but only if it wasn't already queued.
                 if stream.is_flushable() && !was_flushable {
-                    let urgency = stream.urgency;
-                    let incremental = stream.incremental;
-                    self.streams.push_flushable(stream_id, urgency, incremental);
+                    let priority_key = Arc::clone(&stream.priority_key);
+                    self.streams.insert_flushable(&priority_key);
                 }
 
                 if writable {
@@ -12711,9 +12714,6 @@ mod tests {
 
     #[test]
     /// Tests that changing a stream's priority is correctly propagated.
-    ///
-    /// Re-prioritization is not supported, so this should fail.
-    #[should_panic]
     fn stream_reprioritize() {
         let mut buf = [0; 65535];
 
