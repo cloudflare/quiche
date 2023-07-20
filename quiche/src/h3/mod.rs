@@ -5036,7 +5036,7 @@ mod tests {
         let mut buf = [0; 65535];
         let (len, _) = s.pipe.server.send(&mut buf).unwrap();
 
-        let frames = decode_pkt(&mut s.pipe.client, &mut buf, len).unwrap();
+        let frames = decode_pkt(&mut s.pipe.client, &mut buf[..len]).unwrap();
 
         let mut iter = frames.iter();
 
@@ -5094,7 +5094,7 @@ mod tests {
 
         let (len, _) = s.pipe.server.send(&mut buf).unwrap();
 
-        let frames = decode_pkt(&mut s.pipe.client, &mut buf, len).unwrap();
+        let frames = decode_pkt(&mut s.pipe.client, &mut buf[..len]).unwrap();
 
         let mut iter = frames.iter();
 
