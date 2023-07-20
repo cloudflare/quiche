@@ -3475,21 +3475,21 @@ mod tests {
 
         let (_, ev) = s.poll_server().unwrap();
         let ev_headers = Event::Headers {
-            list: reqs[(0 / 4) as usize].clone(),
+            list: reqs[0].clone(),
             has_body: true,
         };
         assert_eq!(ev, ev_headers);
 
         let (_, ev) = s.poll_server().unwrap();
         let ev_headers = Event::Headers {
-            list: reqs[(4 / 4) as usize].clone(),
+            list: reqs[1].clone(),
             has_body: true,
         };
         assert_eq!(ev, ev_headers);
 
         let (_, ev) = s.poll_server().unwrap();
         let ev_headers = Event::Headers {
-            list: reqs[(8 / 4) as usize].clone(),
+            list: reqs[2].clone(),
             has_body: true,
         };
         assert_eq!(ev, ev_headers);
