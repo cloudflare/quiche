@@ -8435,9 +8435,9 @@ pub mod testing {
     }
 
     pub fn decode_pkt(
-        conn: &mut Connection, buf: &mut [u8], len: usize,
+        conn: &mut Connection, buf: &mut [u8],
     ) -> Result<Vec<frame::Frame>> {
-        let mut b = octets::OctetsMut::with_slice(&mut buf[..len]);
+        let mut b = octets::OctetsMut::with_slice(buf);
 
         let mut hdr = Header::from_bytes(&mut b, conn.source_id().len()).unwrap();
 
@@ -9501,7 +9501,7 @@ mod tests {
         assert!(len > 0);
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
         let mut iter = frames.iter();
 
         // Ignore ACK.
@@ -9619,7 +9619,7 @@ mod tests {
         assert!(len > 0);
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
         let mut iter = frames.iter();
 
         // Ignore ACK.
@@ -10143,7 +10143,7 @@ mod tests {
         assert!(len > 0);
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
         let mut iter = frames.iter();
 
         // Ignore ACK.
@@ -10284,7 +10284,7 @@ mod tests {
 
         // Server sent a RESET_STREAM frame in response.
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
         let mut iter = frames.iter();
 
@@ -10338,7 +10338,7 @@ mod tests {
             .unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
         assert_eq!(frames.len(), 1);
 
@@ -10400,7 +10400,7 @@ mod tests {
 
         // Server sent a RESET_STREAM frame in response.
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
         let mut iter = frames.iter();
 
@@ -10521,7 +10521,7 @@ mod tests {
         let mut dummy = buf[..len].to_vec();
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut dummy, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut dummy[..len]).unwrap();
         let mut iter = frames.iter();
 
         assert_eq!(
@@ -10729,7 +10729,7 @@ mod tests {
         let mut dummy = buf[..len].to_vec();
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut dummy, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut dummy[..len]).unwrap();
         let mut iter = frames.iter();
 
         assert_eq!(
@@ -10865,7 +10865,7 @@ mod tests {
         let (len, _) = pipe.client.send(&mut buf).unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
 
         let mut iter = frames.iter();
 
@@ -10883,7 +10883,7 @@ mod tests {
         let (len, _) = pipe.client.send(&mut buf).unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
 
         assert_eq!(
             frames.first(),
@@ -10896,7 +10896,7 @@ mod tests {
         let (len, _) = pipe.client.send(&mut buf).unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
 
         assert_eq!(
             frames.first(),
@@ -11925,7 +11925,7 @@ mod tests {
         assert_eq!(pipe.client.blocked_limit, None);
 
         let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
 
         let mut iter = frames.iter();
 
@@ -11962,7 +11962,7 @@ mod tests {
         assert_eq!(pipe.client.streams.blocked().len(), 0);
 
         let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
 
         let mut iter = frames.iter();
 
@@ -11995,7 +11995,7 @@ mod tests {
         assert_eq!(pipe.client.streams.blocked().len(), 0);
 
         let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
 
         let mut iter = frames.iter();
 
@@ -12066,7 +12066,7 @@ mod tests {
         assert_eq!(pipe.client.streams.blocked().len(), 0);
 
         let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
 
         let mut iter = frames.iter();
 
@@ -12220,7 +12220,7 @@ mod tests {
         assert_ne!(sent, 0, "the client should at least send a pure ACK packet");
 
         let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf, sent).unwrap();
+            testing::decode_pkt(&mut pipe.server, &mut buf[..sent]).unwrap();
         assert_eq!(1, frames.len());
         assert!(
             matches!(frames[0], frame::Frame::ACK { .. }),
@@ -12288,7 +12288,7 @@ mod tests {
             );
 
             let frames =
-                testing::decode_pkt(&mut pipe.server, &mut buf, sent).unwrap();
+                testing::decode_pkt(&mut pipe.server, &mut buf[..sent]).unwrap();
 
             assert_eq!(1, frames.len());
 
@@ -12584,7 +12584,7 @@ mod tests {
                 pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
 
             let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
             let stream = frames.first().unwrap();
 
             assert_eq!(stream, &frame::Frame::Stream {
@@ -12607,7 +12607,7 @@ mod tests {
                 pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
 
             let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
             let stream = frames.first().unwrap();
 
             assert_eq!(stream, &frame::Frame::Stream {
@@ -12630,7 +12630,7 @@ mod tests {
                 pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
 
             let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
             let stream = frames.first().unwrap();
 
             assert_eq!(stream, &frame::Frame::Stream {
@@ -12653,7 +12653,7 @@ mod tests {
                 pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
 
             let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
             assert_eq!(
                 frames.first(),
@@ -12667,7 +12667,7 @@ mod tests {
                 pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
 
             let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
             let stream = frames.first().unwrap();
 
@@ -12691,7 +12691,7 @@ mod tests {
                 pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
 
             let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
             let stream = frames.first().unwrap();
 
             assert_eq!(stream, &frame::Frame::Stream {
@@ -12775,7 +12775,7 @@ mod tests {
         let (len, _) = pipe.server.send(&mut buf).unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
         assert_eq!(
             frames.first(),
@@ -12789,7 +12789,7 @@ mod tests {
         let (len, _) = pipe.server.send(&mut buf).unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
         assert_eq!(
             frames.first(),
@@ -12803,7 +12803,7 @@ mod tests {
         let (len, _) = pipe.server.send(&mut buf).unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
         assert_eq!(
             frames.first(),
@@ -12816,7 +12816,7 @@ mod tests {
         let (len, _) = pipe.server.send(&mut buf).unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
         assert_eq!(
             frames.first(),
@@ -12899,7 +12899,7 @@ mod tests {
                 pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
 
             let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
             let mut frame_iter = frames.iter();
 
             assert_eq!(frame_iter.next().unwrap(), &frame::Frame::Datagram {
@@ -12912,7 +12912,7 @@ mod tests {
                 pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
 
             let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
             let mut frame_iter = frames.iter();
             let stream = frame_iter.next().unwrap();
 
@@ -12933,7 +12933,7 @@ mod tests {
                 pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
 
             let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
             let mut frame_iter = frames.iter();
 
             assert_eq!(frame_iter.next().unwrap(), &frame::Frame::Datagram {
@@ -12946,7 +12946,7 @@ mod tests {
                 pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
 
             let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
             let mut frame_iter = frames.iter();
             let stream = frame_iter.next().unwrap();
 
@@ -13010,7 +13010,7 @@ mod tests {
         );
 
         let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
 
         let mut iter = frames.iter();
 
@@ -13681,7 +13681,7 @@ mod tests {
         let (len, _) = pipe.client.send(&mut buf).unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
 
         assert_eq!(
             frames.first(),
@@ -13707,7 +13707,7 @@ mod tests {
         let (len, _) = pipe.client.send(&mut buf).unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
 
         assert_eq!(
             frames.first(),
@@ -15578,7 +15578,7 @@ mod tests {
             assert!(len > 0);
 
             let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
             assert!(
                 frames
                     .iter()
@@ -15594,7 +15594,7 @@ mod tests {
         assert!(len > 0);
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
         assert!(
             frames
                 .iter()
@@ -15617,7 +15617,7 @@ mod tests {
         let (len, _) = pipe.server.send(&mut buf).unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
         let mut iter = frames.iter();
 
         assert_eq!(iter.next(), Some(&frame::Frame::Ping));
@@ -15641,7 +15641,7 @@ mod tests {
         let (len, _) = pipe.server.send(&mut buf).unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
         let mut iter = frames.iter();
 
         assert!(matches!(
@@ -15764,7 +15764,7 @@ mod tests {
 
         // Server sent a RESET_STREAM frame in response.
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
         let mut iter = frames.iter();
 
@@ -15820,7 +15820,7 @@ mod tests {
             .unwrap();
 
         let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf, len).unwrap();
+            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
         assert_eq!(frames.len(), 1);
 
