@@ -3558,10 +3558,11 @@ mod tests {
     #[test]
     fn writable_prioritized_default_priority() {
         let local_tp = crate::TransportParams::default();
-        let mut peer_tp = crate::TransportParams::default();
-
-        peer_tp.initial_max_stream_data_bidi_local = 100;
-        peer_tp.initial_max_stream_data_uni = 100;
+        let peer_tp = crate::TransportParams {
+            initial_max_stream_data_bidi_local: 100,
+            initial_max_stream_data_uni: 100,
+            ..Default::default()
+        };
 
         let mut streams = StreamMap::new(100, 100, 100);
 
@@ -3593,10 +3594,11 @@ mod tests {
     #[test]
     fn writable_prioritized_insert_order() {
         let local_tp = crate::TransportParams::default();
-        let mut peer_tp = crate::TransportParams::default();
-
-        peer_tp.initial_max_stream_data_bidi_local = 100;
-        peer_tp.initial_max_stream_data_uni = 100;
+        let peer_tp = crate::TransportParams {
+            initial_max_stream_data_bidi_local: 100,
+            initial_max_stream_data_uni: 100,
+            ..Default::default()
+        };
 
         let mut streams = StreamMap::new(100, 100, 100);
 
@@ -3627,10 +3629,11 @@ mod tests {
     #[test]
     fn writable_prioritized_mixed_urgency() {
         let local_tp = crate::TransportParams::default();
-        let mut peer_tp = crate::TransportParams::default();
-
-        peer_tp.initial_max_stream_data_bidi_local = 100;
-        peer_tp.initial_max_stream_data_uni = 100;
+        let peer_tp = crate::TransportParams {
+            initial_max_stream_data_bidi_local: 100,
+            initial_max_stream_data_uni: 100,
+            ..Default::default()
+        };
 
         let mut streams = StreamMap::new(100, 100, 100);
 
@@ -3729,10 +3732,11 @@ mod tests {
     #[test]
     fn writable_prioritized_mixed_urgencies_incrementals() {
         let local_tp = crate::TransportParams::default();
-        let mut peer_tp = crate::TransportParams::default();
-
-        peer_tp.initial_max_stream_data_bidi_local = 100;
-        peer_tp.initial_max_stream_data_uni = 100;
+        let peer_tp = crate::TransportParams {
+            initial_max_stream_data_bidi_local: 100,
+            initial_max_stream_data_uni: 100,
+            ..Default::default()
+        };
 
         let mut streams = StreamMap::new(100, 100, 100);
 
