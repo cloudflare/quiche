@@ -74,7 +74,7 @@ impl PathValidationState {
 
 /// The different usage states of the path.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum PathState {
+pub enum PathState {
     /// The path only sends probing packets.
     Unused,
     /// The path can send non-probing packets.
@@ -1014,6 +1014,10 @@ impl PathMap {
         if is_server && nb_paths == 1 {
             return Err(Error::UnavailablePath);
         }
+        // If the path was already closed, just close it.
+        if abandon_path.closed() {
+            return Ok(());
+        }
         let was_closing = abandon_path.is_closing();
         abandon_path.set_state(PathState::Closing(error_code, reason))?;
         abandon_path.on_abandon_received();
@@ -1188,7 +1192,7 @@ pub struct PathStats {
     pub validation_state: PathValidationState,
 
     /// The path state.
-    state: PathState,
+    pub state: PathState,
 
     /// Is it active?
     pub active: bool,

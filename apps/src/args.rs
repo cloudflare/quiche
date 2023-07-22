@@ -25,6 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::net::SocketAddr;
+use std::str::FromStr;
 
 use super::common::alpns;
 
@@ -295,6 +296,8 @@ Options:
   --multipath              Enable multipath support.
   --multipath-old          Enable (old v4) multipath support.
   -A --address ADDR ...    Specify addresses to be used instead of the unspecified address. Non-routable addresses will lead to connectivity issues.
+  -R --rm-addr TIMEADDR ...   Specify addresses to stop using after the provided time (format time,addr).
+  -S --status TIMEADDRSTAT ...   Specify status to advertise to the peer after the provided time (format time,addr,status).
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
   --send-priority-update   Send HTTP/3 priority updates if the query string params 'u' or 'i' are present in URLs
@@ -325,6 +328,8 @@ pub struct ClientArgs {
     pub perform_migration: bool,
     pub send_priority_update: bool,
     pub addrs: Vec<SocketAddr>,
+    pub rm_addrs: Vec<(std::time::Duration, SocketAddr)>,
+    pub status: Vec<(std::time::Duration, SocketAddr, u64)>,
 }
 
 impl Args for ClientArgs {
@@ -408,6 +413,50 @@ impl Args for ClientArgs {
             .filter_map(|a| a.parse().ok())
             .collect();
 
+        let rm_addrs = args
+            .get_vec("--rm-addr")
+            .into_iter()
+            .filter_map(|ta| {
+                let s = ta.split(',').collect::<Vec<_>>();
+                if s.len() != 2 {
+                    return None;
+                }
+                let secs = match s[0].parse::<u64>() {
+                    Ok(s) => s,
+                    Err(_) => return None,
+                };
+                let addr = match SocketAddr::from_str(s[1]) {
+                    Ok(a) => a,
+                    Err(_) => return None,
+                };
+                Some((std::time::Duration::from_secs(secs), addr))
+            })
+            .collect();
+
+        let status = args
+            .get_vec("--status")
+            .into_iter()
+            .filter_map(|ta| {
+                let s = ta.split(',').collect::<Vec<_>>();
+                if s.len() != 3 {
+                    return None;
+                }
+                let secs = match s[0].parse::<u64>() {
+                    Ok(s) => s,
+                    Err(_) => return None,
+                };
+                let addr = match SocketAddr::from_str(s[1]) {
+                    Ok(a) => a,
+                    Err(_) => return None,
+                };
+                let status = match s[2].parse::<u64>() {
+                    Ok(s) => s,
+                    Err(_) => return None,
+                };
+                Some((std::time::Duration::from_secs(secs), addr, status))
+            })
+            .collect();
+
         ClientArgs {
             version,
             dump_response_path,
@@ -425,6 +474,8 @@ impl Args for ClientArgs {
             perform_migration,
             send_priority_update,
             addrs,
+            rm_addrs,
+            status,
         }
     }
 }
@@ -448,6 +499,8 @@ impl Default for ClientArgs {
             perform_migration: false,
             send_priority_update: false,
             addrs: vec![],
+            rm_addrs: vec![],
+            status: vec![],
         }
     }
 }

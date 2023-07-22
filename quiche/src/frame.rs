@@ -382,6 +382,7 @@ impl Frame {
         };
 
         if !allowed {
+            error!("Bad frame: {:?}", frame);
             return Err(Error::InvalidPacket);
         }
 

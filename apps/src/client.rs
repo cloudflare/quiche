@@ -36,6 +36,7 @@ use std::rc::Rc;
 
 use std::cell::RefCell;
 
+use quiche::PathStatus;
 use ring::rand::*;
 
 use slab::Slab;
@@ -94,6 +95,9 @@ pub fn connect(
             conn_args.max_active_cids
         );
     }
+
+    let mut rm_addrs = args.rm_addrs.clone();
+    let mut status = args.status.clone();
 
     // Create the configuration for the QUIC connection.
     let mut config = quiche::Config::new(args.version).unwrap();
@@ -494,6 +498,38 @@ pub fn connect(
             new_path_probed = true;
         }
 
+        if conn.is_multipath_enabled() {
+            rm_addrs.retain(|(d, addr)| {
+                if app_data_start.elapsed() >= *d {
+                    info!("Abandoning path {:?}", addr);
+                    conn.abandon_path(
+                        *addr,
+                        peer_addr,
+                        0,
+                        "do not use me anymore".to_string().into_bytes(),
+                    )
+                    .is_err()
+                } else {
+                    true
+                }
+            });
+
+            status.retain(|(d, addr, s)| {
+                if app_data_start.elapsed() >= *d {
+                    info!("Advertising path status {s} to {addr:?}");
+                    let status = match s {
+                        1 => PathStatus::Standby,
+                        2 => PathStatus::Available,
+                        s => PathStatus::Unknown(*s),
+                    };
+                    conn.set_path_status(*addr, peer_addr, status, true)
+                        .is_err()
+                } else {
+                    true
+                }
+            });
+        }
+
         // Determine in which order we are going to iterate over paths.
         let scheduled_tuples = lowest_latency_scheduler(&conn);
 
@@ -649,6 +685,7 @@ fn lowest_latency_scheduler(
 ) -> impl Iterator<Item = (std::net::SocketAddr, std::net::SocketAddr)> {
     use itertools::Itertools;
     conn.path_stats()
+        .filter(|p| !matches!(p.state, quiche::PathState::Closed(_, _)))
         .sorted_by_key(|p| p.rtt)
         .map(|p| (p.local_addr, p.peer_addr))
 }

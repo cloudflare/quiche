@@ -7649,11 +7649,15 @@ impl Connection {
                 if !self.use_path_pkt_num_space(epoch) {
                     return Err(Error::MultiPathViolation);
                 }
-                let abandon_pid = self
+                let abandon_pid = match self
                     .ids
                     .get_dcid(dcid_seq_num)?
                     .path_id
-                    .ok_or(Error::InvalidFrame)?;
+                    .ok_or(Error::InvalidFrame)
+                {
+                    Ok(ap) => ap,
+                    Err(_) => return Ok(()),
+                };
                 self.paths.on_path_abandon_received(
                     abandon_pid,
                     error_code,
@@ -17463,6 +17467,7 @@ pub use crate::packet::Header;
 pub use crate::packet::Type;
 
 pub use crate::path::PathEvent;
+pub use crate::path::PathState;
 pub use crate::path::PathStats;
 pub use crate::path::PathStatus;
 pub use crate::path::SocketAddrIter;
