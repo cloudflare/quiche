@@ -30,7 +30,6 @@ use std::sync::Arc;
 
 use std::collections::hash_map;
 use std::collections::BTreeMap;
-use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -139,15 +138,7 @@ pub struct StreamMap {
     /// Queue of stream IDs corresponding to streams that have buffered data
     /// ready to be sent to the peer. This also implies that the stream has
     /// enough flow control credits to send at least some of that data.
-    ///
-    /// Streams are grouped by their priority, where each urgency level has two
-    /// queues, one for non-incremental streams and one for incremental ones.
-    ///
-    /// Streams with lower urgency level are scheduled first, and within the
-    /// same urgency level Non-incremental streams are scheduled first, in the
-    /// order of their stream IDs, and incremental streams are scheduled in a
-    /// round-robin fashion after all non-incremental streams have been flushed.
-    flushable: BTreeMap<u8, (BinaryHeap<std::cmp::Reverse<u64>>, VecDeque<u64>)>,
+    flushable: RBTree<StreamFlushablePriorityAdapter>,
 
     /// Set of stream IDs corresponding to streams that have outstanding data
     /// to read. This is used to generate a `StreamIter` of streams without
@@ -346,70 +337,6 @@ impl StreamMap {
         Ok(stream)
     }
 
-    /// Pushes the stream ID to the back of the flushable streams queue with
-    /// the specified urgency.
-    ///
-    /// Note that the caller is responsible for checking that the specified
-    /// stream ID was not in the queue already before calling this.
-    ///
-    /// Queueing a stream multiple times simultaneously means that it might be
-    /// unfairly scheduled more often than other streams, and might also cause
-    /// spurious cycles through the queue, so it should be avoided.
-    pub fn push_flushable(&mut self, stream_id: u64, urgency: u8, incr: bool) {
-        // Push the element to the back of the queue corresponding to the given
-        // urgency. If the queue doesn't exist yet, create it first.
-        let queues = self
-            .flushable
-            .entry(urgency)
-            .or_insert_with(|| (BinaryHeap::new(), VecDeque::new()));
-
-        if !incr {
-            // Non-incremental streams are scheduled in order of their stream ID.
-            queues.0.push(std::cmp::Reverse(stream_id))
-        } else {
-            // Incremental streams are scheduled in a round-robin fashion.
-            queues.1.push_back(stream_id)
-        };
-    }
-
-    /// Returns the first stream ID from the flushable streams
-    /// queue with the highest urgency.
-    ///
-    /// Note that if the stream is no longer flushable after sending some of its
-    /// outstanding data, it needs to be removed from the queue.
-    pub fn peek_flushable(&mut self) -> Option<u64> {
-        self.flushable.iter_mut().next().and_then(|(_, queues)| {
-            queues.0.peek().map(|x| x.0).or_else(|| {
-                // When peeking incremental streams, make sure to move the current
-                // stream to the end of the queue so they are pocesses in a round
-                // robin fashion
-                if let Some(current_incremental) = queues.1.pop_front() {
-                    queues.1.push_back(current_incremental);
-                    Some(current_incremental)
-                } else {
-                    None
-                }
-            })
-        })
-    }
-
-    /// Remove the last peeked stream
-    pub fn remove_flushable(&mut self) {
-        let mut top_urgency = self
-            .flushable
-            .first_entry()
-            .expect("Remove previously peeked stream");
-
-        let queues = top_urgency.get_mut();
-        queues.0.pop().map(|x| x.0).or_else(|| queues.1.pop_back());
-        // Remove the queue from the list of queues if it is now empty, so that
-        // the next time `pop_flushable()` is called the next queue with elements
-        // is used.
-        if queues.0.is_empty() && queues.1.is_empty() {
-            top_urgency.remove();
-        }
-    }
-
     /// Adds the stream ID to the readable streams set.
     ///
     /// If the stream was already in the list, this does nothing.
@@ -462,6 +389,33 @@ impl StreamMap {
         c.remove();
     }
 
+    /// Adds the stream ID to the flushable streams set.
+    ///
+    /// If the stream was already in the list, this does nothing.
+    pub fn insert_flushable(&mut self, priority_key: &Arc<StreamPriorityKey>) {
+        if !priority_key.flushable.is_linked() {
+            self.flushable.insert(Arc::clone(priority_key));
+        }
+    }
+
+    /// Removes the stream ID from the flushable streams set.
+    pub fn remove_flushable(&mut self, priority_key: &Arc<StreamPriorityKey>) {
+        if !priority_key.flushable.is_linked() {
+            return;
+        }
+
+        let mut c = {
+            let ptr = Arc::as_ptr(priority_key);
+            unsafe { self.flushable.cursor_mut_from_ptr(ptr) }
+        };
+
+        c.remove();
+    }
+
+    pub fn peek_flushable(&self) -> Option<Arc<StreamPriorityKey>> {
+        self.flushable.front().clone_pointer()
+    }
+
     /// Updates the priorities of a stream.
     pub fn update_priority(
         &mut self, old: &Arc<StreamPriorityKey>, new: &Arc<StreamPriorityKey>,
@@ -474,6 +428,11 @@ impl StreamMap {
         if old.writable.is_linked() {
             self.remove_writable(old);
             self.writable.insert(Arc::clone(new));
+        }
+
+        if old.flushable.is_linked() {
+            self.remove_flushable(old);
+            self.flushable.insert(Arc::clone(new));
         }
     }
 
@@ -599,6 +558,8 @@ impl StreamMap {
         self.remove_readable(&s.priority_key);
 
         self.remove_writable(&s.priority_key);
+
+        self.remove_flushable(&s.priority_key);
 
         self.collected.insert(stream_id);
     }
@@ -814,6 +775,7 @@ pub struct StreamPriorityKey {
 
     pub readable: RBTreeAtomicLink,
     pub writable: RBTreeAtomicLink,
+    pub flushable: RBTreeAtomicLink,
 }
 
 impl Default for StreamPriorityKey {
@@ -824,6 +786,7 @@ impl Default for StreamPriorityKey {
             id: Default::default(),
             readable: Default::default(),
             writable: Default::default(),
+            flushable: Default::default(),
         }
     }
 }
@@ -889,6 +852,16 @@ impl<'a> KeyAdapter<'a> for StreamWritablePriorityAdapter {
 intrusive_adapter!(pub StreamReadablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { readable: RBTreeAtomicLink });
 
 impl<'a> KeyAdapter<'a> for StreamReadablePriorityAdapter {
+    type Key = StreamPriorityKey;
+
+    fn get_key(&self, s: &StreamPriorityKey) -> Self::Key {
+        s.clone()
+    }
+}
+
+intrusive_adapter!(pub StreamFlushablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { flushable: RBTreeAtomicLink });
+
+impl<'a> KeyAdapter<'a> for StreamFlushablePriorityAdapter {
     type Key = StreamPriorityKey;
 
     fn get_key(&self, s: &StreamPriorityKey) -> Self::Key {
