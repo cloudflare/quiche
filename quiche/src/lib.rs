@@ -5940,15 +5940,9 @@ impl Connection {
             sockaddrs: self
                 .paths
                 .iter()
-                .filter_map(|(_, p)| {
-                    if (p.usable() || p.validation_requested()) &&
-                        p.local_addr() == from
-                    {
-                        Some(p.peer_addr())
-                    } else {
-                        None
-                    }
-                })
+                .filter(|(_, p)| p.usable() || p.probing_required())
+                .filter(|(_, p)| p.local_addr() == from)
+                .map(|(_, p)| p.peer_addr())
                 .collect(),
 
             index: 0,
