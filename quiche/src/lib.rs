@@ -5941,7 +5941,7 @@ impl Connection {
                 .paths
                 .iter()
                 .filter_map(|(_, p)| {
-                    if (p.usable() || !p.probing_required()) &&
+                    if (p.usable() || p.validation_requested()) &&
                         p.local_addr() == from
                     {
                         Some(p.peer_addr())
@@ -14986,6 +14986,7 @@ mod tests {
             ),
             Err(Error::Done)
         );
+
         // Client should send padded PATH_CHALLENGE.
         let (sent, si) = pipe
             .client
@@ -14994,6 +14995,13 @@ mod tests {
         assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
         assert_eq!(si.from, client_addr_2);
         assert_eq!(si.to, server_addr);
+
+        let ri = RecvInfo {
+            to: si.to,
+            from: si.from,
+        };
+        assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
+
         // A non-existing 4-tuple raises an InvalidState.
         let client_addr_3 = "127.0.0.1:9012".parse().unwrap();
         let server_addr_2 = "127.0.0.1:9876".parse().unwrap();
@@ -15028,13 +15036,27 @@ mod tests {
         assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
         assert_eq!(si.from, client_addr);
         assert_eq!(si.to, server_addr_2);
+
+        let ri = RecvInfo {
+            to: si.to,
+            from: si.from,
+        };
+        assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
+
         // STREAM frame on active path.
-        let (_, si) = pipe
+        let (sent, si) = pipe
             .client
             .send_on_path(&mut buf, Some(client_addr), None)
             .expect("No error");
         assert_eq!(si.from, client_addr);
         assert_eq!(si.to, server_addr);
+
+        let ri = RecvInfo {
+            to: si.to,
+            from: si.from,
+        };
+        assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
+
         // PATH_CHALLENGE
         let (sent, si) = pipe
             .client
@@ -15043,13 +15065,26 @@ mod tests {
         assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
         assert_eq!(si.from, client_addr_3);
         assert_eq!(si.to, server_addr);
+
+        let ri = RecvInfo {
+            to: si.to,
+            from: si.from,
+        };
+        assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
+
         // STREAM frame on active path.
-        let (_, si) = pipe
+        let (sent, si) = pipe
             .client
             .send_on_path(&mut buf, None, Some(server_addr))
             .expect("No error");
         assert_eq!(si.from, client_addr);
         assert_eq!(si.to, server_addr);
+
+        let ri = RecvInfo {
+            to: si.to,
+            from: si.from,
+        };
+        assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
 
         // No more data to exchange leads to Error::Done.
         assert_eq!(
@@ -15060,6 +15095,8 @@ mod tests {
             pipe.client.send_on_path(&mut buf, None, Some(server_addr)),
             Err(Error::Done)
         );
+
+        assert_eq!(pipe.advance(), Ok(()));
 
         let mut v1 = pipe.client.paths_iter(client_addr).collect::<Vec<_>>();
         let mut v2 = vec![server_addr, server_addr_2];
