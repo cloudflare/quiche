@@ -125,6 +125,7 @@ pub fn connect(
     config.set_disable_active_migration(!conn_args.enable_active_migration);
     config.set_active_connection_id_limit(conn_args.max_active_cids);
     config.set_multipath(conn_args.multipath);
+    config.set_multipath_v4(conn_args.multipath_old);
 
     config.set_max_connection_window(conn_args.max_window);
     config.set_max_stream_window(conn_args.max_stream_window);
@@ -418,7 +419,7 @@ pub fn connect(
                         "Path ({}, {}) is now validated",
                         local_addr, peer_addr
                     );
-                    if conn_args.multipath {
+                    if conn.is_multipath_enabled() {
                         conn.set_active(local_addr, peer_addr, true).ok();
                     } else if args.perform_migration {
                         conn.migrate(local_addr, peer_addr).unwrap();
@@ -473,7 +474,7 @@ pub fn connect(
             scid_sent = true;
         }
 
-        if conn_args.multipath &&
+        if (conn_args.multipath || conn_args.multipath_old) &&
             probed_paths < addrs.len() &&
             conn.available_dcids() > 0 &&
             conn.probe_path(addrs[probed_paths], peer_addr).is_ok()

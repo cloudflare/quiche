@@ -6737,7 +6737,7 @@ impl Connection {
     }
 
     fn encode_transport_params(&mut self) -> Result<()> {
-        let mut raw_params = [0; 128];
+        let mut raw_params = [0; 168];
 
         let raw_params = TransportParams::encode(
             &self.local_transport_params,

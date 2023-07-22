@@ -125,6 +125,7 @@ fn main() {
         usize::try_from(conn_args.initial_cwnd_packets).unwrap(),
     );
     config.set_multipath(conn_args.multipath);
+    config.set_multipath_v4(conn_args.multipath_old);
 
     config.set_max_connection_window(conn_args.max_window);
     config.set_max_stream_window(conn_args.max_stream_window);
