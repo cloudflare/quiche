@@ -111,7 +111,7 @@
 //!
 //! let pkt_hdr = qlog::events::quic::PacketHeader::new(
 //!     qlog::events::quic::PacketType::Initial,
-//!     0,                // packet_number
+//!     Some(0),          // packet_number
 //!     None,             // flags
 //!     None,             // token
 //!     None,             // length
@@ -326,7 +326,7 @@
 //!
 //! let pkt_hdr = qlog::events::quic::PacketHeader::with_type(
 //!     qlog::events::quic::PacketType::OneRtt,
-//!     0,
+//!     Some(0),
 //!     Some(0x00000001),
 //!     Some(&scid),
 //!     Some(&dcid),
@@ -669,7 +669,7 @@ pub mod testing {
 
         PacketHeader::new(
             packet_type,
-            0,
+            Some(0),
             None,
             None,
             None,
