@@ -2733,7 +2733,7 @@ impl Connection {
 
             let qlog_pkt_hdr = qlog::events::quic::PacketHeader::with_type(
                 hdr.ty.to_qlog(),
-                pn,
+                Some(pn),
                 Some(hdr.version),
                 Some(&hdr.scid),
                 Some(&hdr.dcid),
@@ -3428,7 +3428,7 @@ impl Connection {
         let qlog_pkt_hdr = self.qlog.streamer.as_ref().map(|_q| {
             qlog::events::quic::PacketHeader::with_type(
                 hdr.ty.to_qlog(),
-                pn,
+                Some(pn),
                 Some(hdr.version),
                 Some(&hdr.scid),
                 Some(&hdr.dcid),
