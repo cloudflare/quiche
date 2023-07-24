@@ -276,6 +276,10 @@ pub fn priority_field_value_from_query_string(url: &url::Url) -> Option<String> 
         if param.0 == "i" && param.1 == "1" {
             priority.push_str("i,");
         }
+
+        if param.0 == "bikeshed-order-name" {
+            priority.push_str(&format!("{}={},", param.0, param.1));
+        }
     }
 
     if !priority.is_empty() {
@@ -292,6 +296,7 @@ pub fn priority_field_value_from_query_string(url: &url::Url) -> Option<String> 
 pub fn priority_from_query_string(url: &url::Url) -> Option<Priority> {
     let mut urgency = None;
     let mut incremental = None;
+    let mut send_order = None;
     for param in url.query_pairs() {
         if param.0 == "u" {
             urgency = Some(param.1.parse::<u8>().unwrap());
@@ -300,14 +305,18 @@ pub fn priority_from_query_string(url: &url::Url) -> Option<Priority> {
         if param.0 == "i" && param.1 == "1" {
             incremental = Some(true);
         }
+
+        if param.0 == "bikeshed-order-name" {
+            send_order = Some(param.1.parse::<u32>().unwrap());
+        }
     }
 
     match (urgency, incremental) {
-        (Some(u), Some(i)) => Some(Priority::new(u, i)),
+        (Some(u), Some(i)) => Some(Priority::new(u, i, send_order)),
 
-        (Some(u), None) => Some(Priority::new(u, false)),
+        (Some(u), None) => Some(Priority::new(u, false, send_order)),
 
-        (None, Some(i)) => Some(Priority::new(3, i)),
+        (None, Some(i)) => Some(Priority::new(3, i, send_order)),
 
         (None, None) => None,
     }

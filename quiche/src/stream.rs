@@ -681,6 +681,9 @@ pub struct Stream {
     /// Whether the stream can be flushed incrementally. Default is `true`.
     pub incremental: bool,
 
+    /// The stream's send order (bigger is better). Default is `None`.
+    pub send_order: u32,
+
     pub priority_key: Arc<StreamPriorityKey>,
 }
 
@@ -703,6 +706,7 @@ impl Stream {
             local,
             urgency: priority_key.urgency,
             incremental: priority_key.incremental,
+            send_order: priority_key.send_order,
             priority_key,
         }
     }
@@ -771,6 +775,7 @@ pub fn is_bidi(stream_id: u64) -> bool {
 pub struct StreamPriorityKey {
     pub urgency: u8,
     pub incremental: bool,
+    pub send_order: u32,
     pub id: u64,
 
     pub readable: RBTreeAtomicLink,
@@ -783,6 +788,7 @@ impl Default for StreamPriorityKey {
         Self {
             urgency: DEFAULT_URGENCY,
             incremental: true,
+            send_order: Default::default(),
             id: Default::default(),
             readable: Default::default(),
             writable: Default::default(),
@@ -811,9 +817,20 @@ impl PartialOrd for StreamPriorityKey {
             return self.urgency.partial_cmp(&other.urgency);
         }
 
-        // ...when the urgency is the same, and both are not incremental, order
-        // by stream ID...
+        // ...when the urgency is the same, and both are not incremental,
         if !self.incremental && !other.incremental {
+            // First consider ordering by send-order if they are not the same
+            if self.send_order != other.send_order {
+                // Bigger is better, so flip the partial_cmp ordering
+                return match self.send_order.partial_cmp(&other.send_order) {
+                    Some(cmp::Ordering::Greater) => Some(cmp::Ordering::Less),
+                    Some(cmp::Ordering::Less) => Some(cmp::Ordering::Greater),
+                    Some(cmp::Ordering::Equal) => Some(cmp::Ordering::Equal),
+                    None => None,
+                };
+            }
+
+            // Otherwise, order by Stream ID
             return self.id.partial_cmp(&other.id);
         }
 
@@ -3865,5 +3882,111 @@ mod tests {
         let walk_2: Vec<u64> =
             prioritized_writable.iter().map(|s| s.id).collect();
         assert_eq!(walk_2, vec![0, 0, 4, 4, 8, 8, 12, 12]);
+    }
+
+    #[test]
+    fn writable_prioritized_send_order() {
+        let local_tp = crate::TransportParams::default();
+        let peer_tp = crate::TransportParams {
+            initial_max_stream_data_bidi_local: 100,
+            initial_max_stream_data_uni: 100,
+            ..Default::default()
+        };
+
+        let mut streams = StreamMap::new(100, 100, 100);
+
+        // Streams where the send-order ascends (becomes more important). No
+        // stream shares a send order.
+        let input = vec![
+            (0, 0),
+            (4, 10),
+            (8, 20),
+            (12, 30),
+            (16, 40),
+            (20, 50),
+            (24, 60),
+            (28, 70),
+            (32, 80),
+            (36, 90),
+            (40, 100),
+        ];
+
+        for (id, send_order) in input.clone() {
+            // this duplicates some code from stream_priority in order to access
+            // streams and the collection they're in
+            let stream = streams
+                .get_or_create(id, &local_tp, &peer_tp, false, true)
+                .unwrap();
+
+            stream.send_order = send_order;
+            stream.incremental = false;
+
+            let new_priority_key = Arc::new(StreamPriorityKey {
+                urgency: stream.urgency,
+                incremental: stream.incremental,
+                send_order: stream.send_order,
+                id,
+                ..Default::default()
+            });
+
+            let old_priority_key = std::mem::replace(
+                &mut stream.priority_key,
+                new_priority_key.clone(),
+            );
+
+            streams.update_priority(&old_priority_key, &new_priority_key);
+        }
+
+        let walk_1: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_1, vec![40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0]);
+
+        // Re-applying priority to a stream does not cause duplication.
+        for (id, send_order) in input {
+            // this duplicates some code from stream_priority in order to access
+            // streams and the collection they're in
+            let stream = streams
+                .get_or_create(id, &local_tp, &peer_tp, false, true)
+                .unwrap();
+
+            stream.send_order = send_order;
+
+            let new_priority_key = Arc::new(StreamPriorityKey {
+                urgency: stream.urgency,
+                incremental: stream.incremental,
+                send_order: stream.send_order,
+                id,
+                ..Default::default()
+            });
+
+            let old_priority_key = std::mem::replace(
+                &mut stream.priority_key,
+                new_priority_key.clone(),
+            );
+
+            streams.update_priority(&old_priority_key, &new_priority_key);
+        }
+
+        let walk_2: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_2, vec![40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0]);
+
+        // Removing streams doesn't break expected ordering.
+        streams.collect(24, true);
+
+        let walk_3: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_3, vec![40, 36, 32, 28, 20, 16, 12, 8, 4, 0]);
+
+        streams.collect(40, true);
+        streams.collect(0, true);
+
+        let walk_4: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_4, vec![36, 32, 28, 20, 16, 12, 8, 4]);
+
+        // Adding streams doesn't break expected ordering.
+        streams
+            .get_or_create(44, &local_tp, &peer_tp, false, true)
+            .unwrap();
+
+        let walk_5: Vec<u64> = streams.writable().collect();
+        assert_eq!(walk_5, vec![36, 32, 28, 20, 16, 12, 8, 4, 44]);
     }
 }

@@ -4676,6 +4676,7 @@ impl Connection {
     /// method.
     pub fn stream_priority(
         &mut self, stream_id: u64, urgency: u8, incremental: bool,
+        send_order: Option<u32>,
     ) -> Result<()> {
         // Get existing stream or create a new one, but if the stream
         // has already been closed and collected, ignore the prioritization.
@@ -4687,16 +4688,21 @@ impl Connection {
             Err(e) => return Err(e),
         };
 
-        if stream.urgency == urgency && stream.incremental == incremental {
+        if stream.urgency == urgency &&
+            stream.incremental == incremental &&
+            Some(stream.send_order) == send_order
+        {
             return Ok(());
         }
 
         stream.urgency = urgency;
         stream.incremental = incremental;
+        stream.send_order = send_order.unwrap_or_default();
 
         let new_priority_key = Arc::new(StreamPriorityKey {
             urgency: stream.urgency,
             incremental: stream.incremental,
+            send_order: stream.send_order,
             id: stream_id,
             ..Default::default()
         });
@@ -12544,37 +12550,37 @@ mod tests {
         //  * Stream 0 is on its own.
 
         pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(0, 255, true), Ok(()));
+        assert_eq!(pipe.server.stream_priority(0, 255, true, None), Ok(()));
         pipe.server.stream_send(0, &out, false).unwrap();
         pipe.server.stream_send(0, &out, false).unwrap();
         pipe.server.stream_send(0, &out, false).unwrap();
 
         pipe.server.stream_recv(12, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(12, 42, true), Ok(()));
+        assert_eq!(pipe.server.stream_priority(12, 42, true, None), Ok(()));
         pipe.server.stream_send(12, &out, false).unwrap();
         pipe.server.stream_send(12, &out, false).unwrap();
         pipe.server.stream_send(12, &out, false).unwrap();
 
         pipe.server.stream_recv(16, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(16, 10, false), Ok(()));
+        assert_eq!(pipe.server.stream_priority(16, 10, false, None), Ok(()));
         pipe.server.stream_send(16, &out, false).unwrap();
         pipe.server.stream_send(16, &out, false).unwrap();
         pipe.server.stream_send(16, &out, false).unwrap();
 
         pipe.server.stream_recv(4, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(4, 42, true), Ok(()));
+        assert_eq!(pipe.server.stream_priority(4, 42, true, None), Ok(()));
         pipe.server.stream_send(4, &out, false).unwrap();
         pipe.server.stream_send(4, &out, false).unwrap();
         pipe.server.stream_send(4, &out, false).unwrap();
 
         pipe.server.stream_recv(8, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(8, 10, false), Ok(()));
+        assert_eq!(pipe.server.stream_priority(8, 10, false, None), Ok(()));
         pipe.server.stream_send(8, &out, false).unwrap();
         pipe.server.stream_send(8, &out, false).unwrap();
         pipe.server.stream_send(8, &out, false).unwrap();
 
         pipe.server.stream_recv(20, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(20, 42, false), Ok(()));
+        assert_eq!(pipe.server.stream_priority(20, 42, false, None), Ok(()));
         pipe.server.stream_send(20, &out, false).unwrap();
         pipe.server.stream_send(20, &out, false).unwrap();
         pipe.server.stream_send(20, &out, false).unwrap();
@@ -12753,23 +12759,23 @@ mod tests {
         let mut b = [0; 1];
 
         pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(0, 255, true), Ok(()));
+        assert_eq!(pipe.server.stream_priority(0, 255, true, None), Ok(()));
         pipe.server.stream_send(0, b"b", false).unwrap();
 
         pipe.server.stream_recv(12, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(12, 42, true), Ok(()));
+        assert_eq!(pipe.server.stream_priority(12, 42, true, None), Ok(()));
         pipe.server.stream_send(12, b"b", false).unwrap();
 
         pipe.server.stream_recv(8, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(8, 10, true), Ok(()));
+        assert_eq!(pipe.server.stream_priority(8, 10, true, None), Ok(()));
         pipe.server.stream_send(8, b"b", false).unwrap();
 
         pipe.server.stream_recv(4, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(4, 42, true), Ok(()));
+        assert_eq!(pipe.server.stream_priority(4, 42, true, None), Ok(()));
         pipe.server.stream_send(4, b"b", false).unwrap();
 
         // Stream 0 is re-prioritized!!!
-        assert_eq!(pipe.server.stream_priority(0, 20, true), Ok(()));
+        assert_eq!(pipe.server.stream_priority(0, 20, true, None), Ok(()));
 
         // First is stream 8.
         let (len, _) = pipe.server.send(&mut buf).unwrap();
@@ -12876,12 +12882,12 @@ mod tests {
         // of the order that the application writes things in.
 
         pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(0, 255, true), Ok(()));
+        assert_eq!(pipe.server.stream_priority(0, 255, true, None), Ok(()));
         pipe.server.stream_send(0, &out, false).unwrap();
         pipe.server.stream_send(0, &out, false).unwrap();
         pipe.server.stream_send(0, &out, false).unwrap();
 
-        assert_eq!(pipe.server.stream_priority(4, 255, true), Ok(()));
+        assert_eq!(pipe.server.stream_priority(4, 255, true, None), Ok(()));
         pipe.server.stream_send(4, &out, false).unwrap();
         pipe.server.stream_send(4, &out, false).unwrap();
         pipe.server.stream_send(4, &out, false).unwrap();

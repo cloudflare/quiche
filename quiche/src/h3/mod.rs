@@ -728,6 +728,7 @@ pub enum Event {
 pub struct Priority {
     urgency: u8,
     incremental: bool,
+    send_order: Option<u32>,
 }
 
 impl Default for Priority {
@@ -735,16 +736,20 @@ impl Default for Priority {
         Priority {
             urgency: PRIORITY_URGENCY_DEFAULT,
             incremental: PRIORITY_INCREMENTAL_DEFAULT,
+            send_order: None,
         }
     }
 }
 
 impl Priority {
     /// Creates a new Priority.
-    pub const fn new(urgency: u8, incremental: bool) -> Self {
+    pub const fn new(
+        urgency: u8, incremental: bool, send_order: Option<u32>,
+    ) -> Self {
         Priority {
             urgency,
             incremental,
+            send_order,
         }
     }
 }
@@ -811,7 +816,15 @@ impl TryFrom<&[u8]> for Priority {
             _ => false,
         };
 
-        Ok(Priority::new(urgency, incremental))
+        let send_order = match dict.get("bikeshed-order-name") {
+            Some(sfv::ListEntry::Item(item)) =>
+                item.bare_item.as_int().map(|v| v as u32),
+
+            // Omitted, so use None
+            _ => None,
+        };
+
+        Ok(Priority::new(urgency, incremental, send_order))
     }
 }
 
@@ -1086,7 +1099,12 @@ impl Connection {
             .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND) +
             PRIORITY_URGENCY_OFFSET;
 
-        conn.stream_priority(stream_id, urgency, priority.incremental)?;
+        conn.stream_priority(
+            stream_id,
+            urgency,
+            priority.incremental,
+            priority.send_order,
+        )?;
 
         self.send_headers(conn, stream_id, headers, fin)?;
 
@@ -1831,7 +1849,7 @@ impl Connection {
             stream::HTTP3_CONTROL_STREAM_TYPE_ID |
             stream::QPACK_ENCODER_STREAM_TYPE_ID |
             stream::QPACK_DECODER_STREAM_TYPE_ID => {
-                conn.stream_priority(stream_id, 0, false)?;
+                conn.stream_priority(stream_id, 0, false, None)?;
             },
 
             // TODO: Server push
@@ -1839,7 +1857,7 @@ impl Connection {
 
             // Anything else is a GREASE stream, so make it the least important.
             _ => {
-                conn.stream_priority(stream_id, 255, false)?;
+                conn.stream_priority(stream_id, 255, false, None)?;
             },
         }
 
@@ -4010,76 +4028,81 @@ mod tests {
     fn parse_priority_field_value() {
         // Legal dicts
         assert_eq!(
-            Ok(Priority::new(0, false)),
+            Ok(Priority::new(0, false, None)),
             Priority::try_from(b"u=0".as_slice())
         );
         assert_eq!(
-            Ok(Priority::new(3, false)),
+            Ok(Priority::new(3, false, None)),
             Priority::try_from(b"u=3".as_slice())
         );
         assert_eq!(
-            Ok(Priority::new(7, false)),
+            Ok(Priority::new(7, false, None)),
             Priority::try_from(b"u=7".as_slice())
         );
 
         assert_eq!(
-            Ok(Priority::new(0, true)),
+            Ok(Priority::new(0, true, None)),
             Priority::try_from(b"u=0, i".as_slice())
         );
         assert_eq!(
-            Ok(Priority::new(3, true)),
+            Ok(Priority::new(3, true, None)),
             Priority::try_from(b"u=3, i".as_slice())
         );
         assert_eq!(
-            Ok(Priority::new(7, true)),
+            Ok(Priority::new(7, true, None)),
             Priority::try_from(b"u=7, i".as_slice())
         );
 
         assert_eq!(
-            Ok(Priority::new(0, true)),
+            Ok(Priority::new(0, true, None)),
             Priority::try_from(b"u=0, i=?1".as_slice())
         );
         assert_eq!(
-            Ok(Priority::new(3, true)),
+            Ok(Priority::new(3, true, None)),
             Priority::try_from(b"u=3, i=?1".as_slice())
         );
         assert_eq!(
-            Ok(Priority::new(7, true)),
+            Ok(Priority::new(7, true, None)),
             Priority::try_from(b"u=7, i=?1".as_slice())
         );
 
         assert_eq!(
-            Ok(Priority::new(3, false)),
+            Ok(Priority::new(3, false, None)),
             Priority::try_from(b"".as_slice())
         );
 
         assert_eq!(
-            Ok(Priority::new(0, true)),
+            Ok(Priority::new(0, true, None)),
             Priority::try_from(b"u=0;foo, i;bar".as_slice())
         );
         assert_eq!(
-            Ok(Priority::new(3, true)),
+            Ok(Priority::new(3, true, None)),
             Priority::try_from(b"u=3;hello, i;world".as_slice())
         );
         assert_eq!(
-            Ok(Priority::new(7, true)),
+            Ok(Priority::new(7, true, None)),
             Priority::try_from(b"u=7;croeso, i;gymru".as_slice())
         );
 
         assert_eq!(
-            Ok(Priority::new(0, true)),
+            Ok(Priority::new(0, true, None)),
             Priority::try_from(b"u=0, i, spinaltap=11".as_slice())
+        );
+
+        assert_eq!(
+            Ok(Priority::new(0, true, Some(11))),
+            Priority::try_from(b"u=0, i, bikeshed-order-name=11".as_slice())
         );
 
         // Illegal formats
         assert_eq!(Err(Error::Done), Priority::try_from(b"0".as_slice()));
         assert_eq!(
-            Ok(Priority::new(7, false)),
+            Ok(Priority::new(7, false, None)),
             Priority::try_from(b"u=-1".as_slice())
         );
         assert_eq!(Err(Error::Done), Priority::try_from(b"u=0.2".as_slice()));
         assert_eq!(
-            Ok(Priority::new(7, false)),
+            Ok(Priority::new(7, false, None)),
             Priority::try_from(b"u=100".as_slice())
         );
         assert_eq!(
@@ -4101,6 +4124,7 @@ mod tests {
             .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
                 urgency: 3,
                 incremental: false,
+                send_order: None,
             })
             .unwrap();
         s.advance().ok();
@@ -4119,6 +4143,7 @@ mod tests {
             .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
                 urgency: 3,
                 incremental: false,
+                send_order: None,
             })
             .unwrap();
         s.advance().ok();
@@ -4130,6 +4155,7 @@ mod tests {
             .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
                 urgency: 5,
                 incremental: false,
+                send_order: None,
             })
             .unwrap();
         s.advance().ok();
@@ -4145,6 +4171,7 @@ mod tests {
             .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
                 urgency: 7,
                 incremental: false,
+                send_order: None,
             })
             .unwrap();
         s.advance().ok();
@@ -4167,6 +4194,7 @@ mod tests {
             .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
                 urgency: 3,
                 incremental: false,
+                send_order: None,
             })
             .unwrap();
         s.advance().ok();
@@ -4178,6 +4206,7 @@ mod tests {
             .send_priority_update_for_request(&mut s.pipe.client, 4, &Priority {
                 urgency: 1,
                 incremental: false,
+                send_order: None,
             })
             .unwrap();
         s.advance().ok();
@@ -4189,6 +4218,7 @@ mod tests {
             .send_priority_update_for_request(&mut s.pipe.client, 8, &Priority {
                 urgency: 2,
                 incremental: false,
+                send_order: None,
             })
             .unwrap();
         s.advance().ok();
@@ -4263,6 +4293,7 @@ mod tests {
             .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
                 urgency: 3,
                 incremental: false,
+                send_order: None,
             })
             .unwrap();
         s.advance().ok();
@@ -4298,6 +4329,7 @@ mod tests {
             .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
                 urgency: 3,
                 incremental: false,
+                send_order: None,
             })
             .unwrap();
         s.advance().ok();
@@ -4317,6 +4349,7 @@ mod tests {
             .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
                 urgency: 3,
                 incremental: false,
+                send_order: None,
             })
             .unwrap();
         s.advance().ok();
@@ -4354,6 +4387,7 @@ mod tests {
             .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
                 urgency: 3,
                 incremental: false,
+                send_order: None,
             })
             .unwrap();
         s.advance().ok();

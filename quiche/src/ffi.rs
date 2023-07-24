@@ -800,8 +800,10 @@ pub extern fn quiche_conn_stream_send(
 #[no_mangle]
 pub extern fn quiche_conn_stream_priority(
     conn: &mut Connection, stream_id: u64, urgency: u8, incremental: bool,
+    send_order: *const u32,
 ) -> c_int {
-    match conn.stream_priority(stream_id, urgency, incremental) {
+    let send_order = unsafe { send_order.as_ref().cloned() };
+    match conn.stream_priority(stream_id, urgency, incremental, send_order) {
         Ok(_) => 0,
 
         Err(e) => e.to_c() as c_int,
