@@ -563,6 +563,9 @@ fn on_packets_acked(
     now: Instant,
 ) {
     r.bbr2_state.newly_acked_bytes = 0;
+
+    let time_sent = packets.last().map(|pkt| pkt.time_sent);
+
     for p in packets.drain(..) {
         r.bbr2_state.prior_bytes_in_flight = r.bytes_in_flight;
 
@@ -577,8 +580,8 @@ fn on_packets_acked(
         r.bbr2_state.newly_acked_bytes += p.size;
     }
 
-    if let Some(pkt) = packets.last() {
-        if !r.in_congestion_recovery(pkt.time_sent) {
+    if let Some(ts) = time_sent {
+        if !r.in_congestion_recovery(ts) {
             // Upon exiting loss recovery.
             bbr2_exit_recovery(r);
         }
