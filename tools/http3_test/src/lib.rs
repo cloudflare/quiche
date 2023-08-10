@@ -230,6 +230,7 @@ extern crate log;
 use std::collections::HashMap;
 
 use quiche::h3::Header;
+use quiche::h3::NameValue;
 
 pub const USER_AGENT: &[u8] = b"quiche-http3-integration-client";
 
@@ -284,6 +285,29 @@ impl Http3Req {
             reset_stream_code: None,
         }
     }
+
+    /// Add a new [`Header`] to the request. If the request already contains a
+    /// header with the new header's name, the existing header's value will
+    /// be replaced with that of the new one.
+    pub fn add_or_replace_header(
+        header_list: &mut Vec<Header>, new_header: Header,
+    ) {
+        if let Some(hdr_in_list) = find_header(header_list, &new_header) {
+            *hdr_in_list = new_header;
+
+            return;
+        }
+
+        header_list.push(new_header.clone());
+    }
+}
+
+fn find_header<'a>(
+    header_list: &'a mut [Header], header: &Header,
+) -> Option<&'a mut Header> {
+    header_list
+        .iter_mut()
+        .find(|curr| curr.name() == header.name())
 }
 
 /// Asserts that the Http3Req received response headers match the expected
