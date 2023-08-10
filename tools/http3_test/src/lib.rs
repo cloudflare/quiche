@@ -286,8 +286,9 @@ impl Http3Req {
         }
     }
 
-    /// Add a new [`Header`] to the request. If the request already contains a header with the new
-    /// header's name, the existing header's value will be replaced with that of the new one.
+    /// Add a new [`Header`] to the request. If the request already contains a
+    /// header with the new header's name, the existing header's value will
+    /// be replaced with that of the new one.
     pub fn add_or_replace_header(
         header_list: &mut Vec<Header>, new_header: Header,
     ) {
@@ -304,13 +305,9 @@ impl Http3Req {
 fn find_header<'a>(
     header_list: &'a mut [Header], header: &Header,
 ) -> Option<&'a mut Header> {
-    for curr in header_list.iter_mut() {
-        if curr.name() == header.name() {
-            return Some(curr);
-        }
-    }
-
-    None
+    header_list
+        .iter_mut()
+        .find(|curr| curr.name() == header.name())
 }
 
 /// Asserts that the Http3Req received response headers match the expected
