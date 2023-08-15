@@ -167,7 +167,7 @@ pub struct Recovery {
     outstanding_non_ack_eliciting: usize,
 
     /// Initial congestion window size in terms of packet count.
-    initial_window_packets: usize,
+    initial_congestion_window_packets: usize,
 }
 
 pub struct RecoveryConfig {
@@ -177,7 +177,7 @@ pub struct RecoveryConfig {
     hystart: bool,
     pacing: bool,
     max_pacing_rate: Option<u64>,
-    initial_window_packets: usize,
+    initial_congestion_window_packets: usize,
 }
 
 impl RecoveryConfig {
@@ -189,7 +189,8 @@ impl RecoveryConfig {
             hystart: config.hystart,
             pacing: config.pacing,
             max_pacing_rate: config.max_pacing_rate,
-            initial_window_packets: config.initial_window_packets,
+            initial_congestion_window_packets: config
+                .initial_congestion_window_packets,
         }
     }
 }
@@ -197,7 +198,7 @@ impl RecoveryConfig {
 impl Recovery {
     pub fn new_with_config(recovery_config: &RecoveryConfig) -> Self {
         let initial_congestion_window = recovery_config.max_send_udp_payload_size *
-            recovery_config.initial_window_packets;
+            recovery_config.initial_congestion_window_packets;
 
         Recovery {
             loss_detection_timer: None,
@@ -292,7 +293,8 @@ impl Recovery {
 
             outstanding_non_ack_eliciting: 0,
 
-            initial_window_packets: recovery_config.initial_window_packets,
+            initial_congestion_window_packets: recovery_config
+                .initial_congestion_window_packets,
         }
     }
 
@@ -306,7 +308,7 @@ impl Recovery {
 
     pub fn reset(&mut self) {
         self.congestion_window =
-            self.max_datagram_size * self.initial_window_packets;
+            self.max_datagram_size * self.initial_congestion_window_packets;
         self.in_flight_count = [0; packet::Epoch::count()];
         self.congestion_recovery_start_time = None;
         self.ssthresh = usize::MAX;
@@ -413,7 +415,7 @@ impl Recovery {
         let is_app = epoch == packet::Epoch::Application;
 
         let in_initcwnd = self.bytes_sent <
-            self.max_datagram_size * self.initial_window_packets;
+            self.max_datagram_size * self.initial_congestion_window_packets;
 
         let sent_bytes = if !self.pacer.enabled() || !is_app || in_initcwnd {
             0
@@ -745,10 +747,10 @@ impl Recovery {
 
         // Update cwnd if it hasn't been updated yet.
         if self.congestion_window ==
-            self.max_datagram_size * self.initial_window_packets
+            self.max_datagram_size * self.initial_congestion_window_packets
         {
             self.congestion_window =
-                max_datagram_size * self.initial_window_packets;
+                max_datagram_size * self.initial_congestion_window_packets;
         }
 
         self.pacer = pacer::Pacer::new(

@@ -213,7 +213,7 @@ void quiche_config_set_disable_active_migration(quiche_config *config, bool v);
 int quiche_config_set_cc_algorithm_name(quiche_config *config, const char *algo);
 
 // Sets the initial cwnd for the connection in terms of packet count.
-void quiche_config_set_initial_window_packets(quiche_config *config, size_t initial_window_packets);
+void quiche_config_set_initial_congestion_window_packets(quiche_config *config, size_t packets);
 
 enum quiche_cc_algorithm {
     QUICHE_CC_RENO = 0,

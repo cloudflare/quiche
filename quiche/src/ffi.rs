@@ -325,10 +325,10 @@ pub extern fn quiche_config_set_cc_algorithm(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_window_packets(
-    config: &mut Config, initial_window_packets: size_t,
+pub extern fn quiche_config_set_initial_congestion_window_packets(
+    config: &mut Config, packets: size_t,
 ) {
-    config.set_initial_window_packets(initial_window_packets);
+    config.set_initial_congestion_window_packets(packets);
 }
 
 #[no_mangle]
