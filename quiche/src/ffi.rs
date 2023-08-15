@@ -325,6 +325,13 @@ pub extern fn quiche_config_set_cc_algorithm(
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_initial_window_packets(
+    config: &mut Config, initial_window_packets: size_t,
+) {
+    config.set_initial_window_packets(window_packets);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
     config.enable_hystart(v);
 }
