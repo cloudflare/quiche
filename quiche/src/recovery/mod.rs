@@ -166,7 +166,7 @@ pub struct Recovery {
     /// How many non-ack-eliciting packets have been sent.
     outstanding_non_ack_eliciting: usize,
 
-    /// How many packets should be sent in the initial congestion window.
+    /// Initial congestion window size in terms of packet count.
     initial_window_packets: usize,
 }
 

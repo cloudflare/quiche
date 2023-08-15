@@ -483,7 +483,7 @@ const CONNECTION_WINDOW_FACTOR: f64 = 1.5;
 // validation as failed.
 const MAX_PROBING_TIMEOUTS: usize = 3;
 
-// The default number of packets sent in the initial congestion window.
+// The default initial congestion window size in terms of packet count.
 const DEFAULT_INITIAL_WINDOW_PACKETS: usize = 10;
 
 /// A specialized [`Result`] type for quiche operations.
@@ -1131,7 +1131,7 @@ impl Config {
         Ok(())
     }
 
-    /// Sets the number of packets to be sent in the initial congestion window.
+    /// Sets initial congestion window size in terms of packet count.
     ///
     /// The default value is 10.
     pub fn set_initial_window_packets(&mut self, initial_window_packets: usize) {
