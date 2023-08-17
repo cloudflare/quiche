@@ -1580,4 +1580,43 @@ mod httpbin_tests {
 
         assert_eq!(Ok(()), do_test(reqs, assert_headers_only, true));
     }
+
+    #[test]
+    fn mismatched_content_length_too_long() {
+        let mut too_long = request_with_body("post")[0].clone();
+        Http3Req::add_or_replace_header(
+            &mut too_long.hdrs,
+            Header::new(b"content-length", b"32"),
+        );
+
+        if let Some(expected_resp_hdrs) = too_long.expect_resp_hdrs.as_mut() {
+            Http3Req::add_or_replace_header(
+                expected_resp_hdrs,
+                Header::new(b":status", b"400"),
+            );
+        }
+
+        let reqs = vec![too_long];
+        assert_eq!(Ok(()), do_test(reqs, assert_headers_only, true));
+    }
+
+    #[test]
+    fn mismatched_content_length_too_short() {
+        let mut too_short = request_with_body("post")[0].clone();
+
+        Http3Req::add_or_replace_header(
+            &mut too_short.hdrs,
+            Header::new(b"content-length", b"34"),
+        );
+
+        if let Some(expected_resp_hdrs) = too_short.expect_resp_hdrs.as_mut() {
+            Http3Req::add_or_replace_header(
+                expected_resp_hdrs,
+                Header::new(b":status", b"400"),
+            );
+        }
+
+        let reqs = vec![too_short];
+        assert_eq!(Ok(()), do_test(reqs, assert_headers_only, true));
+    }
 }
