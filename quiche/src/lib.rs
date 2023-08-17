@@ -3244,12 +3244,6 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        // Make sure we have dcid for send_pid
-        let path = self.paths.get_mut(send_pid)?;
-        if path.active_dcid_seq.is_none() {
-            return Err(Error::Done);
-        }
-
         let is_closing = self.local_error.is_some();
 
         let mut b = octets::OctetsMut::with_slice(out);
@@ -5950,6 +5944,7 @@ impl Connection {
             sockaddrs: self
                 .paths
                 .iter()
+                .filter(|(_, p)| p.active_dcid_seq.is_some())
                 .filter(|(_, p)| p.usable() || p.probing_required())
                 .filter(|(_, p)| p.local_addr() == from)
                 .map(|(_, p)| p.peer_addr())
@@ -15996,48 +15991,11 @@ mod tests {
             })
             .expect("server receive path challenge");
 
-        // Show that the new path is considered a destination path by quiche
-        assert!(pipe
+        // Show that the new path is not considered a destination path by quiche
+        assert!(!pipe
             .server
             .paths_iter(server_addr)
             .any(|path| path == client_addr_2));
-
-        // No CIDs means we can't send anything
-        assert_eq!(
-            pipe.server.send_on_path(
-                &mut pkt_buf,
-                Some(server_addr),
-                Some(client_addr_2)
-            ),
-            Err(Error::Done)
-        );
-
-        // Client shares CID with server
-        let (cid, tok) = testing::create_cid_and_reset_token(16);
-        pipe.client.new_source_cid(&cid, tok, true).unwrap();
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        // Server able to response to PATH_CHALLENGE with PATH_RESPONSE
-        let flight = testing::emit_flight_on_path(
-            &mut pipe.server,
-            Some(server_addr),
-            Some(client_addr_2),
-        )
-        .unwrap();
-
-        assert!(
-            flight.into_iter().any(|(mut pkt, _)| {
-                let frames =
-                    testing::decode_pkt(&mut pipe.client, &mut pkt).unwrap();
-                frames.iter().any(|f| {
-                    f == &frame::Frame::PathResponse {
-                        data: [0, 1, 2, 3, 4, 5, 6, 7],
-                    }
-                })
-            }),
-            "server responses with PATH_RESPONSE"
-        );
     }
 }
 
