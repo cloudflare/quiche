@@ -35,6 +35,8 @@ use std::io::prelude::*;
 
 use std::collections::HashMap;
 
+use std::convert::TryFrom;
+
 use std::rc::Rc;
 
 use std::cell::RefCell;
@@ -119,6 +121,9 @@ fn main() {
     config.set_initial_max_streams_uni(conn_args.max_streams_uni);
     config.set_disable_active_migration(!conn_args.enable_active_migration);
     config.set_active_connection_id_limit(conn_args.max_active_cids);
+    config.set_initial_congestion_window_packets(
+        usize::try_from(conn_args.initial_cwnd_packets).unwrap(),
+    );
 
     config.set_max_connection_window(conn_args.max_window);
     config.set_max_stream_window(conn_args.max_stream_window);
