@@ -80,6 +80,7 @@ pub struct Recovery {
     loss_detection_timer: Option<Instant>,
 
     pto_count: u32,
+    max_pto: Duration,
 
     time_of_last_sent_ack_eliciting_pkt:
         [Option<Instant>; packet::Epoch::count()],
@@ -177,6 +178,7 @@ pub struct RecoveryConfig {
     hystart: bool,
     pacing: bool,
     max_pacing_rate: Option<u64>,
+    max_pto: Duration,
 }
 
 impl RecoveryConfig {
@@ -188,6 +190,7 @@ impl RecoveryConfig {
             hystart: config.hystart,
             pacing: config.pacing,
             max_pacing_rate: config.max_pacing_rate,
+            max_pto: config.max_pto,
         }
     }
 }
@@ -201,6 +204,7 @@ impl Recovery {
             loss_detection_timer: None,
 
             pto_count: 0,
+            max_pto: recovery_config.max_pto,
 
             time_of_last_sent_ack_eliciting_pkt: [None; packet::Epoch::count()],
 
@@ -723,7 +727,10 @@ impl Recovery {
     }
 
     pub fn pto(&self) -> Duration {
-        self.rtt() + cmp::max(self.rttvar * 4, GRANULARITY)
+        cmp::min(
+            self.rtt() + cmp::max(self.rttvar * 4, GRANULARITY),
+            self.max_pto,
+        )
     }
 
     pub fn delivery_rate(&self) -> u64 {
@@ -2183,6 +2190,23 @@ mod tests {
             r.get_packet_send_time(),
             now + Duration::from_secs_f64(12000.0 / pacing_rate as f64)
         );
+    }
+
+    #[test]
+    fn max_pto() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_max_pto(Duration::from_secs(10));
+
+        let mut r = Recovery::new(&cfg);
+        r.update_rtt(Duration::from_millis(100), Duration::ZERO, Instant::now());
+        assert!(
+            r.pto() < Duration::from_secs(10),
+            "pto not unnecessarily limited"
+        );
+
+        r.update_rtt(Duration::from_secs(60), Duration::ZERO, Instant::now());
+
+        assert_eq!(r.pto(), Duration::from_secs(10), "pto limited");
     }
 }
 

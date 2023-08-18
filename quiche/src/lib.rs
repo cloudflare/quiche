@@ -720,6 +720,8 @@ pub struct Config {
     max_stream_window: u64,
 
     disable_dcid_reuse: bool,
+
+    max_pto: time::Duration,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -779,6 +781,7 @@ impl Config {
             max_stream_window: stream::MAX_STREAM_WINDOW,
 
             disable_dcid_reuse: false,
+            max_pto: time::Duration::MAX,
         })
     }
 
@@ -1208,6 +1211,16 @@ impl Config {
     /// The default value is `false`.
     pub fn set_disable_dcid_reuse(&mut self, v: bool) {
         self.disable_dcid_reuse = v;
+    }
+
+    /// Sets the maximum Probe Timeout
+    ///
+    /// PTO is a function of RTT and can get large. Configure a max PTO to limit
+    /// how large it can get.
+    ///
+    /// The default value is [`Duration::MAX`]
+    pub fn set_max_pto(&mut self, v: time::Duration) {
+        self.max_pto = v;
     }
 }
 
