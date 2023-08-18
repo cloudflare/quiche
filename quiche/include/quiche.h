@@ -294,7 +294,7 @@ quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
                                       const uint8_t *odcid, size_t odcid_len,
                                       const struct sockaddr *local, size_t local_len,
                                       const struct sockaddr *peer, size_t peer_len,
-                                      quiche_config *config, void *ssl,
+                                      const quiche_config *config, void *ssl,
                                       bool is_server);
 
 // Enables keylog to the specified file path. Returns true on success.
