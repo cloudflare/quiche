@@ -1671,8 +1671,7 @@ impl Connection {
 
     fn with_tls(
         scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
-        peer: SocketAddr, config: &mut Config, tls: tls::Handshake,
-        is_server: bool,
+        peer: SocketAddr, config: &Config, tls: tls::Handshake, is_server: bool,
     ) -> Result<Connection> {
         let max_rx_data = config.local_transport_params.initial_max_data;
 
