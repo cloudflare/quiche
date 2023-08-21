@@ -459,8 +459,8 @@ impl Recovery {
             let largest_acked_in_block = r.end - 1;
 
             let first_unacked = if sent
-                .get(0)
-                .map(|p| p.pkt_num == lowest_acked_in_block)
+                .front()
+                .map(|p| p.pkt_num >= lowest_acked_in_block)
                 .unwrap_or(true)
             {
                 // In the happy case the first sent packet is the first to be
