@@ -264,6 +264,7 @@ Options:
   --max-json-payload BYTES  Per-response payload limit when dumping JSON [default: 10000].
   --connect-to ADDRESS     Override ther server's address.
   --no-verify              Don't verify server's certificate.
+  --trust-origin-ca-pem <file>  Path to the pem file of the origin's CA, if not publicly trusted.
   --no-grease              Don't send GREASE.
   --cc-algorithm NAME      Specify which congestion control algorithm to use [default: cubic].
   --disable-hystart        Disable HyStart++.
@@ -290,6 +291,7 @@ pub struct ClientArgs {
     pub reqs_cardinal: u64,
     pub req_headers: Vec<String>,
     pub no_verify: bool,
+    pub trust_origin_ca_pem: Option<String>,
     pub body: Option<Vec<u8>>,
     pub method: String,
     pub connect_to: Option<String>,
@@ -340,6 +342,13 @@ impl Args for ClientArgs {
 
         let no_verify = args.get_bool("--no-verify");
 
+        let trust_origin_ca_pem = args.get_str("--trust-origin-ca-pem");
+        let trust_origin_ca_pem = if !trust_origin_ca_pem.is_empty() {
+            Some(trust_origin_ca_pem.to_string())
+        } else {
+            None
+        };
+
         let body = if args.get_bool("--body") {
             std::fs::read(args.get_str("--body")).ok()
         } else {
@@ -375,6 +384,7 @@ impl Args for ClientArgs {
             reqs_cardinal,
             req_headers,
             no_verify,
+            trust_origin_ca_pem,
             body,
             method,
             connect_to,
@@ -396,6 +406,7 @@ impl Default for ClientArgs {
             req_headers: vec![],
             reqs_cardinal: 1,
             no_verify: false,
+            trust_origin_ca_pem: None,
             body: None,
             method: "GET".to_string(),
             connect_to: None,
