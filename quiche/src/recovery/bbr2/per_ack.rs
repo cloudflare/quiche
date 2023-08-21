@@ -105,7 +105,7 @@ fn bbr2_check_startup_full_bandwidth(r: &mut Recovery) {
     // Another round w/o much growth
     r.bbr2_state.full_bw_count += 1;
 
-    if r.bbr2_state.full_bw_count >= 3 {
+    if r.bbr2_state.full_bw_count >= MAX_BW_COUNT {
         r.bbr2_state.filled_pipe = true;
     }
 }
@@ -127,7 +127,7 @@ fn bbr2_check_startup_high_loss(r: &mut Recovery) {
 
 fn bbr2_handle_queue_too_high_in_startup(r: &mut Recovery) {
     r.bbr2_state.filled_pipe = true;
-    bbr2_inflight(r, r.bbr2_state.max_bw, 1.0);
+    r.bbr2_state.inflight_hi = bbr2_inflight(r, r.bbr2_state.max_bw, 1.0);
 }
 
 // 4.3.2.  Drain
