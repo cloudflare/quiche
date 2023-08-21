@@ -133,7 +133,7 @@ const PROBE_RTT_INTERVAL: Duration = Duration::from_secs(86400);
 const MAX_BW_GROWTH_THRESHOLD: f64 = 1.25;
 
 /// Threshold for determining maximum bandwidth of network during Startup.
-const MAX_BW_COUNT: usize = 1;
+const MAX_BW_COUNT: usize = 3;
 
 /// BBR2 Internal State Machine.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
