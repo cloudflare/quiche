@@ -483,6 +483,9 @@ const CONNECTION_WINDOW_FACTOR: f64 = 1.5;
 // validation as failed.
 const MAX_PROBING_TIMEOUTS: usize = 3;
 
+// The default initial congestion window size in terms of packet count.
+const DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 10;
+
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -705,6 +708,7 @@ pub struct Config {
     grease: bool,
 
     cc_algorithm: CongestionControlAlgorithm,
+    initial_congestion_window_packets: usize,
 
     hystart: bool,
 
@@ -766,6 +770,8 @@ impl Config {
             application_protos: Vec::new(),
             grease: true,
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
+            initial_congestion_window_packets:
+                DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
             hystart: true,
             pacing: true,
             max_pacing_rate: None,
@@ -1124,6 +1130,13 @@ impl Config {
         self.cc_algorithm = CongestionControlAlgorithm::from_str(name)?;
 
         Ok(())
+    }
+
+    /// Sets initial congestion window size in terms of packet count.
+    ///
+    /// The default value is 10.
+    pub fn set_initial_congestion_window_packets(&mut self, packets: usize) {
+        self.initial_congestion_window_packets = packets;
     }
 
     /// Sets the congestion control algorithm used.

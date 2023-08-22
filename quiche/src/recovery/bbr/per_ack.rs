@@ -132,7 +132,7 @@ fn bbr_inflight(r: &mut Recovery, gain: f64) -> usize {
     let bbr = &mut r.bbr_state;
 
     if bbr.rtprop == Duration::MAX {
-        return r.max_datagram_size * INITIAL_WINDOW_PACKETS;
+        return r.max_datagram_size * r.initial_congestion_window_packets;
     }
 
     let quanta = 3 * r.send_quantum;
@@ -199,7 +199,7 @@ fn bbr_set_cwnd(r: &mut Recovery) {
             )
         } else if r.congestion_window < r.bbr_state.target_cwnd ||
             r.delivery_rate.delivered() <
-                r.max_datagram_size * INITIAL_WINDOW_PACKETS
+                r.max_datagram_size * r.initial_congestion_window_packets
         {
             r.congestion_window += acked_bytes;
         }

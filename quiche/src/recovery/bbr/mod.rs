@@ -380,7 +380,10 @@ mod tests {
         // called manually here.
         r.on_init();
 
-        assert_eq!(r.cwnd(), r.max_datagram_size * INITIAL_WINDOW_PACKETS);
+        assert_eq!(
+            r.cwnd(),
+            r.max_datagram_size * cfg.initial_congestion_window_packets
+        );
         assert_eq!(r.bytes_in_flight, 0);
 
         assert_eq!(r.bbr_state.state, BBRStateMachine::Startup);

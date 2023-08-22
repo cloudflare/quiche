@@ -218,7 +218,7 @@ mod tests {
         };
 
         // Send initcwnd full MSS packets to become no longer app limited
-        for _ in 0..recovery::INITIAL_WINDOW_PACKETS {
+        for _ in 0..r.initial_congestion_window_packets {
             r.on_packet_sent_cc(p.size, now);
         }
 
@@ -267,7 +267,7 @@ mod tests {
         };
 
         // Send initcwnd full MSS packets to become no longer app limited
-        for _ in 0..recovery::INITIAL_WINDOW_PACKETS {
+        for _ in 0..r.initial_congestion_window_packets {
             r.on_packet_sent_cc(p.size, now);
         }
 
