@@ -5956,6 +5956,7 @@ impl Connection {
             sockaddrs: self
                 .paths
                 .iter()
+                .filter(|(_, p)| p.active_dcid_seq.is_some())
                 .filter(|(_, p)| p.usable() || p.probing_required())
                 .filter(|(_, p)| p.local_addr() == from)
                 .map(|(_, p)| p.peer_addr())
@@ -8337,14 +8338,15 @@ pub mod testing {
     }
 
     pub fn emit_flight_with_max_buffer(
-        conn: &mut Connection, out_size: usize,
+        conn: &mut Connection, out_size: usize, from: Option<SocketAddr>,
+        to: Option<SocketAddr>,
     ) -> Result<Vec<(Vec<u8>, SendInfo)>> {
         let mut flight = Vec::new();
 
         loop {
             let mut out = vec![0u8; out_size];
 
-            let info = match conn.send(&mut out) {
+            let info = match conn.send_on_path(&mut out, from, to) {
                 Ok((written, info)) => {
                     out.truncate(written);
                     info
@@ -8365,10 +8367,16 @@ pub mod testing {
         Ok(flight)
     }
 
+    pub fn emit_flight_on_path(
+        conn: &mut Connection, from: Option<SocketAddr>, to: Option<SocketAddr>,
+    ) -> Result<Vec<(Vec<u8>, SendInfo)>> {
+        emit_flight_with_max_buffer(conn, 65535, from, to)
+    }
+
     pub fn emit_flight(
         conn: &mut Connection,
     ) -> Result<Vec<(Vec<u8>, SendInfo)>> {
-        emit_flight_with_max_buffer(conn, 65535)
+        emit_flight_on_path(conn, None, None)
     }
 
     pub fn encode_pkt(
@@ -14839,8 +14847,13 @@ mod tests {
         // Limited MTU of 1199 bytes for some reason.
         testing::process_flight(
             &mut pipe.server,
-            testing::emit_flight_with_max_buffer(&mut pipe.client, 1199)
-                .expect("no packet"),
+            testing::emit_flight_with_max_buffer(
+                &mut pipe.client,
+                1199,
+                None,
+                None,
+            )
+            .expect("no packet"),
         )
         .expect("error when processing client packets");
         testing::process_flight(
@@ -15896,6 +15909,105 @@ mod tests {
         let mut w = pipe.server.writable();
         assert_eq!(w.len(), 9);
         assert!(!w.any(|s| s == 0));
+    }
+
+    #[test]
+    fn challenge_no_cids() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+        config.set_active_connection_id_limit(4);
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_stream_data_uni(10);
+        config.set_initial_max_streams_bidi(3);
+
+        let mut pipe =
+            testing::Pipe::with_config_and_scid_lengths(&mut config, 16, 16)
+                .unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Server send CIDs to client
+        let mut server_cids = Vec::new();
+        for _ in 0..2 {
+            let (cid, reset_token) = testing::create_cid_and_reset_token(16);
+            pipe.server
+                .new_source_cid(&cid, reset_token, true)
+                .expect("server issue cid");
+            server_cids.push(cid);
+        }
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let server_addr = testing::Pipe::server_addr();
+        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
+
+        // Client probes path before sending CIDs (simulating race condition)
+        let frames = [frame::Frame::PathChallenge {
+            data: [0, 1, 2, 3, 4, 5, 6, 7],
+        }];
+        let mut pkt_buf = [0u8; 1500];
+        let mut b = octets::OctetsMut::with_slice(&mut pkt_buf);
+        let epoch = packet::Type::Short.to_epoch().unwrap();
+        let space = &mut pipe.client.pkt_num_spaces[epoch];
+        let pn = space.next_pkt_num;
+        let pn_len = 4;
+
+        let hdr = Header {
+            ty: packet::Type::Short,
+            version: pipe.client.version,
+            dcid: server_cids[0].clone(),
+            scid: ConnectionId::from_ref(&[5, 4, 3, 2, 1]),
+            pkt_num: 0,
+            pkt_num_len: pn_len,
+            token: pipe.client.token.clone(),
+            versions: None,
+            key_phase: pipe.client.key_phase,
+        };
+        hdr.to_bytes(&mut b).expect("encode header");
+        let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len());
+        b.put_u32(pn as u32).expect("put pn");
+
+        let payload_offset = b.off();
+
+        for frame in frames {
+            frame.to_bytes(&mut b).expect("encode frames");
+        }
+
+        let aead = space.crypto_seal.as_ref().expect("crypto seal");
+
+        let written = packet::encrypt_pkt(
+            &mut b,
+            pn,
+            pn_len,
+            payload_len,
+            payload_offset,
+            None,
+            &aead,
+        )
+        .expect("packet encrypt");
+        space.next_pkt_num += 1;
+
+        pipe.server
+            .recv(&mut pkt_buf[..written], RecvInfo {
+                to: server_addr,
+                from: client_addr_2,
+            })
+            .expect("server receive path challenge");
+
+        // Show that the new path is not considered a destination path by quiche
+        assert!(!pipe
+            .server
+            .paths_iter(server_addr)
+            .any(|path| path == client_addr_2));
     }
 }
 
