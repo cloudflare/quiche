@@ -7170,7 +7170,7 @@ impl Connection {
             .filter_map(|(_, p)| p.active().then(|| p.recovery.cwnd_available()))
             .sum();
 
-        ((self.tx_buffered + self.dgram_send_queue_len()) < cwin_available) &&
+        ((self.tx_buffered + self.dgram_send_queue_byte_size()) < cwin_available) &&
             (self.tx_data.saturating_sub(self.last_tx_data)) <
                 cwin_available as u64 &&
             cwin_available > 0
