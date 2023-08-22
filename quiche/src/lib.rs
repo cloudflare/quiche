@@ -70,7 +70,7 @@
 //!
 //! [`Config`] also holds TLS configuration. This can be changed by mutators on
 //! the an existing object, or by constructing a TLS context manually and
-//! creating a configuration using [`with_boring_ssl_ctx()`].
+//! creating a configuration using [`with_boring_ssl_ctx_builder()`].
 //!
 //! A configuration object can be shared among multiple connections.
 //!
@@ -310,7 +310,7 @@
 //! [`set_initial_max_stream_data_bidi_local()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_stream_data_bidi_local
 //! [`set_initial_max_stream_data_bidi_remote()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_stream_data_bidi_remote
 //! [`set_initial_max_stream_data_uni()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_stream_data_uni
-//! [`with_boring_ssl_ctx()`]: https://docs.quic.tech/quiche/struct.Config.html#method.with_boring_ssl_ctx
+//! [`with_boring_ssl_ctx_builder()`]: https://docs.quic.tech/quiche/struct.Config.html#method.with_boring_ssl_ctx_builder
 //! [`connect()`]: fn.connect.html
 //! [`accept()`]: fn.accept.html
 //! [`recv()`]: struct.Connection.html#method.recv
@@ -744,18 +744,19 @@ impl Config {
         Self::with_tls_ctx(version, tls::Context::new()?)
     }
 
-    /// Creates a config object with the given version and [`SslContext`].
+    /// Creates a config object with the given version and
+    /// [`SslContextBuilder`].
     ///
     /// This is useful for applications that wish to manually configure
-    /// [`SslContext`].
+    /// [`SslContextBuilder`].
     ///
-    /// [`SslContext`]: https://docs.rs/boring/latest/boring/ssl/struct.SslContext.html
+    /// [`SslContextBuilder`]: https://docs.rs/boring/latest/boring/ssl/struct.SslContextBuilder.html
     #[cfg(feature = "boringssl-boring-crate")]
     #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
-    pub fn with_boring_ssl_ctx(
-        version: u32, tls_ctx: boring::ssl::SslContext,
+    pub fn with_boring_ssl_ctx_builder(
+        version: u32, tls_ctx_builder: boring::ssl::SslContextBuilder,
     ) -> Result<Config> {
-        Self::with_tls_ctx(version, tls::Context::from_boring(tls_ctx))
+        Self::with_tls_ctx(version, tls::Context::from_boring(tls_ctx_builder))
     }
 
     fn with_tls_ctx(version: u32, tls_ctx: tls::Context) -> Result<Config> {
@@ -14112,25 +14113,23 @@ mod tests {
     #[test]
     fn user_provided_boring_ctx() -> Result<()> {
         // Manually construct boring ssl ctx for server
-        let server_tls_ctx = {
-            let mut builder = boring::ssl::SslContextBuilder::new(
-                boring::ssl::SslMethod::tls(),
+        let mut server_tls_ctx_builder =
+            boring::ssl::SslContextBuilder::new(boring::ssl::SslMethod::tls())
+                .unwrap();
+        server_tls_ctx_builder
+            .set_certificate_chain_file("examples/cert.crt")
+            .unwrap();
+        server_tls_ctx_builder
+            .set_private_key_file(
+                "examples/cert.key",
+                boring::ssl::SslFiletype::PEM,
             )
             .unwrap();
-            builder
-                .set_certificate_chain_file("examples/cert.crt")
-                .unwrap();
-            builder
-                .set_private_key_file(
-                    "examples/cert.key",
-                    boring::ssl::SslFiletype::PEM,
-                )
-                .unwrap();
-            builder.build()
-        };
 
-        let mut server_config =
-            Config::with_boring_ssl_ctx(crate::PROTOCOL_VERSION, server_tls_ctx)?;
+        let mut server_config = Config::with_boring_ssl_ctx_builder(
+            crate::PROTOCOL_VERSION,
+            server_tls_ctx_builder,
+        )?;
         let mut client_config = Config::new(crate::PROTOCOL_VERSION)?;
         client_config.load_cert_chain_from_pem_file("examples/cert.crt")?;
         client_config.load_priv_key_from_pem_file("examples/cert.key")?;

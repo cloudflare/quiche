@@ -216,10 +216,12 @@ impl Context {
     }
 
     #[cfg(feature = "boringssl-boring-crate")]
-    pub fn from_boring(ssl_ctx: boring::ssl::SslContext) -> Context {
+    pub fn from_boring(
+        ssl_ctx_builder: boring::ssl::SslContextBuilder,
+    ) -> Context {
         use foreign_types_shared::ForeignType;
 
-        let mut ctx = Context(ssl_ctx.into_ptr() as _);
+        let mut ctx = Context(ssl_ctx_builder.build().into_ptr() as _);
         ctx.set_session_callback();
 
         ctx
