@@ -1,4 +1,4 @@
-From 22b2efacfe1fdca8834ebf89b44135c2d01e482f Mon Sep 17 00:00:00 2001
+From ccf5f458d3c03259636819ee54c93c8445b8699b Mon Sep 17 00:00:00 2001
 From: Alessandro Ghedini <alessandro@cloudflare.com>
 Date: Fri, 14 Jul 2023 09:57:31 +0100
 Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
@@ -20,9 +20,9 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/event/ngx_event.h                   |    4 -
  src/event/ngx_event_posted.c            |    1 +
  src/event/ngx_event_posted.h            |    3 +
- src/event/ngx_event_quic.c              |  902 +++++++++
+ src/event/ngx_event_quic.c              |  906 +++++++++
  src/event/ngx_event_quic.h              |   63 +
- src/event/ngx_event_udp.c               |   39 +-
+ src/event/ngx_event_udp.c               |   53 +-
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
  src/http/ngx_http.c                     |   33 +-
  src/http/ngx_http.h                     |    4 +
@@ -32,14 +32,14 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/http/ngx_http_request.h             |    3 +
  src/http/ngx_http_request_body.c        |   33 +
  src/http/ngx_http_upstream.c            |   13 +
- src/http/v3/ngx_http_v3.c               | 2273 +++++++++++++++++++++++
+ src/http/v3/ngx_http_v3.c               | 2295 +++++++++++++++++++++++
  src/http/v3/ngx_http_v3.h               |   80 +
  src/http/v3/ngx_http_v3_filter_module.c |   74 +
- src/http/v3/ngx_http_v3_module.c        |  321 ++++
- src/http/v3/ngx_http_v3_module.h        |   36 +
+ src/http/v3/ngx_http_v3_module.c        |  336 ++++
+ src/http/v3/ngx_http_v3_module.h        |   37 +
  src/os/unix/ngx_linux_config.h          |   10 +
  src/os/unix/ngx_udp_sendmsg_chain.c     |  117 +-
- 35 files changed, 4451 insertions(+), 29 deletions(-)
+ 35 files changed, 4507 insertions(+), 29 deletions(-)
  create mode 100644 auto/lib/quiche/conf
  create mode 100644 auto/lib/quiche/make
  create mode 100644 src/event/ngx_event_quic.c
@@ -635,10 +635,10 @@ index 145d30fea..6c3885537 100644
  #endif /* _NGX_EVENT_POSTED_H_INCLUDED_ */
 diff --git a/src/event/ngx_event_quic.c b/src/event/ngx_event_quic.c
 new file mode 100644
-index 000000000..bc73cffc9
+index 000000000..016ed0c9e
 --- /dev/null
 +++ b/src/event/ngx_event_quic.c
-@@ -0,0 +1,902 @@
+@@ -0,0 +1,906 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -1510,7 +1510,18 @@ index 000000000..bc73cffc9
 +
 +    cl = c->send_chain(c, &out_chain, 0);
 +
++    if (cl == NGX_CHAIN_ERROR) {
++        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0,
++                       "failed to send quic packet");
++
++        return NGX_ERROR;
++    }
++
 +    if (cl != NULL) {
++        if (ls_c->fd < 0) {
++            return NGX_ERROR;
++        }
++
 +        if (retry) {
 +            ls_wev->ready = 0;
 +
@@ -1523,20 +1534,13 @@ index 000000000..bc73cffc9
 +                                   "failed to add quic write event");
 +
 +                    return NGX_ERROR;
-+               }
++                }
 +            }
 +
 +            ngx_post_event(wev, &ls->quic_blocked_events);
 +        }
 +
 +        return NGX_AGAIN;
-+    }
-+
-+    if (cl == NGX_CHAIN_ERROR) {
-+        ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0,
-+                       "failed to send quic packet");
-+
-+        return NGX_ERROR;
 +    }
 +
 +    return NGX_OK;
@@ -1611,7 +1615,7 @@ index 000000000..1459f3b79
 +
 +#endif /* _NGX_EVENT_QUIC_H_INCLUDED_ */
 diff --git a/src/event/ngx_event_udp.c b/src/event/ngx_event_udp.c
-index 557283050..daa504bb0 100644
+index 557283050..aa685359c 100644
 --- a/src/event/ngx_event_udp.c
 +++ b/src/event/ngx_event_udp.c
 @@ -9,6 +9,10 @@
@@ -1636,7 +1640,7 @@ index 557283050..daa504bb0 100644
      }
  
      lc = ev->data;
-@@ -276,6 +281,14 @@ ngx_event_recvmsg(ngx_event_t *ev)
+@@ -276,6 +281,28 @@ ngx_event_recvmsg(ngx_event_t *ev)
          (void) ngx_atomic_fetch_add(ngx_stat_accepted, 1);
  #endif
  
@@ -1645,13 +1649,27 @@ index 557283050..daa504bb0 100644
 +            if (ngx_quic_validate_initial(ev, buffer, n) != NGX_OK) {
 +                goto next;
 +            }
++
++            if (sockaddr->sa_family == AF_INET) {
++                struct sockaddr_in *sin = (struct sockaddr_in *) sockaddr;
++                if (sin->sin_port == 0) {
++                    goto next;
++                }
++            }
++
++            if (sockaddr->sa_family == AF_INET6) {
++                struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *) sockaddr;
++                if (sin6->sin6_port == 0) {
++                    goto next;
++                }
++            }
 +        }
 +#endif
 +
          ngx_accept_disabled = ngx_cycle->connection_n / 8
                                - ngx_cycle->free_connection_n;
  
-@@ -413,13 +426,37 @@ ngx_event_recvmsg(ngx_event_t *ev)
+@@ -413,13 +440,37 @@ ngx_event_recvmsg(ngx_event_t *ev)
  
          ls->handler(c);
  
@@ -2261,10 +2279,10 @@ index a7391d09a..398af2797 100644
      if (ngx_event_flags & NGX_USE_KQUEUE_EVENT) {
 diff --git a/src/http/v3/ngx_http_v3.c b/src/http/v3/ngx_http_v3.c
 new file mode 100644
-index 000000000..d7c4fbf1d
+index 000000000..9447b4c35
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3.c
-@@ -0,0 +1,2273 @@
+@@ -0,0 +1,2295 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -3558,6 +3576,7 @@ index 000000000..d7c4fbf1d
 +    ngx_http_request_body_t   *rb;
 +    ngx_http_core_loc_conf_t  *clcf;
 +    bool                       stream_fin;
++    bool                       received_content_length_hdr;
 +
 +    c = r->qstream->connection->connection;
 +
@@ -3580,6 +3599,8 @@ index 000000000..d7c4fbf1d
 +    out = NULL;
 +    ll = &out;
 +
++    received_content_length_hdr = r->headers_in.content_length_n > 0 && !r->headers_in.chunked;
++
 +    for (cl = in; cl; cl = cl->next) {
 +
 +        if (rb->rest == 0) {
@@ -3587,6 +3608,14 @@ index 000000000..d7c4fbf1d
 +        }
 +
 +        stream_fin = quiche_conn_stream_finished(c->quic->conn, r->qstream->id);
++        if (received_content_length_hdr && stream_fin) {
++            if (rb->received < r->headers_in.content_length_n) {
++                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
++                              "client sent less data than declared");
++
++                return NGX_HTTP_BAD_REQUEST;
++            }
++        }
 +
 +        if ((ngx_buf_size(cl->buf) == 0) && !stream_fin) {
 +            continue;
@@ -3625,6 +3654,15 @@ index 000000000..d7c4fbf1d
 +
 +        *ll = tl;
 +        ll = &tl->next;
++    }
++
++    if (received_content_length_hdr) {
++        if (rb->received > r->headers_in.content_length_n) {
++            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
++                          "client intended to send body data larger than declared");
++
++            return NGX_HTTP_BAD_REQUEST;
++        }
 +    }
 +
 +    rc = ngx_http_top_request_body_filter(r, out);
@@ -4238,6 +4276,8 @@ index 000000000..d7c4fbf1d
 +            rev->ready = 0;
 +        }
 +
++        r->request_body->received += n;
++
 +        return n;
 +    }
 +
@@ -4706,10 +4746,10 @@ index 000000000..7cba70535
 +}
 diff --git a/src/http/v3/ngx_http_v3_module.c b/src/http/v3/ngx_http_v3_module.c
 new file mode 100644
-index 000000000..d413c887b
+index 000000000..e8b48ead2
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3_module.c
-@@ -0,0 +1,321 @@
+@@ -0,0 +1,336 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -4794,6 +4834,13 @@ index 000000000..d413c887b
 +      offsetof(ngx_http_v3_srv_conf_t, pacing),
 +      NULL },
 +
++    { ngx_string("http3_max_pacing_rate"),
++      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_TAKE1,
++      ngx_conf_set_num_slot,
++      NGX_HTTP_SRV_CONF_OFFSET,
++      offsetof(ngx_http_v3_srv_conf_t, max_pacing_rate),
++      NULL },
++
 +      ngx_null_command
 +};
 +
@@ -4876,6 +4923,7 @@ index 000000000..d413c887b
 +    h3scf->concurrent_streams = NGX_CONF_UNSET_UINT;
 +    /* h3scf->congestion_control = { 0, NULL }; */
 +    h3scf->pacing = NGX_CONF_UNSET;
++    h3scf->max_pacing_rate = NGX_CONF_UNSET_UINT;
 +
 +    return h3scf;
 +}
@@ -4923,6 +4971,9 @@ index 000000000..d413c887b
 +
 +    ngx_conf_merge_value(conf->pacing, prev->pacing, 0);
 +
++    ngx_conf_merge_uint_value(conf->max_pacing_rate,
++                              prev->max_pacing_rate, 0);
++
 +    conf->quic.log = cf->log;
 +
 +#if (NGX_DEBUG)
@@ -4963,6 +5014,10 @@ index 000000000..d413c887b
 +
 +    quiche_config_enable_pacing(conf->quic.config, conf->pacing);
 +    conf->quic.pacing = conf->pacing;
++
++    if (conf->max_pacing_rate > 0) {
++        quiche_config_set_max_pacing_rate(conf->quic.config, conf->max_pacing_rate);
++    }
 +
 +    conf->http3 = quiche_h3_config_new();
 +    if (conf->http3 == NULL) {
@@ -5033,10 +5088,10 @@ index 000000000..d413c887b
 +}
 diff --git a/src/http/v3/ngx_http_v3_module.h b/src/http/v3/ngx_http_v3_module.h
 new file mode 100644
-index 000000000..88f7497e6
+index 000000000..65d303875
 --- /dev/null
 +++ b/src/http/v3/ngx_http_v3_module.h
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,37 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -5066,6 +5121,7 @@ index 000000000..88f7497e6
 +    ngx_uint_t                      concurrent_streams;
 +    ngx_str_t                       congestion_control;
 +    ngx_flag_t                      pacing;
++    ngx_uint_t                      max_pacing_rate;
 +} ngx_http_v3_srv_conf_t;
 +
 +
