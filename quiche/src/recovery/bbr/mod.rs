@@ -290,9 +290,9 @@ fn reset(r: &mut Recovery) {
 }
 
 fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
-    r.bytes_in_flight += sent_bytes;
-
     per_transmit::bbr_on_transmit(r);
+
+    r.bytes_in_flight += sent_bytes;
 }
 
 fn on_packets_acked(
