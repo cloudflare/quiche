@@ -143,7 +143,7 @@ impl Pacer {
     }
 
     /// Resets the pacer for the next burst.
-    fn reset(&mut self, now: Instant) {
+    pub fn reset(&mut self, now: Instant) {
         self.used = 0;
 
         self.last_update = now;

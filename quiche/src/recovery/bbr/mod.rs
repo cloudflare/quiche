@@ -252,16 +252,18 @@ impl State {
 }
 
 // When entering the recovery episode.
-fn bbr_enter_recovery(r: &mut Recovery, now: Instant) {
+fn bbr_enter_recovery(r: &mut Recovery) {
     r.bbr_state.prior_cwnd = per_ack::bbr_save_cwnd(r);
 
-    r.congestion_window = r.bytes_in_flight.max(r.max_datagram_size);
-    r.congestion_recovery_start_time = Some(now);
+    // Temporarily add lost bytes, because bytes_in_flight
+    // doesn't have lost bytes at this point. cwnd will be
+    // calculated again in bbr_modulate_cwnd_for_recovery().
+    r.congestion_window = r.bytes_in_flight +
+        r.bbr_state.newly_acked_bytes.max(r.max_datagram_size) +
+        r.bbr_state.newly_lost_bytes;
 
     r.bbr_state.packet_conservation = true;
     r.bbr_state.in_recovery = true;
-
-    r.bbr_state.newly_lost_bytes = 0;
 
     // Start round now.
     r.bbr_state.next_round_delivered = r.delivery_rate.delivered();
@@ -310,9 +312,14 @@ fn on_packets_acked(
             acked_bytes + p.size
         });
 
+    // Upon entering Fast Recovery.
+    if r.congestion_recovery_start_time.is_some() && !r.bbr_state.in_recovery {
+        bbr_enter_recovery(r);
+    }
+
     if let Some(pkt) = packets.last() {
+        // Upon exiting loss recovery.
         if !r.in_congestion_recovery(pkt.time_sent) && r.bbr_state.in_recovery {
-            // Upon exiting loss recovery.
             bbr_exit_recovery(r);
         }
     }
@@ -328,10 +335,8 @@ fn congestion_event(
 ) {
     r.bbr_state.newly_lost_bytes = lost_bytes;
 
-    // Upon entering Fast Recovery.
     if !r.in_congestion_recovery(time_sent) {
-        // Upon entering Fast Recovery.
-        bbr_enter_recovery(r, now);
+        r.congestion_recovery_start_time = Some(now);
     }
 }
 
@@ -530,9 +535,13 @@ mod tests {
             Ok((2, 2400)),
         );
 
-        // Sent: 0, 1, 2, 3, 4, Acked 4.
-        assert_eq!(r.cwnd(), mss * 4);
-        // Stil in flight: 2, 3.
+        // Sent: 0, 1, 2, 3, 4
+        // Acked: [ 4 ]
+        // Detected Lost: 0, 1
+        //   2, 3 is still considered as in-flight due to lost detection threshold
+        // New cwnd: mss * (2 (in flight) + 1 (acked))
+        assert_eq!(r.cwnd(), mss * 3);
+        // Stil in flight: 2, 3
         assert_eq!(r.bytes_in_flight, mss * 2);
     }
 
