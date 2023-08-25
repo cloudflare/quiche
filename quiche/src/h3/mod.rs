@@ -3124,10 +3124,7 @@ mod tests {
         let (len, _) = pipe.client.send(&mut buf).unwrap();
 
         // Now an H3 connection can be created.
-        assert!(matches!(
-            Connection::with_transport(&mut pipe.client, &h3_config),
-            Ok(_)
-        ));
+        assert!(Connection::with_transport(&mut pipe.client, &h3_config).is_ok());
         assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
 
         // Client sends 0-RTT packet.
@@ -5865,7 +5862,7 @@ mod tests {
     #[test]
     /// Tests that the Data event is properly re-armed.
     fn data_event_rearm() {
-        let bytes = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let bytes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
         let mut s = Session::new().unwrap();
         s.handshake().unwrap();
