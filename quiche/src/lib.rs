@@ -5608,8 +5608,8 @@ impl Connection {
     ///
     /// The probing of new addresses can only be done by the client. The server
     /// can only probe network paths that were previously advertised by
-    /// [`NewPath`]. If the server tries to probe such an unseen network path,
-    /// this call raises an [`InvalidState`].
+    /// [`PathEvent::New`]. If the server tries to probe such an unseen network
+    /// path, this call raises an [`InvalidState`].
     ///
     /// The caller might also want to probe an existing path. In such case, it
     /// triggers a PATH_CHALLENGE frame, but it does not require spare CIDs.
@@ -5626,7 +5626,7 @@ impl Connection {
     /// Returns the Destination Connection ID sequence number associated to that
     /// path.
     ///
-    /// [`NewPath`]: enum.QuicEvent.html#NewPath
+    /// [`PathEvent::New`]: enum.PathEvent.html#variant.New
     /// [`OutOfIdentifiers`]: enum.Error.html#OutOfIdentifiers
     /// [`InvalidState`]: enum.Error.html#InvalidState
     /// [`send()`]: struct.Connection.html#method.send
@@ -5911,9 +5911,9 @@ impl Connection {
     /// Note that the iterator includes all the possible combination of
     /// destination `SockAddr`s, even those whose sending is not required now.
     /// In other words, this is another way for the application to recall from
-    /// past [`NewPath`] events.
+    /// past [`PathEvent::New`] events.
     ///
-    /// [`NewPath`]: enum.QuicEvent.html#NewPath
+    /// [`PathEvent::New`]: enum.PathEvent.html#variant.New
     /// [`send_on_path()`]: struct.Connection.html#method.send_on_path
     ///
     /// ## Examples:
