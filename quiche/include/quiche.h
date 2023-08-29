@@ -517,6 +517,12 @@ typedef struct {
     // The number of known paths for the connection.
     size_t paths_count;
 
+} quiche_stats;
+
+// Collects and returns statistics about the connection.
+void quiche_conn_stats(const quiche_conn *conn, quiche_stats *out);
+
+typedef struct {
     // The maximum idle timeout.
     uint64_t peer_max_idle_timeout;
 
@@ -555,10 +561,9 @@ typedef struct {
 
     // DATAGRAM frame extension parameter, if any.
     ssize_t peer_max_datagram_frame_size;
-} quiche_stats;
+} quiche_transport_params;
 
-// Collects and returns statistics about the connection.
-void quiche_conn_stats(const quiche_conn *conn, quiche_stats *out);
+void quiche_conn_peer_transport_params(const quiche_conn *conn, quiche_transport_params *out);
 
 typedef struct {
     // The local address used by this path.
