@@ -15990,7 +15990,7 @@ mod tests {
             payload_len,
             payload_offset,
             None,
-            &aead,
+            aead,
         )
         .expect("packet encrypt");
         space.next_pkt_num += 1;
