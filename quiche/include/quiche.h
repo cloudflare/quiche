@@ -563,7 +563,7 @@ typedef struct {
     ssize_t peer_max_datagram_frame_size;
 } quiche_transport_params;
 
-void quiche_conn_peer_transport_params(const quiche_conn *conn, quiche_transport_params *out);
+bool quiche_conn_peer_transport_params(const quiche_conn *conn, quiche_transport_params *out);
 
 typedef struct {
     // The local address used by this path.
