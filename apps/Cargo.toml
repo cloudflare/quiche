@@ -30,7 +30,7 @@ octets = { version = "0.2", path = "../octets" }
 ring = "0.16"
 quiche = { path = "../quiche" }
 libc = "0.2"
-nix = "0"
+nix = { version = "0.27", features = ["net", "socket", "uio"] }
 
 [lib]
 crate-type = ["lib"]
