@@ -516,7 +516,6 @@ typedef struct {
 
     // The number of known paths for the connection.
     size_t paths_count;
-
 } quiche_stats;
 
 // Collects and returns statistics about the connection.
@@ -563,6 +562,8 @@ typedef struct {
     ssize_t peer_max_datagram_frame_size;
 } quiche_transport_params;
 
+// Returns the peer's transport parameters in |out|. Returns false if we have
+// not yet processed the peer's transport parameters.
 bool quiche_conn_peer_transport_params(const quiche_conn *conn, quiche_transport_params *out);
 
 typedef struct {

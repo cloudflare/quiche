@@ -6248,7 +6248,7 @@ impl Connection {
     }
 
     /// Returns reference to peer's transport parameters. Returns `None` if we
-    /// have not yet processed the peer's transport parameters
+    /// have not yet processed the peer's transport parameters.
     pub fn peer_transport_params(&self) -> Option<&TransportParams> {
         if !self.parsed_peer_transport_params {
             return None;
