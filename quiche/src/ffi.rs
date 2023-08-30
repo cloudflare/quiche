@@ -1091,20 +1091,23 @@ pub struct Stats {
     lost_bytes: u64,
     stream_retrans_bytes: u64,
     paths_count: usize,
-    peer_max_idle_timeout: u64,
-    peer_max_udp_payload_size: u64,
-    peer_initial_max_data: u64,
-    peer_initial_max_stream_data_bidi_local: u64,
-    peer_initial_max_stream_data_bidi_remote: u64,
-    peer_initial_max_stream_data_uni: u64,
-    peer_initial_max_streams_bidi: u64,
-    peer_initial_max_streams_uni: u64,
-    peer_ack_delay_exponent: u64,
-    peer_max_ack_delay: u64,
-    peer_disable_active_migration: bool,
-    peer_active_conn_id_limit: u64,
-    peer_max_datagram_frame_size: ssize_t,
     paths: [PathStats; 8],
+}
+
+pub struct TransportParams {
+    max_idle_timeout: u64,
+    max_udp_payload_size: u64,
+    initial_max_data: u64,
+    initial_max_stream_data_bidi_local: u64,
+    initial_max_stream_data_bidi_remote: u64,
+    initial_max_stream_data_uni: u64,
+    initial_max_streams_bidi: u64,
+    initial_max_streams_uni: u64,
+    ack_delay_exponent: u64,
+    max_ack_delay: u64,
+    disable_active_migration: bool,
+    active_conn_id_limit: u64,
+    max_datagram_frame_size: ssize_t,
 }
 
 #[no_mangle]
@@ -1120,25 +1123,38 @@ pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.lost_bytes = stats.lost_bytes;
     out.stream_retrans_bytes = stats.stream_retrans_bytes;
     out.paths_count = stats.paths_count;
-    out.peer_max_idle_timeout = stats.peer_max_idle_timeout;
-    out.peer_max_udp_payload_size = stats.peer_max_udp_payload_size;
-    out.peer_initial_max_data = stats.peer_initial_max_data;
-    out.peer_initial_max_stream_data_bidi_local =
-        stats.peer_initial_max_stream_data_bidi_local;
-    out.peer_initial_max_stream_data_bidi_remote =
-        stats.peer_initial_max_stream_data_bidi_remote;
-    out.peer_initial_max_stream_data_uni = stats.peer_initial_max_stream_data_uni;
-    out.peer_initial_max_streams_bidi = stats.peer_initial_max_streams_bidi;
-    out.peer_initial_max_streams_uni = stats.peer_initial_max_streams_uni;
-    out.peer_ack_delay_exponent = stats.peer_ack_delay_exponent;
-    out.peer_max_ack_delay = stats.peer_max_ack_delay;
-    out.peer_disable_active_migration = stats.peer_disable_active_migration;
-    out.peer_active_conn_id_limit = stats.peer_active_conn_id_limit;
-    out.peer_max_datagram_frame_size = match stats.peer_max_datagram_frame_size {
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_peer_transport_params(
+    conn: &Connection, out: &mut TransportParams,
+) -> bool {
+    let tps = match conn.peer_transport_params() {
+        Some(v) => v,
+        None => return false,
+    };
+
+    out.max_idle_timeout = tps.max_idle_timeout;
+    out.max_udp_payload_size = tps.max_udp_payload_size;
+    out.initial_max_data = tps.initial_max_data;
+    out.initial_max_stream_data_bidi_local =
+        tps.initial_max_stream_data_bidi_local;
+    out.initial_max_stream_data_bidi_remote =
+        tps.initial_max_stream_data_bidi_remote;
+    out.initial_max_stream_data_uni = tps.initial_max_stream_data_uni;
+    out.initial_max_streams_bidi = tps.initial_max_streams_bidi;
+    out.initial_max_streams_uni = tps.initial_max_streams_uni;
+    out.ack_delay_exponent = tps.ack_delay_exponent;
+    out.max_ack_delay = tps.max_ack_delay;
+    out.disable_active_migration = tps.disable_active_migration;
+    out.active_conn_id_limit = tps.active_conn_id_limit;
+    out.max_datagram_frame_size = match tps.max_datagram_frame_size {
         None => Error::Done.to_c(),
 
         Some(v) => v as ssize_t,
     };
+
+    true
 }
 
 #[repr(C)]

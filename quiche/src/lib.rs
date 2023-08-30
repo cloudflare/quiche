@@ -6244,40 +6244,17 @@ impl Connection {
             lost_bytes: self.lost_bytes,
             stream_retrans_bytes: self.stream_retrans_bytes,
             paths_count: self.paths.len(),
-            peer_max_idle_timeout: self.peer_transport_params.max_idle_timeout,
-            peer_max_udp_payload_size: self
-                .peer_transport_params
-                .max_udp_payload_size,
-            peer_initial_max_data: self.peer_transport_params.initial_max_data,
-            peer_initial_max_stream_data_bidi_local: self
-                .peer_transport_params
-                .initial_max_stream_data_bidi_local,
-            peer_initial_max_stream_data_bidi_remote: self
-                .peer_transport_params
-                .initial_max_stream_data_bidi_remote,
-            peer_initial_max_stream_data_uni: self
-                .peer_transport_params
-                .initial_max_stream_data_uni,
-            peer_initial_max_streams_bidi: self
-                .peer_transport_params
-                .initial_max_streams_bidi,
-            peer_initial_max_streams_uni: self
-                .peer_transport_params
-                .initial_max_streams_uni,
-            peer_ack_delay_exponent: self
-                .peer_transport_params
-                .ack_delay_exponent,
-            peer_max_ack_delay: self.peer_transport_params.max_ack_delay,
-            peer_disable_active_migration: self
-                .peer_transport_params
-                .disable_active_migration,
-            peer_active_conn_id_limit: self
-                .peer_transport_params
-                .active_conn_id_limit,
-            peer_max_datagram_frame_size: self
-                .peer_transport_params
-                .max_datagram_frame_size,
         }
+    }
+
+    /// Returns reference to peer's transport parameters. Returns `None` if we
+    /// have not yet processed the peer's transport parameters.
+    pub fn peer_transport_params(&self) -> Option<&TransportParams> {
+        if !self.parsed_peer_transport_params {
+            return None;
+        }
+
+        Some(&self.peer_transport_params)
     }
 
     /// Collects and returns statistics about each known path for the
@@ -7494,45 +7471,6 @@ pub struct Stats {
 
     /// The number of known paths for the connection.
     pub paths_count: usize,
-
-    /// The maximum idle timeout.
-    pub peer_max_idle_timeout: u64,
-
-    /// The maximum UDP payload size.
-    pub peer_max_udp_payload_size: u64,
-
-    /// The initial flow control maximum data for the connection.
-    pub peer_initial_max_data: u64,
-
-    /// The initial flow control maximum data for local bidirectional streams.
-    pub peer_initial_max_stream_data_bidi_local: u64,
-
-    /// The initial flow control maximum data for remote bidirectional streams.
-    pub peer_initial_max_stream_data_bidi_remote: u64,
-
-    /// The initial flow control maximum data for unidirectional streams.
-    pub peer_initial_max_stream_data_uni: u64,
-
-    /// The initial maximum bidirectional streams.
-    pub peer_initial_max_streams_bidi: u64,
-
-    /// The initial maximum unidirectional streams.
-    pub peer_initial_max_streams_uni: u64,
-
-    /// The ACK delay exponent.
-    pub peer_ack_delay_exponent: u64,
-
-    /// The max ACK delay.
-    pub peer_max_ack_delay: u64,
-
-    /// Whether active migration is disabled.
-    pub peer_disable_active_migration: bool,
-
-    /// The active connection ID limit.
-    pub peer_active_conn_id_limit: u64,
-
-    /// DATAGRAM frame extension parameter, if any.
-    pub peer_max_datagram_frame_size: Option<u64>,
 }
 
 impl std::fmt::Debug for Stats {
@@ -7550,94 +7488,50 @@ impl std::fmt::Debug for Stats {
             self.sent_bytes, self.recv_bytes, self.lost_bytes,
         )?;
 
-        write!(f, " peer_tps={{")?;
-
-        write!(f, " max_idle_timeout={},", self.peer_max_idle_timeout)?;
-
-        write!(
-            f,
-            " max_udp_payload_size={},",
-            self.peer_max_udp_payload_size,
-        )?;
-
-        write!(f, " initial_max_data={},", self.peer_initial_max_data)?;
-
-        write!(
-            f,
-            " initial_max_stream_data_bidi_local={},",
-            self.peer_initial_max_stream_data_bidi_local,
-        )?;
-
-        write!(
-            f,
-            " initial_max_stream_data_bidi_remote={},",
-            self.peer_initial_max_stream_data_bidi_remote,
-        )?;
-
-        write!(
-            f,
-            " initial_max_stream_data_uni={},",
-            self.peer_initial_max_stream_data_uni,
-        )?;
-
-        write!(
-            f,
-            " initial_max_streams_bidi={},",
-            self.peer_initial_max_streams_bidi,
-        )?;
-
-        write!(
-            f,
-            " initial_max_streams_uni={},",
-            self.peer_initial_max_streams_uni,
-        )?;
-
-        write!(f, " ack_delay_exponent={},", self.peer_ack_delay_exponent)?;
-
-        write!(f, " max_ack_delay={},", self.peer_max_ack_delay)?;
-
-        write!(
-            f,
-            " disable_active_migration={},",
-            self.peer_disable_active_migration,
-        )?;
-
-        write!(
-            f,
-            " active_conn_id_limit={},",
-            self.peer_active_conn_id_limit,
-        )?;
-
-        write!(
-            f,
-            " max_datagram_frame_size={:?}",
-            self.peer_max_datagram_frame_size,
-        )?;
-
-        write!(f, "}}")
+        Ok(())
     }
 }
 
+/// QUIC Transport Parameters
 #[derive(Clone, Debug, PartialEq)]
-struct TransportParams {
+pub struct TransportParams {
+    /// Value of Destination CID field from first Initial packet sent by client
     pub original_destination_connection_id: Option<ConnectionId<'static>>,
+    /// The maximum idle timeout.
     pub max_idle_timeout: u64,
+    /// Token used for verifying stateless resets
     pub stateless_reset_token: Option<u128>,
+    /// The maximum UDP payload size.
     pub max_udp_payload_size: u64,
+    /// The initial flow control maximum data for the connection.
     pub initial_max_data: u64,
+    /// The initial flow control maximum data for local bidirectional streams.
     pub initial_max_stream_data_bidi_local: u64,
+    /// The initial flow control maximum data for remote bidirectional streams.
     pub initial_max_stream_data_bidi_remote: u64,
+    /// The initial flow control maximum data for unidirectional streams.
     pub initial_max_stream_data_uni: u64,
+    /// The initial maximum bidirectional streams.
     pub initial_max_streams_bidi: u64,
+    /// The initial maximum unidirectional streams.
     pub initial_max_streams_uni: u64,
+    /// The ACK delay exponent.
     pub ack_delay_exponent: u64,
+    /// The max ACK delay.
     pub max_ack_delay: u64,
+    /// Whether active migration is disabled.
     pub disable_active_migration: bool,
-    // pub preferred_address: ...,
+    /// The active connection ID limit.
     pub active_conn_id_limit: u64,
+    /// The value that the endpoint included in the Source CID field of a Retry
+    /// Packet.
     pub initial_source_connection_id: Option<ConnectionId<'static>>,
+    /// The value that the server included in the Source CID field of a Retry
+    /// Packet.
     pub retry_source_connection_id: Option<ConnectionId<'static>>,
+    /// DATAGRAM frame extension parameter, if any.
     pub max_datagram_frame_size: Option<u64>,
+    // pub preferred_address: ...,
 }
 
 impl Default for TransportParams {
