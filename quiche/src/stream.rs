@@ -1320,11 +1320,6 @@ impl SendBuf {
             self.fin_off = Some(max_off);
         }
 
-        // Don't queue data that was already fully acked.
-        if self.ack_off() >= max_off {
-            return Ok(data.len());
-        }
-
         // We already recorded the final offset, so we can just discard the
         // empty buffer now.
         if data.is_empty() {
@@ -1436,11 +1431,11 @@ impl SendBuf {
     pub fn ack_and_drop(&mut self, off: u64, len: usize) {
         self.ack(off, len);
 
-        let ack_off = self.ack_off();
-
         if self.data.is_empty() {
             return;
         }
+
+        let ack_off = self.ack_off();
 
         if off > ack_off {
             return;
@@ -1478,11 +1473,12 @@ impl SendBuf {
 
     pub fn retransmit(&mut self, off: u64, len: usize) {
         let max_off = off + len as u64;
-        let ack_off = self.ack_off();
 
         if self.data.is_empty() {
             return;
         }
+
+        let ack_off = self.ack_off();
 
         if max_off <= ack_off {
             return;
