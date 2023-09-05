@@ -3263,7 +3263,11 @@ impl Connection {
 
         let pkt_type = self.write_pkt_type(send_pid)?;
 
-        let max_dgram_len = self.dgram_max_writable_len();
+        let max_dgram_len = if !self.dgram_send_queue.is_empty() {
+            self.dgram_max_writable_len()
+        } else {
+            None
+        };
 
         let epoch = pkt_type.to_epoch()?;
         let pkt_space = &mut self.pkt_num_spaces[epoch];
