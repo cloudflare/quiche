@@ -858,6 +858,14 @@ impl Config {
     ///
     /// The default value is `true` for client connections, and `false` for
     /// server ones.
+    ///
+    /// Note that on the server-side, enabling verification of the peer will
+    /// trigger a certificate request and make authentication errors fatal, but
+    /// will still allow anonymous clients (i.e. clients that don't present a
+    /// certificate at all). Servers can check whether a client presented a
+    /// certificate by calling [`peer_cert()`] if they need to.
+    ///
+    /// [`peer_cert()`]: struct.Connection.html#method.peer_cert
     pub fn verify_peer(&mut self, verify: bool) {
         self.tls_ctx.set_verify(verify);
     }
@@ -8101,6 +8109,37 @@ pub mod testing {
             })
         }
 
+        pub fn with_client_and_server_config(
+            client_config: &mut Config, server_config: &mut Config,
+        ) -> Result<Pipe> {
+            let mut client_scid = [0; 16];
+            rand::rand_bytes(&mut client_scid[..]);
+            let client_scid = ConnectionId::from_ref(&client_scid);
+            let client_addr = Pipe::client_addr();
+
+            let mut server_scid = [0; 16];
+            rand::rand_bytes(&mut server_scid[..]);
+            let server_scid = ConnectionId::from_ref(&server_scid);
+            let server_addr = Pipe::server_addr();
+
+            Ok(Pipe {
+                client: connect(
+                    Some("quic.tech"),
+                    &client_scid,
+                    client_addr,
+                    server_addr,
+                    client_config,
+                )?,
+                server: accept(
+                    &server_scid,
+                    None,
+                    server_addr,
+                    client_addr,
+                    server_config,
+                )?,
+            })
+        }
+
         pub fn handshake(&mut self) -> Result<()> {
             while !self.client.is_established() || !self.server.is_established() {
                 let flight = emit_flight(&mut self.client)?;
@@ -8574,6 +8613,87 @@ mod tests {
 
         let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
+    }
+
+    #[test]
+    fn verify_client_invalid() {
+        let mut server_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        server_config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        server_config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        server_config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        server_config.set_initial_max_data(30);
+        server_config.set_initial_max_stream_data_bidi_local(15);
+        server_config.set_initial_max_stream_data_bidi_remote(15);
+        server_config.set_initial_max_streams_bidi(3);
+
+        // The server shouldn't be able to verify the client's certificate due
+        // to missing CA.
+        server_config.verify_peer(true);
+
+        let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        client_config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        client_config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        client_config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        client_config.set_initial_max_data(30);
+        client_config.set_initial_max_stream_data_bidi_local(15);
+        client_config.set_initial_max_stream_data_bidi_remote(15);
+        client_config.set_initial_max_streams_bidi(3);
+
+        // The client is able to verify the server's certificate with the
+        // appropriate CA.
+        client_config
+            .load_verify_locations_from_file("examples/rootca.crt")
+            .unwrap();
+        client_config.verify_peer(true);
+
+        let mut pipe = testing::Pipe::with_client_and_server_config(
+            &mut client_config,
+            &mut server_config,
+        )
+        .unwrap();
+        assert_eq!(pipe.handshake(), Err(Error::TlsFail));
+
+        // Client did send a certificate.
+        assert!(pipe.server.peer_cert().is_some());
+    }
+
+    #[test]
+    fn verify_client_anonymous() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_streams_bidi(3);
+
+        // Try to validate client certificate.
+        config.verify_peer(true);
+
+        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client didn't send a certificate.
+        assert!(pipe.server.peer_cert().is_none());
     }
 
     #[test]
