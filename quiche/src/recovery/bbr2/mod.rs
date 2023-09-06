@@ -844,12 +844,12 @@ mod tests {
             )
             .is_ok());
 
-        assert_eq!(r.bbr2_state.in_recovery, true);
+        assert!(r.bbr2_state.in_recovery);
 
         // Stil in flight: 2, 3.
         assert_eq!(r.bytes_in_flight, mss * 2);
 
-        assert_eq!(r.bbr2_state.newly_acked_bytes, mss * 1);
+        assert_eq!(r.bbr2_state.newly_acked_bytes, mss);
 
         assert_eq!(r.cwnd(), mss * 3);
     }
@@ -970,7 +970,7 @@ mod tests {
             .is_ok());
 
         assert_eq!(r.bbr2_state.state, BBR2StateMachine::Drain);
-        assert_eq!(r.bbr2_state.filled_pipe, true);
+        assert!(r.bbr2_state.filled_pipe);
         assert!(r.bbr2_state.pacing_gain < 1.0);
     }
 
