@@ -55,7 +55,7 @@ const PACING_MARGIN_PERCENT: f64 = 0.01;
 
 /// A constant specifying the minimum gain value
 /// for calculating the pacing rate that will allow the sending rate to
-/// double each round (4*ln(2) ~=2.77 ) [BBRStartupPacingGain]; used in
+/// double each round (4*ln(2) ~=2.77 ) BBRStartupPacingGain; used in
 /// Startup mode for BBR.pacing_gain.
 const STARTUP_PACING_GAIN: f64 = 2.77;
 
@@ -125,7 +125,7 @@ const PROBE_RTT_CWND_GAIN: f64 = 0.5;
 const PROBE_RTT_DURATION: Duration = Duration::from_millis(200);
 
 /// ProbeRTTInterval: A constant specifying the minimum time interval between
-/// ProbeRTT states. To do: investigate probe duration. Set arbirarily high for
+/// ProbeRTT states. To do: investigate probe duration. Set arbitrarily high for
 /// now.
 const PROBE_RTT_INTERVAL: Duration = Duration::from_secs(86400);
 
@@ -846,7 +846,7 @@ mod tests {
 
         assert!(r.bbr2_state.in_recovery);
 
-        // Stil in flight: 2, 3.
+        // Still in flight: 2, 3.
         assert_eq!(r.bytes_in_flight, mss * 2);
 
         assert_eq!(r.bbr2_state.newly_acked_bytes, mss);
