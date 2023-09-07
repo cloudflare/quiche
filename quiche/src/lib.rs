@@ -6801,7 +6801,7 @@ impl Connection {
                 let was_readable = stream.is_readable();
                 let priority_key = Arc::clone(&stream.priority_key);
 
-                let was_draining = stream.is_draining();
+                let was_draining = stream.recv.is_draining();
 
                 stream.recv.write(data)?;
 
