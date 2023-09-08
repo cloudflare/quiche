@@ -595,6 +595,7 @@ impl Config {
             frame::SETTINGS_QPACK_BLOCKED_STREAMS,
             frame::SETTINGS_ENABLE_CONNECT_PROTOCOL,
             frame::SETTINGS_H3_DATAGRAM,
+            frame::SETTINGS_H3_DATAGRAM_00,
         ]);
 
         let dedup_settings: HashSet<u64> =
