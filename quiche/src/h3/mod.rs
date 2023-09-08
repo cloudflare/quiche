@@ -282,6 +282,7 @@
 //! [`send_response()`]: struct.Connection.html#method.send_response
 //! [`send_body()`]: struct.Connection.html#method.send_body
 
+use std::collections::HashSet;
 use std::collections::VecDeque;
 
 #[cfg(feature = "sfv")]
@@ -581,20 +582,26 @@ impl Config {
     /// If such a setting is present in the `additional_settings`,
     /// the method will return the [`Error::SettingsError`] error.
     ///
+    /// If a setting identifier is present twice in `additional_settings`,
+    /// the method will return the [`Error::SettingsError`] error.
+    ///
     /// [`Error::SettingsError`]: enum.Error.html#variant.SettingsError
     pub fn set_additional_settings(
         &mut self, additional_settings: Vec<(u64, u64)>,
     ) -> Result<()> {
-        let explicit_settings = vec![
+        let explicit_quiche_settings = HashSet::from([
             frame::SETTINGS_QPACK_MAX_TABLE_CAPACITY,
             frame::SETTINGS_MAX_FIELD_SECTION_SIZE,
             frame::SETTINGS_QPACK_BLOCKED_STREAMS,
             frame::SETTINGS_ENABLE_CONNECT_PROTOCOL,
             frame::SETTINGS_H3_DATAGRAM,
-        ];
-        if additional_settings
-            .iter()
-            .any(|(identifier, _)| explicit_settings.contains(identifier))
+        ]);
+
+        let dedup_settings: HashSet<u64> =
+            additional_settings.iter().map(|(key, _)| *key).collect();
+
+        if dedup_settings.len() != additional_settings.len() ||
+            !explicit_quiche_settings.is_disjoint(&dedup_settings)
         {
             return Err(Error::SettingsError);
         }
