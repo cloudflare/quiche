@@ -9,6 +9,11 @@ env:
 jobs:
   quiche:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tls-feature:
+          - "" # default, boringssl-vendored
+          - "boringssl-boring-crate"
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -30,7 +35,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --all-targets --features=ffi,qlog
+          args: --verbose --all-targets --features=ffi,qlog,${{ matrix.tls-feature }}
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
@@ -38,7 +43,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --doc --features=ffi,qlog
+          args: --verbose --doc --features=ffi,qlog,${{ matrix.tls-feature }}
 
       - name: Run cargo package
         uses: actions-rs/cargo@v1
@@ -50,13 +55,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --features=ffi,qlog -- -D warnings
+          args: --features=ffi,qlog,${{ matrix.tls-feature }} -- -D warnings
 
       - name: Run cargo clippy on examples
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --examples --features=ffi,qlog -- -D warnings
+          args: --examples --features=ffi,qlog,${{ matrix.tls-feature }} -- -D warnings
 
       - name: Run cargo doc
         uses: actions-rs/cargo@v1
