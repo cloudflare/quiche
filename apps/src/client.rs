@@ -101,7 +101,18 @@ pub fn connect(
     // Create the configuration for the QUIC connection.
     let mut config = quiche::Config::new(args.version).unwrap();
 
-    config.verify_peer(!args.no_verify);
+    if let Some(ref trust_origin_ca_pem) = args.trust_origin_ca_pem {
+        config
+            .load_verify_locations_from_file(trust_origin_ca_pem)
+            .map_err(|e| {
+                ClientError::Other(format!(
+                    "error loading origin CA file : {}",
+                    e
+                ))
+            })?;
+    } else {
+        config.verify_peer(!args.no_verify);
+    }
 
     config.set_application_protos(&conn_args.alpns).unwrap();
 

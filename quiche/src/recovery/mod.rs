@@ -63,9 +63,6 @@ const RTT_WINDOW: Duration = Duration::from_secs(300);
 
 const MAX_PTO_PROBES_COUNT: usize = 2;
 
-// Congestion Control
-const INITIAL_WINDOW_PACKETS: usize = 10;
-
 const MINIMUM_WINDOW_PACKETS: usize = 2;
 
 const LOSS_REDUCTION_FACTOR: f64 = 0.5;
@@ -166,8 +163,14 @@ pub struct Recovery {
     // BBR state.
     bbr_state: bbr::State,
 
+    // BBRv2 state.
+    bbr2_state: bbr2::State,
+
     /// How many non-ack-eliciting packets have been sent.
     outstanding_non_ack_eliciting: usize,
+
+    /// Initial congestion window size in terms of packet count.
+    initial_congestion_window_packets: usize,
 }
 
 pub struct RecoveryConfig {
@@ -177,6 +180,7 @@ pub struct RecoveryConfig {
     hystart: bool,
     pacing: bool,
     max_pacing_rate: Option<u64>,
+    initial_congestion_window_packets: usize,
 }
 
 impl RecoveryConfig {
@@ -188,14 +192,16 @@ impl RecoveryConfig {
             hystart: config.hystart,
             pacing: config.pacing,
             max_pacing_rate: config.max_pacing_rate,
+            initial_congestion_window_packets: config
+                .initial_congestion_window_packets,
         }
     }
 }
 
 impl Recovery {
     pub fn new_with_config(recovery_config: &RecoveryConfig) -> Self {
-        let initial_congestion_window =
-            recovery_config.max_send_udp_payload_size * INITIAL_WINDOW_PACKETS;
+        let initial_congestion_window = recovery_config.max_send_udp_payload_size *
+            recovery_config.initial_congestion_window_packets;
 
         Recovery {
             loss_detection_timer: None,
@@ -288,7 +294,12 @@ impl Recovery {
 
             bbr_state: bbr::State::new(),
 
+            bbr2_state: bbr2::State::new(),
+
             outstanding_non_ack_eliciting: 0,
+
+            initial_congestion_window_packets: recovery_config
+                .initial_congestion_window_packets,
         }
     }
 
@@ -301,7 +312,8 @@ impl Recovery {
     }
 
     pub fn reset(&mut self) {
-        self.congestion_window = self.max_datagram_size * INITIAL_WINDOW_PACKETS;
+        self.congestion_window =
+            self.max_datagram_size * self.initial_congestion_window_packets;
         self.in_flight_count = [0; packet::Epoch::count()];
         self.congestion_recovery_start_time = None;
         self.ssthresh = usize::MAX;
@@ -376,8 +388,11 @@ impl Recovery {
         pkt.time_sent = self.get_packet_send_time();
 
         // bytes_in_flight is already updated. Use previous value.
-        self.delivery_rate
-            .on_packet_sent(&mut pkt, self.bytes_in_flight - sent_bytes);
+        self.delivery_rate.on_packet_sent(
+            &mut pkt,
+            self.bytes_in_flight - sent_bytes,
+            self.bytes_lost,
+        );
 
         self.sent[epoch].push_back(pkt);
 
@@ -407,8 +422,8 @@ impl Recovery {
 
         let is_app = epoch == packet::Epoch::Application;
 
-        let in_initcwnd =
-            self.bytes_sent < self.max_datagram_size * INITIAL_WINDOW_PACKETS;
+        let in_initcwnd = self.bytes_sent <
+            self.max_datagram_size * self.initial_congestion_window_packets;
 
         let sent_bytes = if !self.pacer.enabled() || !is_app || in_initcwnd {
             0
@@ -459,8 +474,8 @@ impl Recovery {
             let largest_acked_in_block = r.end - 1;
 
             let first_unacked = if sent
-                .get(0)
-                .map(|p| p.pkt_num == lowest_acked_in_block)
+                .front()
+                .map(|p| p.pkt_num >= lowest_acked_in_block)
                 .unwrap_or(true)
             {
                 // In the happy case the first sent packet is the first to be
@@ -541,6 +556,10 @@ impl Recovery {
                     first_sent_time: unacked.first_sent_time,
 
                     is_app_limited: unacked.is_app_limited,
+
+                    tx_in_flight: unacked.tx_in_flight,
+
+                    lost: unacked.lost,
                 });
 
                 trace!("{} packet newly acked {}", trace_id, unacked.pkt_num);
@@ -740,9 +759,10 @@ impl Recovery {
 
         // Update cwnd if it hasn't been updated yet.
         if self.congestion_window ==
-            self.max_datagram_size * INITIAL_WINDOW_PACKETS
+            self.max_datagram_size * self.initial_congestion_window_packets
         {
-            self.congestion_window = max_datagram_size * INITIAL_WINDOW_PACKETS;
+            self.congestion_window =
+                max_datagram_size * self.initial_congestion_window_packets;
         }
 
         self.pacer = pacer::Pacer::new(
@@ -1030,7 +1050,7 @@ impl Recovery {
     ) {
         self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
 
-        self.congestion_event(lost_bytes, largest_lost_pkt.time_sent, epoch, now);
+        self.congestion_event(lost_bytes, largest_lost_pkt, epoch, now);
 
         if self.in_persistent_congestion(largest_lost_pkt.pkt_num) {
             self.collapse_cwnd();
@@ -1038,14 +1058,22 @@ impl Recovery {
     }
 
     fn congestion_event(
-        &mut self, lost_bytes: usize, time_sent: Instant, epoch: packet::Epoch,
-        now: Instant,
+        &mut self, lost_bytes: usize, largest_lost_pkt: &Sent,
+        epoch: packet::Epoch, now: Instant,
     ) {
+        let time_sent = largest_lost_pkt.time_sent;
+
         if !self.in_congestion_recovery(time_sent) {
             (self.cc_ops.checkpoint)(self);
         }
 
-        (self.cc_ops.congestion_event)(self, lost_bytes, time_sent, epoch, now);
+        (self.cc_ops.congestion_event)(
+            self,
+            lost_bytes,
+            largest_lost_pkt,
+            epoch,
+            now,
+        );
     }
 
     fn collapse_cwnd(&mut self) {
@@ -1098,6 +1126,8 @@ pub enum CongestionControlAlgorithm {
     CUBIC = 1,
     /// BBR congestion control algorithm. `bbr` in a string form.
     BBR   = 2,
+    /// BBRv2 congestion control algorithm. `bbr2` in a string form.
+    BBR2  = 3,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -1111,6 +1141,7 @@ impl FromStr for CongestionControlAlgorithm {
             "reno" => Ok(CongestionControlAlgorithm::Reno),
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
             "bbr" => Ok(CongestionControlAlgorithm::BBR),
+            "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
 
             _ => Err(crate::Error::CongestionControl),
         }
@@ -1134,7 +1165,7 @@ pub struct CongestionControlOps {
     pub congestion_event: fn(
         r: &mut Recovery,
         lost_bytes: usize,
-        time_sent: Instant,
+        largest_lost_packet: &Sent,
         epoch: packet::Epoch,
         now: Instant,
     ),
@@ -1157,6 +1188,7 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
             CongestionControlAlgorithm::Reno => &reno::RENO,
             CongestionControlAlgorithm::CUBIC => &cubic::CUBIC,
             CongestionControlAlgorithm::BBR => &bbr::BBR,
+            CongestionControlAlgorithm::BBR2 => &bbr2::BBR2,
         }
     }
 }
@@ -1235,6 +1267,10 @@ pub struct Sent {
 
     pub is_app_limited: bool,
 
+    pub tx_in_flight: usize,
+
+    pub lost: u64,
+
     pub has_data: bool,
 }
 
@@ -1247,6 +1283,8 @@ impl std::fmt::Debug for Sent {
         write!(f, "delivered_time={:?} ", self.delivered_time)?;
         write!(f, "first_sent_time={:?} ", self.first_sent_time)?;
         write!(f, "is_app_limited={} ", self.is_app_limited)?;
+        write!(f, "tx_in_flight={} ", self.tx_in_flight)?;
+        write!(f, "lost={} ", self.lost)?;
         write!(f, "has_data={} ", self.has_data)?;
 
         Ok(())
@@ -1270,6 +1308,10 @@ pub struct Acked {
     pub first_sent_time: Instant,
 
     pub is_app_limited: bool,
+
+    pub tx_in_flight: usize,
+
+    pub lost: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1472,6 +1514,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1498,6 +1542,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1524,6 +1570,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1550,6 +1598,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1609,6 +1659,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1635,6 +1687,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1707,6 +1761,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1733,6 +1789,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1759,6 +1817,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1785,6 +1845,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1868,6 +1930,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1894,6 +1958,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1920,6 +1986,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -1946,6 +2014,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -2042,6 +2112,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -2100,6 +2172,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -2131,6 +2205,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -2159,6 +2235,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 
@@ -2187,6 +2265,7 @@ mod tests {
 }
 
 mod bbr;
+mod bbr2;
 mod cubic;
 mod delivery_rate;
 mod hystart;

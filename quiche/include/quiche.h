@@ -212,10 +212,14 @@ void quiche_config_set_disable_active_migration(quiche_config *config, bool v);
 // Sets the congestion control algorithm used by string.
 int quiche_config_set_cc_algorithm_name(quiche_config *config, const char *algo);
 
+// Sets the initial cwnd for the connection in terms of packet count.
+void quiche_config_set_initial_congestion_window_packets(quiche_config *config, size_t packets);
+
 enum quiche_cc_algorithm {
     QUICHE_CC_RENO = 0,
     QUICHE_CC_CUBIC = 1,
     QUICHE_CC_BBR = 2,
+    QUICHE_CC_BBR2 = 3,
 };
 
 // Sets the congestion control algorithm used.
@@ -294,7 +298,7 @@ quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
                                       const uint8_t *odcid, size_t odcid_len,
                                       const struct sockaddr *local, size_t local_len,
                                       const struct sockaddr *peer, size_t peer_len,
-                                      quiche_config *config, void *ssl,
+                                      const quiche_config *config, void *ssl,
                                       bool is_server);
 
 // Enables keylog to the specified file path. Returns true on success.
@@ -512,7 +516,12 @@ typedef struct {
 
     // The number of known paths for the connection.
     size_t paths_count;
+} quiche_stats;
 
+// Collects and returns statistics about the connection.
+void quiche_conn_stats(const quiche_conn *conn, quiche_stats *out);
+
+typedef struct {
     // The maximum idle timeout.
     uint64_t peer_max_idle_timeout;
 
@@ -551,10 +560,11 @@ typedef struct {
 
     // DATAGRAM frame extension parameter, if any.
     ssize_t peer_max_datagram_frame_size;
-} quiche_stats;
+} quiche_transport_params;
 
-// Collects and returns statistics about the connection.
-void quiche_conn_stats(const quiche_conn *conn, quiche_stats *out);
+// Returns the peer's transport parameters in |out|. Returns false if we have
+// not yet processed the peer's transport parameters.
+bool quiche_conn_peer_transport_params(const quiche_conn *conn, quiche_transport_params *out);
 
 typedef struct {
     // The local address used by this path.
@@ -659,6 +669,15 @@ ssize_t quiche_conn_send_ack_eliciting_on_path(quiche_conn *conn,
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
 
+// Writes an unsigned variable-length integer in network byte-order into
+// the provided buffer.
+int quiche_put_varint(uint8_t *buf, size_t buf_len,
+                      uint64_t val);
+
+// Reads an unsigned variable-length integer in network byte-order from
+// the provided buffer and returns the wire length.
+ssize_t quiche_get_varint(const uint8_t *buf, size_t buf_len,
+                          uint64_t val);
 
 // HTTP/3 API
 //
@@ -827,7 +846,6 @@ enum quiche_h3_event_type {
     QUICHE_H3_EVENT_HEADERS,
     QUICHE_H3_EVENT_DATA,
     QUICHE_H3_EVENT_FINISHED,
-    QUICHE_H3_EVENT_DATAGRAM,
     QUICHE_H3_EVENT_GOAWAY,
     QUICHE_H3_EVENT_RESET,
     QUICHE_H3_EVENT_PRIORITY_UPDATE,
@@ -939,15 +957,6 @@ int quiche_h3_take_last_priority_update(quiche_h3_conn *conn,
 // Returns whether the peer enabled HTTP/3 DATAGRAM frame support.
 bool quiche_h3_dgram_enabled_by_peer(quiche_h3_conn *conn,
                                      quiche_conn *quic_conn);
-
-// Writes data to the DATAGRAM send queue.
-ssize_t quiche_h3_send_dgram(quiche_h3_conn *conn, quiche_conn *quic_conn,
-                            uint64_t flow_id, uint8_t *data, size_t data_len);
-
-// Reads data from the DATAGRAM receive queue.
-ssize_t quiche_h3_recv_dgram(quiche_h3_conn *conn, quiche_conn *quic_conn,
-                            uint64_t *flow_id, size_t *flow_id_len,
-                            uint8_t *out, size_t out_len);
 
 // Frees the HTTP/3 connection object.
 void quiche_h3_conn_free(quiche_h3_conn *conn);

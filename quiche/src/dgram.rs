@@ -103,6 +103,10 @@ impl DatagramQueue {
         self.len() == self.queue_max_len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn len(&self) -> usize {
         self.queue.as_ref().map(|q| q.len()).unwrap_or(0)
     }

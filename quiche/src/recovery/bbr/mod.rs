@@ -290,9 +290,9 @@ fn reset(r: &mut Recovery) {
 }
 
 fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
-    r.bytes_in_flight += sent_bytes;
-
     per_transmit::bbr_on_transmit(r);
+
+    r.bytes_in_flight += sent_bytes;
 }
 
 fn on_packets_acked(
@@ -323,13 +323,13 @@ fn on_packets_acked(
 }
 
 fn congestion_event(
-    r: &mut Recovery, lost_bytes: usize, time_sent: Instant,
+    r: &mut Recovery, lost_bytes: usize, largest_lost_pkt: &Sent,
     _epoch: packet::Epoch, now: Instant,
 ) {
     r.bbr_state.newly_lost_bytes = lost_bytes;
 
     // Upon entering Fast Recovery.
-    if !r.in_congestion_recovery(time_sent) {
+    if !r.in_congestion_recovery(largest_lost_pkt.time_sent) {
         // Upon entering Fast Recovery.
         bbr_enter_recovery(r, now);
     }
@@ -380,7 +380,10 @@ mod tests {
         // called manually here.
         r.on_init();
 
-        assert_eq!(r.cwnd(), r.max_datagram_size * INITIAL_WINDOW_PACKETS);
+        assert_eq!(
+            r.cwnd(),
+            r.max_datagram_size * cfg.initial_congestion_window_packets
+        );
         assert_eq!(r.bytes_in_flight, 0);
 
         assert_eq!(r.bbr_state.state, BBRStateMachine::Startup);
@@ -426,6 +429,8 @@ mod tests {
                 delivered_time: now,
                 first_sent_time: now,
                 is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
                 has_data: false,
             };
 
@@ -494,6 +499,8 @@ mod tests {
                 delivered_time: now,
                 first_sent_time: now,
                 is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
                 has_data: false,
             };
 
@@ -561,6 +568,8 @@ mod tests {
                 delivered_time: now,
                 first_sent_time: now,
                 is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
                 has_data: false,
             };
 
@@ -610,6 +619,8 @@ mod tests {
                 delivered_time: now,
                 first_sent_time: now,
                 is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
                 has_data: false,
             };
 
@@ -680,6 +691,8 @@ mod tests {
                 delivered_time: now,
                 first_sent_time: now,
                 is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
                 has_data: false,
             };
 
@@ -749,6 +762,8 @@ mod tests {
                 delivered_time: now,
                 first_sent_time: now,
                 is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
                 has_data: false,
             };
 
@@ -801,6 +816,8 @@ mod tests {
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
             has_data: false,
         };
 

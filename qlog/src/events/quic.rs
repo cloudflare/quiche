@@ -66,7 +66,7 @@ pub enum PacketNumberSpace {
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct PacketHeader {
     pub packet_type: PacketType,
-    pub packet_number: u64,
+    pub packet_number: Option<u64>,
 
     pub flags: Option<u8>,
     pub token: Option<Token>,
@@ -85,7 +85,7 @@ impl PacketHeader {
     #[allow(clippy::too_many_arguments)]
     /// Creates a new PacketHeader.
     pub fn new(
-        packet_type: PacketType, packet_number: u64, flags: Option<u8>,
+        packet_type: PacketType, packet_number: Option<u64>, flags: Option<u8>,
         token: Option<Token>, length: Option<u16>, version: Option<u32>,
         scid: Option<&[u8]>, dcid: Option<&[u8]>,
     ) -> Self {
@@ -129,7 +129,7 @@ impl PacketHeader {
     /// there are space benefits to not logging them in every packet, especially
     /// PacketType::OneRtt.
     pub fn with_type(
-        ty: PacketType, packet_number: u64, version: Option<u32>,
+        ty: PacketType, packet_number: Option<u64>, version: Option<u32>,
         scid: Option<&[u8]>, dcid: Option<&[u8]>,
     ) -> Self {
         match ty {

@@ -367,8 +367,6 @@ fn main() {
 
                         Ok((_stream_id, quiche::h3::Event::Reset { .. })) => (),
 
-                        Ok((_flow_id, quiche::h3::Event::Datagram)) => (),
-
                         Ok((
                             _prioritized_element_id,
                             quiche::h3::Event::PriorityUpdate,

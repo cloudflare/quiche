@@ -95,7 +95,7 @@ impl RangeSet {
             RangeSet::BTree(set) if set.inner.len() <= MIN_TO_INLINE => {
                 let old_inner = std::mem::take(&mut set.inner);
                 *self = RangeSet::Inline(InlineRangeSet {
-                    inner: SmallVec::from_iter(old_inner.into_iter()),
+                    inner: SmallVec::from_iter(old_inner),
                     capacity: set.capacity,
                 })
             },

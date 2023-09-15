@@ -53,6 +53,7 @@ pub struct CommonArgs {
     pub max_field_section_size: Option<u64>,
     pub qpack_max_table_capacity: Option<u64>,
     pub qpack_blocked_streams: Option<u64>,
+    pub initial_cwnd_packets: u64,
 }
 
 /// Creates a new `CommonArgs` structure using the provided [`Docopt`].
@@ -78,6 +79,7 @@ pub struct CommonArgs {
 /// --max-field-section-size BYTES  Max size of uncompressed field section.
 /// --qpack-max-table-capacity BYTES  Max capacity of dynamic QPACK decoding.
 /// --qpack-blocked-streams STREAMS  Limit of blocked streams while decoding.
+/// --initial-cwnd-packets      Size of initial congestion window, in packets.
 ///
 /// [`Docopt`]: https://docs.rs/docopt/1.1.0/docopt/
 impl Args for CommonArgs {
@@ -184,6 +186,11 @@ impl Args for CommonArgs {
                 None
             };
 
+        let initial_cwnd_packets = args
+            .get_str("--initial-cwnd-packets")
+            .parse::<u64>()
+            .unwrap();
+
         CommonArgs {
             alpns,
             max_data,
@@ -206,6 +213,7 @@ impl Args for CommonArgs {
             max_field_section_size,
             qpack_max_table_capacity,
             qpack_blocked_streams,
+            initial_cwnd_packets,
         }
     }
 }
@@ -234,6 +242,7 @@ impl Default for CommonArgs {
             max_field_section_size: None,
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
+            initial_cwnd_packets: 10,
         }
     }
 }
@@ -264,6 +273,7 @@ Options:
   --max-json-payload BYTES  Per-response payload limit when dumping JSON [default: 10000].
   --connect-to ADDRESS     Override ther server's address.
   --no-verify              Don't verify server's certificate.
+  --trust-origin-ca-pem <file>  Path to the pem file of the origin's CA, if not publicly trusted.
   --no-grease              Don't send GREASE.
   --cc-algorithm NAME      Specify which congestion control algorithm to use [default: cubic].
   --disable-hystart        Disable HyStart++.
@@ -278,6 +288,7 @@ Options:
   --qpack-blocked-streams STREAMS   Limit of blocked streams while decoding. Any value other that 0 is currently unsupported.
   --session-file PATH      File used to cache a TLS session for resumption.
   --source-port PORT       Source port to use when connecting to the server [default: 0].
+  --initial-cwnd-packets PACKETS   The initial congestion window size in terms of packet count [default: 10].
   -h --help                Show this screen.
 ";
 
@@ -290,6 +301,7 @@ pub struct ClientArgs {
     pub reqs_cardinal: u64,
     pub req_headers: Vec<String>,
     pub no_verify: bool,
+    pub trust_origin_ca_pem: Option<String>,
     pub body: Option<Vec<u8>>,
     pub method: String,
     pub connect_to: Option<String>,
@@ -340,6 +352,13 @@ impl Args for ClientArgs {
 
         let no_verify = args.get_bool("--no-verify");
 
+        let trust_origin_ca_pem = args.get_str("--trust-origin-ca-pem");
+        let trust_origin_ca_pem = if !trust_origin_ca_pem.is_empty() {
+            Some(trust_origin_ca_pem.to_string())
+        } else {
+            None
+        };
+
         let body = if args.get_bool("--body") {
             std::fs::read(args.get_str("--body")).ok()
         } else {
@@ -375,6 +394,7 @@ impl Args for ClientArgs {
             reqs_cardinal,
             req_headers,
             no_verify,
+            trust_origin_ca_pem,
             body,
             method,
             connect_to,
@@ -396,6 +416,7 @@ impl Default for ClientArgs {
             req_headers: vec![],
             reqs_cardinal: 1,
             no_verify: false,
+            trust_origin_ca_pem: None,
             body: None,
             method: "GET".to_string(),
             connect_to: None,
@@ -442,6 +463,7 @@ Options:
   --qpack-blocked-streams STREAMS   Limit of streams that can be blocked while decoding. Any value other that 0 is currently unsupported.
   --disable-gso               Disable GSO (linux only).
   --disable-pacing            Disable pacing (linux only).
+  --initial-cwnd-packets PACKETS      The initial congestion window size in terms of packet count [default: 10].
   -h --help                   Show this screen.
 ";
 
