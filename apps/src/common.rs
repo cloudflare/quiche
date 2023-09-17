@@ -51,6 +51,8 @@ use quiche::ConnectionId;
 use quiche::h3::NameValue;
 use quiche::h3::Priority;
 
+use crate::args::ClientArgs;
+
 pub fn stdout_sink(out: String) {
     print!("{out}");
 }
@@ -335,7 +337,7 @@ fn send_h3_dgram(
 
 pub trait HttpConn {
     fn send_requests(
-        &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
+        &mut self, conn: &mut quiche::Connection, client_args: &ClientArgs,
     );
 
     fn handle_responses(
@@ -438,8 +440,12 @@ impl Http09Conn {
 
 impl HttpConn for Http09Conn {
     fn send_requests(
-        &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
+        &mut self, conn: &mut quiche::Connection, client_args: &ClientArgs,
     ) {
+        let ClientArgs {
+            dump_response_path: target_path,
+            ..
+        } = client_args;
         let mut reqs_done = 0;
 
         for req in self.reqs.iter_mut().skip(self.reqs_sent) {
@@ -757,6 +763,7 @@ pub struct Http3Conn {
     dump_json: bool,
     dgram_sender: Option<Http3DgramSender>,
     output_sink: Rc<RefCell<dyn FnMut(String)>>,
+    reqs_in_flight: u64,
 }
 
 impl Http3Conn {
@@ -850,6 +857,7 @@ impl Http3Conn {
             dump_json: dump_json.is_some(),
             dgram_sender,
             output_sink,
+            reqs_in_flight: 0
         };
 
         Box::new(h_conn)
@@ -882,6 +890,7 @@ impl Http3Conn {
             dump_json: false,
             dgram_sender,
             output_sink,
+            reqs_in_flight: 0,
         };
 
         Ok(Box::new(h_conn))
@@ -1114,18 +1123,31 @@ impl Http3Conn {
 
 impl HttpConn for Http3Conn {
     fn send_requests(
-        &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
+        &mut self, conn: &mut quiche::Connection, client_args: &ClientArgs,
     ) {
+        let ClientArgs {
+            dump_response_path: target_path,
+            reqs_concurrent,
+            ..
+        } = client_args;
         let mut reqs_done = 0;
 
         // First send headers.
         for req in self.reqs.iter_mut().skip(self.reqs_hdrs_sent) {
+            if &self.reqs_in_flight >= reqs_concurrent {
+                debug!("too many reqs in flight, retry later...");
+                break;
+            }
+
             let s = match self.h3_conn.send_request(
                 conn,
                 &req.hdrs,
                 self.body.is_none(),
             ) {
-                Ok(v) => v,
+                Ok(v) => {
+                    self.reqs_in_flight += 1;
+                    v
+                },
 
                 Err(quiche::h3::Error::TransportError(
                     quiche::Error::StreamLimit,
@@ -1276,6 +1298,10 @@ impl HttpConn for Http3Conn {
 
                 Ok((_stream_id, quiche::h3::Event::Finished)) => {
                     self.reqs_complete += 1;
+                    if self.reqs_in_flight > 0 {
+                        self.reqs_in_flight -= 1;
+                    }
+
                     let reqs_count = self.reqs.len();
 
                     debug!(
