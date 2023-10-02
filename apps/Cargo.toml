@@ -27,7 +27,7 @@ mio = { version = "0.8", features = ["net", "os-poll"] }
 url = "1"
 log = "0.4"
 octets = { version = "0.2", path = "../octets" }
-ring = "0.16"
+ring = "0.17"
 quiche = { path = "../quiche" }
 libc = "0.2"
 nix = { version = "0.27", features = ["net", "socket", "uio"] }

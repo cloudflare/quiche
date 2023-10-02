@@ -58,7 +58,7 @@ either = { version = "1.8", default-features = false }
 log = { version = "0.4", features = ["std"] }
 libc = "0.2"
 libm = "0.2"
-ring = "0.16"
+ring = "0.17"
 slab = "0.4"
 once_cell = "1"
 octets = { version = "0.2", path = "../octets" }
