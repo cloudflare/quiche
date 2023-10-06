@@ -930,6 +930,10 @@ ssize_t quiche_h3_send_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
 ssize_t quiche_h3_recv_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t stream_id, uint8_t *out, size_t out_len);
 
+// Sends a GOAWAY frame to initiate graceful connection closure.
+int quiche_h3_send_goaway(quiche_h3_conn *conn, quiche_conn *quic_conn,
+                          uint64_t id);
+
 // Try to parse an Extensible Priority field value.
 int quiche_h3_parse_extensible_priority(uint8_t *priority,
                                         size_t priority_len,

@@ -302,6 +302,17 @@ pub extern fn quiche_h3_recv_body(
 }
 
 #[no_mangle]
+pub extern fn quiche_h3_send_goaway(
+    conn: &mut h3::Connection, quic_conn: &mut Connection, id: u64,
+) -> c_int {
+    match conn.send_goaway(quic_conn, id) {
+        Ok(()) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 #[cfg(feature = "sfv")]
 pub extern fn quiche_h3_parse_extensible_priority(
     priority: *const u8, priority_len: size_t, parsed: &mut Priority,
