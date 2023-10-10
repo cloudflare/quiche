@@ -2155,7 +2155,7 @@ impl Connection {
                     if self.is_stateless_reset(&buf[len - left..len]) {
                         trace!("{} packet is a stateless reset", self.trace_id);
 
-                        self.closed = true;
+                        self.mark_closed();
                     }
 
                     left
@@ -5555,11 +5555,7 @@ impl Connection {
             if draining_timer <= now {
                 trace!("{} draining timeout expired", self.trace_id);
 
-                qlog_with!(self.qlog, q, {
-                    q.finish_log().ok();
-                });
-
-                self.closed = true;
+                self.mark_closed();
             }
 
             // Draining timer takes precedence over all other timers. If it is
@@ -5572,11 +5568,7 @@ impl Connection {
             if timer <= now {
                 trace!("{} idle timeout expired", self.trace_id);
 
-                qlog_with!(self.qlog, q, {
-                    q.finish_log().ok();
-                });
-
-                self.closed = true;
+                self.mark_closed();
                 self.timed_out = true;
                 return;
             }
@@ -5630,11 +5622,13 @@ impl Connection {
                 Some(pid) =>
                     if self.set_active_path(pid, now).is_err() {
                         // The connection cannot continue.
-                        self.closed = true;
+                        self.mark_closed();
                     },
 
                 // The connection cannot continue.
-                None => self.closed = true,
+                None => {
+                    self.mark_closed();
+                },
             }
         }
     }
@@ -6059,7 +6053,7 @@ impl Connection {
 
         // When no packet was successfully processed close connection immediately.
         if self.recv_count == 0 {
-            self.closed = true;
+            self.mark_closed();
         }
 
         Ok(())
@@ -7435,6 +7429,14 @@ impl Connection {
         self.ids.link_dcid_to_path_id(dcid_seq, pid)?;
 
         Ok(pid)
+    }
+
+    // Marks the connection as closed and does any related tidyup.
+    fn mark_closed(&mut self) {
+        qlog_with!(self.qlog, q, {
+            q = None;
+        });
+        self.closed = true;
     }
 }
 
