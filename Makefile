@@ -34,9 +34,9 @@ docker-publish:
 # build fuzzers
 .PHONY: build-fuzz
 build-fuzz:
-	cargo +nightly fuzz build --release packet_recv_client
-	cargo +nightly fuzz build --release packet_recv_server
-	cargo +nightly fuzz build --release qpack_decode
+	cargo +nightly fuzz build --release --debug-assertions packet_recv_client
+	cargo +nightly fuzz build --release --debug-assertions packet_recv_server
+	cargo +nightly fuzz build --release --debug-assertions qpack_decode
 
 # build fuzzing image
 .PHONY: docker-fuzz
