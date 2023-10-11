@@ -4,7 +4,7 @@ project: protocols/quiche
 
 target: qpack-decode-libfuzzer
 
-baseimage: mayhem.cloudflare-security.com:5000/protocols/quiche-libfuzzer:latest
+baseimage: cloudflare.mayhem.security:5000/protocols/quiche-libfuzzer:latest
 
 advanced_triage: false
 
