@@ -7,8 +7,7 @@ COPY octets/ ./octets/
 COPY qlog/ ./qlog/
 COPY quiche/ ./quiche/
 
-RUN apt-get update && apt-get install -y cmake && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y cmake && rm -rf /var/lib/apt/lists/*
 
 RUN cargo build --manifest-path apps/Cargo.toml
 

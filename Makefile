@@ -40,8 +40,8 @@ build-fuzz:
 
 # build fuzzing image
 .PHONY: docker-fuzz
-docker-fuzz: build-fuzz
-	$(DOCKER) build --tag $(FUZZ_REPO):$(FUZZ_TAG) fuzz
+docker-fuzz:
+	$(DOCKER) build -f fuzz/Dockerfile --target quiche-libfuzzer --tag $(FUZZ_REPO):$(FUZZ_TAG) .
 
 .PHONY: docker-fuzz-publish
 docker-fuzz-publish:
