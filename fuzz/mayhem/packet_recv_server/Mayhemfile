@@ -1,10 +1,8 @@
-version: '1.5'
-
 project: protocols/quiche
 
 target: packet-recv-server-libfuzzer
 
-baseimage: cloudflare.mayhem.security:5000/protocols/quiche-libfuzzer:latest
+image: ${MAYHEM_DOCKER_REGISTRY}/protocols/quiche-libfuzzer:latest
 
 advanced_triage: false
 
@@ -13,4 +11,4 @@ cmds:
     libfuzzer: true
     sanitizer: true
     timeout: 5
-    env: { "QUICHE_FUZZ_CRT": "/home/mayhem/cert.crt", "QUICHE_FUZZ_KEY": "/home/mayhem/cert.key" }
+    env: {QUICHE_FUZZ_CRT: /home/mayhem/cert.crt, QUICHE_FUZZ_KEY: /home/mayhem/cert.key}
