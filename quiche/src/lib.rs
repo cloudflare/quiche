@@ -3231,6 +3231,7 @@ impl Connection {
         }
 
         // Pad UDP datagram if it contains a QUIC Initial packet.
+        #[cfg(not(feature = "fuzzing"))]
         if has_initial && left > 0 && done < MIN_CLIENT_INITIAL_LEN {
             let pad_len = cmp::min(left, MIN_CLIENT_INITIAL_LEN - done);
 
