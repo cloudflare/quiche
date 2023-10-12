@@ -7158,7 +7158,8 @@ impl Connection {
         let cwin_available = self
             .paths
             .iter()
-            .filter_map(|(_, p)| p.active().then(|| p.recovery.cwnd_available()))
+            .filter(|&(_, p)| p.active())
+            .map(|(_, p)| p.recovery.cwnd_available())
             .sum();
 
         ((self.tx_buffered + self.dgram_send_queue_byte_size()) < cwin_available) &&

@@ -783,6 +783,8 @@ impl PartialEq for StreamPriorityKey {
 impl Eq for StreamPriorityKey {}
 
 impl PartialOrd for StreamPriorityKey {
+    // Priority ordering is complex, disable Clippy warning.
+    #[allow(clippy::incorrect_partial_ord_impl_on_ord_type)]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         // Ignore priority if ID matches.
         if self.id == other.id {
