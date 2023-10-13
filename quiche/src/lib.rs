@@ -9869,6 +9869,92 @@ mod tests {
     }
 
     #[test]
+    fn stream_left_reset_bidi() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::new().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(3, pipe.client.peer_streams_left_bidi());
+        assert_eq!(3, pipe.server.peer_streams_left_bidi());
+
+        pipe.client.stream_send(0, b"a", false).ok();
+        assert_eq!(2, pipe.client.peer_streams_left_bidi());
+        pipe.client.stream_send(4, b"a", false).ok();
+        assert_eq!(1, pipe.client.peer_streams_left_bidi());
+        pipe.client.stream_send(8, b"a", false).ok();
+        assert_eq!(0, pipe.client.peer_streams_left_bidi());
+
+        // Client resets the stream.
+        pipe.client
+            .stream_shutdown(0, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.advance().unwrap();
+
+        assert_eq!(0, pipe.client.peer_streams_left_bidi());
+        let mut r = pipe.server.readable();
+        assert_eq!(Some(0), r.next());
+        assert_eq!(Some(4), r.next());
+        assert_eq!(Some(8), r.next());
+        assert_eq!(None, r.next());
+
+        assert_eq!(
+            pipe.server.stream_recv(0, &mut buf),
+            Err(Error::StreamReset(1001))
+        );
+
+        let mut r = pipe.server.readable();
+        assert_eq!(Some(4), r.next());
+        assert_eq!(Some(8), r.next());
+        assert_eq!(None, r.next());
+
+        // Server resets the stream in reaction.
+        pipe.server
+            .stream_shutdown(0, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.advance().unwrap();
+
+        assert_eq!(1, pipe.client.peer_streams_left_bidi());
+
+        // Repeat for the other 2 streams
+        pipe.client
+            .stream_shutdown(4, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.client
+            .stream_shutdown(8, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.advance().unwrap();
+
+        let mut r = pipe.server.readable();
+        assert_eq!(Some(4), r.next());
+        assert_eq!(Some(8), r.next());
+        assert_eq!(None, r.next());
+
+        assert_eq!(
+            pipe.server.stream_recv(4, &mut buf),
+            Err(Error::StreamReset(1001))
+        );
+
+        assert_eq!(
+            pipe.server.stream_recv(8, &mut buf),
+            Err(Error::StreamReset(1001))
+        );
+
+        let mut r = pipe.server.readable();
+        assert_eq!(None, r.next());
+
+        pipe.server
+            .stream_shutdown(4, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.server
+            .stream_shutdown(8, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.advance().unwrap();
+
+        assert_eq!(3, pipe.client.peer_streams_left_bidi());
+    }
+
+    #[test]
     fn streams_blocked_max_bidi() {
         let mut buf = [0; 65535];
 

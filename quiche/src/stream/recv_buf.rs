@@ -209,8 +209,10 @@ impl RecvBuf {
             return Err(Error::Done);
         }
 
-        // The stream was reset, so return the error code instead.
+        // The stream was reset, so clear its data and return the error code
+        // instead.
         if let Some(e) = self.error {
+            self.data.clear();
             return Err(Error::StreamReset(e));
         }
 
