@@ -414,7 +414,11 @@ pub fn connect(
         // If we have an HTTP connection, first issue the requests then
         // process received data.
         if let Some(h_conn) = http_conn.as_mut() {
-            h_conn.send_requests(&mut conn, &args);
+            h_conn.send_requests(
+                &mut conn,
+                &args.dump_response_path,
+                &args.reqs_concurrent,
+            );
             h_conn.handle_responses(&mut conn, &mut buf, &app_data_start);
         }
 

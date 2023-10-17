@@ -29,6 +29,8 @@
 //! This module provides some utility functions that are common to quiche
 //! applications.
 
+use std::cmp;
+
 use std::io::prelude::*;
 
 use std::collections::HashMap;
@@ -42,6 +44,8 @@ use std::rc::Rc;
 
 use std::cell::RefCell;
 
+use std::cmp::min;
+
 use std::path;
 
 use ring::rand::SecureRandom;
@@ -50,8 +54,6 @@ use quiche::ConnectionId;
 
 use quiche::h3::NameValue;
 use quiche::h3::Priority;
-
-use crate::args::ClientArgs;
 
 pub fn stdout_sink(out: String) {
     print!("{out}");
@@ -337,7 +339,8 @@ fn send_h3_dgram(
 
 pub trait HttpConn {
     fn send_requests(
-        &mut self, conn: &mut quiche::Connection, client_args: &ClientArgs,
+        &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
+        max_reqs_concurrent: &u64,
     );
 
     fn handle_responses(
@@ -440,12 +443,9 @@ impl Http09Conn {
 
 impl HttpConn for Http09Conn {
     fn send_requests(
-        &mut self, conn: &mut quiche::Connection, client_args: &ClientArgs,
+        &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
+        _: &u64,
     ) {
-        let ClientArgs {
-            dump_response_path: target_path,
-            ..
-        } = client_args;
         let mut reqs_done = 0;
 
         for req in self.reqs.iter_mut().skip(self.reqs_sent) {
@@ -1123,18 +1123,17 @@ impl Http3Conn {
 
 impl HttpConn for Http3Conn {
     fn send_requests(
-        &mut self, conn: &mut quiche::Connection, client_args: &ClientArgs,
+        &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
+        max_reqs_concurrent: &u64,
     ) {
-        let ClientArgs {
-            dump_response_path: target_path,
-            reqs_concurrent,
-            ..
-        } = client_args;
         let mut reqs_done = 0;
+
+        let max_reqs_concurrent =
+            min(*max_reqs_concurrent, conn.peer_streams_left_bidi());
 
         // First send headers.
         for req in self.reqs.iter_mut().skip(self.reqs_hdrs_sent) {
-            if &self.reqs_in_flight >= reqs_concurrent {
+            if self.reqs_in_flight >= max_reqs_concurrent {
                 debug!("too many reqs in flight, retry later...");
                 break;
             }
@@ -1298,9 +1297,7 @@ impl HttpConn for Http3Conn {
 
                 Ok((_stream_id, quiche::h3::Event::Finished)) => {
                     self.reqs_complete += 1;
-                    if self.reqs_in_flight > 0 {
-                        self.reqs_in_flight -= 1;
-                    }
+                    self.reqs_in_flight = self.reqs_in_flight.saturating_sub(1);
 
                     let reqs_count = self.reqs.len();
 
@@ -1337,6 +1334,7 @@ impl HttpConn for Http3Conn {
 
                 Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
                     error!("request was reset by peer with {}, closing...", e);
+                    self.reqs_in_flight = self.reqs_in_flight.saturating_sub(1);
 
                     match conn.close(true, 0x100, b"kthxbye") {
                         // Already closed.
@@ -1368,6 +1366,7 @@ impl HttpConn for Http3Conn {
                 },
 
                 Err(quiche::h3::Error::Done) => {
+                    self.reqs_in_flight = self.reqs_in_flight.saturating_sub(1);
                     break;
                 },
 
