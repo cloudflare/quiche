@@ -8480,14 +8480,6 @@ pub mod testing {
             recv_send(&mut self.server, buf, written)
         }
 
-        pub fn send_pkt_to_client(
-            &mut self, pkt_type: packet::Type, frames: &[frame::Frame],
-            buf: &mut [u8],
-        ) -> Result<usize> {
-            let written = encode_pkt(&mut self.server, pkt_type, frames, buf)?;
-            recv_send(&mut self.client, buf, written)
-        }
-
         pub fn client_update_key(&mut self) -> Result<()> {
             let space =
                 &mut self.client.pkt_num_spaces[packet::Epoch::Application];
