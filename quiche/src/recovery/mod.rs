@@ -400,6 +400,24 @@ impl Recovery {
         trace!("{} {:?}", trace_id, self);
     }
 
+    // Limit data buffered in host send buffer to avoid bufferbloat
+    // at the sender.
+    pub fn get_host_buffered(&mut self, now: Instant) -> usize {
+        let mut buffered: usize = 0;
+
+        for epoch in 0..packet::Epoch::count() {
+            for bytes in self.sent[epoch].iter()
+                // Skip packets that have already been sent, acked or lost, or that are not in-flight.
+                .filter(|p| p.in_flight && p.time_acked.is_none() && p.time_lost.is_none() && p.time_sent > now)
+                .map(|x| x.size)
+            {
+                buffered += bytes;
+            }
+        }
+
+        buffered
+    }
+
     fn on_packet_sent_cc(&mut self, sent_bytes: usize, now: Instant) {
         (self.cc_ops.on_packet_sent)(self, sent_bytes, now);
     }
@@ -2261,6 +2279,204 @@ mod tests {
             r.get_packet_send_time(),
             now + Duration::from_secs_f64(12000.0 / pacing_rate as f64)
         );
+    }
+
+    #[test]
+    fn test_host_buffered() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::CUBIC);
+
+        let mut r = Recovery::new(&cfg);
+
+        let mut now = Instant::now();
+
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
+
+        // Send out the first packet (a full initcwnd).
+        let p = Sent {
+            pkt_num: 0,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: 12000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+        };
+
+        r.on_packet_sent(
+            p,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 1);
+        assert_eq!(r.bytes_in_flight, 12000);
+        assert_eq!(r.get_host_buffered(now), 0);
+
+        // First packet will be sent out immediately.
+        assert_eq!(r.pacer.rate(), 0);
+        assert_eq!(r.get_packet_send_time(), now);
+
+        // Wait 50ms for ACK.
+        now += Duration::from_millis(50);
+
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..1);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                10,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+                &mut Vec::new(),
+            ),
+            Ok((0, 0))
+        );
+
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
+        assert_eq!(r.bytes_in_flight, 0);
+        assert_eq!(r.smoothed_rtt.unwrap(), Duration::from_millis(50));
+
+        // 1 MSS increased.
+        assert_eq!(r.congestion_window, 12000 + 1200);
+
+        // Send out second packet.
+        let p = Sent {
+            pkt_num: 1,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: 6000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+        };
+
+        r.on_packet_sent(
+            p,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 1);
+        assert_eq!(r.bytes_in_flight, 6000);
+
+        // Pacing is not done during initial phase of connection.
+        assert_eq!(r.get_packet_send_time(), now);
+
+        // Send the third packet out.
+        let p = Sent {
+            pkt_num: 2,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: 6000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+        };
+
+        r.on_packet_sent(
+            p,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 2);
+        assert_eq!(r.bytes_in_flight, 12000);
+        assert_eq!(r.get_host_buffered(now), 0);
+
+        // Send the fourth packet out.
+        let p = Sent {
+            pkt_num: 3,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: 5000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+        };
+
+        r.on_packet_sent(
+            p,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 3);
+        assert_eq!(r.bytes_in_flight, 17000);
+        assert_eq!(r.get_host_buffered(now), 5000);
+
+        let p = Sent {
+            pkt_num: 3,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: 1200,
+            ack_eliciting: true,
+            in_flight: false,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+        };
+
+        r.on_packet_sent(
+            p,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 4);
+        assert_eq!(r.bytes_in_flight, 17000);
+        assert_eq!(r.get_host_buffered(now), 5000);
     }
 }
 

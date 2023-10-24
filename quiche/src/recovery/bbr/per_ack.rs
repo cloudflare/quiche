@@ -257,11 +257,18 @@ fn bbr_check_drain(r: &mut Recovery, now: Instant) {
     }
 
     if r.bbr_state.state == BBRStateMachine::Drain &&
-        r.bytes_in_flight <= bbr_inflight(r, 1.0)
+        bbr_bytes_in_net(r, now) <= bbr_inflight(r, 1.0)
     {
         // we estimate queue is drained
         bbr_enter_probe_bw(r, now);
     }
+}
+
+fn bbr_bytes_in_net(r: &mut Recovery, now: Instant) -> usize {
+    let buffered = r.get_host_buffered(now);
+    let in_flight = r.bytes_in_flight;
+
+    in_flight.saturating_sub(buffered)
 }
 
 // 4.3.4.3.  Gain Cycling Algorithm

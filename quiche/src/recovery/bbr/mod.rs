@@ -605,7 +605,7 @@ mod tests {
         }
 
         // Stop at right before filled_pipe=true.
-        for _ in 0..5 {
+        for _ in 0..6 {
             let pkt = Sent {
                 pkt_num: pn,
                 frames: smallvec![],
@@ -640,9 +640,9 @@ mod tests {
 
         let mut acked = ranges::RangeSet::default();
 
-        // We sent 5 packets, but ack only one, to stay
+        // We sent 6 packets, but ack only one, to stay
         // in Drain state.
-        acked.insert(0..pn - 4);
+        acked.insert(0..pn - 5);
 
         assert_eq!(
             r.on_ack_received(
