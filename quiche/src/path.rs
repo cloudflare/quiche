@@ -151,6 +151,9 @@ pub struct Path {
     /// Received challenge data.
     received_challenges: VecDeque<[u8; 8]>,
 
+    /// Max length of received challenges queue.
+    received_challenges_max_len: usize,
+
     /// Number of packets sent on this path.
     pub sent_count: usize,
 
@@ -199,7 +202,8 @@ impl Path {
     /// the fields being set to their default value.
     pub fn new(
         local_addr: SocketAddr, peer_addr: SocketAddr,
-        recovery_config: &recovery::RecoveryConfig, is_initial: bool,
+        recovery_config: &recovery::RecoveryConfig,
+        path_challenge_recv_max_queue_len: usize, is_initial: bool,
     ) -> Self {
         let (state, active_scid_seq, active_dcid_seq) = if is_initial {
             (PathState::Validated, Some(0), Some(0))
@@ -219,7 +223,10 @@ impl Path {
             max_challenge_size: 0,
             probing_lost: 0,
             last_probe_lost_time: None,
-            received_challenges: VecDeque::new(),
+            received_challenges: VecDeque::with_capacity(
+                path_challenge_recv_max_queue_len,
+            ),
+            received_challenges_max_len: path_challenge_recv_max_queue_len,
             sent_count: 0,
             recv_count: 0,
             retrans_count: 0,
@@ -334,6 +341,13 @@ impl Path {
     }
 
     pub fn on_challenge_received(&mut self, data: [u8; 8]) {
+        // Discard challenges that would cause us to queue more than we want.
+        if self.received_challenges.len() ==
+            self.received_challenges_max_len
+        {
+            return;
+        }
+
         self.received_challenges.push_back(data);
         self.peer_verified_local_address = true;
     }
@@ -906,11 +920,22 @@ mod tests {
         let config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         let recovery_config = RecoveryConfig::from_config(&config);
 
-        let path = Path::new(client_addr, server_addr, &recovery_config, true);
+        let path = Path::new(
+            client_addr,
+            server_addr,
+            &recovery_config,
+            config.path_challenge_recv_max_queue_len,
+            true,
+        );
         let mut path_mgr = PathMap::new(path, 2, false);
 
-        let probed_path =
-            Path::new(client_addr_2, server_addr, &recovery_config, false);
+        let probed_path = Path::new(
+            client_addr_2,
+            server_addr,
+            &recovery_config,
+            config.path_challenge_recv_max_queue_len,
+            false,
+        );
         path_mgr.insert_path(probed_path, false).unwrap();
 
         let pid = path_mgr
@@ -980,10 +1005,21 @@ mod tests {
         let config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         let recovery_config = RecoveryConfig::from_config(&config);
 
-        let path = Path::new(client_addr, server_addr, &recovery_config, true);
+        let path = Path::new(
+            client_addr,
+            server_addr,
+            &recovery_config,
+            config.path_challenge_recv_max_queue_len,
+            true,
+        );
         let mut client_path_mgr = PathMap::new(path, 2, false);
-        let mut server_path =
-            Path::new(server_addr, client_addr, &recovery_config, false);
+        let mut server_path = Path::new(
+            server_addr,
+            client_addr,
+            &recovery_config,
+            config.path_challenge_recv_max_queue_len,
+            false,
+        );
 
         let client_pid = client_path_mgr
             .path_id_from_addrs(&(client_addr, server_addr))
@@ -1048,5 +1084,153 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn too_many_probes() {
+        let client_addr = "127.0.0.1:1234".parse().unwrap();
+        let server_addr = "127.0.0.1:4321".parse().unwrap();
+
+        // Default to DEFAULT_MAX_PATH_CHALLENGE_RX_QUEUE_LEN
+        let config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let recovery_config = RecoveryConfig::from_config(&config);
+
+        let path = Path::new(
+            client_addr,
+            server_addr,
+            &recovery_config,
+            config.path_challenge_recv_max_queue_len,
+            true,
+        );
+        let mut client_path_mgr = PathMap::new(path, 2, false);
+        let mut server_path = Path::new(
+            server_addr,
+            client_addr,
+            &recovery_config,
+            config.path_challenge_recv_max_queue_len,
+            false,
+        );
+
+        let client_pid = client_path_mgr
+            .path_id_from_addrs(&(client_addr, server_addr))
+            .unwrap();
+
+        // First probe.
+        let data = rand::rand_u64().to_be_bytes();
+
+        client_path_mgr
+            .get_mut(client_pid)
+            .unwrap()
+            .add_challenge_sent(
+                data,
+                MIN_CLIENT_INITIAL_LEN,
+                time::Instant::now(),
+            );
+
+        // Second probe.
+        let data_2 = rand::rand_u64().to_be_bytes();
+
+        client_path_mgr
+            .get_mut(client_pid)
+            .unwrap()
+            .add_challenge_sent(
+                data_2,
+                MIN_CLIENT_INITIAL_LEN,
+                time::Instant::now(),
+            );
+        assert_eq!(
+            client_path_mgr
+                .get(client_pid)
+                .unwrap()
+                .in_flight_challenges
+                .len(),
+            2
+        );
+
+        // Third probe.
+        let data_3 = rand::rand_u64().to_be_bytes();
+
+        client_path_mgr
+            .get_mut(client_pid)
+            .unwrap()
+            .add_challenge_sent(
+                data_3,
+                MIN_CLIENT_INITIAL_LEN,
+                time::Instant::now(),
+            );
+        assert_eq!(
+            client_path_mgr
+                .get(client_pid)
+                .unwrap()
+                .in_flight_challenges
+                .len(),
+            3
+        );
+
+        // Fourth probe.
+        let data_4 = rand::rand_u64().to_be_bytes();
+
+        client_path_mgr
+            .get_mut(client_pid)
+            .unwrap()
+            .add_challenge_sent(
+                data_4,
+                MIN_CLIENT_INITIAL_LEN,
+                time::Instant::now(),
+            );
+        assert_eq!(
+            client_path_mgr
+                .get(client_pid)
+                .unwrap()
+                .in_flight_challenges
+                .len(),
+            4
+        );
+
+        // If we receive multiple challenges, we can store them up to our queue size
+        server_path.on_challenge_received(data);
+        assert_eq!(server_path.received_challenges.len(), 1);
+        server_path.on_challenge_received(data_2);
+        assert_eq!(server_path.received_challenges.len(), 2);
+        server_path.on_challenge_received(data_3);
+        assert_eq!(server_path.received_challenges.len(), 3);
+        server_path.on_challenge_received(data_4);
+        assert_eq!(server_path.received_challenges.len(), 3);
+
+        // Response for first probe.
+        client_path_mgr.on_response_received(data).unwrap();
+        assert_eq!(
+            client_path_mgr
+                .get(client_pid)
+                .unwrap()
+                .in_flight_challenges
+                .len(),
+            3
+        );
+
+        // Response for second probe.
+        client_path_mgr.on_response_received(data_2).unwrap();
+        assert_eq!(
+            client_path_mgr
+                .get(client_pid)
+                .unwrap()
+                .in_flight_challenges
+                .len(),
+            2
+        );
+
+        // Response for third probe.
+        client_path_mgr.on_response_received(data_3).unwrap();
+        assert_eq!(
+            client_path_mgr
+                .get(client_pid)
+                .unwrap()
+                .in_flight_challenges
+                .len(),
+            1
+        );
+
+        // There will never be a response for fourth probe...
+
     }
 }

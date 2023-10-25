@@ -457,6 +457,9 @@ const MAX_SEND_UDP_PAYLOAD_SIZE: usize = 1200;
 // The default length of DATAGRAM queues.
 const DEFAULT_MAX_DGRAM_QUEUE_LEN: usize = 0;
 
+// The default length of PATH_CHALLENGE receive queue.
+const DEFAULT_MAX_PATH_CHALLENGE_RX_QUEUE_LEN: usize = 3;
+
 // The DATAGRAM standard recommends either none or 65536 as maximum DATAGRAM
 // frames size. We enforce the recommendation for forward compatibility.
 const MAX_DGRAM_FRAME_SIZE: u64 = 65536;
@@ -718,6 +721,8 @@ pub struct Config {
     dgram_recv_max_queue_len: usize,
     dgram_send_max_queue_len: usize,
 
+    path_challenge_recv_max_queue_len: usize,
+
     max_send_udp_payload_size: usize,
 
     max_connection_window: u64,
@@ -779,6 +784,9 @@ impl Config {
 
             dgram_recv_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
             dgram_send_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
+
+            path_challenge_recv_max_queue_len:
+                DEFAULT_MAX_PATH_CHALLENGE_RX_QUEUE_LEN,
 
             max_send_udp_payload_size: MAX_SEND_UDP_PAYLOAD_SIZE,
 
@@ -1194,6 +1202,16 @@ impl Config {
         self.dgram_send_max_queue_len = send_queue_len;
     }
 
+    /// Configures the max number of queued received PATH_CHALLENGE frames.
+    ///
+    /// When an endpoint receives a PATH_CHALLENGE frame and the queue is full,
+    /// the frame is discarded.
+    ///
+    /// The default is 3.
+    pub fn set_path_challenge_recv_max_queue_len(&mut self, queue_len: usize) {
+        self.path_challenge_recv_max_queue_len = queue_len;
+    }
+
     /// Sets the maximum size of the connection window.
     ///
     /// The default value is MAX_CONNECTION_WINDOW (24MBytes).
@@ -1267,6 +1285,12 @@ pub struct Connection {
 
     /// The path manager.
     paths: path::PathMap,
+
+    /// PATH_CHALLENGE receive queue max length.
+    path_challenge_recv_max_queue_len: usize,
+
+    /// Total number of received PATH_CHALLENGE frames.
+    path_challenge_rx_count: u64,
 
     /// List of supported application protocols.
     application_protos: Vec<Vec<u8>>,
@@ -1720,7 +1744,13 @@ impl Connection {
 
         let recovery_config = recovery::RecoveryConfig::from_config(config);
 
-        let mut path = path::Path::new(local, peer, &recovery_config, true);
+        let mut path = path::Path::new(
+            local,
+            peer,
+            &recovery_config,
+            config.path_challenge_recv_max_queue_len,
+            true,
+        );
         // If we did stateless retry assume the peer's address is verified.
         path.verified_peer_address = odcid.is_some();
         // Assume clients validate the server's address implicitly.
@@ -1766,6 +1796,9 @@ impl Connection {
             recovery_config,
 
             paths,
+            path_challenge_recv_max_queue_len: config
+                .path_challenge_recv_max_queue_len,
+            path_challenge_rx_count: 0,
 
             application_protos: config.application_protos.clone(),
 
@@ -6284,6 +6317,7 @@ impl Connection {
             stopped_stream_count_local: self.stopped_stream_local_count,
             reset_stream_count_remote: self.reset_stream_remote_count,
             stopped_stream_count_remote: self.stopped_stream_remote_count,
+            path_challenge_rx_count: self.path_challenge_rx_count,
         }
     }
 
@@ -7009,6 +7043,8 @@ impl Connection {
             },
 
             frame::Frame::PathChallenge { data } => {
+                self.path_challenge_rx_count += 1;
+
                 self.paths
                     .get_mut(recv_path_id)?
                     .on_challenge_received(data);
@@ -7301,8 +7337,13 @@ impl Connection {
         }
 
         // This is a new path using an unassigned CID; create it!
-        let mut path =
-            path::Path::new(info.to, info.from, &self.recovery_config, false);
+        let mut path = path::Path::new(
+            info.to,
+            info.from,
+            &self.recovery_config,
+            self.path_challenge_recv_max_queue_len,
+            false,
+        );
 
         path.max_send_bytes = buf_len * MAX_AMPLIFICATION_FACTOR;
         path.active_scid_seq = Some(in_scid_seq);
@@ -7424,8 +7465,13 @@ impl Connection {
                 .ok_or(Error::OutOfIdentifiers)?
         };
 
-        let mut path =
-            path::Path::new(local_addr, peer_addr, &self.recovery_config, false);
+        let mut path = path::Path::new(
+            local_addr,
+            peer_addr,
+            &self.recovery_config,
+            self.path_challenge_recv_max_queue_len,
+            false,
+        );
         path.active_dcid_seq = Some(dcid_seq);
 
         let pid = self
@@ -7539,6 +7585,9 @@ pub struct Stats {
 
     /// The number of streams stopped by remote.
     pub stopped_stream_count_remote: u64,
+
+    /// The total number of PATH_CHALLENGE frames that were received.
+    pub path_challenge_rx_count: u64,
 }
 
 impl std::fmt::Debug for Stats {
@@ -15263,6 +15312,9 @@ mod tests {
         };
         assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
 
+        let stats = pipe.server.stats();
+        assert_eq!(stats.path_challenge_rx_count, 1);
+
         // A non-existing 4-tuple raises an InvalidState.
         let client_addr_3 = "127.0.0.1:9012".parse().unwrap();
         let server_addr_2 = "127.0.0.1:9876".parse().unwrap();
@@ -15304,6 +15356,9 @@ mod tests {
         };
         assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
 
+        let stats = pipe.server.stats();
+        assert_eq!(stats.path_challenge_rx_count, 2);
+
         // STREAM frame on active path.
         let (sent, si) = pipe
             .client
@@ -15317,6 +15372,9 @@ mod tests {
             from: si.from,
         };
         assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
+
+        let stats = pipe.server.stats();
+        assert_eq!(stats.path_challenge_rx_count, 2);
 
         // PATH_CHALLENGE
         let (sent, si) = pipe
@@ -15332,6 +15390,9 @@ mod tests {
             from: si.from,
         };
         assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
+
+        let stats = pipe.server.stats();
+        assert_eq!(stats.path_challenge_rx_count, 3);
 
         // STREAM frame on active path.
         let (sent, si) = pipe
@@ -15382,6 +15443,9 @@ mod tests {
         v2.sort();
 
         assert_eq!(v1, v2);
+
+        let stats = pipe.server.stats();
+        assert_eq!(stats.path_challenge_rx_count, 3);
     }
 
     #[test]
