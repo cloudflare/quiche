@@ -516,6 +516,18 @@ typedef struct {
 
     // The number of known paths for the connection.
     size_t paths_count;
+
+    // The number of streams reset by local.
+    uint64_t reset_stream_count_local;
+
+    // The number of streams stopped by local.
+    uint64_t stopped_stream_count_local;
+
+    // The number of streams reset by remote.
+    uint64_t reset_stream_count_remote;
+
+    // The number of streams stopped by remote.
+    uint64_t stopped_stream_count_remote;
 } quiche_stats;
 
 // Collects and returns statistics about the connection.
