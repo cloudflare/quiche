@@ -677,7 +677,7 @@ int quiche_put_varint(uint8_t *buf, size_t buf_len,
 // Reads an unsigned variable-length integer in network byte-order from
 // the provided buffer and returns the wire length.
 ssize_t quiche_get_varint(const uint8_t *buf, size_t buf_len,
-                          uint64_t val);
+                          uint64_t *val);
 
 // HTTP/3 API
 //
