@@ -1426,6 +1426,18 @@ pub struct Connection {
 
     /// A resusable buffer used by Recovery
     newly_acked: Vec<recovery::Acked>,
+
+    /// The number of streams reset by local.
+    reset_stream_local_count: u64,
+
+    /// The number of streams stopped by local.
+    stopped_stream_local_count: u64,
+
+    /// The number of streams reset by remote.
+    reset_stream_remote_count: u64,
+
+    /// The number of streams stopped by remote.
+    stopped_stream_remote_count: u64,
 }
 
 /// Creates a new server-side connection.
@@ -1859,6 +1871,11 @@ impl Connection {
             disable_dcid_reuse: config.disable_dcid_reuse,
 
             newly_acked: Vec::new(),
+
+            reset_stream_local_count: 0,
+            stopped_stream_local_count: 0,
+            reset_stream_remote_count: 0,
+            stopped_stream_remote_count: 0,
         };
 
         if let Some(odcid) = odcid {
@@ -4797,6 +4814,9 @@ impl Connection {
 
                 // Once shutdown, the stream is guaranteed to be non-readable.
                 self.streams.remove_readable(&priority_key);
+
+                self.stopped_stream_local_count =
+                    self.stopped_stream_local_count.saturating_add(1);
             },
 
             Shutdown::Write => {
@@ -4816,6 +4836,9 @@ impl Connection {
 
                 // Once shutdown, the stream is guaranteed to be non-writable.
                 self.streams.remove_writable(&priority_key);
+
+                self.reset_stream_local_count =
+                    self.reset_stream_local_count.saturating_add(1);
             },
         }
 
@@ -6257,6 +6280,10 @@ impl Connection {
             lost_bytes: self.lost_bytes,
             stream_retrans_bytes: self.stream_retrans_bytes,
             paths_count: self.paths.len(),
+            reset_stream_count_local: self.reset_stream_local_count,
+            stopped_stream_count_local: self.stopped_stream_local_count,
+            reset_stream_count_remote: self.reset_stream_remote_count,
+            stopped_stream_count_remote: self.stopped_stream_remote_count,
         }
     }
 
@@ -6682,6 +6709,9 @@ impl Connection {
                 }
 
                 self.rx_data += max_off_delta;
+
+                self.reset_stream_remote_count =
+                    self.reset_stream_remote_count.saturating_add(1);
             },
 
             frame::Frame::StopSending {
@@ -6735,6 +6765,11 @@ impl Connection {
                     if !was_writable {
                         self.streams.insert_writable(&priority_key);
                     }
+
+                    self.stopped_stream_remote_count =
+                        self.stopped_stream_remote_count.saturating_add(1);
+                    self.reset_stream_local_count =
+                        self.reset_stream_local_count.saturating_add(1);
                 }
             },
 
@@ -7485,6 +7520,18 @@ pub struct Stats {
 
     /// The number of known paths for the connection.
     pub paths_count: usize,
+
+    /// The number of streams reset by local.
+    pub reset_stream_count_local: u64,
+
+    /// The number of streams stopped by local.
+    pub stopped_stream_count_local: u64,
+
+    /// The number of streams reset by remote.
+    pub reset_stream_count_remote: u64,
+
+    /// The number of streams stopped by remote.
+    pub stopped_stream_count_remote: u64,
 }
 
 impl std::fmt::Debug for Stats {
@@ -9952,6 +9999,131 @@ mod tests {
         pipe.advance().unwrap();
 
         assert_eq!(3, pipe.client.peer_streams_left_bidi());
+    }
+
+    #[test]
+    fn stream_reset_counts() {
+        let mut pipe = testing::Pipe::new().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        pipe.client.stream_send(0, b"a", false).ok();
+        pipe.client.stream_send(2, b"a", false).ok();
+        pipe.client.stream_send(4, b"a", false).ok();
+        pipe.client.stream_send(8, b"a", false).ok();
+        pipe.advance().unwrap();
+
+        let stats = pipe.client.stats();
+        assert_eq!(stats.reset_stream_count_local, 0);
+
+        // Client resets the stream.
+        pipe.client
+            .stream_shutdown(0, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.advance().unwrap();
+
+        let stats = pipe.client.stats();
+        assert_eq!(stats.reset_stream_count_local, 1);
+        assert_eq!(stats.reset_stream_count_remote, 0);
+        let stats = pipe.server.stats();
+        assert_eq!(stats.reset_stream_count_local, 0);
+        assert_eq!(stats.reset_stream_count_remote, 1);
+
+        // Server resets the stream in reaction.
+        pipe.server
+            .stream_shutdown(0, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.advance().unwrap();
+
+        let stats = pipe.client.stats();
+        assert_eq!(stats.reset_stream_count_local, 1);
+        assert_eq!(stats.reset_stream_count_remote, 1);
+        let stats = pipe.server.stats();
+        assert_eq!(stats.reset_stream_count_local, 1);
+        assert_eq!(stats.reset_stream_count_remote, 1);
+
+        // Repeat for the other streams
+        pipe.client
+            .stream_shutdown(2, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.client
+            .stream_shutdown(4, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.client
+            .stream_shutdown(8, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.advance().unwrap();
+
+        pipe.server
+            .stream_shutdown(4, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.server
+            .stream_shutdown(8, Shutdown::Write, 1001)
+            .unwrap();
+        pipe.advance().unwrap();
+
+        let stats = pipe.client.stats();
+        assert_eq!(stats.reset_stream_count_local, 4);
+        assert_eq!(stats.reset_stream_count_remote, 3);
+        let stats = pipe.server.stats();
+        assert_eq!(stats.reset_stream_count_local, 3);
+        assert_eq!(stats.reset_stream_count_remote, 4);
+    }
+
+    #[test]
+    fn stream_stop_counts() {
+        let mut pipe = testing::Pipe::new().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        pipe.client.stream_send(0, b"a", false).ok();
+        pipe.client.stream_send(2, b"a", false).ok();
+        pipe.client.stream_send(4, b"a", false).ok();
+        pipe.client.stream_send(8, b"a", false).ok();
+        pipe.advance().unwrap();
+
+        let stats = pipe.client.stats();
+        assert_eq!(stats.reset_stream_count_local, 0);
+
+        // Server stops the stream and client automatically resets.
+        pipe.server
+            .stream_shutdown(0, Shutdown::Read, 1001)
+            .unwrap();
+        pipe.advance().unwrap();
+
+        let stats = pipe.client.stats();
+        assert_eq!(stats.stopped_stream_count_local, 0);
+        assert_eq!(stats.stopped_stream_count_remote, 1);
+        assert_eq!(stats.reset_stream_count_local, 1);
+        assert_eq!(stats.reset_stream_count_remote, 0);
+
+        let stats = pipe.server.stats();
+        assert_eq!(stats.stopped_stream_count_local, 1);
+        assert_eq!(stats.stopped_stream_count_remote, 0);
+        assert_eq!(stats.reset_stream_count_local, 0);
+        assert_eq!(stats.reset_stream_count_remote, 1);
+
+        // Repeat for the other streams
+        pipe.server
+            .stream_shutdown(2, Shutdown::Read, 1001)
+            .unwrap();
+        pipe.server
+            .stream_shutdown(4, Shutdown::Read, 1001)
+            .unwrap();
+        pipe.server
+            .stream_shutdown(8, Shutdown::Read, 1001)
+            .unwrap();
+        pipe.advance().unwrap();
+
+        let stats = pipe.client.stats();
+        assert_eq!(stats.stopped_stream_count_local, 0);
+        assert_eq!(stats.stopped_stream_count_remote, 4);
+        assert_eq!(stats.reset_stream_count_local, 4);
+        assert_eq!(stats.reset_stream_count_remote, 0);
+
+        let stats = pipe.server.stats();
+        assert_eq!(stats.stopped_stream_count_local, 4);
+        assert_eq!(stats.stopped_stream_count_remote, 0);
+        assert_eq!(stats.reset_stream_count_local, 0);
+        assert_eq!(stats.reset_stream_count_remote, 4);
     }
 
     #[test]

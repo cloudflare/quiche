@@ -1091,6 +1091,10 @@ pub struct Stats {
     lost_bytes: u64,
     stream_retrans_bytes: u64,
     paths_count: usize,
+    reset_stream_count_local: u64,
+    stopped_stream_count_local: u64,
+    reset_stream_count_remote: u64,
+    stopped_stream_count_remote: u64,
 }
 
 pub struct TransportParams {
@@ -1122,6 +1126,10 @@ pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.lost_bytes = stats.lost_bytes;
     out.stream_retrans_bytes = stats.stream_retrans_bytes;
     out.paths_count = stats.paths_count;
+    out.reset_stream_count_local = stats.reset_stream_count_local;
+    out.stopped_stream_count_local = stats.stopped_stream_count_local;
+    out.reset_stream_count_remote = stats.reset_stream_count_remote;
+    out.stopped_stream_count_remote = stats.stopped_stream_count_remote;
 }
 
 #[no_mangle]
