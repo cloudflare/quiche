@@ -1091,7 +1091,6 @@ pub struct Stats {
     lost_bytes: u64,
     stream_retrans_bytes: u64,
     paths_count: usize,
-    paths: [PathStats; 8],
 }
 
 pub struct TransportParams {
