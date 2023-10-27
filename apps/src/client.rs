@@ -476,7 +476,7 @@ pub fn connect(
             scid_sent = true;
         }
 
-        if (conn_args.multipath || conn_args.multipath_old) &&
+        if conn_args.multipath &&
             probed_paths < addrs.len() &&
             conn.available_dcids() > 0 &&
             conn.probe_path(addrs[probed_paths], peer_addr).is_ok()
