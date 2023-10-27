@@ -27,6 +27,7 @@
 use crate::args::*;
 use crate::common::*;
 
+use std::collections::HashMap;
 use std::net::ToSocketAddrs;
 
 use std::io::prelude::*;
@@ -36,6 +37,8 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 use ring::rand::*;
+
+use slab::Slab;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
@@ -70,33 +73,30 @@ pub fn connect(
         connect_url.to_socket_addrs().unwrap().next().unwrap()
     };
 
-    // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
-    // server address. This is needed on macOS and BSD variants that don't
-    // support binding to IN6ADDR_ANY for both v4 and v6.
-    let bind_addr = match peer_addr {
-        std::net::SocketAddr::V4(_) => format!("0.0.0.0:{}", args.source_port),
-        std::net::SocketAddr::V6(_) => format!("[::]:{}", args.source_port),
-    };
+    let (sockets, src_addr_to_token, local_addr) =
+        create_sockets(&mut poll, &peer_addr, &args);
+    let mut addrs = Vec::with_capacity(sockets.len());
+    addrs.push(local_addr);
+    for src in src_addr_to_token.keys() {
+        if *src != local_addr {
+            addrs.push(*src);
+        }
+    }
 
-    // Create the UDP socket backing the QUIC connection, and register it with
-    // the event loop.
-    let mut socket =
-        mio::net::UdpSocket::bind(bind_addr.parse().unwrap()).unwrap();
-    poll.registry()
-        .register(&mut socket, mio::Token(0), mio::Interest::READABLE)
-        .unwrap();
+    // Warn the user if there are more usable addresses than the advertised
+    // `active_connection_id_limit`.
+    if addrs.len() as u64 > conn_args.max_active_cids {
+        warn!(
+            "{} addresses provided, but configuration restricts to at most {} \
+               active CIDs; increase the --max-active-cids parameter to use all \
+               the provided addresses",
+            addrs.len(),
+            conn_args.max_active_cids
+        );
+    }
 
-    let migrate_socket = if args.perform_migration {
-        let mut socket =
-            mio::net::UdpSocket::bind(bind_addr.parse().unwrap()).unwrap();
-        poll.registry()
-            .register(&mut socket, mio::Token(1), mio::Interest::READABLE)
-            .unwrap();
-
-        Some(socket)
-    } else {
-        None
-    };
+    let mut rm_addrs = args.rm_addrs.clone();
+    let mut status = args.status.clone();
 
     // Create the configuration for the QUIC connection.
     let mut config = quiche::Config::new(args.version).unwrap();
@@ -127,6 +127,7 @@ pub fn connect(
     config.set_initial_max_streams_uni(conn_args.max_streams_uni);
     config.set_disable_active_migration(!conn_args.enable_active_migration);
     config.set_active_connection_id_limit(conn_args.max_active_cids);
+    config.set_multipath(conn_args.multipath);
 
     config.set_max_connection_window(conn_args.max_window);
     config.set_max_stream_window(conn_args.max_stream_window);
@@ -176,8 +177,6 @@ pub fn connect(
 
     let scid = quiche::ConnectionId::from_ref(&scid);
 
-    let local_addr = socket.local_addr().unwrap();
-
     // Create a QUIC connection and initiate handshake.
     let mut conn = quiche::connect(
         connect_url.domain(),
@@ -217,18 +216,17 @@ pub fn connect(
 
     info!(
         "connecting to {:} from {:} with scid {:?}",
-        peer_addr,
-        socket.local_addr().unwrap(),
-        scid,
+        peer_addr, local_addr, scid,
     );
 
     let (write, send_info) = conn.send(&mut out).expect("initial send failed");
+    let token = src_addr_to_token[&send_info.from];
 
-    while let Err(e) = socket.send_to(&out[..write], send_info.to) {
+    while let Err(e) = sockets[token].send_to(&out[..write], send_info.to) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
             trace!(
                 "{} -> {}: send() would block",
-                socket.local_addr().unwrap(),
+                sockets[token].local_addr().unwrap(),
                 send_info.to
             );
             continue;
@@ -241,6 +239,7 @@ pub fn connect(
 
     let app_data_start = std::time::Instant::now();
 
+    let mut probed_paths = 0;
     let mut pkt_count = 0;
 
     let mut scid_sent = false;
@@ -264,14 +263,8 @@ pub fn connect(
         // Read incoming UDP packets from the socket and feed them to quiche,
         // until there are no more packets to read.
         for event in &events {
-            let socket = match event.token() {
-                mio::Token(0) => &socket,
-
-                mio::Token(1) => migrate_socket.as_ref().unwrap(),
-
-                _ => unreachable!(),
-            };
-
+            let token = event.token().into();
+            let socket = &sockets[token];
             let local_addr = socket.local_addr().unwrap();
             'read: loop {
                 let (len, from) = match socket.recv_from(&mut buf) {
@@ -428,8 +421,12 @@ pub fn connect(
                         "Path ({}, {}) is now validated",
                         local_addr, peer_addr
                     );
-                    conn.migrate(local_addr, peer_addr).unwrap();
-                    migrated = true;
+                    if conn.is_multipath_enabled() {
+                        conn.set_active(local_addr, peer_addr, true).ok();
+                    } else if args.perform_migration {
+                        conn.migrate(local_addr, peer_addr).unwrap();
+                        migrated = true;
+                    }
                 },
 
                 quiche::PathEvent::FailedValidation(local_addr, peer_addr) => {
@@ -439,10 +436,10 @@ pub fn connect(
                     );
                 },
 
-                quiche::PathEvent::Closed(local_addr, peer_addr) => {
+                quiche::PathEvent::Closed(local_addr, peer_addr, e, reason) => {
                     info!(
-                        "Path ({}, {}) is now closed and unusable",
-                        local_addr, peer_addr
+                        "Path ({}, {}) is now closed and unusable; err = {}, reason = {:?}",
+                        local_addr, peer_addr, e, reason
                     );
                 },
 
@@ -458,6 +455,8 @@ pub fn connect(
                 },
 
                 quiche::PathEvent::PeerMigrated(..) => unreachable!(),
+
+                quiche::PathEvent::PeerPathStatus(..) => {},
             }
         }
 
@@ -477,80 +476,103 @@ pub fn connect(
             scid_sent = true;
         }
 
-        if args.perform_migration &&
+        if conn_args.multipath &&
+            probed_paths < addrs.len() &&
+            conn.available_dcids() > 0 &&
+            conn.probe_path(addrs[probed_paths], peer_addr).is_ok()
+        {
+            probed_paths += 1;
+        }
+
+        if !conn_args.multipath &&
+            args.perform_migration &&
             !new_path_probed &&
             scid_sent &&
             conn.available_dcids() > 0
         {
-            let additional_local_addr =
-                migrate_socket.as_ref().unwrap().local_addr().unwrap();
+            let additional_local_addr = sockets[1].local_addr().unwrap();
             conn.probe_path(additional_local_addr, peer_addr).unwrap();
 
             new_path_probed = true;
         }
 
-        // Generate outgoing QUIC packets and send them on the UDP socket, until
-        // quiche reports that there are no more packets to be sent.
-        let mut sockets = vec![&socket];
-        if let Some(migrate_socket) = migrate_socket.as_ref() {
-            sockets.push(migrate_socket);
+        if conn.is_multipath_enabled() {
+            rm_addrs.retain(|(d, addr)| {
+                if app_data_start.elapsed() >= *d {
+                    info!("Abandoning path {:?}", addr);
+                    conn.abandon_path(
+                        *addr,
+                        peer_addr,
+                        0,
+                        "do not use me anymore".to_string().into_bytes(),
+                    )
+                    .is_err()
+                } else {
+                    true
+                }
+            });
+
+            status.retain(|(d, addr, available)| {
+                if app_data_start.elapsed() >= *d {
+                    let status = (*available).into();
+                    info!("Advertising path status {status:?} to {addr:?}");
+                    conn.set_path_status(*addr, peer_addr, status, true)
+                        .is_err()
+                } else {
+                    true
+                }
+            });
         }
 
-        for socket in sockets {
-            let local_addr = socket.local_addr().unwrap();
+        // Determine in which order we are going to iterate over paths.
+        let scheduled_tuples = lowest_latency_scheduler(&conn);
 
-            for peer_addr in conn.paths_iter(local_addr) {
-                loop {
-                    let (write, send_info) = match conn.send_on_path(
-                        &mut out,
-                        Some(local_addr),
-                        Some(peer_addr),
-                    ) {
-                        Ok(v) => v,
+        // Generate outgoing QUIC packets and send them on the UDP socket, until
+        // quiche reports that there are no more packets to be sent.
+        for (local_addr, peer_addr) in scheduled_tuples {
+            let token = src_addr_to_token[&local_addr];
+            let socket = &sockets[token];
+            loop {
+                let (write, send_info) = match conn.send_on_path(
+                    &mut out,
+                    Some(local_addr),
+                    Some(peer_addr),
+                ) {
+                    Ok(v) => v,
 
-                        Err(quiche::Error::Done) => {
-                            trace!(
-                                "{} -> {}: done writing",
-                                local_addr,
-                                peer_addr
-                            );
-                            break;
-                        },
+                    Err(quiche::Error::Done) => {
+                        trace!("{} -> {}: done writing", local_addr, peer_addr);
+                        break;
+                    },
 
-                        Err(e) => {
-                            error!(
-                                "{} -> {}: send failed: {:?}",
-                                local_addr, peer_addr, e
-                            );
+                    Err(e) => {
+                        error!(
+                            "{} -> {}: send failed: {:?}",
+                            local_addr, peer_addr, e
+                        );
 
-                            conn.close(false, 0x1, b"fail").ok();
-                            break;
-                        },
-                    };
+                        conn.close(false, 0x1, b"fail").ok();
+                        break;
+                    },
+                };
 
-                    if let Err(e) = socket.send_to(&out[..write], send_info.to) {
-                        if e.kind() == std::io::ErrorKind::WouldBlock {
-                            trace!(
-                                "{} -> {}: send() would block",
-                                local_addr,
-                                send_info.to
-                            );
-                            break;
-                        }
-
-                        return Err(ClientError::Other(format!(
-                            "{} -> {}: send() failed: {:?}",
-                            local_addr, send_info.to, e
-                        )));
+                if let Err(e) = socket.send_to(&out[..write], send_info.to) {
+                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                        trace!(
+                            "{} -> {}: send() would block",
+                            local_addr,
+                            send_info.to
+                        );
+                        break;
                     }
 
-                    trace!(
-                        "{} -> {}: written {}",
-                        local_addr,
-                        send_info.to,
-                        write
-                    );
+                    return Err(ClientError::Other(format!(
+                        "{} -> {}: send() failed: {:?}",
+                        local_addr, send_info.to, e
+                    )));
                 }
+
+                trace!("{} -> {}: written {}", local_addr, send_info.to, write);
             }
         }
 
@@ -587,4 +609,77 @@ pub fn connect(
     }
 
     Ok(())
+}
+
+fn create_sockets(
+    poll: &mut mio::Poll, peer_addr: &std::net::SocketAddr, args: &ClientArgs,
+) -> (
+    Slab<mio::net::UdpSocket>,
+    HashMap<std::net::SocketAddr, usize>,
+    std::net::SocketAddr,
+) {
+    let mut sockets = Slab::with_capacity(std::cmp::max(args.addrs.len(), 1));
+    let mut src_addrs = HashMap::new();
+    let mut first_local_addr = None;
+
+    // Create UDP sockets backing the QUIC connection, and register them with
+    // the event loop. Check first user-provided addresses and keep the ones
+    // compatible with the address family of the peer.
+    for src_addr in args.addrs.iter().filter(|sa| {
+        (sa.is_ipv4() && peer_addr.is_ipv4()) ||
+            (sa.is_ipv6() && peer_addr.is_ipv6())
+    }) {
+        let socket = mio::net::UdpSocket::bind(*src_addr).unwrap();
+        let local_addr = socket.local_addr().unwrap();
+        let token = sockets.insert(socket);
+        src_addrs.insert(local_addr, token);
+        poll.registry()
+            .register(
+                &mut sockets[token],
+                mio::Token(token),
+                mio::Interest::READABLE,
+            )
+            .unwrap();
+        if first_local_addr.is_none() {
+            first_local_addr = Some(local_addr);
+        }
+    }
+
+    // If there is no such address, rely on the default INADDR_IN or IN6ADDR_ANY
+    // depending on the IP family of the server address. This is needed on macOS
+    // and BSD variants that don't support binding to IN6ADDR_ANY for both v4
+    // and v6.
+    if first_local_addr.is_none() {
+        let bind_addr = match peer_addr {
+            std::net::SocketAddr::V4(_) => "0.0.0.0:0",
+            std::net::SocketAddr::V6(_) => "[::]:0",
+        };
+        let bind_addr = bind_addr.parse().unwrap();
+        let socket = mio::net::UdpSocket::bind(bind_addr).unwrap();
+        let local_addr = socket.local_addr().unwrap();
+        let token = sockets.insert(socket);
+        src_addrs.insert(local_addr, token);
+        poll.registry()
+            .register(
+                &mut sockets[token],
+                mio::Token(token),
+                mio::Interest::READABLE,
+            )
+            .unwrap();
+        first_local_addr = Some(local_addr)
+    }
+
+    (sockets, src_addrs, first_local_addr.unwrap())
+}
+
+/// Generate a ordered list of 4-tuples on which the host should send packets,
+/// following a lowest-latency scheduling.
+fn lowest_latency_scheduler(
+    conn: &quiche::Connection,
+) -> impl Iterator<Item = (std::net::SocketAddr, std::net::SocketAddr)> {
+    use itertools::Itertools;
+    conn.path_stats()
+        .filter(|p| !matches!(p.state, quiche::PathState::Closed(_, _)))
+        .sorted_by_key(|p| p.rtt)
+        .map(|p| (p.local_addr, p.peer_addr))
 }

@@ -124,6 +124,7 @@ fn main() {
     config.set_initial_congestion_window_packets(
         usize::try_from(conn_args.initial_cwnd_packets).unwrap(),
     );
+    config.set_multipath(conn_args.multipath);
 
     config.set_max_connection_window(conn_args.max_window);
     config.set_max_stream_window(conn_args.max_stream_window);
@@ -547,16 +548,24 @@ fn main() {
                     client.max_datagram_size *
                     client.max_datagram_size;
             let mut total_write = 0;
-            let mut dst_info = None;
+            let mut dst_info: Option<quiche::SendInfo> = None;
 
             while total_write < max_send_burst {
-                let (write, send_info) = match client
-                    .conn
-                    .send(&mut out[total_write..max_send_burst])
-                {
+                let res = match dst_info {
+                    Some(info) => client.conn.send_on_path(
+                        &mut out[total_write..max_send_burst],
+                        Some(info.from),
+                        Some(info.to),
+                    ),
+                    None =>
+                        client.conn.send(&mut out[total_write..max_send_burst]),
+                };
+
+                let (write, send_info) = match res {
                     Ok(v) => v,
 
                     Err(quiche::Error::Done) => {
+                        continue_write = dst_info.is_some();
                         trace!("{} done writing", client.conn.trace_id());
                         break;
                     },
@@ -601,6 +610,14 @@ fn main() {
             }
 
             trace!("{} written {} bytes", client.conn.trace_id(), total_write);
+
+            if continue_write {
+                trace!(
+                    "{} pause writing and consider another path",
+                    client.conn.trace_id()
+                );
+                break;
+            }
 
             if total_write >= max_send_burst {
                 trace!("{} pause writing", client.conn.trace_id(),);
@@ -703,7 +720,8 @@ fn handle_path_events(client: &mut Client) {
                 client
                     .conn
                     .probe_path(local_addr, peer_addr)
-                    .expect("cannot probe");
+                    .map_err(|e| error!("cannot probe: {}", e))
+                    .ok();
             },
 
             quiche::PathEvent::Validated(local_addr, peer_addr) => {
@@ -713,6 +731,13 @@ fn handle_path_events(client: &mut Client) {
                     local_addr,
                     peer_addr
                 );
+                if client.conn.is_multipath_enabled() {
+                    client
+                        .conn
+                        .set_active(local_addr, peer_addr, true)
+                        .map_err(|e| error!("cannot set path active: {}", e))
+                        .ok();
+                }
             },
 
             quiche::PathEvent::FailedValidation(local_addr, peer_addr) => {
@@ -724,12 +749,14 @@ fn handle_path_events(client: &mut Client) {
                 );
             },
 
-            quiche::PathEvent::Closed(local_addr, peer_addr) => {
+            quiche::PathEvent::Closed(local_addr, peer_addr, err, reason) => {
                 info!(
-                    "{} Path ({}, {}) is now closed and unusable",
+                    "{} Path ({}, {}) is now closed and unusable; err = {} reason = {:?}",
                     client.conn.trace_id(),
                     local_addr,
-                    peer_addr
+                    peer_addr,
+                    err,
+                    reason,
                 );
             },
 
@@ -750,6 +777,15 @@ fn handle_path_events(client: &mut Client) {
                     local_addr,
                     peer_addr
                 );
+            },
+
+            quiche::PathEvent::PeerPathStatus(addr, path_status) => {
+                info!("Peer asks status {:?} for {:?}", path_status, addr,);
+                client
+                    .conn
+                    .set_path_status(addr.0, addr.1, path_status, false)
+                    .map_err(|e| error!("cannot follow status request: {}", e))
+                    .ok();
             },
         }
     }
