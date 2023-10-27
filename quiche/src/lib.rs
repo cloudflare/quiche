@@ -4117,16 +4117,23 @@ impl Connection {
                 }
             }
 
-            // Create PATH_STATUS frames as needed.
-            while let Some((path_id, seq_num, status)) = self.paths.path_status()
+            // Create PATH_AVAILABLE/PATH_STANDBY frames as needed.
+            while let Some((path_id, seq_num, available)) =
+                self.paths.path_status()
             {
                 let status_path = self.paths.get(path_id)?;
                 let dcid_seq_num =
                     status_path.active_dcid_seq.ok_or(Error::InvalidState)?;
-                let frame = frame::Frame::PathStatus {
-                    dcid_seq_num,
-                    seq_num,
-                    status,
+                let frame = if available {
+                    frame::Frame::PathAvailable {
+                        dcid_seq_num,
+                        seq_num,
+                    }
+                } else {
+                    frame::Frame::PathStandby {
+                        dcid_seq_num,
+                        seq_num,
+                    }
                 };
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     self.paths.on_path_status_sent();
@@ -7641,11 +7648,9 @@ impl Connection {
                 )?;
             },
 
-            frame::Frame::PathStatus {
+            frame::Frame::PathStandby {
                 dcid_seq_num,
                 seq_num,
-                status,
-                ..
             } => {
                 if !self.use_path_pkt_num_space(epoch) {
                     return Err(Error::MultiPathViolation);
@@ -7655,7 +7660,22 @@ impl Connection {
                     .get_dcid(dcid_seq_num)?
                     .path_id
                     .ok_or(Error::InvalidFrame)?;
-                self.paths.on_path_status_received(pid, seq_num, status);
+                self.paths.on_path_status_received(pid, seq_num, false);
+            },
+
+            frame::Frame::PathAvailable {
+                dcid_seq_num,
+                seq_num,
+            } => {
+                if !self.use_path_pkt_num_space(epoch) {
+                    return Err(Error::MultiPathViolation);
+                }
+                let pid = self
+                    .ids
+                    .get_dcid(dcid_seq_num)?
+                    .path_id
+                    .ok_or(Error::InvalidFrame)?;
+                self.paths.on_path_status_received(pid, seq_num, true);
             },
         };
         Ok(())
@@ -8465,7 +8485,7 @@ impl TransportParams {
                     tp.max_datagram_frame_size = Some(val.get_varint()?);
                 },
 
-                0x0f739bbc1b666d05 => {
+                0x0f739bbc1b666d06 => {
                     tp.enable_multipath = true;
                 },
 
@@ -8632,7 +8652,7 @@ impl TransportParams {
         }
 
         if tp.enable_multipath {
-            TransportParams::encode_param(&mut b, 0x0f739bbc1b666d05, 0)?;
+            TransportParams::encode_param(&mut b, 0x0f739bbc1b666d06, 0)?;
         }
 
         let out_len = b.off();

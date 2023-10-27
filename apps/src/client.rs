@@ -36,7 +36,6 @@ use std::rc::Rc;
 
 use std::cell::RefCell;
 
-use quiche::PathStatus;
 use ring::rand::*;
 
 use slab::Slab;
@@ -513,14 +512,10 @@ pub fn connect(
                 }
             });
 
-            status.retain(|(d, addr, s)| {
+            status.retain(|(d, addr, available)| {
                 if app_data_start.elapsed() >= *d {
-                    info!("Advertising path status {s} to {addr:?}");
-                    let status = match s {
-                        1 => PathStatus::Standby,
-                        2 => PathStatus::Available,
-                        s => PathStatus::Unknown(*s),
-                    };
+                    let status = (*available).into();
+                    info!("Advertising path status {status:?} to {addr:?}");
                     conn.set_path_status(*addr, peer_addr, status, true)
                         .is_err()
                 } else {

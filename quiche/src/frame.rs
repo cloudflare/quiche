@@ -191,10 +191,14 @@ pub enum Frame {
         reason: Vec<u8>,
     },
 
-    PathStatus {
+    PathStandby {
         dcid_seq_num: u64,
         seq_num: u64,
-        status: u64,
+    },
+
+    PathAvailable {
+        dcid_seq_num: u64,
+        seq_num: u64,
     },
 }
 
@@ -334,10 +338,14 @@ impl Frame {
                 reason: b.get_bytes_with_varint_length()?.to_vec(),
             },
 
-            0x15228c06 => Frame::PathStatus {
+            0x15228c07 => Frame::PathStandby {
                 dcid_seq_num: b.get_varint()?,
                 seq_num: b.get_varint()?,
-                status: b.get_varint()?,
+            },
+
+            0x15228c08 => Frame::PathAvailable {
+                dcid_seq_num: b.get_varint()?,
+                seq_num: b.get_varint()?,
             },
 
             _ => return Err(Error::InvalidFrame),
@@ -359,7 +367,8 @@ impl Frame {
             (packet::Type::ZeroRTT, Frame::ConnectionClose { .. }) => false,
             (packet::Type::ZeroRTT, Frame::ACKMP { .. }) => false,
             (packet::Type::ZeroRTT, Frame::PathAbandon { .. }) => false,
-            (packet::Type::ZeroRTT, Frame::PathStatus { .. }) => false,
+            (packet::Type::ZeroRTT, Frame::PathStandby { .. }) => false,
+            (packet::Type::ZeroRTT, Frame::PathAvailable { .. }) => false,
 
             // ACK, CRYPTO and CONNECTION_CLOSE can be sent on all other packet
             // types.
@@ -609,16 +618,24 @@ impl Frame {
                 b.put_bytes(reason.as_ref())?;
             },
 
-            Frame::PathStatus {
+            Frame::PathStandby {
                 dcid_seq_num,
                 seq_num,
-                status,
             } => {
-                b.put_varint(0x15228c06)?;
+                b.put_varint(0x15228c07)?;
 
                 b.put_varint(*dcid_seq_num)?;
                 b.put_varint(*seq_num)?;
-                b.put_varint(*status)?;
+            },
+
+            Frame::PathAvailable {
+                dcid_seq_num,
+                seq_num,
+            } => {
+                b.put_varint(0x15228c08)?;
+
+                b.put_varint(*dcid_seq_num)?;
+                b.put_varint(*seq_num)?;
             },
         }
 
@@ -831,15 +848,22 @@ impl Frame {
                 reason.len()
             },
 
-            Frame::PathStatus {
+            Frame::PathStandby {
                 dcid_seq_num,
                 seq_num,
-                status,
             } => {
                 4 + // frame size
                 octets::varint_len(*dcid_seq_num) +
-                octets::varint_len(*seq_num) +
-                octets::varint_len(*status)
+                octets::varint_len(*seq_num)
+            },
+
+            Frame::PathAvailable {
+                dcid_seq_num,
+                seq_num,
+            } => {
+                4 + // frame size
+                octets::varint_len(*dcid_seq_num) +
+                octets::varint_len(*seq_num)
             },
         }
     }
@@ -1095,14 +1119,20 @@ impl Frame {
                 reason: Some(String::from_utf8_lossy(reason).into_owned()),
             },
 
-            Frame::PathStatus {
+            Frame::PathStandby {
                 dcid_seq_num,
                 seq_num,
-                status,
-            } => QuicFrame::PathStatus {
+            } => QuicFrame::PathStandby {
                 dcid_seq_num: *dcid_seq_num,
                 seq_num: *seq_num,
-                status: *status,
+            },
+
+            Frame::PathAvailable {
+                dcid_seq_num,
+                seq_num,
+            } => QuicFrame::PathAvailable {
+                dcid_seq_num: *dcid_seq_num,
+                seq_num: *seq_num,
             },
         }
     }
@@ -1297,16 +1327,24 @@ impl std::fmt::Debug for Frame {
                 )?;
             },
 
-            Frame::PathStatus {
+            Frame::PathStandby {
                 dcid_seq_num,
                 seq_num,
-                status,
-                ..
             } => {
                 write!(
                     f,
-                    "PATH_STATUS dcid_seq_num={dcid_seq_num:x} seq_num={seq_num:x} status={status:x}",
-                )?;
+                    "PATH_STANDBY dcid_seq_num={dcid_seq_num:x} seq_num={seq_num:x}",
+                )?
+            },
+
+            Frame::PathAvailable {
+                dcid_seq_num,
+                seq_num,
+            } => {
+                write!(
+                    f,
+                    "PATH_AVAILABLE dcid_seq_num={dcid_seq_num:x} seq_num={seq_num:x}",
+                )?
             },
         }
 
@@ -2432,17 +2470,15 @@ mod tests {
     }
 
     #[test]
-    fn path_status() {
+    fn path_standby() {
         let mut d = [42; 128];
 
         let dcid_seq_num = 0xabcdef00;
         let seq_num = 0x42;
-        let status = 1;
 
-        let frame = Frame::PathStatus {
+        let frame = Frame::PathStandby {
             dcid_seq_num,
             seq_num,
-            status,
         };
 
         let wire_len = {
@@ -2451,7 +2487,40 @@ mod tests {
         };
 
         assert_eq!(frame.wire_len(), wire_len);
-        assert_eq!(wire_len, 15);
+        assert_eq!(wire_len, 14);
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn path_available() {
+        let mut d = [42; 128];
+
+        let dcid_seq_num = 0xabcdef00;
+        let seq_num = 0x42;
+
+        let frame = Frame::PathAvailable {
+            dcid_seq_num,
+            seq_num,
+        };
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(frame.wire_len(), wire_len);
+        assert_eq!(wire_len, 14);
 
         let mut b = octets::Octets::with_slice(&d);
         assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));

@@ -515,10 +515,14 @@ pub enum QuicFrame {
         reason: Option<String>,
     },
 
-    PathStatus {
+    PathStandby {
         dcid_seq_num: u64,
         seq_num: u64,
-        status: u64,
+    },
+
+    PathAvailable {
+        dcid_seq_num: u64,
+        seq_num: u64,
     },
 
     Unknown {

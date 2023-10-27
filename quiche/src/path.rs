@@ -115,27 +115,19 @@ pub enum PathStatus {
 
     /// The host should consider this path to send non-probing packets.
     Available,
-
-    /// Other values, might be application-specific.
-    Unknown(u64),
 }
 
-impl From<PathStatus> for u64 {
+impl From<PathStatus> for bool {
     fn from(s: PathStatus) -> Self {
-        match s {
-            PathStatus::Standby => 1,
-            PathStatus::Available => 2,
-            PathStatus::Unknown(v) => v,
-        }
+        matches!(s, PathStatus::Available)
     }
 }
 
-impl From<u64> for PathStatus {
-    fn from(v: u64) -> Self {
+impl From<bool> for PathStatus {
+    fn from(v: bool) -> Self {
         match v {
-            1 => PathStatus::Standby,
-            2 => PathStatus::Available,
-            u => PathStatus::Unknown(u),
+            false => PathStatus::Standby,
+            true => PathStatus::Available,
         }
     }
 }
@@ -687,7 +679,8 @@ pub struct PathMap {
     path_abandon: VecDeque<usize>,
 
     /// Whether a connection-wide PATH_STATUS frame should be sent.
-    path_status_to_advertise: VecDeque<(usize, u64, u64)>,
+    /// Send a PATH_AVAILABLE is true, PATH_STANDBY else.
+    path_status_to_advertise: VecDeque<(usize, u64, bool)>,
     /// The sequence number for the next PATH_STATUS.
     next_path_status_seq_num: u64,
 }
@@ -1139,27 +1132,27 @@ impl PathMap {
         !self.path_status_to_advertise.is_empty()
     }
 
-    /// Returns the Path ID, the sequence number and the status value that
-    /// should be advertised in the next PATH_STATUS frame.
-    pub fn path_status(&self) -> Option<(usize, u64, u64)> {
+    /// Returns the Path ID, the sequence number and the availability
+    /// status (PATH_STANDBY or PATH_AVAILABLE) that should be advertised next.
+    pub fn path_status(&self) -> Option<(usize, u64, bool)> {
         self.path_status_to_advertise.front().copied()
     }
 
-    /// Handles the sending of PATH_STATUSes.
+    /// Handles the sending of PATH_STANDBY/PATH_AVAILABLE.
     pub fn on_path_status_sent(&mut self) {
         self.path_status_to_advertise.pop_front();
     }
 
-    /// Handles the reception of PATH_STATUSes.
+    /// Handles the reception of PATH_STANDBY/PATH_AVAILABLE.
     pub fn on_path_status_received(
-        &mut self, path_id: usize, seq_num: u64, status: u64,
+        &mut self, path_id: usize, seq_num: u64, available: bool,
     ) {
         if let Ok(p) = self.get_mut(path_id) {
             if seq_num >= p.expected_path_status_seq_num {
                 p.expected_path_status_seq_num = seq_num.saturating_add(1);
                 let addr = (p.local_addr(), p.peer_addr());
                 self.events
-                    .push_back(PathEvent::PeerPathStatus(addr, status.into()));
+                    .push_back(PathEvent::PeerPathStatus(addr, available.into()));
             }
         }
     }
@@ -1496,10 +1489,10 @@ mod tests {
         paths.advertise_path_status(pid_3).unwrap();
 
         assert_eq!(paths.has_path_status(), true);
-        assert_eq!(paths.path_status(), Some((pid_2, 0, 1)));
+        assert_eq!(paths.path_status(), Some((pid_2, 0, false)));
         paths.on_path_status_sent();
         assert_eq!(paths.has_path_status(), true);
-        assert_eq!(paths.path_status(), Some((pid_3, 1, 2)));
+        assert_eq!(paths.path_status(), Some((pid_3, 1, true)));
         paths.on_path_status_sent();
         assert_eq!(paths.has_path_status(), false);
         assert_eq!(paths.path_status(), None);
@@ -1509,10 +1502,10 @@ mod tests {
         paths.advertise_path_status(pid_2).unwrap();
         paths.advertise_path_status(pid_3).unwrap();
         assert_eq!(paths.has_path_status(), true);
-        assert_eq!(paths.path_status(), Some((pid_2, 2, 2)));
+        assert_eq!(paths.path_status(), Some((pid_2, 2, true)));
         paths.on_path_status_sent();
         assert_eq!(paths.has_path_status(), true);
-        assert_eq!(paths.path_status(), Some((pid_3, 3, 1)));
+        assert_eq!(paths.path_status(), Some((pid_3, 3, false)));
         paths.on_path_status_sent();
         assert_eq!(paths.has_path_status(), false);
         assert_eq!(paths.path_status(), None);
