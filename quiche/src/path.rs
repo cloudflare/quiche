@@ -333,7 +333,6 @@ impl Path {
     }
 
     /// Function used to set timer for path MTU Discovery probe
-    /// Function used to set timer for path MTU Discovery probe
     pub fn set_pmtu_probe_timer(
         &mut self, handshake_status: &recovery::HandshakeStatus, now: Instant,
     ) -> bool {
