@@ -138,28 +138,29 @@ pub struct Open {
 
 impl Open {
     pub fn new(
-        alg: Algorithm, key: &[u8], iv: &[u8], hp_key: &[u8], secret: &[u8],
+        alg: Algorithm, key: Vec<u8>, iv: Vec<u8>, hp_key: Vec<u8>,
+        secret: Vec<u8>,
     ) -> Result<Open> {
         Ok(Open {
             alg,
 
-            secret: Vec::from(secret),
-
             header: HeaderProtectionKey::new(alg, hp_key)?,
 
             packet: PacketKey::new(alg, key, iv)?,
+
+            secret,
         })
     }
 
-    pub fn from_secret(aead: Algorithm, secret: &[u8]) -> Result<Open> {
+    pub fn from_secret(aead: Algorithm, secret: Vec<u8>) -> Result<Open> {
         Ok(Open {
             alg: aead,
 
-            secret: Vec::from(secret),
+            header: HeaderProtectionKey::from_secret(aead, &secret)?,
 
-            header: HeaderProtectionKey::from_secret(aead, secret)?,
+            packet: PacketKey::from_secret(aead, &secret)?,
 
-            packet: PacketKey::from_secret(aead, secret)?,
+            secret,
         })
     }
 
@@ -231,7 +232,10 @@ impl Open {
 
             secret: next_secret,
 
-            header: HeaderProtectionKey::new(self.alg, &self.header.hp_key)?,
+            header: HeaderProtectionKey::new(
+                self.alg,
+                self.header.hp_key.clone(),
+            )?,
 
             packet: next_packet_key,
         })
@@ -250,28 +254,29 @@ pub struct Seal {
 
 impl Seal {
     pub fn new(
-        alg: Algorithm, key: &[u8], iv: &[u8], hp_key: &[u8], secret: &[u8],
+        alg: Algorithm, key: Vec<u8>, iv: Vec<u8>, hp_key: Vec<u8>,
+        secret: Vec<u8>,
     ) -> Result<Seal> {
         Ok(Seal {
             alg,
 
-            secret: Vec::from(secret),
-
             header: HeaderProtectionKey::new(alg, hp_key)?,
 
             packet: PacketKey::new(alg, key, iv)?,
+
+            secret,
         })
     }
 
-    pub fn from_secret(aead: Algorithm, secret: &[u8]) -> Result<Seal> {
+    pub fn from_secret(aead: Algorithm, secret: Vec<u8>) -> Result<Seal> {
         Ok(Seal {
             alg: aead,
 
-            secret: Vec::from(secret),
+            header: HeaderProtectionKey::from_secret(aead, &secret)?,
 
-            header: HeaderProtectionKey::from_secret(aead, secret)?,
+            packet: PacketKey::from_secret(aead, &secret)?,
 
-            packet: PacketKey::from_secret(aead, secret)?,
+            secret,
         })
     }
 
@@ -358,7 +363,10 @@ impl Seal {
 
             secret: next_secret,
 
-            header: HeaderProtectionKey::new(self.alg, &self.header.hp_key)?,
+            header: HeaderProtectionKey::new(
+                self.alg,
+                self.header.hp_key.clone(),
+            )?,
 
             packet: next_packet_key,
         })
@@ -372,12 +380,9 @@ pub struct HeaderProtectionKey {
 }
 
 impl HeaderProtectionKey {
-    pub fn new(alg: Algorithm, hp_key: &[u8]) -> Result<Self> {
-        aead::quic::HeaderProtectionKey::new(alg.get_ring_hp(), hp_key)
-            .map(|hpk| Self {
-                hpk,
-                hp_key: Vec::from(hp_key),
-            })
+    pub fn new(alg: Algorithm, hp_key: Vec<u8>) -> Result<Self> {
+        aead::quic::HeaderProtectionKey::new(alg.get_ring_hp(), &hp_key)
+            .map(|hpk| Self { hpk, hp_key })
             .map_err(|_| Error::CryptoFail)
     }
 
@@ -388,7 +393,7 @@ impl HeaderProtectionKey {
 
         derive_hdr_key(aead, secret, &mut hp_key)?;
 
-        Self::new(aead, &hp_key)
+        Self::new(aead, hp_key)
     }
 }
 
@@ -399,11 +404,11 @@ pub struct PacketKey {
 }
 
 impl PacketKey {
-    pub fn new(alg: Algorithm, key: &[u8], iv: &[u8]) -> Result<Self> {
+    pub fn new(alg: Algorithm, key: Vec<u8>, iv: Vec<u8>) -> Result<Self> {
         Ok(Self {
-            ctx: make_aead_ctx(alg, key)?,
+            ctx: make_aead_ctx(alg, &key)?,
 
-            nonce: Vec::from(iv),
+            nonce: iv,
         })
     }
 
@@ -417,7 +422,7 @@ impl PacketKey {
         derive_pkt_key(aead, secret, &mut key)?;
         derive_pkt_iv(aead, secret, &mut iv)?;
 
-        Self::new(aead, &key, &iv)
+        Self::new(aead, key, iv)
     }
 }
 
@@ -458,34 +463,34 @@ pub fn derive_initial_key_material(
         (
             Open::new(
                 aead,
-                &client_key,
-                &client_iv,
-                &client_hp_key,
-                &client_secret,
+                client_key,
+                client_iv,
+                client_hp_key,
+                client_secret.to_vec(),
             )?,
             Seal::new(
                 aead,
-                &server_key,
-                &server_iv,
-                &server_hp_key,
-                &server_secret,
+                server_key,
+                server_iv,
+                server_hp_key,
+                server_secret.to_vec(),
             )?,
         )
     } else {
         (
             Open::new(
                 aead,
-                &server_key,
-                &server_iv,
-                &server_hp_key,
-                &server_secret,
+                server_key,
+                server_iv,
+                server_hp_key,
+                server_secret.to_vec(),
             )?,
             Seal::new(
                 aead,
-                &client_key,
-                &client_iv,
-                &client_hp_key,
-                &client_secret,
+                client_key,
+                client_iv,
+                client_hp_key,
+                client_secret.to_vec(),
             )?,
         )
     };
