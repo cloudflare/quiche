@@ -1514,7 +1514,7 @@ mod tests {
 
         let alg = crypto::Algorithm::ChaCha20_Poly1305;
 
-        let aead = crypto::Open::from_secret(alg, &secret).unwrap();
+        let aead = crypto::Open::from_secret(alg, secret.into()).unwrap();
 
         let mut hdr = Header::from_bytes(&mut b, 0).unwrap();
         assert_eq!(hdr.ty, Type::Short);
@@ -1882,7 +1882,7 @@ mod tests {
 
         let alg = crypto::Algorithm::ChaCha20_Poly1305;
 
-        let aead = crypto::Seal::from_secret(alg, &secret).unwrap();
+        let aead = crypto::Seal::from_secret(alg, secret.into()).unwrap();
 
         let pn = 654_360_564;
         let pn_len = 3;
