@@ -139,7 +139,9 @@ fn main() {
     let mut req_sent = false;
 
     loop {
+        debug!("entered client.rs loop");
         poll.poll(&mut events, conn.timeout()).unwrap();
+        debug!("polled");
 
         // Read incoming UDP packets from the socket and feed them to quiche,
         // until there are no more packets to read.
@@ -265,8 +267,6 @@ fn main() {
 
                 panic!("send() failed: {:?}", e);
             }
-
-            debug!("written {}", write);
         }
 
         if conn.is_closed() {

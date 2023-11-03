@@ -237,7 +237,7 @@ pub fn connect(
         return Err(ClientError::Other(format!("send() failed: {e:?}")));
     }
 
-    trace!("written {}", write);
+    trace!("EVAN written {}", write);
 
     let app_data_start = std::time::Instant::now();
 
@@ -251,6 +251,9 @@ pub fn connect(
         if !conn.is_in_early_data() || app_proto_selected {
             poll.poll(&mut events, conn.timeout()).unwrap();
         }
+
+        // MAIN ISSUE WITH -m=1 is that events is empty for some reason. We enter
+        // polling and then don't pick up any new events
 
         // If the event loop reported no events, it means that the timeout
         // has expired, so handle it without attempting to read packets. We
@@ -414,6 +417,7 @@ pub fn connect(
         // If we have an HTTP connection, first issue the requests then
         // process received data.
         if let Some(h_conn) = http_conn.as_mut() {
+            debug!("EVAN issue requests\n\n");
             h_conn.send_requests(
                 &mut conn,
                 &args.dump_response_path,
@@ -548,6 +552,7 @@ pub fn connect(
                         )));
                     }
 
+                    // stalls here for some reason
                     trace!(
                         "{} -> {}: written {}",
                         local_addr,
@@ -557,6 +562,8 @@ pub fn connect(
                 }
             }
         }
+
+        debug!("EVAN Got out of loop");
 
         if conn.is_closed() {
             info!(
