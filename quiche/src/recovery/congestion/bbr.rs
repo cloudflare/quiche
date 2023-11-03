@@ -290,7 +290,7 @@ impl BBR {
             detect_overshooting: false,
             bytes_lost_while_detecting_overshooting: 0,
             bytes_lost_multiplier_while_detecting_overshooting: 2,
-            sampler: BandwidthSampler::new(BANDWIDTH_WINDOW_SIZE),
+            sampler: BandwidthSampler::new(BANDWIDTH_WINDOW_SIZE, true),
             max_bandwidth: WindowedFilter::new(BANDWIDTH_WINDOW_SIZE),
             mss: max_segment_size,
         }

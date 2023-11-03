@@ -105,14 +105,14 @@ struct Params {
 }
 
 const PARAMS: Params = Params {
-    startup_cwnd_gain: 2.0,
+    startup_cwnd_gain: 2.89,
     probe_bw_cwnd_gain: 2.25,
     drain_cwnd_gain: 2.0,
 
     // Pacing gains.
-    startup_pacing_gain: 2.77,
+    startup_pacing_gain: 2.89,
     probe_bw_probe_up_pacing_gain: 1.25,
-    probe_bw_probe_down_pacing_gain: 0.9,
+    probe_bw_probe_down_pacing_gain: 0.75,
     probe_bw_default_pacing_gain: 1.0,
 
     probe_bw_probe_max_rounds: 63,
@@ -128,7 +128,7 @@ const PARAMS: Params = Params {
     startup_full_bw_rounds: 4,
     max_startup_queue_rounds: 0,
     startup_full_loss_count: 6,
-    loss_threshold: 0.01,
+    loss_threshold: 0.02,
 
     probe_bw_probe_base_duration: Duration::from_millis(2000),
 

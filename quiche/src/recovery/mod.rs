@@ -558,6 +558,8 @@ impl Recovery {
         &mut self, pkt: Sent, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     ) {
+        let time_sent = self.get_next_release_time().time(now).unwrap_or(now);
+
         let epoch = &mut self.epochs[epoch];
 
         let ack_eliciting = pkt.ack_eliciting;
@@ -570,7 +572,7 @@ impl Recovery {
         }
 
         let status = SentStatus::Sent {
-            time_sent: now,
+            time_sent,
             ack_eliciting,
             in_flight,
             has_data: pkt.has_data,
@@ -581,7 +583,7 @@ impl Recovery {
         epoch.sent_packets.push_back(SentPacket { pkt_num, status });
 
         if ack_eliciting {
-            epoch.time_of_last_ack_eliciting_packet = Some(now);
+            epoch.time_of_last_ack_eliciting_packet = Some(time_sent);
             self.outstanding_non_ack_eliciting = 0;
         } else {
             self.outstanding_non_ack_eliciting += 1;
@@ -589,7 +591,7 @@ impl Recovery {
 
         if in_flight {
             self.pacer.on_packet_sent(
-                now,
+                time_sent,
                 self.bytes_in_flight,
                 pkt_num,
                 sent_bytes,
@@ -599,7 +601,7 @@ impl Recovery {
 
             self.bytes_in_flight += sent_bytes;
             epoch.pkts_in_flight += 1;
-            self.set_loss_detection_timer(handshake_status, now);
+            self.set_loss_detection_timer(handshake_status, time_sent);
         }
 
         self.bytes_sent += sent_bytes;

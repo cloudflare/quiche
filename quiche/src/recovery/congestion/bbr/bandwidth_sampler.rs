@@ -121,9 +121,7 @@ pub struct BandwidthSampler {
     /// The packet that will be acknowledged after this one will cause the
     /// sampler to exit the app-limited phase.
     end_of_app_limited_phase: Option<u64>,
-    /// True if connection option 'BSAO' is set.
     overestimate_avoidance: bool,
-    /// True if connection option 'BBRB' is set.
     limit_max_ack_height_tracker_by_send_rate: bool,
 
     total_bytes_acked_after_last_ack_event: usize,
@@ -155,7 +153,7 @@ pub struct SendTimeState {
     pub bytes_in_flight: usize,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default)]
 struct ExtraAckedEvent {
     /// The excess bytes acknowlwedged in the time delta for this event.
     extra_acked: usize,
@@ -218,8 +216,8 @@ struct ConnectionStateOnSentPacket {
 }
 
 /// [`MaxAckHeightTracker`] is part of the [`BandwidthSampler`]. It is called
-/// after every
-// ack event to keep track the degree of ack aggregation(a.k.a "ack height").
+/// after every ack event to keep track the degree of ack
+/// aggregation(a.k.a "ack height").
 #[derive(Debug)]
 struct MaxAckHeightTracker {
     /// Tracks the maximum number of bytes acked faster than the estimated
@@ -263,14 +261,18 @@ pub(crate) struct CongestionEventSample {
 }
 
 impl MaxAckHeightTracker {
-    pub(crate) fn new(window: usize) -> Self {
+    pub(crate) fn new(window: usize, overestimate_avoidance: bool) -> Self {
         MaxAckHeightTracker {
             max_ack_height_filter: WindowedFilter::new(window),
             aggregation_epoch_start_time: None,
             aggregation_epoch_bytes: 0,
             last_sent_packet_number_before_epoch: 0,
             num_ack_aggregation_epochs: 0,
-            ack_aggregation_bandwidth_threshold: 1.0,
+            ack_aggregation_bandwidth_threshold: if overestimate_avoidance {
+                2.0
+            } else {
+                1.0
+            },
             start_new_aggregation_epoch_after_full_round: false,
             reduce_extra_acked_on_bandwidth_increase: false,
         }
@@ -298,11 +300,16 @@ impl MaxAckHeightTracker {
 
         if self.reduce_extra_acked_on_bandwidth_increase && is_new_max_bandwidth {
             // Save and clear existing entries.
-            let mut best = self.max_ack_height_filter.get_best().unwrap();
-            let mut second_best =
-                self.max_ack_height_filter.get_second_best().unwrap();
-            let mut third_best =
-                self.max_ack_height_filter.get_third_best().unwrap();
+            let mut best =
+                self.max_ack_height_filter.get_best().unwrap_or_default();
+            let mut second_best = self
+                .max_ack_height_filter
+                .get_second_best()
+                .unwrap_or_default();
+            let mut third_best = self
+                .max_ack_height_filter
+                .get_third_best()
+                .unwrap_or_default();
             self.max_ack_height_filter.clear();
 
             // Reinsert the heights into the filter after recalculating.
@@ -451,7 +458,9 @@ impl RecentAckPoints {
 }
 
 impl BandwidthSampler {
-    pub(crate) fn new(max_height_tracker_window_length: usize) -> Self {
+    pub(crate) fn new(
+        max_height_tracker_window_length: usize, overestimate_avoidance: bool,
+    ) -> Self {
         BandwidthSampler {
             total_bytes_sent: 0,
             total_bytes_acked: 0,
@@ -464,9 +473,10 @@ impl BandwidthSampler {
             connection_state_map: ConnectionStateMap::default(),
             max_ack_height_tracker: MaxAckHeightTracker::new(
                 max_height_tracker_window_length,
+                overestimate_avoidance,
             ),
             total_bytes_acked_after_last_ack_event: 0,
-            overestimate_avoidance: false,
+            overestimate_avoidance,
             limit_max_ack_height_tracker_by_send_rate: true,
 
             last_sent_packet: 0,
@@ -745,7 +755,7 @@ impl BandwidthSampler {
 
         let ack_rate = Bandwidth::from_bytes_and_time_delta(
             self.total_bytes_acked - a0.total_bytes_acked,
-            ack_time - a0.ack_time,
+            ack_time.duration_since(a0.ack_time),
         );
 
         let bandwidth = if let Some(send_rate) = send_rate {
@@ -753,6 +763,7 @@ impl BandwidthSampler {
         } else {
             ack_rate
         };
+
         // Note: this sample does not account for delayed acknowledgement time.
         // This means that the RTT measurements here can be artificially
         // high, especially on low bandwidth connections.
@@ -774,10 +785,6 @@ impl BandwidthSampler {
     ) -> Option<AckPoint> {
         if a0_candidates.is_empty() {
             return None;
-        }
-
-        if a0_candidates.len() == 1 {
-            return Some(a0_candidates[0]);
         }
 
         while let Some(candidate) = a0_candidates.get(1) {
@@ -846,7 +853,7 @@ mod bandwidth_sampler_tests {
 
     impl TestSender {
         fn new() -> Self {
-            let sampler = BandwidthSampler::new(0);
+            let sampler = BandwidthSampler::new(0, false);
             TestSender {
                 sampler_app_limited_at_start: sampler.is_app_limited(),
                 sampler,
@@ -1636,7 +1643,7 @@ mod max_ack_height_tracker_tests {
 
     impl TestTracker {
         fn new() -> Self {
-            let mut tracker = MaxAckHeightTracker::new(10);
+            let mut tracker = MaxAckHeightTracker::new(10, false);
             tracker.ack_aggregation_bandwidth_threshold = 1.8;
             tracker.start_new_aggregation_epoch_after_full_round = true;
             let start = Instant::now();

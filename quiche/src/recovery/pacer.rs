@@ -241,6 +241,11 @@ impl CongestionControl for Pacer {
             }
         }
 
+        let is_pacing_limited = match self.ideal_next_packet_send_time {
+            ReleaseTime::Immediate => false,
+            ReleaseTime::At(time) => time >= sent_time,
+        };
+
         self.lumpy_tokens -= 1;
         if self.pacing_limited {
             // Make up for lost time since pacing throttles the sending.
@@ -250,7 +255,7 @@ impl CongestionControl for Pacer {
         }
 
         // Stop making up for lost time if underlying sender prevents sending.
-        self.pacing_limited = self.sender.can_send(bytes_in_flight + bytes);
+        self.pacing_limited = is_pacing_limited;
     }
 
     #[inline]

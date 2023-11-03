@@ -83,7 +83,7 @@ impl MaxBandwidthFilter {
     }
 
     fn update(&mut self, sample: Bandwidth) {
-        self.max_bandwidth[1] = sample.max(self.max_bandwidth[1]);
+        self.max_bandwidth[1] = self.max_bandwidth[1].max(sample);
     }
 
     fn advance(&mut self) {
@@ -161,6 +161,7 @@ impl BBRv2NetworkModel {
             inflight_hi_limited_in_round: false,
             bandwidth_sampler: BandwidthSampler::new(
                 PARAMS.initial_max_ack_height_filter_window,
+                true,
             ),
             round_trip_counter: RoundTripCounter {
                 round_trip_count: 0,
