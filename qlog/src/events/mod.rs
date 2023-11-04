@@ -328,6 +328,9 @@ impl From<&EventData> for EventType {
                 EventType::ConnectivityEventType(
                     ConnectivityEventType::ConnectionStateUpdated,
                 ),
+            EventData::MtuUpdated { .. } => EventType::ConnectivityEventType(
+                ConnectivityEventType::MtuUpdated,
+            ),
 
             EventData::KeyUpdated { .. } =>
                 EventType::SecurityEventType(SecurityEventType::KeyUpdated),
@@ -475,6 +478,9 @@ pub enum EventData {
 
     #[serde(rename = "connectivity:connection_state_updated")]
     ConnectionStateUpdated(connectivity::ConnectionStateUpdated),
+
+    #[serde(rename = "connectivity:mtu_updated")]
+    MtuUpdated(connectivity::MtuUpdated),
 
     // Security
     #[serde(rename = "security:key_updated")]
