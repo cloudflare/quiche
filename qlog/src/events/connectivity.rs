@@ -61,6 +61,7 @@ pub enum ConnectivityEventType {
     ConnectionIdUpdated,
     SpinBitUpdated,
     ConnectionStateUpdated,
+    MtuUpdated,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
