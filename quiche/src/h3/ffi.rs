@@ -143,11 +143,11 @@ pub extern fn quiche_h3_event_type(ev: &h3::Event) -> u32 {
 
         h3::Event::Finished { .. } => 2,
 
-        h3::Event::GoAway { .. } => 4,
+        h3::Event::GoAway { .. } => 3,
 
-        h3::Event::Reset { .. } => 5,
+        h3::Event::Reset { .. } => 4,
 
-        h3::Event::PriorityUpdate { .. } => 6,
+        h3::Event::PriorityUpdate { .. } => 5,
     }
 }
 
