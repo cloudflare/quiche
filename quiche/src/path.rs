@@ -345,6 +345,20 @@ impl Path {
         }
     }
 
+    pub fn should_send_pmtu_probe(
+        &mut self, hs_confirmed: bool, hs_done: bool, out_len: usize,
+        is_closing: bool, frames_empty: bool,
+    ) -> bool {
+        return (hs_confirmed && hs_done) &&
+            self.pmtud.get_probe_size() > self.pmtud.get_current() &&
+            self.recovery.cwnd_available() > self.pmtud.get_probe_size() &&
+            out_len >= self.pmtud.get_probe_size() &&
+            self.pmtud.get_probe_status() &&
+            self.pmtud.get_probe_timeout().is_none() &&
+            !is_closing &&
+            frames_empty;
+    }
+
     pub fn on_challenge_sent(&mut self) {
         self.promote_to(PathState::Validating);
         self.challenge_requested = false;

@@ -415,6 +415,7 @@ use std::str::FromStr;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
+use qlog::events::connectivity::ConnectivityEventType;
 use smallvec::SmallVec;
 
 /// The current QUIC wire version.
@@ -2866,7 +2867,7 @@ impl Connection {
             });
         }
 
-        // Foll. flag used to upgrade datagram size, if probe successful
+        // Following flag used to upgrade datagram size, if probe is successful
         let mut pmtud_probe = false;
 
         // Process acked frames. Note that several packets from several paths
@@ -2881,7 +2882,7 @@ impl Connection {
                         p.pmtud.set_current(cmp::max(pmtud_next, mtu_probe));
                         // Stop sending path MTU probes after successful
                         // probe
-                        trace!("PMTUD: Acked");
+                        trace!("{} PMTUD: Acked", self.trace_id);
                         p.pmtud.should_probe(false);
                         pmtud_probe = true;
                     },
@@ -2973,7 +2974,31 @@ impl Connection {
             }
             // Update max datagram send size with newly acked probe size
             if pmtud_probe {
-                trace!("Updating PMTU {:?}", p.pmtud.get_current());
+                trace!(
+                    "{} Updating PMTU {:?}",
+                    p.pmtud.get_current(),
+                    self.trace_id
+                );
+
+                qlog_with_type!(
+                    EventType::ConnectivityEventType(
+                        ConnectivityEventType::MtuUpdated
+                    ),
+                    self.qlog,
+                    q,
+                    {
+                        let pmtu_data = EventData::MtuUpdated(
+                            qlog::events::connectivity::MtuUpdated {
+                                old: Some(p.recovery.max_datagram_size() as u16),
+                                new: p.pmtud.get_current() as u16,
+                                done: Some(pmtud_probe),
+                            },
+                        );
+
+                        q.add_event_data_with_instant(pmtu_data, now).ok();
+                    }
+                );
+
                 p.recovery
                     .pmtud_update_max_datagram_size(p.pmtud.get_current());
             }
@@ -3696,24 +3721,19 @@ impl Connection {
             // is confirmed, to avoid interfering with the handshake
             // (e.g. due to the anti-amplification limits).
 
-            if (self.handshake_confirmed && self.handshake_done_sent) &&
-                active_path.pmtud.get_probe_size() >
-                    active_path.pmtud.get_current() &&
-                active_path.recovery.cwnd_available() >
-                    active_path.pmtud.get_probe_size() &&
-                out_len >= active_path.pmtud.get_probe_size() &&
-                active_path.pmtud.get_probe_status() &&
-                active_path.pmtud.get_probe_timeout().is_none() &&
-                !is_closing &&
-                frames.is_empty()
-            {
-                trace!("Sending PMTUD probe pmtu_probe {} next_size {} and pmtu {} hs_con {} hs_sent {} cwnd_avail {} out_len {} left {}",
-                     active_path.pmtud.get_probe_size(), active_path.pmtud.get_probe_status(), active_path.pmtud.get_current(),
+            let pmtu_probe = active_path.should_send_pmtu_probe(
+                self.handshake_confirmed,
+                self.handshake_done_sent,
+                out_len,
+                is_closing,
+                frames.is_empty(),
+            );
+            if pmtu_probe {
+                trace!("{} Sending PMTUD probe pmtu_probe {} next_size {} and pmtu {} hs_con {} hs_sent {} cwnd_avail {} out_len {} left {}",
+                     self.trace_id, active_path.pmtud.get_probe_size(), active_path.pmtud.get_probe_status(), active_path.pmtud.get_current(),
                      self.handshake_confirmed, self.handshake_done_sent, active_path.recovery.cwnd_available(),out_len, left);
-                left = cmp::min(
-                    active_path.pmtud.get_probe_size(),
-                    active_path.recovery.cwnd_available(),
-                );
+                left = active_path.pmtud.get_probe_size();
+
                 match left.checked_sub(overhead) {
                     Some(v) => left = v,
 
@@ -4544,7 +4564,11 @@ impl Connection {
             // Start path MTU Discovery probe timer
             let pmtud_timer_status =
                 active_path.set_pmtu_probe_timer(&handshake_status, now);
-            trace!("Sent PMTUD: Probe Timer Status {:?}", pmtud_timer_status);
+            trace!(
+                "{} Sent PMTUD: Probe Timer Status {:?}",
+                pmtud_timer_status,
+                self.trace_id
+            );
         }
         if active_path.pmtud.is_enabled() {
             active_path

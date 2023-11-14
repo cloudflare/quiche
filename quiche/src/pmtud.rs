@@ -72,7 +72,7 @@ impl Pmtud {
 
     /// Selects path MTU probe based on the binary search
     /// algorithm. Based on the Optimistic Binary algorithm defined in:
-    /// Ref: https://www.hb.fh-muenster.de/opus4/frontdoor/deliver/index/docId/14965/file/dplpmtudQuicPaper.pdf
+    /// Ref: <https://www.hb.fh-muenster.de/opus4/frontdoor/deliver/index/docId/14965/file/dplpmtudQuicPaper.pdf>
     pub fn update_probe_size(&mut self) {
         self.probe = self.cur_size + ((self.probe - self.cur_size) / 2);
     }

@@ -1032,7 +1032,7 @@ impl std::fmt::Debug for Frame {
             },
 
             Frame::Ping { mtu_probe } => {
-                write!(f, "PING len={mtu_probe:?}")?;
+                write!(f, "PING mtu_probe={mtu_probe:?}")?;
             },
 
             Frame::ACK {
