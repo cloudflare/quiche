@@ -19,4 +19,5 @@ spec:
   type: "library"
   lifecycle: "Active"
   owner: "teams/fl-protocols"
-  system: "system:default/protocols"
+  dependsOn:
+    - component:default/boringssl
