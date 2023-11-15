@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Pmtud {
     /// The current path MTU estimate.
     cur_size: usize,
@@ -95,5 +95,15 @@ impl Pmtud {
         self.update_probe_size();
         self.should_probe(true);
         self.probe_timer = None;
+    }
+}
+
+impl std::fmt::Debug for Pmtud {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "current={:?} ", self.cur_size)?;
+        write!(f, "probe_size={:?} ", self.probe)?;
+        write!(f, "continue_probing={:?} ", self.next_size)?;
+        write!(f, "enable={:?} ", self.enable)?;
+        Ok(())
     }
 }

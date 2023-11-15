@@ -1914,13 +1914,6 @@ impl Connection {
             path_pmtud.should_probe(config.pmtud);
             path_pmtud.set_probe_size(config.max_send_udp_payload_size);
             path_pmtud.enable(config.pmtud);
-            trace!(
-                "PMTU configured pmtu {} next_size {} pmtu_probe {} enable {}",
-                path_pmtud.get_current(),
-                path_pmtud.get_probe_status(),
-                path_pmtud.get_probe_size(),
-                path_pmtud.is_enabled(),
-            );
         }
 
         if let Some(odcid) = odcid {

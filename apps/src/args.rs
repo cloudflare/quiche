@@ -477,6 +477,7 @@ pub struct ServerArgs {
     pub key: String,
     pub disable_gso: bool,
     pub disable_pacing: bool,
+    pub enable_pmtud: bool,
 }
 
 impl Args for ServerArgs {
@@ -491,6 +492,7 @@ impl Args for ServerArgs {
         let key = args.get_str("--key").to_string();
         let disable_gso = args.get_bool("--disable-gso");
         let disable_pacing = args.get_bool("--disable-pacing");
+        let enable_pmtud = args.get_bool("--enable-pmtud");
 
         ServerArgs {
             listen,
@@ -501,6 +503,7 @@ impl Args for ServerArgs {
             key,
             disable_gso,
             disable_pacing,
+            enable_pmtud,
         }
     }
 }
