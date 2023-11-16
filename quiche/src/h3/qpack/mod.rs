@@ -34,6 +34,10 @@ pub const INDEXED_WITH_POST_BASE: u8 = 0b0001_0000;
 pub const LITERAL: u8 = 0b0010_0000;
 pub const LITERAL_WITH_NAME_REF: u8 = 0b0100_0000;
 
+const SET_DYNAMIC_TABLE_CAPACITY: u8 = 0b0010_0000;
+const INSERT_WITH_NAME_REF: u8 = 0b1000_0000;
+const INSERT_WITH_LITERAL_NAME: u8 = 0b0100_0000;
+
 /// A specialized [`Result`] type for quiche QPACK operations.
 ///
 /// This type is used throughout quiche's QPACK public API for any operation
@@ -59,6 +63,16 @@ pub enum Error {
 
     /// The decoded header list exceeded the size limit.
     HeaderListTooLarge,
+
+    /// The QPACK encountered an error related to the dynamic table.
+    InvalidDynamicTableIndex,
+
+    /// The peer set the dynamic table capacity too high.
+    DynamicTableTooBig,
+
+    /// The peer wants to use a dynamic table entry that was not inserted yet,
+    /// and would block the stream TODO: implement blocking
+    DynamicTableWouldBlock,
 }
 
 impl std::fmt::Display for Error {
@@ -105,8 +119,8 @@ mod tests {
         let mut enc = Encoder::new();
         assert_eq!(enc.encode(&headers, &mut encoded), Ok(240));
 
-        let mut dec = Decoder::new();
-        assert_eq!(dec.decode(&encoded, u64::MAX), Ok(headers));
+        let mut dec = Decoder::new(0);
+        assert_eq!(dec.decode(&encoded, u64::MAX, 0), Ok(headers));
     }
 
     #[test]
@@ -127,17 +141,17 @@ mod tests {
         let mut enc = Encoder::new();
         assert_eq!(enc.encode(&headers, &mut encoded), Ok(102));
 
-        let mut dec = Decoder::new();
+        let mut dec = Decoder::new(0);
 
         // Equal max_size param ok
         assert_eq!(
-            dec.decode(&encoded, qpack_field_section_size as u64),
+            dec.decode(&encoded, qpack_field_section_size as u64, 0),
             Ok(headers.clone())
         );
 
         // Oversized max_size param ok
         assert_eq!(
-            dec.decode(&encoded, qpack_field_section_size as u64 + 1),
+            dec.decode(&encoded, qpack_field_section_size as u64 + 1, 0),
             Ok(headers.clone())
         );
 
@@ -145,7 +159,7 @@ mod tests {
         let wrong_qpack_field_section_size =
             (b"hello".len() + b"world".len()) * NUM_HDRS;
         assert_eq!(
-            dec.decode(&encoded, wrong_qpack_field_section_size as u64),
+            dec.decode(&encoded, wrong_qpack_field_section_size as u64, 0),
             Err(HeaderListTooLarge)
         );
     }
@@ -174,8 +188,8 @@ mod tests {
         let mut enc = Encoder::new();
         assert_eq!(enc.encode(&headers_in, &mut encoded), Ok(35));
 
-        let mut dec = Decoder::new();
-        let headers_out = dec.decode(&encoded, u64::MAX).unwrap();
+        let mut dec = Decoder::new(0);
+        let headers_out = dec.decode(&encoded, u64::MAX, 0).unwrap();
 
         assert_eq!(headers_expected, headers_out);
 
@@ -191,8 +205,8 @@ mod tests {
         let mut enc = Encoder::new();
         assert_eq!(enc.encode(&headers_in, &mut encoded), Ok(35));
 
-        let mut dec = Decoder::new();
-        let headers_out = dec.decode(&encoded, u64::MAX).unwrap();
+        let mut dec = Decoder::new(0);
+        let headers_out = dec.decode(&encoded, u64::MAX, 0).unwrap();
 
         assert_eq!(headers_expected, headers_out);
     }

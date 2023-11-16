@@ -283,7 +283,7 @@ fn convert_response<B>(res: Response<B>) -> (Vec<Header>, B) {
         vec![Header::new(b":status", res.status().as_str().as_bytes())];
 
     for (name, value) in res.headers().iter() {
-        h3_headers.push(Header::new(name.as_ref(), value.as_bytes()));
+        h3_headers.push(Header::new(name.as_str().as_bytes(), value.as_bytes()));
     }
 
     (h3_headers, res.into_body())
