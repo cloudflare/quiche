@@ -49,7 +49,7 @@ fn main() {
 
     let mut file = File::open(args.next().unwrap()).unwrap();
 
-    let mut dec = qpack::Decoder::new();
+    let mut dec = qpack::Decoder::new(0);
 
     loop {
         let mut stream_id: [u8; 8] = [0; 8];
@@ -72,11 +72,11 @@ fn main() {
         debug!("Got stream={} len={}", stream_id, len);
 
         if stream_id == 0 {
-            dec.control(&mut data[..len]).unwrap();
+            dec.control(&data[..len]).unwrap();
             continue;
         }
 
-        for hdr in dec.decode(&data[..len], u64::MAX).unwrap() {
+        for hdr in dec.decode(&data[..len], u64::MAX, 0).unwrap() {
             let name = std::str::from_utf8(hdr.name()).unwrap();
             let value = std::str::from_utf8(hdr.value()).unwrap();
             println!("{name}\t{value}");

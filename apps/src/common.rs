@@ -734,12 +734,11 @@ fn make_h3_config(
     }
 
     if let Some(v) = qpack_max_table_capacity {
-        // quiche doesn't support dynamic QPACK, so clamp to 0 for now.
-        config.set_qpack_max_table_capacity(v.clamp(0, 0));
+        config.set_qpack_max_table_capacity(v);
     }
 
     if let Some(v) = qpack_blocked_streams {
-        // quiche doesn't support dynamic QPACK, so clamp to 0 for now.
+        // quiche doesn't support dynamic QPACK blocking, so clamp to 0 for now.
         config.set_qpack_blocked_streams(v.clamp(0, 0));
     }
 

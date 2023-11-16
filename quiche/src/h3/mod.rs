@@ -312,6 +312,8 @@ use qlog::events::EventImportance;
 #[cfg(feature = "qlog")]
 use qlog::events::EventType;
 
+use crate::Shutdown;
+
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
 /// This can be passed directly to the [`Config::set_application_protos()`]
@@ -570,6 +572,11 @@ pub trait NameValue {
 
     /// Returns the object's value.
     fn value(&self) -> &[u8];
+
+    /// Return the qpack cost of the pair
+    fn qpack_cost(&self) -> u64 {
+        self.name().len() as u64 + self.value().len() as u64 + 32
+    }
 }
 
 impl<N, V> NameValue for (N, V)
@@ -611,8 +618,11 @@ impl Header {
     /// Creates a new header.
     ///
     /// Both `name` and `value` will be cloned.
-    pub fn new(name: &[u8], value: &[u8]) -> Self {
-        Self(name.to_vec(), value.to_vec())
+    pub fn new<N, V>(name: N, value: V) -> Self
+    where
+        Vec<u8>: From<N> + From<V>,
+    {
+        Self(name.into(), value.into())
     }
 }
 
@@ -881,7 +891,9 @@ impl Connection {
             peer_control_stream_id: None,
 
             qpack_encoder: qpack::Encoder::new(),
-            qpack_decoder: qpack::Decoder::new(),
+            qpack_decoder: qpack::Decoder::new(
+                config.qpack_max_table_capacity.unwrap_or(0),
+            ),
 
             local_qpack_streams: QpackStreams {
                 encoder_stream_id: None,
@@ -1590,6 +1602,25 @@ impl Connection {
             };
         }
 
+        // Send any outstanding QPACK decoder instructions
+        if let Some(stream_id) = self.local_qpack_streams.decoder_stream_id {
+            let mut buf = [0u8; 64];
+
+            while self.qpack_decoder.has_instructions() {
+                let cap = conn.stream_capacity(stream_id)?;
+                if cap == 0 {
+                    break;
+                }
+
+                let n = self.qpack_decoder.emit_instructions(&mut buf);
+                if n == 0 {
+                    break;
+                }
+
+                conn.stream_send(stream_id, &buf[..n], false)?;
+            }
+        }
+
         // Process finished streams list.
         if let Some(finished) = self.finished_streams.pop_front() {
             return Ok((finished, Event::Finished));
@@ -1606,8 +1637,10 @@ impl Connection {
 
                 // Return early if the stream was reset, to avoid returning
                 // a Finished event later as well.
-                Err(Error::TransportError(crate::Error::StreamReset(e))) =>
-                    return Ok((s, Event::Reset(e))),
+                Err(Error::TransportError(crate::Error::StreamReset(e))) => {
+                    self.qpack_decoder.cancel_stream(s);
+                    return Ok((s, Event::Reset(e)));
+                },
 
                 Err(e) => return Err(e),
             };
@@ -2296,8 +2329,19 @@ impl Connection {
                     return Ok((stream_id, Event::Data));
                 },
 
-                stream::State::QpackInstruction => {
-                    let mut d = [0; 4096];
+                stream::State::QpackEncoderInstruction => {
+                    let mut d = [0; 1024];
+
+                    loop {
+                        let (n, _) = conn.stream_recv(stream_id, &mut d)?;
+                        self.qpack_decoder
+                            .control(&d[..n])
+                            .map_err(|_| Error::QpackDecompressionFailed)?;
+                    }
+                },
+
+                stream::State::QpackDecoderInstruction => {
+                    let mut d = [0; 1024];
 
                     // Read data from the stream and discard immediately.
                     loop {
@@ -2423,10 +2467,11 @@ impl Connection {
                     .max_field_section_size
                     .unwrap_or(u64::MAX);
 
-                let headers = match self
-                    .qpack_decoder
-                    .decode(&header_block[..], max_size)
-                {
+                let headers = match self.qpack_decoder.decode(
+                    &header_block[..],
+                    max_size,
+                    stream_id,
+                ) {
                     Ok(v) => v,
 
                     Err(e) => {
@@ -2712,6 +2757,23 @@ impl Connection {
         }
 
         Err(Error::Done)
+    }
+
+    /// Shuts down reading or writing from/to the specified stream. This method
+    /// should be preferred over the equivalent `quiche::stream_shutdown`
+    /// method, as the other method may prevent evictions from the QPACK
+    /// decoder.
+    pub fn stream_shutdown(
+        &mut self, conn: &mut super::Connection, stream_id: u64,
+        direction: Shutdown, err: u64,
+    ) -> Result<()> {
+        let is_read = direction == Shutdown::Read;
+        conn.stream_shutdown(stream_id, direction, err)?;
+        if is_read {
+            self.qpack_decoder.cancel_stream(stream_id);
+        }
+
+        Ok(())
     }
 }
 
@@ -4469,39 +4531,6 @@ mod tests {
         }
 
         assert!(qpack_stream_closed);
-    }
-
-    #[test]
-    /// Client sends QPACK data.
-    fn qpack_data() {
-        // TODO: QPACK instructions are ignored until dynamic table support is
-        // added so we just test that the data is safely ignored.
-        let mut s = Session::new().unwrap();
-        s.handshake().unwrap();
-
-        let e_stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
-        let d_stream_id = s.client.local_qpack_streams.decoder_stream_id.unwrap();
-        let d = [0; 20];
-
-        s.pipe.client.stream_send(e_stream_id, &d, false).unwrap();
-        s.advance().ok();
-
-        s.pipe.client.stream_send(d_stream_id, &d, false).unwrap();
-        s.advance().ok();
-
-        loop {
-            match s.server.poll(&mut s.pipe.server) {
-                Ok(_) => (),
-
-                Err(Error::Done) => {
-                    break;
-                },
-
-                Err(_) => {
-                    panic!();
-                },
-            }
-        }
     }
 
     #[test]
