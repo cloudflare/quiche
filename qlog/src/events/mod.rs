@@ -169,6 +169,9 @@ impl From<EventType> for EventImportance {
             EventType::ConnectivityEventType(
                 ConnectivityEventType::ConnectionStateUpdated,
             ) => EventImportance::Base,
+            EventType::ConnectivityEventType(
+                ConnectivityEventType::MtuUpdated,
+            ) => EventImportance::Extra,
 
             EventType::SecurityEventType(SecurityEventType::KeyUpdated) =>
                 EventImportance::Base,
