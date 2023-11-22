@@ -268,15 +268,15 @@ typedef struct quiche_conn quiche_conn;
 // Creates a new server-side connection.
 quiche_conn *quiche_accept(const uint8_t *scid, size_t scid_len,
                            const uint8_t *odcid, size_t odcid_len,
-                           const struct sockaddr *local, size_t local_len,
-                           const struct sockaddr *peer, size_t peer_len,
+                           const struct sockaddr *local, socklen_t local_len,
+                           const struct sockaddr *peer, socklen_t peer_len,
                            quiche_config *config);
 
 // Creates a new client-side connection.
 quiche_conn *quiche_connect(const char *server_name,
                             const uint8_t *scid, size_t scid_len,
-                            const struct sockaddr *local, size_t local_len,
-                            const struct sockaddr *peer, size_t peer_len,
+                            const struct sockaddr *local, socklen_t local_len,
+                            const struct sockaddr *peer, socklen_t peer_len,
                             quiche_config *config);
 
 // Writes a version negotiation packet.
@@ -296,8 +296,8 @@ bool quiche_version_is_supported(uint32_t version);
 
 quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
                                       const uint8_t *odcid, size_t odcid_len,
-                                      const struct sockaddr *local, size_t local_len,
-                                      const struct sockaddr *peer, size_t peer_len,
+                                      const struct sockaddr *local, socklen_t local_len,
+                                      const struct sockaddr *peer, socklen_t peer_len,
                                       const quiche_config *config, void *ssl,
                                       bool is_server);
 
@@ -675,8 +675,8 @@ ssize_t quiche_conn_send_ack_eliciting(quiche_conn *conn);
 
 // Schedule an ack-eliciting packet on the specified path.
 ssize_t quiche_conn_send_ack_eliciting_on_path(quiche_conn *conn,
-                           const struct sockaddr *local, size_t local_len,
-                           const struct sockaddr *peer, size_t peer_len);
+                           const struct sockaddr *local, socklen_t local_len,
+                           const struct sockaddr *peer, socklen_t peer_len);
 
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
