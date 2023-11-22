@@ -4611,6 +4611,55 @@ impl<F: BufFactory> Connection<F> {
     pub fn stream_send(
         &mut self, stream_id: u64, buf: &[u8], fin: bool,
     ) -> Result<usize> {
+        self.stream_do_send(
+            stream_id,
+            buf,
+            fin,
+            |stream: &mut stream::Stream<F>,
+             buf: &[u8],
+             cap: usize,
+             fin: bool| {
+                stream.send.write(&buf[..cap], fin).map(|v| (v, v))
+            },
+        )
+    }
+
+    /// Writes data to a stream with zero copying, instead, it appends the
+    /// provided buffer directly to the send queue if the capacity allows
+    /// it.
+    ///
+    /// When a partial write happens (including when [`Done`] is returned) the
+    /// remaining (unwrittent) buffer will also be returned. The application
+    /// should retry the operation once the stream is reported as writable
+    /// again.
+    pub fn stream_send_zc(
+        &mut self, stream_id: u64, buf: F::Buf, len: Option<usize>, fin: bool,
+    ) -> Result<(usize, Option<F::Buf>)>
+    where
+        F::Buf: BufSplit,
+    {
+        self.stream_do_send(
+            stream_id,
+            buf,
+            fin,
+            |stream: &mut stream::Stream<F>,
+             buf: F::Buf,
+             cap: usize,
+             fin: bool| {
+                let len = len.unwrap_or(usize::MAX).min(cap);
+                let (sent, remaining) = stream.send.append_buf(buf, len, fin)?;
+                Ok((sent, (sent, remaining)))
+            },
+        )
+    }
+
+    fn stream_do_send<B, R, SND>(
+        &mut self, stream_id: u64, buf: B, fin: bool, write_fn: SND,
+    ) -> Result<R>
+    where
+        B: AsRef<[u8]>,
+        SND: FnOnce(&mut stream::Stream<F>, B, usize, bool) -> Result<(usize, R)>,
+    {
         // We can't write on the peer's unidirectional streams.
         if !stream::is_bidi(stream_id) &&
             !stream::is_local(stream_id, self.is_server)
@@ -4618,12 +4667,14 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::InvalidStreamState(stream_id));
         }
 
+        let len = buf.as_ref().len();
+
         // Mark the connection as blocked if the connection-level flow control
         // limit doesn't let us buffer all the data.
         //
         // Note that this is separate from "send capacity" as that also takes
         // congestion control into consideration.
-        if self.max_tx_data - self.tx_data < buf.len() as u64 {
+        if self.max_tx_data - self.tx_data < len as u64 {
             self.blocked_limit = Some(self.max_tx_data);
         }
 
@@ -4646,7 +4697,7 @@ impl<F: BufFactory> Connection<F> {
         //
         // When the cap is zero, the method returns Ok(0) *only* when the passed
         // buffer is empty. We return Error::Done otherwise.
-        if cap == 0 && !buf.is_empty() {
+        if cap == 0 && len > 0 {
             if was_writable {
                 // When `stream_writable_next()` returns a stream, the writable
                 // mark is removed, but because the stream is blocked by the
@@ -4660,13 +4711,13 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::Done);
         }
 
-        let (buf, fin, blocked_by_cap) = if cap < buf.len() {
-            (&buf[..cap], false, true)
+        let (cap, fin, blocked_by_cap) = if cap < len {
+            (cap, false, true)
         } else {
-            (buf, fin, false)
+            (len, fin, false)
         };
 
-        let sent = match stream.send.write(buf, fin) {
+        let (sent, ret) = match write_fn(stream, buf, cap, fin) {
             Ok(v) => v,
 
             Err(e) => {
@@ -4682,9 +4733,9 @@ impl<F: BufFactory> Connection<F> {
 
         let writable = stream.is_writable();
 
-        let empty_fin = buf.is_empty() && fin;
+        let empty_fin = len == 0 && fin;
 
-        if sent < buf.len() {
+        if sent < cap {
             let max_off = stream.send.max_off();
 
             if stream.send.blocked_at() != Some(max_off) {
@@ -4737,7 +4788,7 @@ impl<F: BufFactory> Connection<F> {
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
-        if sent == 0 && !buf.is_empty() {
+        if sent == 0 && cap > 0 {
             return Err(Error::Done);
         }
 
@@ -4747,7 +4798,7 @@ impl<F: BufFactory> Connection<F> {
             self.streams.insert_writable(&priority_key);
         }
 
-        Ok(sent)
+        Ok(ret)
     }
 
     /// Sets the priority for a stream.
@@ -5666,11 +5717,12 @@ impl<F: BufFactory> Connection<F> {
         // If the active path failed, try to find a new candidate.
         if self.paths.get_active_path_id().is_err() {
             match self.paths.find_candidate_path() {
-                Some(pid) =>
+                Some(pid) => {
                     if self.set_active_path(pid, now).is_err() {
                         // The connection cannot continue.
                         self.closed = true;
-                    },
+                    }
+                },
 
                 // The connection cannot continue.
                 None => self.closed = true,
@@ -6971,15 +7023,17 @@ impl<F: BufFactory> Connection<F> {
 
             frame::Frame::StreamDataBlocked { .. } => (),
 
-            frame::Frame::StreamsBlockedBidi { limit } =>
+            frame::Frame::StreamsBlockedBidi { limit } => {
                 if limit > MAX_STREAM_ID {
                     return Err(Error::InvalidFrame);
-                },
+                }
+            },
 
-            frame::Frame::StreamsBlockedUni { limit } =>
+            frame::Frame::StreamsBlockedUni { limit } => {
                 if limit > MAX_STREAM_ID {
                     return Err(Error::InvalidFrame);
-                },
+                }
+            },
 
             frame::Frame::NewConnectionId {
                 seq_num,
@@ -16307,6 +16361,7 @@ pub use crate::recovery::CongestionControlAlgorithm;
 pub use crate::stream::StreamIter;
 
 pub use crate::range_buf::BufFactory;
+pub use crate::range_buf::BufSplit;
 
 mod cid;
 mod crypto;
