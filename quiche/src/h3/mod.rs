@@ -314,6 +314,7 @@ use qlog::events::EventImportance;
 use qlog::events::EventType;
 
 use crate::range_buf::BufFactory;
+use crate::BufSplit;
 
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
@@ -1456,8 +1457,85 @@ impl Connection {
         &mut self, conn: &mut super::Connection<F>, stream_id: u64, body: &[u8],
         fin: bool,
     ) -> Result<usize> {
+        self.do_send_body(
+            conn,
+            stream_id,
+            body,
+            fin,
+            |conn: &mut super::Connection<F>,
+             stream_id: u64,
+             body: &[u8],
+             body_len: usize,
+             fin: bool| {
+                Ok(conn
+                    .stream_send(stream_id, &body[..body_len], fin)
+                    .map(|v| (v, v))?)
+            },
+        )
+    }
+
+    /// Sends an HTTP/3 body chunk provided as a raw buffer on the given stream.
+    ///
+    /// If the capacity allows it the buffer will be appended to the stream's
+    /// send queue with zero copying.
+    ///
+    /// On success the number of bytes written is returned, or [`Done`] if no
+    /// bytes could be written (e.g. because the stream is blocked).
+    ///
+    /// Note that the number of written bytes returned can be lower than the
+    /// length of the input buffer when the underlying QUIC stream doesn't have
+    /// enough capacity for the operation to complete.
+    ///
+    /// When a partial write happens (including when [`Done`] is returned) the
+    /// remaining (unwrittent) buffer will also be returned. The application
+    /// should retry the operation once the stream is reported as writable
+    /// again.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    pub fn send_body_zc<F>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64, body: F::Buf,
+        fin: bool,
+    ) -> Result<(usize, Option<F::Buf>)>
+    where
+        F: BufFactory,
+        F::Buf: BufSplit,
+    {
+        self.do_send_body(
+            conn,
+            stream_id,
+            body,
+            fin,
+            |conn: &mut super::Connection<F>,
+             stream_id: u64,
+             body: F::Buf,
+             body_len: usize,
+             fin: bool| {
+                Ok(conn
+                    .stream_send_zc(stream_id, body, Some(body_len), fin)
+                    .map(|v| (v.0, v))?)
+            },
+        )
+    }
+
+    fn do_send_body<F, B, R, SND>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64, body: B,
+        fin: bool, write_fn: SND,
+    ) -> Result<R>
+    where
+        F: BufFactory,
+        B: AsRef<[u8]>,
+        SND: FnOnce(
+            &mut super::Connection<F>,
+            u64,
+            B,
+            usize,
+            bool,
+        ) -> Result<(usize, R)>,
+    {
         let mut d = [42; 10];
         let mut b = octets::OctetsMut::with_slice(&mut d);
+
+        let len = body.as_ref().len();
 
         // Validate that it is sane to send data on the stream.
         if stream_id % 4 != 0 {
@@ -1481,12 +1559,12 @@ impl Connection {
         };
 
         // Avoid sending 0-length DATA frames when the fin flag is false.
-        if body.is_empty() && !fin {
+        if len == 0 && !fin {
             return Err(Error::Done);
         }
 
         let overhead = octets::varint_len(frame::DATA_FRAME_TYPE_ID) +
-            octets::varint_len(body.len() as u64);
+            octets::varint_len(len as u64);
 
         let stream_cap = match conn.stream_capacity(stream_id) {
             Ok(v) => v,
@@ -1507,11 +1585,11 @@ impl Connection {
         }
 
         // Cap the frame payload length to the stream's capacity.
-        let body_len = std::cmp::min(body.len(), stream_cap - overhead);
+        let body_len = std::cmp::min(len, stream_cap - overhead);
 
         // If we can't send the entire body, set the fin flag to false so the
         // application can try again later.
-        let fin = if body_len != body.len() { false } else { fin };
+        let fin = if body_len != len { false } else { fin };
 
         // Again, avoid sending 0-length DATA frames when the fin flag is false.
         if body_len == 0 && !fin {
@@ -1526,7 +1604,7 @@ impl Connection {
 
         // Return how many bytes were written, excluding the frame header.
         // Sending body separately avoids unnecessary copy.
-        let written = conn.stream_send(stream_id, &body[..body_len], fin)?;
+        let (written, ret) = write_fn(conn, stream_id, body, body_len, fin)?;
 
         trace!(
             "{} tx frm DATA stream={} len={} fin={}",
@@ -1548,7 +1626,7 @@ impl Connection {
             q.add_event_data_now(ev_data).ok();
         });
 
-        if written < body.len() {
+        if written < len {
             // Ensure the peer is notified that the connection or stream is
             // blocked when the stream's capacity is limited by flow control.
             //
@@ -1558,11 +1636,11 @@ impl Connection {
             let _ = conn.stream_writable(stream_id, overhead + 1);
         }
 
-        if fin && written == body.len() && conn.stream_finished(stream_id) {
+        if fin && written == len && conn.stream_finished(stream_id) {
             self.streams.remove(&stream_id);
         }
 
-        Ok(written)
+        Ok(ret)
     }
 
     /// Returns whether the peer enabled HTTP/3 DATAGRAM frame support.
