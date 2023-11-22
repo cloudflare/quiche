@@ -49,8 +49,8 @@ where
 }
 
 /// A trait for providing internal storage buffers for [`RangeBuf`].
-/// The associated type [`Buf`] can be any type that dereferences to
-/// a slice, but should be fast to clone, eg. by wrapping it into an
+/// The associated type `Buf` can be any type that dereferences to
+/// a slice, but should be fast to clone, eg. by wrapping it with an
 /// [`Arc`].
 pub trait BufFactory: Clone + Default + Debug {
     /// The type of the generated buffer.
@@ -61,11 +61,21 @@ pub trait BufFactory: Clone + Default + Debug {
     fn buf_from_slice(buf: &[u8]) -> Self::Buf;
 }
 
+/// A trait that enables zero-copy sends to quiche. When buffers produced
+/// by the `BufFactory` implement this trait, quiche and h3 can supply the
+/// raw buffers to be sent, instead of slices that must be copied first.
+pub trait BufSplit {
+    /// Split the buffer at a given point, after the split the old buffer
+    /// must only contain the first `at` bytes, while the newly produced
+    /// buffer must containt the remaining bytes.
+    fn split_at(&mut self, at: usize) -> Self;
+}
+
 /// The default [`BufFactory`] allocates buffers on the heap on demand.
 #[derive(Debug, Clone, Default)]
 pub struct DefaultBufFactory;
 
-/// The default [`BufFactory::Buf`] is a boxes slices wrapped in an [`Arc`].
+/// The default [`BufFactory::Buf`] is a boxed slice wrapped in an [`Arc`].
 #[derive(Debug, Clone, Default)]
 pub struct DefaultBuf(Arc<Box<[u8]>>);
 
@@ -89,11 +99,15 @@ where
 {
     /// Creates a new `RangeBuf` from the given slice.
     pub fn from(buf: &[u8], off: u64, fin: bool) -> RangeBuf<F> {
+        Self::from_raw(F::buf_from_slice(buf), off, fin)
+    }
+
+    pub fn from_raw(data: F::Buf, off: u64, fin: bool) -> RangeBuf<F> {
         RangeBuf {
-            data: F::buf_from_slice(buf),
+            len: data.as_ref().len(),
+            data,
             start: 0,
             pos: 0,
-            len: buf.len(),
             off,
             fin,
             _bf: Default::default(),
