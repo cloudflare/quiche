@@ -191,27 +191,6 @@ impl BoundedNonEmptyConnectionIdVecDeque {
     }
 }
 
-/// An iterator over QUIC Connection IDs.
-pub struct ConnectionIdIter {
-    cids: VecDeque<ConnectionId<'static>>,
-}
-
-impl Iterator for ConnectionIdIter {
-    type Item = ConnectionId<'static>;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.cids.pop_front()
-    }
-}
-
-impl ExactSizeIterator for ConnectionIdIter {
-    #[inline]
-    fn len(&self) -> usize {
-        self.cids.len()
-    }
-}
-
 #[derive(Default)]
 pub struct ConnectionIdentifiers {
     /// All the Destination Connection IDs provided by our peer.
