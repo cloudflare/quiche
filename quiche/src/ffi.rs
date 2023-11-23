@@ -941,6 +941,52 @@ pub extern fn quiche_conn_trace_id(
     *out_len = trace_id.len();
 }
 
+/// An iterator over connection ids.
+#[derive(Default)]
+pub struct ConnectionIdIter<'a> {
+    cids: Vec<ConnectionId<'a>>,
+    index: usize,
+}
+
+impl<'a> Iterator for ConnectionIdIter<'a> {
+    type Item = ConnectionId<'a>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let v = self.cids.get(self.index)?;
+        self.index += 1;
+        Some(v.clone())
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_source_ids(conn: &Connection) -> *mut ConnectionIdIter {
+    let vec = conn.source_ids().cloned().collect();
+    Box::into_raw(Box::new(ConnectionIdIter {
+        cids: vec,
+        index: 0,
+    }))
+}
+
+#[no_mangle]
+pub extern fn quiche_connection_id_iter_next(
+    iter: &mut ConnectionIdIter, out: &mut *const u8, out_len: &mut size_t,
+) -> bool {
+    if let Some(conn_id) = iter.next() {
+        let id = conn_id.as_ref();
+        *out = id.as_ptr();
+        *out_len = id.len();
+        return true;
+    }
+
+    false
+}
+
+#[no_mangle]
+pub extern fn quiche_connection_id_iter_free(iter: *mut ConnectionIdIter) {
+    drop(unsafe { Box::from_raw(iter) });
+}
+
 #[no_mangle]
 pub extern fn quiche_conn_source_id(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
