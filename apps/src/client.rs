@@ -467,10 +467,10 @@ pub fn connect(
         }
 
         // Provides as many CIDs as possible.
-        while conn.source_cids_left() > 0 {
+        while conn.scids_left() > 0 {
             let (scid, reset_token) = generate_cid_and_reset_token(&rng);
 
-            if conn.new_source_cid(&scid, reset_token, false).is_err() {
+            if conn.new_scid(&scid, reset_token, false).is_err() {
                 break;
             }
 
