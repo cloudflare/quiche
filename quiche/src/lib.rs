@@ -5783,7 +5783,7 @@ impl Connection {
     ///
     /// At any time, the peer cannot have more Destination Connection IDs than
     /// the maximum number of active Connection IDs it negotiated. In such case
-    /// (i.e., when [`source_cids_left()`] returns 0), if the host agrees to
+    /// (i.e., when [`scids_left()`] returns 0), if the host agrees to
     /// request the removal of previous connection IDs, it sets the
     /// `retire_if_needed` parameter. Otherwise, an [`IdLimit`] is returned.
     ///
@@ -5802,10 +5802,10 @@ impl Connection {
     ///
     /// Returns the sequence number associated to the provided Connection ID.
     ///
-    /// [`source_cids_left()`]: struct.Connection.html#method.source_cids_left
+    /// [`scids_left()`]: struct.Connection.html#method.scids_left
     /// [`IdLimit`]: enum.Error.html#IdLimit
     /// [`InvalidState`]: enum.Error.html#InvalidState
-    pub fn new_source_cid(
+    pub fn new_scid(
         &mut self, scid: &ConnectionId, reset_token: u128, retire_if_needed: bool,
     ) -> Result<u64> {
         self.ids.new_scid(
@@ -5819,7 +5819,7 @@ impl Connection {
 
     /// Returns the number of source Connection IDs that are active. This is
     /// only meaningful if the host uses non-zero length Source Connection IDs.
-    pub fn active_source_cids(&self) -> usize {
+    pub fn active_scids(&self) -> usize {
         self.ids.active_source_cids()
     }
 
@@ -5835,13 +5835,13 @@ impl Connection {
     ///
     /// [`peer_active_conn_id_limit`]: struct.Stats.html#structfield.peer_active_conn_id_limit
     #[inline]
-    pub fn source_cids_left(&self) -> usize {
+    pub fn scids_left(&self) -> usize {
         let max_active_source_cids = cmp::min(
             self.peer_transport_params.active_conn_id_limit,
             self.local_transport_params.active_conn_id_limit,
         ) as usize;
 
-        max_active_source_cids - self.active_source_cids()
+        max_active_source_cids - self.active_scids()
     }
 
     /// Requests the retirement of the destination Connection ID used by the
@@ -5863,7 +5863,7 @@ impl Connection {
     ///
     /// [`InvalidState`]: enum.Error.html#InvalidState
     /// [`OutOfIdentifiers`]: enum.Error.html#OutOfIdentifiers
-    pub fn retire_destination_cid(&mut self, dcid_seq: u64) -> Result<()> {
+    pub fn retire_dcid(&mut self, dcid_seq: u64) -> Result<()> {
         if self.ids.zero_length_dcid() {
             return Err(Error::InvalidState);
         }
@@ -14543,10 +14543,10 @@ mod tests {
         // So far, there should not have any QUIC event.
         assert_eq!(pipe.client.path_event_next(), None);
         assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(pipe.client.source_cids_left(), 2);
+        assert_eq!(pipe.client.scids_left(), 2);
 
         let (scid, reset_token) = testing::create_cid_and_reset_token(16);
-        assert_eq!(pipe.client.new_source_cid(&scid, reset_token, false), Ok(1));
+        assert_eq!(pipe.client.new_scid(&scid, reset_token, false), Ok(1));
 
         // Let exchange packets over the connection.
         assert_eq!(pipe.advance(), Ok(()));
@@ -14555,11 +14555,11 @@ mod tests {
         assert_eq!(pipe.server.available_dcids(), 1);
         assert_eq!(pipe.server.path_event_next(), None);
         assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.client.source_cids_left(), 1);
+        assert_eq!(pipe.client.scids_left(), 1);
 
         // Now, a second CID can be provided.
         let (scid, reset_token) = testing::create_cid_and_reset_token(16);
-        assert_eq!(pipe.client.new_source_cid(&scid, reset_token, false), Ok(2));
+        assert_eq!(pipe.client.new_scid(&scid, reset_token, false), Ok(2));
 
         // Let exchange packets over the connection.
         assert_eq!(pipe.advance(), Ok(()));
@@ -14568,13 +14568,13 @@ mod tests {
         assert_eq!(pipe.server.available_dcids(), 2);
         assert_eq!(pipe.server.path_event_next(), None);
         assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.client.source_cids_left(), 0);
+        assert_eq!(pipe.client.scids_left(), 0);
 
         // If now the client tries to send another CID, it reports an error
         // since it exceeds the limit of active CIDs.
         let (scid, reset_token) = testing::create_cid_and_reset_token(16);
         assert_eq!(
-            pipe.client.new_source_cid(&scid, reset_token, false),
+            pipe.client.new_scid(&scid, reset_token, false),
             Err(Error::IdLimit),
         );
     }
@@ -14602,15 +14602,12 @@ mod tests {
         // So far, there should not have any QUIC event.
         assert_eq!(pipe.client.path_event_next(), None);
         assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(pipe.client.source_cids_left(), 1);
+        assert_eq!(pipe.client.scids_left(), 1);
 
         let scid = pipe.client.source_id().into_owned();
 
         let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
-        assert_eq!(
-            pipe.client.new_source_cid(&scid_1, reset_token_1, false),
-            Ok(1)
-        );
+        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(1));
 
         // Let exchange packets over the connection.
         assert_eq!(pipe.advance(), Ok(()));
@@ -14619,7 +14616,7 @@ mod tests {
         assert_eq!(pipe.server.available_dcids(), 1);
         assert_eq!(pipe.server.path_event_next(), None);
         assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.client.source_cids_left(), 0);
+        assert_eq!(pipe.client.scids_left(), 0);
 
         // Now we assume that the client wants to advertise more source
         // Connection IDs than the advertised limit. This is valid if it
@@ -14627,10 +14624,7 @@ mod tests {
         // limits.
 
         let (scid_2, reset_token_2) = testing::create_cid_and_reset_token(16);
-        assert_eq!(
-            pipe.client.new_source_cid(&scid_2, reset_token_2, true),
-            Ok(2)
-        );
+        assert_eq!(pipe.client.new_scid(&scid_2, reset_token_2, true), Ok(2));
 
         // Let exchange packets over the connection.
         assert_eq!(pipe.advance(), Ok(()));
@@ -14644,7 +14638,7 @@ mod tests {
         assert_eq!(pipe.client.retired_scid_next(), None);
 
         assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.client.source_cids_left(), 0);
+        assert_eq!(pipe.client.scids_left(), 0);
 
         // The active Destination Connection ID of the server should now be the
         // one with sequence number 1.
@@ -14652,17 +14646,11 @@ mod tests {
 
         // Now tries to experience CID retirement. If the server tries to remove
         // non-existing DCIDs, it fails.
-        assert_eq!(
-            pipe.server.retire_destination_cid(0),
-            Err(Error::InvalidState)
-        );
-        assert_eq!(
-            pipe.server.retire_destination_cid(3),
-            Err(Error::InvalidState)
-        );
+        assert_eq!(pipe.server.retire_dcid(0), Err(Error::InvalidState));
+        assert_eq!(pipe.server.retire_dcid(3), Err(Error::InvalidState));
 
         // Now it removes DCID with sequence 1.
-        assert_eq!(pipe.server.retire_destination_cid(1), Ok(()));
+        assert_eq!(pipe.server.retire_dcid(1), Ok(()));
 
         // Let exchange packets over the connection.
         assert_eq!(pipe.advance(), Ok(()));
@@ -14675,10 +14663,7 @@ mod tests {
         assert_eq!(pipe.server.available_dcids(), 0);
 
         // Trying to remove the last DCID triggers an error.
-        assert_eq!(
-            pipe.server.retire_destination_cid(2),
-            Err(Error::OutOfIdentifiers)
-        );
+        assert_eq!(pipe.server.retire_dcid(2), Err(Error::OutOfIdentifiers));
     }
 
     #[test]
@@ -14702,10 +14687,7 @@ mod tests {
         let scid = pipe.client.source_id().into_owned();
 
         let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
-        assert_eq!(
-            pipe.client.new_source_cid(&scid_1, reset_token_1, false),
-            Ok(1)
-        );
+        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(1));
 
         // Packets are sent, but never received.
         testing::emit_flight(&mut pipe.client).unwrap();
@@ -14723,7 +14705,7 @@ mod tests {
         assert_eq!(pipe.server.available_dcids(), 1);
 
         // Now the server retires the first Destination CID.
-        assert_eq!(pipe.server.retire_destination_cid(0), Ok(()));
+        assert_eq!(pipe.server.retire_dcid(0), Ok(()));
 
         // But the packet never reaches the client.
         testing::emit_flight(&mut pipe.server).unwrap();
@@ -14760,38 +14742,29 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
 
         let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
-        assert_eq!(
-            pipe.client.new_source_cid(&scid_1, reset_token_1, false),
-            Ok(1)
-        );
+        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(1));
         assert_eq!(pipe.advance(), Ok(()));
 
         // Trying to send the same CID with a different reset token raises an
         // InvalidState error.
         let reset_token_2 = reset_token_1.wrapping_add(1);
         assert_eq!(
-            pipe.client.new_source_cid(&scid_1, reset_token_2, false),
+            pipe.client.new_scid(&scid_1, reset_token_2, false),
             Err(Error::InvalidState),
         );
 
         // Retrying to send the exact same CID with the same token returns the
         // previously assigned CID seq, but without sending anything.
-        assert_eq!(
-            pipe.client.new_source_cid(&scid_1, reset_token_1, false),
-            Ok(1)
-        );
+        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(1));
         assert!(!pipe.client.ids.has_new_scids());
 
         // Now retire this new CID.
-        assert_eq!(pipe.server.retire_destination_cid(1), Ok(()));
+        assert_eq!(pipe.server.retire_dcid(1), Ok(()));
         assert_eq!(pipe.advance(), Ok(()));
 
         // It is up to the application to ensure that a given SCID is not reused
         // later.
-        assert_eq!(
-            pipe.client.new_source_cid(&scid_1, reset_token_1, false),
-            Ok(2),
-        );
+        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(2));
     }
 
     // Utility function.
@@ -14820,11 +14793,7 @@ mod tests {
                 c_reset_tokens.push(c_reset_token);
 
                 assert_eq!(
-                    pipe.client.new_source_cid(
-                        &c_cids[i],
-                        c_reset_tokens[i],
-                        true
-                    ),
+                    pipe.client.new_scid(&c_cids[i], c_reset_tokens[i], true),
                     Ok(i as u64 + 1)
                 );
             }
@@ -14835,11 +14804,7 @@ mod tests {
                 s_cids.push(s_cid);
                 s_reset_tokens.push(s_reset_token);
                 assert_eq!(
-                    pipe.server.new_source_cid(
-                        &s_cids[i],
-                        s_reset_tokens[i],
-                        true
-                    ),
+                    pipe.server.new_scid(&s_cids[i], s_reset_tokens[i], true),
                     Ok(i as u64 + 1)
                 );
             }
@@ -14891,16 +14856,10 @@ mod tests {
 
         let (c_cid, c_reset_token) = testing::create_cid_and_reset_token(16);
 
-        assert_eq!(
-            pipe.client.new_source_cid(&c_cid, c_reset_token, true),
-            Ok(1)
-        );
+        assert_eq!(pipe.client.new_scid(&c_cid, c_reset_token, true), Ok(1));
 
         let (s_cid, s_reset_token) = testing::create_cid_and_reset_token(16);
-        assert_eq!(
-            pipe.server.new_source_cid(&s_cid, s_reset_token, true),
-            Ok(1)
-        );
+        assert_eq!(pipe.server.new_scid(&s_cid, s_reset_token, true), Ok(1));
 
         // We need to exchange the CIDs first.
         assert_eq!(
@@ -15242,10 +15201,7 @@ mod tests {
         let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
         assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
 
-        assert_eq!(
-            pipe.client.retire_destination_cid(0),
-            Err(Error::OutOfIdentifiers)
-        );
+        assert_eq!(pipe.client.retire_dcid(0), Err(Error::OutOfIdentifiers));
     }
 
     #[test]
@@ -16220,7 +16176,7 @@ mod tests {
         for _ in 0..2 {
             let (cid, reset_token) = testing::create_cid_and_reset_token(16);
             pipe.server
-                .new_source_cid(&cid, reset_token, true)
+                .new_scid(&cid, reset_token, true)
                 .expect("server issue cid");
             server_cids.push(cid);
         }

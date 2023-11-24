@@ -512,13 +512,9 @@ fn main() {
             }
 
             // Provides as many CIDs as possible.
-            while client.conn.source_cids_left() > 0 {
+            while client.conn.scids_left() > 0 {
                 let (scid, reset_token) = generate_cid_and_reset_token(&rng);
-                if client
-                    .conn
-                    .new_source_cid(&scid, reset_token, false)
-                    .is_err()
-                {
+                if client.conn.new_scid(&scid, reset_token, false).is_err() {
                     break;
                 }
 
