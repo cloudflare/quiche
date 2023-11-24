@@ -898,6 +898,13 @@ impl Handshake {
             }
         }
     }
+
+    #[cfg(feature = "boringssl-boring-crate")]
+    pub(crate) fn ssl_mut(&mut self) -> &mut boring::ssl::SslRef {
+        use foreign_types_shared::ForeignTypeRef;
+
+        unsafe { boring::ssl::SslRef::from_ptr_mut(self.as_mut_ptr() as _) }
+    }
 }
 
 // NOTE: These traits are not automatically implemented for Handshake due to the
