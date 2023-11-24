@@ -1352,6 +1352,64 @@ pub extern fn quiche_conn_send_quantum(conn: &Connection) -> size_t {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_active_scids(conn: &Connection) -> size_t {
+    conn.active_scids() as size_t
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_scids_left(conn: &Connection) -> size_t {
+    conn.scids_left() as size_t
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_new_scid(
+    conn: &mut Connection, scid: *const u8, scid_len: size_t,
+    reset_token: *const u8, retire_if_needed: bool,
+) -> u64 {
+    let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
+    let scid = ConnectionId::from_ref(scid);
+
+    let reset_token = unsafe { slice::from_raw_parts(reset_token, 16) };
+    let reset_token = match reset_token.try_into() {
+        Ok(rt) => rt,
+        Err(_) => unreachable!(),
+    };
+    let reset_token = u128::from_be_bytes(reset_token);
+
+    match conn.new_scid(&scid, reset_token, retire_if_needed) {
+        Ok(c) => c,
+
+        Err(e) => e.to_c() as u64,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_available_dcids(conn: &Connection) -> size_t {
+    conn.available_dcids() as size_t
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_retired_scids(conn: &Connection) -> size_t {
+    conn.retired_scids() as size_t
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_retired_scid_next(
+    conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
+) -> bool {
+    match conn.retired_scid_next() {
+        None => false,
+
+        Some(conn_id) => {
+            let id = conn_id.as_ref();
+            *out = id.as_ptr();
+            *out_len = id.len();
+            true
+        },
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_put_varint(
     buf: *mut u8, buf_len: size_t, val: u64,
 ) -> c_int {

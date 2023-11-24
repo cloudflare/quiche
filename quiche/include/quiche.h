@@ -678,6 +678,30 @@ ssize_t quiche_conn_send_ack_eliciting_on_path(quiche_conn *conn,
                            const struct sockaddr *local, socklen_t local_len,
                            const struct sockaddr *peer, socklen_t peer_len);
 
+// Returns true if there are retired source connection ids and fill the parameters
+bool quiche_conn_retired_scid_next(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
+
+// Returns the number of source Connection IDs that are retired.
+size_t quiche_conn_retired_scids(const quiche_conn *conn);
+
+// Returns the number of spare Destination Connection IDs, i.e.,
+// Destination Connection IDs that are still unused.
+size_t quiche_conn_available_dcids(const quiche_conn *conn);
+
+// Returns the number of source Connection IDs that should be provided
+// to the peer without exceeding the limit it advertised.
+size_t quiche_conn_scids_left(quiche_conn *conn);
+
+// Returns the number of source Connection IDs that are active. This is
+// only meaningful if the host uses non-zero length Source Connection IDs.
+size_t quiche_conn_active_scids(quiche_conn *conn);
+
+// Provides additional source Connection IDs that the peer can use to reach
+// this host.
+uint64_t quiche_conn_new_scid(quiche_conn *conn,
+                           const uint8_t *scid, size_t scid_len,
+                           const uint8_t *reset_token, bool retire_if_needed);
+
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
 
