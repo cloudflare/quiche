@@ -690,15 +690,15 @@ size_t quiche_conn_available_dcids(const quiche_conn *conn);
 
 // Returns the number of source Connection IDs that should be provided
 // to the peer without exceeding the limit it advertised.
-size_t quiche_conn_source_cids_left(quiche_conn *conn);
+size_t quiche_conn_scids_left(quiche_conn *conn);
 
 // Returns the number of source Connection IDs that are active. This is
 // only meaningful if the host uses non-zero length Source Connection IDs.
-size_t quiche_conn_active_source_cids(quiche_conn *conn);
+size_t quiche_conn_active_scids(quiche_conn *conn);
 
 // Provides additional source Connection IDs that the peer can use to reach
 // this host.
-uint64_t quiche_conn_new_source_cid(quiche_conn *conn,
+uint64_t quiche_conn_new_scid(quiche_conn *conn,
                            const uint8_t *scid, size_t scid_len,
                            const uint8_t *reset_token, bool retire_if_needed);
 

@@ -1352,17 +1352,17 @@ pub extern fn quiche_conn_send_quantum(conn: &Connection) -> size_t {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_active_source_cids(conn: &Connection) -> size_t {
-    conn.active_source_cids() as size_t
+pub extern fn quiche_conn_active_scids(conn: &Connection) -> size_t {
+    conn.active_scids() as size_t
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_source_cids_left(conn: &Connection) -> size_t {
-    conn.source_cids_left() as size_t
+pub extern fn quiche_conn_scids_left(conn: &Connection) -> size_t {
+    conn.scids_left() as size_t
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_new_source_cid(
+pub extern fn quiche_conn_new_scid(
     conn: &mut Connection, scid: *const u8, scid_len: size_t,
     reset_token: *const u8, retire_if_needed: bool,
 ) -> u64 {
@@ -1376,7 +1376,7 @@ pub extern fn quiche_conn_new_source_cid(
     };
     let reset_token = u128::from_be_bytes(reset_token);
 
-    match conn.new_source_cid(&scid, reset_token, retire_if_needed) {
+    match conn.new_scid(&scid, reset_token, retire_if_needed) {
         Ok(c) => c,
 
         Err(e) => e.to_c() as u64,
