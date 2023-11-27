@@ -727,6 +727,21 @@ int quiche_conn_new_scid(quiche_conn *conn,
                            const uint8_t *scid, size_t scid_len,
                            const uint8_t *reset_token, bool retire_if_needed, uint64_t *scid_seq);
 
+// Requests the stack to perform path validation of the proposed 4-tuple.
+int quiche_conn_probe_path(quiche_conn *conn,
+                                const struct sockaddr *local, socklen_t local_len,
+                                const struct sockaddr *peer, socklen_t peer_len, uint64_t *seq);
+
+// Migrates the connection to a new local address.
+int quiche_conn_migrate_source(quiche_conn *conn, const struct sockaddr *local, socklen_t local_len, uint64_t *seq);
+
+// Migrates the connection over the given network path between "local"
+// and "peer".
+int quiche_conn_migrate(quiche_conn *conn,
+                             const struct sockaddr *local, socklen_t local_len,
+                             const struct sockaddr *peer, socklen_t peer_len,
+                             uint64_t *seq);
+
 enum quiche_path_event_type {
     QUICHE_PATH_EVENT_NEW,
     QUICHE_PATH_EVENT_VALIDATED,

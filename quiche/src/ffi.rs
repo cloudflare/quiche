@@ -1547,6 +1547,52 @@ pub extern fn quiche_conn_is_path_validated(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_probe_path(
+    conn: &mut Connection, local: &sockaddr, local_len: socklen_t,
+    peer: &sockaddr, peer_len: socklen_t, seq: *mut u64,
+) -> c_int {
+    let local = std_addr_from_c(local, local_len);
+    let peer = std_addr_from_c(peer, peer_len);
+    match conn.probe_path(local, peer) {
+        Ok(v) => {
+            unsafe { *seq = v }
+            0
+        },
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_migrate_source(
+    conn: &mut Connection, local: &sockaddr, local_len: socklen_t, seq: *mut u64,
+) -> c_int {
+    let local = std_addr_from_c(local, local_len);
+    match conn.migrate_source(local) {
+        Ok(v) => {
+            unsafe { *seq = v }
+            0
+        },
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_migrate(
+    conn: &mut Connection, local: &sockaddr, local_len: socklen_t,
+    peer: &sockaddr, peer_len: socklen_t, seq: *mut u64,
+) -> c_int {
+    let local = std_addr_from_c(local, local_len);
+    let peer = std_addr_from_c(peer, peer_len);
+    match conn.migrate(local, peer) {
+        Ok(v) => {
+            unsafe { *seq = v }
+            0
+        },
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_path_event_next(
     conn: &mut Connection,
 ) -> *const PathEvent {
