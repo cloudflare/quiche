@@ -352,6 +352,19 @@ ssize_t quiche_conn_send(quiche_conn *conn, uint8_t *out, size_t out_len,
 // Returns the size of the send quantum, in bytes.
 size_t quiche_conn_send_quantum(const quiche_conn *conn);
 
+// Writes a single QUIC packet to be sent to the peer from the specified
+// local address "from" to the destination address "to".
+ssize_t quiche_conn_send_on_path(quiche_conn *conn, uint8_t *out, size_t out_len,
+                                 const struct sockaddr *from, socklen_t from_len,
+                                 const struct sockaddr *to, socklen_t to_len,
+                                 quiche_send_info *out_info);
+
+// Returns the size of the send quantum over the given 4-tuple, in bytes.
+size_t quiche_conn_send_quantum_on_path(const quiche_conn *conn,
+                                        const struct sockaddr *local_addr, socklen_t local_len,
+                                        const struct sockaddr *peer_addr, socklen_t peer_len);
+
+
 // Reads contiguous data from a stream.
 ssize_t quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
                                 uint8_t *out, size_t buf_len, bool *fin);
@@ -765,6 +778,23 @@ void quiche_path_event_free(quiche_path_event *ev);
 // Requests the retirement of the destination Connection ID used by the
 // host to reach its peer.
 int quiche_conn_retire_dcid(quiche_conn *conn, uint64_t dcid_seq);
+
+typedef struct quiche_socket_addr_iter quiche_socket_addr_iter;
+
+// Returns an iterator over destination `SockAddr`s whose association
+// with "from" forms a known QUIC path on which packets can be sent to.
+quiche_socket_addr_iter *quiche_conn_paths_iter(quiche_conn *conn, const struct sockaddr *from, size_t from_len);
+
+// Fetches the next peer from the given iterator. Returns false if there are
+// no more elements in the iterator.
+bool quiche_socket_addr_iter_next(quiche_socket_addr_iter *iter, struct sockaddr_storage *peer, size_t *peer_len);
+
+// Frees the given path iterator object.
+void quiche_socket_addr_iter_free(quiche_socket_addr_iter *iter);
+
+// Returns whether the network path with local address "from and remote address "to" has been validated.
+// If the 4-tuple does not exist over the connection, returns an InvalidState.
+int quiche_conn_is_path_validated(const quiche_conn *conn, const struct sockaddr *from, size_t from_len, const struct sockaddr *to, size_t to_len);
 
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
