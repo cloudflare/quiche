@@ -1382,6 +1382,7 @@ pub extern fn quiche_conn_new_scid(
         Err(e) => e.to_c() as u64,
     }
 }
+
 #[no_mangle]
 pub extern fn quiche_conn_retire_dcid(
     conn: &mut Connection, dcid_seq: u64,
