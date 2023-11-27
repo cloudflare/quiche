@@ -701,6 +701,7 @@ size_t quiche_conn_active_scids(quiche_conn *conn);
 uint64_t quiche_conn_new_scid(quiche_conn *conn,
                            const uint8_t *scid, size_t scid_len,
                            const uint8_t *reset_token, bool retire_if_needed);
+
 enum quiche_path_event_type {
     QUICHE_PATH_EVENT_NEW,
     QUICHE_PATH_EVENT_VALIDATED,
