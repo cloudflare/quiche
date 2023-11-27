@@ -1410,8 +1410,8 @@ pub extern fn quiche_conn_scids_left(conn: &Connection) -> size_t {
 #[no_mangle]
 pub extern fn quiche_conn_new_scid(
     conn: &mut Connection, scid: *const u8, scid_len: size_t,
-    reset_token: *const u8, retire_if_needed: bool,
-) -> u64 {
+    reset_token: *const u8, retire_if_needed: bool, scid_seq: *mut u64,
+) -> c_int {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
     let scid = ConnectionId::from_ref(scid);
 
@@ -1423,9 +1423,11 @@ pub extern fn quiche_conn_new_scid(
     let reset_token = u128::from_be_bytes(reset_token);
 
     match conn.new_scid(&scid, reset_token, retire_if_needed) {
-        Ok(c) => c,
-
-        Err(e) => e.to_c() as u64,
+        Ok(c) => {
+            unsafe { *scid_seq = c }
+            0
+        },
+        Err(e) => e.to_c() as c_int,
     }
 }
 
