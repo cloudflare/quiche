@@ -1384,6 +1384,16 @@ pub extern fn quiche_conn_new_scid(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_retire_dcid(
+    conn: &mut Connection, dcid_seq: u64,
+) -> c_int {
+    match conn.retire_dcid(dcid_seq) {
+        Ok(_) => 0,
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_available_dcids(conn: &Connection) -> size_t {
     conn.available_dcids() as size_t
 }

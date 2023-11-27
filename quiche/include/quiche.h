@@ -702,6 +702,10 @@ uint64_t quiche_conn_new_scid(quiche_conn *conn,
                            const uint8_t *scid, size_t scid_len,
                            const uint8_t *reset_token, bool retire_if_needed);
 
+// Requests the retirement of the destination Connection ID used by the
+// host to reach its peer.
+int quiche_conn_retire_dcid(quiche_conn *conn, uint64_t dcid_seq);
+
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
 
