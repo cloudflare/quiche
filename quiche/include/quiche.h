@@ -428,7 +428,7 @@ void quiche_conn_source_id(const quiche_conn *conn, const uint8_t **out, size_t 
 
 typedef struct quiche_connection_id_iter quiche_connection_id_iter;
 
-// Returns all active source connection IDs..
+// Returns all active source connection IDs.
 quiche_connection_id_iter *quiche_conn_source_ids(quiche_conn *conn);
 
 // Fetches the next id from the given iterator. Returns false if there are
