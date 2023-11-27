@@ -709,10 +709,10 @@ size_t quiche_conn_scids_left(quiche_conn *conn);
 size_t quiche_conn_active_scids(quiche_conn *conn);
 
 // Provides additional source Connection IDs that the peer can use to reach
-// this host.
-uint64_t quiche_conn_new_scid(quiche_conn *conn,
+// this host. Writes the sequence number to "scid_seq" and returns 0.
+int quiche_conn_new_scid(quiche_conn *conn,
                            const uint8_t *scid, size_t scid_len,
-                           const uint8_t *reset_token, bool retire_if_needed);
+                           const uint8_t *reset_token, bool retire_if_needed, uint64_t *scid_seq);
 
 enum quiche_path_event_type {
     QUICHE_PATH_EVENT_NEW,
