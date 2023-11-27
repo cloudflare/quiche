@@ -727,7 +727,7 @@ void quiche_path_event_validated(quiche_path_event *ev,
                            struct sockaddr_storage *local, socklen_t *local_len, struct sockaddr_storage *peer, socklen_t *peer_len);
 
 // Should be called if the quiche_path_event_type(...) returns QUICHE_PATH_EVENT_FAILED_VALIDATION.
-void quiche_path_event_failed_validated(quiche_path_event *ev,
+void quiche_path_event_failed_validation(quiche_path_event *ev,
                            struct sockaddr_storage *local, socklen_t *local_len, struct sockaddr_storage *peer, socklen_t *peer_len);
 
 // Should be called if the quiche_path_event_type(...) returns QUICHE_PATH_EVENT_CLOSED.
