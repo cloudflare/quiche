@@ -426,6 +426,18 @@ void quiche_conn_trace_id(const quiche_conn *conn, const uint8_t **out, size_t *
 // Returns the source connection ID.
 void quiche_conn_source_id(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
+typedef struct quiche_connection_id_iter quiche_connection_id_iter;
+
+// Returns all active source connection IDs.
+quiche_connection_id_iter *quiche_conn_source_ids(quiche_conn *conn);
+
+// Fetches the next id from the given iterator. Returns false if there are
+// no more elements in the iterator.
+bool quiche_connection_id_iter_next(quiche_connection_id_iter *iter,  const uint8_t **out, size_t *out_len);
+
+// Frees the given path iterator object.
+void quiche_connection_id_iter_free(quiche_connection_id_iter *iter);
+
 // Returns the destination connection ID.
 void quiche_conn_destination_id(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
