@@ -765,6 +765,34 @@ pub extern fn quiche_conn_send(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_send_on_path(
+    conn: &mut Connection, out: *mut u8, out_len: size_t, from: *const sockaddr,
+    from_len: socklen_t, to: *const sockaddr, to_len: socklen_t,
+    out_info: &mut SendInfo,
+) -> ssize_t {
+    if out_len > <ssize_t>::max_value() as usize {
+        panic!("The provided buffer is too large");
+    }
+
+    let from = optional_std_addr_from_c(from, from_len);
+    let to = optional_std_addr_from_c(to, to_len);
+    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+
+    match conn.send_on_path(out, from, to) {
+        Ok((v, info)) => {
+            out_info.from_len = std_addr_to_c(&info.from, &mut out_info.from);
+            out_info.to_len = std_addr_to_c(&info.to, &mut out_info.to);
+
+            std_time_to_c(&info.at, &mut out_info.at);
+
+            v as ssize_t
+        },
+
+        Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_stream_recv(
     conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: size_t,
     fin: &mut bool,
@@ -1468,6 +1496,57 @@ pub extern fn quiche_conn_retired_scid_next(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_send_quantum_on_path(
+    conn: &Connection, local: &sockaddr, local_len: socklen_t, peer: &sockaddr,
+    peer_len: socklen_t,
+) -> size_t {
+    let local = std_addr_from_c(local, local_len);
+    let peer = std_addr_from_c(peer, peer_len);
+
+    conn.send_quantum_on_path(local, peer) as size_t
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_paths_iter(
+    conn: &Connection, from: &sockaddr, from_len: socklen_t,
+) -> *mut SocketAddrIter {
+    let addr = std_addr_from_c(from, from_len);
+
+    Box::into_raw(Box::new(conn.paths_iter(addr)))
+}
+
+#[no_mangle]
+pub extern fn quiche_socket_addr_iter_next(
+    iter: &mut SocketAddrIter, peer: &mut sockaddr_storage,
+    peer_len: *mut socklen_t,
+) -> bool {
+    if let Some(v) = iter.next() {
+        unsafe { *peer_len = std_addr_to_c(&v, peer) }
+        return true;
+    }
+
+    false
+}
+
+#[no_mangle]
+pub extern fn quiche_socket_addr_iter_free(iter: *mut SocketAddrIter) {
+    drop(unsafe { Box::from_raw(iter) });
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_is_path_validated(
+    conn: &Connection, from: &sockaddr, from_len: socklen_t, to: &sockaddr,
+    to_len: socklen_t,
+) -> c_int {
+    let from = std_addr_from_c(from, from_len);
+    let to = std_addr_from_c(to, to_len);
+    match conn.is_path_validated(from, to) {
+        Ok(v) => v as c_int,
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_path_event_next(
     conn: &mut Connection,
 ) -> *const PathEvent {
@@ -1635,6 +1714,19 @@ pub extern fn quiche_get_varint(
     };
 
     b.off() as ssize_t
+}
+
+fn optional_std_addr_from_c(
+    addr: *const sockaddr, addr_len: socklen_t,
+) -> Option<SocketAddr> {
+    if addr.is_null() || addr_len == 0 {
+        return None;
+    }
+
+    Some({
+        let addr = unsafe { slice::from_raw_parts(addr, addr_len as usize) };
+        std_addr_from_c(addr.first().unwrap(), addr_len)
+    })
 }
 
 fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
