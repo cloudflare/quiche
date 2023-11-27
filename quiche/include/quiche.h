@@ -714,6 +714,54 @@ uint64_t quiche_conn_new_scid(quiche_conn *conn,
                            const uint8_t *scid, size_t scid_len,
                            const uint8_t *reset_token, bool retire_if_needed);
 
+enum quiche_path_event_type {
+    QUICHE_PATH_EVENT_NEW,
+    QUICHE_PATH_EVENT_VALIDATED,
+    QUICHE_PATH_EVENT_FAILED_VALIDATION,
+    QUICHE_PATH_EVENT_CLOSED,
+    QUICHE_PATH_EVENT_REUSED_SOURCE_CONNECTION_ID,
+    QUICHE_PATH_EVENT_PEER_MIGRATED,
+};
+
+typedef struct quiche_path_event quiche_path_event;
+
+// Retrieves the next event. Returns NULL if there is no event to process.
+const quiche_path_event *quiche_conn_path_event_next(quiche_conn *conn);
+
+// Returns the type of the event.
+enum quiche_path_event_type quiche_path_event_type(quiche_path_event *ev);
+
+// Should be called if the quiche_path_event_type(...) returns QUICHE_PATH_EVENT_NEW.
+void quiche_path_event_new(quiche_path_event *ev,
+                           struct sockaddr_storage *local, socklen_t *local_len, struct sockaddr_storage *peer, socklen_t *peer_len);
+
+// Should be called if the quiche_path_event_type(...) returns QUICHE_PATH_EVENT_VALIDATED.
+void quiche_path_event_validated(quiche_path_event *ev,
+                           struct sockaddr_storage *local, socklen_t *local_len, struct sockaddr_storage *peer, socklen_t *peer_len);
+
+// Should be called if the quiche_path_event_type(...) returns QUICHE_PATH_EVENT_FAILED_VALIDATION.
+void quiche_path_event_failed_validation(quiche_path_event *ev,
+                           struct sockaddr_storage *local, socklen_t *local_len, struct sockaddr_storage *peer, socklen_t *peer_len);
+
+// Should be called if the quiche_path_event_type(...) returns QUICHE_PATH_EVENT_CLOSED.
+void quiche_path_event_closed(quiche_path_event *ev,
+                           struct sockaddr_storage *local, socklen_t *local_len, struct sockaddr_storage *peer, socklen_t *peer_len);
+
+// Should be called if the quiche_path_event_type(...) returns QUICHE_PATH_EVENT_REUSED_SOURCE_CONNECTION_ID.
+void quiche_path_event_reused_source_connection_id(quiche_path_event *ev, uint64_t *id,
+                           struct sockaddr_storage *old_local, socklen_t *old_local_len,
+                           struct sockaddr_storage *old_peer, socklen_t *old_peer_len,
+                           struct sockaddr_storage *local, socklen_t *local_len,
+                           struct sockaddr_storage *peer, socklen_t *peer_len);
+
+// Should be called if the quiche_path_event_type(...) returns QUICHE_PATH_EVENT_PEER_MIGRATED.
+void quiche_path_event_peer_migrated(quiche_path_event *ev,
+                           struct sockaddr_storage *local, socklen_t *local_len,
+                           struct sockaddr_storage *peer, socklen_t *peer_len);
+
+// Frees the path event object.
+void quiche_path_event_free(quiche_path_event *ev);
+
 // Requests the retirement of the destination Connection ID used by the
 // host to reach its peer.
 int quiche_conn_retire_dcid(quiche_conn *conn, uint64_t dcid_seq);

@@ -1466,6 +1466,140 @@ pub extern fn quiche_conn_retired_scid_next(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_path_event_next(
+    conn: &mut Connection,
+) -> *const PathEvent {
+    match conn.path_event_next() {
+        Some(v) => Box::into_raw(Box::new(v)),
+        None => ptr::null(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_path_event_type(ev: &PathEvent) -> u32 {
+    match ev {
+        PathEvent::New { .. } => 0,
+
+        PathEvent::Validated { .. } => 1,
+
+        PathEvent::FailedValidation { .. } => 2,
+
+        PathEvent::Closed { .. } => 3,
+
+        PathEvent::ReusedSourceConnectionId { .. } => 4,
+
+        PathEvent::PeerMigrated { .. } => 5,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_path_event_new(
+    ev: &PathEvent, local_addr: &mut sockaddr_storage,
+    local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
+    peer_addr_len: &mut socklen_t,
+) {
+    match ev {
+        PathEvent::New(local, peer) => {
+            *local_addr_len = std_addr_to_c(local, local_addr);
+            *peer_addr_len = std_addr_to_c(peer, peer_addr)
+        },
+
+        _ => unreachable!(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_path_event_validated(
+    ev: &PathEvent, local_addr: &mut sockaddr_storage,
+    local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
+    peer_addr_len: &mut socklen_t,
+) {
+    match ev {
+        PathEvent::Validated(local, peer) => {
+            *local_addr_len = std_addr_to_c(local, local_addr);
+            *peer_addr_len = std_addr_to_c(peer, peer_addr)
+        },
+
+        _ => unreachable!(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_path_event_failed_validation(
+    ev: &PathEvent, local_addr: &mut sockaddr_storage,
+    local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
+    peer_addr_len: &mut socklen_t,
+) {
+    match ev {
+        PathEvent::FailedValidation(local, peer) => {
+            *local_addr_len = std_addr_to_c(local, local_addr);
+            *peer_addr_len = std_addr_to_c(peer, peer_addr)
+        },
+
+        _ => unreachable!(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_path_event_closed(
+    ev: &PathEvent, local_addr: &mut sockaddr_storage,
+    local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
+    peer_addr_len: &mut socklen_t,
+) {
+    match ev {
+        PathEvent::Closed(local, peer) => {
+            *local_addr_len = std_addr_to_c(local, local_addr);
+            *peer_addr_len = std_addr_to_c(peer, peer_addr)
+        },
+
+        _ => unreachable!(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_path_event_reused_source_connection_id(
+    ev: &PathEvent, cid_sequence_number: &mut u64,
+    old_local_addr: &mut sockaddr_storage, old_local_addr_len: &mut socklen_t,
+    old_peer_addr: &mut sockaddr_storage, old_peer_addr_len: &mut socklen_t,
+    local_addr: &mut sockaddr_storage, local_addr_len: &mut socklen_t,
+    peer_addr: &mut sockaddr_storage, peer_addr_len: &mut socklen_t,
+) {
+    match ev {
+        PathEvent::ReusedSourceConnectionId(id, old, new) => {
+            *cid_sequence_number = *id;
+            *old_local_addr_len = std_addr_to_c(&old.0, old_local_addr);
+            *old_peer_addr_len = std_addr_to_c(&old.1, old_peer_addr);
+
+            *local_addr_len = std_addr_to_c(&new.0, local_addr);
+            *peer_addr_len = std_addr_to_c(&new.1, peer_addr)
+        },
+
+        _ => unreachable!(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_path_event_peer_migrated(
+    ev: &PathEvent, local_addr: &mut sockaddr_storage,
+    local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
+    peer_addr_len: &mut socklen_t,
+) {
+    match ev {
+        PathEvent::PeerMigrated(local, peer) => {
+            *local_addr_len = std_addr_to_c(local, local_addr);
+            *peer_addr_len = std_addr_to_c(peer, peer_addr);
+        },
+
+        _ => unreachable!(),
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_path_event_free(ev: *mut PathEvent) {
+    drop(unsafe { Box::from_raw(ev) });
+}
+
+#[no_mangle]
 pub extern fn quiche_put_varint(
     buf: *mut u8, buf_len: size_t, val: u64,
 ) -> c_int {
