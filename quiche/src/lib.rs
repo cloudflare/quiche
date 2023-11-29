@@ -383,6 +383,8 @@
 extern crate log;
 
 #[cfg(feature = "qlog")]
+use qlog::events::connectivity::ConnectivityEventType;
+#[cfg(feature = "qlog")]
 use qlog::events::connectivity::TransportOwner;
 #[cfg(feature = "qlog")]
 use qlog::events::quic::RecoveryEventType;
@@ -415,7 +417,6 @@ use std::str::FromStr;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
-use qlog::events::connectivity::ConnectivityEventType;
 use smallvec::SmallVec;
 
 /// The current QUIC wire version.
