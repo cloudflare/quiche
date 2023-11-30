@@ -69,6 +69,11 @@ pub trait BufSplit {
     /// must only contain the first `at` bytes, while the newly produced
     /// buffer must containt the remaining bytes.
     fn split_at(&mut self, at: usize) -> Self;
+
+    /// Try to append a prefix to the buffer, return true if succeeded.
+    fn try_add_prefix(&mut self, _prefix: &[u8]) -> bool {
+        false
+    }
 }
 
 /// The default [`BufFactory`] allocates buffers on the heap on demand.
