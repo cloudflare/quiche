@@ -1080,6 +1080,11 @@ pub extern fn quiche_conn_is_established(conn: &Connection) -> bool {
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_is_resumed(conn: &Connection) -> bool {
+    conn.is_resumed()
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_is_in_early_data(conn: &Connection) -> bool {
     conn.is_in_early_data()
 }
