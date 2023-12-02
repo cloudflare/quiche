@@ -2012,7 +2012,7 @@ impl Connection {
             None,
             time::Instant::now(),
             trace,
-            self.qlog.level.clone(),
+            self.qlog.level,
             writer,
         );
 
