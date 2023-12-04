@@ -1625,21 +1625,6 @@ macro_rules! push_frame_to_pkt {
     }};
 }
 
-/// Conditional qlog actions.
-///
-/// Executes the provided body if the qlog feature is enabled and quiche
-/// has been configured with a log writer.
-macro_rules! qlog_with {
-    ($qlog:expr, $qlog_streamer_ref:ident, $body:block) => {{
-        #[cfg(feature = "qlog")]
-        {
-            if let Some($qlog_streamer_ref) = &mut $qlog.streamer {
-                $body
-            }
-        }
-    }};
-}
-
 /// Executes the provided body if the qlog feature is enabled, quiche has been
 /// configured with a log writer, the event's importance is within the
 /// configured level.
@@ -7433,9 +7418,10 @@ impl Connection {
 
     // Marks the connection as closed and does any related tidyup.
     fn mark_closed(&mut self) {
-        qlog_with!(self.qlog, q, {
-            q = None;
-        });
+        #[cfg(feature = "qlog")]
+        {
+            self.qlog.streamer = None;
+        }
         self.closed = true;
     }
 }
