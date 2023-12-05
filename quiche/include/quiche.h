@@ -467,6 +467,9 @@ void quiche_conn_session(const quiche_conn *conn, const uint8_t **out, size_t *o
 // Returns true if the connection handshake is complete.
 bool quiche_conn_is_established(const quiche_conn *conn);
 
+// Returns true if the connection is resumed.
+bool quiche_conn_is_resumed(const quiche_conn *conn);
+
 // Returns true if the connection has a pending handshake that has progressed
 // enough to send or receive early data.
 bool quiche_conn_is_in_early_data(const quiche_conn *conn);
