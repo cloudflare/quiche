@@ -1390,6 +1390,16 @@ pub extern fn quiche_conn_dgram_purge_outgoing(
 }
 
 #[no_mangle]
+pub extern fn quiche_conn_is_dgram_send_queue_full(conn: &Connection) -> bool {
+    conn.is_dgram_send_queue_full()
+}
+
+#[no_mangle]
+pub extern fn quiche_conn_is_dgram_recv_queue_full(conn: &Connection) -> bool {
+    conn.is_dgram_recv_queue_full()
+}
+
+#[no_mangle]
 pub extern fn quiche_conn_send_ack_eliciting(conn: &mut Connection) -> ssize_t {
     match conn.send_ack_eliciting() {
         Ok(()) => 0,

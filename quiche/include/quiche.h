@@ -698,6 +698,12 @@ ssize_t quiche_conn_dgram_send(quiche_conn *conn, const uint8_t *buf,
 void quiche_conn_dgram_purge_outgoing(quiche_conn *conn,
                                       bool (*f)(uint8_t *, size_t));
 
+// Returns whether or not the DATAGRAM send queue is full.
+bool quiche_conn_is_dgram_send_queue_full(const quiche_conn *conn);
+
+// Returns whether or not the DATAGRAM recv queue is full.
+bool quiche_conn_is_dgram_recv_queue_full(const quiche_conn *conn);
+
 // Schedule an ack-eliciting packet on the active path.
 ssize_t quiche_conn_send_ack_eliciting(quiche_conn *conn);
 
