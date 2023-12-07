@@ -271,7 +271,7 @@ Options:
   --dump-responses PATH    Dump response payload as files in the given directory.
   --dump-json              Dump response headers and payload to stdout in JSON format.
   --max-json-payload BYTES  Per-response payload limit when dumping JSON [default: 10000].
-  --connect-to ADDRESS     Override ther server's address.
+  --connect-to ADDRESS     Override the server's address.
   --no-verify              Don't verify server's certificate.
   --trust-origin-ca-pem <file>  Path to the pem file of the origin's CA, if not publicly trusted.
   --no-grease              Don't send GREASE.

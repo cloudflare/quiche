@@ -14587,7 +14587,7 @@ mod tests {
     }
 
     #[test]
-    /// Exercices the handling of NEW_CONNECTION_ID and RETIRE_CONNECTION_ID
+    /// Exercises the handling of NEW_CONNECTION_ID and RETIRE_CONNECTION_ID
     /// frames.
     fn connection_id_handling() {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();

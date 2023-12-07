@@ -236,7 +236,7 @@ impl InlineRangeSet {
             }
         }
 
-        // Merge any newly overlaping ranges
+        // Merge any newly overlapping ranges
         while let Some((s, e)) = self.inner.get(pos + 1).copied() {
             if end < s {
                 // We are done, since the next range is completely disjoint
