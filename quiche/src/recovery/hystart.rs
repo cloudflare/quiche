@@ -52,7 +52,7 @@ pub const CSS_ROUNDS: usize = 5;
 pub struct Hystart {
     enabled: bool,
 
-    window_end: Option<u64>,
+    window_end: Option<recovery::SpacedPktNum>,
 
     last_round_min_rtt: Duration,
 
@@ -114,7 +114,7 @@ impl Hystart {
             self.css_start_time().is_some()
     }
 
-    pub fn start_round(&mut self, pkt_num: u64) {
+    pub fn start_round(&mut self, pkt_num: recovery::SpacedPktNum) {
         if self.window_end.is_none() {
             self.window_end = Some(pkt_num);
 
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn start_round() {
         let mut hspp = Hystart::default();
-        let pkt_num = 100;
+        let pkt_num = recovery::SpacedPktNum(0, 100);
 
         hspp.start_round(pkt_num);
 
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn congestion_event() {
         let mut hspp = Hystart::default();
-        let pkt_num = 100;
+        let pkt_num = recovery::SpacedPktNum(0, 100);
 
         hspp.start_round(pkt_num);
 
