@@ -251,6 +251,12 @@ void quiche_config_set_active_connection_id_limit(quiche_config *config, uint64_
 // Sets the initial stateless reset token. |v| must contain 16 bytes, otherwise the behaviour is undefined.
 void quiche_config_set_stateless_reset_token(quiche_config *config, const uint8_t *v);
 
+// Sets whether the QUIC connection should avoid reusing DCIDs over different paths.
+void quiche_config_set_disable_dcid_reuse(quiche_config *config, bool v);
+
+// Configures the session ticket key material.
+int quiche_config_set_ticket_key(quiche_config *config, const uint8_t *key, size_t key_len);
+
 // Frees the config object.
 void quiche_config_free(quiche_config *config);
 
