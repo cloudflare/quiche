@@ -137,7 +137,7 @@ pub struct JsonEvent {
     pub time: f32,
 
     #[serde(skip)]
-    pub importantance: EventImportance,
+    pub importance: EventImportance,
 
     pub name: String,
     pub data: serde_json::Value,
@@ -145,7 +145,7 @@ pub struct JsonEvent {
 
 impl Eventable for JsonEvent {
     fn importance(&self) -> EventImportance {
-        self.importantance
+        self.importance
     }
 
     fn set_time(&mut self, time: f32) {

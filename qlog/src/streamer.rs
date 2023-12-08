@@ -382,7 +382,7 @@ mod tests {
         let data = json!({"foo": "Bar", "hello": 123});
         let ev = events::JsonEvent {
             time: 0.0,
-            importantance: events::EventImportance::Core,
+            importance: events::EventImportance::Core,
             name: "jsonevent:sample".into(),
             data,
         };
