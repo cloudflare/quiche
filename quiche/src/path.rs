@@ -342,9 +342,7 @@ impl Path {
 
     pub fn on_challenge_received(&mut self, data: [u8; 8]) {
         // Discard challenges that would cause us to queue more than we want.
-        if self.received_challenges.len() ==
-            self.received_challenges_max_len
-        {
+        if self.received_challenges.len() == self.received_challenges_max_len {
             return;
         }
 
@@ -1187,7 +1185,8 @@ mod tests {
             4
         );
 
-        // If we receive multiple challenges, we can store them up to our queue size
+        // If we receive multiple challenges, we can store them up to our queue
+        // size.
         server_path.on_challenge_received(data);
         assert_eq!(server_path.received_challenges.len(), 1);
         server_path.on_challenge_received(data_2);
@@ -1231,6 +1230,5 @@ mod tests {
         );
 
         // There will never be a response for fourth probe...
-
     }
 }
