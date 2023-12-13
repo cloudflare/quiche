@@ -967,4 +967,5 @@ mod tests {
 }
 
 pub mod events;
+pub mod reader;
 pub mod streamer;
