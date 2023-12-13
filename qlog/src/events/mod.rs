@@ -109,9 +109,15 @@ impl Event {
             ty,
         }
     }
+}
 
-    pub fn importance(&self) -> EventImportance {
+impl Eventable for Event {
+    fn importance(&self) -> EventImportance {
         self.ty.into()
+    }
+
+    fn set_time(&mut self, time: f32) {
+        self.time = time;
     }
 }
 
@@ -126,8 +132,30 @@ impl PartialEq for Event {
     }
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct JsonEvent {
+    pub time: f32,
+
+    #[serde(skip)]
+    pub importance: EventImportance,
+
+    pub name: String,
+    pub data: serde_json::Value,
+}
+
+impl Eventable for JsonEvent {
+    fn importance(&self) -> EventImportance {
+        self.importance
+    }
+
+    fn set_time(&mut self, time: f32) {
+        self.time = time;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
 pub enum EventImportance {
+    #[default]
     Core,
     Base,
     Extra,
@@ -260,6 +288,12 @@ impl From<EventType> for EventImportance {
             _ => unimplemented!(),
         }
     }
+}
+
+pub trait Eventable {
+    fn importance(&self) -> EventImportance;
+
+    fn set_time(&mut self, time: f32);
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

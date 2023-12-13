@@ -27,6 +27,7 @@
 use crate::events::EventData;
 use crate::events::EventImportance;
 use crate::events::EventType;
+use crate::events::Eventable;
 
 /// A helper object specialized for streaming JSON-serialized qlog to a
 /// [`Write`] trait.
@@ -134,17 +135,20 @@ impl QlogStreamer {
         Ok(())
     }
 
-    /// Writes a JSON-SEQ-serialized [Event] using [std::time::Instant::now()].
-    pub fn add_event_now(&mut self, event: Event) -> Result<()> {
+    /// Writes a serializable to a JSON-SEQ record using
+    /// [std::time::Instant::now()].
+    pub fn add_event_now<E: Serialize + Eventable>(
+        &mut self, event: E,
+    ) -> Result<()> {
         let now = std::time::Instant::now();
 
         self.add_event_with_instant(event, now)
     }
 
-    /// Writes a JSON-SEQ-serialized [Event] using the provided
+    /// Writes a serializable to a JSON-SEQ record using the provided
     /// [std::time::Instant].
-    pub fn add_event_with_instant(
-        &mut self, mut event: Event, now: std::time::Instant,
+    pub fn add_event_with_instant<E: Serialize + Eventable>(
+        &mut self, mut event: E, now: std::time::Instant,
     ) -> Result<()> {
         if self.state != StreamerState::Ready {
             return Err(Error::InvalidState);
@@ -161,12 +165,12 @@ impl QlogStreamer {
         };
 
         let rel_time = dur.as_secs_f32() * 1000.0;
-        event.time = rel_time;
+        event.set_time(rel_time);
 
         self.add_event(event)
     }
 
-    /// Writes a JSON-SEQ-serialized [Event] based on the provided [EventData]
+    /// Writes an [Event] based on the provided [EventData] to a JSON-SEQ record
     /// at time [std::time::Instant::now()].
     pub fn add_event_data_now(&mut self, event_data: EventData) -> Result<()> {
         let now = std::time::Instant::now();
@@ -174,8 +178,8 @@ impl QlogStreamer {
         self.add_event_data_with_instant(event_data, now)
     }
 
-    /// Writes a JSON-SEQ-serialized [Event] based on the provided [EventData]
-    /// and [std::time::Instant].
+    /// Writes an [Event] based on the provided [EventData] and
+    /// [std::time::Instant] to a JSON-SEQ record.
     pub fn add_event_data_with_instant(
         &mut self, event_data: EventData, now: std::time::Instant,
     ) -> Result<()> {
@@ -201,7 +205,9 @@ impl QlogStreamer {
     }
 
     /// Writes a JSON-SEQ-serialized [Event] using the provided [Event].
-    pub fn add_event(&mut self, event: Event) -> Result<()> {
+    pub fn add_event<E: Serialize + Eventable>(
+        &mut self, event: E,
+    ) -> Result<()> {
         if self.state != StreamerState::Ready {
             return Err(Error::InvalidState);
         }
@@ -243,6 +249,8 @@ mod tests {
     use crate::events::RawInfo;
     use smallvec::smallvec;
     use testing::*;
+
+    use serde_json::json;
 
     #[test]
     fn serialization_states() {
@@ -368,6 +376,50 @@ mod tests {
 {"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}}
 {"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}}
 {"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}}
+"#;
+
+        let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
+
+        assert_eq!(log_string, written_string);
+    }
+
+    #[test]
+    fn stream_json_event() {
+        let data = json!({"foo": "Bar", "hello": 123});
+        let ev = events::JsonEvent {
+            time: 0.0,
+            importance: events::EventImportance::Core,
+            name: "jsonevent:sample".into(),
+            data,
+        };
+
+        let v: Vec<u8> = Vec::new();
+        let buff = std::io::Cursor::new(v);
+        let writer = Box::new(buff);
+
+        let trace = make_trace_seq();
+
+        let mut s = streamer::QlogStreamer::new(
+            "version".to_string(),
+            Some("title".to_string()),
+            Some("description".to_string()),
+            None,
+            std::time::Instant::now(),
+            trace,
+            EventImportance::Base,
+            writer,
+        );
+
+        assert!(matches!(s.start_log(), Ok(())));
+        assert!(matches!(s.add_event(ev), Ok(())));
+        assert!(matches!(s.finish_log(), Ok(())));
+
+        let r = s.writer();
+        #[allow(clippy::borrowed_box)]
+        let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
+
+        let log_string = r#"{"qlog_version":"version","qlog_format":"JSON-SEQ","title":"title","description":"description","trace":{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0}}}
+{"time":0.0,"name":"jsonevent:sample","data":{"foo":"Bar","hello":123}}
 "#;
 
         let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
