@@ -312,6 +312,9 @@ use qlog::events::EventImportance;
 #[cfg(feature = "qlog")]
 use qlog::events::EventType;
 
+use crate::range_buf::BufFactory;
+use crate::BufSplit;
+
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
 /// This can be passed directly to the [`Config::set_application_protos()`]
@@ -920,8 +923,8 @@ impl Connection {
     ///
     /// [`StreamLimit`]: ../enum.Error.html#variant.StreamLimit
     /// [`InternalError`]: ../enum.Error.html#variant.InternalError
-    pub fn with_transport(
-        conn: &mut super::Connection, config: &Config,
+    pub fn with_transport<F: BufFactory>(
+        conn: &mut super::Connection<F>, config: &Config,
     ) -> Result<Connection> {
         let is_client = !conn.is_server;
         if is_client && !(conn.is_established() || conn.is_in_early_data()) {
@@ -971,8 +974,8 @@ impl Connection {
     ///
     /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
-    pub fn send_request<T: NameValue>(
-        &mut self, conn: &mut super::Connection, headers: &[T], fin: bool,
+    pub fn send_request<T: NameValue, F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, headers: &[T], fin: bool,
     ) -> Result<u64> {
         // If we received a GOAWAY from the peer, MUST NOT initiate new
         // requests.
@@ -983,7 +986,7 @@ impl Connection {
         let stream_id = self.next_request_stream_id;
 
         self.streams
-            .insert(stream_id, stream::Stream::new(stream_id, true));
+            .insert(stream_id, <stream::Stream>::new(stream_id, true));
 
         // The underlying QUIC stream does not exist yet, so calls to e.g.
         // stream_capacity() will fail. By writing a 0-length buffer, we force
@@ -1024,9 +1027,9 @@ impl Connection {
     ///
     /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
-    pub fn send_response<T: NameValue>(
-        &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
-        fin: bool,
+    pub fn send_response<T: NameValue, F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        headers: &[T], fin: bool,
     ) -> Result<()> {
         let priority = Default::default();
 
@@ -1051,9 +1054,9 @@ impl Connection {
     ///
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
-    pub fn send_response_with_priority<T: NameValue>(
-        &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
-        priority: &Priority, fin: bool,
+    pub fn send_response_with_priority<T: NameValue, F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        headers: &[T], priority: &Priority, fin: bool,
     ) -> Result<()> {
         if !self.streams.contains_key(&stream_id) {
             return Err(Error::FrameUnexpected);
@@ -1090,9 +1093,9 @@ impl Connection {
         Ok(header_block)
     }
 
-    fn send_headers<T: NameValue>(
-        &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
-        fin: bool,
+    fn send_headers<T: NameValue, F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        headers: &[T], fin: bool,
     ) -> Result<()> {
         let mut d = [42; 10];
         let mut b = octets::OctetsMut::with_slice(&mut d);
@@ -1186,12 +1189,89 @@ impl Connection {
     /// writable again.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
-    pub fn send_body(
-        &mut self, conn: &mut super::Connection, stream_id: u64, body: &[u8],
+    pub fn send_body<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64, body: &[u8],
         fin: bool,
     ) -> Result<usize> {
+        self.do_send_body(
+            conn,
+            stream_id,
+            body,
+            fin,
+            |conn: &mut super::Connection<F>,
+             stream_id: u64,
+             body: &[u8],
+             body_len: usize,
+             fin: bool| {
+                Ok(conn
+                    .stream_send(stream_id, &body[..body_len], fin)
+                    .map(|v| (v, v))?)
+            },
+        )
+    }
+
+    /// Sends an HTTP/3 body chunk provided as a raw buffer on the given stream.
+    ///
+    /// If the capacity allows it the buffer will be appended to the stream's
+    /// send queue with zero copying.
+    ///
+    /// On success the number of bytes written is returned, or [`Done`] if no
+    /// bytes could be written (e.g. because the stream is blocked).
+    ///
+    /// Note that the number of written bytes returned can be lower than the
+    /// length of the input buffer when the underlying QUIC stream doesn't have
+    /// enough capacity for the operation to complete.
+    ///
+    /// When a partial write happens (including when [`Done`] is returned) the
+    /// remaining (unwrittent) buffer will also be returned. The application
+    /// should retry the operation once the stream is reported as writable
+    /// again.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    pub fn send_body_zc<F>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64, body: F::Buf,
+        fin: bool,
+    ) -> Result<(usize, Option<F::Buf>)>
+    where
+        F: BufFactory,
+        F::Buf: BufSplit,
+    {
+        self.do_send_body(
+            conn,
+            stream_id,
+            body,
+            fin,
+            |conn: &mut super::Connection<F>,
+             stream_id: u64,
+             body: F::Buf,
+             body_len: usize,
+             fin: bool| {
+                Ok(conn
+                    .stream_send_zc(stream_id, body, Some(body_len), fin)
+                    .map(|v| (v.0, v))?)
+            },
+        )
+    }
+
+    fn do_send_body<F, B, R, SND>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64, body: B,
+        fin: bool, write_fn: SND,
+    ) -> Result<R>
+    where
+        F: BufFactory,
+        B: AsRef<[u8]>,
+        SND: FnOnce(
+            &mut super::Connection<F>,
+            u64,
+            B,
+            usize,
+            bool,
+        ) -> Result<(usize, R)>,
+    {
         let mut d = [42; 10];
         let mut b = octets::OctetsMut::with_slice(&mut d);
+
+        let len = body.as_ref().len();
 
         // Validate that it is sane to send data on the stream.
         if stream_id % 4 != 0 {
@@ -1210,12 +1290,12 @@ impl Connection {
         };
 
         // Avoid sending 0-length DATA frames when the fin flag is false.
-        if body.is_empty() && !fin {
+        if len == 0 && !fin {
             return Err(Error::Done);
         }
 
         let overhead = octets::varint_len(frame::DATA_FRAME_TYPE_ID) +
-            octets::varint_len(body.len() as u64);
+            octets::varint_len(len as u64);
 
         let stream_cap = match conn.stream_capacity(stream_id) {
             Ok(v) => v,
@@ -1236,11 +1316,11 @@ impl Connection {
         }
 
         // Cap the frame payload length to the stream's capacity.
-        let body_len = std::cmp::min(body.len(), stream_cap - overhead);
+        let body_len = std::cmp::min(len, stream_cap - overhead);
 
         // If we can't send the entire body, set the fin flag to false so the
         // application can try again later.
-        let fin = if body_len != body.len() { false } else { fin };
+        let fin = if body_len != len { false } else { fin };
 
         // Again, avoid sending 0-length DATA frames when the fin flag is false.
         if body_len == 0 && !fin {
@@ -1255,7 +1335,7 @@ impl Connection {
 
         // Return how many bytes were written, excluding the frame header.
         // Sending body separately avoids unnecessary copy.
-        let written = conn.stream_send(stream_id, &body[..body_len], fin)?;
+        let (written, ret) = write_fn(conn, stream_id, body, body_len, fin)?;
 
         trace!(
             "{} tx frm DATA stream={} len={} fin={}",
@@ -1277,7 +1357,7 @@ impl Connection {
             q.add_event_data_now(ev_data).ok();
         });
 
-        if written < body.len() {
+        if written < len {
             // Ensure the peer is notified that the connection or stream is
             // blocked when the stream's capacity is limited by flow control.
             //
@@ -1287,11 +1367,11 @@ impl Connection {
             let _ = conn.stream_writable(stream_id, overhead + 1);
         }
 
-        if fin && written == body.len() && conn.stream_finished(stream_id) {
+        if fin && written == len && conn.stream_finished(stream_id) {
             self.streams.remove(&stream_id);
         }
 
-        Ok(written)
+        Ok(ret)
     }
 
     /// Returns whether the peer enabled HTTP/3 DATAGRAM frame support.
@@ -1301,7 +1381,9 @@ impl Connection {
     /// method.
     ///
     /// [`poll()`]: struct.Connection.html#method.poll
-    pub fn dgram_enabled_by_peer(&self, conn: &super::Connection) -> bool {
+    pub fn dgram_enabled_by_peer<F: BufFactory>(
+        &self, conn: &super::Connection<F>,
+    ) -> bool {
         self.peer_settings.h3_datagram == Some(1) &&
             conn.dgram_max_writable_len().is_some()
     }
@@ -1328,8 +1410,9 @@ impl Connection {
     /// [`poll()`]: struct.Connection.html#method.poll
     /// [`Data`]: enum.Event.html#variant.Data
     /// [`Done`]: enum.Error.html#variant.Done
-    pub fn recv_body(
-        &mut self, conn: &mut super::Connection, stream_id: u64, out: &mut [u8],
+    pub fn recv_body<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        out: &mut [u8],
     ) -> Result<usize> {
         let mut total = 0;
 
@@ -1402,8 +1485,8 @@ impl Connection {
     ///
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
-    pub fn send_priority_update_for_request(
-        &mut self, conn: &mut super::Connection, stream_id: u64,
+    pub fn send_priority_update_for_request<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
         priority: &Priority,
     ) -> Result<()> {
         let mut d = [42; 20];
@@ -1551,7 +1634,9 @@ impl Connection {
     /// [`recv_dgram()`]: struct.Connection.html#method.recv_dgram
     /// [`take_last_priority_update()`]: struct.Connection.html#method.take_last_priority_update
     /// [`close()`]: ../struct.Connection.html#method.close
-    pub fn poll(&mut self, conn: &mut super::Connection) -> Result<(u64, Event)> {
+    pub fn poll<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>,
+    ) -> Result<(u64, Event)> {
         // When connection close is initiated by the local application (e.g. due
         // to a protocol error), the connection itself might be in a broken
         // state, so return early.
@@ -1643,8 +1728,8 @@ impl Connection {
     /// required to call [`close()`] themselves.
     ///
     /// [`close()`]: ../struct.Connection.html#method.close
-    pub fn send_goaway(
-        &mut self, conn: &mut super::Connection, id: u64,
+    pub fn send_goaway<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, id: u64,
     ) -> Result<()> {
         let mut id = id;
 
@@ -1707,8 +1792,8 @@ impl Connection {
         self.peer_settings.raw.as_deref()
     }
 
-    fn open_uni_stream(
-        &mut self, conn: &mut super::Connection, ty: u64,
+    fn open_uni_stream<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, ty: u64,
     ) -> Result<u64> {
         let stream_id = self.next_uni_stream_id;
 
@@ -1744,8 +1829,8 @@ impl Connection {
         Ok(stream_id)
     }
 
-    fn open_qpack_encoder_stream(
-        &mut self, conn: &mut super::Connection,
+    fn open_qpack_encoder_stream<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>,
     ) -> Result<()> {
         let stream_id =
             self.open_uni_stream(conn, stream::QPACK_ENCODER_STREAM_TYPE_ID)?;
@@ -1766,8 +1851,8 @@ impl Connection {
         Ok(())
     }
 
-    fn open_qpack_decoder_stream(
-        &mut self, conn: &mut super::Connection,
+    fn open_qpack_decoder_stream<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>,
     ) -> Result<()> {
         let stream_id =
             self.open_uni_stream(conn, stream::QPACK_DECODER_STREAM_TYPE_ID)?;
@@ -1789,8 +1874,8 @@ impl Connection {
     }
 
     /// Send GREASE frames on the provided stream ID.
-    fn send_grease_frames(
-        &mut self, conn: &mut super::Connection, stream_id: u64,
+    fn send_grease_frames<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
     ) -> Result<()> {
         let mut d = [0; 8];
 
@@ -1882,7 +1967,9 @@ impl Connection {
 
     /// Opens a new unidirectional stream with a GREASE type and sends some
     /// unframed payload.
-    fn open_grease_stream(&mut self, conn: &mut super::Connection) -> Result<()> {
+    fn open_grease_stream<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>,
+    ) -> Result<()> {
         match self.open_uni_stream(conn, grease_value()) {
             Ok(stream_id) => {
                 conn.stream_send(stream_id, b"GREASE is the word", true)?;
@@ -1914,7 +2001,9 @@ impl Connection {
     }
 
     /// Sends SETTINGS frame based on HTTP/3 configuration.
-    fn send_settings(&mut self, conn: &mut super::Connection) -> Result<()> {
+    fn send_settings<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>,
+    ) -> Result<()> {
         let stream_id = match self
             .open_uni_stream(conn, stream::HTTP3_CONTROL_STREAM_TYPE_ID)
         {
@@ -1997,8 +2086,8 @@ impl Connection {
         Ok(())
     }
 
-    fn process_control_stream(
-        &mut self, conn: &mut super::Connection, stream_id: u64,
+    fn process_control_stream<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
     ) -> Result<(u64, Event)> {
         if conn.stream_finished(stream_id) {
             conn.close(
@@ -2031,12 +2120,12 @@ impl Connection {
         Err(Error::Done)
     }
 
-    fn process_readable_stream(
-        &mut self, conn: &mut super::Connection, stream_id: u64, polling: bool,
+    fn process_readable_stream<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64, polling: bool,
     ) -> Result<(u64, Event)> {
         self.streams
             .entry(stream_id)
-            .or_insert_with(|| stream::Stream::new(stream_id, false));
+            .or_insert_with(|| <stream::Stream>::new(stream_id, false));
 
         // We need to get a fresh reference to the stream for each
         // iteration, to avoid borrowing `self` for the entire duration
@@ -2345,8 +2434,8 @@ impl Connection {
         };
     }
 
-    fn process_frame(
-        &mut self, conn: &mut super::Connection, stream_id: u64,
+    fn process_frame<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
         frame: frame::Frame, payload_len: u64,
     ) -> Result<(u64, Event)> {
         trace!(
@@ -2656,7 +2745,7 @@ impl Connection {
                 // If the stream did not yet exist, create it and store.
                 let stream =
                     self.streams.entry(prioritized_element_id).or_insert_with(
-                        || stream::Stream::new(prioritized_element_id, false),
+                        || <stream::Stream>::new(prioritized_element_id, false),
                     );
 
                 let had_priority_update = stream.has_last_priority_update();
@@ -3132,7 +3221,7 @@ mod tests {
 
         let frames = [crate::frame::Frame::Stream {
             stream_id: 6,
-            data: crate::stream::RangeBuf::from(b"aaaaa", 0, true),
+            data: <crate::range_buf::RangeBuf>::from(b"aaaaa", 0, true),
         }];
 
         assert_eq!(

@@ -417,6 +417,8 @@ use std::collections::VecDeque;
 
 use smallvec::SmallVec;
 
+use range_buf::DefaultBufFactory;
+
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
 
@@ -1252,7 +1254,10 @@ impl Config {
 }
 
 /// A QUIC connection.
-pub struct Connection {
+pub struct Connection<F = DefaultBufFactory>
+where
+    F: BufFactory,
+{
     /// QUIC wire version used for the connection.
     version: u32,
 
@@ -1345,7 +1350,7 @@ pub struct Connection {
     lost_bytes: u64,
 
     /// Streams map, indexed by stream ID.
-    streams: stream::StreamMap,
+    streams: stream::StreamMap<F>,
 
     /// Peer's original destination connection ID. Used by the client to
     /// validate the server's transport parameter.
@@ -1493,6 +1498,21 @@ pub fn accept(
     Ok(conn)
 }
 
+/// Creates a new server-side connection, with a custom buffer generation
+/// method.
+///
+/// The buffers generated can be anything that can be drereferenced as a byte
+/// slice. See [`accept`] and [`BufFactory`] for more info.
+#[inline]
+pub fn accept_with_buf_factory<F: BufFactory>(
+    scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
+    peer: SocketAddr, config: &mut Config,
+) -> Result<Connection<F>> {
+    let conn = Connection::new(scid, odcid, local, peer, config, true)?;
+
+    Ok(conn)
+}
+
 /// Creates a new client-side connection.
 ///
 /// The `scid` parameter is used as the connection's source connection ID,
@@ -1516,6 +1536,25 @@ pub fn connect(
     server_name: Option<&str>, scid: &ConnectionId, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection> {
+    let mut conn = Connection::new(scid, None, local, peer, config, false)?;
+
+    if let Some(server_name) = server_name {
+        conn.handshake.set_host_name(server_name)?;
+    }
+
+    Ok(conn)
+}
+
+/// Creates a new client-side connection, with a custom buffer generation
+/// method.
+///
+/// The buffers generated can be anything that can be drereferenced as a byte
+/// slice. See [`connect`] and [`BufFactory`] for more info.
+#[inline]
+pub fn connect_with_buffer_factory<F: BufFactory>(
+    server_name: Option<&str>, scid: &ConnectionId, local: SocketAddr,
+    peer: SocketAddr, config: &mut Config,
+) -> Result<Connection<F>> {
     let mut conn = Connection::new(scid, None, local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
@@ -1718,11 +1757,11 @@ impl Default for QlogInfo {
     }
 }
 
-impl Connection {
+impl<F: BufFactory> Connection<F> {
     fn new(
         scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
         peer: SocketAddr, config: &mut Config, is_server: bool,
-    ) -> Result<Connection> {
+    ) -> Result<Connection<F>> {
         let tls = config.tls_ctx.new_handshake()?;
         Connection::with_tls(scid, odcid, local, peer, config, tls, is_server)
     }
@@ -1730,7 +1769,7 @@ impl Connection {
     fn with_tls(
         scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
         peer: SocketAddr, config: &Config, tls: tls::Handshake, is_server: bool,
-    ) -> Result<Connection> {
+    ) -> Result<Connection<F>> {
         let max_rx_data = config.local_transport_params.initial_max_data;
 
         let scid_as_hex: Vec<String> =
@@ -4605,6 +4644,55 @@ impl Connection {
     pub fn stream_send(
         &mut self, stream_id: u64, buf: &[u8], fin: bool,
     ) -> Result<usize> {
+        self.stream_do_send(
+            stream_id,
+            buf,
+            fin,
+            |stream: &mut stream::Stream<F>,
+             buf: &[u8],
+             cap: usize,
+             fin: bool| {
+                stream.send.write(&buf[..cap], fin).map(|v| (v, v))
+            },
+        )
+    }
+
+    /// Writes data to a stream with zero copying, instead, it appends the
+    /// provided buffer directly to the send queue if the capacity allows
+    /// it.
+    ///
+    /// When a partial write happens (including when [`Done`] is returned) the
+    /// remaining (unwrittent) buffer will also be returned. The application
+    /// should retry the operation once the stream is reported as writable
+    /// again.
+    pub fn stream_send_zc(
+        &mut self, stream_id: u64, buf: F::Buf, len: Option<usize>, fin: bool,
+    ) -> Result<(usize, Option<F::Buf>)>
+    where
+        F::Buf: BufSplit,
+    {
+        self.stream_do_send(
+            stream_id,
+            buf,
+            fin,
+            |stream: &mut stream::Stream<F>,
+             buf: F::Buf,
+             cap: usize,
+             fin: bool| {
+                let len = len.unwrap_or(usize::MAX).min(cap);
+                let (sent, remaining) = stream.send.append_buf(buf, len, fin)?;
+                Ok((sent, (sent, remaining)))
+            },
+        )
+    }
+
+    fn stream_do_send<B, R, SND>(
+        &mut self, stream_id: u64, buf: B, fin: bool, write_fn: SND,
+    ) -> Result<R>
+    where
+        B: AsRef<[u8]>,
+        SND: FnOnce(&mut stream::Stream<F>, B, usize, bool) -> Result<(usize, R)>,
+    {
         // We can't write on the peer's unidirectional streams.
         if !stream::is_bidi(stream_id) &&
             !stream::is_local(stream_id, self.is_server)
@@ -4612,12 +4700,14 @@ impl Connection {
             return Err(Error::InvalidStreamState(stream_id));
         }
 
+        let len = buf.as_ref().len();
+
         // Mark the connection as blocked if the connection-level flow control
         // limit doesn't let us buffer all the data.
         //
         // Note that this is separate from "send capacity" as that also takes
         // congestion control into consideration.
-        if self.max_tx_data - self.tx_data < buf.len() as u64 {
+        if self.max_tx_data - self.tx_data < len as u64 {
             self.blocked_limit = Some(self.max_tx_data);
         }
 
@@ -4640,7 +4730,7 @@ impl Connection {
         //
         // When the cap is zero, the method returns Ok(0) *only* when the passed
         // buffer is empty. We return Error::Done otherwise.
-        if cap == 0 && !buf.is_empty() {
+        if cap == 0 && len > 0 {
             if was_writable {
                 // When `stream_writable_next()` returns a stream, the writable
                 // mark is removed, but because the stream is blocked by the
@@ -4654,13 +4744,13 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let (buf, fin, blocked_by_cap) = if cap < buf.len() {
-            (&buf[..cap], false, true)
+        let (cap, fin, blocked_by_cap) = if cap < len {
+            (cap, false, true)
         } else {
-            (buf, fin, false)
+            (len, fin, false)
         };
 
-        let sent = match stream.send.write(buf, fin) {
+        let (sent, ret) = match write_fn(stream, buf, cap, fin) {
             Ok(v) => v,
 
             Err(e) => {
@@ -4676,9 +4766,9 @@ impl Connection {
 
         let writable = stream.is_writable();
 
-        let empty_fin = buf.is_empty() && fin;
+        let empty_fin = len == 0 && fin;
 
-        if sent < buf.len() {
+        if sent < cap {
             let max_off = stream.send.max_off();
 
             if stream.send.blocked_at() != Some(max_off) {
@@ -4731,7 +4821,7 @@ impl Connection {
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
-        if sent == 0 && !buf.is_empty() {
+        if sent == 0 && cap > 0 {
             return Err(Error::Done);
         }
 
@@ -4741,7 +4831,7 @@ impl Connection {
             self.streams.insert_writable(&priority_key);
         }
 
-        Ok(sent)
+        Ok(ret)
     }
 
     /// Sets the priority for a stream.
@@ -5461,7 +5551,7 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     #[inline]
-    pub fn dgram_purge_outgoing<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
+    pub fn dgram_purge_outgoing<FN: Fn(&[u8]) -> bool>(&mut self, f: FN) {
         self.dgram_send_queue.purge(f);
     }
 
@@ -5660,11 +5750,12 @@ impl Connection {
         // If the active path failed, try to find a new candidate.
         if self.paths.get_active_path_id().is_err() {
             match self.paths.find_candidate_path() {
-                Some(pid) =>
+                Some(pid) => {
                     if self.set_active_path(pid, now).is_err() {
                         // The connection cannot continue.
                         self.closed = true;
-                    },
+                    }
+                },
 
                 // The connection cannot continue.
                 None => self.closed = true,
@@ -6634,7 +6725,7 @@ impl Connection {
     /// a new one otherwise.
     fn get_or_create_stream(
         &mut self, id: u64, local: bool,
-    ) -> Result<&mut stream::Stream> {
+    ) -> Result<&mut stream::Stream<F>> {
         self.streams.get_or_create(
             id,
             &self.local_transport_params,
@@ -6966,15 +7057,17 @@ impl Connection {
 
             frame::Frame::StreamDataBlocked { .. } => (),
 
-            frame::Frame::StreamsBlockedBidi { limit } =>
+            frame::Frame::StreamsBlockedBidi { limit } => {
                 if limit > MAX_STREAM_ID {
                     return Err(Error::InvalidFrame);
-                },
+                }
+            },
 
-            frame::Frame::StreamsBlockedUni { limit } =>
+            frame::Frame::StreamsBlockedUni { limit } => {
                 if limit > MAX_STREAM_ID {
                     return Err(Error::InvalidFrame);
-                },
+                }
+            },
 
             frame::Frame::NewConnectionId {
                 seq_num,
@@ -8343,8 +8436,8 @@ pub mod testing {
         }
     }
 
-    pub fn recv_send(
-        conn: &mut Connection, buf: &mut [u8], len: usize,
+    pub fn recv_send<F: BufFactory>(
+        conn: &mut Connection<F>, buf: &mut [u8], len: usize,
     ) -> Result<usize> {
         let active_path = conn.paths.get_active()?;
         let info = RecvInfo {
@@ -8554,6 +8647,8 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    use crate::range_buf::RangeBuf;
+
     use super::*;
 
     #[test]
@@ -9057,7 +9152,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaa", 0, true),
+            data: <RangeBuf>::from(b"aaaaa", 0, true),
         }];
 
         assert_eq!(
@@ -9118,7 +9213,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaa", 0, true),
+            data: <RangeBuf>::from(b"aaaaa", 0, true),
         }];
 
         let len =
@@ -9188,7 +9283,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaa", 0, true),
+            data: <RangeBuf>::from(b"aaaaa", 0, true),
         }];
 
         let len =
@@ -9353,7 +9448,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaa", 0, false),
+            data: <RangeBuf>::from(b"aaaaa", 0, false),
         }];
 
         let pkt_type = packet::Type::Short;
@@ -9366,7 +9461,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"", 5, true),
+            data: <RangeBuf>::from(b"", 5, true),
         }];
 
         let pkt_type = packet::Type::Short;
@@ -9379,7 +9474,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"", 15, true),
+            data: <RangeBuf>::from(b"", 15, true),
         }];
 
         let pkt_type = packet::Type::Short;
@@ -9440,7 +9535,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"hello", 0, false),
+            data: <RangeBuf>::from(b"hello", 0, false),
         }];
 
         // Client sends stream frame with key update request.
@@ -9566,15 +9661,15 @@ mod tests {
         let frames = [
             frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaaaaaaaaaaaa", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 4,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaaaaaaaaaaaa", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 8,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
         ];
 
@@ -9596,16 +9691,16 @@ mod tests {
             // One byte less than stream limit.
             frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaaaaaaaaaaa", 0, false),
             },
             // Same stream, but one byte more.
             frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaaaaaaaaaaaa", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 8,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaaaaaaaaaaaa", 0, false),
             },
         ];
 
@@ -9623,11 +9718,11 @@ mod tests {
         let frames = [
             frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaaaaaaaaaaaa", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 4,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
         ];
 
@@ -9640,7 +9735,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"a", 1, false),
+            data: <RangeBuf>::from(b"a", 1, false),
         }];
 
         let len = pipe
@@ -9709,7 +9804,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaaa", 0, true),
+            data: <RangeBuf>::from(b"aaaaaaaaaaaaaaaa", 0, true),
         }];
 
         let pkt_type = packet::Type::Short;
@@ -9728,7 +9823,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 2,
-            data: stream::RangeBuf::from(b"aaaaaaaaaaa", 0, true),
+            data: <RangeBuf>::from(b"aaaaaaaaaaa", 0, true),
         }];
 
         let pkt_type = packet::Type::Short;
@@ -9747,7 +9842,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaaaaaa", 0, false),
+            data: <RangeBuf>::from(b"aaaaaaaaa", 0, false),
         }];
 
         let pkt_type = packet::Type::Short;
@@ -9758,7 +9853,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"a", 9, false),
+            data: <RangeBuf>::from(b"a", 9, false),
         }];
 
         let len = pipe
@@ -9845,31 +9940,31 @@ mod tests {
         let frames = [
             frame::Frame::Stream {
                 stream_id: 4,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 8,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 12,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 16,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 20,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 24,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 28,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
         ];
 
@@ -9913,31 +10008,31 @@ mod tests {
         let frames = [
             frame::Frame::Stream {
                 stream_id: 2,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 6,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 10,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 14,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 18,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 22,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 26,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
         ];
 
@@ -10242,15 +10337,15 @@ mod tests {
         let frames = [
             frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaa", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"bbbbb", 3, false),
+                data: <RangeBuf>::from(b"bbbbb", 3, false),
             },
             frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"ccccc", 6, false),
+                data: <RangeBuf>::from(b"ccccc", 6, false),
             },
         ];
 
@@ -10272,15 +10367,15 @@ mod tests {
         let frames = [
             frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaa", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"ccccc", 6, false),
+                data: <RangeBuf>::from(b"ccccc", 6, false),
             },
             frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"bbbbb", 3, false),
+                data: <RangeBuf>::from(b"bbbbb", 3, false),
             },
         ];
 
@@ -10433,11 +10528,11 @@ mod tests {
         let frames = [
             frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaaaaaaaaaaaa", 0, false),
             },
             frame::Frame::Stream {
                 stream_id: 4,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::ResetStream {
                 stream_id: 4,
@@ -10446,7 +10541,7 @@ mod tests {
             },
             frame::Frame::Stream {
                 stream_id: 8,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
         ];
 
@@ -10469,7 +10564,7 @@ mod tests {
         let frames = [
             frame::Frame::Stream {
                 stream_id: 4,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             },
             frame::Frame::ResetStream {
                 stream_id: 4,
@@ -10545,7 +10640,7 @@ mod tests {
         // Send 1-RTT packet #0.
         let frames = [frame::Frame::Stream {
             stream_id: 0,
-            data: stream::RangeBuf::from(b"hello, world", 0, true),
+            data: <RangeBuf>::from(b"hello, world", 0, true),
         }];
 
         let pkt_type = packet::Type::Short;
@@ -10558,7 +10653,7 @@ mod tests {
         // Send 1-RTT packet #1.
         let frames = [frame::Frame::Stream {
             stream_id: 4,
-            data: stream::RangeBuf::from(b"hello, world", 0, true),
+            data: <RangeBuf>::from(b"hello, world", 0, true),
         }];
 
         let written =
@@ -11236,7 +11331,7 @@ mod tests {
             iter.next(),
             Some(&frame::Frame::Stream {
                 stream_id: 8,
-                data: stream::RangeBuf::from(b"aaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaa", 0, false),
             })
         );
 
@@ -11249,7 +11344,7 @@ mod tests {
             frames.first(),
             Some(&frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaa", 0, false),
             })
         );
 
@@ -11262,7 +11357,7 @@ mod tests {
             frames.first(),
             Some(&frame::Frame::Stream {
                 stream_id: 4,
-                data: stream::RangeBuf::from(b"aaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaa", 0, false),
             })
         );
     }
@@ -11987,7 +12082,7 @@ mod tests {
 
         let frames = [frame::Frame::Stream {
             stream_id: 0,
-            data: stream::RangeBuf::from(b"aa", 0, false),
+            data: <RangeBuf>::from(b"aa", 0, false),
         }];
 
         let pkt_type = packet::Type::Short;
@@ -12295,7 +12390,7 @@ mod tests {
             iter.next(),
             Some(&frame::Frame::Stream {
                 stream_id: 8,
-                data: stream::RangeBuf::from(b"aaaaaaaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaaaaaaa", 0, false),
             })
         );
 
@@ -12341,7 +12436,7 @@ mod tests {
             iter.next(),
             Some(&frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
+                data: <RangeBuf>::from(b"aaaaaaaaaaaaaaa", 0, false),
             })
         );
 
@@ -12363,7 +12458,7 @@ mod tests {
             iter.next(),
             Some(&frame::Frame::Stream {
                 stream_id: 4,
-                data: stream::RangeBuf::from(b"a", 0, false),
+                data: <RangeBuf>::from(b"a", 0, false),
             })
         );
 
@@ -12949,7 +13044,7 @@ mod tests {
 
             assert_eq!(stream, &frame::Frame::Stream {
                 stream_id: 8,
-                data: stream::RangeBuf::from(&out, off, false),
+                data: <RangeBuf>::from(&out, off, false),
             });
 
             off = match stream {
@@ -12972,7 +13067,7 @@ mod tests {
 
             assert_eq!(stream, &frame::Frame::Stream {
                 stream_id: 16,
-                data: stream::RangeBuf::from(&out, off, false),
+                data: <RangeBuf>::from(&out, off, false),
             });
 
             off = match stream {
@@ -12995,7 +13090,7 @@ mod tests {
 
             assert_eq!(stream, &frame::Frame::Stream {
                 stream_id: 20,
-                data: stream::RangeBuf::from(&out, off, false),
+                data: <RangeBuf>::from(&out, off, false),
             });
 
             off = match stream {
@@ -13019,7 +13114,7 @@ mod tests {
                 frames.first(),
                 Some(&frame::Frame::Stream {
                     stream_id: 12,
-                    data: stream::RangeBuf::from(&out, off, false),
+                    data: <RangeBuf>::from(&out, off, false),
                 })
             );
 
@@ -13033,7 +13128,7 @@ mod tests {
 
             assert_eq!(stream, &frame::Frame::Stream {
                 stream_id: 4,
-                data: stream::RangeBuf::from(&out, off, false),
+                data: <RangeBuf>::from(&out, off, false),
             });
 
             off = match stream {
@@ -13056,7 +13151,7 @@ mod tests {
 
             assert_eq!(stream, &frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(&out, off, false),
+                data: <RangeBuf>::from(&out, off, false),
             });
 
             off = match stream {
@@ -13138,7 +13233,7 @@ mod tests {
             frames.first(),
             Some(&frame::Frame::Stream {
                 stream_id: 8,
-                data: stream::RangeBuf::from(b"b", 0, false),
+                data: <RangeBuf>::from(b"b", 0, false),
             })
         );
 
@@ -13152,7 +13247,7 @@ mod tests {
             frames.first(),
             Some(&frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(b"b", 0, false),
+                data: <RangeBuf>::from(b"b", 0, false),
             })
         );
 
@@ -13166,7 +13261,7 @@ mod tests {
             frames.first(),
             Some(&frame::Frame::Stream {
                 stream_id: 12,
-                data: stream::RangeBuf::from(b"b", 0, false),
+                data: <RangeBuf>::from(b"b", 0, false),
             })
         );
 
@@ -13179,7 +13274,7 @@ mod tests {
             frames.first(),
             Some(&frame::Frame::Stream {
                 stream_id: 4,
-                data: stream::RangeBuf::from(b"b", 0, false),
+                data: <RangeBuf>::from(b"b", 0, false),
             })
         );
 
@@ -13260,7 +13355,7 @@ mod tests {
             let mut frame_iter = frames.iter();
 
             assert_eq!(frame_iter.next().unwrap(), &frame::Frame::Datagram {
-                data: out.into(),
+                data: out.into()
             });
             assert_eq!(frame_iter.next(), None);
 
@@ -13275,7 +13370,7 @@ mod tests {
 
             assert_eq!(stream, &frame::Frame::Stream {
                 stream_id: 0,
-                data: stream::RangeBuf::from(&out, off_0, false),
+                data: <RangeBuf>::from(&out, off_0, false),
             });
 
             off_0 = match stream {
@@ -13294,7 +13389,7 @@ mod tests {
             let mut frame_iter = frames.iter();
 
             assert_eq!(frame_iter.next().unwrap(), &frame::Frame::Datagram {
-                data: out.into(),
+                data: out.into()
             });
             assert_eq!(frame_iter.next(), None);
 
@@ -13309,7 +13404,7 @@ mod tests {
 
             assert_eq!(stream, &frame::Frame::Stream {
                 stream_id: 4,
-                data: stream::RangeBuf::from(&out, off_4, false),
+                data: <RangeBuf>::from(&out, off_4, false),
             });
 
             off_4 = match stream {
@@ -13378,7 +13473,7 @@ mod tests {
             iter.next(),
             Some(&frame::Frame::Stream {
                 stream_id: 4,
-                data: stream::RangeBuf::from(b"b", 0, false),
+                data: <RangeBuf>::from(b"b", 0, false),
             })
         );
         assert_eq!(pipe.client.stats().retrans, 1);
@@ -16329,6 +16424,9 @@ pub use crate::recovery::CongestionControlAlgorithm;
 
 pub use crate::stream::StreamIter;
 
+pub use crate::range_buf::BufFactory;
+pub use crate::range_buf::BufSplit;
+
 mod cid;
 mod crypto;
 mod dgram;
@@ -16341,6 +16439,7 @@ mod minmax;
 mod packet;
 mod path;
 mod rand;
+mod range_buf;
 mod ranges;
 mod recovery;
 mod stream;
