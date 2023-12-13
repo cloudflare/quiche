@@ -229,6 +229,12 @@ impl QlogStreamer {
     }
 }
 
+impl Drop for QlogStreamer {
+    fn drop(&mut self) {
+        let _ = self.finish_log();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
