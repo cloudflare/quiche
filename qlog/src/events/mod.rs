@@ -178,14 +178,17 @@ impl From<EventType> for EventImportance {
             EventType::SecurityEventType(SecurityEventType::KeyDiscarded) =>
                 EventImportance::Base,
 
-            EventType::TransportEventType(TransportEventType::VersionInformation) =>
-                EventImportance::Core,
-            EventType::TransportEventType(TransportEventType::AlpnInformation) =>
-                EventImportance::Core,
+            EventType::TransportEventType(
+                TransportEventType::VersionInformation,
+            ) => EventImportance::Core,
+            EventType::TransportEventType(
+                TransportEventType::AlpnInformation,
+            ) => EventImportance::Core,
             EventType::TransportEventType(TransportEventType::ParametersSet) =>
                 EventImportance::Core,
-            EventType::TransportEventType(TransportEventType::ParametersRestored) =>
-                EventImportance::Base,
+            EventType::TransportEventType(
+                TransportEventType::ParametersRestored,
+            ) => EventImportance::Base,
             EventType::TransportEventType(
                 TransportEventType::DatagramsReceived,
             ) => EventImportance::Extra,
