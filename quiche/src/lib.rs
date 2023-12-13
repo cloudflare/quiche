@@ -2046,6 +2046,13 @@ impl Connection {
         self.qlog.streamer = Some(streamer);
     }
 
+    /// Returns a mutable reference to the QlogStreamer, if it exists.
+    #[cfg(feature = "qlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
+    pub fn qlog_streamer(&mut self) -> Option<&mut qlog::streamer::QlogStreamer> {
+        self.qlog.streamer.as_mut()
+    }
+
     /// Configures the given session for resumption.
     ///
     /// On the client, this can be used to offer the given serialized session,
