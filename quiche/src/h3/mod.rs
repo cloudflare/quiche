@@ -6277,6 +6277,10 @@ mod tests {
 
 #[cfg(feature = "ffi")]
 mod ffi;
+#[cfg(feature = "internal")]
+#[doc(hidden)]
+pub mod frame;
+#[cfg(not(feature = "internal"))]
 mod frame;
 #[doc(hidden)]
 pub mod qpack;
