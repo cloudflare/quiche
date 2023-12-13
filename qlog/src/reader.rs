@@ -31,7 +31,6 @@ use crate::QlogSeq;
 /// trait.
 ///
 /// [`BufRead`]: https://doc.rust-lang.org/std/io/trait.BufRead.html
-
 pub struct QlogSeqReader {
     pub qlog: QlogSeq,
     reader: Box<dyn std::io::BufRead + Send + Sync>,
