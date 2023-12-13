@@ -45,6 +45,9 @@ fuzzing = []
 # Build and expose the FFI API.
 ffi = []
 
+# Exposes internal APIs that have no stability guarantees across versions.
+internal = []
+
 [package.metadata.docs.rs]
 no-default-features = true
 features = ["boringssl-boring-crate", "qlog"]
