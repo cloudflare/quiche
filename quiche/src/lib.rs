@@ -6124,6 +6124,25 @@ impl Connection {
         self.handshake.peer_cert_chain()
     }
 
+    /// Returns the peer's certificate chain length.
+    ///
+    /// This function supports FFI, enabling reading the certificate chain
+    /// without extra allocations.
+    #[inline]
+    pub(crate) fn peer_cert_chain_len(&self) -> usize {
+        self.handshake.peer_cert_chain_len()
+    }
+
+    /// Returns the nth certificate of the peer's certificate chain as a
+    /// DER-encoded buffer.
+    ///
+    /// This function supports FFI, enabling reading the certificate chain
+    /// without extra allocations.
+    #[inline]
+    pub(crate) fn peer_cert_chain_index(&self, index: usize) -> Option<&[u8]> {
+        self.handshake.peer_cert_chain_index(index)
+    }
+
     /// Returns the serialized cryptographic session for the connection.
     ///
     /// This can be used by a client to cache a connection's session, and resume

@@ -758,6 +758,35 @@ impl Handshake {
         Some(cert_chain)
     }
 
+    pub fn peer_cert_chain_index(&self, index: usize) -> Option<&[u8]> {
+        let cert = unsafe {
+            let chain =
+                map_result_ptr(SSL_get0_peer_certificates(self.as_ptr())).ok()?;
+
+            let buffer =
+                map_result_ptr(sk_value(chain, index) as *const CRYPTO_BUFFER)
+                    .ok()?;
+
+            let out_len = CRYPTO_BUFFER_len(buffer);
+            if out_len == 0 {
+                return None;
+            }
+
+            let out = CRYPTO_BUFFER_data(buffer);
+            slice::from_raw_parts(out, out_len)
+        };
+
+        Some(cert)
+    }
+
+    pub fn peer_cert_chain_len(&self) -> usize {
+        unsafe {
+            let chain =
+                map_result_ptr(SSL_get0_peer_certificates(self.as_ptr())).ok();
+            chain.map_or(0, |c| sk_num(c))
+        }
+    }
+
     pub fn peer_cert(&self) -> Option<&[u8]> {
         let peer_cert = unsafe {
             let chain =
