@@ -26,10 +26,13 @@
 
 use crate::QlogSeq;
 
+/// Represents the format of the read event, either standard qlog::events::Event
+/// or non-standard qlog::events::JsonEvent.
 pub enum Event {
     Qlog(Box<crate::events::Event>),
     Json(crate::events::JsonEvent),
 }
+
 /// A helper object specialized for reading JSON-SEQ qlog from a [`BufRead`]
 /// trait.
 ///
