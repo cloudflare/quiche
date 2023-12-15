@@ -28,6 +28,7 @@ use crate::events::EventData;
 use crate::events::EventImportance;
 use crate::events::EventType;
 use crate::events::Eventable;
+use crate::events::ExData;
 
 /// A helper object specialized for streaming JSON-serialized qlog to a
 /// [`Write`] trait.
@@ -173,15 +174,32 @@ impl QlogStreamer {
     /// Writes an [Event] based on the provided [EventData] to a JSON-SEQ record
     /// at time [std::time::Instant::now()].
     pub fn add_event_data_now(&mut self, event_data: EventData) -> Result<()> {
+        self.add_event_data_ex_now(event_data, Default::default())
+    }
+
+    /// Writes an [Event] based on the provided [EventData] and [ExData] to a
+    /// JSON-SEQ record at time [std::time::Instant::now()].
+    pub fn add_event_data_ex_now(
+        &mut self, event_data: EventData, ex_data: ExData,
+    ) -> Result<()> {
         let now = std::time::Instant::now();
 
-        self.add_event_data_with_instant(event_data, now)
+        self.add_event_data_ex_with_instant(event_data, ex_data, now)
     }
 
     /// Writes an [Event] based on the provided [EventData] and
     /// [std::time::Instant] to a JSON-SEQ record.
     pub fn add_event_data_with_instant(
         &mut self, event_data: EventData, now: std::time::Instant,
+    ) -> Result<()> {
+        self.add_event_data_ex_with_instant(event_data, Default::default(), now)
+    }
+
+    /// Writes an [Event] based on the provided [EventData], [ExData], and
+    /// [std::time::Instant] to a JSON-SEQ record.
+    pub fn add_event_data_ex_with_instant(
+        &mut self, event_data: EventData, ex_data: ExData,
+        now: std::time::Instant,
     ) -> Result<()> {
         if self.state != StreamerState::Ready {
             return Err(Error::InvalidState);
@@ -199,7 +217,7 @@ impl QlogStreamer {
         };
 
         let rel_time = dur.as_secs_f32() * 1000.0;
-        let event = Event::with_time(rel_time, event_data);
+        let event = Event::with_time_ex(rel_time, event_data, ex_data);
 
         self.add_event(event)
     }
@@ -243,6 +261,8 @@ impl Drop for QlogStreamer {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::events::quic;
     use crate::events::quic::QuicFrame;
@@ -420,6 +440,101 @@ mod tests {
 
         let log_string = r#"{"qlog_version":"version","qlog_format":"JSON-SEQ","title":"title","description":"description","trace":{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0}}}
 {"time":0.0,"name":"jsonevent:sample","data":{"foo":"Bar","hello":123}}
+"#;
+
+        let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
+
+        assert_eq!(log_string, written_string);
+    }
+
+    #[test]
+    fn stream_data_ex() {
+        let v: Vec<u8> = Vec::new();
+        let buff = std::io::Cursor::new(v);
+        let writer = Box::new(buff);
+
+        let trace = make_trace_seq();
+        let pkt_hdr = make_pkt_hdr(quic::PacketType::Handshake);
+        let raw = Some(RawInfo {
+            length: Some(1251),
+            payload_length: Some(1224),
+            data: None,
+        });
+
+        let frame1 = QuicFrame::Stream {
+            stream_id: 40,
+            offset: 40,
+            length: 400,
+            fin: Some(true),
+            raw: None,
+        };
+
+        let event_data1 = EventData::PacketSent(quic::PacketSent {
+            header: pkt_hdr.clone(),
+            frames: Some(smallvec![frame1]),
+            is_coalesced: None,
+            retry_token: None,
+            stateless_reset_token: None,
+            supported_versions: None,
+            raw: raw.clone(),
+            datagram_id: None,
+            send_at_time: None,
+            trigger: None,
+        });
+        let j1 = json!({"foo": "Bar", "hello": 123});
+        let j2 = json!({"baz": [1,2,3,4]});
+        let mut ex_data = BTreeMap::new();
+        ex_data.insert("first".to_string(), j1);
+        ex_data.insert("second".to_string(), j2);
+
+        let ev1 = Event::with_time_ex(0.0, event_data1, ex_data);
+
+        let frame2 = QuicFrame::Stream {
+            stream_id: 1,
+            offset: 0,
+            length: 100,
+            fin: Some(true),
+            raw: None,
+        };
+
+        let event_data2 = EventData::PacketSent(quic::PacketSent {
+            header: pkt_hdr.clone(),
+            frames: Some(smallvec![frame2]),
+            is_coalesced: None,
+            retry_token: None,
+            stateless_reset_token: None,
+            supported_versions: None,
+            raw: raw.clone(),
+            datagram_id: None,
+            send_at_time: None,
+            trigger: None,
+        });
+
+        let ev2 = Event::with_time(0.0, event_data2);
+
+        let mut s = streamer::QlogStreamer::new(
+            "version".to_string(),
+            Some("title".to_string()),
+            Some("description".to_string()),
+            None,
+            std::time::Instant::now(),
+            trace,
+            EventImportance::Base,
+            writer,
+        );
+
+        assert!(matches!(s.start_log(), Ok(())));
+        assert!(matches!(s.add_event(ev1), Ok(())));
+        assert!(matches!(s.add_event(ev2), Ok(())));
+        assert!(matches!(s.finish_log(), Ok(())));
+
+        let r = s.writer();
+        #[allow(clippy::borrowed_box)]
+        let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
+
+        let log_string = r#"{"qlog_version":"version","qlog_format":"JSON-SEQ","title":"title","description":"description","trace":{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0}}}
+{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":40,"offset":40,"length":400,"fin":true}]},"first":{"foo":"Bar","hello":123},"second":{"baz":[1,2,3,4]}}
+{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":1,"offset":0,"length":100,"fin":true}]}}
 "#;
 
         let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();

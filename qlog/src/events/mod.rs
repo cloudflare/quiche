@@ -35,6 +35,10 @@ use connectivity::ConnectivityEventType;
 use serde::Deserialize;
 use serde::Serialize;
 
+use std::collections::BTreeMap;
+
+pub type ExData = BTreeMap<String, serde_json::Value>;
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(untagged)]
 pub enum EventType {
@@ -87,6 +91,9 @@ pub struct Event {
     #[serde(flatten)]
     pub data: EventData,
 
+    #[serde(flatten)]
+    pub ex_data: ExData,
+
     pub protocol_type: Option<String>,
     pub group_id: Option<String>,
 
@@ -99,10 +106,16 @@ pub struct Event {
 impl Event {
     /// Returns a new `Event` object with the provided time and data.
     pub fn with_time(time: f32, data: EventData) -> Self {
+        Self::with_time_ex(time, data, Default::default())
+    }
+
+    /// Returns a new `Event` object with the provided time, data and ex_data.
+    pub fn with_time_ex(time: f32, data: EventData, ex_data: ExData) -> Self {
         let ty = EventType::from(&data);
         Event {
             time,
             data,
+            ex_data,
             protocol_type: Default::default(),
             group_id: Default::default(),
             time_format: Default::default(),
@@ -126,6 +139,7 @@ impl PartialEq for Event {
     fn eq(&self, other: &Event) -> bool {
         self.time == other.time &&
             self.data == other.data &&
+            self.ex_data == other.ex_data &&
             self.protocol_type == other.protocol_type &&
             self.group_id == other.group_id &&
             self.time_format == other.time_format
