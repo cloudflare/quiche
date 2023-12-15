@@ -174,13 +174,11 @@ impl QlogStreamer {
     /// Writes an [Event] based on the provided [EventData] to a JSON-SEQ record
     /// at time [std::time::Instant::now()].
     pub fn add_event_data_now(&mut self, event_data: EventData) -> Result<()> {
-        let now = std::time::Instant::now();
-
-        self.add_event_data_with_instant(event_data, now)
+        self.add_event_data_ex_now(event_data, Default::default())
     }
 
-    /// Writes an [Event] based on the provided [EventData] to a JSON-SEQ record
-    /// at time [std::time::Instant::now()].
+    /// Writes an [Event] based on the provided [EventData] and [ExData] to a
+    /// JSON-SEQ record at time [std::time::Instant::now()].
     pub fn add_event_data_ex_now(
         &mut self, event_data: EventData, ex_data: ExData,
     ) -> Result<()> {
@@ -194,28 +192,10 @@ impl QlogStreamer {
     pub fn add_event_data_with_instant(
         &mut self, event_data: EventData, now: std::time::Instant,
     ) -> Result<()> {
-        if self.state != StreamerState::Ready {
-            return Err(Error::InvalidState);
-        }
-
-        let ty = EventType::from(&event_data);
-        if !EventImportance::from(ty).is_contained_in(&self.log_level) {
-            return Err(Error::Done);
-        }
-
-        let dur = if cfg!(test) {
-            std::time::Duration::from_secs(0)
-        } else {
-            now.duration_since(self.start_time)
-        };
-
-        let rel_time = dur.as_secs_f32() * 1000.0;
-        let event = Event::with_time(rel_time, event_data);
-
-        self.add_event(event)
+        self.add_event_data_ex_with_instant(event_data, Default::default(), now)
     }
 
-    /// Writes an [Event] based on the provided [EventData] and
+    /// Writes an [Event] based on the provided [EventData], [ExData], and
     /// [std::time::Instant] to a JSON-SEQ record.
     pub fn add_event_data_ex_with_instant(
         &mut self, event_data: EventData, ex_data: ExData,
