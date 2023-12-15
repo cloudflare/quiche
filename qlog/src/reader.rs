@@ -24,9 +24,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use crate::events::Event;
 use crate::QlogSeq;
 
+pub enum Event {
+    Qlog(Box<crate::events::Event>),
+    Json(crate::events::JsonEvent),
+}
 /// A helper object specialized for reading JSON-SEQ qlog from a [`BufRead`]
 /// trait.
 ///
@@ -82,8 +85,18 @@ impl Iterator for QlogSeqReader {
         // Attempt to deserialize events but skip them if that fails for any
         // reason, ensuring we always read all bytes in the reader.
         while let Some(bytes) = Self::read_record(&mut self.reader) {
-            if let Ok(event) = serde_json::from_slice(&bytes) {
-                return event;
+            let r: serde_json::Result<crate::events::Event> =
+                serde_json::from_slice(&bytes);
+
+            if let Ok(event) = r {
+                return Some(Event::Qlog(Box::new(event)));
+            }
+
+            let r: serde_json::Result<crate::events::JsonEvent> =
+                serde_json::from_slice(&bytes);
+
+            if let Ok(event) = r {
+                return Some(Event::Json(event));
             }
         }
 
