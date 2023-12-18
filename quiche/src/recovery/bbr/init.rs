@@ -60,6 +60,7 @@ fn bbr_init_pacing_rate(r: &mut Recovery) {
     let bbr = &mut r.bbr_state;
 
     let srtt = r
+        .rtt_stats
         .smoothed_rtt
         .unwrap_or_else(|| Duration::from_millis(1))
         .as_secs_f64();

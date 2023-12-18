@@ -93,7 +93,9 @@ fn on_packet_acked(
             r.congestion_window += r.max_datagram_size;
         }
 
-        if r.hystart.on_packet_acked(epoch, packet, r.latest_rtt, now) {
+        if r.hystart
+            .on_packet_acked(epoch, packet, r.rtt_stats.latest_rtt, now)
+        {
             // Exit to congestion avoidance if CSS ends.
             r.ssthresh = r.congestion_window;
         }
@@ -432,7 +434,7 @@ mod tests {
         }];
 
         // Ack more than cwnd bytes with rtt=100ms
-        r.update_rtt(rtt, Duration::from_millis(0), now);
+        r.rtt_stats.update_rtt(rtt, Duration::from_millis(0), now);
         r.on_packets_acked(&mut acked, packet::Epoch::Application, now + rtt * 2);
 
         // After acking more than cwnd, expect cwnd increased by MSS

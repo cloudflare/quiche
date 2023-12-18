@@ -6679,7 +6679,7 @@ impl Connection {
 
         let active_path = self.paths.get_active_mut()?;
 
-        active_path.recovery.max_ack_delay = max_ack_delay;
+        active_path.recovery.update_max_ack_delay(max_ack_delay);
 
         if active_path.pmtud.get_probe_status() {
             active_path.recovery.pmtud_update_max_datagram_size(
