@@ -454,7 +454,7 @@ fn bbr2_update_min_rtt(r: &mut Recovery, now: Instant) {
     // To do: Figure out Probe RTT logic
     // if bbr.probe_rtt_min_delay < bbr.min_rtt ||  bbr.min_rtt == INITIAL_RTT ||
     // min_rtt_expired {
-    if bbr.min_rtt == INITIAL_RTT || min_rtt_expired {
+    if bbr.min_rtt == rtt::INITIAL_RTT || min_rtt_expired {
         // bbr.min_rtt = bbr.probe_rtt_min_delay;
         // bbr.min_rtt_stamp = bbr.probe_rtt_min_stamp;
         bbr.min_rtt = rs_rtt;

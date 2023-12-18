@@ -266,7 +266,9 @@ fn on_packet_acked(
             r.bytes_acked_sl -= r.max_datagram_size;
         }
 
-        if r.hystart.on_packet_acked(epoch, packet, r.latest_rtt, now) {
+        if r.hystart
+            .on_packet_acked(epoch, packet, r.rtt_stats.latest_rtt, now)
+        {
             // Exit to congestion avoidance if CSS ends.
             r.ssthresh = r.congestion_window;
         }
@@ -307,7 +309,9 @@ fn on_packet_acked(
         let t = now.saturating_duration_since(ca_start_time);
 
         // target = w_cubic(t + rtt)
-        let target = r.cubic_state.w_cubic(t + r.min_rtt, r.max_datagram_size);
+        let target = r
+            .cubic_state
+            .w_cubic(t + r.rtt_stats.min_rtt, r.max_datagram_size);
 
         // Clipping target to [cwnd, 1.5 x cwnd]
         let target = f64::max(target, r.congestion_window as f64);
@@ -686,7 +690,7 @@ mod tests {
         // Shift current time by 1 RTT.
         let rtt = Duration::from_millis(100);
 
-        r.update_rtt(rtt, Duration::from_millis(0), now);
+        r.rtt_stats.update_rtt(rtt, Duration::from_millis(0), now);
 
         // Exit from the recovery.
         now += rtt;
@@ -832,7 +836,8 @@ mod tests {
         // Receiving Acks.
         let now = now + rtt_1st;
         for _ in 0..n_rtt_sample {
-            r.update_rtt(rtt_1st, Duration::from_millis(0), now);
+            r.rtt_stats
+                .update_rtt(rtt_1st, Duration::from_millis(0), now);
 
             let mut acked = vec![Acked {
                 pkt_num: ack_pn,
@@ -871,7 +876,8 @@ mod tests {
 
         for _ in 0..n_rtt_sample {
             cwnd_prev = r.cwnd();
-            r.update_rtt(rtt_2nd, Duration::from_millis(0), now);
+            r.rtt_stats
+                .update_rtt(rtt_2nd, Duration::from_millis(0), now);
 
             let mut acked = vec![Acked {
                 pkt_num: ack_pn,
@@ -913,7 +919,8 @@ mod tests {
         // Receiving Acks.
         // Last ack will cause to exit to SS.
         for _ in 0..n_rtt_sample {
-            r.update_rtt(rtt_3rd, Duration::from_millis(0), now);
+            r.rtt_stats
+                .update_rtt(rtt_3rd, Duration::from_millis(0), now);
 
             let mut acked = vec![Acked {
                 pkt_num: ack_pn,
@@ -989,7 +996,8 @@ mod tests {
         // Receiving Acks.
         let now = now + rtt_1st;
         for _ in 0..n_rtt_sample {
-            r.update_rtt(rtt_1st, Duration::from_millis(0), now);
+            r.rtt_stats
+                .update_rtt(rtt_1st, Duration::from_millis(0), now);
 
             let mut acked = vec![Acked {
                 pkt_num: ack_pn,
@@ -1028,7 +1036,8 @@ mod tests {
 
         for _ in 0..n_rtt_sample {
             cwnd_prev = r.cwnd();
-            r.update_rtt(rtt_2nd, Duration::from_millis(0), now);
+            r.rtt_stats
+                .update_rtt(rtt_2nd, Duration::from_millis(0), now);
 
             let mut acked = vec![Acked {
                 pkt_num: ack_pn,
@@ -1068,7 +1077,8 @@ mod tests {
 
             // Receiving Acks.
             for _ in 0..n_rtt_sample {
-                r.update_rtt(rtt_css, Duration::from_millis(0), now);
+                r.rtt_stats
+                    .update_rtt(rtt_css, Duration::from_millis(0), now);
 
                 let mut acked = vec![Acked {
                     pkt_num: ack_pn,
@@ -1154,7 +1164,7 @@ mod tests {
         }];
 
         // Ack more than cwnd bytes with rtt=100ms
-        r.update_rtt(rtt, Duration::from_millis(0), now);
+        r.rtt_stats.update_rtt(rtt, Duration::from_millis(0), now);
 
         // Trigger detecting spurious congestion event
         r.on_packets_acked(
@@ -1217,7 +1227,7 @@ mod tests {
         }];
 
         // Ack more than cwnd bytes with rtt=100ms.
-        r.update_rtt(rtt, Duration::from_millis(0), now);
+        r.rtt_stats.update_rtt(rtt, Duration::from_millis(0), now);
 
         // Trigger detecting spurious congestion event.
         r.on_packets_acked(
@@ -1277,7 +1287,7 @@ mod tests {
 
         // Shift current time by 1 RTT.
         let rtt = Duration::from_millis(100);
-        r.update_rtt(rtt, Duration::from_millis(0), now);
+        r.rtt_stats.update_rtt(rtt, Duration::from_millis(0), now);
 
         // Exit from the recovery.
         now += rtt;
