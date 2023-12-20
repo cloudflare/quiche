@@ -26,10 +26,13 @@
 
 use crate::QlogSeq;
 
-/// Represents the format of the read event, either standard qlog::events::Event
-/// or non-standard qlog::events::JsonEvent.
+/// Represents the format of the read event.
+#[allow(clippy::large_enum_variant)]
 pub enum Event {
-    Qlog(Box<crate::events::Event>),
+    /// A native qlog event type.
+    Qlog(crate::events::Event),
+
+    // An extended JSON event type.
     Json(crate::events::JsonEvent),
 }
 
@@ -92,7 +95,7 @@ impl Iterator for QlogSeqReader {
                 serde_json::from_slice(&bytes);
 
             if let Ok(event) = r {
-                return Some(Event::Qlog(Box::new(event)));
+                return Some(Event::Qlog(event));
             }
 
             let r: serde_json::Result<crate::events::JsonEvent> =
