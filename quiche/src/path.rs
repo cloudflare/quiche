@@ -207,7 +207,8 @@ impl Path {
     /// the fields being set to their default value.
     pub fn new(
         local_addr: SocketAddr, peer_addr: SocketAddr,
-        recovery_config: &recovery::RecoveryConfig, path_challenge_recv_max_queue_len: usize, pmtud_init: usize,
+        recovery_config: &recovery::RecoveryConfig,
+        path_challenge_recv_max_queue_len: usize, pmtud_init: usize,
         is_initial: bool,
     ) -> Self {
         let (state, active_scid_seq, active_dcid_seq) = if is_initial {
