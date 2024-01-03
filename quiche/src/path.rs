@@ -29,6 +29,7 @@ use std::time;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
+use std::time::Instant;
 
 use smallvec::SmallVec;
 
@@ -37,6 +38,7 @@ use slab::Slab;
 use crate::Error;
 use crate::Result;
 
+use crate::pmtud;
 use crate::recovery;
 use crate::recovery::HandshakeStatus;
 
@@ -135,6 +137,9 @@ pub struct Path {
     /// Loss recovery and congestion control state.
     pub recovery: recovery::Recovery,
 
+    /// Path MTU discovery
+    pub pmtud: pmtud::Pmtud,
+
     /// Pending challenge data with the size of the packet containing them and
     /// when they were sent.
     in_flight_challenges: VecDeque<([u8; 8], usize, time::Instant)>,
@@ -202,8 +207,8 @@ impl Path {
     /// the fields being set to their default value.
     pub fn new(
         local_addr: SocketAddr, peer_addr: SocketAddr,
-        recovery_config: &recovery::RecoveryConfig,
-        path_challenge_recv_max_queue_len: usize, is_initial: bool,
+        recovery_config: &recovery::RecoveryConfig, path_challenge_recv_max_queue_len: usize, pmtud_init: usize,
+        is_initial: bool,
     ) -> Self {
         let (state, active_scid_seq, active_dcid_seq) = if is_initial {
             (PathState::Validated, Some(0), Some(0))
@@ -219,6 +224,7 @@ impl Path {
             state,
             active: false,
             recovery: recovery::Recovery::new_with_config(recovery_config),
+            pmtud: pmtud::Pmtud::new(pmtud_init),
             in_flight_challenges: VecDeque::new(),
             max_challenge_size: 0,
             probing_lost: 0,
@@ -324,6 +330,20 @@ impl Path {
     #[inline]
     pub fn validation_requested(&self) -> bool {
         self.challenge_requested
+    }
+
+    /// Function used to set timer for path MTU Discovery probe
+    /// Function used to set timer for path MTU Discovery probe
+    pub fn set_pmtu_probe_timer(
+        &mut self, handshake_status: &recovery::HandshakeStatus, now: Instant,
+    ) -> bool {
+        if handshake_status.completed {
+            self.pmtud
+                .set_probe_timeout(Some(now + self.recovery.rtt()));
+            true
+        } else {
+            false
+        }
     }
 
     pub fn on_challenge_sent(&mut self) {
@@ -923,6 +943,7 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            1200,
             true,
         );
         let mut path_mgr = PathMap::new(path, 2, false);
@@ -932,6 +953,7 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            1200,
             false,
         );
         path_mgr.insert_path(probed_path, false).unwrap();
@@ -1008,6 +1030,7 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            1200,
             true,
         );
         let mut client_path_mgr = PathMap::new(path, 2, false);
@@ -1016,6 +1039,7 @@ mod tests {
             client_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            1200,
             false,
         );
 
@@ -1098,6 +1122,7 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            1200,
             true,
         );
         let mut client_path_mgr = PathMap::new(path, 2, false);
@@ -1106,6 +1131,7 @@ mod tests {
             client_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            1200,
             false,
         );
 

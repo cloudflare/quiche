@@ -665,6 +665,9 @@ impl Recovery {
         // HANDSHAKE_DONE and MAX_DATA / MAX_STREAM_DATA as well, in addition
         // to CRYPTO and STREAM, if the original packet carried them.
         for unacked in unacked_iter {
+            if unacked.pmtud {
+                continue;
+            }
             self.lost[epoch].extend_from_slice(&unacked.frames);
         }
 
@@ -751,6 +754,27 @@ impl Recovery {
 
     pub fn max_datagram_size(&self) -> usize {
         self.max_datagram_size
+    }
+
+    pub fn pmtud_update_max_datagram_size(
+        &mut self, new_max_datagram_size: usize,
+    ) {
+        // Congestion Window is updated only when it's not updated already.
+        if self.congestion_window ==
+            self.max_datagram_size * self.initial_congestion_window_packets
+        {
+            self.congestion_window =
+                new_max_datagram_size * self.initial_congestion_window_packets;
+        }
+
+        self.pacer = pacer::Pacer::new(
+            self.pacer.enabled(),
+            self.congestion_window,
+            0,
+            new_max_datagram_size,
+            self.pacer.max_pacing_rate(),
+        );
+        self.max_datagram_size = new_max_datagram_size;
     }
 
     pub fn update_max_datagram_size(&mut self, new_max_datagram_size: usize) {
@@ -927,7 +951,7 @@ impl Recovery {
             // Skip packets that follow the largest acked packet.
             .take_while(|p| p.pkt_num <= largest_acked)
             // Skip packets that have already been acked or lost.
-            .filter(|p| p.time_acked.is_none() && p.time_lost.is_none());
+            .filter(|p| p.time_acked.is_none() && p.time_lost.is_none() && !p.pmtud);
 
         for unacked in unacked_iter {
             // Mark packet as lost, or set time when it should be marked.
@@ -935,7 +959,6 @@ impl Recovery {
                 largest_acked >= unacked.pkt_num + self.pkt_thresh
             {
                 self.lost[epoch].extend(unacked.frames.drain(..));
-
                 unacked.time_lost = Some(now);
 
                 if unacked.in_flight {
@@ -974,7 +997,10 @@ impl Recovery {
         self.bytes_lost += lost_bytes as u64;
 
         if let Some(pkt) = largest_lost_pkt {
-            self.on_packets_lost(lost_bytes, &pkt, epoch, now);
+            // Do not track lost PMTUD packets.
+            if !pkt.pmtud {
+                self.on_packets_lost(lost_bytes, &pkt, epoch, now);
+            }
         }
 
         self.drain_packets(epoch, now);
@@ -1272,6 +1298,8 @@ pub struct Sent {
     pub lost: u64,
 
     pub has_data: bool,
+
+    pub pmtud: bool,
 }
 
 impl std::fmt::Debug for Sent {
@@ -1286,6 +1314,7 @@ impl std::fmt::Debug for Sent {
         write!(f, "tx_in_flight={} ", self.tx_in_flight)?;
         write!(f, "lost={} ", self.lost)?;
         write!(f, "has_data={} ", self.has_data)?;
+        write!(f, "pmtud={}", self.pmtud)?;
 
         Ok(())
     }
@@ -1517,6 +1546,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -1545,6 +1575,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -1573,6 +1604,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -1601,6 +1633,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -1662,6 +1695,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -1690,6 +1724,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -1764,6 +1799,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -1792,6 +1828,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -1820,6 +1857,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -1848,6 +1886,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -1933,6 +1972,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -1961,6 +2001,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -1989,6 +2030,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -2017,6 +2059,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -2115,6 +2158,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -2175,6 +2219,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -2208,6 +2253,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(
@@ -2238,6 +2284,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(

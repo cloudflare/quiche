@@ -713,6 +713,8 @@ pub struct Config {
     cc_algorithm: CongestionControlAlgorithm,
     initial_congestion_window_packets: usize,
 
+    pmtud: bool,
+
     hystart: bool,
 
     pacing: bool,
@@ -778,6 +780,7 @@ impl Config {
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
             initial_congestion_window_packets:
                 DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
+            pmtud: false,
             hystart: true,
             pacing: true,
             max_pacing_rate: None,
@@ -876,6 +879,11 @@ impl Config {
     /// [`peer_cert()`]: struct.Connection.html#method.peer_cert
     pub fn verify_peer(&mut self, verify: bool) {
         self.tls_ctx.set_verify(verify);
+    }
+
+    /// Configures whether to do path MTU discovery.
+    pub fn discover_pmtu(&mut self, discover: bool) {
+        self.pmtud = discover;
     }
 
     /// Configures whether to send GREASE values.
@@ -1734,8 +1742,10 @@ impl Connection {
             peer,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            MIN_CLIENT_INITIAL_LEN,
             true,
         );
+
         // If we did stateless retry assume the peer's address is verified.
         path.verified_peer_address = odcid.is_some();
         // Assume clients validate the server's address implicitly.
@@ -1895,6 +1905,22 @@ impl Connection {
             reset_stream_remote_count: 0,
             stopped_stream_remote_count: 0,
         };
+
+        // Enable path MTU Discovery and start probing with the largest datagram
+        // size
+        if config.pmtud {
+            let path_pmtud = &mut conn.paths.get_mut(active_path_id)?.pmtud;
+            path_pmtud.should_probe(config.pmtud);
+            path_pmtud.set_probe_size(config.max_send_udp_payload_size);
+            path_pmtud.enable(config.pmtud);
+            trace!(
+                "PMTU configured pmtu {} next_size {} pmtu_probe {} enable {}",
+                path_pmtud.get_current(),
+                path_pmtud.get_probe_status(),
+                path_pmtud.get_probe_size(),
+                path_pmtud.is_enabled(),
+            );
+        }
 
         if let Some(odcid) = odcid {
             conn.local_transport_params
@@ -2840,11 +2866,25 @@ impl Connection {
             });
         }
 
+        // Foll. flag used to upgrade datagram size, if probe successful
+        let mut pmtud_probe = false;
+
         // Process acked frames. Note that several packets from several paths
         // might have been acked by the received packet.
         for (_, p) in self.paths.iter_mut() {
             for acked in p.recovery.acked[epoch].drain(..) {
                 match acked {
+                    frame::Frame::Ping {
+                        mtu_probe: Some(mtu_probe),
+                    } => {
+                        let pmtud_next = p.pmtud.get_current();
+                        p.pmtud.set_current(cmp::max(pmtud_next, mtu_probe));
+                        // Stop sending path MTU probes after successful
+                        // probe
+                        trace!("PMTUD: Acked");
+                        p.pmtud.should_probe(false);
+                        pmtud_probe = true;
+                    },
                     frame::Frame::ACK { ranges, .. } => {
                         // Stop acknowledging packets less than or equal to the
                         // largest acknowledged in the sent ACK frame that, in
@@ -2931,6 +2971,12 @@ impl Connection {
                     _ => (),
                 }
             }
+            // Update max datagram send size with newly acked probe size
+            if pmtud_probe {
+                trace!("Updating PMTU {:?}", p.pmtud.get_current());
+                p.recovery
+                    .pmtud_update_max_datagram_size(p.pmtud.get_current());
+            }
         }
 
         // Now that we processed all the frames, if there is a path that has no
@@ -3014,6 +3060,17 @@ impl Connection {
         }
 
         self.ack_eliciting_sent = false;
+
+        let active_path = self.paths.get_active_mut()?;
+
+        // Check if path MTU Discovery probe timer has expired.
+        // If yes, we re-initiate probe during next send
+        if let Some(timer) = active_path.pmtud.get_probe_timeout() {
+            if timer <= now && active_path.pmtud.get_probe_status() {
+                trace!("{} PMTU probe detection timeout expired", self.trace_id);
+                active_path.pmtud.pmtu_probe_lost();
+            }
+        }
 
         Ok(read)
     }
@@ -3217,6 +3274,20 @@ impl Connection {
 
         let send_path = self.paths.get_mut(send_pid)?;
 
+        // Update max datagram size to allow path MTU discovery probe to be sent
+        if send_path.pmtud.get_probe_status() {
+            if self.handshake_confirmed || self.handshake_done_sent {
+                send_path.recovery.pmtud_update_max_datagram_size(
+                    send_path.pmtud.get_probe_size(),
+                );
+            } else {
+                send_path.recovery.pmtud_update_max_datagram_size(
+                    send_path.pmtud.get_current(),
+                );
+            }
+            left = cmp::min(out.len(), send_path.recovery.max_datagram_size());
+        }
+
         // Limit data sent by the server based on the amount of data received
         // from the client before its address is validated.
         if !send_path.verified_peer_address && self.is_server {
@@ -3309,6 +3380,8 @@ impl Connection {
         }
 
         let is_closing = self.local_error.is_some();
+
+        let out_len = out.len();
 
         let mut b = octets::OctetsMut::with_slice(out);
 
@@ -3426,6 +3499,11 @@ impl Connection {
 
         let mut left = b.cap();
 
+        if path.pmtud.is_enabled() {
+            // Limit output buffer size by estimated path MTU.
+            left = cmp::min(path.pmtud.get_current(), b.cap());
+        }
+
         let pn = pkt_space.next_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
 
@@ -3526,6 +3604,8 @@ impl Connection {
 
         let mut ack_eliciting = false;
         let mut in_flight = false;
+        // Foll. flag used to upgrade datagram size, if probe successful
+        let mut pmtud_probe = false;
         let mut has_data = false;
 
         // Whether or not we should explicitly elicit an ACK via PING frame if we
@@ -3601,7 +3681,73 @@ impl Connection {
 
         let mut challenge_data = None;
 
+        let active_path = self.paths.get_active_mut()?;
+
         if pkt_type == packet::Type::Short {
+            // Create PMTUD probe.
+            //
+            // In order to send a PMTUD probe the current `left` value, which was
+            // already limited by the current PMTU measure, needs to be ignored,
+            // but the outgoing packet still needs to be limited by
+            // the output buffer size, as well as the congestion
+            // window.
+            //
+            // In addition, the PMTUD probe is only generated when the handshake
+            // is confirmed, to avoid interfering with the handshake
+            // (e.g. due to the anti-amplification limits).
+
+            if (self.handshake_confirmed && self.handshake_done_sent) &&
+                active_path.pmtud.get_probe_size() >
+                    active_path.pmtud.get_current() &&
+                active_path.recovery.cwnd_available() >
+                    active_path.pmtud.get_probe_size() &&
+                out_len >= active_path.pmtud.get_probe_size() &&
+                active_path.pmtud.get_probe_status() &&
+                active_path.pmtud.get_probe_timeout().is_none() &&
+                !is_closing &&
+                frames.is_empty()
+            {
+                trace!("Sending PMTUD probe pmtu_probe {} next_size {} and pmtu {} hs_con {} hs_sent {} cwnd_avail {} out_len {} left {}",
+                     active_path.pmtud.get_probe_size(), active_path.pmtud.get_probe_status(), active_path.pmtud.get_current(),
+                     self.handshake_confirmed, self.handshake_done_sent, active_path.recovery.cwnd_available(),out_len, left);
+                left = cmp::min(
+                    active_path.pmtud.get_probe_size(),
+                    active_path.recovery.cwnd_available(),
+                );
+                match left.checked_sub(overhead) {
+                    Some(v) => left = v,
+
+                    None => {
+                        // We can't send more because there isn't enough space
+                        // available in the output buffer.
+                        //
+                        // This usually happens when we try to send a new packet
+                        // but failed because cwnd is
+                        // almost full. In such case app_limited
+                        // is set to false here to make cwnd grow when ACK is
+                        // received.
+                        active_path.recovery.update_app_limited(false);
+                        return Err(Error::InvalidState);
+                    },
+                }
+                let frame = frame::Frame::Padding {
+                    len: active_path.pmtud.get_probe_size() - overhead - 1,
+                };
+
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    let frame = frame::Frame::Ping {
+                        mtu_probe: Some(active_path.pmtud.get_probe_size()),
+                    };
+                    if push_frame_to_pkt!(b, frames, frame, left) {
+                        ack_eliciting = true;
+                        in_flight = true;
+                    }
+                }
+
+                pmtud_probe = true;
+            }
+
+            let path = self.paths.get_mut(send_pid)?;
             // Create PATH_RESPONSE frame if needed.
             // We do not try to ensure that these are really sent.
             while let Some(challenge) = path.pop_received_challenge() {
@@ -3637,6 +3783,8 @@ impl Connection {
                 key_update.update_acked = true;
             }
         }
+
+        let path = self.paths.get_mut(send_pid)?;
 
         if pkt_type == packet::Type::Short && !is_closing {
             // Create NEW_CONNECTION_ID frames as needed.
@@ -4176,7 +4324,7 @@ impl Connection {
             left >= 1 &&
             !is_closing
         {
-            let frame = frame::Frame::Ping;
+            let frame = frame::Frame::Ping { mtu_probe: None };
 
             if push_frame_to_pkt!(b, frames, frame, left) {
                 ack_eliciting = true;
@@ -4184,7 +4332,7 @@ impl Connection {
             }
         }
 
-        if ack_eliciting {
+        if ack_eliciting && !pmtud_probe {
             path.needs_ack_eliciting = false;
             path.recovery.loss_probes[epoch] =
                 path.recovery.loss_probes[epoch].saturating_sub(1);
@@ -4328,6 +4476,7 @@ impl Connection {
             tx_in_flight: 0,
             lost: 0,
             has_data,
+            pmtud: pmtud_probe,
         };
 
         if in_flight && is_app_limited {
@@ -4388,6 +4537,19 @@ impl Connection {
 
         if ack_eliciting {
             self.ack_eliciting_sent = true;
+        }
+
+        let active_path = self.paths.get_active_mut()?;
+        if pmtud_probe {
+            // Start path MTU Discovery probe timer
+            let pmtud_timer_status =
+                active_path.set_pmtu_probe_timer(&handshake_status, now);
+            trace!("Sent PMTUD: Probe Timer Status {:?}", pmtud_timer_status);
+        }
+        if active_path.pmtud.is_enabled() {
+            active_path
+                .recovery
+                .pmtud_update_max_datagram_size(active_path.pmtud.get_current());
         }
 
         Ok((pkt_type, written))
@@ -6417,9 +6579,15 @@ impl Connection {
 
         active_path.recovery.max_ack_delay = max_ack_delay;
 
-        active_path
-            .recovery
-            .update_max_datagram_size(peer_params.max_udp_payload_size as usize);
+        if active_path.pmtud.get_probe_status() {
+            active_path.recovery.pmtud_update_max_datagram_size(
+                active_path.pmtud.get_probe_size(),
+            );
+        } else {
+            active_path.recovery.update_max_datagram_size(
+                peer_params.max_udp_payload_size as usize,
+            );
+        }
 
         // Record the max_active_conn_id parameter advertised by the peer.
         self.ids
@@ -6602,6 +6770,8 @@ impl Connection {
                 self.streams.has_stopped() ||
                 self.ids.has_new_scids() ||
                 self.ids.has_retire_dcids() ||
+                (send_path.pmtud.get_probe_status() &&
+                    send_path.pmtud.get_probe_timeout().is_none()) ||
                 send_path.needs_ack_eliciting ||
                 send_path.probing_required())
         {
@@ -6640,7 +6810,7 @@ impl Connection {
         match frame {
             frame::Frame::Padding { .. } => (),
 
-            frame::Frame::Ping => (),
+            frame::Frame::Ping { .. } => (),
 
             frame::Frame::ACK {
                 ranges, ack_delay, ..
@@ -7331,6 +7501,7 @@ impl Connection {
             info.from,
             &self.recovery_config,
             self.path_challenge_recv_max_queue_len,
+            MIN_CLIENT_INITIAL_LEN,
             false,
         );
 
@@ -7459,6 +7630,7 @@ impl Connection {
             peer_addr,
             &self.recovery_config,
             self.path_challenge_recv_max_queue_len,
+            MIN_CLIENT_INITIAL_LEN,
             false,
         );
         path.active_dcid_seq = Some(dcid_seq);
@@ -8306,6 +8478,14 @@ pub mod testing {
         ) -> Result<usize> {
             let written = encode_pkt(&mut self.client, pkt_type, frames, buf)?;
             recv_send(&mut self.server, buf, written)
+        }
+
+        pub fn send_pkt_to_client(
+            &mut self, pkt_type: packet::Type, frames: &[frame::Frame],
+            buf: &mut [u8],
+        ) -> Result<usize> {
+            let written = encode_pkt(&mut self.server, pkt_type, frames, buf)?;
+            recv_send(&mut self.client, buf, written)
         }
 
         pub fn client_update_key(&mut self) -> Result<()> {
@@ -12671,7 +12851,7 @@ mod tests {
             let written = testing::encode_pkt(
                 &mut pipe.server,
                 packet::Type::Short,
-                &[frame::Frame::Ping],
+                &[frame::Frame::Ping { mtu_probe: None }],
                 &mut buf,
             )
             .unwrap();
@@ -12851,7 +13031,10 @@ mod tests {
 
         assert_eq!(pipe.server.pkt_num_spaces[epoch].recv_pkt_need_ack.len(), 0);
 
-        let frames = [frame::Frame::Ping, frame::Frame::Padding { len: 3 }];
+        let frames = [
+            frame::Frame::Ping { mtu_probe: None },
+            frame::Frame::Padding { len: 3 },
+        ];
 
         let pkt_type = packet::Type::Short;
 
@@ -16124,7 +16307,7 @@ mod tests {
 
         // Client sends a bunch of PING frames, causing server to ACK (ACKs aren't
         // ack-eliciting)
-        let frames = [frame::Frame::Ping];
+        let frames = [frame::Frame::Ping { mtu_probe: None }];
         let pkt_type = packet::Type::Short;
         for _ in 0..24 {
             let len = pipe
@@ -16153,7 +16336,9 @@ mod tests {
         assert!(
             frames
                 .iter()
-                .any(|frame| matches!(frame, frame::Frame::Ping)),
+                .any(|frame| matches!(frame, frame::Frame::Ping {
+                    mtu_probe: None
+                })),
             "found a PING"
         );
     }
@@ -16175,7 +16360,7 @@ mod tests {
             testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
         let mut iter = frames.iter();
 
-        assert_eq!(iter.next(), Some(&frame::Frame::Ping));
+        assert_eq!(iter.next(), Some(&frame::Frame::Ping { mtu_probe: None }));
     }
 
     #[test]
@@ -16500,6 +16685,115 @@ mod tests {
             .paths_iter(server_addr)
             .any(|path| path == client_addr_2));
     }
+
+    #[test]
+    fn successful_probe_pmtud() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+        config.set_initial_max_data(100000);
+        config.set_initial_max_stream_data_bidi_local(100000);
+        config.set_initial_max_stream_data_bidi_remote(100000);
+        config.set_initial_max_streams_bidi(2);
+        config.set_active_connection_id_limit(4);
+        config.set_max_send_udp_payload_size(1350);
+        config.set_max_recv_udp_payload_size(1350);
+        config.discover_pmtu(true);
+
+        // Perform initial handshake.
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let server_addr = testing::Pipe::server_addr();
+        let client_addr = testing::Pipe::client_addr();
+        let pid_1 = pipe
+            .server
+            .paths
+            .path_id_from_addrs(&(server_addr, client_addr))
+            .expect("no such path");
+
+        // Check that PMTU params are configured correctly
+        let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
+        assert!(pmtu_param.get_probe_status());
+        assert_eq!(pmtu_param.get_probe_size(), 1350);
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let active_server_path = pipe.server.paths.get_active_mut().unwrap();
+        let pmtu_param = &mut active_server_path.pmtud;
+        assert_eq!(pmtu_param.get_current(), 1350);
+        assert!(!pmtu_param.get_probe_status());
+    }
+
+    #[test]
+    fn pmtud_probe_loss() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+        config.set_initial_max_data(100000);
+        config.set_initial_max_stream_data_bidi_local(100000);
+        config.set_initial_max_stream_data_bidi_remote(100000);
+        config.set_initial_max_streams_bidi(2);
+        config.set_active_connection_id_limit(4);
+        config.set_max_send_udp_payload_size(1350);
+        config.set_max_recv_udp_payload_size(1250);
+        config.discover_pmtu(true);
+
+        // Perform initial handshake.
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let server_addr = testing::Pipe::server_addr();
+        let client_addr = testing::Pipe::client_addr();
+        let pid_1 = pipe
+            .server
+            .paths
+            .path_id_from_addrs(&(server_addr, client_addr))
+            .expect("no such path");
+
+        // Check that PMTU params are configured correctly
+        let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
+        assert!(pmtu_param.get_probe_status());
+        assert_eq!(pmtu_param.get_probe_size(), 1350);
+        // assert_eq!(pipe.advance(), Ok(()));
+
+        let probe_inst = pipe
+            .server
+            .paths
+            .get_mut(pid_1)
+            .unwrap()
+            .pmtud
+            .get_probe_timeout()
+            .unwrap();
+        let now = time::Instant::now();
+        std::thread::sleep(
+            now.duration_since(probe_inst) + time::Duration::from_millis(1),
+        );
+
+        let active_server_path = pipe.server.paths.get_active_mut().unwrap();
+        let pmtu_param = &mut active_server_path.pmtud;
+
+        // PMTU not updated since probe is not ACKed
+        assert_eq!(pmtu_param.get_current(), 1200);
+
+        // Continue searching for PMTU
+        assert!(pmtu_param.get_probe_status());
+    }
 }
 
 pub use crate::packet::ConnectionId;
@@ -16525,6 +16819,7 @@ pub mod h3;
 mod minmax;
 mod packet;
 mod path;
+mod pmtud;
 mod rand;
 mod ranges;
 mod recovery;

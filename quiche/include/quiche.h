@@ -161,6 +161,9 @@ void quiche_config_verify_peer(quiche_config *config, bool v);
 // Configures whether to send GREASE.
 void quiche_config_grease(quiche_config *config, bool v);
 
+// Configures whether to do path MTU discovery.
+void quiche_config_discover_pmtu(quiche_config *config, bool v);
+
 // Enables logging of secrets.
 void quiche_config_log_keys(quiche_config *config);
 
