@@ -851,22 +851,22 @@ impl Handshake {
                     3 => Err(Error::Done),
 
                     // SSL_ERROR_WANT_X509_LOOKUP
-                    4 => Err(Error::Done),
+                    4 => Err(Error::TlsRetry),
 
                     // SSL_ERROR_SYSCALL
                     5 => Err(Error::TlsFail),
 
                     // SSL_ERROR_PENDING_SESSION
-                    11 => Err(Error::Done),
+                    11 => Err(Error::TlsRetry),
 
                     // SSL_ERROR_PENDING_CERTIFICATE
-                    12 => Err(Error::Done),
+                    12 => Err(Error::TlsRetry),
 
                     // SSL_ERROR_WANT_PRIVATE_KEY_OPERATION
-                    13 => Err(Error::Done),
+                    13 => Err(Error::TlsRetry),
 
                     // SSL_ERROR_PENDING_TICKET
-                    14 => Err(Error::Done),
+                    14 => Err(Error::TlsRetry),
 
                     // SSL_ERROR_EARLY_DATA_REJECTED
                     15 => {
@@ -875,7 +875,7 @@ impl Handshake {
                     },
 
                     // SSL_ERROR_WANT_CERTIFICATE_VERIFY
-                    16 => Err(Error::Done),
+                    16 => Err(Error::TlsRetry),
 
                     _ => Err(Error::TlsFail),
                 }

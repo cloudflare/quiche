@@ -567,6 +567,11 @@ pub enum Error {
 
     /// Error in key update.
     KeyUpdate,
+
+    /// Need to call a TLS operation again from the local side, without waiting
+    /// on data from the peer. Helpful when using asynchronous SSL
+    /// callbacks.
+    TlsRetry,
 }
 
 impl Error {
@@ -606,6 +611,7 @@ impl Error {
             Error::IdLimit => -17,
             Error::OutOfIdentifiers => -18,
             Error::KeyUpdate => -19,
+            Error::TlsRetry => -20,
         }
     }
 }
@@ -2185,6 +2191,8 @@ impl Connection {
 
                     left
                 },
+
+                Err(Error::TlsRetry) => left,
 
                 Err(e) => {
                     // In case of error processing the incoming packet, close
@@ -6433,7 +6441,7 @@ impl Connection {
     /// Continues the handshake.
     ///
     /// If the connection is already established, it does nothing.
-    fn do_handshake(&mut self, now: time::Instant) -> Result<()> {
+    pub fn do_handshake(&mut self, now: time::Instant) -> Result<()> {
         let mut ex_data = tls::ExData {
             application_protos: &self.application_protos,
 
