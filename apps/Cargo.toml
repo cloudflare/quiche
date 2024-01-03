@@ -22,7 +22,7 @@ default = ["qlog", "sfv"]
 
 [dependencies]
 docopt = "1"
-env_logger = "0.6"
+env_logger = "0.10"
 mio = { version = "0.8", features = ["net", "os-poll"] }
 url = "1"
 log = "0.4"

@@ -181,11 +181,7 @@ mod httpbin_tests {
     fn do_test(
         reqs: Vec<Http3Req>, assert: Http3Assert, concurrent: bool,
     ) -> std::result::Result<(), Http3TestError> {
-        INIT.call_once(|| {
-            env_logger::builder()
-                .default_format_timestamp_nanos(true)
-                .init()
-        });
+        INIT.call_once(|| env_logger::builder().format_timestamp_nanos().init());
 
         let mut test = Http3Test::new(endpoint(None), reqs, assert, concurrent);
         runner::run(
@@ -203,11 +199,7 @@ mod httpbin_tests {
         reqs: Vec<Http3Req>, stream_data: Vec<ArbitraryStreamData>,
         assert: Http3Assert, concurrent: bool,
     ) -> std::result::Result<(), Http3TestError> {
-        INIT.call_once(|| {
-            env_logger::builder()
-                .default_format_timestamp_nanos(true)
-                .init()
-        });
+        INIT.call_once(|| env_logger::builder().format_timestamp_nanos().init());
 
         let mut test = Http3Test::with_stream_data(
             endpoint(None),
