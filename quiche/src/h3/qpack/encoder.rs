@@ -117,7 +117,7 @@ fn lookup_static<T: NameValue>(h: &T) -> Option<(u64, bool)> {
     None
 }
 
-fn encode_int(
+pub(crate) fn encode_int(
     mut v: u64, first: u8, prefix: usize, b: &mut octets::OctetsMut,
 ) -> Result<()> {
     let mask = 2u64.pow(prefix as u32) - 1;

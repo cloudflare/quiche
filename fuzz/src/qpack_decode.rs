@@ -13,10 +13,10 @@ use quiche::h3::NameValue;
 // input. However, that transformation is not guaranteed to be the identify
 // function, as there are multiple ways the same hdr list could be encoded.
 fuzz_target!(|data: &[u8]| {
-    let mut decoder = quiche::h3::qpack::Decoder::new();
+    let mut decoder = quiche::h3::qpack::Decoder::new(0);
     let mut encoder = quiche::h3::qpack::Encoder::new();
 
-    let hdrs = match decoder.decode(&mut data.to_vec(), u64::MAX) {
+    let hdrs = match decoder.decode(&mut data.to_vec(), u64::MAX, 0) {
         Err(_) => return,
         Ok(hdrs) => hdrs,
     };
@@ -25,7 +25,7 @@ fuzz_target!(|data: &[u8]| {
     let encoded_size = encoder.encode(&hdrs, &mut encoded_hdrs).unwrap();
 
     let decoded_hdrs = decoder
-        .decode(&encoded_hdrs[..encoded_size], u64::MAX)
+        .decode(&encoded_hdrs[..encoded_size], u64::MAX, 0)
         .unwrap();
 
     let mut expected_hdrs = Vec::new();
@@ -35,7 +35,7 @@ fuzz_target!(|data: &[u8]| {
     for h in &hdrs {
         let name = h.name().to_ascii_lowercase();
 
-        expected_hdrs.push(quiche::h3::Header::new(&name, h.value()));
+        expected_hdrs.push(quiche::h3::Header::new(name, h.value()));
     }
 
     assert_eq!(expected_hdrs, decoded_hdrs)
