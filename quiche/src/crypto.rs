@@ -649,7 +649,9 @@ impl hkdf::KeyType for ArbitraryOutputLen {
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-struct EVP_AEAD(c_void);
+struct EVP_AEAD {
+    _unused: c_void,
+}
 
 // NOTE: This structure is copied from <openssl/aead.h> in order to be able to
 // statically allocate it. While it is not often modified upstream, it needs to

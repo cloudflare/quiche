@@ -53,49 +53,71 @@ const INTERNAL_ERROR: u64 = 0x01;
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-struct SSL_METHOD(c_void);
+struct SSL_METHOD {
+    _unused: c_void,
+}
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-struct SSL_CTX(c_void);
+struct SSL_CTX {
+    _unused: c_void,
+}
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-struct SSL(c_void);
+struct SSL {
+    _unused: c_void,
+}
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-struct SSL_CIPHER(c_void);
+struct SSL_CIPHER {
+    _unused: c_void,
+}
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-struct SSL_SESSION(c_void);
+struct SSL_SESSION {
+    _unused: c_void,
+}
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-struct X509_VERIFY_PARAM(c_void);
+struct X509_VERIFY_PARAM {
+    _unused: c_void,
+}
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 #[cfg(windows)]
-struct X509_STORE(c_void);
+struct X509_STORE {
+    _unused: c_void,
+}
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-struct X509_STORE_CTX(c_void);
+struct X509_STORE_CTX {
+    _unused: c_void,
+}
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 #[cfg(windows)]
-struct X509(c_void);
+struct X509 {
+    _unused: c_void,
+}
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-struct STACK_OF(c_void);
+struct STACK_OF {
+    _unused: c_void,
+}
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-struct CRYPTO_BUFFER(c_void);
+struct CRYPTO_BUFFER {
+    _unused: c_void,
+}
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
