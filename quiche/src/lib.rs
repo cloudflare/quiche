@@ -1758,6 +1758,8 @@ impl Connection {
             path,
             config.local_transport_params.active_conn_id_limit as usize,
             is_server,
+            config.pmtud,
+            config.max_send_udp_payload_size,
         );
 
         let active_path_id = paths.get_active_path_id()?;
@@ -1910,12 +1912,12 @@ impl Connection {
 
         // Enable path MTU Discovery and start probing with the largest datagram
         // size
-        if config.pmtud {
-            let path_pmtud = &mut conn.paths.get_mut(active_path_id)?.pmtud;
-            path_pmtud.should_probe(config.pmtud);
-            path_pmtud.set_probe_size(config.max_send_udp_payload_size);
-            path_pmtud.enable(config.pmtud);
-        }
+        // if config.pmtud {
+        // let path_pmtud = &mut conn.paths.get_active_mut()?.pmtud;
+        // path_pmtud.should_probe(config.pmtud);
+        // path_pmtud.set_probe_size(config.max_send_udp_payload_size);
+        // path_pmtud.enable(config.pmtud);
+        // }
 
         if let Some(odcid) = odcid {
             conn.local_transport_params
@@ -6600,7 +6602,10 @@ impl Connection {
 
         if active_path.pmtud.get_probe_status() {
             active_path.recovery.pmtud_update_max_datagram_size(
-                active_path.pmtud.get_probe_size(),
+                active_path
+                    .pmtud
+                    .get_probe_size()
+                    .min(peer_params.max_udp_payload_size as usize),
             );
         } else {
             active_path.recovery.update_max_datagram_size(

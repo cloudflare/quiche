@@ -562,6 +562,7 @@ impl PathMap {
     /// capacity limit.
     pub fn new(
         mut initial_path: Path, max_concurrent_paths: usize, is_server: bool,
+        enable_pmtud: bool, max_send_udp_payload_size: usize,
     ) -> Self {
         let mut paths = Slab::with_capacity(1); // most connections only have one path
         let mut addrs_to_paths = BTreeMap::new();
@@ -571,6 +572,14 @@ impl PathMap {
 
         // As it is the first path, it is active by default.
         initial_path.active = true;
+
+        // Enable path MTU Discovery and start probing with the largest datagram
+        // size
+        if enable_pmtud {
+            initial_path.pmtud.should_probe(enable_pmtud);
+            initial_path.pmtud.set_probe_size(max_send_udp_payload_size);
+            initial_path.pmtud.enable(enable_pmtud);
+        }
 
         let active_path_id = paths.insert(initial_path);
         addrs_to_paths.insert((local_addr, peer_addr), active_path_id);
@@ -960,7 +969,7 @@ mod tests {
             1200,
             true,
         );
-        let mut path_mgr = PathMap::new(path, 2, false);
+        let mut path_mgr = PathMap::new(path, 2, false, true, 1200);
 
         let probed_path = Path::new(
             client_addr_2,
@@ -1047,7 +1056,7 @@ mod tests {
             1200,
             true,
         );
-        let mut client_path_mgr = PathMap::new(path, 2, false);
+        let mut client_path_mgr = PathMap::new(path, 2, false, false, 1200);
         let mut server_path = Path::new(
             server_addr,
             client_addr,
@@ -1139,7 +1148,7 @@ mod tests {
             1200,
             true,
         );
-        let mut client_path_mgr = PathMap::new(path, 2, false);
+        let mut client_path_mgr = PathMap::new(path, 2, false, false, 1200);
         let mut server_path = Path::new(
             server_addr,
             client_addr,
