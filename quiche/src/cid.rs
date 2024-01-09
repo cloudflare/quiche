@@ -455,10 +455,11 @@ impl ConnectionIdentifiers {
         // received NEW_CONNECTION_ID frame MUST send a corresponding
         // RETIRE_CONNECTION_ID frame that retires the newly received connection
         // ID, unless it has already done so for that sequence number.
-        if seq < self.largest_peer_retire_prior_to &&
-            !self.retire_dcid_seqs.contains(&seq)
-        {
-            self.retire_dcid_seqs.push_back(seq);
+        if seq < self.largest_peer_retire_prior_to {
+            if !self.retire_dcid_seqs.contains(&seq) {
+                self.retire_dcid_seqs.push_back(seq);
+            }
+
             return Ok(retired_path_ids);
         }
 
@@ -915,6 +916,41 @@ mod tests {
         assert_eq!(ids.available_dcids(), 0);
         assert!(!ids.has_retire_dcids());
         assert_eq!(ids.dcids.len(), 1);
+    }
+
+    #[test]
+    fn new_dcid_reordered() {
+        let (scid, _) = create_cid_and_reset_token(16);
+        let (dcid, _) = create_cid_and_reset_token(16);
+
+        let mut ids = ConnectionIdentifiers::new(2, &scid, 0, None);
+        ids.set_initial_dcid(dcid, None, Some(0));
+
+        assert_eq!(ids.available_dcids(), 0);
+        assert_eq!(ids.dcids.len(), 1);
+
+        // Skip DCID #1 (e.g due to packet loss) and insert DCID #2.
+        let (dcid, rt) = create_cid_and_reset_token(16);
+        assert!(ids.new_dcid(dcid.clone(), 2, rt, 1).is_ok());
+        assert_eq!(ids.dcids.len(), 1);
+
+        let (dcid, rt) = create_cid_and_reset_token(16);
+        assert!(ids.new_dcid(dcid.clone(), 3, rt, 2).is_ok());
+        assert_eq!(ids.dcids.len(), 2);
+
+        let (dcid, rt) = create_cid_and_reset_token(16);
+        assert!(ids.new_dcid(dcid.clone(), 4, rt, 3).is_ok());
+        assert_eq!(ids.dcids.len(), 2);
+
+        // Insert DCID #1 (e.g due to packet reordering).
+        let (dcid, rt) = create_cid_and_reset_token(16);
+        assert!(ids.new_dcid(dcid.clone(), 1, rt, 0).is_ok());
+        assert_eq!(ids.dcids.len(), 2);
+
+        // Try inserting DCID #1 again (e.g. due to retransmission).
+        let (dcid, rt) = create_cid_and_reset_token(16);
+        assert!(ids.new_dcid(dcid.clone(), 1, rt, 0).is_ok());
+        assert_eq!(ids.dcids.len(), 2);
     }
 
     #[test]
