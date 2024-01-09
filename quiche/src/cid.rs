@@ -28,8 +28,10 @@ use crate::Error;
 use crate::Result;
 
 use crate::frame;
+
 use crate::packet::ConnectionId;
 
+use std::collections::HashSet;
 use std::collections::VecDeque;
 
 /// A structure holding a `ConnectionId` and all its related metadata.
@@ -203,7 +205,7 @@ pub struct ConnectionIdentifiers {
     advertise_new_scid_seqs: VecDeque<u64>,
 
     /// Retired Destination Connection IDs that should be announced to the peer.
-    retire_dcid_seqs: VecDeque<u64>,
+    retire_dcid_seqs: HashSet<u64>,
 
     /// Retired Source Connection IDs that should be notified to the
     /// application.
@@ -456,10 +458,7 @@ impl ConnectionIdentifiers {
         // RETIRE_CONNECTION_ID frame that retires the newly received connection
         // ID, unless it has already done so for that sequence number.
         if seq < self.largest_peer_retire_prior_to {
-            if !self.retire_dcid_seqs.contains(&seq) {
-                self.retire_dcid_seqs.push_back(seq);
-            }
-
+            self.mark_retire_dcid_seq(seq, true);
             return Ok(retired_path_ids);
         }
 
@@ -488,7 +487,7 @@ impl ConnectionIdentifiers {
                 retire_prior_to,
                 new_entry,
                 |e| {
-                    retired.push_back(e.seq);
+                    retired.insert(e.seq);
 
                     if let Some(pid) = e.path_id {
                         retired_path_ids.push((e.seq, pid));
@@ -560,7 +559,7 @@ impl ConnectionIdentifiers {
 
         let e = self.dcids.remove(seq)?.ok_or(Error::InvalidState)?;
 
-        self.retire_dcid_seqs.push_back(seq);
+        self.mark_retire_dcid_seq(seq, true);
 
         Ok(e.path_id)
     }
@@ -702,11 +701,9 @@ impl ConnectionIdentifiers {
     #[inline]
     pub fn mark_retire_dcid_seq(&mut self, dcid_seq: u64, retire: bool) {
         if retire {
-            self.retire_dcid_seqs.push_back(dcid_seq);
-        } else if let Some(index) =
-            self.retire_dcid_seqs.iter().position(|s| *s == dcid_seq)
-        {
-            self.retire_dcid_seqs.remove(index);
+            self.retire_dcid_seqs.insert(dcid_seq);
+        } else {
+            self.retire_dcid_seqs.remove(&dcid_seq);
         }
     }
 
@@ -727,7 +724,7 @@ impl ConnectionIdentifiers {
     /// using `mark_retire_dcid_seq`.
     #[inline]
     pub fn next_retire_dcid_seq(&self) -> Option<u64> {
-        self.retire_dcid_seqs.front().copied()
+        self.retire_dcid_seqs.iter().next().copied()
     }
 
     /// Returns true if there are new source Connection IDs to advertise.
