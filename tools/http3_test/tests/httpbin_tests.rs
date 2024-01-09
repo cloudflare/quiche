@@ -70,27 +70,14 @@ mod httpbin_tests {
 
     fn verify_peer() -> bool {
         match std::env::var_os("VERIFY_PEER") {
-            Some(val) => match val.to_str().unwrap() {
-                "false" => {
-                    return false;
-                },
-
-                _ => {
-                    return true;
-                },
-            },
-
-            None => {
-                return true;
-            },
-        };
+            Some(val) => !matches!(val.to_str().unwrap(), "false"),
+            None => true,
+        }
     }
 
     fn idle_timeout() -> u64 {
         match std::env::var_os("IDLE_TIMEOUT") {
-            Some(val) =>
-                u64::from_str_radix(&val.into_string().unwrap(), 10).unwrap(),
-
+            Some(val) => val.into_string().unwrap().parse::<u64>().unwrap(),
             None => 60000,
         }
     }
@@ -103,7 +90,7 @@ mod httpbin_tests {
             return Some(parsed.as_object().unwrap().clone());
         }
 
-        return None;
+        None
     }
 
     fn expect_req_headers() -> Option<serde_json::Map<String, serde_json::Value>>
@@ -115,42 +102,25 @@ mod httpbin_tests {
             return Some(parsed.as_object().unwrap().clone());
         }
 
-        return None;
+        None
     }
 
     fn max_data() -> u64 {
         match std::env::var_os("MAX_DATA") {
-            Some(val) =>
-                u64::from_str_radix(&val.into_string().unwrap(), 10).unwrap(),
-
+            Some(val) => val.into_string().unwrap().parse::<u64>().unwrap(),
             None => 1_000_000,
         }
     }
 
     fn early_data() -> bool {
         match std::env::var_os("EARLY_DATA") {
-            Some(val) => match val.to_str().unwrap() {
-                "true" => {
-                    return true;
-                },
-
-                _ => {
-                    return false;
-                },
-            },
-
-            None => {
-                return false;
-            },
-        };
+            Some(val) => matches!(val.to_str().unwrap(), "true"),
+            None => false,
+        }
     }
 
     fn session_file() -> Option<String> {
-        if let Some(val) = std::env::var_os("SESSION_FILE") {
-            Some(val.into_string().unwrap())
-        } else {
-            None
-        }
+        std::env::var_os("SESSION_FILE").map(|val| val.into_string().unwrap())
     }
 
     // A rudimentary structure to hold httpbin response data
@@ -175,7 +145,7 @@ mod httpbin_tests {
     }
 
     fn jsonify(data: &[u8]) -> HttpBinResponseBody {
-        serde_json::from_slice(&data).unwrap()
+        serde_json::from_slice(data).unwrap()
     }
 
     fn do_test(
@@ -1240,7 +1210,7 @@ mod httpbin_tests {
         for size in &sizes {
             let expect_hdrs = Some(vec![Header::new(b":status", b"200")]);
 
-            let testpoint = format!("{}/{}", "stream", size.to_string());
+            let testpoint = format!("{}/{}", "stream", size);
 
             let url = endpoint(Some(&testpoint));
 
@@ -1410,7 +1380,7 @@ mod httpbin_tests {
                 Header::new(b"content-length", size.to_string().as_bytes()),
             ]);
 
-            let testpoint = format!("{}/{}", "bytes", size.to_string());
+            let testpoint = format!("{}/{}", "bytes", size);
             let url = endpoint(Some(&testpoint));
 
             reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
@@ -1428,7 +1398,7 @@ mod httpbin_tests {
         for size in &sizes {
             let expect_hdrs = Some(vec![Header::new(b":status", b"200")]);
 
-            let testpoint = format!("{}/{}", "stream-bytes", size.to_string());
+            let testpoint = format!("{}/{}", "stream-bytes", size);
             let url = endpoint(Some(&testpoint));
 
             reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));
@@ -1485,7 +1455,7 @@ mod httpbin_tests {
                 format
             };
 
-            let url = endpoint(Some(&testpoint));
+            let url = endpoint(Some(testpoint));
             let mut req = Http3Req::new("GET", &url, None, expect_hdrs);
             req.hdrs.push(Header::new(b"accept", format.as_bytes()));
             reqs.push(req);

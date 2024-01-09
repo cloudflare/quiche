@@ -16,7 +16,7 @@ fuzz_target!(|data: &[u8]| {
     let mut decoder = quiche::h3::qpack::Decoder::new();
     let mut encoder = quiche::h3::qpack::Encoder::new();
 
-    let hdrs = match decoder.decode(&mut data.to_vec(), u64::MAX) {
+    let hdrs = match decoder.decode(data, u64::MAX) {
         Err(_) => return,
         Ok(hdrs) => hdrs,
     };

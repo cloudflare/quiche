@@ -40,8 +40,8 @@ fuzz_target!(|data: &[u8]| {
     let mut conn = quiche::connect(
         Some("quic.tech"),
         &SCID,
-        to.clone(),
-        from.clone(),
+        to,
+        from,
         &mut CONFIG.lock().unwrap(),
     )
     .unwrap();
