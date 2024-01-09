@@ -58,9 +58,7 @@ fn main() {
     let mut out = [0; MAX_BUF_SIZE];
     let mut pacing = false;
 
-    env_logger::builder()
-        .default_format_timestamp_nanos(true)
-        .init();
+    env_logger::builder().format_timestamp_nanos().init();
 
     // Parse CLI parameters.
     let docopt = docopt::Docopt::new(SERVER_USAGE).unwrap();

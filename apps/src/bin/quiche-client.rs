@@ -31,9 +31,7 @@ use quiche_apps::common::*;
 use quiche_apps::client::*;
 
 fn main() {
-    env_logger::builder()
-        .default_format_timestamp_nanos(true)
-        .init();
+    env_logger::builder().format_timestamp_nanos().init();
 
     // Parse CLI parameters.
     let docopt = docopt::Docopt::new(CLIENT_USAGE).unwrap();
