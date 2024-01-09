@@ -581,6 +581,7 @@ impl Error {
             Error::FlowControl => 0x3,
             Error::StreamLimit => 0x4,
             Error::FinalSize => 0x6,
+            Error::IdLimit => 0x09,
             Error::KeyUpdate => 0xe,
             _ => 0xa,
         }
@@ -3492,7 +3493,7 @@ impl Connection {
                     },
 
                     frame::Frame::RetireConnectionId { seq_num } => {
-                        self.ids.mark_retire_dcid_seq(seq_num, true);
+                        self.ids.mark_retire_dcid_seq(seq_num, true)?;
                     },
 
                     frame::Frame::Ping { mtu_probe } if mtu_probe.is_some() => {
@@ -4015,7 +4016,7 @@ impl Connection {
                 let frame = frame::Frame::RetireConnectionId { seq_num };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
-                    self.ids.mark_retire_dcid_seq(seq_num, false);
+                    self.ids.mark_retire_dcid_seq(seq_num, false)?;
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -7163,12 +7164,17 @@ impl Connection {
                     return Err(Error::InvalidState);
                 }
 
-                let retired_path_ids = self.ids.new_dcid(
+                let mut retired_path_ids = SmallVec::new();
+
+                // Retire pending path IDs before propagating the error code to
+                // make sure retired connection IDs are not in use anymore.
+                let new_dcid_res = self.ids.new_dcid(
                     conn_id.into(),
                     seq_num,
                     u128::from_be_bytes(reset_token),
                     retire_prior_to,
-                )?;
+                    &mut retired_path_ids,
+                );
 
                 for (dcid_seq, pid) in retired_path_ids {
                     let path = self.paths.get_mut(pid)?;
@@ -7199,6 +7205,9 @@ impl Connection {
                         );
                     }
                 }
+
+                // Propagate error (if any) now...
+                new_dcid_res?;
             },
 
             frame::Frame::RetireConnectionId { seq_num } => {
@@ -15199,6 +15208,95 @@ mod tests {
         // It is up to the application to ensure that a given SCID is not reused
         // later.
         assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(2));
+    }
+
+    #[test]
+    /// Tests the limit to retired DCID sequence numbers.
+    fn connection_id_retire_limit() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+        config.set_active_connection_id_limit(2);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // So far, there should not have any QUIC event.
+        assert_eq!(pipe.client.path_event_next(), None);
+        assert_eq!(pipe.server.path_event_next(), None);
+        assert_eq!(pipe.client.scids_left(), 1);
+
+        let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
+        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(1));
+
+        // Let exchange packets over the connection.
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // At this point, the server should be notified that it has a new CID.
+        assert_eq!(pipe.server.available_dcids(), 1);
+        assert_eq!(pipe.server.path_event_next(), None);
+        assert_eq!(pipe.client.path_event_next(), None);
+        assert_eq!(pipe.client.scids_left(), 0);
+
+        let mut frames = Vec::new();
+
+        // Client retires more than 3x the number of allowed active CIDs.
+        for i in 2..=7 {
+            let (scid, reset_token) = testing::create_cid_and_reset_token(16);
+
+            frames.push(frame::Frame::NewConnectionId {
+                seq_num: i,
+                retire_prior_to: i,
+                conn_id: scid.to_vec(),
+                reset_token: reset_token.to_be_bytes(),
+            });
+        }
+
+        let pkt_type = packet::Type::Short;
+
+        let written =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+
+        let active_path = pipe.server.paths.get_active().unwrap();
+        let info = RecvInfo {
+            to: active_path.local_addr(),
+            from: active_path.peer_addr(),
+        };
+
+        assert_eq!(
+            pipe.server.recv(&mut buf[..written], info),
+            Err(Error::IdLimit)
+        );
+
+        let written = match pipe.server.send(&mut buf) {
+            Ok((write, _)) => write,
+
+            Err(_) => unreachable!(),
+        };
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf[..written]).unwrap();
+        let mut iter = frames.iter();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::ConnectionClose {
+                error_code: 0x9,
+                frame_type: 0,
+                reason: Vec::new(),
+            })
+        );
     }
 
     // Utility function.
