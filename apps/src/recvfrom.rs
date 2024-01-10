@@ -84,7 +84,7 @@ fn recvmsg(
     let mut iov = IoSliceMut::new(buf);
     let mut name = MaybeUninit::<libc::sockaddr_storage>::uninit();
     let mut ctrl = cmsg::Aligned(MaybeUninit::<
-        [u8; (std::mem::size_of::<libc::in6_pktinfo>() as _)],
+        [u8; std::mem::size_of::<libc::in6_pktinfo>() as _],
     >::uninit());
     let mut hdr = unsafe { std::mem::zeroed::<libc::msghdr>() };
 
