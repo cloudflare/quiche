@@ -491,6 +491,9 @@ const MAX_PROBING_TIMEOUTS: usize = 3;
 // The default initial congestion window size in terms of packet count.
 const DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 10;
 
+// The maximum data offset that can be stored in a crypto stream.
+const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
+
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -569,6 +572,9 @@ pub enum Error {
 
     /// Error in key update.
     KeyUpdate,
+
+    /// The peer sent more data in CRYPTO frames than we can buffer.
+    CryptoBufferExceeded,
 }
 
 impl Error {
@@ -583,6 +589,7 @@ impl Error {
             Error::FinalSize => 0x6,
             Error::IdLimit => 0x09,
             Error::KeyUpdate => 0xe,
+            Error::CryptoBufferExceeded => 0x0d,
             _ => 0xa,
         }
     }
@@ -609,6 +616,7 @@ impl Error {
             Error::IdLimit => -17,
             Error::OutOfIdentifiers => -18,
             Error::KeyUpdate => -19,
+            Error::CryptoBufferExceeded => -20,
         }
     }
 }
@@ -6981,6 +6989,10 @@ impl Connection {
             },
 
             frame::Frame::Crypto { data } => {
+                if data.max_off() >= MAX_CRYPTO_STREAM_OFFSET {
+                    return Err(Error::CryptoBufferExceeded);
+                }
+
                 // Push the data to the stream so it can be re-ordered.
                 self.pkt_num_spaces[epoch].crypto_stream.recv.write(data)?;
 
@@ -9401,6 +9413,74 @@ mod tests {
         assert_eq!(pipe.server.undecryptable_pkts.len(), 0);
 
         assert!(pipe.server.is_closed());
+    }
+
+    #[test]
+    fn crypto_limit() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_streams_bidi(3);
+        config.enable_early_data();
+        config.verify_peer(false);
+
+        // Perform initial handshake.
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client send a 1-byte frame that starts from the crypto stream offset
+        // limit.
+        let frames = [frame::Frame::Crypto {
+            data: stream::RangeBuf::from(b"a", MAX_CRYPTO_STREAM_OFFSET, false),
+        }];
+
+        let pkt_type = packet::Type::Short;
+
+        let written =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+
+        let active_path = pipe.server.paths.get_active().unwrap();
+        let info = RecvInfo {
+            to: active_path.local_addr(),
+            from: active_path.peer_addr(),
+        };
+
+        assert_eq!(
+            pipe.server.recv(&mut buf[..written], info),
+            Err(Error::CryptoBufferExceeded)
+        );
+
+        let written = match pipe.server.send(&mut buf) {
+            Ok((write, _)) => write,
+
+            Err(_) => unreachable!(),
+        };
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf[..written]).unwrap();
+        let mut iter = frames.iter();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::ConnectionClose {
+                error_code: 0x0d,
+                frame_type: 0,
+                reason: Vec::new(),
+            })
+        );
     }
 
     #[test]
