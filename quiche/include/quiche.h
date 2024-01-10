@@ -124,6 +124,9 @@ enum quiche_error {
 
     // Error in key update.
     QUICHE_ERR_KEY_UPDATE = -19,
+
+    // The peer sent more data in CRYPTO frames than we can buffer.
+    QUICHE_ERR_CRYPTO_BUFFER_EXCEEDED = -20,
 };
 
 // Returns a human readable string with the quiche version number.
