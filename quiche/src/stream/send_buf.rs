@@ -172,11 +172,17 @@ impl SendBuf {
 
         let mut next_off = out_off;
 
-        while out_len > 0 &&
-            self.ready() &&
-            self.off_front() == next_off &&
-            self.off_front() < self.max_data
-        {
+        while out_len > 0 {
+            let off_front = self.off_front();
+
+            if self.is_empty() ||
+                off_front >= self.off ||
+                off_front != next_off ||
+                off_front >= self.max_data
+            {
+                break;
+            }
+
             let buf = match self.data.get_mut(self.pos) {
                 Some(v) => v,
 
@@ -448,9 +454,9 @@ impl SendBuf {
         self.shutdown
     }
 
-    /// Returns true if there is data to be written.
-    pub fn ready(&self) -> bool {
-        !self.data.is_empty() && self.off_front() < self.off
+    /// Returns true if there is no data.
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
     }
 
     /// Returns the highest contiguously acked offset.
