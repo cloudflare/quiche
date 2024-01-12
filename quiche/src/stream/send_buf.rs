@@ -175,7 +175,7 @@ impl SendBuf {
         while out_len > 0 {
             let off_front = self.off_front();
 
-            if self.data.is_empty() ||
+            if self.is_empty() ||
                 off_front >= self.off ||
                 off_front != next_off ||
                 off_front >= self.max_data
