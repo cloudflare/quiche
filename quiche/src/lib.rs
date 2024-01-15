@@ -567,9 +567,6 @@ pub enum Error {
 
     /// Error in key update.
     KeyUpdate,
-
-    /// Protocol error.
-    ProtocolViolation,
 }
 
 impl Error {
@@ -583,7 +580,6 @@ impl Error {
             Error::StreamLimit => 0x4,
             Error::FinalSize => 0x6,
             Error::KeyUpdate => 0xe,
-            Error::ProtocolViolation => 0xa,
             _ => 0xa,
         }
     }
@@ -610,7 +606,6 @@ impl Error {
             Error::IdLimit => -17,
             Error::OutOfIdentifiers => -18,
             Error::KeyUpdate => -19,
-            Error::ProtocolViolation => -20,
         }
     }
 }
@@ -6823,7 +6818,7 @@ impl Connection {
             // TODO: implement stateless retry
             frame::Frame::NewToken { .. } =>
                 if self.is_server {
-                    return Err(Error::ProtocolViolation);
+                    return Err(Error::InvalidPacket);
                 },
 
             frame::Frame::Stream { stream_id, data } => {
@@ -12284,7 +12279,7 @@ mod tests {
 
         assert_eq!(
             pipe.server_recv(&mut buf[..written]),
-            Err(Error::ProtocolViolation)
+            Err(Error::InvalidPacket)
         );
     }
 
