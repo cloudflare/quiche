@@ -221,8 +221,15 @@ impl Frame {
                 Frame::Crypto { data }
             },
 
-            0x07 => Frame::NewToken {
-                token: b.get_bytes_with_varint_length()?.to_vec(),
+            0x07 => {
+                let len = b.get_varint()?;
+                if len == 0 {
+                    return Err(Error::InvalidFrame);
+                }
+
+                Frame::NewToken {
+                    token: b.get_bytes(len as usize)?.to_vec(),
+                }
             },
 
             0x08..=0x0f => parse_stream_frame(frame_type, b)?,
@@ -1058,8 +1065,8 @@ impl std::fmt::Debug for Frame {
                 write!(f, "CRYPTO off={offset} len={length}")?;
             },
 
-            Frame::NewToken { .. } => {
-                write!(f, "NEW_TOKEN (TODO)")?;
+            Frame::NewToken { token } => {
+                write!(f, "NEW_TOKEN len={}", token.len())?;
             },
 
             Frame::Stream { stream_id, data } => {
