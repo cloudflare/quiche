@@ -14631,6 +14631,147 @@ mod tests {
     }
 
     #[test]
+    /// Tests that NEW_CONNECTION_ID with zero-length CID are rejected.
+    fn connection_id_zero() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+        config.set_active_connection_id_limit(2);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let mut frames = Vec::new();
+
+        // Client adds a CID that is too short.
+        let (scid, reset_token) = testing::create_cid_and_reset_token(0);
+
+        frames.push(frame::Frame::NewConnectionId {
+            seq_num: 1,
+            retire_prior_to: 0,
+            conn_id: scid.to_vec(),
+            reset_token: reset_token.to_be_bytes(),
+        });
+
+        let pkt_type = packet::Type::Short;
+
+        let written =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+
+        let active_path = pipe.server.paths.get_active().unwrap();
+        let info = RecvInfo {
+            to: active_path.local_addr(),
+            from: active_path.peer_addr(),
+        };
+
+        assert_eq!(
+            pipe.server.recv(&mut buf[..written], info),
+            Err(Error::InvalidFrame)
+        );
+
+        let written = match pipe.server.send(&mut buf) {
+            Ok((write, _)) => write,
+
+            Err(_) => unreachable!(),
+        };
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf[..written]).unwrap();
+        let mut iter = frames.iter();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::ConnectionClose {
+                error_code: 0x7,
+                frame_type: 0,
+                reason: Vec::new(),
+            })
+        );
+    }
+
+    #[test]
+    /// Tests that NEW_CONNECTION_ID with too long CID are rejected.
+    fn connection_id_invalid_max_len() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+        config.set_active_connection_id_limit(2);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let mut frames = Vec::new();
+
+        // Client adds a CID that is too long.
+        let (scid, reset_token) =
+            testing::create_cid_and_reset_token(MAX_CONN_ID_LEN + 1);
+
+        frames.push(frame::Frame::NewConnectionId {
+            seq_num: 1,
+            retire_prior_to: 0,
+            conn_id: scid.to_vec(),
+            reset_token: reset_token.to_be_bytes(),
+        });
+
+        let pkt_type = packet::Type::Short;
+
+        let written =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+
+        let active_path = pipe.server.paths.get_active().unwrap();
+        let info = RecvInfo {
+            to: active_path.local_addr(),
+            from: active_path.peer_addr(),
+        };
+
+        assert_eq!(
+            pipe.server.recv(&mut buf[..written], info),
+            Err(Error::InvalidFrame)
+        );
+
+        let written = match pipe.server.send(&mut buf) {
+            Ok((write, _)) => write,
+
+            Err(_) => unreachable!(),
+        };
+
+        let frames =
+            testing::decode_pkt(&mut pipe.client, &mut buf[..written]).unwrap();
+        let mut iter = frames.iter();
+
+        assert_eq!(
+            iter.next(),
+            Some(&frame::Frame::ConnectionClose {
+                error_code: 0x7,
+                frame_type: 0,
+                reason: Vec::new(),
+            })
+        );
+    }
+
+    #[test]
     /// Exercises the handling of NEW_CONNECTION_ID and RETIRE_CONNECTION_ID
     /// frames.
     fn connection_id_handling() {

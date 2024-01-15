@@ -261,15 +261,25 @@ impl Frame {
                 limit: b.get_varint()?,
             },
 
-            0x18 => Frame::NewConnectionId {
-                seq_num: b.get_varint()?,
-                retire_prior_to: b.get_varint()?,
-                conn_id: b.get_bytes_with_u8_length()?.to_vec(),
-                reset_token: b
-                    .get_bytes(16)?
-                    .buf()
-                    .try_into()
-                    .map_err(|_| Error::BufferTooShort)?,
+            0x18 => {
+                let seq_num = b.get_varint()?;
+                let retire_prior_to = b.get_varint()?;
+                let conn_id_len = b.get_u8()?;
+
+                if !(1..=packet::MAX_CID_LEN).contains(&conn_id_len) {
+                    return Err(Error::InvalidFrame);
+                }
+
+                Frame::NewConnectionId {
+                    seq_num,
+                    retire_prior_to,
+                    conn_id: b.get_bytes(conn_id_len as usize)?.to_vec(),
+                    reset_token: b
+                        .get_bytes(16)?
+                        .buf()
+                        .try_into()
+                        .map_err(|_| Error::BufferTooShort)?,
+                }
             },
 
             0x19 => Frame::RetireConnectionId {
