@@ -567,6 +567,9 @@ pub enum Error {
 
     /// Error in key update.
     KeyUpdate,
+
+    /// Protocol error.
+    ProtocolViolation,
 }
 
 impl Error {
@@ -580,6 +583,7 @@ impl Error {
             Error::StreamLimit => 0x4,
             Error::FinalSize => 0x6,
             Error::KeyUpdate => 0xe,
+            Error::ProtocolViolation => 0xa,
             _ => 0xa,
         }
     }
@@ -606,6 +610,7 @@ impl Error {
             Error::IdLimit => -17,
             Error::OutOfIdentifiers => -18,
             Error::KeyUpdate => -19,
+            Error::ProtocolViolation => -20,
         }
     }
 }
@@ -6816,7 +6821,10 @@ impl Connection {
             frame::Frame::CryptoHeader { .. } => unreachable!(),
 
             // TODO: implement stateless retry
-            frame::Frame::NewToken { .. } => (),
+            frame::Frame::NewToken { .. } =>
+                if self.is_server {
+                    return Err(Error::ProtocolViolation);
+                },
 
             frame::Frame::Stream { stream_id, data } => {
                 // Peer can't send on our unidirectional streams.
@@ -12227,6 +12235,56 @@ mod tests {
         assert_eq!(
             testing::process_flight(&mut pipe.client, flight),
             Err(Error::InvalidTransportParam)
+        );
+    }
+
+    #[test]
+    /// Tests that a zero-length NEW_TOKEN frame is detected as an error.
+    fn zero_length_new_token() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::new().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let mut frames = Vec::new();
+
+        frames.push(frame::Frame::NewToken { token: vec![] });
+
+        let pkt_type = packet::Type::Short;
+
+        let written =
+            testing::encode_pkt(&mut pipe.server, pkt_type, &frames, &mut buf)
+                .unwrap();
+
+        assert_eq!(
+            pipe.client_recv(&mut buf[..written]),
+            Err(Error::InvalidFrame)
+        );
+    }
+
+    #[test]
+    /// Tests that a NEW_TOKEN frame sent by client is detected as an error.
+    fn client_sent_new_token() {
+        let mut buf = [0; 65535];
+
+        let mut pipe = testing::Pipe::new().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let mut frames = Vec::new();
+
+        frames.push(frame::Frame::NewToken {
+            token: vec![1, 2, 3],
+        });
+
+        let pkt_type = packet::Type::Short;
+
+        let written =
+            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+                .unwrap();
+
+        assert_eq!(
+            pipe.server_recv(&mut buf[..written]),
+            Err(Error::ProtocolViolation)
         );
     }
 
