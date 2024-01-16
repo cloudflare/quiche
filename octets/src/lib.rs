@@ -251,7 +251,7 @@ impl<'a> Octets<'a> {
     }
 
     /// Returns a slice of `len` elements from the current offset.
-    pub fn slice(&'a self, len: usize) -> Result<&'a [u8]> {
+    pub fn slice(&self, len: usize) -> Result<&'a [u8]> {
         if len > self.cap() {
             return Err(BufferTooShortError);
         }
@@ -260,7 +260,7 @@ impl<'a> Octets<'a> {
     }
 
     /// Returns a slice of `len` elements from the end of the buffer.
-    pub fn slice_last(&'a self, len: usize) -> Result<&'a [u8]> {
+    pub fn slice_last(&self, len: usize) -> Result<&'a [u8]> {
         if len > self.cap() {
             return Err(BufferTooShortError);
         }
