@@ -98,7 +98,7 @@ pub enum Frame {
 
     Unknown {
         raw_type: u64,
-        payload_length: u64,
+        payload: Vec<u8>,
     },
 }
 
@@ -142,7 +142,7 @@ impl Frame {
 
             _ => Frame::Unknown {
                 raw_type: frame_type,
-                payload_length,
+                payload: b.get_bytes(payload_length as usize)?.to_vec(),
             },
         };
 
@@ -307,7 +307,12 @@ impl Frame {
                 b.put_bytes(priority_field_value)?;
             },
 
-            Frame::Unknown { .. } => unreachable!(),
+            Frame::Unknown { raw_type, payload } => {
+                b.put_varint(*raw_type)?;
+                b.put_varint(payload.len() as u64)?;
+
+                b.put_bytes(payload.as_ref())?;
+            },
         }
 
         Ok(before - b.cap())
@@ -423,14 +428,11 @@ impl Frame {
                 .into_owned(),
             },
 
-            Frame::Unknown {
-                raw_type,
-                payload_length,
-            } => Http3Frame::Unknown {
+            Frame::Unknown { raw_type, payload } => Http3Frame::Unknown {
                 frame_type_value: *raw_type,
                 raw: Some(RawInfo {
                     data: None,
-                    payload_length: Some(*payload_length),
+                    payload_length: Some(payload.len() as u64),
                     length: None,
                 }),
             },
@@ -1283,10 +1285,10 @@ mod tests {
         let d = [42; 12];
 
         assert_eq!(
-            Frame::from_bytes(255, 12345, &d[..]),
+            Frame::from_bytes(255, 12, &d[..]),
             Ok(Frame::Unknown {
                 raw_type: 255,
-                payload_length: 12345
+                payload: vec![42; 12]
             })
         );
     }
