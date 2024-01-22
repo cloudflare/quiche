@@ -39,6 +39,8 @@ use intrusive_collections::RBTreeAtomicLink;
 
 use smallvec::SmallVec;
 
+use crate::range_buf::DefaultBufFactory;
+use crate::BufFactory;
 use crate::Error;
 use crate::Result;
 
@@ -85,9 +87,9 @@ pub type StreamIdHashSet = HashSet<u64, BuildStreamIdHasher>;
 
 /// Keeps track of QUIC streams and enforces stream limits.
 #[derive(Default)]
-pub struct StreamMap {
+pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
     /// Map of streams indexed by stream ID.
-    streams: StreamIdHashMap<Stream>,
+    streams: StreamIdHashMap<Stream<F>>,
 
     /// Set of streams that were completed and garbage collected.
     ///
@@ -163,10 +165,10 @@ pub struct StreamMap {
     max_stream_window: u64,
 }
 
-impl StreamMap {
+impl<F: BufFactory> StreamMap<F> {
     pub fn new(
         max_streams_bidi: u64, max_streams_uni: u64, max_stream_window: u64,
-    ) -> StreamMap {
+    ) -> Self {
         StreamMap {
             local_max_streams_bidi: max_streams_bidi,
             local_max_streams_bidi_next: max_streams_bidi,
@@ -181,12 +183,12 @@ impl StreamMap {
     }
 
     /// Returns the stream with the given ID if it exists.
-    pub fn get(&self, id: u64) -> Option<&Stream> {
+    pub fn get(&self, id: u64) -> Option<&Stream<F>> {
         self.streams.get(&id)
     }
 
     /// Returns the mutable stream with the given ID if it exists.
-    pub fn get_mut(&mut self, id: u64) -> Option<&mut Stream> {
+    pub fn get_mut(&mut self, id: u64) -> Option<&mut Stream<F>> {
         self.streams.get_mut(&id)
     }
 
@@ -205,7 +207,7 @@ impl StreamMap {
     pub(crate) fn get_or_create(
         &mut self, id: u64, local_params: &crate::TransportParams,
         peer_params: &crate::TransportParams, local: bool, is_server: bool,
-    ) -> Result<&mut Stream> {
+    ) -> Result<&mut Stream<F>> {
         let (stream, is_new_and_writable) = match self.streams.entry(id) {
             hash_map::Entry::Vacant(v) => {
                 // Stream has already been closed and garbage collected.
@@ -647,12 +649,12 @@ impl StreamMap {
 }
 
 /// A QUIC stream.
-pub struct Stream {
+pub struct Stream<F: BufFactory = DefaultBufFactory> {
     /// Receive-side stream buffer.
     pub recv: recv_buf::RecvBuf,
 
     /// Send-side stream buffer.
-    pub send: send_buf::SendBuf,
+    pub send: send_buf::SendBuf<F>,
 
     pub send_lowat: usize,
 
@@ -671,12 +673,12 @@ pub struct Stream {
     pub priority_key: Arc<StreamPriorityKey>,
 }
 
-impl Stream {
+impl<F: BufFactory> Stream<F> {
     /// Creates a new stream with the given flow control limits.
     pub fn new(
         id: u64, max_rx_data: u64, max_tx_data: u64, bidi: bool, local: bool,
         max_window: u64,
-    ) -> Stream {
+    ) -> Self {
         let priority_key = Arc::new(StreamPriorityKey {
             id,
             ..Default::default()
@@ -893,148 +895,16 @@ impl ExactSizeIterator for StreamIter {
     }
 }
 
-/// Buffer holding data at a specific offset.
-///
-/// The data is stored in a `Vec<u8>` in such a way that it can be shared
-/// between multiple `RangeBuf` objects.
-///
-/// Each `RangeBuf` will have its own view of that buffer, where the `start`
-/// value indicates the initial offset within the `Vec`, and `len` indicates the
-/// number of bytes, starting from `start` that are included.
-///
-/// In addition, `pos` indicates the current offset within the `Vec`, starting
-/// from the very beginning of the `Vec`.
-///
-/// Finally, `off` is the starting offset for the specific `RangeBuf` within the
-/// stream the buffer belongs to.
-#[derive(Clone, Debug, Default, Eq)]
-pub struct RangeBuf {
-    /// The internal buffer holding the data.
-    ///
-    /// To avoid needless allocations when a RangeBuf is split, this field is
-    /// reference-counted and can be shared between multiple RangeBuf objects,
-    /// and sliced using the `start` and `len` values.
-    data: Arc<Vec<u8>>,
-
-    /// The initial offset within the internal buffer.
-    start: usize,
-
-    /// The current offset within the internal buffer.
-    pos: usize,
-
-    /// The number of bytes in the buffer, from the initial offset.
-    len: usize,
-
-    /// The offset of the buffer within a stream.
-    off: u64,
-
-    /// Whether this contains the final byte in the stream.
-    fin: bool,
-}
-
-impl RangeBuf {
-    /// Creates a new `RangeBuf` from the given slice.
-    pub fn from(buf: &[u8], off: u64, fin: bool) -> RangeBuf {
-        RangeBuf {
-            data: Arc::new(Vec::from(buf)),
-            start: 0,
-            pos: 0,
-            len: buf.len(),
-            off,
-            fin,
-        }
-    }
-
-    /// Returns whether `self` holds the final offset in the stream.
-    pub fn fin(&self) -> bool {
-        self.fin
-    }
-
-    /// Returns the starting offset of `self`.
-    pub fn off(&self) -> u64 {
-        (self.off - self.start as u64) + self.pos as u64
-    }
-
-    /// Returns the final offset of `self`.
-    pub fn max_off(&self) -> u64 {
-        self.off() + self.len() as u64
-    }
-
-    /// Returns the length of `self`.
-    pub fn len(&self) -> usize {
-        self.len - (self.pos - self.start)
-    }
-
-    /// Returns true if `self` has a length of zero bytes.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Consumes the starting `count` bytes of `self`.
-    pub fn consume(&mut self, count: usize) {
-        self.pos += count;
-    }
-
-    /// Splits the buffer into two at the given index.
-    pub fn split_off(&mut self, at: usize) -> RangeBuf {
-        assert!(
-            at <= self.len,
-            "`at` split index (is {}) should be <= len (is {})",
-            at,
-            self.len
-        );
-
-        let buf = RangeBuf {
-            data: self.data.clone(),
-            start: self.start + at,
-            pos: cmp::max(self.pos, self.start + at),
-            len: self.len - at,
-            off: self.off + at as u64,
-            fin: self.fin,
-        };
-
-        self.pos = cmp::min(self.pos, self.start + at);
-        self.len = at;
-        self.fin = false;
-
-        buf
-    }
-}
-
-impl std::ops::Deref for RangeBuf {
-    type Target = [u8];
-
-    fn deref(&self) -> &[u8] {
-        &self.data[self.pos..self.start + self.len]
-    }
-}
-
-impl Ord for RangeBuf {
-    fn cmp(&self, other: &RangeBuf) -> cmp::Ordering {
-        // Invert ordering to implement min-heap.
-        self.off.cmp(&other.off).reverse()
-    }
-}
-
-impl PartialOrd for RangeBuf {
-    fn partial_cmp(&self, other: &RangeBuf) -> Option<cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for RangeBuf {
-    fn eq(&self, other: &RangeBuf) -> bool {
-        self.off == other.off
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::range_buf::RangeBuf;
+
     use super::*;
 
     #[test]
     fn recv_flow_control() {
-        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let mut buf = [0; 32];
@@ -1065,7 +935,8 @@ mod tests {
 
     #[test]
     fn recv_past_fin() {
-        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -1077,7 +948,8 @@ mod tests {
 
     #[test]
     fn recv_fin_dup() {
-        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -1095,7 +967,8 @@ mod tests {
 
     #[test]
     fn recv_fin_change() {
-        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -1107,7 +980,8 @@ mod tests {
 
     #[test]
     fn recv_fin_lower_than_received() {
-        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -1119,7 +993,8 @@ mod tests {
 
     #[test]
     fn recv_fin_flow_control() {
-        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let mut buf = [0; 32];
@@ -1139,7 +1014,8 @@ mod tests {
 
     #[test]
     fn recv_fin_reset_mismatch() {
-        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, true);
@@ -1150,7 +1026,8 @@ mod tests {
 
     #[test]
     fn recv_reset_dup() {
-        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, false);
@@ -1162,7 +1039,8 @@ mod tests {
 
     #[test]
     fn recv_reset_change() {
-        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, false);
@@ -1174,7 +1052,8 @@ mod tests {
 
     #[test]
     fn recv_reset_lower_than_received() {
-        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
         assert!(!stream.recv.almost_full());
 
         let first = RangeBuf::from(b"hello", 0, false);
@@ -1187,7 +1066,8 @@ mod tests {
     fn send_flow_control() {
         let mut buf = [0; 25];
 
-        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         let first = b"hello";
         let second = b"world";
@@ -1230,7 +1110,8 @@ mod tests {
 
     #[test]
     fn send_past_fin() {
-        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         let first = b"hello";
         let second = b"world";
@@ -1246,7 +1127,8 @@ mod tests {
 
     #[test]
     fn send_fin_dup() {
-        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", true), Ok(5));
         assert!(stream.send.is_fin());
@@ -1257,7 +1139,8 @@ mod tests {
 
     #[test]
     fn send_undo_fin() {
-        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", true), Ok(5));
         assert!(stream.send.is_fin());
@@ -1272,7 +1155,8 @@ mod tests {
     fn send_fin_max_data_match() {
         let mut buf = [0; 15];
 
-        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         let slice = b"hellohellohello";
 
@@ -1288,7 +1172,8 @@ mod tests {
     fn send_fin_zero_length() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"", true), Ok(0));
@@ -1304,7 +1189,8 @@ mod tests {
     fn send_ack() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -1334,7 +1220,8 @@ mod tests {
     fn send_ack_reordering() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -1371,7 +1258,8 @@ mod tests {
 
     #[test]
     fn recv_data_below_off() {
-        let mut stream = Stream::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
 
         let first = RangeBuf::from(b"hello", 0, false);
 
@@ -1394,7 +1282,7 @@ mod tests {
     #[test]
     fn stream_complete() {
         let mut stream =
-            Stream::new(0, 30, 30, true, true, DEFAULT_STREAM_WINDOW);
+            <Stream>::new(0, 30, 30, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -1437,7 +1325,8 @@ mod tests {
     fn send_fin_zero_length_output() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 0, 15, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.off_front(), 0);
@@ -1467,7 +1356,8 @@ mod tests {
     fn send_emit() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 0, 20, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 0, 20, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -1519,7 +1409,8 @@ mod tests {
     fn send_emit_ack() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 0, 20, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 0, 20, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -1586,7 +1477,8 @@ mod tests {
     fn send_emit_retransmit() {
         let mut buf = [0; 5];
 
-        let mut stream = Stream::new(0, 0, 20, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream =
+            <Stream>::new(0, 0, 20, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -1696,7 +1588,7 @@ mod tests {
 
     #[test]
     fn rangebuf_split_off() {
-        let mut buf = RangeBuf::from(b"helloworld", 5, true);
+        let mut buf = <RangeBuf>::from(b"helloworld", 5, true);
         assert_eq!(buf.start, 0);
         assert_eq!(buf.pos, 0);
         assert_eq!(buf.len, 10);
@@ -1816,7 +1708,7 @@ mod tests {
         let local_tp = crate::TransportParams::default();
         let peer_tp = crate::TransportParams::default();
 
-        let mut streams = StreamMap::new(5, 5, 5);
+        let mut streams = <StreamMap>::new(5, 5, 5);
 
         let stream_id = 500;
         assert!(!is_local(stream_id, true), "stream id is peer initiated");
@@ -1837,7 +1729,7 @@ mod tests {
         let local_tp = crate::TransportParams::default();
         let peer_tp = crate::TransportParams::default();
 
-        let mut streams = StreamMap::new(5, 5, 5);
+        let mut streams = <StreamMap>::new(5, 5, 5);
 
         for stream_id in [8, 12, 4] {
             assert!(is_local(stream_id, false), "stream id is client initiated");
@@ -1854,7 +1746,7 @@ mod tests {
         let local_tp = crate::TransportParams::default();
         let peer_tp = crate::TransportParams::default();
 
-        let mut streams = StreamMap::new(3, 3, 3);
+        let mut streams = <StreamMap>::new(3, 3, 3);
 
         // Highest permitted
         let stream_id = 8;
@@ -1957,7 +1849,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut streams = StreamMap::new(100, 100, 100);
+        let mut streams = <StreamMap>::new(100, 100, 100);
 
         // Streams where the urgency descends (becomes more important). No stream
         // shares an urgency.

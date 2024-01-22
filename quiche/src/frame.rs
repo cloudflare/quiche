@@ -30,8 +30,8 @@ use crate::Error;
 use crate::Result;
 
 use crate::packet;
+use crate::range_buf::RangeBuf;
 use crate::ranges;
-use crate::stream;
 
 #[cfg(feature = "qlog")]
 use qlog::events::quic::AckedRanges;
@@ -80,7 +80,7 @@ pub enum Frame {
     },
 
     Crypto {
-        data: stream::RangeBuf,
+        data: RangeBuf,
     },
 
     CryptoHeader {
@@ -94,7 +94,7 @@ pub enum Frame {
 
     Stream {
         stream_id: u64,
-        data: stream::RangeBuf,
+        data: RangeBuf,
     },
 
     StreamHeader {
@@ -216,7 +216,7 @@ impl Frame {
             0x06 => {
                 let offset = b.get_varint()?;
                 let data = b.get_bytes_with_varint_length()?;
-                let data = stream::RangeBuf::from(data.as_ref(), offset, false);
+                let data = <RangeBuf>::from(data.as_ref(), offset, false);
 
                 Frame::Crypto { data }
             },
@@ -1320,7 +1320,7 @@ fn parse_stream_frame(ty: u64, b: &mut octets::Octets) -> Result<Frame> {
     let fin = first & 0x01 != 0;
 
     let data = b.get_bytes(len)?;
-    let data = stream::RangeBuf::from(data.as_ref(), offset, fin);
+    let data = <RangeBuf>::from(data.as_ref(), offset, fin);
 
     Ok(Frame::Stream { stream_id, data })
 }
@@ -1542,7 +1542,7 @@ mod tests {
         let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
         let frame = Frame::Crypto {
-            data: stream::RangeBuf::from(&data, 1230976, false),
+            data: <RangeBuf>::from(&data, 1230976, false),
         };
 
         let wire_len = {
@@ -1601,7 +1601,7 @@ mod tests {
 
         let frame = Frame::Stream {
             stream_id: 32,
-            data: stream::RangeBuf::from(&data, 1230976, true),
+            data: <RangeBuf>::from(&data, 1230976, true),
         };
 
         let wire_len = {
@@ -1632,7 +1632,7 @@ mod tests {
 
         let frame = Frame::Stream {
             stream_id: 32,
-            data: stream::RangeBuf::from(&data, MAX_STREAM_SIZE - 11, true),
+            data: <RangeBuf>::from(&data, MAX_STREAM_SIZE - 11, true),
         };
 
         let wire_len = {

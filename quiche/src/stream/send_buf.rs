@@ -28,12 +28,13 @@ use std::cmp;
 
 use std::collections::VecDeque;
 
+use crate::range_buf::RangeBuf;
+use crate::BufFactory;
 use crate::Error;
 use crate::Result;
 
+use crate::range_buf::DefaultBufFactory;
 use crate::ranges;
-
-use super::RangeBuf;
 
 #[cfg(test)]
 const SEND_BUFFER_SIZE: usize = 5;
@@ -51,9 +52,12 @@ const SEND_BUFFER_SIZE: usize = 4096;
 /// inserted at the start of the buffer (this is to allow data that needs to be
 /// retransmitted to be re-buffered).
 #[derive(Debug, Default)]
-pub struct SendBuf {
+pub struct SendBuf<F = DefaultBufFactory>
+where
+    F: BufFactory,
+{
     /// Chunks of data to be sent, ordered by offset.
-    data: VecDeque<RangeBuf>,
+    data: VecDeque<RangeBuf<F>>,
 
     /// The index of the buffer that needs to be sent next.
     pos: usize,
@@ -87,9 +91,9 @@ pub struct SendBuf {
     error: Option<u64>,
 }
 
-impl SendBuf {
+impl<F: BufFactory> SendBuf<F> {
     /// Creates a new send buffer.
-    pub fn new(max_data: u64) -> SendBuf {
+    pub fn new(max_data: u64) -> SendBuf<F> {
         SendBuf {
             max_data,
             ..SendBuf::default()
@@ -495,7 +499,7 @@ mod tests {
     fn empty_write() {
         let mut buf = [0; 5];
 
-        let mut send = SendBuf::new(u64::MAX);
+        let mut send = <SendBuf>::new(u64::MAX);
         assert_eq!(send.len, 0);
 
         let (written, fin) = send.emit(&mut buf).unwrap();
@@ -507,7 +511,7 @@ mod tests {
     fn multi_write() {
         let mut buf = [0; 128];
 
-        let mut send = SendBuf::new(u64::MAX);
+        let mut send = <SendBuf>::new(u64::MAX);
         assert_eq!(send.len, 0);
 
         let first = b"something";
@@ -530,7 +534,7 @@ mod tests {
     fn split_write() {
         let mut buf = [0; 10];
 
-        let mut send = SendBuf::new(u64::MAX);
+        let mut send = <SendBuf>::new(u64::MAX);
         assert_eq!(send.len, 0);
 
         let first = b"something";
@@ -573,7 +577,7 @@ mod tests {
     fn resend() {
         let mut buf = [0; 15];
 
-        let mut send = SendBuf::new(u64::MAX);
+        let mut send = <SendBuf>::new(u64::MAX);
         assert_eq!(send.len, 0);
         assert_eq!(send.off_front(), 0);
 
@@ -636,7 +640,7 @@ mod tests {
     fn write_blocked_by_off() {
         let mut buf = [0; 10];
 
-        let mut send = SendBuf::default();
+        let mut send = <SendBuf>::default();
         assert_eq!(send.len, 0);
 
         let first = b"something";
@@ -706,7 +710,7 @@ mod tests {
     fn zero_len_write() {
         let mut buf = [0; 10];
 
-        let mut send = SendBuf::new(u64::MAX);
+        let mut send = <SendBuf>::new(u64::MAX);
         assert_eq!(send.len, 0);
 
         let first = b"something";
@@ -731,7 +735,7 @@ mod tests {
     fn send_buf_len_on_retransmit() {
         let mut buf = [0; 15];
 
-        let mut send = SendBuf::new(u64::MAX);
+        let mut send = <SendBuf>::new(u64::MAX);
         assert_eq!(send.len, 0);
         assert_eq!(send.off_front(), 0);
 
@@ -757,7 +761,7 @@ mod tests {
     #[test]
     fn send_buf_final_size_retransmit() {
         let mut buf = [0; 50];
-        let mut send = SendBuf::new(u64::MAX);
+        let mut send = <SendBuf>::new(u64::MAX);
 
         send.write(&buf, false).unwrap();
         assert_eq!(send.off_front(), 0);
