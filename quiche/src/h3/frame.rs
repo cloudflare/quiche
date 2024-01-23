@@ -356,6 +356,7 @@ impl Frame {
                 connect_protocol_enabled,
                 h3_datagram,
                 grease,
+                additional_settings,
                 ..
             } => {
                 let mut settings = vec![];
@@ -400,6 +401,15 @@ impl Frame {
                         name: k.to_string(),
                         value: *v,
                     });
+                }
+
+                if let Some(additional_settings) = additional_settings {
+                    for (k, v) in additional_settings {
+                        settings.push(qlog::events::h3::Setting {
+                            name: k.to_string(),
+                            value: *v,
+                        });
+                    }
                 }
 
                 qlog::events::h3::Http3Frame::Settings { settings }
