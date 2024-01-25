@@ -728,6 +728,8 @@ pub struct Config {
     max_connection_window: u64,
     max_stream_window: u64,
 
+    handshake_timeout: u64,
+
     disable_dcid_reuse: bool,
 }
 
@@ -792,6 +794,8 @@ impl Config {
 
             max_connection_window: MAX_CONNECTION_WINDOW,
             max_stream_window: stream::MAX_STREAM_WINDOW,
+
+            handshake_timeout: 0,
 
             disable_dcid_reuse: false,
         })
@@ -970,6 +974,13 @@ impl Config {
         }
 
         self.set_application_protos(&protos_list)
+    }
+
+    /// Sets the timeout for the handshake.
+    ///
+    /// The default value is infinite, that is, no timeout is used.
+    pub fn set_handshake_timeout(&mut self, v: u64) {
+        self.handshake_timeout = v;
     }
 
     /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
@@ -1273,6 +1284,9 @@ pub struct Connection {
 
     /// TLS handshake state.
     handshake: tls::Handshake,
+
+    /// The configured handshake timer deadline, if any is configured.
+    handshake_timer: Option<time::Instant>,
 
     /// Serialized TLS session buffer.
     ///
@@ -1716,6 +1730,8 @@ impl Connection {
         scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
         peer: SocketAddr, config: &Config, tls: tls::Handshake, is_server: bool,
     ) -> Result<Connection> {
+        let now = time::Instant::now();
+
         let max_rx_data = config.local_transport_params.initial_max_data;
 
         let scid_as_hex: Vec<String> =
@@ -1736,6 +1752,7 @@ impl Connection {
             config.path_challenge_recv_max_queue_len,
             true,
         );
+
         // If we did stateless retry assume the peer's address is verified.
         path.verified_peer_address = odcid.is_some();
         // Assume clients validate the server's address implicitly.
@@ -1757,6 +1774,12 @@ impl Connection {
             reset_token,
         );
 
+        let handshake_timer = if config.handshake_timeout > 0 {
+            Some(now + time::Duration::from_millis(config.handshake_timeout))
+        } else {
+            None
+        };
+
         let mut conn = Connection {
             version: config.version,
 
@@ -1775,6 +1798,8 @@ impl Connection {
             local_transport_params: config.local_transport_params.clone(),
 
             handshake: tls,
+
+            handshake_timer,
 
             session: None,
 
@@ -5530,10 +5555,6 @@ impl Connection {
             // processing the other timers.
             self.draining_timer
         } else {
-            // Use the lowest timer value (i.e. "sooner") among idle and loss
-            // detection timers. If they are both unset (i.e. `None`) then the
-            // result is `None`, but if at least one of them is set then a
-            // `Some(...)` value is returned.
             let path_timer = self
                 .paths
                 .iter()
@@ -5546,8 +5567,16 @@ impl Connection {
                 .as_ref()
                 .map(|key_update| key_update.timer);
 
-            let timers = [self.idle_timer, path_timer, key_update_timer];
+            let timers = [
+                self.idle_timer,
+                self.handshake_timer,
+                path_timer,
+                key_update_timer,
+            ];
 
+            // Use the lowest timer value (i.e. "sooner"). If they are all unset
+            // (i.e. `None`) then the result is `None`, but if at least one of
+            // them is set then a `Some(...)` value is returned.
             timers.iter().filter_map(|&x| x).min()
         }
     }
@@ -5592,6 +5621,16 @@ impl Connection {
         if let Some(timer) = self.idle_timer {
             if timer <= now {
                 trace!("{} idle timeout expired", self.trace_id);
+
+                self.mark_closed();
+                self.timed_out = true;
+                return;
+            }
+        }
+
+        if let Some(timer) = self.handshake_timer {
+            if timer <= now {
+                trace!("{} handshake timeout expired", self.trace_id);
 
                 self.mark_closed();
                 self.timed_out = true;
@@ -6501,6 +6540,9 @@ impl Connection {
 
                 self.drop_epoch_state(packet::Epoch::Handshake, now);
             }
+
+            // Disarm handshake timer.
+            self.handshake_timer = None;
 
             // Once the handshake is completed there's no point in processing
             // 0-RTT packets anymore, so clear the buffer now.
@@ -8854,6 +8896,68 @@ mod tests {
         );
 
         assert_eq!(pipe.server.server_name(), Some("quic.tech"));
+    }
+
+    #[test]
+    fn handshake_timeout_client() {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_handshake_timeout(500);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+
+        let timer = pipe.client.timeout().unwrap();
+        assert!(timer <= time::Duration::from_millis(500));
+
+        // Client sends initial flight.
+        let flight = testing::emit_flight(&mut pipe.client).unwrap();
+        testing::process_flight(&mut pipe.server, flight).unwrap();
+
+        std::thread::sleep(timer + time::Duration::from_millis(1));
+
+        pipe.client.on_timeout();
+        assert!(pipe.client.is_timed_out());
+
+        pipe.server.on_timeout();
+        assert!(!pipe.server.is_timed_out());
+    }
+
+    #[test]
+    fn handshake_timeout_server() {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_handshake_timeout(500);
+
+        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
+
+        let timer = pipe.server.timeout().unwrap();
+        assert!(timer <= time::Duration::from_millis(500));
+
+        // Client sends initial flight.
+        let flight = testing::emit_flight(&mut pipe.client).unwrap();
+        testing::process_flight(&mut pipe.server, flight).unwrap();
+
+        // Server sends initial flight.
+        let _ = testing::emit_flight(&mut pipe.server).unwrap();
+
+        std::thread::sleep(timer + time::Duration::from_millis(1));
+
+        pipe.client.on_timeout();
+        assert!(!pipe.client.is_timed_out());
+
+        pipe.server.on_timeout();
+        assert!(pipe.server.is_timed_out());
     }
 
     #[test]

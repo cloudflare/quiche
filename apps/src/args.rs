@@ -39,6 +39,7 @@ pub struct CommonArgs {
     pub max_stream_window: u64,
     pub max_streams_bidi: u64,
     pub max_streams_uni: u64,
+    pub handshake_timeout: u64,
     pub idle_timeout: u64,
     pub early_data: bool,
     pub dump_packet_path: Option<String>,
@@ -131,6 +132,9 @@ impl Args for CommonArgs {
         let max_streams_uni = args.get_str("--max-streams-uni");
         let max_streams_uni = max_streams_uni.parse::<u64>().unwrap();
 
+        let handshake_timeout = args.get_str("--handshake-timeout");
+        let handshake_timeout = handshake_timeout.parse::<u64>().unwrap();
+
         let idle_timeout = args.get_str("--idle-timeout");
         let idle_timeout = idle_timeout.parse::<u64>().unwrap();
 
@@ -199,6 +203,7 @@ impl Args for CommonArgs {
             max_stream_window,
             max_streams_bidi,
             max_streams_uni,
+            handshake_timeout,
             idle_timeout,
             early_data,
             dump_packet_path,
@@ -228,6 +233,7 @@ impl Default for CommonArgs {
             max_stream_window: 16777216,
             max_streams_bidi: 100,
             max_streams_uni: 100,
+            handshake_timeout: 5000,
             idle_timeout: 30000,
             early_data: false,
             dump_packet_path: None,
@@ -260,6 +266,7 @@ Options:
   --max-stream-window BYTES   Per-stream max receiver window [default: 16777216].
   --max-streams-bidi STREAMS  Number of allowed concurrent streams [default: 100].
   --max-streams-uni STREAMS   Number of allowed concurrent streams [default: 100].
+  --handshake-timeout TIMEOUT   Handshake timeout in milliseconds [default: 5000].
   --idle-timeout TIMEOUT   Idle timeout in milliseconds [default: 30000].
   --wire-version VERSION   The version number to send to the server [default: babababa].
   --http-version VERSION   HTTP version to use [default: all].
