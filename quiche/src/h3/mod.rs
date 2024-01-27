@@ -2165,6 +2165,7 @@ impl Connection {
                     };
 
                     let ty = stream::Type::deserialize(varint)?;
+                    let ty_val = if matches!(ty, stream::Type::Unknown) { Some(varint)} else { None};
 
                     if let Err(e) = stream.set_ty(ty) {
                         conn.close(true, e.to_wire(), b"")?;
