@@ -1757,6 +1757,7 @@ impl Connection {
                 stream_id,
                 owner: Some(H3Owner::Local),
                 stream_type: H3StreamType::QpackEncode,
+                stream_type_value: None,
                 associated_push_id: None,
             });
 
@@ -1779,6 +1780,7 @@ impl Connection {
                 stream_id,
                 owner: Some(H3Owner::Local),
                 stream_type: H3StreamType::QpackDecode,
+                stream_type_value: None,
                 associated_push_id: None,
             });
 
@@ -1883,7 +1885,8 @@ impl Connection {
     /// Opens a new unidirectional stream with a GREASE type and sends some
     /// unframed payload.
     fn open_grease_stream(&mut self, conn: &mut super::Connection) -> Result<()> {
-        match self.open_uni_stream(conn, grease_value()) {
+        let ty = grease_value();
+        match self.open_uni_stream(conn, ty) {
             Ok(stream_id) => {
                 conn.stream_send(stream_id, b"GREASE is the word", true)?;
 
@@ -1894,6 +1897,7 @@ impl Connection {
                         stream_id,
                         owner: Some(H3Owner::Local),
                         stream_type: H3StreamType::Unknown,
+                        stream_type_value: Some(ty),
                         associated_push_id: None,
                     });
 
@@ -1938,6 +1942,7 @@ impl Connection {
                 stream_id,
                 owner: Some(H3Owner::Local),
                 stream_type: H3StreamType::Control,
+                stream_type_value: None,
                 associated_push_id: None,
             });
 
@@ -2061,11 +2066,18 @@ impl Connection {
                     }
 
                     qlog_with_type!(QLOG_STREAM_TYPE_SET, conn.qlog, q, {
+                        let ty_val = if matches!(ty, stream::Type::Unknown) {
+                            Some(varint)
+                        } else {
+                            None
+                        };
+
                         let ev_data =
                             EventData::H3StreamTypeSet(H3StreamTypeSet {
                                 stream_id,
                                 owner: Some(H3Owner::Remote),
                                 stream_type: ty.to_qlog(),
+                                stream_type_value: ty_val,
                                 associated_push_id: None,
                             });
 

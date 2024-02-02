@@ -209,9 +209,8 @@ pub struct H3ParametersRestored {
 pub struct H3StreamTypeSet {
     pub owner: Option<H3Owner>,
     pub stream_id: u64,
-
     pub stream_type: H3StreamType,
-
+    pub stream_type_value: Option<u64>,
     pub associated_push_id: Option<u64>,
 }
 
