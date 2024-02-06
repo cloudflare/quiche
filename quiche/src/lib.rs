@@ -1910,15 +1910,6 @@ impl Connection {
             stopped_stream_remote_count: 0,
         };
 
-        // Enable path MTU Discovery and start probing with the largest datagram
-        // size
-        // if config.pmtud {
-        // let path_pmtud = &mut conn.paths.get_active_mut()?.pmtud;
-        // path_pmtud.should_probe(config.pmtud);
-        // path_pmtud.set_probe_size(config.max_send_udp_payload_size);
-        // path_pmtud.enable(config.pmtud);
-        // }
-
         if let Some(odcid) = odcid {
             conn.local_transport_params
                 .original_destination_connection_id = Some(odcid.to_vec().into());
