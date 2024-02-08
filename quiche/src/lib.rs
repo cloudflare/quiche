@@ -12241,9 +12241,7 @@ mod tests {
         let mut pipe = testing::Pipe::new().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
-        let mut frames = Vec::new();
-
-        frames.push(frame::Frame::NewToken { token: vec![] });
+        let frames = vec![frame::Frame::NewToken { token: vec![] }];
 
         let pkt_type = packet::Type::Short;
 
@@ -12265,11 +12263,9 @@ mod tests {
         let mut pipe = testing::Pipe::new().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
-        let mut frames = Vec::new();
-
-        frames.push(frame::Frame::NewToken {
+        let frames = vec![frame::Frame::NewToken {
             token: vec![1, 2, 3],
-        });
+        }];
 
         let pkt_type = packet::Type::Short;
 
