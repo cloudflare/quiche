@@ -122,7 +122,7 @@ impl RangeSet {
     /// Iterate over the stored ranges in incremental order.
     pub fn iter(
         &self,
-    ) -> impl Iterator<Item = Range<u64>> + DoubleEndedIterator + ExactSizeIterator + '_
+    ) -> impl DoubleEndedIterator<Item = Range<u64>> + ExactSizeIterator + '_
     {
         match self {
             RangeSet::BTree(set) =>
@@ -135,9 +135,7 @@ impl RangeSet {
 
     /// Iterate over every single [`u64`] value covered by the ranges in this
     /// [`RangeSet`] in incremental order.
-    pub fn flatten(
-        &self,
-    ) -> impl Iterator<Item = u64> + DoubleEndedIterator + '_ {
+    pub fn flatten(&self) -> impl DoubleEndedIterator<Item = u64> + '_ {
         match self {
             RangeSet::BTree(set) =>
                 Either::Left(set.inner.iter().flat_map(|(k, v)| *k..*v)),
