@@ -2869,7 +2869,7 @@ impl Connection {
                         p.pmtud.set_current(cmp::max(pmtud_next, mtu_probe));
                         // Stop sending path MTU probes after successful
                         // probe
-                        trace!("{} PMTUD: Acked", self.trace_id);
+                        trace!("{} pmtud acked", self.trace_id);
                         p.pmtud.should_probe(false);
                         pmtud_probe = true;
                     },
@@ -2962,7 +2962,7 @@ impl Connection {
             // Update max datagram send size with newly acked probe size
             if pmtud_probe {
                 trace!(
-                    "{} Updating PMTU {:?}",
+                    "{} updating pmtu {:?}",
                     p.pmtud.get_current(),
                     self.trace_id
                 );
@@ -3708,7 +3708,7 @@ impl Connection {
                 frames.is_empty(),
             );
             if pmtu_probe {
-                trace!("{} Sending PMTUD probe pmtu_probe {} next_size {} and pmtu {} hs_con {} hs_sent {} cwnd_avail {} out_len {} left {}",
+                trace!("{} sending pmtud probe pmtu_probe {} next_size {} and pmtu {} hs_con {} hs_sent {} cwnd_avail {} out_len {} left {}",
                      self.trace_id, active_path.pmtud.get_probe_size(), active_path.pmtud.get_probe_status(), active_path.pmtud.get_current(),
                      self.handshake_confirmed, self.handshake_done_sent, active_path.recovery.cwnd_available(),out_len, left);
                 left = active_path.pmtud.get_probe_size();
