@@ -3073,17 +3073,6 @@ impl Connection {
 
         self.ack_eliciting_sent = false;
 
-        let active_path = self.paths.get_active_mut()?;
-
-        // Check if path MTU Discovery probe timer has expired.
-        // If yes, we re-initiate probe during next send
-        if let Some(timer) = active_path.pmtud.get_probe_timeout() {
-            if timer <= now && active_path.pmtud.get_probe_status() {
-                trace!("{} PMTU probe detection timeout expired", self.trace_id);
-                active_path.pmtud.pmtu_probe_lost();
-            }
-        }
-
         Ok(read)
     }
 
@@ -3498,6 +3487,9 @@ impl Connection {
                         self.ids.mark_retire_dcid_seq(seq_num, true);
                     },
 
+                    frame::Frame::Ping { .. } => {
+                        p.pmtud.pmtu_probe_lost();
+                    },
                     _ => (),
                 }
             }
@@ -4547,16 +4539,6 @@ impl Connection {
         }
 
         let active_path = self.paths.get_active_mut()?;
-        if pmtud_probe {
-            // Start path MTU Discovery probe timer
-            let pmtud_timer_status =
-                active_path.set_pmtu_probe_timer(&handshake_status, now);
-            trace!(
-                "{} Sent PMTUD: Probe Timer Status {:?}",
-                pmtud_timer_status,
-                self.trace_id
-            );
-        }
         if active_path.pmtud.is_enabled() {
             active_path
                 .recovery
@@ -6785,8 +6767,7 @@ impl Connection {
                 self.streams.has_stopped() ||
                 self.ids.has_new_scids() ||
                 self.ids.has_retire_dcids() ||
-                (send_path.pmtud.get_probe_status() &&
-                    send_path.pmtud.get_probe_timeout().is_none()) ||
+                send_path.pmtud.get_probe_status() ||
                 send_path.needs_ack_eliciting ||
                 send_path.probing_required())
         {
@@ -16731,14 +16712,14 @@ mod tests {
 
         // Check that PMTU params are configured correctly
         let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
-        assert!(pmtu_param.get_probe_status());
+        assert_eq!(pmtu_param.get_probe_status(), true);
         assert_eq!(pmtu_param.get_probe_size(), 1350);
         assert_eq!(pipe.advance(), Ok(()));
 
-        let active_server_path = pipe.server.paths.get_active_mut().unwrap();
-        let pmtu_param = &mut active_server_path.pmtud;
-        assert_eq!(pmtu_param.get_current(), 1350);
-        assert!(!pmtu_param.get_probe_status());
+        for (_, p) in pipe.server.paths.iter_mut() {
+            assert_eq!(p.pmtud.get_current(), 1350);
+            assert_eq!(p.pmtud.get_probe_status(), false);
+        }
     }
 
     #[test]
@@ -16779,19 +16760,9 @@ mod tests {
         let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
         assert!(pmtu_param.get_probe_status());
         assert_eq!(pmtu_param.get_probe_size(), 1350);
-        // assert_eq!(pipe.advance(), Ok(()));
-
-        let probe_inst = pipe
-            .server
-            .paths
-            .get_mut(pid_1)
-            .unwrap()
-            .pmtud
-            .get_probe_timeout()
-            .unwrap();
-        let now = time::Instant::now();
         std::thread::sleep(
-            now.duration_since(probe_inst) + time::Duration::from_millis(1),
+            pipe.server.paths.get_mut(pid_1).unwrap().recovery.rtt() +
+                time::Duration::from_millis(1),
         );
 
         let active_server_path = pipe.server.paths.get_active_mut().unwrap();
@@ -16801,7 +16772,7 @@ mod tests {
         assert_eq!(pmtu_param.get_current(), 1200);
 
         // Continue searching for PMTU
-        assert!(pmtu_param.get_probe_status());
+        assert_eq!(pmtu_param.get_probe_status(), true);
     }
 }
 

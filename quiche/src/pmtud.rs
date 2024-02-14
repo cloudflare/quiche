@@ -1,4 +1,4 @@
-use std::time::Instant;
+// use std::time::Instant;
 
 #[derive(Default)]
 pub struct Pmtud {
@@ -10,9 +10,6 @@ pub struct Pmtud {
 
     /// Indicated if Path MTU probe needs to be generated.
     next_size: bool,
-
-    /// This maintains a timer to track when Path MTU probe was sent out
-    probe_timer: Option<Instant>,
 
     // Check config for PMTU variable
     enable: bool,
@@ -77,24 +74,11 @@ impl Pmtud {
         self.probe = self.cur_size + ((self.probe - self.cur_size) / 2);
     }
 
-    /// Sets the probe timer Instant that tracks the timeout
-    /// for a Path MTU Discovery probe
-    pub fn set_probe_timeout(&mut self, probe_timer: Option<Instant>) {
-        self.probe_timer = probe_timer;
-    }
-
-    /// Returns the probe timer Instant that tracks the timeout
-    /// for a Path MTU Discovery probe
-    pub fn get_probe_timeout(&self) -> Option<Instant> {
-        self.probe_timer
-    }
-
     /// Updates probe value when the Path MTU Discovery probe is
     /// lost
     pub fn pmtu_probe_lost(&mut self) {
         self.update_probe_size();
         self.should_probe(true);
-        self.probe_timer = None;
     }
 }
 

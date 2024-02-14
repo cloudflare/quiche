@@ -665,9 +665,9 @@ impl Recovery {
         // HANDSHAKE_DONE and MAX_DATA / MAX_STREAM_DATA as well, in addition
         // to CRYPTO and STREAM, if the original packet carried them.
         for unacked in unacked_iter {
-            if unacked.pmtud {
-                continue;
-            }
+            // if unacked.pmtud {
+            // continue;
+            // }
             self.lost[epoch].extend_from_slice(&unacked.frames);
         }
 
@@ -951,7 +951,7 @@ impl Recovery {
             // Skip packets that follow the largest acked packet.
             .take_while(|p| p.pkt_num <= largest_acked)
             // Skip packets that have already been acked or lost.
-            .filter(|p| p.time_acked.is_none() && p.time_lost.is_none() && !p.pmtud);
+            .filter(|p| p.time_acked.is_none() && p.time_lost.is_none());
 
         for unacked in unacked_iter {
             // Mark packet as lost, or set time when it should be marked.
@@ -961,7 +961,7 @@ impl Recovery {
                 self.lost[epoch].extend(unacked.frames.drain(..));
                 unacked.time_lost = Some(now);
 
-                if unacked.in_flight {
+                if unacked.in_flight && !unacked.pmtud {
                     lost_bytes += unacked.size;
 
                     // Frames have already been removed from the packet, so
@@ -979,8 +979,11 @@ impl Recovery {
                     );
                 }
 
-                lost_packets += 1;
-                self.lost_count += 1;
+                if !unacked.pmtud {
+                    // Do not add PMTUD probes to loss statistics
+                    lost_packets += 1;
+                    self.lost_count += 1;
+                }
             } else {
                 let loss_time = match self.loss_time[epoch] {
                     None => unacked.time_sent + loss_delay,
@@ -2308,6 +2311,147 @@ mod tests {
             r.get_packet_send_time(),
             now + Duration::from_secs_f64(12000.0 / pacing_rate as f64)
         );
+    }
+
+    #[test]
+    fn pmtud_loss_on_timer() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+
+        let mut r = Recovery::new(&cfg);
+
+        let mut now = Instant::now();
+
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
+
+        // Start by sending a few packets.
+        let p = Sent {
+            pkt_num: 0,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+            pmtud: false,
+        };
+
+        r.on_packet_sent(
+            p,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 1);
+        assert_eq!(r.bytes_in_flight, 1000);
+
+        let p = Sent {
+            pkt_num: 1,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+            pmtud: true,
+        };
+
+        r.on_packet_sent(
+            p,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        let p = Sent {
+            pkt_num: 2,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+            pmtud: false,
+        };
+
+        r.on_packet_sent(
+            p,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        // Wait for 10ms.
+        now += Duration::from_millis(10);
+
+        // Only the first  packets and the last one are acked.
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..1);
+        acked.insert(2..3);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+                &mut Vec::new(),
+            ),
+            Ok((0, 0))
+        );
+
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 2);
+        assert_eq!(r.bytes_in_flight, 1000);
+        assert_eq!(r.lost_count, 0);
+
+        // Wait until loss detection timer expires.
+        now = r.loss_detection_timer().unwrap();
+
+        // Packet is declared lost.
+        r.on_loss_detection_timeout(HandshakeStatus::default(), now, "");
+        assert_eq!(r.loss_probes[packet::Epoch::Application], 0);
+
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 2);
+        assert_eq!(r.bytes_in_flight, 1000);
+        assert_eq!(r.congestion_window, 12000);
+
+        assert_eq!(r.lost_count, 0);
+
+        // Wait 1 RTT.
+        now += r.rtt();
+
+        r.detect_lost_packets(packet::Epoch::Application, now, "");
+
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
     }
 }
 

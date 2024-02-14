@@ -29,7 +29,7 @@ use std::time;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
-use std::time::Instant;
+// use std::time::Instant;
 
 use smallvec::SmallVec;
 
@@ -334,17 +334,17 @@ impl Path {
     }
 
     /// Function used to set timer for path MTU Discovery probe
-    pub fn set_pmtu_probe_timer(
-        &mut self, handshake_status: &recovery::HandshakeStatus, now: Instant,
-    ) -> bool {
-        if handshake_status.completed {
-            self.pmtud
-                .set_probe_timeout(Some(now + self.recovery.rtt()));
-            true
-        } else {
-            false
-        }
-    }
+    // pub fn set_pmtu_probe_timer(
+    // &mut self, handshake_status: &recovery::HandshakeStatus, now: Instant,
+    // ) -> bool {
+    // if handshake_status.completed {
+    // self.pmtud
+    // .set_probe_timeout(Some(now + self.recovery.rtt()));
+    // true
+    // } else {
+    // false
+    // }
+    // }
 
     pub fn should_send_pmtu_probe(
         &mut self, hs_confirmed: bool, hs_done: bool, out_len: usize,
@@ -355,7 +355,7 @@ impl Path {
             self.recovery.cwnd_available() > self.pmtud.get_probe_size() &&
             out_len >= self.pmtud.get_probe_size() &&
             self.pmtud.get_probe_status() &&
-            self.pmtud.get_probe_timeout().is_none() &&
+            //self.pmtud.get_probe_timeout().is_none() &&
             !is_closing &&
             frames_empty
     }
