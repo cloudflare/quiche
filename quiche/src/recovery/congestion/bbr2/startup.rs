@@ -45,8 +45,8 @@ impl ModeImpl for Startup {
         // TCP BBR always exits upon excessive losses. QUIC BBRv1 does not exit
         // upon excessive losses, if enough bandwidth growth is observed or if the
         // sample was app limited.
-        if !congestion_event.last_packet_send_state.is_app_limited
-            && !has_bandwidth_growth
+        if !congestion_event.last_packet_send_state.is_app_limited &&
+            !has_bandwidth_growth
         {
             self.check_excessive_losses(congestion_event);
         }

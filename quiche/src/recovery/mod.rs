@@ -53,7 +53,7 @@ const INITIAL_PACKET_THRESHOLD: u64 = 3;
 
 const MAX_PACKET_THRESHOLD: u64 = 20;
 
-const INITIAL_TIME_THRESHOLD: f64 = 9.0 / 8.0;
+const INITIAL_TIME_THRESHOLD: f64 = 11.0 / 8.0;
 
 const GRANULARITY: Duration = Duration::from_millis(1);
 
@@ -334,8 +334,8 @@ impl RecoveryEpoch {
             }
 
             if let SentStatus::Sent { time_sent, .. } = status {
-                if *time_sent <= lost_send_time ||
-                    largest_acked >= *pkt_num + pkt_thresh
+                if *time_sent <= lost_send_time
+                    || largest_acked >= *pkt_num + pkt_thresh
                 {
                     if let SentStatus::Sent {
                         in_flight,
@@ -549,9 +549,9 @@ impl Recovery {
     /// Returns whether or not we should elicit an ACK even if we wouldn't
     /// otherwise have constructed an ACK eliciting packet.
     pub fn should_elicit_ack(&self, epoch: packet::Epoch) -> bool {
-        self.epochs[epoch].loss_probes > 0 ||
-            self.outstanding_non_ack_eliciting >=
-                MAX_OUTSTANDING_NON_ACK_ELICITING
+        self.epochs[epoch].loss_probes > 0
+            || self.outstanding_non_ack_eliciting
+                >= MAX_OUTSTANDING_NON_ACK_ELICITING
     }
 
     pub fn on_packet_sent(
@@ -951,11 +951,11 @@ impl Recovery {
 #[repr(C)]
 pub enum CongestionControlAlgorithm {
     /// Reno congestion control algorithm. `reno` in a string form.
-    Reno  = 0,
+    Reno = 0,
     /// CUBIC congestion control algorithm (default). `cubic` in a string form.
     CUBIC = 1,
     /// BBR congestion control algorithm. `bbr` in a string form.
-    BBR   = 2,
+    BBR = 2,
     /// BBRv2 congestion control algorithm. `bbr2` in a string form.
     BBRv2 = 3,
 }

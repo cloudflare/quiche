@@ -161,7 +161,7 @@ impl BBRv2NetworkModel {
             inflight_hi_limited_in_round: false,
             bandwidth_sampler: BandwidthSampler::new(
                 PARAMS.initial_max_ack_height_filter_window,
-                true,
+                false,
             ),
             round_trip_counter: RoundTripCounter {
                 round_trip_count: 0,
@@ -282,8 +282,8 @@ impl BBRv2NetworkModel {
 
         if sample.extra_acked == 0 {
             self.cwnd_limited_before_aggregation_epoch = congestion_event
-                .prior_bytes_in_flight
-                >= congestion_event.prior_cwnd;
+                .prior_bytes_in_flight >=
+                congestion_event.prior_cwnd;
         }
 
         if sample.last_packet_send_state.is_valid {
@@ -297,9 +297,9 @@ impl BBRv2NetworkModel {
         // total_bytes_acked() will not change.
         if sample.sample_max_bandwidth.is_some() {
             congestion_event.sample_max_bandwidth = sample.sample_max_bandwidth;
-            if !sample.sample_is_app_limited
-                || congestion_event.sample_max_bandwidth
-                    > Some(self.max_bandwidth())
+            if !sample.sample_is_app_limited ||
+                congestion_event.sample_max_bandwidth >
+                    Some(self.max_bandwidth())
             {
                 self.max_bandwidth_filter
                     .update(congestion_event.sample_max_bandwidth.unwrap());
@@ -315,13 +315,13 @@ impl BBRv2NetworkModel {
             self.total_bytes_acked() - prior_bytes_acked;
         congestion_event.bytes_lost = self.total_bytes_lost() - prior_bytes_lost;
 
-        if congestion_event.prior_bytes_in_flight
-            >= congestion_event.bytes_acked + congestion_event.bytes_lost
+        if congestion_event.prior_bytes_in_flight >=
+            congestion_event.bytes_acked + congestion_event.bytes_lost
         {
             congestion_event.bytes_in_flight = congestion_event
-                .prior_bytes_in_flight
-                - congestion_event.bytes_acked
-                - congestion_event.bytes_lost;
+                .prior_bytes_in_flight -
+                congestion_event.bytes_acked -
+                congestion_event.bytes_lost;
         } else {
             congestion_event.bytes_in_flight = 0;
             panic!("?")
@@ -332,13 +332,13 @@ impl BBRv2NetworkModel {
             self.loss_events_in_round += 1;
         }
 
-        if congestion_event.bytes_acked > 0
-            && congestion_event.last_packet_send_state.is_valid
-            && self.total_bytes_acked()
-                > congestion_event.last_packet_send_state.total_bytes_acked
+        if congestion_event.bytes_acked > 0 &&
+            congestion_event.last_packet_send_state.is_valid &&
+            self.total_bytes_acked() >
+                congestion_event.last_packet_send_state.total_bytes_acked
         {
-            let bytes_delivered = self.total_bytes_acked()
-                - congestion_event.last_packet_send_state.total_bytes_acked;
+            let bytes_delivered = self.total_bytes_acked() -
+                congestion_event.last_packet_send_state.total_bytes_acked;
             self.max_bytes_delivered_in_round =
                 self.max_bytes_delivered_in_round.max(bytes_delivered);
         }
@@ -375,15 +375,15 @@ impl BBRv2NetworkModel {
 
     fn adapt_lower_bounds(&mut self, congestion_event: &BBRv2CongestionEvent) {
         if PARAMS.bw_lo_mode == BwLoMode::Default {
-            if !congestion_event.end_of_round_trip
-                || congestion_event.is_probing_for_bandwidth
+            if !congestion_event.end_of_round_trip ||
+                congestion_event.is_probing_for_bandwidth
             {
                 return;
             }
 
             if self.bytes_lost_in_round > 0 {
-                if self.bandwidth_lo.is_none()
-                    && self.max_bandwidth() > Bandwidth::zero()
+                if self.bandwidth_lo.is_none() &&
+                    self.max_bandwidth() > Bandwidth::zero()
                 {
                     self.bandwidth_lo = Some(self.max_bandwidth());
                 }
@@ -432,16 +432,16 @@ impl BBRv2NetworkModel {
                 // saved when entering 'recovery', but this BBRv2
                 // implementation doesn't have recovery defined.
                 self.bandwidth_lo = self.bandwidth_lo.map(|b| {
-                    b * ((effective_inflight as f64
-                        - congestion_event.bytes_lost as f64)
-                        / effective_inflight as f64)
+                    b * ((effective_inflight as f64 -
+                        congestion_event.bytes_lost as f64) /
+                        effective_inflight as f64)
                 });
             },
             BwLoMode::CwndReduction => {
                 self.bandwidth_lo = self.bandwidth_lo.map(|b| {
-                    b * ((congestion_event.prior_cwnd as f64
-                        - congestion_event.bytes_lost as f64)
-                        / congestion_event.prior_cwnd as f64)
+                    b * ((congestion_event.prior_cwnd as f64 -
+                        congestion_event.bytes_lost as f64) /
+                        congestion_event.prior_cwnd as f64)
                 });
             },
         }
@@ -499,8 +499,8 @@ impl BBRv2NetworkModel {
             return false;
         }
 
-        if congestion_event.event_time
-            < self.min_rtt_filter.min_rtt_timestamp + PARAMS.probe_rtt_period
+        if congestion_event.event_time <
+            self.min_rtt_filter.min_rtt_timestamp + PARAMS.probe_rtt_period
         {
             return false;
         }
@@ -571,8 +571,8 @@ impl BBRv2NetworkModel {
         self.rounds_without_bandwidth_growth += 1;
 
         // full_bandwidth_reached is only set to true when not app-limited
-        if self.rounds_without_bandwidth_growth >= PARAMS.startup_full_bw_rounds
-            && !congestion_event.last_packet_send_state.is_app_limited
+        if self.rounds_without_bandwidth_growth >= PARAMS.startup_full_bw_rounds &&
+            !congestion_event.last_packet_send_state.is_app_limited
         {
             self.full_bandwidth_reached = true;
         }

@@ -88,8 +88,11 @@ impl ReleaseTime {
 }
 
 impl ReleaseDecision {
+    const EQUAL_THRESHOLD: Duration = Duration::from_micros(20);
+
     /// Get the [`Instant`] the next packet should be released. It will never be
     /// in the past.
+    #[inline]
     pub fn time(&self, now: Instant) -> Option<Instant> {
         match self.time {
             ReleaseTime::Immediate => None,
@@ -98,13 +101,22 @@ impl ReleaseDecision {
     }
 
     /// Can this packet be appended to a previous burst
+    #[inline]
     pub fn can_burst(&self) -> bool {
         self.allow_burst
     }
 
     /// Check if the two packets can be released at the same time
+    #[inline]
     pub fn time_eq(&self, other: &Self, now: Instant) -> bool {
-        self.time(now) == other.time(now)
+        let delta = match (self.time(now), other.time(now)) {
+            (None, None) => Duration::ZERO,
+            (Some(t), None) | (None, Some(t)) => t.duration_since(now),
+            (Some(t1), Some(t2)) if t1 < t2 => t2.duration_since(t1),
+            (Some(t1), Some(t2)) => t1.duration_since(t2),
+        };
+
+        delta <= Self::EQUAL_THRESHOLD
     }
 }
 #[derive(Debug)]
@@ -222,12 +234,12 @@ impl CongestionControl for Pacer {
             // Reset lumpy_tokens_ if either application or cwnd throttles sending
             // or token runs out.
             self.lumpy_tokens = 1.max(LUMPY_PACING_SIZE.min(
-                (self.sender.get_congestion_window_in_packets() as f64 *
-                    LUMPY_PACING_CWND_FRACTION) as usize,
+                (self.sender.get_congestion_window_in_packets() as f64
+                    * LUMPY_PACING_CWND_FRACTION) as usize,
             ));
 
-            if self.sender.bandwidth_estimate(rtt_stats) <
-                LUMPY_PACING_MIN_BANDWIDTH_KBPS
+            if self.sender.bandwidth_estimate(rtt_stats)
+                < LUMPY_PACING_MIN_BANDWIDTH_KBPS
             {
                 // Below 1.2Mbps, send 1 packet at once, because one full-sized
                 // packet is about 10ms of queueing.
@@ -241,11 +253,6 @@ impl CongestionControl for Pacer {
             }
         }
 
-        let is_pacing_limited = match self.ideal_next_packet_send_time {
-            ReleaseTime::Immediate => false,
-            ReleaseTime::At(time) => time >= sent_time,
-        };
-
         self.lumpy_tokens -= 1;
         if self.pacing_limited {
             // Make up for lost time since pacing throttles the sending.
@@ -255,7 +262,7 @@ impl CongestionControl for Pacer {
         }
 
         // Stop making up for lost time if underlying sender prevents sending.
-        self.pacing_limited = is_pacing_limited;
+        self.pacing_limited = self.sender.can_send(bytes_in_flight + bytes);
     }
 
     #[inline]
