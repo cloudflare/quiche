@@ -25,7 +25,6 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use super::*;
-use crate::recovery::Recovery;
 
 // BBR2 Functions on every packet loss event.
 //

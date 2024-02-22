@@ -28,9 +28,6 @@ use super::*;
 use crate::rand;
 use crate::recovery;
 
-use std::cmp;
-use std::time::Instant;
-
 /// 1.2Mbps in bytes/sec
 const PACING_RATE_1_2MBPS: u64 = 1200 * 1000 / 8;
 

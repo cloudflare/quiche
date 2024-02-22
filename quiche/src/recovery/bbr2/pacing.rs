@@ -26,10 +26,6 @@
 
 use super::*;
 
-use std::time::Duration;
-
-use crate::recovery::Recovery;
-
 // BBR2 Transmit Packet Pacing Functions
 //
 

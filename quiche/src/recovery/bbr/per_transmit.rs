@@ -26,8 +26,6 @@
 
 use super::*;
 
-use crate::recovery::Recovery;
-
 // BBR Functions when trasmitting packets.
 //
 pub fn bbr_on_transmit(r: &mut Recovery) {
