@@ -30,11 +30,9 @@
 //! <https://tools.ietf.org/html/draft-cardwell-iccrg-bbr-congestion-control-00>
 
 use crate::minmax::Minmax;
-use crate::packet;
 use crate::recovery::*;
 
 use std::time::Duration;
-use std::time::Instant;
 
 pub static BBR: CongestionControlOps = CongestionControlOps {
     on_init,
