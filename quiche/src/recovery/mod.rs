@@ -36,6 +36,7 @@ use std::collections::VecDeque;
 use crate::Config;
 use crate::Result;
 
+use crate::ecn;
 use crate::frame;
 use crate::minmax;
 use crate::packet;
@@ -142,6 +143,8 @@ pub struct Recovery {
 
     max_datagram_size: usize,
 
+    pub ecn: ecn::Ecn,
+
     cubic_state: cubic::State,
 
     // HyStart++.
@@ -171,6 +174,9 @@ pub struct Recovery {
 
     /// Initial congestion window size in terms of packet count.
     initial_congestion_window_packets: usize,
+
+    /// Prague state.
+    prague_state: prague::State,
 }
 
 pub struct RecoveryConfig {
@@ -181,6 +187,8 @@ pub struct RecoveryConfig {
     pacing: bool,
     max_pacing_rate: Option<u64>,
     initial_congestion_window_packets: usize,
+    pub ecn_enabled: bool,
+    pub ecn_use_ect1: bool,
 }
 
 impl RecoveryConfig {
@@ -194,6 +202,8 @@ impl RecoveryConfig {
             max_pacing_rate: config.max_pacing_rate,
             initial_congestion_window_packets: config
                 .initial_congestion_window_packets,
+            ecn_enabled: config.ecn_enabled,
+            ecn_use_ect1: config.ecn_use_ect1,
         }
     }
 }
@@ -267,6 +277,12 @@ impl Recovery {
 
             max_datagram_size: recovery_config.max_send_udp_payload_size,
 
+            ecn: ecn::Ecn::new(
+                recovery_config.ecn_enabled,
+                recovery_config.ecn_use_ect1,
+                [packet::EcnCounts::default(); packet::Epoch::count()],
+            ),
+
             cc_ops: recovery_config.cc_ops,
 
             delivery_rate: delivery_rate::Rate::default(),
@@ -300,6 +316,8 @@ impl Recovery {
 
             initial_congestion_window_packets: recovery_config
                 .initial_congestion_window_packets,
+
+            prague_state: prague::State::default(),
         }
     }
 
@@ -437,8 +455,9 @@ impl Recovery {
     #[allow(clippy::too_many_arguments)]
     pub fn on_ack_received(
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
-        epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
-        trace_id: &str, newly_acked: &mut Vec<Acked>,
+        ecn_counts: Option<packet::EcnCounts>, epoch: packet::Epoch,
+        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
+        newly_acked: &mut Vec<Acked>,
     ) -> Result<(usize, usize)> {
         let largest_acked = ranges.last().unwrap();
 
@@ -459,7 +478,10 @@ impl Recovery {
         let mut has_ack_eliciting = false;
 
         let mut largest_newly_acked_pkt_num = 0;
+        let mut newly_acked_size = 0;
         let mut largest_newly_acked_sent_time = now;
+
+        let mut newly_ecn_marked_acked = 0;
 
         let mut undo_cwnd = false;
 
@@ -531,6 +553,7 @@ impl Recovery {
                 }
 
                 largest_newly_acked_pkt_num = unacked.pkt_num;
+                newly_acked_size += unacked.size;
                 largest_newly_acked_sent_time = unacked.time_sent;
 
                 self.acked[epoch].extend(unacked.frames.drain(..));
@@ -538,6 +561,10 @@ impl Recovery {
                 if unacked.in_flight {
                     self.in_flight_count[epoch] =
                         self.in_flight_count[epoch].saturating_sub(1);
+                }
+
+                if unacked.ecn_marked {
+                    newly_ecn_marked_acked += 1;
                 }
 
                 newly_acked.push(Acked {
@@ -592,6 +619,35 @@ impl Recovery {
                 self.update_rtt(latest_rtt, ack_delay, now);
             }
         }
+
+        // See if we can not do better.
+        let largest_unacked = newly_acked.last().unwrap();
+        let largest_sent = Sent {
+            pkt_num: largest_unacked.pkt_num,
+            frames: SmallVec::new(),
+            time_sent: largest_unacked.time_sent,
+            time_acked: Some(now),
+            time_lost: None,
+            size: largest_unacked.size,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: largest_unacked.delivered,
+            delivered_time: largest_unacked.delivered_time,
+            first_sent_time: largest_unacked.first_sent_time,
+            is_app_limited: largest_unacked.is_app_limited,
+            tx_in_flight: largest_unacked.tx_in_flight,
+            lost: largest_unacked.lost,
+            has_data: true,
+            ecn_marked: true,
+        };
+        self.process_ecn(
+            newly_ecn_marked_acked,
+            ecn_counts,
+            newly_acked_size,
+            &largest_sent,
+            epoch,
+            now,
+        );
 
         // Detect and mark lost packets without removing them from the sent
         // packets list.
@@ -919,6 +975,7 @@ impl Recovery {
 
         let mut lost_packets = 0;
         let mut lost_bytes = 0;
+        let mut lost_ecn_marked_ack_eliciting_packets = 0;
 
         let mut largest_lost_pkt = None;
 
@@ -956,6 +1013,10 @@ impl Recovery {
                     );
                 }
 
+                if unacked.ack_eliciting && unacked.ecn_marked {
+                    lost_ecn_marked_ack_eliciting_packets += 1;
+                }
+
                 lost_packets += 1;
                 self.lost_count += 1;
             } else {
@@ -976,6 +1037,9 @@ impl Recovery {
         if let Some(pkt) = largest_lost_pkt {
             self.on_packets_lost(lost_bytes, &pkt, epoch, now);
         }
+
+        self.ecn
+            .on_packets_lost(lost_ecn_marked_ack_eliciting_packets);
 
         self.drain_packets(epoch, now);
 
@@ -1057,6 +1121,27 @@ impl Recovery {
         }
     }
 
+    fn process_ecn(
+        &mut self, newly_ecn_marked_acked: u64,
+        ecn_counts: Option<packet::EcnCounts>, acked_size: usize,
+        largest_acked_sent: &Sent, epoch: packet::Epoch, now: Instant,
+    ) {
+        let new_ce_marks =
+            self.ecn
+                .on_ack_received(epoch, newly_ecn_marked_acked, ecn_counts);
+        if newly_ecn_marked_acked > 0 {
+            (self.cc_ops.process_ecn)(
+                self,
+                newly_ecn_marked_acked,
+                new_ce_marks,
+                acked_size,
+                largest_acked_sent,
+                epoch,
+                now,
+            );
+        }
+    }
+
     fn congestion_event(
         &mut self, lost_bytes: usize, largest_lost_pkt: &Sent,
         epoch: packet::Epoch, now: Instant,
@@ -1121,13 +1206,15 @@ impl Recovery {
 #[repr(C)]
 pub enum CongestionControlAlgorithm {
     /// Reno congestion control algorithm. `reno` in a string form.
-    Reno  = 0,
+    Reno   = 0,
     /// CUBIC congestion control algorithm (default). `cubic` in a string form.
-    CUBIC = 1,
+    CUBIC  = 1,
     /// BBR congestion control algorithm. `bbr` in a string form.
-    BBR   = 2,
+    BBR    = 2,
     /// BBRv2 congestion control algorithm. `bbr2` in a string form.
-    BBR2  = 3,
+    BBR2   = 3,
+    /// Prague congestion control algorithm. `prague` in a string form.
+    Prague = 4,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -1142,6 +1229,7 @@ impl FromStr for CongestionControlAlgorithm {
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
             "bbr" => Ok(CongestionControlAlgorithm::BBR),
             "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
+            "prague" => Ok(CongestionControlAlgorithm::Prague),
 
             _ => Err(crate::Error::CongestionControl),
         }
@@ -1170,6 +1258,16 @@ pub struct CongestionControlOps {
         now: Instant,
     ),
 
+    pub process_ecn: fn(
+        r: &mut Recovery,
+        newly_ecn_marked_acked: u64,
+        new_ce_marks: u64,
+        acked_bytes: usize,
+        sent: &Sent,
+        epoch: packet::Epoch,
+        now: Instant,
+    ),
+
     pub collapse_cwnd: fn(r: &mut Recovery),
 
     pub checkpoint: fn(r: &mut Recovery),
@@ -1189,6 +1287,7 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
             CongestionControlAlgorithm::CUBIC => &cubic::CUBIC,
             CongestionControlAlgorithm::BBR => &bbr::BBR,
             CongestionControlAlgorithm::BBR2 => &bbr2::BBR2,
+            CongestionControlAlgorithm::Prague => &prague::PRAGUE,
         }
     }
 }
@@ -1272,6 +1371,8 @@ pub struct Sent {
     pub lost: u64,
 
     pub has_data: bool,
+
+    pub ecn_marked: bool,
 }
 
 impl std::fmt::Debug for Sent {
@@ -1517,6 +1618,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1545,6 +1647,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1573,6 +1676,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1601,6 +1705,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1624,6 +1729,7 @@ mod tests {
             r.on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
@@ -1662,6 +1768,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1690,6 +1797,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1714,6 +1822,7 @@ mod tests {
             r.on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
@@ -1764,6 +1873,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1792,6 +1902,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1820,6 +1931,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1848,6 +1960,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1872,6 +1985,7 @@ mod tests {
             r.on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
@@ -1933,6 +2047,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1961,6 +2076,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1989,6 +2105,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -2017,6 +2134,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -2040,6 +2158,7 @@ mod tests {
             r.on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
@@ -2060,6 +2179,7 @@ mod tests {
             r.on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
@@ -2115,6 +2235,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -2142,6 +2263,7 @@ mod tests {
             r.on_ack_received(
                 &acked,
                 10,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
@@ -2175,6 +2297,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -2208,6 +2331,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -2238,6 +2362,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -2270,5 +2395,6 @@ mod cubic;
 mod delivery_rate;
 mod hystart;
 mod pacer;
+mod prague;
 mod prr;
 mod reno;

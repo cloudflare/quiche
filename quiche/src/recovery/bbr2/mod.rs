@@ -41,6 +41,7 @@ pub static BBR2: CongestionControlOps = CongestionControlOps {
     on_packet_sent,
     on_packets_acked,
     congestion_event,
+    process_ecn,
     collapse_cwnd,
     checkpoint,
     rollback,
@@ -609,6 +610,20 @@ fn congestion_event(
     }
 }
 
+fn process_ecn(
+    r: &mut Recovery, _newly_ecn_marked_acked: u64, new_ce_marks: u64,
+    _acked_bytes: usize, largest_sent: &Sent, epoch: packet::Epoch, now: Instant,
+) {
+    if new_ce_marks > 0 {
+        r.congestion_event(
+            new_ce_marks as usize * r.max_datagram_size,
+            largest_sent,
+            epoch,
+            now,
+        );
+    }
+}
+
 fn collapse_cwnd(r: &mut Recovery) {
     // BBROnEnterRTO()
     r.bbr2_state.prior_cwnd = per_ack::bbr2_save_cwnd(r);
@@ -743,6 +758,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                ecn_marked: false,
             };
 
             r.on_packet_sent(
@@ -765,6 +781,7 @@ mod tests {
             .on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
@@ -812,6 +829,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                ecn_marked: false,
             };
 
             r.on_packet_sent(
@@ -835,6 +853,7 @@ mod tests {
             .on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
@@ -884,6 +903,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                ecn_marked: false,
             };
 
             r.on_packet_sent(
@@ -907,6 +927,7 @@ mod tests {
                 .on_ack_received(
                     &acked,
                     25,
+                    None,
                     packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
@@ -934,6 +955,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                ecn_marked: false,
             };
 
             r.on_packet_sent(
@@ -960,6 +982,7 @@ mod tests {
             .on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
@@ -1006,6 +1029,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                ecn_marked: false,
             };
 
             r.on_packet_sent(
@@ -1028,6 +1052,7 @@ mod tests {
                 .on_ack_received(
                     &acked,
                     25,
+                    None,
                     packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
@@ -1059,6 +1084,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1083,6 +1109,7 @@ mod tests {
             .on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,

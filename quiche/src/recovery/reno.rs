@@ -45,6 +45,7 @@ pub static RENO: CongestionControlOps = CongestionControlOps {
     on_packet_sent,
     on_packets_acked,
     congestion_event,
+    process_ecn,
     collapse_cwnd,
     checkpoint,
     rollback,
@@ -108,7 +109,7 @@ fn on_packet_acked(
     }
 }
 
-fn congestion_event(
+pub(crate) fn congestion_event(
     r: &mut Recovery, _lost_bytes: usize, largest_lost_pkt: &Sent,
     epoch: packet::Epoch, now: Instant,
 ) {
@@ -136,6 +137,20 @@ fn congestion_event(
         if r.hystart.in_css(epoch) {
             r.hystart.congestion_event();
         }
+    }
+}
+
+fn process_ecn(
+    r: &mut Recovery, _newly_ecn_marked_acked: u64, new_ce_marks: u64,
+    _acked_bytes: usize, largest_sent: &Sent, epoch: packet::Epoch, now: Instant,
+) {
+    if new_ce_marks > 0 {
+        r.congestion_event(
+            new_ce_marks as usize * r.max_datagram_size,
+            largest_sent,
+            epoch,
+            now,
+        );
     }
 }
 
@@ -220,6 +235,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         // Send initcwnd full MSS packets to become no longer app limited
@@ -273,6 +289,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         // Send initcwnd full MSS packets to become no longer app limited
@@ -354,6 +371,7 @@ mod tests {
             has_data: false,
             tx_in_flight: 0,
             lost: 0,
+            ecn_marked: false,
         };
 
         r.congestion_event(
@@ -395,6 +413,7 @@ mod tests {
             has_data: false,
             tx_in_flight: 0,
             lost: 0,
+            ecn_marked: false,
         };
 
         // Trigger congestion event to update ssthresh

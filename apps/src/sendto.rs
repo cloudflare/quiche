@@ -93,13 +93,53 @@ fn send_to_gso_pacing(
     panic!("send_to_gso() should not be called on non-linux platforms");
 }
 
+#[cfg(target_os = "linux")]
+fn set_ecn_value(
+    socket: &mio::net::UdpSocket, send_info: &quiche::SendInfo,
+) -> std::io::Result<()> {
+    use crate::common::setsockopt;
+    use libc::c_int;
+    use libc::IPPROTO_IP;
+    use libc::IPPROTO_IPV6;
+    use libc::IPV6_TCLASS;
+    use libc::IP_TOS;
+    use std::os::unix::io::AsRawFd;
+
+    let ecn: u32 = send_info.ecn as u32;
+    let res6 = unsafe {
+        setsockopt(socket.as_raw_fd(), IPPROTO_IPV6, IPV6_TCLASS, ecn as c_int)
+    };
+    let res4 = unsafe {
+        setsockopt(socket.as_raw_fd(), IPPROTO_IP, IP_TOS, ecn as c_int)
+    };
+    if res6.is_ok() {
+        res6
+    } else {
+        res4
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn set_ecn_value(
+    _socket: &mio::net::UdpSocket, _send_info: &quiche::SendInfo,
+) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        "ecn not supported",
+    ))
+}
+
 /// A wrapper function of send_to().
 /// - when GSO and SO_TXTIME enabled, send a packet using send_to_gso().
 /// Otherwise, send packet using socket.send_to().
 pub fn send_to(
     socket: &mio::net::UdpSocket, buf: &[u8], send_info: &quiche::SendInfo,
-    segment_size: usize, pacing: bool, enable_gso: bool,
+    segment_size: usize, pacing: bool, enable_gso: bool, enable_ecn: bool,
 ) -> io::Result<usize> {
+    if enable_ecn {
+        set_ecn_value(socket, send_info).ok();
+    }
+
     if pacing && enable_gso {
         match send_to_gso_pacing(socket, buf, send_info, segment_size) {
             Ok(v) => {

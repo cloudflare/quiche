@@ -37,6 +37,7 @@ use slab::Slab;
 use crate::Error;
 use crate::Result;
 
+use crate::packet::EcnCounts;
 use crate::recovery;
 use crate::recovery::HandshakeStatus;
 
@@ -769,12 +770,16 @@ impl PathMap {
     pub fn set_active_path(&mut self, path_id: usize) -> Result<()> {
         let is_server = self.is_server;
 
-        if let Ok(old_active_path) = self.get_active_mut() {
+        let old_ecn_counts = if let Ok(old_active_path) = self.get_active_mut() {
             old_active_path.active = false;
-        }
+            old_active_path.recovery.ecn.ecn_counts()
+        } else {
+            [EcnCounts::default(); crate::packet::Epoch::count()]
+        };
 
         let new_active_path = self.get_mut(path_id)?;
         new_active_path.active = true;
+        new_active_path.recovery.ecn.reset(old_ecn_counts);
 
         if is_server {
             if new_active_path.validated() {
