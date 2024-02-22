@@ -884,6 +884,8 @@ impl Config {
     }
 
     /// Configures whether to do path MTU discovery.
+    ///
+    /// The default value is `false`.
     pub fn discover_pmtu(&mut self, discover: bool) {
         self.pmtud = discover;
     }
@@ -2869,7 +2871,11 @@ impl Connection {
                         p.pmtud.set_current(cmp::max(pmtud_next, mtu_probe));
                         // Stop sending path MTU probes after successful
                         // probe
-                        trace!("{} pmtud acked", self.trace_id);
+                        trace!(
+                            "{} pmtud acked; pmtu size {:?}",
+                            self.trace_id,
+                            p.pmtud.get_current()
+                        );
                         p.pmtud.should_probe(false);
                         pmtud_probe = true;
                     },
@@ -3501,11 +3507,13 @@ impl Connection {
         let flow_control = &mut self.flow_control;
         let pkt_space = &mut self.pkt_num_spaces[epoch];
 
-        let mut left = b.cap();
+        let mut left: usize;
 
         if path.pmtud.is_enabled() {
             // Limit output buffer size by estimated path MTU.
             left = cmp::min(path.pmtud.get_current(), b.cap());
+        } else {
+            left = b.cap();
         }
 
         let pn = pkt_space.next_pkt_num;

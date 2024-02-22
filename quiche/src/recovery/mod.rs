@@ -665,9 +665,6 @@ impl Recovery {
         // HANDSHAKE_DONE and MAX_DATA / MAX_STREAM_DATA as well, in addition
         // to CRYPTO and STREAM, if the original packet carried them.
         for unacked in unacked_iter {
-            // if unacked.pmtud {
-            // continue;
-            // }
             self.lost[epoch].extend_from_slice(&unacked.frames);
         }
 

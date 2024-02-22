@@ -333,19 +333,6 @@ impl Path {
         self.challenge_requested
     }
 
-    /// Function used to set timer for path MTU Discovery probe
-    // pub fn set_pmtu_probe_timer(
-    // &mut self, handshake_status: &recovery::HandshakeStatus, now: Instant,
-    // ) -> bool {
-    // if handshake_status.completed {
-    // self.pmtud
-    // .set_probe_timeout(Some(now + self.recovery.rtt()));
-    // true
-    // } else {
-    // false
-    // }
-    // }
-
     pub fn should_send_pmtu_probe(
         &mut self, hs_confirmed: bool, hs_done: bool, out_len: usize,
         is_closing: bool, frames_empty: bool,
