@@ -743,6 +743,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                ecn_marked: false,
             };
 
             r.on_packet_sent(
@@ -765,6 +766,7 @@ mod tests {
             .on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
@@ -812,6 +814,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                ecn_marked: false,
             };
 
             r.on_packet_sent(
@@ -835,6 +838,7 @@ mod tests {
             .on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
@@ -884,6 +888,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                ecn_marked: false,
             };
 
             r.on_packet_sent(
@@ -907,6 +912,7 @@ mod tests {
                 .on_ack_received(
                     &acked,
                     25,
+                    None,
                     packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
@@ -934,6 +940,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                ecn_marked: false,
             };
 
             r.on_packet_sent(
@@ -960,6 +967,7 @@ mod tests {
             .on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
@@ -1006,6 +1014,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                ecn_marked: false,
             };
 
             r.on_packet_sent(
@@ -1028,6 +1037,7 @@ mod tests {
                 .on_ack_received(
                     &acked,
                     25,
+                    None,
                     packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
@@ -1059,6 +1069,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            ecn_marked: false,
         };
 
         r.on_packet_sent(
@@ -1083,6 +1094,7 @@ mod tests {
             .on_ack_received(
                 &acked,
                 25,
+                None,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,

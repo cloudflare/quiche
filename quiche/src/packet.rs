@@ -870,6 +870,8 @@ pub struct PktNumSpace {
 
     pub key_update: Option<KeyUpdate>,
 
+    pub ecn_counts: Option<EcnCounts>,
+
     pub crypto_open: Option<crypto::Open>,
     pub crypto_seal: Option<crypto::Seal>,
 
@@ -897,6 +899,8 @@ impl PktNumSpace {
             ack_elicited: false,
 
             key_update: None,
+
+            ecn_counts: None,
 
             crypto_open: None,
             crypto_seal: None,
@@ -986,6 +990,13 @@ impl PktNumWindow {
             .saturating_add(std::mem::size_of::<u128>() as u64 * 8) -
             1
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EcnCounts {
+    pub ect0_count: u64,
+    pub ect1_count: u64,
+    pub ecn_ce_count: u64,
 }
 
 #[cfg(test)]

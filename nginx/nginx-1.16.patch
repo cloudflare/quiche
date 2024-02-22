@@ -20,7 +20,7 @@ Subject: [PATCH] Initial QUIC and HTTP/3 implementation using quiche
  src/event/ngx_event.h                   |    4 -
  src/event/ngx_event_posted.c            |    1 +
  src/event/ngx_event_posted.h            |    3 +
- src/event/ngx_event_quic.c              |  902 +++++++++
+ src/event/ngx_event_quic.c              |  904 +++++++++
  src/event/ngx_event_quic.h              |   63 +
  src/event/ngx_event_udp.c               |   39 +-
  src/http/modules/ngx_http_ssl_module.c  |   13 +-
@@ -638,7 +638,7 @@ new file mode 100644
 index 000000000..bc73cffc9
 --- /dev/null
 +++ b/src/event/ngx_event_quic.c
-@@ -0,0 +1,902 @@
+@@ -0,0 +1,904 @@
 +
 +/*
 + * Copyright (C) Cloudflare, Inc.
@@ -866,6 +866,7 @@ index 000000000..bc73cffc9
 +        c->socklen,
 +        c->local_sockaddr,
 +        c->local_socklen,
++        0,
 +    };
 +
 +    /* Process the client's Initial packet, which was saved into c->buffer by
@@ -932,6 +933,7 @@ index 000000000..bc73cffc9
 +            c->socklen,
 +            c->local_sockaddr,
 +            c->local_socklen,
++            0,
 +        };
 +
 +        ssize_t done = quiche_conn_recv(c->quic->conn, b, n, &recv_info);

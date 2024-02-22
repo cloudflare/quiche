@@ -1640,3 +1640,39 @@ impl HttpConn for Http3Conn {
         }
     }
 }
+
+// The two following functions were copied from
+// https://github.com/rust-lang/socket2/blob/master/src/sys/unix.rs.
+
+#[cfg(target_os = "linux")]
+pub(crate) mod macro_helper {
+    /// Helper macro to execute a system call that returns an `io::Result`.
+    macro_rules! syscall {
+        ($fn: ident ( $($arg: expr),* $(,)* ) ) => {{
+            #[allow(unused_unsafe)]
+            let res = unsafe { libc::$fn($($arg, )*) };
+            if res == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(res)
+            }
+        }};
+    }
+
+    pub(crate) use syscall;
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) unsafe fn setsockopt<T>(
+    fd: libc::c_int, opt: libc::c_int, val: libc::c_int, payload: T,
+) -> std::io::Result<()> {
+    let payload = std::ptr::addr_of!(payload).cast();
+    macro_helper::syscall!(setsockopt(
+        fd,
+        opt,
+        val,
+        payload,
+        std::mem::size_of::<T>() as libc::socklen_t,
+    ))
+    .map(|_| ())
+}

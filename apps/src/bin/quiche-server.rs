@@ -41,6 +41,7 @@ use std::rc::Rc;
 
 use std::cell::RefCell;
 
+use quiche_apps::recvfrom::recv_from;
 use ring::rand::*;
 
 use quiche_apps::args::*;
@@ -127,6 +128,8 @@ fn main() {
     config.set_max_stream_window(conn_args.max_stream_window);
 
     config.enable_pacing(pacing);
+    config.enable_ecn(conn_args.enable_ecn);
+    config.set_ecn_use_ect1(conn_args.use_ect1);
 
     let mut keylog = None;
 
@@ -202,7 +205,12 @@ fn main() {
                 break 'read;
             }
 
-            let (len, from) = match socket.recv_from(&mut buf) {
+            let (len, recv_info) = match recv_from(
+                &socket,
+                local_addr,
+                &mut buf,
+                conn_args.enable_ecn,
+            ) {
                 Ok(v) => v,
 
                 Err(e) => {
@@ -270,7 +278,7 @@ fn main() {
 
                     let out = &out[..len];
 
-                    if let Err(e) = socket.send_to(out, from) {
+                    if let Err(e) = socket.send_to(out, recv_info.from) {
                         if e.kind() == std::io::ErrorKind::WouldBlock {
                             trace!("send() would block");
                             break;
@@ -295,7 +303,7 @@ fn main() {
                         warn!("Doing stateless retry");
 
                         let scid = quiche::ConnectionId::from_ref(&scid);
-                        let new_token = mint_token(&hdr, &from);
+                        let new_token = mint_token(&hdr, &recv_info.from);
 
                         let len = quiche::retry(
                             &hdr.scid,
@@ -309,7 +317,7 @@ fn main() {
 
                         let out = &out[..len];
 
-                        if let Err(e) = socket.send_to(out, from) {
+                        if let Err(e) = socket.send_to(out, recv_info.from) {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
                                 trace!("send() would block");
                                 break;
@@ -320,7 +328,7 @@ fn main() {
                         continue 'read;
                     }
 
-                    odcid = validate_token(&from, token);
+                    odcid = validate_token(&recv_info.from, token);
 
                     // The token was not valid, meaning the retry failed, so
                     // drop the packet.
@@ -348,7 +356,7 @@ fn main() {
                     &scid,
                     odcid.as_ref(),
                     local_addr,
-                    from,
+                    recv_info.from,
                     &mut config,
                 )
                 .unwrap();
@@ -402,11 +410,6 @@ fn main() {
                 };
 
                 clients.get_mut(cid).unwrap()
-            };
-
-            let recv_info = quiche::RecvInfo {
-                to: local_addr,
-                from,
             };
 
             // Process potentially coalesced packets.
@@ -585,6 +588,7 @@ fn main() {
                 client.max_datagram_size,
                 pacing,
                 enable_gso,
+                conn_args.enable_ecn,
             ) {
                 if e.kind() == std::io::ErrorKind::WouldBlock {
                     trace!("send() would block");
