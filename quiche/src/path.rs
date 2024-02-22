@@ -342,7 +342,6 @@ impl Path {
             self.recovery.cwnd_available() > self.pmtud.get_probe_size() &&
             out_len >= self.pmtud.get_probe_size() &&
             self.pmtud.get_probe_status() &&
-            //self.pmtud.get_probe_timeout().is_none() &&
             !is_closing &&
             frames_empty
     }
