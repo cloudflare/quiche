@@ -827,6 +827,8 @@ impl Frame {
 
     #[cfg(feature = "qlog")]
     pub fn to_qlog(&self) -> QuicFrame {
+        use qlog::events::quic::ConnectionCloseErrorCode;
+
         match self {
             Frame::Padding { .. } => QuicFrame::Padding,
 
@@ -987,20 +989,25 @@ impl Frame {
                 error_code, reason, ..
             } => QuicFrame::ConnectionClose {
                 error_space: Some(ErrorSpace::TransportError),
-                error_code: Some(*error_code),
-                error_code_value: None, // raw error is no different for us
+                // TODO: determine if connection is established so we can log
+                // CryptoErrors
+                error_code: Some(ConnectionCloseErrorCode::Numeric(*error_code)),
                 reason: Some(String::from_utf8_lossy(reason).into_owned()),
                 trigger_frame_type: None, // don't know trigger type
             },
 
-            Frame::ApplicationClose { error_code, reason } =>
+            Frame::ApplicationClose { error_code, reason } => {
                 QuicFrame::ConnectionClose {
                     error_space: Some(ErrorSpace::ApplicationError),
-                    error_code: Some(*error_code),
-                    error_code_value: None, // raw error is no different for us
+                    // TODO: determine if connection is established so we can log
+                    // CryptoErrors
+                    error_code: Some(ConnectionCloseErrorCode::Numeric(
+                        *error_code,
+                    )),
                     reason: Some(String::from_utf8_lossy(reason).into_owned()),
                     trigger_frame_type: None, // don't know trigger type
-                },
+                }
+            },
 
             Frame::HandshakeDone => QuicFrame::HandshakeDone,
 

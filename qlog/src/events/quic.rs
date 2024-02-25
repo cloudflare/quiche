@@ -31,6 +31,7 @@ use smallvec::SmallVec;
 
 use super::connectivity::TransportOwner;
 use super::Bytes;
+use super::CryptoError;
 use super::DataRecipient;
 use super::RawInfo;
 use super::Token;
@@ -478,8 +479,7 @@ pub enum QuicFrame {
 
     ConnectionClose {
         error_space: Option<ErrorSpace>,
-        error_code: Option<u64>,
-        error_code_value: Option<u64>,
+        error_code: Option<ConnectionCloseErrorCode>,
         reason: Option<String>,
 
         trigger_frame_type: Option<u64>,
@@ -785,6 +785,13 @@ pub struct PacketLost {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct MarkedForRetransmit {
     pub frames: Vec<QuicFrame>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(untagged)]
+pub enum ConnectionCloseErrorCode {
+    CryptoError(CryptoError),
+    Numeric(u64),
 }
 
 #[cfg(test)]
