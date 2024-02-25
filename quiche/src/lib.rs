@@ -3321,102 +3321,7 @@ impl Connection {
         };
 
         let epoch = pkt_type.to_epoch()?;
-        let pkt_space = &mut self.pkt_num_spaces[epoch];
-
-        // Process lost frames. There might be several paths having lost frames.
-        for (_, p) in self.paths.iter_mut() {
-            for lost in p.recovery.lost[epoch].drain(..) {
-                match lost {
-                    frame::Frame::CryptoHeader { offset, length } => {
-                        pkt_space.crypto_stream.send.retransmit(offset, length);
-
-                        self.stream_retrans_bytes += length as u64;
-                        p.stream_retrans_bytes += length as u64;
-
-                        self.retrans_count += 1;
-                        p.retrans_count += 1;
-                    },
-
-                    frame::Frame::StreamHeader {
-                        stream_id,
-                        offset,
-                        length,
-                        fin,
-                    } => {
-                        let stream = match self.streams.get_mut(stream_id) {
-                            Some(v) => v,
-
-                            None => continue,
-                        };
-
-                        let was_flushable = stream.is_flushable();
-
-                        let empty_fin = length == 0 && fin;
-
-                        stream.send.retransmit(offset, length);
-
-                        // If the stream is now flushable push it to the
-                        // flushable queue, but only if it wasn't already
-                        // queued.
-                        //
-                        // Consider the stream flushable also when we are
-                        // sending a zero-length frame that has the fin flag
-                        // set.
-                        if (stream.is_flushable() || empty_fin) && !was_flushable
-                        {
-                            let priority_key = Arc::clone(&stream.priority_key);
-                            self.streams.insert_flushable(&priority_key);
-                        }
-
-                        self.stream_retrans_bytes += length as u64;
-                        p.stream_retrans_bytes += length as u64;
-
-                        self.retrans_count += 1;
-                        p.retrans_count += 1;
-                    },
-
-                    frame::Frame::ACK { .. } => {
-                        pkt_space.ack_elicited = true;
-                    },
-
-                    frame::Frame::ResetStream {
-                        stream_id,
-                        error_code,
-                        final_size,
-                    } =>
-                        if self.streams.get(stream_id).is_some() {
-                            self.streams
-                                .insert_reset(stream_id, error_code, final_size);
-                        },
-
-                    // Retransmit HANDSHAKE_DONE only if it hasn't been acked at
-                    // least once already.
-                    frame::Frame::HandshakeDone if !self.handshake_done_acked => {
-                        self.handshake_done_sent = false;
-                    },
-
-                    frame::Frame::MaxStreamData { stream_id, .. } => {
-                        if self.streams.get(stream_id).is_some() {
-                            self.streams.insert_almost_full(stream_id);
-                        }
-                    },
-
-                    frame::Frame::MaxData { .. } => {
-                        self.almost_full = true;
-                    },
-
-                    frame::Frame::NewConnectionId { seq_num, .. } => {
-                        self.ids.mark_advertise_new_scid_seq(seq_num, true);
-                    },
-
-                    frame::Frame::RetireConnectionId { seq_num } => {
-                        self.ids.mark_retire_dcid_seq(seq_num, true);
-                    },
-
-                    _ => (),
-                }
-            }
-        }
+        self.process_lost_frames(epoch);
 
         let is_app_limited = self.delivery_rate_check_if_app_limited();
         let n_paths = self.paths.len();
@@ -4391,6 +4296,105 @@ impl Connection {
         }
 
         Ok((pkt_type, written))
+    }
+
+    fn process_lost_frames(&mut self, epoch: packet::Epoch) {
+        let pkt_space = &mut self.pkt_num_spaces[epoch];
+
+        // There might be several paths having lost frames.
+        for (_, p) in self.paths.iter_mut() {
+            for lost in p.recovery.lost[epoch].drain(..) {
+                match lost {
+                    frame::Frame::CryptoHeader { offset, length } => {
+                        pkt_space.crypto_stream.send.retransmit(offset, length);
+
+                        self.stream_retrans_bytes += length as u64;
+                        p.stream_retrans_bytes += length as u64;
+
+                        self.retrans_count += 1;
+                        p.retrans_count += 1;
+                    },
+
+                    frame::Frame::StreamHeader {
+                        stream_id,
+                        offset,
+                        length,
+                        fin,
+                    } => {
+                        let stream = match self.streams.get_mut(stream_id) {
+                            Some(v) => v,
+
+                            None => continue,
+                        };
+
+                        let was_flushable = stream.is_flushable();
+
+                        let empty_fin = length == 0 && fin;
+
+                        stream.send.retransmit(offset, length);
+
+                        // If the stream is now flushable push it to the
+                        // flushable queue, but only if it wasn't already
+                        // queued.
+                        //
+                        // Consider the stream flushable also when we are
+                        // sending a zero-length frame that has the fin flag
+                        // set.
+                        if (stream.is_flushable() || empty_fin) && !was_flushable
+                        {
+                            let priority_key = Arc::clone(&stream.priority_key);
+                            self.streams.insert_flushable(&priority_key);
+                        }
+
+                        self.stream_retrans_bytes += length as u64;
+                        p.stream_retrans_bytes += length as u64;
+
+                        self.retrans_count += 1;
+                        p.retrans_count += 1;
+                    },
+
+                    frame::Frame::ACK { .. } => {
+                        pkt_space.ack_elicited = true;
+                    },
+
+                    frame::Frame::ResetStream {
+                        stream_id,
+                        error_code,
+                        final_size,
+                    } =>
+                        if self.streams.get(stream_id).is_some() {
+                            self.streams
+                                .insert_reset(stream_id, error_code, final_size);
+                        },
+
+                    // Retransmit HANDSHAKE_DONE only if it hasn't been acked at
+                    // least once already.
+                    frame::Frame::HandshakeDone if !self.handshake_done_acked => {
+                        self.handshake_done_sent = false;
+                    },
+
+                    frame::Frame::MaxStreamData { stream_id, .. } => {
+                        if self.streams.get(stream_id).is_some() {
+                            self.streams.insert_almost_full(stream_id);
+                        }
+                    },
+
+                    frame::Frame::MaxData { .. } => {
+                        self.almost_full = true;
+                    },
+
+                    frame::Frame::NewConnectionId { seq_num, .. } => {
+                        self.ids.mark_advertise_new_scid_seq(seq_num, true);
+                    },
+
+                    frame::Frame::RetireConnectionId { seq_num } => {
+                        self.ids.mark_retire_dcid_seq(seq_num, true);
+                    },
+
+                    _ => (),
+                }
+            }
+        }
     }
 
     /// Returns the size of the send quantum, in bytes.
