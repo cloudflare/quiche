@@ -375,6 +375,7 @@ impl Recovery {
 
     fn on_packet_sent_cc(&mut self, sent_bytes: usize, now: Instant) {
         (self.cc_ops.on_packet_sent)(self, sent_bytes, now);
+        self.bytes_in_flight += sent_bytes;
     }
 
     pub fn set_pacing_rate(&mut self, rate: u64, now: Instant) {
@@ -979,9 +980,11 @@ impl Recovery {
     fn on_packets_acked(
         &mut self, acked: &mut Vec<Acked>, epoch: packet::Epoch, now: Instant,
     ) {
+        let mut newly_acked_bytes = 0;
         // Update delivery rate sample per acked packet.
         for pkt in acked.iter() {
             self.delivery_rate.update_rate_sample(pkt, now);
+            newly_acked_bytes += pkt.size;
         }
 
         // Fill in a rate sample.
@@ -990,6 +993,8 @@ impl Recovery {
 
         // Call congestion control hooks.
         (self.cc_ops.on_packets_acked)(self, acked, epoch, now);
+
+        self.bytes_in_flight -= newly_acked_bytes;
     }
 
     fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
@@ -1012,13 +1017,13 @@ impl Recovery {
         &mut self, lost_bytes: usize, largest_lost_pkt: &Sent,
         epoch: packet::Epoch, now: Instant,
     ) {
-        self.bytes_in_flight = self.bytes_in_flight.saturating_sub(lost_bytes);
-
         self.congestion_event(lost_bytes, largest_lost_pkt, epoch, now);
 
         if self.in_persistent_congestion(largest_lost_pkt.pkt_num) {
             self.collapse_cwnd();
         }
+
+        self.bytes_in_flight -= lost_bytes;
     }
 
     fn congestion_event(

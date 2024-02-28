@@ -40,21 +40,23 @@ fn bbr2_min_pipe_cwnd(r: &mut Recovery) -> usize {
 // BBR2 Functions when ACK is received.
 //
 pub fn bbr2_update_model_and_state(
-    r: &mut Recovery, packet: &Acked, now: Instant,
+    r: &mut Recovery, packet: &Acked, in_flight: usize, now: Instant,
 ) {
     per_loss::bbr2_update_latest_delivery_signals(r);
     per_loss::bbr2_update_congestion_signals(r, packet);
     bbr2_update_ack_aggregation(r, packet, now);
     bbr2_check_startup_done(r);
-    bbr2_check_drain(r, now);
-    bbr2_update_probe_bw_cycle_phase(r, now);
+    bbr2_check_drain(r, in_flight, now);
+    bbr2_update_probe_bw_cycle_phase(r, in_flight, now);
     bbr2_update_min_rtt(r, now);
-    bbr2_check_probe_rtt(r, now);
+    bbr2_check_probe_rtt(r, in_flight, now);
     per_loss::bbr2_advance_latest_delivery_signals(r);
     per_loss::bbr2_bound_bw_for_model(r);
 }
 
-pub fn bbr2_update_control_parameters(r: &mut Recovery, now: Instant) {
+pub fn bbr2_update_control_parameters(
+    r: &mut Recovery, in_flight: usize, now: Instant,
+) {
     pacing::bbr2_set_pacing_rate(r);
     bbr2_set_send_quantum(r);
 
@@ -62,7 +64,7 @@ pub fn bbr2_update_control_parameters(r: &mut Recovery, now: Instant) {
     // It is called here because send_quantum may be updated too.
     r.set_pacing_rate(r.bbr2_state.pacing_rate, now);
 
-    bbr2_set_cwnd(r);
+    bbr2_set_cwnd(r, in_flight);
 }
 
 // BBR2 Functions while processing ACKs.
@@ -140,9 +142,9 @@ fn bbr2_enter_drain(r: &mut Recovery) {
     bbr.cwnd_gain = STARTUP_CWND_GAIN;
 }
 
-fn bbr2_check_drain(r: &mut Recovery, now: Instant) {
+fn bbr2_check_drain(r: &mut Recovery, in_flight: usize, now: Instant) {
     if r.bbr2_state.state == BBR2StateMachine::Drain &&
-        r.bytes_in_flight <= bbr2_inflight(r, r.bbr2_state.max_bw, 1.0)
+        in_flight <= bbr2_inflight(r, r.bbr2_state.max_bw, 1.0)
     {
         // BBR estimates the queue was drained
         bbr2_enter_probe_bw(r, now);
@@ -252,7 +254,9 @@ fn bbr2_start_probe_bw_up(r: &mut Recovery, now: Instant) {
 }
 
 // The core state machine logic for ProbeBW
-fn bbr2_update_probe_bw_cycle_phase(r: &mut Recovery, now: Instant) {
+fn bbr2_update_probe_bw_cycle_phase(
+    r: &mut Recovery, in_flight: usize, now: Instant,
+) {
     if !r.bbr2_state.filled_pipe {
         // only handling steady-state behavior here
         return;
@@ -272,7 +276,7 @@ fn bbr2_update_probe_bw_cycle_phase(r: &mut Recovery, now: Instant) {
                 return;
             }
 
-            if bbr2_check_time_to_cruise(r) {
+            if bbr2_check_time_to_cruise(r, in_flight) {
                 bbr2_start_probe_bw_cruise(r);
             }
         },
@@ -292,7 +296,7 @@ fn bbr2_update_probe_bw_cycle_phase(r: &mut Recovery, now: Instant) {
 
         BBR2StateMachine::ProbeBWUP => {
             if bbr2_has_elapsed_in_phase(r, r.bbr2_state.min_rtt, now) &&
-                r.bytes_in_flight > bbr2_inflight(r, r.bbr2_state.max_bw, 1.25)
+                in_flight > bbr2_inflight(r, r.bbr2_state.max_bw, 1.25)
             {
                 bbr2_start_probe_bw_down(r, now);
             }
@@ -311,13 +315,13 @@ pub fn bbr2_is_in_a_probe_bw_state(r: &mut Recovery) -> bool {
         state == BBR2StateMachine::ProbeBWUP
 }
 
-fn bbr2_check_time_to_cruise(r: &mut Recovery) -> bool {
-    if r.bytes_in_flight > bbr2_inflight_with_headroom(r) {
+fn bbr2_check_time_to_cruise(r: &mut Recovery, in_flight: usize) -> bool {
+    if in_flight > bbr2_inflight_with_headroom(r) {
         // Not enough headroom.
         return false;
     }
 
-    if r.bytes_in_flight <= bbr2_inflight(r, r.bbr2_state.max_bw, 1.0) {
+    if in_flight <= bbr2_inflight(r, r.bbr2_state.max_bw, 1.0) {
         // inflight <= estimated BDP
         return true;
     }
@@ -462,7 +466,7 @@ fn bbr2_update_min_rtt(r: &mut Recovery, now: Instant) {
     }
 }
 
-fn bbr2_check_probe_rtt(r: &mut Recovery, now: Instant) {
+fn bbr2_check_probe_rtt(r: &mut Recovery, in_flight: usize, now: Instant) {
     if r.bbr2_state.state != BBR2StateMachine::ProbeRTT &&
         r.bbr2_state.probe_rtt_expired &&
         !r.bbr2_state.idle_restart
@@ -477,7 +481,7 @@ fn bbr2_check_probe_rtt(r: &mut Recovery, now: Instant) {
     }
 
     if r.bbr2_state.state == BBR2StateMachine::ProbeRTT {
-        bbr2_handle_probe_rtt(r, now);
+        bbr2_handle_probe_rtt(r, in_flight, now);
     }
 
     if r.delivery_rate.sample_delivered() > 0 {
@@ -493,7 +497,7 @@ fn bbr2_enter_probe_rtt(r: &mut Recovery) {
     bbr.cwnd_gain = PROBE_RTT_CWND_GAIN;
 }
 
-fn bbr2_handle_probe_rtt(r: &mut Recovery, now: Instant) {
+fn bbr2_handle_probe_rtt(r: &mut Recovery, in_flight: usize, now: Instant) {
     // Ignore low rate samples during ProbeRTT.
     r.delivery_rate.update_app_limited(true);
 
@@ -505,7 +509,7 @@ fn bbr2_handle_probe_rtt(r: &mut Recovery, now: Instant) {
         if r.bbr2_state.probe_rtt_round_done {
             bbr2_check_probe_rtt_done(r, now);
         }
-    } else if r.bytes_in_flight <= bbr2_probe_rtt_cwnd(r) {
+    } else if in_flight <= bbr2_probe_rtt_cwnd(r) {
         // Wait for at least ProbeRTTDuration to elapse.
         r.bbr2_state.probe_rtt_done_stamp = Some(now + PROBE_RTT_DURATION);
 
@@ -699,7 +703,7 @@ pub fn bbr2_restore_cwnd(r: &mut Recovery) {
     r.congestion_window = r.congestion_window.max(r.bbr2_state.prior_cwnd);
 }
 
-fn bbr2_modulate_cwnd_for_recovery(r: &mut Recovery) {
+fn bbr2_modulate_cwnd_for_recovery(r: &mut Recovery, in_flight: usize) {
     let acked_bytes = r.bbr2_state.newly_acked_bytes;
     let lost_bytes = r.bbr2_state.newly_lost_bytes;
 
@@ -712,8 +716,7 @@ fn bbr2_modulate_cwnd_for_recovery(r: &mut Recovery) {
     }
 
     if r.bbr2_state.packet_conservation {
-        r.congestion_window =
-            r.congestion_window.max(r.bytes_in_flight + acked_bytes);
+        r.congestion_window = r.congestion_window.max(in_flight + acked_bytes);
     }
 }
 
@@ -732,11 +735,11 @@ fn bbr2_bound_cwnd_for_probe_rtt(r: &mut Recovery) {
 }
 
 // 4.6.4.6.  Core cwnd Adjustment Mechanism
-fn bbr2_set_cwnd(r: &mut Recovery) {
+fn bbr2_set_cwnd(r: &mut Recovery, in_flight: usize) {
     let acked_bytes = r.bbr2_state.newly_acked_bytes;
 
     bbr2_update_max_inflight(r);
-    bbr2_modulate_cwnd_for_recovery(r);
+    bbr2_modulate_cwnd_for_recovery(r, in_flight);
 
     if !r.bbr2_state.packet_conservation {
         if r.bbr2_state.filled_pipe {
