@@ -211,8 +211,6 @@ fn on_packet_acked(
 ) {
     let in_congestion_recovery = r.in_congestion_recovery(packet.time_sent);
 
-    r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
-
     if in_congestion_recovery {
         r.prr.on_packet_acked(
             packet.size,

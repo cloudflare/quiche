@@ -56,9 +56,7 @@ pub fn on_init(_r: &mut Recovery) {}
 
 pub fn reset(_r: &mut Recovery) {}
 
-pub fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
-    r.bytes_in_flight += sent_bytes;
-}
+pub fn on_packet_sent(_r: &mut Recovery, _sent_bytes: usize, _now: Instant) {}
 
 fn on_packets_acked(
     r: &mut Recovery, packets: &mut Vec<Acked>, epoch: packet::Epoch,
@@ -72,8 +70,6 @@ fn on_packets_acked(
 fn on_packet_acked(
     r: &mut Recovery, packet: &Acked, epoch: packet::Epoch, now: Instant,
 ) {
-    r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
-
     if r.in_congestion_recovery(packet.time_sent) {
         return;
     }
