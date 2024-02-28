@@ -518,11 +518,11 @@ impl State {
 }
 
 // When entering the recovery episode.
-fn bbr2_enter_recovery(r: &mut Recovery, now: Instant) {
+fn bbr2_enter_recovery(r: &mut Recovery, in_flight: usize, now: Instant) {
     r.bbr2_state.prior_cwnd = per_ack::bbr2_save_cwnd(r);
 
-    r.congestion_window = r.bytes_in_flight +
-        r.bbr2_state.newly_acked_bytes.max(r.max_datagram_size);
+    r.congestion_window =
+        in_flight + r.bbr2_state.newly_acked_bytes.max(r.max_datagram_size);
     r.congestion_recovery_start_time = Some(now);
 
     r.bbr2_state.packet_conservation = true;
@@ -554,9 +554,7 @@ fn reset(r: &mut Recovery) {
     init::bbr2_init(r);
 }
 
-fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, now: Instant) {
-    r.bytes_in_flight += sent_bytes;
-
+fn on_packet_sent(r: &mut Recovery, _sent_bytes: usize, now: Instant) {
     per_transmit::bbr2_on_transmit(r, now);
 }
 
@@ -568,17 +566,15 @@ fn on_packets_acked(
 
     let time_sent = packets.last().map(|pkt| pkt.time_sent);
 
+    r.bbr2_state.prior_bytes_in_flight = r.bytes_in_flight;
+    let mut bytes_in_flight = r.bytes_in_flight;
+
     for p in packets.drain(..) {
-        r.bbr2_state.prior_bytes_in_flight = r.bytes_in_flight;
+        per_ack::bbr2_update_model_and_state(r, &p, bytes_in_flight, now);
 
-        per_ack::bbr2_update_model_and_state(r, &p, now);
+        r.bbr2_state.prior_bytes_in_flight = bytes_in_flight;
+        bytes_in_flight -= p.size;
 
-        if r.bytes_in_flight < p.size {
-            trace!("BBR2 on_packets_acked subtraction overflow");
-            r.bytes_in_flight = 0;
-        } else {
-            r.bytes_in_flight -= p.size
-        }
         r.bbr2_state.newly_acked_bytes += p.size;
     }
 
@@ -589,7 +585,7 @@ fn on_packets_acked(
         }
     }
 
-    per_ack::bbr2_update_control_parameters(r, now);
+    per_ack::bbr2_update_control_parameters(r, bytes_in_flight, now);
 
     r.bbr2_state.newly_lost_bytes = 0;
 }
@@ -605,7 +601,7 @@ fn congestion_event(
     // Upon entering Fast Recovery.
     if !r.in_congestion_recovery(largest_lost_pkt.time_sent) {
         // Upon entering Fast Recovery.
-        bbr2_enter_recovery(r, now);
+        bbr2_enter_recovery(r, r.bytes_in_flight - lost_bytes, now);
     }
 }
 
@@ -956,7 +952,7 @@ mod tests {
 
         let mut acked = ranges::RangeSet::default();
 
-        // We sent 5 packets, but ack only one, to stay
+        // We sent 5 packets, but ack only one, so stay
         // in Drain state.
         acked.insert(0..pn - 4);
 
