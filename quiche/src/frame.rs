@@ -61,11 +61,11 @@ pub enum Frame {
     },
 
     Ping {
-        /// Attach metadata to the Ping frame. This doesn't appear on the wire,
-        /// but does tell us if this frame was part of a PMTUD probe and
-        /// how large the probe was. This will only show up on sent frames and
-        /// be None otherwise. This is the total size of the QUIC packet in the
-        /// probe.
+        // Attach metadata to the Ping frame. This doesn't appear on the wire,
+        // but does tell us if this frame was part of a PMTUD probe and how
+        // large the probe was. This will only show up on sent frames and be
+        // None otherwise. This is the total size of the QUIC packet in the
+        // probe.
         mtu_probe: Option<usize>,
     },
 

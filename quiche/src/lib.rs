@@ -2856,7 +2856,7 @@ impl Connection {
             });
         }
 
-        // Following flag used to upgrade datagram size, if probe is successful
+        // Following flag used to upgrade datagram size, if probe is successful.
         let mut pmtud_probe = false;
 
         // Process acked frames. Note that several packets from several paths
@@ -2869,16 +2869,18 @@ impl Connection {
                     } => {
                         let pmtud_next = p.pmtud.get_current();
                         p.pmtud.set_current(cmp::max(pmtud_next, mtu_probe));
-                        // Stop sending path MTU probes after successful
-                        // probe
+
+                        // Stop sending path MTU probes after successful probe.
+                        p.pmtud.should_probe(false);
+                        pmtud_probe = true;
+
                         trace!(
                             "{} pmtud acked; pmtu size {:?}",
                             self.trace_id,
                             p.pmtud.get_current()
                         );
-                        p.pmtud.should_probe(false);
-                        pmtud_probe = true;
                     },
+
                     frame::Frame::ACK { ranges, .. } => {
                         // Stop acknowledging packets less than or equal to the
                         // largest acknowledged in the sent ACK frame that, in
@@ -2965,7 +2967,8 @@ impl Connection {
                     _ => (),
                 }
             }
-            // Update max datagram send size with newly acked probe size
+
+            // Update max datagram send size with newly acked probe size.
             if pmtud_probe {
                 trace!(
                     "{} updating pmtu {:?}",
@@ -3281,17 +3284,16 @@ impl Connection {
 
         let send_path = self.paths.get_mut(send_pid)?;
 
-        // Update max datagram size to allow path MTU discovery probe to be sent
+        // Update max datagram size to allow path MTU discovery probe to be sent.
         if send_path.pmtud.get_probe_status() {
-            if self.handshake_confirmed || self.handshake_done_sent {
-                send_path.recovery.pmtud_update_max_datagram_size(
-                    send_path.pmtud.get_probe_size(),
-                );
+            let size = if self.handshake_confirmed || self.handshake_done_sent {
+                send_path.pmtud.get_probe_size()
             } else {
-                send_path.recovery.pmtud_update_max_datagram_size(
-                    send_path.pmtud.get_current(),
-                );
-            }
+                send_path.pmtud.get_current()
+            };
+
+            send_path.recovery.pmtud_update_max_datagram_size(size);
+
             left = cmp::min(out.len(), send_path.recovery.max_datagram_size());
         }
 
@@ -3496,6 +3498,7 @@ impl Connection {
                     frame::Frame::Ping { .. } => {
                         p.pmtud.pmtu_probe_lost();
                     },
+
                     _ => (),
                 }
             }
@@ -3507,14 +3510,12 @@ impl Connection {
         let flow_control = &mut self.flow_control;
         let pkt_space = &mut self.pkt_num_spaces[epoch];
 
-        let mut left: usize;
-
-        if path.pmtud.is_enabled() {
+        let mut left = if path.pmtud.is_enabled() {
             // Limit output buffer size by estimated path MTU.
-            left = cmp::min(path.pmtud.get_current(), b.cap());
+            cmp::min(path.pmtud.get_current(), b.cap())
         } else {
-            left = b.cap();
-        }
+            b.cap()
+        };
 
         let pn = pkt_space.next_pkt_num;
         let pn_len = packet::pkt_num_len(pn)?;
@@ -3715,10 +3716,17 @@ impl Connection {
                 is_closing,
                 frames.is_empty(),
             );
+
             if pmtu_probe {
-                trace!("{} sending pmtud probe pmtu_probe {} next_size {} and pmtu {} hs_con {} hs_sent {} cwnd_avail {} out_len {} left {}",
-                     self.trace_id, active_path.pmtud.get_probe_size(), active_path.pmtud.get_probe_status(), active_path.pmtud.get_current(),
-                     self.handshake_confirmed, self.handshake_done_sent, active_path.recovery.cwnd_available(),out_len, left);
+                trace!(
+                    "{} sending pmtud probe pmtu_probe={} next_size={} pmtu={} hs_con={} hs_sent={} cwnd_avail={} out_len={} left={}",
+                    self.trace_id, active_path.pmtud.get_probe_size(),
+                    active_path.pmtud.get_probe_status(),
+                    active_path.pmtud.get_current(),
+                    self.handshake_confirmed, self.handshake_done_sent,
+                    active_path.recovery.cwnd_available(),out_len, left
+                );
+
                 left = active_path.pmtud.get_probe_size();
 
                 match left.checked_sub(overhead) {
@@ -3729,14 +3737,15 @@ impl Connection {
                         // available in the output buffer.
                         //
                         // This usually happens when we try to send a new packet
-                        // but failed because cwnd is
-                        // almost full. In such case app_limited
-                        // is set to false here to make cwnd grow when ACK is
-                        // received.
+                        // but failed because cwnd is almost full.
+                        //
+                        // In such case app_limited is set to false here to make
+                        // cwnd grow when ACK is received.
                         active_path.recovery.update_app_limited(false);
                         return Err(Error::InvalidState);
                     },
                 }
+
                 let frame = frame::Frame::Padding {
                     len: active_path.pmtud.get_probe_size() - overhead - 1,
                 };
@@ -3745,6 +3754,7 @@ impl Connection {
                     let frame = frame::Frame::Ping {
                         mtu_probe: Some(active_path.pmtud.get_probe_size()),
                     };
+
                     if push_frame_to_pkt!(b, frames, frame, left) {
                         ack_eliciting = true;
                         in_flight = true;

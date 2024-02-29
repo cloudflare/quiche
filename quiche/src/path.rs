@@ -29,7 +29,6 @@ use std::time;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
-// use std::time::Instant;
 
 use smallvec::SmallVec;
 
@@ -137,7 +136,7 @@ pub struct Path {
     /// Loss recovery and congestion control state.
     pub recovery: recovery::Recovery,
 
-    /// Path MTU discovery
+    /// Path MTU discovery state.
     pub pmtud: pmtud::Pmtud,
 
     /// Pending challenge data with the size of the packet containing them and
@@ -560,7 +559,7 @@ impl PathMap {
         initial_path.active = true;
 
         // Enable path MTU Discovery and start probing with the largest datagram
-        // size
+        // size.
         if enable_pmtud {
             initial_path.pmtud.should_probe(enable_pmtud);
             initial_path.pmtud.set_probe_size(max_send_udp_payload_size);
