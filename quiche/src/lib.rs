@@ -3717,14 +3717,16 @@ impl Connection {
                 frames.is_empty(),
             );
 
+            trace!("{} pmtud probe status {} hs_con={} hs_sent={} cwnd_avail={} out_len={} left={}", self.trace_id, pmtu_probe, self.handshake_confirmed, self.handshake_done_sent,
+                    active_path.recovery.cwnd_available(), out_len, left);
+
             if pmtu_probe {
                 trace!(
-                    "{} sending pmtud probe pmtu_probe={} next_size={} pmtu={} hs_con={} hs_sent={} cwnd_avail={} out_len={} left={}",
-                    self.trace_id, active_path.pmtud.get_probe_size(),
+                    "{} sending pmtud probe pmtu_probe={} next_size={} pmtu={}",
+                    self.trace_id,
+                    active_path.pmtud.get_probe_size(),
                     active_path.pmtud.get_probe_status(),
                     active_path.pmtud.get_current(),
-                    self.handshake_confirmed, self.handshake_done_sent,
-                    active_path.recovery.cwnd_available(),out_len, left
                 );
 
                 left = active_path.pmtud.get_probe_size();
@@ -3742,7 +3744,7 @@ impl Connection {
                         // In such case app_limited is set to false here to make
                         // cwnd grow when ACK is received.
                         active_path.recovery.update_app_limited(false);
-                        return Err(Error::InvalidState);
+                        return Err(Error::Done);
                     },
                 }
 
