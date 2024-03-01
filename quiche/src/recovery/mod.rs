@@ -185,9 +185,7 @@ impl RecoveryEpoch {
         }
     }
 
-    fn drain_packets(&mut self, rtt_stats: &RttStats, now: Instant) {
-        let mut lowest_non_expired_pkt_index = self.sent_packets.len();
-
+    fn drain_acked_and_lost_packets(&mut self, loss_thresh: Instant) {
         // In order to avoid removing elements from the middle of the list
         // (which would require copying other elements to compact the list),
         // we only remove a contiguous range of elements from the start of the
@@ -196,24 +194,19 @@ impl RecoveryEpoch {
         // This means that acked or lost elements coming after this will not
         // be removed at this point, but their removal is delayed for a later
         // time, once the gaps have been filled.
-
-        // First, find the first element that is neither acked nor lost.
-        for (i, pkt) in self.sent_packets.iter().enumerate() {
+        while let Some(pkt) = self.sent_packets.front() {
             if let Some(time_lost) = pkt.time_lost {
-                if time_lost + rtt_stats.rtt() > now {
-                    lowest_non_expired_pkt_index = i;
+                if time_lost > loss_thresh {
                     break;
                 }
             }
 
             if pkt.time_acked.is_none() && pkt.time_lost.is_none() {
-                lowest_non_expired_pkt_index = i;
                 break;
             }
-        }
 
-        // Then remove elements up to the previously found index.
-        self.sent_packets.drain(..lowest_non_expired_pkt_index);
+            self.sent_packets.pop_front();
+        }
     }
 }
 
@@ -736,7 +729,8 @@ impl Recovery {
 
         self.set_loss_detection_timer(handshake_status, now);
 
-        self.epochs[epoch].drain_packets(&self.rtt_stats, now);
+        self.epochs[epoch]
+            .drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
 
         Ok(loss)
     }
@@ -1041,7 +1035,8 @@ impl Recovery {
 
         self.bytes_in_flight -= loss.pmtud_lost_bytes;
 
-        self.epochs[epoch].drain_packets(&self.rtt_stats, now);
+        self.epochs[epoch]
+            .drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
 
         self.lost_count += loss.lost_packets;
 
