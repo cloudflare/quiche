@@ -558,10 +558,7 @@ fn on_packet_sent(r: &mut Recovery, _sent_bytes: usize, now: Instant) {
     per_transmit::bbr2_on_transmit(r, now);
 }
 
-fn on_packets_acked(
-    r: &mut Recovery, packets: &mut Vec<Acked>, _epoch: packet::Epoch,
-    now: Instant,
-) {
+fn on_packets_acked(r: &mut Recovery, packets: &mut Vec<Acked>, now: Instant) {
     r.bbr2_state.newly_acked_bytes = 0;
 
     let time_sent = packets.last().map(|pkt| pkt.time_sent);
@@ -591,8 +588,7 @@ fn on_packets_acked(
 }
 
 fn congestion_event(
-    r: &mut Recovery, lost_bytes: usize, largest_lost_pkt: &Sent,
-    _epoch: packet::Epoch, now: Instant,
+    r: &mut Recovery, lost_bytes: usize, largest_lost_pkt: &Sent, now: Instant,
 ) {
     r.bbr2_state.newly_lost_bytes = lost_bytes;
 
@@ -705,7 +701,7 @@ mod tests {
         let now = Instant::now();
 
         r.on_init();
-        r.on_packet_sent_cc(1000, now);
+        r.on_packet_sent_cc(0, 1000, now);
 
         assert_eq!(r.bytes_in_flight, 1000);
     }
