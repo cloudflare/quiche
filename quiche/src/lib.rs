@@ -2944,7 +2944,7 @@ impl Connection {
         // Process acked frames. Note that several packets from several paths
         // might have been acked by the received packet.
         for (_, p) in self.paths.iter_mut() {
-            for acked in p.recovery.acked[epoch].drain(..) {
+            for acked in p.recovery.get_acked_frames(epoch) {
                 match acked {
                     frame::Frame::Ping {
                         mtu_probe: Some(mtu_probe),
@@ -3415,7 +3415,7 @@ impl Connection {
             // When sending multiple PTO probes, don't coalesce them together,
             // so they are sent on separate UDP datagrams.
             if let Ok(epoch) = ty.to_epoch() {
-                if self.paths.get_mut(send_pid)?.recovery.loss_probes[epoch] > 0 {
+                if self.paths.get_mut(send_pid)?.recovery.loss_probes(epoch) > 0 {
                     break;
                 }
             }
@@ -3489,7 +3489,7 @@ impl Connection {
 
         // Process lost frames. There might be several paths having lost frames.
         for (_, p) in self.paths.iter_mut() {
-            for lost in p.recovery.lost[epoch].drain(..) {
+            for lost in p.recovery.get_lost_frames(epoch) {
                 match lost {
                     frame::Frame::CryptoHeader { offset, length } => {
                         pkt_space.crypto_stream.send.retransmit(offset, length);
@@ -4441,8 +4441,7 @@ impl Connection {
 
         if ack_eliciting && !pmtud_probe {
             path.needs_ack_eliciting = false;
-            path.recovery.loss_probes[epoch] =
-                path.recovery.loss_probes[epoch].saturating_sub(1);
+            path.recovery.ping_sent(epoch);
         }
 
         if frames.is_empty() {
@@ -6844,12 +6843,12 @@ impl Connection {
 
             // There are lost frames in this packet number space.
             for (_, p) in self.paths.iter() {
-                if !p.recovery.lost[epoch].is_empty() {
+                if p.recovery.has_lost_frames(epoch) {
                     return Ok(packet::Type::from_epoch(epoch));
                 }
 
                 // We need to send PTO probe packets.
-                if p.recovery.loss_probes[epoch] > 0 {
+                if p.recovery.loss_probes(epoch) > 0 {
                     return Ok(packet::Type::from_epoch(epoch));
                 }
             }
@@ -8812,7 +8811,7 @@ pub mod testing {
             scid: ConnectionId::from_ref(
                 conn.ids.get_scid(*active_scid_seq)?.cid.as_ref(),
             ),
-            pkt_num: 0,
+            pkt_num: pn,
             pkt_num_len: pn_len,
             token: conn.token.clone(),
             versions: None,
@@ -9981,7 +9980,7 @@ mod tests {
             .get_active_mut()
             .expect("no active path")
             .recovery
-            .loss_probes[packet::Epoch::Initial] = 1;
+            .inc_loss_probes(packet::Epoch::Initial);
 
         let initial_path = pipe
             .server
@@ -13839,7 +13838,7 @@ mod tests {
                 .get_active()
                 .expect("no active")
                 .recovery
-                .loss_probes[epoch],
+                .loss_probes(epoch),
             1,
         );
 
@@ -13851,7 +13850,7 @@ mod tests {
                 .get_active()
                 .expect("no active")
                 .recovery
-                .loss_probes[epoch],
+                .loss_probes(epoch),
             0,
         );
 
@@ -13897,7 +13896,7 @@ mod tests {
                 .get_active()
                 .expect("no active")
                 .recovery
-                .loss_probes[epoch],
+                .loss_probes(epoch),
             1,
         );
 
@@ -13910,7 +13909,7 @@ mod tests {
                 .get_active()
                 .expect("no active")
                 .recovery
-                .loss_probes[epoch],
+                .loss_probes(epoch),
             0,
         );
 
@@ -13926,7 +13925,7 @@ mod tests {
                 .get_active()
                 .expect("no active")
                 .recovery
-                .loss_probes[epoch],
+                .loss_probes(epoch),
             2,
         );
 
@@ -13939,7 +13938,7 @@ mod tests {
                 .get_active()
                 .expect("no active")
                 .recovery
-                .loss_probes[epoch],
+                .loss_probes(epoch),
             1,
         );
 
@@ -13952,7 +13951,7 @@ mod tests {
                 .get_active()
                 .expect("no active")
                 .recovery
-                .loss_probes[epoch],
+                .loss_probes(epoch),
             0,
         );
     }
