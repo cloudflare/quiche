@@ -303,7 +303,7 @@ fn on_packet_acked(r: &mut Recovery, packet: &Acked, now: Instant) {
         // target = w_cubic(t + rtt)
         let target = r
             .cubic_state
-            .w_cubic(t + r.rtt_stats.min_rtt, r.max_datagram_size);
+            .w_cubic(t + *r.rtt_stats.min_rtt, r.max_datagram_size);
 
         // Clipping target to [cwnd, 1.5 x cwnd]
         let target = f64::max(target, r.congestion_window as f64);
@@ -670,7 +670,8 @@ mod tests {
         // Shift current time by 1 RTT.
         let rtt = Duration::from_millis(100);
 
-        r.rtt_stats.update_rtt(rtt, Duration::from_millis(0), now);
+        r.rtt_stats
+            .update_rtt(rtt, Duration::from_millis(0), now, true);
 
         // Exit from the recovery.
         now += rtt;
@@ -821,7 +822,8 @@ mod tests {
         }];
 
         // Ack more than cwnd bytes with rtt=100ms
-        r.rtt_stats.update_rtt(rtt, Duration::from_millis(0), now);
+        r.rtt_stats
+            .update_rtt(rtt, Duration::from_millis(0), now, true);
 
         // Trigger detecting spurious congestion event
         r.on_packets_acked(&mut acked, now + rtt + Duration::from_millis(5));
@@ -875,7 +877,8 @@ mod tests {
         }];
 
         // Ack more than cwnd bytes with rtt=100ms.
-        r.rtt_stats.update_rtt(rtt, Duration::from_millis(0), now);
+        r.rtt_stats
+            .update_rtt(rtt, Duration::from_millis(0), now, true);
 
         // Trigger detecting spurious congestion event.
         r.on_packets_acked(&mut acked, now + rtt + Duration::from_millis(5));
@@ -926,7 +929,8 @@ mod tests {
 
         // Shift current time by 1 RTT.
         let rtt = Duration::from_millis(100);
-        r.rtt_stats.update_rtt(rtt, Duration::from_millis(0), now);
+        r.rtt_stats
+            .update_rtt(rtt, Duration::from_millis(0), now, true);
 
         // Exit from the recovery.
         now += rtt;
