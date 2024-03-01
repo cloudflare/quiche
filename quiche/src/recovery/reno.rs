@@ -413,7 +413,8 @@ mod tests {
         }];
 
         // Ack more than cwnd bytes with rtt=100ms
-        r.rtt_stats.update_rtt(rtt, Duration::from_millis(0), now);
+        r.rtt_stats
+            .update_rtt(rtt, Duration::from_millis(0), now, true);
         r.on_packets_acked(&mut acked, now + rtt * 2);
 
         // After acking more than cwnd, expect cwnd increased by MSS

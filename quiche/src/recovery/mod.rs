@@ -492,12 +492,12 @@ impl Recovery {
         self.bytes_sent += sent_bytes;
 
         // Pacing: Set the pacing rate if CC doesn't do its own.
-        if !(self.cc_ops.has_custom_pacing)() {
-            if let Some(srtt) = self.rtt_stats.smoothed_rtt {
-                let rate = PACING_MULTIPLIER * self.congestion_window as f64 /
-                    srtt.as_secs_f64();
-                self.set_pacing_rate(rate as u64, now);
-            }
+        if !(self.cc_ops.has_custom_pacing)() &&
+            self.rtt_stats.first_rtt_sample.is_some()
+        {
+            let rate = PACING_MULTIPLIER * self.congestion_window as f64 /
+                self.rtt_stats.smoothed_rtt.as_secs_f64();
+            self.set_pacing_rate(rate as u64, now);
         }
 
         self.schedule_next_packet(now, sent_bytes);
@@ -717,7 +717,12 @@ impl Recovery {
 
             // Don't update srtt if rtt is zero.
             if !latest_rtt.is_zero() {
-                self.rtt_stats.update_rtt(latest_rtt, ack_delay, now);
+                self.rtt_stats.update_rtt(
+                    latest_rtt,
+                    ack_delay,
+                    now,
+                    handshake_status.completed,
+                );
             }
         }
 
@@ -1053,7 +1058,7 @@ impl Recovery {
 
         // Fill in a rate sample.
         self.delivery_rate
-            .generate_rate_sample(self.rtt_stats.min_rtt);
+            .generate_rate_sample(*self.rtt_stats.min_rtt);
 
         // Call congestion control hooks.
         (self.cc_ops.on_packets_acked)(self, acked, now);
@@ -1124,7 +1129,7 @@ impl Recovery {
     #[cfg(feature = "qlog")]
     pub fn maybe_qlog(&mut self) -> Option<EventData> {
         let qlog_metrics = QlogMetrics {
-            min_rtt: self.rtt_stats.min_rtt,
+            min_rtt: *self.rtt_stats.min_rtt,
             smoothed_rtt: self.rtt(),
             latest_rtt: self.rtt_stats.latest_rtt,
             rttvar: self.rtt_stats.rttvar,
@@ -1238,7 +1243,7 @@ impl std::fmt::Debug for Recovery {
 
         write!(f, "latest_rtt={:?} ", self.rtt_stats.latest_rtt)?;
         write!(f, "srtt={:?} ", self.rtt_stats.smoothed_rtt)?;
-        write!(f, "min_rtt={:?} ", self.rtt_stats.min_rtt)?;
+        write!(f, "min_rtt={:?} ", *self.rtt_stats.min_rtt)?;
         write!(f, "rttvar={:?} ", self.rtt_stats.rttvar)?;
         write!(f, "cwnd={} ", self.congestion_window)?;
         write!(f, "ssthresh={} ", self.ssthresh)?;
@@ -2187,7 +2192,7 @@ mod tests {
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 0);
         assert_eq!(r.bytes_in_flight, 0);
-        assert_eq!(r.rtt_stats.smoothed_rtt.unwrap(), Duration::from_millis(50));
+        assert_eq!(r.rtt_stats.smoothed_rtt, Duration::from_millis(50));
 
         // 1 MSS increased.
         assert_eq!(r.congestion_window, 12000 + 1200);

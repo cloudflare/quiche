@@ -26,6 +26,10 @@
 
 use super::*;
 
+use crate::recovery::Recovery;
+
+use std::time::Instant;
+
 // BBR Functions at Initialization.
 //
 
@@ -59,11 +63,7 @@ fn bbr_init_round_counting(r: &mut Recovery) {
 fn bbr_init_pacing_rate(r: &mut Recovery) {
     let bbr = &mut r.bbr_state;
 
-    let srtt = r
-        .rtt_stats
-        .smoothed_rtt
-        .unwrap_or_else(|| Duration::from_millis(1))
-        .as_secs_f64();
+    let srtt = r.rtt_stats.smoothed_rtt.as_secs_f64();
 
     // At init, cwnd is initcwnd.
     let nominal_bandwidth = r.congestion_window as f64 / srtt;
