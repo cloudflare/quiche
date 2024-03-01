@@ -217,10 +217,25 @@ impl RecoveryEpoch {
     }
 }
 
+#[derive(Default)]
+struct LossDetectionTimer {
+    time: Option<Instant>,
+}
+
+impl LossDetectionTimer {
+    fn update(&mut self, timeout: Instant) {
+        self.time = Some(timeout);
+    }
+
+    fn clear(&mut self) {
+        self.time = None;
+    }
+}
+
 pub struct Recovery {
     epochs: [RecoveryEpoch; packet::Epoch::count()],
 
-    loss_detection_timer: Option<Instant>,
+    loss_timer: LossDetectionTimer,
 
     pto_count: u32,
 
@@ -323,7 +338,7 @@ impl Recovery {
         Recovery {
             epochs: Default::default(),
 
-            loss_detection_timer: None,
+            loss_timer: Default::default(),
 
             pto_count: 0,
 
@@ -824,7 +839,7 @@ impl Recovery {
     }
 
     pub fn loss_detection_timer(&self) -> Option<Instant> {
-        self.loss_detection_timer
+        self.loss_timer.time
     }
 
     pub fn cwnd(&self) -> usize {
@@ -983,20 +998,22 @@ impl Recovery {
     ) {
         let (earliest_loss_time, _) = self.loss_time_and_space();
 
-        if earliest_loss_time.is_some() {
+        if let Some(to) = earliest_loss_time {
             // Time threshold loss detection.
-            self.loss_detection_timer = earliest_loss_time;
+            self.loss_timer.update(to);
             return;
         }
 
         if self.bytes_in_flight == 0 && handshake_status.peer_verified_address {
-            self.loss_detection_timer = None;
+            self.loss_timer.clear();
             return;
         }
 
         // PTO timer.
-        let (timeout, _) = self.pto_time_and_space(handshake_status, now);
-        self.loss_detection_timer = timeout;
+        if let (Some(timeout), _) = self.pto_time_and_space(handshake_status, now)
+        {
+            self.loss_timer.update(timeout);
+        }
     }
 
     fn detect_lost_packets(
@@ -1202,7 +1219,7 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
 
 impl std::fmt::Debug for Recovery {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self.loss_detection_timer {
+        match self.loss_timer.time {
             Some(v) => {
                 let now = Instant::now();
 
