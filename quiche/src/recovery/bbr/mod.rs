@@ -430,6 +430,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                pmtud: false,
             };
 
             r.on_packet_sent(
@@ -500,6 +501,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                pmtud: false,
             };
 
             r.on_packet_sent(
@@ -569,6 +571,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                pmtud: false,
             };
 
             r.on_packet_sent(
@@ -620,6 +623,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                pmtud: false,
             };
 
             r.on_packet_sent(
@@ -692,6 +696,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                pmtud: false,
             };
 
             r.on_packet_sent(
@@ -763,6 +768,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
+                pmtud: false,
             };
 
             r.on_packet_sent(
@@ -817,6 +823,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
+            pmtud: false,
         };
 
         r.on_packet_sent(

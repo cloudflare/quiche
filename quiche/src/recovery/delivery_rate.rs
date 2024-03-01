@@ -244,6 +244,7 @@ mod tests {
                 has_data: false,
                 tx_in_flight: 0,
                 lost: 0,
+                pmtud: false,
             };
 
             r.on_packet_sent(
@@ -312,6 +313,7 @@ mod tests {
                 has_data: false,
                 tx_in_flight: 0,
                 lost: 0,
+                pmtud: false,
             };
 
             r.on_packet_sent(
@@ -353,6 +355,7 @@ mod tests {
                 has_data: false,
                 tx_in_flight: 0,
                 lost: 0,
+                pmtud: false,
             };
 
             r.on_packet_sent(

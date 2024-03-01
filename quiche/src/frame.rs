@@ -60,7 +60,14 @@ pub enum Frame {
         len: usize,
     },
 
-    Ping,
+    Ping {
+        // Attach metadata to the Ping frame. This doesn't appear on the wire,
+        // but does tell us if this frame was part of a PMTUD probe and how
+        // large the probe was. This will only show up on sent frames and be
+        // None otherwise. This is the total size of the QUIC packet in the
+        // probe.
+        mtu_probe: Option<usize>,
+    },
 
     ACK {
         ack_delay: u64,
@@ -198,7 +205,7 @@ impl Frame {
                 Frame::Padding { len }
             },
 
-            0x01 => Frame::Ping,
+            0x01 => Frame::Ping { mtu_probe: None },
 
             0x02..=0x03 => parse_ack_frame(frame_type, b)?,
 
@@ -376,7 +383,7 @@ impl Frame {
                 }
             },
 
-            Frame::Ping => {
+            Frame::Ping { .. } => {
                 b.put_varint(0x01)?;
             },
 
@@ -595,7 +602,7 @@ impl Frame {
         match self {
             Frame::Padding { len } => *len,
 
-            Frame::Ping => 1,
+            Frame::Ping { .. } => 1,
 
             Frame::ACK {
                 ack_delay,
@@ -1024,8 +1031,8 @@ impl std::fmt::Debug for Frame {
                 write!(f, "PADDING len={len}")?;
             },
 
-            Frame::Ping => {
-                write!(f, "PING")?;
+            Frame::Ping { mtu_probe } => {
+                write!(f, "PING mtu_probe={mtu_probe:?}")?;
             },
 
             Frame::ACK {
@@ -1375,7 +1382,7 @@ mod tests {
     fn ping() {
         let mut d = [42; 128];
 
-        let frame = Frame::Ping;
+        let frame = Frame::Ping { mtu_probe: None };
 
         let wire_len = {
             let mut b = octets::OctetsMut::with_slice(&mut d);

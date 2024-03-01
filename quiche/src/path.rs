@@ -37,6 +37,7 @@ use slab::Slab;
 use crate::Error;
 use crate::Result;
 
+use crate::pmtud;
 use crate::recovery;
 use crate::recovery::HandshakeStatus;
 
@@ -135,6 +136,9 @@ pub struct Path {
     /// Loss recovery and congestion control state.
     pub recovery: recovery::Recovery,
 
+    /// Path MTU discovery state.
+    pub pmtud: pmtud::Pmtud,
+
     /// Pending challenge data with the size of the packet containing them and
     /// when they were sent.
     in_flight_challenges: VecDeque<([u8; 8], usize, time::Instant)>,
@@ -203,7 +207,8 @@ impl Path {
     pub fn new(
         local_addr: SocketAddr, peer_addr: SocketAddr,
         recovery_config: &recovery::RecoveryConfig,
-        path_challenge_recv_max_queue_len: usize, is_initial: bool,
+        path_challenge_recv_max_queue_len: usize, pmtud_init: usize,
+        is_initial: bool,
     ) -> Self {
         let (state, active_scid_seq, active_dcid_seq) = if is_initial {
             (PathState::Validated, Some(0), Some(0))
@@ -219,6 +224,7 @@ impl Path {
             state,
             active: false,
             recovery: recovery::Recovery::new_with_config(recovery_config),
+            pmtud: pmtud::Pmtud::new(pmtud_init),
             in_flight_challenges: VecDeque::new(),
             max_challenge_size: 0,
             probing_lost: 0,
@@ -324,6 +330,19 @@ impl Path {
     #[inline]
     pub fn validation_requested(&self) -> bool {
         self.challenge_requested
+    }
+
+    pub fn should_send_pmtu_probe(
+        &mut self, hs_confirmed: bool, hs_done: bool, out_len: usize,
+        is_closing: bool, frames_empty: bool,
+    ) -> bool {
+        (hs_confirmed && hs_done) &&
+            self.pmtud.get_probe_size() > self.pmtud.get_current() &&
+            self.recovery.cwnd_available() > self.pmtud.get_probe_size() &&
+            out_len >= self.pmtud.get_probe_size() &&
+            self.pmtud.get_probe_status() &&
+            !is_closing &&
+            frames_empty
     }
 
     pub fn on_challenge_sent(&mut self) {
@@ -528,6 +547,7 @@ impl PathMap {
     /// capacity limit.
     pub fn new(
         mut initial_path: Path, max_concurrent_paths: usize, is_server: bool,
+        enable_pmtud: bool, max_send_udp_payload_size: usize,
     ) -> Self {
         let mut paths = Slab::with_capacity(1); // most connections only have one path
         let mut addrs_to_paths = BTreeMap::new();
@@ -537,6 +557,14 @@ impl PathMap {
 
         // As it is the first path, it is active by default.
         initial_path.active = true;
+
+        // Enable path MTU Discovery and start probing with the largest datagram
+        // size.
+        if enable_pmtud {
+            initial_path.pmtud.should_probe(enable_pmtud);
+            initial_path.pmtud.set_probe_size(max_send_udp_payload_size);
+            initial_path.pmtud.enable(enable_pmtud);
+        }
 
         let active_path_id = paths.insert(initial_path);
         addrs_to_paths.insert((local_addr, peer_addr), active_path_id);
@@ -923,15 +951,17 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            1200,
             true,
         );
-        let mut path_mgr = PathMap::new(path, 2, false);
+        let mut path_mgr = PathMap::new(path, 2, false, true, 1200);
 
         let probed_path = Path::new(
             client_addr_2,
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            1200,
             false,
         );
         path_mgr.insert_path(probed_path, false).unwrap();
@@ -1008,14 +1038,16 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            1200,
             true,
         );
-        let mut client_path_mgr = PathMap::new(path, 2, false);
+        let mut client_path_mgr = PathMap::new(path, 2, false, false, 1200);
         let mut server_path = Path::new(
             server_addr,
             client_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            1200,
             false,
         );
 
@@ -1098,14 +1130,16 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            1200,
             true,
         );
-        let mut client_path_mgr = PathMap::new(path, 2, false);
+        let mut client_path_mgr = PathMap::new(path, 2, false, false, 1200);
         let mut server_path = Path::new(
             server_addr,
             client_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
+            1200,
             false,
         );
 
