@@ -4320,7 +4320,7 @@ impl Connection {
                 if !stream.is_flushable() {
                     self.streams.remove_flushable(&priority_key);
                 } else if stream.incremental {
-                    // Shuffle the incremental stream to the back of the the
+                    // Shuffle the incremental stream to the back of the
                     // queue.
                     self.streams.remove_flushable(&priority_key);
                     self.streams.insert_flushable(&priority_key);
@@ -4714,7 +4714,7 @@ impl Connection {
         }
 
         if priority_key.incremental && readable {
-            // Shuffle the incremental stream to the back of the the queue.
+            // Shuffle the incremental stream to the back of the queue.
             self.streams.remove_readable(&priority_key);
             self.streams.insert_readable(&priority_key);
         }
@@ -4903,7 +4903,7 @@ impl Connection {
         }
 
         if incremental && writable {
-            // Shuffle the incremental stream to the back of the the queue.
+            // Shuffle the incremental stream to the back of the queue.
             self.streams.remove_writable(&priority_key);
             self.streams.insert_writable(&priority_key);
         }
