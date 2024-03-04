@@ -265,6 +265,7 @@ mod tests {
 
     use super::*;
     use crate::events::quic;
+    use crate::events::quic::PacketSentExtension;
     use crate::events::quic::QuicFrame;
     use crate::events::RawInfo;
     use smallvec::smallvec;
@@ -303,7 +304,7 @@ mod tests {
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
-            send_at_time: None,
+            extension: PacketSentExtension { send_at_time: None },
             trigger: None,
         });
 
@@ -334,7 +335,7 @@ mod tests {
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
-            send_at_time: None,
+            extension: PacketSentExtension { send_at_time: None },
             trigger: None,
         });
 
@@ -349,7 +350,7 @@ mod tests {
             supported_versions: None,
             raw,
             datagram_id: None,
-            send_at_time: None,
+            extension: PacketSentExtension { send_at_time: None },
             trigger: None,
         });
 
@@ -478,7 +479,7 @@ mod tests {
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
-            send_at_time: None,
+            extension: PacketSentExtension { send_at_time: None },
             trigger: None,
         });
         let j1 = json!({"foo": "Bar", "hello": 123});
@@ -506,7 +507,7 @@ mod tests {
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
-            send_at_time: None,
+            extension: PacketSentExtension { send_at_time: None },
             trigger: None,
         });
 

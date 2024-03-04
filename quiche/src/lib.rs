@@ -4456,7 +4456,10 @@ impl Connection {
                         supported_versions: None,
                         raw: Some(qlog_raw_info),
                         datagram_id: None,
-                        send_at_time: Some(send_at_time),
+                        extension: qlog::events::quic::PacketSentExtension {
+                            send_at_time: Some(send_at_time),
+                        },
+
                         trigger: None,
                     });
 
