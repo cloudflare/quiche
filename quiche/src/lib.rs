@@ -3495,7 +3495,7 @@ impl Connection {
                         self.ids.mark_retire_dcid_seq(seq_num, true);
                     },
 
-                    frame::Frame::Ping { .. } => {
+                    frame::Frame::Ping { mtu_probe } if mtu_probe.is_some() => {
                         p.pmtud.pmtu_probe_lost();
                     },
 
