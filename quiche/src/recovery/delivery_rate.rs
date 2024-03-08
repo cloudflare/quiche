@@ -274,14 +274,14 @@ mod tests {
                 lost: 0,
             };
 
-            r.delivery_rate.update_rate_sample(&acked, now);
+            r.congestion.delivery_rate.update_rate_sample(&acked, now);
         }
 
         // Update rate sample after 1 rtt.
-        r.delivery_rate.generate_rate_sample(rtt);
+        r.congestion.delivery_rate.generate_rate_sample(rtt);
 
         // Bytes acked so far.
-        assert_eq!(r.delivery_rate.delivered(), 2400);
+        assert_eq!(r.congestion.delivery_rate.delivered(), 2400);
 
         // Estimated delivery rate = (1200 x 2) / 0.05s = 48000.
         assert_eq!(r.delivery_rate(), 48000);
@@ -326,7 +326,7 @@ mod tests {
         }
 
         assert!(!r.app_limited());
-        assert!(!r.delivery_rate.sample_is_app_limited());
+        assert!(!r.congestion.delivery_rate.sample_is_app_limited());
     }
 
     #[test]
@@ -388,7 +388,7 @@ mod tests {
 
         assert!(r.app_limited());
         // Rate sample is not app limited (all acked).
-        assert!(!r.delivery_rate.sample_is_app_limited());
-        assert_eq!(r.delivery_rate.sample_rtt(), rtt);
+        assert!(!r.congestion.delivery_rate.sample_is_app_limited());
+        assert_eq!(r.congestion.delivery_rate.sample_rtt(), rtt);
     }
 }

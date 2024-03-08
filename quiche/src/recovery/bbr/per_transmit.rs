@@ -28,13 +28,13 @@ use super::*;
 
 // BBR Functions when trasmitting packets.
 //
-pub fn bbr_on_transmit(r: &mut Recovery) {
-    bbr_handle_restart_from_idle(r);
+pub fn bbr_on_transmit(r: &mut Congestion, bytes_in_flight: usize) {
+    bbr_handle_restart_from_idle(r, bytes_in_flight);
 }
 
 // 4.3.4.4.  Restarting From Idle
-fn bbr_handle_restart_from_idle(r: &mut Recovery) {
-    if r.bytes_in_flight == 0 && r.delivery_rate.app_limited() {
+fn bbr_handle_restart_from_idle(r: &mut Congestion, bytes_in_flight: usize) {
+    if bytes_in_flight == 0 && r.delivery_rate.app_limited() {
         r.bbr_state.idle_restart = true;
 
         if r.bbr_state.state == BBRStateMachine::ProbeBW {
