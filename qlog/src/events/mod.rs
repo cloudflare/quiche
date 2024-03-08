@@ -203,6 +203,9 @@ impl From<EventType> for EventImportance {
                 ConnectivityEventType::ConnectionStarted,
             ) => EventImportance::Base,
             EventType::ConnectivityEventType(
+                ConnectivityEventType::ConnectionClosed,
+            ) => EventImportance::Base,
+            EventType::ConnectivityEventType(
                 ConnectivityEventType::ConnectionIdUpdated,
             ) => EventImportance::Base,
             EventType::ConnectivityEventType(
