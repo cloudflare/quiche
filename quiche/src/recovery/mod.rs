@@ -324,47 +324,9 @@ impl LossDetectionTimer {
     }
 }
 
-pub struct Recovery {
-    epochs: [RecoveryEpoch; packet::Epoch::count()],
-
-    loss_timer: LossDetectionTimer,
-
-    pto_count: u32,
-
-    rtt_stats: RttStats,
-
-    pub lost_count: usize,
-
-    pub lost_spurious_count: usize,
-
-    app_limited: bool,
-
-    delivery_rate: delivery_rate::Rate,
-
-    pkt_thresh: u64,
-
-    time_thresh: f64,
-
+pub struct Congestion {
     // Congestion control.
     cc_ops: &'static CongestionControlOps,
-
-    congestion_window: usize,
-
-    bytes_in_flight: usize,
-
-    ssthresh: usize,
-
-    bytes_acked_sl: usize,
-
-    bytes_acked_ca: usize,
-
-    bytes_sent: usize,
-
-    pub bytes_lost: u64,
-
-    congestion_recovery_start_time: Option<Instant>,
-
-    max_datagram_size: usize,
 
     cubic_state: cubic::State,
 
@@ -372,13 +334,10 @@ pub struct Recovery {
     hystart: hystart::Hystart,
 
     // Pacing.
-    pub pacer: pacer::Pacer,
+    pacer: pacer::Pacer,
 
     // RFC6937 PRR.
     prr: prr::PRR,
-
-    #[cfg(feature = "qlog")]
-    qlog_metrics: QlogMetrics,
 
     // The maximum size of a data aggregate scheduled and
     // transmitted together.
@@ -390,11 +349,135 @@ pub struct Recovery {
     // BBRv2 state.
     bbr2_state: bbr2::State,
 
-    /// How many non-ack-eliciting packets have been sent.
-    outstanding_non_ack_eliciting: usize,
+    congestion_window: usize,
+
+    ssthresh: usize,
+
+    bytes_acked_sl: usize,
+
+    bytes_acked_ca: usize,
+
+    congestion_recovery_start_time: Option<Instant>,
+
+    app_limited: bool,
+
+    delivery_rate: delivery_rate::Rate,
 
     /// Initial congestion window size in terms of packet count.
     initial_congestion_window_packets: usize,
+
+    max_datagram_size: usize,
+
+    lost_count: usize,
+}
+
+impl Congestion {
+    fn from_config(recovery_config: &RecoveryConfig) -> Self {
+        let initial_congestion_window = recovery_config.max_send_udp_payload_size *
+            recovery_config.initial_congestion_window_packets;
+
+        let mut cc = Congestion {
+            congestion_window: initial_congestion_window,
+
+            ssthresh: usize::MAX,
+
+            bytes_acked_sl: 0,
+
+            bytes_acked_ca: 0,
+
+            congestion_recovery_start_time: None,
+
+            cc_ops: recovery_config.cc_ops,
+
+            cubic_state: cubic::State::default(),
+
+            app_limited: false,
+
+            initial_congestion_window_packets: recovery_config
+                .initial_congestion_window_packets,
+
+            max_datagram_size: recovery_config.max_send_udp_payload_size,
+
+            lost_count: 0,
+
+            send_quantum: initial_congestion_window,
+
+            delivery_rate: delivery_rate::Rate::default(),
+
+            hystart: hystart::Hystart::new(recovery_config.hystart),
+
+            pacer: pacer::Pacer::new(
+                recovery_config.pacing,
+                initial_congestion_window,
+                0,
+                recovery_config.max_send_udp_payload_size,
+                recovery_config.max_pacing_rate,
+            ),
+
+            prr: prr::PRR::default(),
+
+            bbr_state: bbr::State::new(),
+
+            bbr2_state: bbr2::State::new(),
+        };
+
+        (cc.cc_ops.on_init)(&mut cc);
+
+        cc
+    }
+
+    fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
+        match self.congestion_recovery_start_time {
+            Some(congestion_recovery_start_time) =>
+                sent_time <= congestion_recovery_start_time,
+
+            None => false,
+        }
+    }
+
+    fn delivery_rate(&self) -> u64 {
+        self.delivery_rate.sample_delivery_rate()
+    }
+
+    fn send_quantum(&self) -> usize {
+        self.send_quantum
+    }
+
+    fn set_pacing_rate(&mut self, rate: u64, now: Instant) {
+        self.pacer.update(self.send_quantum, rate, now);
+    }
+}
+
+pub struct Recovery {
+    epochs: [RecoveryEpoch; packet::Epoch::count()],
+
+    loss_timer: LossDetectionTimer,
+
+    pto_count: u32,
+
+    rtt_stats: RttStats,
+
+    pub lost_spurious_count: usize,
+
+    pkt_thresh: u64,
+
+    time_thresh: f64,
+
+    bytes_in_flight: usize,
+
+    bytes_sent: usize,
+
+    pub bytes_lost: u64,
+
+    max_datagram_size: usize,
+
+    #[cfg(feature = "qlog")]
+    qlog_metrics: QlogMetrics,
+
+    /// How many non-ack-eliciting packets have been sent.
+    outstanding_non_ack_eliciting: usize,
+
+    congestion: Congestion,
 }
 
 pub struct RecoveryConfig {
@@ -424,9 +507,6 @@ impl RecoveryConfig {
 
 impl Recovery {
     pub fn new_with_config(recovery_config: &RecoveryConfig) -> Self {
-        let initial_congestion_window = recovery_config.max_send_udp_payload_size *
-            recovery_config.initial_congestion_window_packets;
-
         Recovery {
             epochs: Default::default(),
 
@@ -436,10 +516,7 @@ impl Recovery {
 
             rtt_stats: RttStats::new(recovery_config.max_ack_delay),
 
-            lost_count: 0,
             lost_spurious_count: 0,
-
-            congestion_window: initial_congestion_window,
 
             pkt_thresh: INITIAL_PACKET_THRESHOLD,
 
@@ -447,73 +524,24 @@ impl Recovery {
 
             bytes_in_flight: 0,
 
-            ssthresh: usize::MAX,
-
-            bytes_acked_sl: 0,
-
-            bytes_acked_ca: 0,
-
             bytes_sent: 0,
 
             bytes_lost: 0,
 
-            congestion_recovery_start_time: None,
-
             max_datagram_size: recovery_config.max_send_udp_payload_size,
-
-            cc_ops: recovery_config.cc_ops,
-
-            delivery_rate: delivery_rate::Rate::default(),
-
-            cubic_state: cubic::State::default(),
-
-            app_limited: false,
-
-            hystart: hystart::Hystart::new(recovery_config.hystart),
-
-            pacer: pacer::Pacer::new(
-                recovery_config.pacing,
-                initial_congestion_window,
-                0,
-                recovery_config.max_send_udp_payload_size,
-                recovery_config.max_pacing_rate,
-            ),
-
-            prr: prr::PRR::default(),
-
-            send_quantum: initial_congestion_window,
 
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
 
-            bbr_state: bbr::State::new(),
-
-            bbr2_state: bbr2::State::new(),
-
             outstanding_non_ack_eliciting: 0,
 
-            initial_congestion_window_packets: recovery_config
-                .initial_congestion_window_packets,
+            congestion: Congestion::from_config(recovery_config),
         }
     }
 
+    #[cfg(test)]
     pub fn new(config: &Config) -> Self {
         Self::new_with_config(&RecoveryConfig::from_config(config))
-    }
-
-    pub fn on_init(&mut self) {
-        (self.cc_ops.on_init)(self);
-    }
-
-    pub fn reset(&mut self) {
-        self.congestion_window =
-            self.max_datagram_size * self.initial_congestion_window_packets;
-        self.epochs.iter_mut().for_each(|e| e.in_flight_count = 0);
-        self.congestion_recovery_start_time = None;
-        self.ssthresh = usize::MAX;
-        (self.cc_ops.reset)(self);
-        self.hystart.reset();
-        self.prr = prr::PRR::default();
     }
 
     /// Returns whether or not we should elicit an ACK even if we wouldn't
@@ -584,10 +612,10 @@ impl Recovery {
         self.bytes_sent += sent_bytes;
 
         // Pacing: Set the pacing rate if CC doesn't do its own.
-        if !(self.cc_ops.has_custom_pacing)() &&
+        if !(self.congestion.cc_ops.has_custom_pacing)() &&
             self.rtt_stats.first_rtt_sample.is_some()
         {
-            let rate = PACING_MULTIPLIER * self.congestion_window as f64 /
+            let rate = PACING_MULTIPLIER * self.cwnd() as f64 /
                 self.rtt_stats.smoothed_rtt.as_secs_f64();
             self.set_pacing_rate(rate as u64, now);
         }
@@ -597,7 +625,7 @@ impl Recovery {
         pkt.time_sent = self.get_packet_send_time();
 
         // bytes_in_flight is already updated. Use previous value.
-        self.delivery_rate.on_packet_sent(
+        self.congestion.delivery_rate.on_packet_sent(
             &mut pkt,
             self.bytes_in_flight - sent_bytes,
             self.bytes_lost,
@@ -612,27 +640,34 @@ impl Recovery {
         &mut self, pkt_num: u64, sent_bytes: usize, now: Instant,
     ) {
         self.update_app_limited(
-            (self.bytes_in_flight + sent_bytes) < self.congestion_window,
+            (self.bytes_in_flight + sent_bytes) < self.cwnd(),
         );
 
-        (self.cc_ops.on_packet_sent)(self, sent_bytes, now);
+        (self.congestion.cc_ops.on_packet_sent)(
+            &mut self.congestion,
+            sent_bytes,
+            self.bytes_in_flight,
+            now,
+        );
 
-        self.prr.on_packet_sent(sent_bytes);
+        self.congestion.prr.on_packet_sent(sent_bytes);
 
         // HyStart++: Start of the round in a slow start.
-        if self.hystart.enabled() && self.congestion_window < self.ssthresh {
-            self.hystart.start_round(pkt_num);
+        if self.congestion.hystart.enabled() &&
+            self.cwnd() < self.congestion.ssthresh
+        {
+            self.congestion.hystart.start_round(pkt_num);
         }
 
         self.bytes_in_flight += sent_bytes;
     }
 
     pub fn set_pacing_rate(&mut self, rate: u64, now: Instant) {
-        self.pacer.update(self.send_quantum, rate, now);
+        self.congestion.set_pacing_rate(rate, now)
     }
 
     pub fn get_packet_send_time(&self) -> Instant {
-        self.pacer.next_time()
+        self.congestion.pacer.next_time()
     }
 
     fn schedule_next_packet(&mut self, now: Instant, packet_size: usize) {
@@ -641,15 +676,16 @@ impl Recovery {
         //   * The congestion window is within initcwnd.
 
         let in_initcwnd = self.bytes_sent <
-            self.max_datagram_size * self.initial_congestion_window_packets;
+            self.max_datagram_size *
+                self.congestion.initial_congestion_window_packets;
 
-        let sent_bytes = if !self.pacer.enabled() || in_initcwnd {
+        let sent_bytes = if !self.congestion.pacer.enabled() || in_initcwnd {
             0
         } else {
             packet_size
         };
 
-        self.pacer.send(sent_bytes, now);
+        self.congestion.pacer.send(sent_bytes, now);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -690,7 +726,7 @@ impl Recovery {
 
         // Undo congestion window update.
         if has_in_flight_spurious_loss {
-            (self.cc_ops.rollback)(self);
+            (self.congestion.cc_ops.rollback)(&mut self.congestion);
         }
 
         if newly_acked.is_empty() {
@@ -835,7 +871,7 @@ impl Recovery {
     }
 
     pub fn cwnd(&self) -> usize {
-        self.congestion_window
+        self.congestion.congestion_window
     }
 
     pub fn cwnd_available(&self) -> usize {
@@ -845,8 +881,10 @@ impl Recovery {
         }
 
         // Open more space (snd_cnt) for PRR when allowed.
-        self.congestion_window.saturating_sub(self.bytes_in_flight) +
-            self.prr.snd_cnt
+        self.congestion
+            .congestion_window
+            .saturating_sub(self.bytes_in_flight) +
+            self.congestion.prr.snd_cnt
     }
 
     pub fn rtt(&self) -> Duration {
@@ -866,7 +904,7 @@ impl Recovery {
     }
 
     pub fn delivery_rate(&self) -> u64 {
-        self.delivery_rate.sample_delivery_rate()
+        self.congestion.delivery_rate()
     }
 
     pub fn max_datagram_size(&self) -> usize {
@@ -877,44 +915,30 @@ impl Recovery {
         &mut self, new_max_datagram_size: usize,
     ) {
         // Congestion Window is updated only when it's not updated already.
-        if self.congestion_window ==
-            self.max_datagram_size * self.initial_congestion_window_packets
+        // Update cwnd if it hasn't been updated yet.
+        if self.cwnd() ==
+            self.max_datagram_size *
+                self.congestion.initial_congestion_window_packets
         {
-            self.congestion_window =
-                new_max_datagram_size * self.initial_congestion_window_packets;
+            self.congestion.congestion_window = new_max_datagram_size *
+                self.congestion.initial_congestion_window_packets;
         }
 
-        self.pacer = pacer::Pacer::new(
-            self.pacer.enabled(),
-            self.congestion_window,
+        self.congestion.pacer = pacer::Pacer::new(
+            self.congestion.pacer.enabled(),
+            self.cwnd(),
             0,
             new_max_datagram_size,
-            self.pacer.max_pacing_rate(),
+            self.congestion.pacer.max_pacing_rate(),
         );
+
         self.max_datagram_size = new_max_datagram_size;
     }
 
     pub fn update_max_datagram_size(&mut self, new_max_datagram_size: usize) {
-        let max_datagram_size =
-            cmp::min(self.max_datagram_size, new_max_datagram_size);
-
-        // Update cwnd if it hasn't been updated yet.
-        if self.congestion_window ==
-            self.max_datagram_size * self.initial_congestion_window_packets
-        {
-            self.congestion_window =
-                max_datagram_size * self.initial_congestion_window_packets;
-        }
-
-        self.pacer = pacer::Pacer::new(
-            self.pacer.enabled(),
-            self.congestion_window,
-            0,
-            max_datagram_size,
-            self.pacer.max_pacing_rate(),
-        );
-
-        self.max_datagram_size = max_datagram_size;
+        self.pmtud_update_max_datagram_size(
+            self.max_datagram_size.min(new_max_datagram_size),
+        )
     }
 
     fn loss_time_and_space(&self) -> (Option<Instant>, packet::Epoch) {
@@ -1031,7 +1055,7 @@ impl Recovery {
         self.epochs[epoch]
             .drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
 
-        self.lost_count += loss.lost_packets;
+        self.congestion.lost_count += loss.lost_packets;
 
         (loss.lost_packets, loss.lost_bytes)
     }
@@ -1039,24 +1063,22 @@ impl Recovery {
     fn on_packets_acked(&mut self, acked: &mut Vec<Acked>, now: Instant) {
         // Update delivery rate sample per acked packet.
         for pkt in acked.iter() {
-            self.delivery_rate.update_rate_sample(pkt, now);
+            self.congestion.delivery_rate.update_rate_sample(pkt, now);
         }
 
         // Fill in a rate sample.
-        self.delivery_rate
+        self.congestion
+            .delivery_rate
             .generate_rate_sample(*self.rtt_stats.min_rtt);
 
         // Call congestion control hooks.
-        (self.cc_ops.on_packets_acked)(self, acked, now);
-    }
-
-    fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
-        match self.congestion_recovery_start_time {
-            Some(congestion_recovery_start_time) =>
-                sent_time <= congestion_recovery_start_time,
-
-            None => false,
-        }
+        (self.congestion.cc_ops.on_packets_acked)(
+            &mut self.congestion,
+            self.bytes_in_flight,
+            acked,
+            now,
+            &self.rtt_stats,
+        );
     }
 
     fn in_persistent_congestion(&mut self, _largest_lost_pkt_num: u64) -> bool {
@@ -1083,27 +1105,37 @@ impl Recovery {
     ) {
         let time_sent = largest_lost_pkt.time_sent;
 
-        if !self.in_congestion_recovery(time_sent) {
-            (self.cc_ops.checkpoint)(self);
+        if !self.congestion.in_congestion_recovery(time_sent) {
+            (self.congestion.cc_ops.checkpoint)(&mut self.congestion);
         }
 
-        (self.cc_ops.congestion_event)(self, lost_bytes, largest_lost_pkt, now);
+        (self.congestion.cc_ops.congestion_event)(
+            &mut self.congestion,
+            self.bytes_in_flight,
+            lost_bytes,
+            largest_lost_pkt,
+            now,
+        );
     }
 
     fn collapse_cwnd(&mut self) {
-        (self.cc_ops.collapse_cwnd)(self);
+        (self.congestion.cc_ops.collapse_cwnd)(
+            &mut self.congestion,
+            self.bytes_in_flight,
+        );
     }
 
     pub fn update_app_limited(&mut self, v: bool) {
-        self.app_limited = v;
+        self.congestion.app_limited = v;
     }
 
+    #[cfg(test)]
     pub fn app_limited(&self) -> bool {
-        self.app_limited
+        self.congestion.app_limited
     }
 
     pub fn delivery_rate_update_app_limited(&mut self, v: bool) {
-        self.delivery_rate.update_app_limited(v);
+        self.congestion.delivery_rate.update_app_limited(v);
     }
 
     pub fn update_max_ack_delay(&mut self, max_ack_delay: Duration) {
@@ -1119,15 +1151,19 @@ impl Recovery {
             rttvar: self.rtt_stats.rttvar,
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight as u64,
-            ssthresh: self.ssthresh as u64,
-            pacing_rate: self.pacer.rate(),
+            ssthresh: self.congestion.ssthresh as u64,
+            pacing_rate: self.congestion.pacer.rate(),
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
     }
 
     pub fn send_quantum(&self) -> usize {
-        self.send_quantum
+        self.congestion.send_quantum()
+    }
+
+    pub fn lost_count(&self) -> usize {
+        self.congestion.lost_count
     }
 }
 
@@ -1167,32 +1203,45 @@ impl FromStr for CongestionControlAlgorithm {
 }
 
 pub struct CongestionControlOps {
-    pub on_init: fn(r: &mut Recovery),
+    pub on_init: fn(r: &mut Congestion),
 
-    pub reset: fn(r: &mut Recovery),
+    pub reset: fn(r: &mut Congestion),
 
-    pub on_packet_sent: fn(r: &mut Recovery, sent_bytes: usize, now: Instant),
+    pub on_packet_sent: fn(
+        r: &mut Congestion,
+        sent_bytes: usize,
+        bytes_in_flight: usize,
+        now: Instant,
+    ),
 
-    pub on_packets_acked:
-        fn(r: &mut Recovery, packets: &mut Vec<Acked>, now: Instant),
+    pub on_packets_acked: fn(
+        r: &mut Congestion,
+        bytes_in_flight: usize,
+        packets: &mut Vec<Acked>,
+        now: Instant,
+        rtt_stats: &RttStats,
+    ),
 
     pub congestion_event: fn(
-        r: &mut Recovery,
+        r: &mut Congestion,
+        bytes_in_flight: usize,
         lost_bytes: usize,
         largest_lost_packet: &Sent,
         now: Instant,
     ),
 
-    pub collapse_cwnd: fn(r: &mut Recovery),
+    pub collapse_cwnd: fn(r: &mut Congestion, bytes_in_flight: usize),
 
-    pub checkpoint: fn(r: &mut Recovery),
+    pub checkpoint: fn(r: &mut Congestion),
 
-    pub rollback: fn(r: &mut Recovery) -> bool,
+    pub rollback: fn(r: &mut Congestion) -> bool,
 
     pub has_custom_pacing: fn() -> bool,
 
-    pub debug_fmt:
-        fn(r: &Recovery, formatter: &mut std::fmt::Formatter) -> std::fmt::Result,
+    pub debug_fmt: fn(
+        r: &Congestion,
+        formatter: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result,
 }
 
 impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
@@ -1229,24 +1278,24 @@ impl std::fmt::Debug for Recovery {
         write!(f, "srtt={:?} ", self.rtt_stats.smoothed_rtt)?;
         write!(f, "min_rtt={:?} ", *self.rtt_stats.min_rtt)?;
         write!(f, "rttvar={:?} ", self.rtt_stats.rttvar)?;
-        write!(f, "cwnd={} ", self.congestion_window)?;
-        write!(f, "ssthresh={} ", self.ssthresh)?;
+        write!(f, "cwnd={} ", self.cwnd())?;
+        write!(f, "ssthresh={} ", self.congestion.ssthresh)?;
         write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
-        write!(f, "app_limited={} ", self.app_limited)?;
+        write!(f, "app_limited={} ", self.congestion.app_limited)?;
         write!(
             f,
             "congestion_recovery_start_time={:?} ",
-            self.congestion_recovery_start_time
+            self.congestion.congestion_recovery_start_time
         )?;
-        write!(f, "{:?} ", self.delivery_rate)?;
-        write!(f, "pacer={:?} ", self.pacer)?;
+        write!(f, "{:?} ", self.congestion.delivery_rate)?;
+        write!(f, "pacer={:?} ", self.congestion.pacer)?;
 
-        if self.hystart.enabled() {
-            write!(f, "hystart={:?} ", self.hystart)?;
+        if self.congestion.hystart.enabled() {
+            write!(f, "hystart={:?} ", self.congestion.hystart)?;
         }
 
         // CC-specific debug info
-        (self.cc_ops.debug_fmt)(self, f)?;
+        (self.congestion.cc_ops.debug_fmt)(&self.congestion, f)?;
 
         Ok(())
     }
@@ -1647,7 +1696,7 @@ mod tests {
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 2);
         assert_eq!(r.bytes_in_flight, 2000);
-        assert_eq!(r.lost_count, 0);
+        assert_eq!(r.congestion.lost_count, 0);
 
         // Wait until loss detection timer expires.
         now = r.loss_detection_timer().unwrap();
@@ -1655,7 +1704,7 @@ mod tests {
         // PTO.
         r.on_loss_detection_timeout(HandshakeStatus::default(), now, "");
         assert_eq!(r.epochs[packet::Epoch::Application].loss_probes, 1);
-        assert_eq!(r.lost_count, 0);
+        assert_eq!(r.congestion.lost_count, 0);
         assert_eq!(r.pto_count, 1);
 
         let p = Sent {
@@ -1715,7 +1764,7 @@ mod tests {
         );
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 4);
         assert_eq!(r.bytes_in_flight, 4000);
-        assert_eq!(r.lost_count, 0);
+        assert_eq!(r.congestion.lost_count, 0);
 
         // Wait for 10ms.
         now += Duration::from_millis(10);
@@ -1740,7 +1789,7 @@ mod tests {
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 4);
         assert_eq!(r.bytes_in_flight, 0);
 
-        assert_eq!(r.lost_count, 2);
+        assert_eq!(r.congestion.lost_count, 2);
 
         // Wait 1 RTT.
         now += r.rtt();
@@ -1901,7 +1950,7 @@ mod tests {
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 2);
         assert_eq!(r.bytes_in_flight, 1000);
-        assert_eq!(r.lost_count, 0);
+        assert_eq!(r.congestion.lost_count, 0);
 
         // Wait until loss detection timer expires.
         now = r.loss_detection_timer().unwrap();
@@ -1913,7 +1962,7 @@ mod tests {
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 2);
         assert_eq!(r.bytes_in_flight, 0);
 
-        assert_eq!(r.lost_count, 1);
+        assert_eq!(r.congestion.lost_count, 1);
 
         // Wait 1 RTT.
         now += r.rtt();
@@ -2095,7 +2144,7 @@ mod tests {
         assert_eq!(r.bytes_in_flight, 0);
 
         // Spurious loss.
-        assert_eq!(r.lost_count, 1);
+        assert_eq!(r.congestion.lost_count, 1);
         assert_eq!(r.lost_spurious_count, 1);
 
         // Packet threshold was increased.
@@ -2152,7 +2201,7 @@ mod tests {
         assert_eq!(r.bytes_in_flight, 12000);
 
         // First packet will be sent out immediately.
-        assert_eq!(r.pacer.rate(), 0);
+        assert_eq!(r.congestion.pacer.rate(), 0);
         assert_eq!(r.get_packet_send_time(), now);
 
         // Wait 50ms for ACK.
@@ -2179,7 +2228,7 @@ mod tests {
         assert_eq!(r.rtt_stats.smoothed_rtt, Duration::from_millis(50));
 
         // 1 MSS increased.
-        assert_eq!(r.congestion_window, 12000 + 1200);
+        assert_eq!(r.cwnd(), 12000 + 1200);
 
         // Send out second packet.
         let p = Sent {
@@ -2279,9 +2328,8 @@ mod tests {
 
         // We pace this outgoing packet. as all conditions for pacing
         // are passed.
-        let pacing_rate =
-            (r.congestion_window as f64 * PACING_MULTIPLIER / 0.05) as u64;
-        assert_eq!(r.pacer.rate(), pacing_rate);
+        let pacing_rate = (r.cwnd() as f64 * PACING_MULTIPLIER / 0.05) as u64;
+        assert_eq!(r.congestion.pacer.rate(), pacing_rate);
 
         assert_eq!(
             r.get_packet_send_time(),
@@ -2413,7 +2461,7 @@ mod tests {
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 2);
         assert_eq!(r.bytes_in_flight, 1000);
-        assert_eq!(r.lost_count, 0);
+        assert_eq!(r.congestion.lost_count, 0);
 
         // Wait until loss detection timer expires.
         now = r.loss_detection_timer().unwrap();
@@ -2425,9 +2473,9 @@ mod tests {
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 2);
         assert_eq!(r.epochs[packet::Epoch::Application].in_flight_count, 0);
         assert_eq!(r.bytes_in_flight, 0);
-        assert_eq!(r.congestion_window, 12000);
+        assert_eq!(r.cwnd(), 12000);
 
-        assert_eq!(r.lost_count, 0);
+        assert_eq!(r.congestion.lost_count, 0);
 
         // Wait 1 RTT.
         now += r.rtt();
@@ -2437,7 +2485,7 @@ mod tests {
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 0);
         assert_eq!(r.epochs[packet::Epoch::Application].in_flight_count, 0);
         assert_eq!(r.bytes_in_flight, 0);
-        assert_eq!(r.lost_count, 0);
+        assert_eq!(r.congestion.lost_count, 0);
     }
 }
 

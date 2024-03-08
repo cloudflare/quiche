@@ -2061,8 +2061,6 @@ impl Connection {
             conn.derived_initial_secrets = true;
         }
 
-        conn.paths.get_mut(active_path_id)?.recovery.on_init();
-
         Ok(conn)
     }
 

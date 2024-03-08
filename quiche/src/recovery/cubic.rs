@@ -41,8 +41,10 @@ use crate::recovery::reno;
 
 use crate::recovery::Acked;
 use crate::recovery::CongestionControlOps;
-use crate::recovery::Recovery;
 use crate::recovery::Sent;
+
+use super::rtt::RttStats;
+use super::Congestion;
 
 pub static CUBIC: CongestionControlOps = CongestionControlOps {
     on_init,
@@ -146,13 +148,13 @@ impl State {
     }
 }
 
-fn on_init(_r: &mut Recovery) {}
+fn on_init(_r: &mut Congestion) {}
 
-fn reset(r: &mut Recovery) {
+fn reset(r: &mut Congestion) {
     r.cubic_state = State::default();
 }
 
-fn collapse_cwnd(r: &mut Recovery) {
+fn collapse_cwnd(r: &mut Congestion, bytes_in_flight: usize) {
     let cubic = &mut r.cubic_state;
 
     r.congestion_recovery_start_time = None;
@@ -168,16 +170,18 @@ fn collapse_cwnd(r: &mut Recovery) {
 
     cubic.cwnd_inc = 0;
 
-    reno::collapse_cwnd(r);
+    reno::collapse_cwnd(r, bytes_in_flight);
 }
 
-fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, now: Instant) {
+fn on_packet_sent(
+    r: &mut Congestion, sent_bytes: usize, bytes_in_flight: usize, now: Instant,
+) {
     // See https://github.com/torvalds/linux/commit/30927520dbae297182990bb21d08762bcc35ce1d
     // First transmit when no packets in flight
     let cubic = &mut r.cubic_state;
 
     if let Some(last_sent_time) = cubic.last_sent_time {
-        if r.bytes_in_flight == 0 {
+        if bytes_in_flight == 0 {
             let delta = now - last_sent_time;
 
             // We were application limited (idle) for a while.
@@ -193,22 +197,28 @@ fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, now: Instant) {
 
     cubic.last_sent_time = Some(now);
 
-    reno::on_packet_sent(r, sent_bytes, now);
+    reno::on_packet_sent(r, sent_bytes, bytes_in_flight, now);
 }
 
-fn on_packets_acked(r: &mut Recovery, packets: &mut Vec<Acked>, now: Instant) {
+fn on_packets_acked(
+    r: &mut Congestion, bytes_in_flight: usize, packets: &mut Vec<Acked>,
+    now: Instant, rtt_stats: &RttStats,
+) {
     for pkt in packets.drain(..) {
-        on_packet_acked(r, &pkt, now);
+        on_packet_acked(r, bytes_in_flight, &pkt, now, rtt_stats);
     }
 }
 
-fn on_packet_acked(r: &mut Recovery, packet: &Acked, now: Instant) {
+fn on_packet_acked(
+    r: &mut Congestion, bytes_in_flight: usize, packet: &Acked, now: Instant,
+    rtt_stats: &RttStats,
+) {
     let in_congestion_recovery = r.in_congestion_recovery(packet.time_sent);
 
     if in_congestion_recovery {
         r.prr.on_packet_acked(
             packet.size,
-            r.bytes_in_flight,
+            bytes_in_flight,
             r.ssthresh,
             r.max_datagram_size,
         );
@@ -258,9 +268,7 @@ fn on_packet_acked(r: &mut Recovery, packet: &Acked, now: Instant) {
             r.bytes_acked_sl -= r.max_datagram_size;
         }
 
-        if r.hystart
-            .on_packet_acked(packet, r.rtt_stats.latest_rtt, now)
-        {
+        if r.hystart.on_packet_acked(packet, rtt_stats.latest_rtt, now) {
             // Exit to congestion avoidance if CSS ends.
             r.ssthresh = r.congestion_window;
         }
@@ -303,7 +311,7 @@ fn on_packet_acked(r: &mut Recovery, packet: &Acked, now: Instant) {
         // target = w_cubic(t + rtt)
         let target = r
             .cubic_state
-            .w_cubic(t + *r.rtt_stats.min_rtt, r.max_datagram_size);
+            .w_cubic(t + *rtt_stats.min_rtt, r.max_datagram_size);
 
         // Clipping target to [cwnd, 1.5 x cwnd]
         let target = f64::max(target, r.congestion_window as f64);
@@ -345,7 +353,8 @@ fn on_packet_acked(r: &mut Recovery, packet: &Acked, now: Instant) {
 }
 
 fn congestion_event(
-    r: &mut Recovery, _lost_bytes: usize, largest_lost_pkt: &Sent, now: Instant,
+    r: &mut Congestion, bytes_in_flight: usize, _lost_bytes: usize,
+    largest_lost_pkt: &Sent, now: Instant,
 ) {
     let time_sent = largest_lost_pkt.time_sent;
     let in_congestion_recovery = r.in_congestion_recovery(time_sent);
@@ -387,11 +396,11 @@ fn congestion_event(
             r.hystart.congestion_event();
         }
 
-        r.prr.congestion_event(r.bytes_in_flight);
+        r.prr.congestion_event(bytes_in_flight);
     }
 }
 
-fn checkpoint(r: &mut Recovery) {
+fn checkpoint(r: &mut Congestion) {
     r.cubic_state.prior.congestion_window = r.congestion_window;
     r.cubic_state.prior.ssthresh = r.ssthresh;
     r.cubic_state.prior.w_max = r.cubic_state.w_max;
@@ -400,7 +409,7 @@ fn checkpoint(r: &mut Recovery) {
     r.cubic_state.prior.lost_count = r.lost_count;
 }
 
-fn rollback(r: &mut Recovery) -> bool {
+fn rollback(r: &mut Congestion) -> bool {
     // Don't go back to slow start.
     if r.cubic_state.prior.congestion_window < r.cubic_state.prior.ssthresh {
         return false;
@@ -423,7 +432,7 @@ fn has_custom_pacing() -> bool {
     false
 }
 
-fn debug_fmt(r: &Recovery, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+fn debug_fmt(r: &Congestion, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     write!(
         f,
         "cubic={{ k={} w_max={} }} ",
@@ -438,6 +447,7 @@ mod tests {
 
     use super::*;
 
+    use crate::recovery::Recovery;
     use smallvec::smallvec;
 
     #[test]
@@ -491,7 +501,7 @@ mod tests {
         };
 
         // Send initcwnd full MSS packets to become no longer app limited
-        for pn in 0..r.initial_congestion_window_packets {
+        for pn in 0..r.congestion.initial_congestion_window_packets {
             r.on_packet_sent_cc(pn as _, p.size, now);
         }
 
@@ -544,7 +554,7 @@ mod tests {
         };
 
         // Send initcwnd full MSS packets to become no longer app limited
-        for pn in 0..r.initial_congestion_window_packets {
+        for pn in 0..r.congestion.initial_congestion_window_packets {
             r.on_packet_sent_cc(pn as _, p.size, now);
         }
 
@@ -640,7 +650,7 @@ mod tests {
         let prev_cwnd = r.cwnd();
 
         // Send initcwnd full MSS packets to become no longer app limited
-        for pn in 0..r.initial_congestion_window_packets {
+        for pn in 0..r.congestion.initial_congestion_window_packets {
             r.on_packet_sent_cc(pn as _, r.max_datagram_size, now);
         }
 
@@ -678,9 +688,6 @@ mod tests {
 
         // Exit from the recovery.
         now += rtt;
-
-        // To avoid rollback
-        r.lost_count += MIN_ROLLBACK_THRESHOLD;
 
         // During Congestion Avoidance, it will take
         // 5 ACKs to increase cwnd by 1 MSS.
@@ -803,7 +810,9 @@ mod tests {
 
         let rtt_1st = Duration::from_millis(50);
 
-        r.hystart.start_round(send_pn + n_rtt_sample as u64 - 1);
+        r.congestion
+            .hystart
+            .start_round(send_pn + n_rtt_sample as u64 - 1);
         // Send 1st round packets.
         for _ in 0..n_rtt_sample {
             r.on_packet_sent_cc(send_pn, p.size, now);
@@ -835,13 +844,15 @@ mod tests {
         }
 
         // Not in CSS yet.
-        assert!(r.hystart.css_start_time().is_none());
+        assert!(r.congestion.hystart.css_start_time().is_none());
 
         // 2nd round.
         let mut rtt_2nd = Duration::from_millis(100);
         let now = now + rtt_2nd;
 
-        r.hystart.start_round(send_pn + n_rtt_sample as u64 - 1);
+        r.congestion
+            .hystart
+            .start_round(send_pn + n_rtt_sample as u64 - 1);
         // Send 2nd round packets.
         for _ in 0..n_rtt_sample {
             r.on_packet_sent_cc(send_pn, p.size, now);
@@ -879,7 +890,7 @@ mod tests {
         }
 
         // Now we are in CSS.
-        assert!(r.hystart.css_start_time().is_some());
+        assert!(r.congestion.hystart.css_start_time().is_some());
         assert_eq!(r.cwnd(), cwnd_prev + r.max_datagram_size);
 
         // 3rd round, which RTT is less than previous round to
@@ -888,7 +899,9 @@ mod tests {
         let now = now + rtt_3rd;
         cwnd_prev = r.cwnd();
 
-        r.hystart.start_round(send_pn + n_rtt_sample as u64 - 1);
+        r.congestion
+            .hystart
+            .start_round(send_pn + n_rtt_sample as u64 - 1);
         // Send 3nd round packets.
         for _ in 0..n_rtt_sample {
             r.on_packet_sent_cc(send_pn, p.size, now);
@@ -920,7 +933,7 @@ mod tests {
         }
 
         // Now we are back in Slow Start.
-        assert!(r.hystart.css_start_time().is_none());
+        assert!(r.congestion.hystart.css_start_time().is_none());
         assert_eq!(
             r.cwnd(),
             cwnd_prev +
@@ -964,7 +977,9 @@ mod tests {
 
         let rtt_1st = Duration::from_millis(50);
 
-        r.hystart.start_round(send_pn + n_rtt_sample as u64 - 1);
+        r.congestion
+            .hystart
+            .start_round(send_pn + n_rtt_sample as u64 - 1);
         // Send 1st round packets.
         for _ in 0..n_rtt_sample {
             r.on_packet_sent_cc(send_pn, p.size, now);
@@ -996,13 +1011,15 @@ mod tests {
         }
 
         // Not in CSS yet.
-        assert!(r.hystart.css_start_time().is_none());
+        assert!(r.congestion.hystart.css_start_time().is_none());
 
         // 2nd round.
         let mut rtt_2nd = Duration::from_millis(100);
         let now = now + rtt_2nd;
         // Send 2nd round packets.
-        r.hystart.start_round(send_pn + n_rtt_sample as u64 - 1);
+        r.congestion
+            .hystart
+            .start_round(send_pn + n_rtt_sample as u64 - 1);
         for _ in 0..n_rtt_sample {
             r.on_packet_sent_cc(send_pn, p.size, now);
             send_pn += 1;
@@ -1038,7 +1055,7 @@ mod tests {
         }
 
         // Now we are in CSS.
-        assert!(r.hystart.css_start_time().is_some());
+        assert!(r.congestion.hystart.css_start_time().is_some());
         assert_eq!(r.cwnd(), cwnd_prev + r.max_datagram_size);
 
         // Run 5 (CSS_ROUNDS) in CSS, to exit to congestion avoidance.
@@ -1047,7 +1064,9 @@ mod tests {
 
         for _ in 0..hystart::CSS_ROUNDS {
             // Send a round of packets.
-            r.hystart.start_round(send_pn + n_rtt_sample as u64 - 1);
+            r.congestion
+                .hystart
+                .start_round(send_pn + n_rtt_sample as u64 - 1);
             for _ in 0..n_rtt_sample {
                 r.on_packet_sent_cc(send_pn, p.size, now);
                 send_pn += 1;
@@ -1081,7 +1100,7 @@ mod tests {
             }
         }
         // Now we are in congestion avoidance.
-        assert_eq!(r.cwnd(), r.ssthresh);
+        assert_eq!(r.cwnd(), r.congestion.ssthresh);
     }
 
     #[test]
@@ -1094,7 +1113,7 @@ mod tests {
         let prev_cwnd = r.cwnd();
 
         // Send initcwnd full MSS packets to become no longer app limited
-        for pn in 0..r.initial_congestion_window_packets {
+        for pn in 0..r.congestion.initial_congestion_window_packets {
             r.on_packet_sent_cc(pn as _, r.max_datagram_size, now);
         }
 
@@ -1216,7 +1235,7 @@ mod tests {
         let prev_cwnd = r.cwnd();
 
         // Send initcwnd full MSS packets to become no longer app limited
-        for pn in 0..r.initial_congestion_window_packets {
+        for pn in 0..r.congestion.initial_congestion_window_packets {
             r.on_packet_sent_cc(pn as _, r.max_datagram_size, now);
         }
 
@@ -1253,9 +1272,6 @@ mod tests {
 
         // Exit from the recovery.
         now += rtt;
-
-        // To avoid rollback
-        r.lost_count += MIN_ROLLBACK_THRESHOLD;
 
         // During Congestion Avoidance, it will take
         // 5 ACKs to increase cwnd by 1 MSS.
@@ -1311,7 +1327,7 @@ mod tests {
 
         // w_max will be further reduced, not prev_cwnd
         assert_eq!(
-            r.cubic_state.w_max,
+            r.congestion.cubic_state.w_max,
             prev_cwnd as f64 * (1.0 + BETA_CUBIC) / 2.0
         );
     }

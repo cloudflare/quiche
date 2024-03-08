@@ -250,7 +250,7 @@ impl State {
 }
 
 // When entering the recovery episode.
-fn bbr_enter_recovery(r: &mut Recovery, in_flight: usize, now: Instant) {
+fn bbr_enter_recovery(r: &mut Congestion, in_flight: usize, now: Instant) {
     r.bbr_state.prior_cwnd = per_ack::bbr_save_cwnd(r);
 
     r.congestion_window = in_flight.max(r.max_datagram_size);
@@ -266,7 +266,7 @@ fn bbr_enter_recovery(r: &mut Recovery, in_flight: usize, now: Instant) {
 }
 
 // When exiting the recovery episode.
-fn bbr_exit_recovery(r: &mut Recovery) {
+fn bbr_exit_recovery(r: &mut Congestion) {
     r.congestion_recovery_start_time = None;
 
     r.bbr_state.packet_conservation = false;
@@ -277,28 +277,33 @@ fn bbr_exit_recovery(r: &mut Recovery) {
 
 // Congestion Control Hooks.
 //
-fn on_init(r: &mut Recovery) {
+fn on_init(r: &mut Congestion) {
     init::bbr_init(r);
 }
 
-fn reset(r: &mut Recovery) {
+fn reset(r: &mut Congestion) {
     r.bbr_state = State::new();
 
     init::bbr_init(r);
 }
 
-fn on_packet_sent(r: &mut Recovery, _sent_bytes: usize, _now: Instant) {
-    per_transmit::bbr_on_transmit(r);
+fn on_packet_sent(
+    r: &mut Congestion, _sent_bytes: usize, bytes_in_flight: usize, _now: Instant,
+) {
+    per_transmit::bbr_on_transmit(r, bytes_in_flight);
 }
 
-fn on_packets_acked(r: &mut Recovery, packets: &mut Vec<Acked>, now: Instant) {
-    r.bbr_state.prior_bytes_in_flight = r.bytes_in_flight;
+fn on_packets_acked(
+    r: &mut Congestion, bytes_in_flight: usize, packets: &mut Vec<Acked>,
+    now: Instant, _rtt_stats: &RttStats,
+) {
+    r.bbr_state.prior_bytes_in_flight = bytes_in_flight;
 
     r.bbr_state.newly_acked_bytes =
         packets.drain(..).fold(0, |acked_bytes, p| {
             r.bbr_state.prior_bytes_in_flight -= p.size;
 
-            per_ack::bbr_update_model_and_state(r, &p, now);
+            per_ack::bbr_update_model_and_state(r, &p, bytes_in_flight, now);
 
             acked_bytes + p.size
         });
@@ -310,32 +315,33 @@ fn on_packets_acked(r: &mut Recovery, packets: &mut Vec<Acked>, now: Instant) {
         }
     }
 
-    per_ack::bbr_update_control_parameters(r, now);
+    per_ack::bbr_update_control_parameters(r, bytes_in_flight, now);
 
     r.bbr_state.newly_lost_bytes = 0;
 }
 
 fn congestion_event(
-    r: &mut Recovery, lost_bytes: usize, largest_lost_pkt: &Sent, now: Instant,
+    r: &mut Congestion, bytes_in_flight: usize, lost_bytes: usize,
+    largest_lost_pkt: &Sent, now: Instant,
 ) {
     r.bbr_state.newly_lost_bytes = lost_bytes;
 
     // Upon entering Fast Recovery.
     if !r.in_congestion_recovery(largest_lost_pkt.time_sent) {
         // Upon entering Fast Recovery.
-        bbr_enter_recovery(r, r.bytes_in_flight - lost_bytes, now);
+        bbr_enter_recovery(r, bytes_in_flight - lost_bytes, now);
     }
 }
 
-fn collapse_cwnd(r: &mut Recovery) {
+fn collapse_cwnd(r: &mut Congestion, bytes_in_flight: usize) {
     r.bbr_state.prior_cwnd = per_ack::bbr_save_cwnd(r);
 
-    reno::collapse_cwnd(r);
+    reno::collapse_cwnd(r, bytes_in_flight);
 }
 
-fn checkpoint(_r: &mut Recovery) {}
+fn checkpoint(_r: &mut Congestion) {}
 
-fn rollback(_r: &mut Recovery) -> bool {
+fn rollback(_r: &mut Congestion) -> bool {
     false
 }
 
@@ -343,7 +349,7 @@ fn has_custom_pacing() -> bool {
     true
 }
 
-fn debug_fmt(r: &Recovery, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+fn debug_fmt(r: &Congestion, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     let bbr = &r.bbr_state;
 
     write!(
@@ -366,11 +372,7 @@ mod tests {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR);
 
-        let mut r = Recovery::new(&cfg);
-
-        // on_init() is called in Connection::new(), so it need to be
-        // called manually here.
-        r.on_init();
+        let r = Recovery::new(&cfg);
 
         assert_eq!(
             r.cwnd(),
@@ -378,7 +380,7 @@ mod tests {
         );
         assert_eq!(r.bytes_in_flight, 0);
 
-        assert_eq!(r.bbr_state.state, BBRStateMachine::Startup);
+        assert_eq!(r.congestion.bbr_state.state, BBRStateMachine::Startup);
     }
 
     #[test]
@@ -389,7 +391,6 @@ mod tests {
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
 
-        r.on_init();
         r.on_packet_sent_cc(0, 1000, now);
 
         assert_eq!(r.bytes_in_flight, 1000);
@@ -403,8 +404,6 @@ mod tests {
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
         let mss = r.max_datagram_size;
-
-        r.on_init();
 
         // Send 5 packets.
         for pn in 0..5 {
@@ -456,14 +455,14 @@ mod tests {
             Ok((0, 0, mss * 5)),
         );
 
-        assert_eq!(r.bbr_state.state, BBRStateMachine::Startup);
+        assert_eq!(r.congestion.bbr_state.state, BBRStateMachine::Startup);
         assert_eq!(r.cwnd(), cwnd_prev + mss * 5);
         assert_eq!(r.bytes_in_flight, 0);
         assert_eq!(
             r.delivery_rate(),
             ((mss * 5) as f64 / rtt.as_secs_f64()) as u64
         );
-        assert_eq!(r.bbr_state.btlbw, r.delivery_rate());
+        assert_eq!(r.congestion.bbr_state.btlbw, r.delivery_rate());
     }
 
     #[test]
@@ -474,8 +473,6 @@ mod tests {
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
         let mss = r.max_datagram_size;
-
-        r.on_init();
 
         // Send 5 packets.
         for pn in 0..5 {
@@ -543,8 +540,6 @@ mod tests {
         let now = Instant::now();
         let mss = r.max_datagram_size;
 
-        r.on_init();
-
         let mut pn = 0;
 
         // Stop right before filled_pipe=true.
@@ -558,7 +553,7 @@ mod tests {
                 size: mss,
                 ack_eliciting: true,
                 in_flight: true,
-                delivered: r.delivery_rate.delivered(),
+                delivered: r.congestion.delivery_rate.delivered(),
                 delivered_time: now,
                 first_sent_time: now,
                 is_app_limited: false,
@@ -610,7 +605,7 @@ mod tests {
                 size: mss,
                 ack_eliciting: true,
                 in_flight: true,
-                delivered: r.delivery_rate.delivered(),
+                delivered: r.congestion.delivery_rate.delivered(),
                 delivered_time: now,
                 first_sent_time: now,
                 is_app_limited: false,
@@ -654,9 +649,9 @@ mod tests {
         );
 
         // Now we are in Drain state.
-        assert!(r.bbr_state.filled_pipe);
-        assert_eq!(r.bbr_state.state, BBRStateMachine::Drain);
-        assert!(r.bbr_state.pacing_gain < 1.0);
+        assert!(r.congestion.bbr_state.filled_pipe);
+        assert_eq!(r.congestion.bbr_state.state, BBRStateMachine::Drain);
+        assert!(r.congestion.bbr_state.pacing_gain < 1.0);
     }
 
     #[test]
@@ -667,8 +662,6 @@ mod tests {
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
         let mss = r.max_datagram_size;
-
-        r.on_init();
 
         // At 4th roundtrip, filled_pipe=true and switch to Drain,
         // but move to ProbeBW immediately because bytes_in_flight is
@@ -683,7 +676,7 @@ mod tests {
                 size: mss,
                 ack_eliciting: true,
                 in_flight: true,
-                delivered: r.delivery_rate.delivered(),
+                delivered: r.congestion.delivery_rate.delivered(),
                 delivered_time: now,
                 first_sent_time: now,
                 is_app_limited: false,
@@ -722,11 +715,11 @@ mod tests {
         }
 
         // Now we are in ProbeBW state.
-        assert!(r.bbr_state.filled_pipe);
-        assert_eq!(r.bbr_state.state, BBRStateMachine::ProbeBW);
+        assert!(r.congestion.bbr_state.filled_pipe);
+        assert_eq!(r.congestion.bbr_state.state, BBRStateMachine::ProbeBW);
 
         // In the first ProbeBW cycle, pacing_gain should be >= 1.0.
-        assert!(r.bbr_state.pacing_gain >= 1.0);
+        assert!(r.congestion.bbr_state.pacing_gain >= 1.0);
     }
 
     #[test]
@@ -737,8 +730,6 @@ mod tests {
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
         let mss = r.max_datagram_size;
-
-        r.on_init();
 
         let mut pn = 0;
 
@@ -755,7 +746,7 @@ mod tests {
                 size: mss,
                 ack_eliciting: true,
                 in_flight: true,
-                delivered: r.delivery_rate.delivered(),
+                delivered: r.congestion.delivery_rate.delivered(),
                 delivered_time: now,
                 first_sent_time: now,
                 is_app_limited: false,
@@ -796,7 +787,7 @@ mod tests {
         }
 
         // Now we are in ProbeBW state.
-        assert_eq!(r.bbr_state.state, BBRStateMachine::ProbeBW);
+        assert_eq!(r.congestion.bbr_state.state, BBRStateMachine::ProbeBW);
 
         // After RTPROP_FILTER_LEN (10s), switch to ProbeRTT.
         let now = now + RTPROP_FILTER_LEN;
@@ -810,7 +801,7 @@ mod tests {
             size: mss,
             ack_eliciting: true,
             in_flight: true,
-            delivered: r.delivery_rate.delivered(),
+            delivered: r.congestion.delivery_rate.delivered(),
             delivered_time: now,
             first_sent_time: now,
             is_app_limited: false,
@@ -851,8 +842,8 @@ mod tests {
             Ok((0, 0, mss)),
         );
 
-        assert_eq!(r.bbr_state.state, BBRStateMachine::ProbeRTT);
-        assert_eq!(r.bbr_state.pacing_gain, 1.0);
+        assert_eq!(r.congestion.bbr_state.state, BBRStateMachine::ProbeRTT);
+        assert_eq!(r.congestion.bbr_state.pacing_gain, 1.0);
     }
 }
 
