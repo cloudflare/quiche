@@ -24,9 +24,9 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use super::*;
+use self::rtt::INITIAL_RTT;
 
-use crate::recovery::Recovery;
+use super::*;
 
 use std::time::Instant;
 
@@ -34,11 +34,10 @@ use std::time::Instant;
 //
 
 // 4.3.1.  Initialization Steps
-pub fn bbr_init(r: &mut Recovery) {
-    let rtt = r.rtt();
+pub fn bbr_init(r: &mut Congestion) {
     let bbr = &mut r.bbr_state;
 
-    bbr.rtprop = rtt;
+    bbr.rtprop = INITIAL_RTT;
     bbr.rtprop_stamp = Instant::now();
     bbr.next_round_delivered = r.delivery_rate.delivered();
 
@@ -51,7 +50,7 @@ pub fn bbr_init(r: &mut Recovery) {
 }
 
 // 4.1.1.3.  Tracking Time for the BBR.BtlBw Max Filter
-fn bbr_init_round_counting(r: &mut Recovery) {
+fn bbr_init_round_counting(r: &mut Congestion) {
     let bbr = &mut r.bbr_state;
 
     bbr.next_round_delivered = 0;
@@ -60,10 +59,10 @@ fn bbr_init_round_counting(r: &mut Recovery) {
 }
 
 // 4.2.1.  Pacing Rate
-fn bbr_init_pacing_rate(r: &mut Recovery) {
+fn bbr_init_pacing_rate(r: &mut Congestion) {
     let bbr = &mut r.bbr_state;
 
-    let srtt = r.rtt_stats.smoothed_rtt.as_secs_f64();
+    let srtt = INITIAL_RTT.as_secs_f64();
 
     // At init, cwnd is initcwnd.
     let nominal_bandwidth = r.congestion_window as f64 / srtt;
@@ -72,7 +71,7 @@ fn bbr_init_pacing_rate(r: &mut Recovery) {
 }
 
 // 4.3.2.1.  Startup Dynamics
-pub fn bbr_enter_startup(r: &mut Recovery) {
+pub fn bbr_enter_startup(r: &mut Congestion) {
     let bbr = &mut r.bbr_state;
 
     bbr.state = BBRStateMachine::Startup;
@@ -81,7 +80,7 @@ pub fn bbr_enter_startup(r: &mut Recovery) {
 }
 
 // 4.3.2.2.  Estimating When Startup has Filled the Pipe
-fn bbr_init_full_pipe(r: &mut Recovery) {
+fn bbr_init_full_pipe(r: &mut Congestion) {
     let bbr = &mut r.bbr_state;
 
     bbr.filled_pipe = false;

@@ -29,13 +29,15 @@ use super::*;
 // BBR2 Functions on every packet loss event.
 //
 // 4.2.4.  Per-Loss Steps
-pub fn bbr2_update_on_loss(r: &mut Recovery, packet: &Sent, now: Instant) {
-    bbr2_handle_lost_packet(r, packet, now);
+pub fn bbr2_update_on_loss(
+    r: &mut Congestion, packet: &Sent, lost_bytes: usize, now: Instant,
+) {
+    bbr2_handle_lost_packet(r, packet, lost_bytes, now);
 }
 
 // 4.5.6.  Updating the Model Upon Packet Loss
 // 4.5.6.2.  Probing for Bandwidth In ProbeBW
-pub fn bbr2_check_inflight_too_high(r: &mut Recovery, now: Instant) -> bool {
+pub fn bbr2_check_inflight_too_high(r: &mut Congestion, now: Instant) -> bool {
     if bbr2_is_inflight_too_high(r) {
         if r.bbr2_state.bw_probe_samples {
             bbr2_handle_inflight_too_high(r, now);
@@ -49,11 +51,11 @@ pub fn bbr2_check_inflight_too_high(r: &mut Recovery, now: Instant) -> bool {
     false
 }
 
-pub fn bbr2_is_inflight_too_high(r: &mut Recovery) -> bool {
+pub fn bbr2_is_inflight_too_high(r: &mut Congestion) -> bool {
     r.bbr2_state.lost > (r.bbr2_state.tx_in_flight as f64 * LOSS_THRESH) as usize
 }
 
-fn bbr2_handle_inflight_too_high(r: &mut Recovery, now: Instant) {
+fn bbr2_handle_inflight_too_high(r: &mut Congestion, now: Instant) {
     // Only react once per bw probe.
     r.bbr2_state.bw_probe_samples = false;
 
@@ -69,15 +71,17 @@ fn bbr2_handle_inflight_too_high(r: &mut Recovery, now: Instant) {
     }
 }
 
-fn bbr2_handle_lost_packet(r: &mut Recovery, packet: &Sent, now: Instant) {
+fn bbr2_handle_lost_packet(
+    r: &mut Congestion, packet: &Sent, lost_bytes: usize, now: Instant,
+) {
     if !r.bbr2_state.bw_probe_samples {
         return;
     }
 
     r.bbr2_state.tx_in_flight = packet.tx_in_flight;
-    r.bbr2_state.lost = (r.bytes_lost - packet.lost) as usize;
+    r.bbr2_state.lost = lost_bytes;
 
-    r.delivery_rate_update_app_limited(packet.is_app_limited);
+    r.delivery_rate.update_app_limited(packet.is_app_limited);
 
     if bbr2_is_inflight_too_high(r) {
         r.bbr2_state.tx_in_flight = bbr2_inflight_hi_from_lost_packet(r, packet);
@@ -86,7 +90,7 @@ fn bbr2_handle_lost_packet(r: &mut Recovery, packet: &Sent, now: Instant) {
     }
 }
 
-fn bbr2_inflight_hi_from_lost_packet(r: &mut Recovery, packet: &Sent) -> usize {
+fn bbr2_inflight_hi_from_lost_packet(r: &mut Congestion, packet: &Sent) -> usize {
     let size = packet.size;
     let inflight_prev = r.bbr2_state.tx_in_flight - size;
     let lost_prev = r.bbr2_state.lost - size;
@@ -97,7 +101,7 @@ fn bbr2_inflight_hi_from_lost_packet(r: &mut Recovery, packet: &Sent) -> usize {
 }
 
 // 4.5.6.3.  When not Probing for Bandwidth
-pub fn bbr2_update_latest_delivery_signals(r: &mut Recovery) {
+pub fn bbr2_update_latest_delivery_signals(r: &mut Congestion) {
     let bbr = &mut r.bbr2_state;
 
     // Near start of ACK processing.
@@ -112,7 +116,7 @@ pub fn bbr2_update_latest_delivery_signals(r: &mut Recovery) {
     }
 }
 
-pub fn bbr2_advance_latest_delivery_signals(r: &mut Recovery) {
+pub fn bbr2_advance_latest_delivery_signals(r: &mut Congestion) {
     let bbr = &mut r.bbr2_state;
 
     // Near end of ACK processing.
@@ -122,7 +126,7 @@ pub fn bbr2_advance_latest_delivery_signals(r: &mut Recovery) {
     }
 }
 
-pub fn bbr2_reset_congestion_signals(r: &mut Recovery) {
+pub fn bbr2_reset_congestion_signals(r: &mut Congestion) {
     let bbr = &mut r.bbr2_state;
 
     bbr.loss_in_round = false;
@@ -131,7 +135,7 @@ pub fn bbr2_reset_congestion_signals(r: &mut Recovery) {
     bbr.inflight_latest = 0;
 }
 
-pub fn bbr2_update_congestion_signals(r: &mut Recovery, packet: &Acked) {
+pub fn bbr2_update_congestion_signals(r: &mut Congestion, packet: &Acked) {
     // Update congestion state on every ACK.
     per_ack::bbr2_update_max_bw(r, packet);
 
@@ -151,7 +155,7 @@ pub fn bbr2_update_congestion_signals(r: &mut Recovery, packet: &Acked) {
     r.bbr2_state.loss_events_in_round = 0;
 }
 
-fn bbr2_adapt_lower_bounds_from_congestion(r: &mut Recovery) {
+fn bbr2_adapt_lower_bounds_from_congestion(r: &mut Congestion) {
     // Once per round-trip respond to congestion.
     if bbr2_is_probing_bw(r) {
         return;
@@ -163,7 +167,7 @@ fn bbr2_adapt_lower_bounds_from_congestion(r: &mut Recovery) {
     }
 }
 
-fn bbr2_init_lower_bounds(r: &mut Recovery) {
+fn bbr2_init_lower_bounds(r: &mut Congestion) {
     let bbr = &mut r.bbr2_state;
 
     // Handle the first congestion episode in this cycle.
@@ -176,7 +180,7 @@ fn bbr2_init_lower_bounds(r: &mut Recovery) {
     }
 }
 
-fn bbr2_loss_lower_bounds(r: &mut Recovery) {
+fn bbr2_loss_lower_bounds(r: &mut Congestion) {
     let bbr = &mut r.bbr2_state;
 
     // Adjust model once per round based on loss.
@@ -186,21 +190,21 @@ fn bbr2_loss_lower_bounds(r: &mut Recovery) {
         .max((bbr.inflight_lo as f64 * BETA) as usize);
 }
 
-pub fn bbr2_reset_lower_bounds(r: &mut Recovery) {
+pub fn bbr2_reset_lower_bounds(r: &mut Congestion) {
     let bbr = &mut r.bbr2_state;
 
     bbr.bw_lo = u64::MAX;
     bbr.inflight_lo = usize::MAX;
 }
 
-pub fn bbr2_bound_bw_for_model(r: &mut Recovery) {
+pub fn bbr2_bound_bw_for_model(r: &mut Congestion) {
     let bbr = &mut r.bbr2_state;
 
     bbr.bw = bbr.max_bw.min(bbr.bw_lo.min(bbr.bw_hi));
 }
 
 // This function is not defined in the draft but used.
-fn bbr2_is_probing_bw(r: &mut Recovery) -> bool {
+fn bbr2_is_probing_bw(r: &mut Congestion) -> bool {
     let state = r.bbr2_state.state;
 
     state == BBR2StateMachine::Startup ||

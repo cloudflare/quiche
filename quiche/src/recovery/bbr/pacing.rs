@@ -24,13 +24,13 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use crate::recovery::Recovery;
+use super::Congestion;
 
 // BBR Transmit Packet Pacing Functions
 //
 
 // 4.2.1. Pacing Rate
-pub fn bbr_set_pacing_rate_with_gain(r: &mut Recovery, pacing_gain: f64) {
+pub fn bbr_set_pacing_rate_with_gain(r: &mut Congestion, pacing_gain: f64) {
     let rate = (pacing_gain * r.bbr_state.btlbw as f64) as u64;
 
     if r.bbr_state.filled_pipe || rate > r.bbr_state.pacing_rate {
@@ -38,6 +38,6 @@ pub fn bbr_set_pacing_rate_with_gain(r: &mut Recovery, pacing_gain: f64) {
     }
 }
 
-pub fn bbr_set_pacing_rate(r: &mut Recovery) {
+pub fn bbr_set_pacing_rate(r: &mut Congestion) {
     bbr_set_pacing_rate_with_gain(r, r.bbr_state.pacing_gain);
 }
