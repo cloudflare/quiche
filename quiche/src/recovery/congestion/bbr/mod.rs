@@ -34,13 +34,13 @@ use crate::recovery::*;
 
 use std::time::Duration;
 
-pub static BBR: CongestionControlOps = CongestionControlOps {
+use super::CongestionControlOps;
+
+pub(crate) static BBR: CongestionControlOps = CongestionControlOps {
     on_init,
-    reset,
     on_packet_sent,
     on_packets_acked,
     congestion_event,
-    collapse_cwnd,
     checkpoint,
     rollback,
     has_custom_pacing,
@@ -281,12 +281,6 @@ fn on_init(r: &mut Congestion) {
     init::bbr_init(r);
 }
 
-fn reset(r: &mut Congestion) {
-    r.bbr_state = State::new();
-
-    init::bbr_init(r);
-}
-
 fn on_packet_sent(
     r: &mut Congestion, _sent_bytes: usize, bytes_in_flight: usize, _now: Instant,
 ) {
@@ -333,12 +327,6 @@ fn congestion_event(
     }
 }
 
-fn collapse_cwnd(r: &mut Congestion, bytes_in_flight: usize) {
-    r.bbr_state.prior_cwnd = per_ack::bbr_save_cwnd(r);
-
-    reno::collapse_cwnd(r, bytes_in_flight);
-}
-
 fn checkpoint(_r: &mut Congestion) {}
 
 fn rollback(_r: &mut Congestion) -> bool {
@@ -365,7 +353,13 @@ mod tests {
 
     use crate::recovery;
 
+    use self::congestion::test_sender::TestSender;
+
     use smallvec::smallvec;
+
+    fn test_sender() -> TestSender {
+        TestSender::new(recovery::CongestionControlAlgorithm::BBR, false)
+    }
 
     #[test]
     fn bbr_init() {
@@ -384,85 +378,33 @@ mod tests {
     }
 
     #[test]
-    fn bbr_send() {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR);
-
-        let mut r = Recovery::new(&cfg);
-        let now = Instant::now();
-
-        r.on_packet_sent_cc(0, 1000, now);
-
-        assert_eq!(r.bytes_in_flight, 1000);
-    }
-
-    #[test]
     fn bbr_startup() {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR);
-
-        let mut r = Recovery::new(&cfg);
-        let now = Instant::now();
-        let mss = r.max_datagram_size;
-
-        // Send 5 packets.
-        for pn in 0..5 {
-            let pkt = Sent {
-                pkt_num: pn,
-                frames: smallvec![],
-                time_sent: now,
-                time_acked: None,
-                time_lost: None,
-                size: mss,
-                ack_eliciting: true,
-                in_flight: true,
-                delivered: 0,
-                delivered_time: now,
-                first_sent_time: now,
-                is_app_limited: false,
-                tx_in_flight: 0,
-                lost: 0,
-                has_data: false,
-                pmtud: false,
-            };
-
-            r.on_packet_sent(
-                pkt,
-                packet::Epoch::Application,
-                HandshakeStatus::default(),
-                now,
-                "",
-            );
-        }
+        let mut sender = test_sender();
+        let mss = sender.max_datagram_size;
 
         let rtt = Duration::from_millis(50);
-        let now = now + rtt;
-        let cwnd_prev = r.cwnd();
+        sender.update_rtt(rtt);
+        sender.advance_time(rtt);
 
-        let mut acked = ranges::RangeSet::default();
-        acked.insert(0..5);
+        // Send 5 packets.
+        for _ in 0..5 {
+            sender.send_packet(mss);
+        }
 
+        sender.advance_time(rtt);
+
+        let cwnd_prev = sender.congestion_window;
+
+        sender.ack_n_packets(5, mss);
+
+        assert_eq!(sender.bbr_state.state, BBRStateMachine::Startup);
+        assert_eq!(sender.congestion_window, cwnd_prev + mss * 5);
+        assert_eq!(sender.bytes_in_flight, 0);
         assert_eq!(
-            r.on_ack_received(
-                &acked,
-                25,
-                packet::Epoch::Application,
-                HandshakeStatus::default(),
-                now,
-                "",
-                &mut Vec::new(),
-            ),
-            Ok((0, 0, mss * 5)),
-        );
-
-        assert_eq!(r.congestion.bbr_state.state, BBRStateMachine::Startup);
-        assert_eq!(r.cwnd(), cwnd_prev + mss * 5);
-        assert_eq!(r.bytes_in_flight, 0);
-        assert_eq!(
-            r.delivery_rate(),
+            sender.delivery_rate(),
             ((mss * 5) as f64 / rtt.as_secs_f64()) as u64
         );
-        assert_eq!(r.congestion.bbr_state.btlbw, r.delivery_rate());
+        assert_eq!(sender.bbr_state.btlbw, sender.delivery_rate());
     }
 
     #[test]
