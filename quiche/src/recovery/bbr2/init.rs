@@ -26,16 +26,19 @@
 
 use super::*;
 
+use rtt::INITIAL_RTT;
+
+use std::time::Instant;
+
 // BBR2 Functions at Initialization.
 //
 
 // 4.2.1.  Initialization
-pub fn bbr2_init(r: &mut Recovery) {
-    let rtt = r.rtt();
+pub fn bbr2_init(r: &mut Congestion) {
     let now = Instant::now();
 
     let bbr = &mut r.bbr2_state;
-    bbr.min_rtt = rtt;
+    bbr.min_rtt = INITIAL_RTT;
     bbr.min_rtt_stamp = now;
     bbr.probe_rtt_done_stamp = None;
     bbr.probe_rtt_round_done = false;
@@ -60,7 +63,7 @@ pub fn bbr2_init(r: &mut Recovery) {
 }
 
 // 4.5.1.  BBR.round_count: Tracking Packet-Timed Round Trips
-fn bbr2_init_round_counting(r: &mut Recovery) {
+fn bbr2_init_round_counting(r: &mut Congestion) {
     let bbr = &mut r.bbr2_state;
 
     bbr.next_round_delivered = 0;
@@ -69,7 +72,7 @@ fn bbr2_init_round_counting(r: &mut Recovery) {
 }
 
 // 4.3.1.1.  Startup Dynamics
-pub fn bbr2_enter_startup(r: &mut Recovery) {
+pub fn bbr2_enter_startup(r: &mut Congestion) {
     let bbr = &mut r.bbr2_state;
 
     bbr.state = BBR2StateMachine::Startup;
@@ -78,7 +81,7 @@ pub fn bbr2_enter_startup(r: &mut Recovery) {
 }
 
 // 4.3.1.2.  Exiting Startup Based on Bandwidth Plateau
-fn bbr2_init_full_pipe(r: &mut Recovery) {
+fn bbr2_init_full_pipe(r: &mut Congestion) {
     let bbr = &mut r.bbr2_state;
 
     bbr.filled_pipe = false;

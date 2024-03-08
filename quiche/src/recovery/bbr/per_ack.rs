@@ -36,24 +36,26 @@ const PACING_RATE_24MBPS: u64 = 24 * 1000 * 1000 / 8;
 
 /// The minimal cwnd value BBR tries to target, in bytes
 #[inline]
-fn bbr_min_pipe_cwnd(r: &mut Recovery) -> usize {
+fn bbr_min_pipe_cwnd(r: &mut Congestion) -> usize {
     BBR_MIN_PIPE_CWND_PKTS * r.max_datagram_size
 }
 
 // BBR Functions when ACK is received.
 //
 pub fn bbr_update_model_and_state(
-    r: &mut Recovery, packet: &Acked, now: Instant,
+    r: &mut Congestion, packet: &Acked, bytes_in_flight: usize, now: Instant,
 ) {
-    bbr_update_btlbw(r, packet);
+    bbr_update_btlbw(r, packet, bytes_in_flight);
     bbr_check_cycle_phase(r, now);
     bbr_check_full_pipe(r);
-    bbr_check_drain(r, now);
+    bbr_check_drain(r, bytes_in_flight, now);
     bbr_update_rtprop(r, now);
-    bbr_check_probe_rtt(r, now);
+    bbr_check_probe_rtt(r, bytes_in_flight, now);
 }
 
-pub fn bbr_update_control_parameters(r: &mut Recovery, now: Instant) {
+pub fn bbr_update_control_parameters(
+    r: &mut Congestion, bytes_in_flight: usize, now: Instant,
+) {
     pacing::bbr_set_pacing_rate(r);
     bbr_set_send_quantum(r);
 
@@ -61,14 +63,14 @@ pub fn bbr_update_control_parameters(r: &mut Recovery, now: Instant) {
     // It is called here because send_quantum may be updated too.
     r.set_pacing_rate(r.bbr_state.pacing_rate, now);
 
-    bbr_set_cwnd(r);
+    bbr_set_cwnd(r, bytes_in_flight);
 }
 
 // BBR Functions while processing ACKs.
 //
 
 // 4.1.1.5.  Updating the BBR.BtlBw Max Filter
-fn bbr_update_btlbw(r: &mut Recovery, packet: &Acked) {
+fn bbr_update_btlbw(r: &mut Congestion, packet: &Acked, _bytes_in_flight: usize) {
     bbr_update_round(r, packet);
 
     if r.delivery_rate() >= r.bbr_state.btlbw ||
@@ -85,7 +87,7 @@ fn bbr_update_btlbw(r: &mut Recovery, packet: &Acked) {
 }
 
 // 4.1.1.3 Tracking Time for the BBR.BtlBw Max Filter
-fn bbr_update_round(r: &mut Recovery, packet: &Acked) {
+fn bbr_update_round(r: &mut Congestion, packet: &Acked) {
     let bbr = &mut r.bbr_state;
 
     if packet.delivered >= bbr.next_round_delivered {
@@ -99,7 +101,7 @@ fn bbr_update_round(r: &mut Recovery, packet: &Acked) {
 }
 
 // 4.1.2.3. Updating the BBR.RTprop Min Filter
-fn bbr_update_rtprop(r: &mut Recovery, now: Instant) {
+fn bbr_update_rtprop(r: &mut Congestion, now: Instant) {
     let bbr = &mut r.bbr_state;
     let rs_rtt = r.delivery_rate.sample_rtt();
 
@@ -112,7 +114,7 @@ fn bbr_update_rtprop(r: &mut Recovery, now: Instant) {
 }
 
 // 4.2.2 Send Quantum
-fn bbr_set_send_quantum(r: &mut Recovery) {
+fn bbr_set_send_quantum(r: &mut Congestion) {
     let rate = r.bbr_state.pacing_rate;
 
     r.send_quantum = match rate {
@@ -125,7 +127,7 @@ fn bbr_set_send_quantum(r: &mut Recovery) {
 }
 
 // 4.2.3.2 Target cwnd
-fn bbr_inflight(r: &mut Recovery, gain: f64) -> usize {
+fn bbr_inflight(r: &mut Congestion, gain: f64) -> usize {
     let bbr = &mut r.bbr_state;
 
     if bbr.rtprop == Duration::MAX {
@@ -138,12 +140,12 @@ fn bbr_inflight(r: &mut Recovery, gain: f64) -> usize {
     (gain * estimated_bdp) as usize + quanta
 }
 
-fn bbr_update_target_cwnd(r: &mut Recovery) {
+fn bbr_update_target_cwnd(r: &mut Congestion) {
     r.bbr_state.target_cwnd = bbr_inflight(r, r.bbr_state.cwnd_gain);
 }
 
 // 4.2.3.4 Modulating cwnd in Loss Recovery
-pub fn bbr_save_cwnd(r: &mut Recovery) -> usize {
+pub fn bbr_save_cwnd(r: &mut Congestion) -> usize {
     if !r.bbr_state.in_recovery && r.bbr_state.state != BBRStateMachine::ProbeRTT
     {
         r.congestion_window
@@ -152,11 +154,11 @@ pub fn bbr_save_cwnd(r: &mut Recovery) -> usize {
     }
 }
 
-pub fn bbr_restore_cwnd(r: &mut Recovery) {
+pub fn bbr_restore_cwnd(r: &mut Congestion) {
     r.congestion_window = r.congestion_window.max(r.bbr_state.prior_cwnd);
 }
 
-fn bbr_modulate_cwnd_for_recovery(r: &mut Recovery) {
+fn bbr_modulate_cwnd_for_recovery(r: &mut Congestion, bytes_in_flight: usize) {
     let acked_bytes = r.bbr_state.newly_acked_bytes;
     let lost_bytes = r.bbr_state.newly_lost_bytes;
 
@@ -170,23 +172,23 @@ fn bbr_modulate_cwnd_for_recovery(r: &mut Recovery) {
 
     if r.bbr_state.packet_conservation {
         r.congestion_window =
-            r.congestion_window.max(r.bytes_in_flight + acked_bytes);
+            r.congestion_window.max(bytes_in_flight + acked_bytes);
     }
 }
 
 // 4.2.3.5 Modulating cwnd in ProbeRTT
-fn bbr_modulate_cwnd_for_probe_rtt(r: &mut Recovery) {
+fn bbr_modulate_cwnd_for_probe_rtt(r: &mut Congestion) {
     if r.bbr_state.state == BBRStateMachine::ProbeRTT {
         r.congestion_window = r.congestion_window.min(bbr_min_pipe_cwnd(r))
     }
 }
 
 // 4.2.3.6 Core cwnd Adjustment Mechanism
-fn bbr_set_cwnd(r: &mut Recovery) {
+fn bbr_set_cwnd(r: &mut Congestion, bytes_in_flight: usize) {
     let acked_bytes = r.bbr_state.newly_acked_bytes;
 
     bbr_update_target_cwnd(r);
-    bbr_modulate_cwnd_for_recovery(r);
+    bbr_modulate_cwnd_for_recovery(r, bytes_in_flight);
 
     if !r.bbr_state.packet_conservation {
         if r.bbr_state.filled_pipe {
@@ -208,7 +210,7 @@ fn bbr_set_cwnd(r: &mut Recovery) {
 }
 
 // 4.3.2.2.  Estimating When Startup has Filled the Pipe
-fn bbr_check_full_pipe(r: &mut Recovery) {
+fn bbr_check_full_pipe(r: &mut Congestion) {
     // No need to check for a full pipe now.
     if r.bbr_state.filled_pipe ||
         !r.bbr_state.round_start ||
@@ -236,7 +238,7 @@ fn bbr_check_full_pipe(r: &mut Recovery) {
 }
 
 // 4.3.3.  Drain
-fn bbr_enter_drain(r: &mut Recovery) {
+fn bbr_enter_drain(r: &mut Congestion) {
     let bbr = &mut r.bbr_state;
 
     bbr.state = BBRStateMachine::Drain;
@@ -248,13 +250,13 @@ fn bbr_enter_drain(r: &mut Recovery) {
     bbr.cwnd_gain = BBR_HIGH_GAIN;
 }
 
-fn bbr_check_drain(r: &mut Recovery, now: Instant) {
+fn bbr_check_drain(r: &mut Congestion, bytes_in_flight: usize, now: Instant) {
     if r.bbr_state.state == BBRStateMachine::Startup && r.bbr_state.filled_pipe {
         bbr_enter_drain(r);
     }
 
     if r.bbr_state.state == BBRStateMachine::Drain &&
-        r.bytes_in_flight <= bbr_inflight(r, 1.0)
+        bytes_in_flight <= bbr_inflight(r, 1.0)
     {
         // we estimate queue is drained
         bbr_enter_probe_bw(r, now);
@@ -262,7 +264,7 @@ fn bbr_check_drain(r: &mut Recovery, now: Instant) {
 }
 
 // 4.3.4.3.  Gain Cycling Algorithm
-fn bbr_enter_probe_bw(r: &mut Recovery, now: Instant) {
+fn bbr_enter_probe_bw(r: &mut Congestion, now: Instant) {
     let bbr = &mut r.bbr_state;
 
     bbr.state = BBRStateMachine::ProbeBW;
@@ -281,7 +283,7 @@ fn bbr_enter_probe_bw(r: &mut Recovery, now: Instant) {
     bbr_advance_cycle_phase(r, now);
 }
 
-fn bbr_check_cycle_phase(r: &mut Recovery, now: Instant) {
+fn bbr_check_cycle_phase(r: &mut Congestion, now: Instant) {
     let bbr = &mut r.bbr_state;
 
     if bbr.state == BBRStateMachine::ProbeBW && bbr_is_next_cycle_phase(r, now) {
@@ -289,7 +291,7 @@ fn bbr_check_cycle_phase(r: &mut Recovery, now: Instant) {
     }
 }
 
-fn bbr_advance_cycle_phase(r: &mut Recovery, now: Instant) {
+fn bbr_advance_cycle_phase(r: &mut Congestion, now: Instant) {
     let bbr = &mut r.bbr_state;
 
     bbr.cycle_stamp = now;
@@ -297,7 +299,7 @@ fn bbr_advance_cycle_phase(r: &mut Recovery, now: Instant) {
     bbr.pacing_gain = PACING_GAIN_CYCLE[bbr.cycle_index];
 }
 
-fn bbr_is_next_cycle_phase(r: &mut Recovery, now: Instant) -> bool {
+fn bbr_is_next_cycle_phase(r: &mut Congestion, now: Instant) -> bool {
     let bbr = &mut r.bbr_state;
     let lost_bytes = bbr.newly_lost_bytes;
     let pacing_gain = bbr.pacing_gain;
@@ -320,7 +322,7 @@ fn bbr_is_next_cycle_phase(r: &mut Recovery, now: Instant) -> bool {
 }
 
 // 4.3.5.  ProbeRTT
-fn bbr_check_probe_rtt(r: &mut Recovery, now: Instant) {
+fn bbr_check_probe_rtt(r: &mut Congestion, bytes_in_flight: usize, now: Instant) {
     if r.bbr_state.state != BBRStateMachine::ProbeRTT &&
         r.bbr_state.rtprop_expired &&
         !r.bbr_state.idle_restart
@@ -332,13 +334,13 @@ fn bbr_check_probe_rtt(r: &mut Recovery, now: Instant) {
     }
 
     if r.bbr_state.state == BBRStateMachine::ProbeRTT {
-        bbr_handle_probe_rtt(r, now);
+        bbr_handle_probe_rtt(r, bytes_in_flight, now);
     }
 
     r.bbr_state.idle_restart = false;
 }
 
-fn bbr_enter_probe_rtt(r: &mut Recovery) {
+fn bbr_enter_probe_rtt(r: &mut Congestion) {
     let bbr = &mut r.bbr_state;
 
     bbr.state = BBRStateMachine::ProbeRTT;
@@ -346,7 +348,9 @@ fn bbr_enter_probe_rtt(r: &mut Recovery) {
     bbr.cwnd_gain = 1.0;
 }
 
-fn bbr_handle_probe_rtt(r: &mut Recovery, now: Instant) {
+fn bbr_handle_probe_rtt(
+    r: &mut Congestion, bytes_in_flight: usize, now: Instant,
+) {
     // Ignore low rate samples during ProbeRTT.
     r.delivery_rate.update_app_limited(true);
 
@@ -361,14 +365,14 @@ fn bbr_handle_probe_rtt(r: &mut Recovery, now: Instant) {
             bbr_restore_cwnd(r);
             bbr_exit_probe_rtt(r, now);
         }
-    } else if r.bytes_in_flight <= bbr_min_pipe_cwnd(r) {
+    } else if bytes_in_flight <= bbr_min_pipe_cwnd(r) {
         r.bbr_state.probe_rtt_done_stamp = Some(now + PROBE_RTT_DURATION);
         r.bbr_state.probe_rtt_round_done = false;
         r.bbr_state.next_round_delivered = r.delivery_rate.delivered();
     }
 }
 
-fn bbr_exit_probe_rtt(r: &mut Recovery, now: Instant) {
+fn bbr_exit_probe_rtt(r: &mut Congestion, now: Instant) {
     if r.bbr_state.filled_pipe {
         bbr_enter_probe_bw(r, now);
     } else {

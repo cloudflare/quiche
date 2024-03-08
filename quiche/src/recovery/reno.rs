@@ -35,8 +35,10 @@ use crate::recovery;
 
 use crate::recovery::Acked;
 use crate::recovery::CongestionControlOps;
-use crate::recovery::Recovery;
 use crate::recovery::Sent;
+
+use super::rtt::RttStats;
+use super::Congestion;
 
 pub static RENO: CongestionControlOps = CongestionControlOps {
     on_init,
@@ -51,19 +53,28 @@ pub static RENO: CongestionControlOps = CongestionControlOps {
     debug_fmt,
 };
 
-pub fn on_init(_r: &mut Recovery) {}
+pub fn on_init(_r: &mut Congestion) {}
 
-pub fn reset(_r: &mut Recovery) {}
+pub fn reset(_r: &mut Congestion) {}
 
-pub fn on_packet_sent(_r: &mut Recovery, _sent_bytes: usize, _now: Instant) {}
+pub fn on_packet_sent(
+    _r: &mut Congestion, _sent_bytes: usize, _bytes_in_flight: usize,
+    _now: Instant,
+) {
+}
 
-fn on_packets_acked(r: &mut Recovery, packets: &mut Vec<Acked>, now: Instant) {
+fn on_packets_acked(
+    r: &mut Congestion, _bytes_in_flight: usize, packets: &mut Vec<Acked>,
+    now: Instant, rtt_stats: &RttStats,
+) {
     for pkt in packets.drain(..) {
-        on_packet_acked(r, &pkt, now);
+        on_packet_acked(r, &pkt, now, rtt_stats);
     }
 }
 
-fn on_packet_acked(r: &mut Recovery, packet: &Acked, now: Instant) {
+fn on_packet_acked(
+    r: &mut Congestion, packet: &Acked, now: Instant, rtt_stats: &RttStats,
+) {
     if r.in_congestion_recovery(packet.time_sent) {
         return;
     }
@@ -83,9 +94,7 @@ fn on_packet_acked(r: &mut Recovery, packet: &Acked, now: Instant) {
             r.congestion_window += r.max_datagram_size;
         }
 
-        if r.hystart
-            .on_packet_acked(packet, r.rtt_stats.latest_rtt, now)
-        {
+        if r.hystart.on_packet_acked(packet, rtt_stats.latest_rtt, now) {
             // Exit to congestion avoidance if CSS ends.
             r.ssthresh = r.congestion_window;
         }
@@ -101,7 +110,8 @@ fn on_packet_acked(r: &mut Recovery, packet: &Acked, now: Instant) {
 }
 
 fn congestion_event(
-    r: &mut Recovery, _lost_bytes: usize, largest_lost_pkt: &Sent, now: Instant,
+    r: &mut Congestion, _bytes_in_flight: usize, _lost_bytes: usize,
+    largest_lost_pkt: &Sent, now: Instant,
 ) {
     // Start a new congestion event if packet was sent after the
     // start of the previous congestion recovery period.
@@ -130,7 +140,7 @@ fn congestion_event(
     }
 }
 
-pub fn collapse_cwnd(r: &mut Recovery) {
+pub fn collapse_cwnd(r: &mut Congestion, _bytes_in_flight: usize) {
     r.congestion_window = r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS;
     r.bytes_acked_sl = 0;
     r.bytes_acked_ca = 0;
@@ -140,9 +150,9 @@ pub fn collapse_cwnd(r: &mut Recovery) {
     }
 }
 
-fn checkpoint(_r: &mut Recovery) {}
+fn checkpoint(_r: &mut Congestion) {}
 
-fn rollback(_r: &mut Recovery) -> bool {
+fn rollback(_r: &mut Congestion) -> bool {
     true
 }
 
@@ -150,7 +160,7 @@ fn has_custom_pacing() -> bool {
     false
 }
 
-fn debug_fmt(_r: &Recovery, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
+fn debug_fmt(_r: &Congestion, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
     Ok(())
 }
 
@@ -158,6 +168,7 @@ fn debug_fmt(_r: &Recovery, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
 mod tests {
     use super::*;
 
+    use crate::recovery::Recovery;
     use smallvec::smallvec;
     use std::time::Duration;
 
@@ -215,7 +226,7 @@ mod tests {
         };
 
         // Send initcwnd full MSS packets to become no longer app limited
-        for pn in 0..r.initial_congestion_window_packets {
+        for pn in 0..r.congestion.initial_congestion_window_packets {
             r.on_packet_sent_cc(pn as _, p.size, now);
         }
 
@@ -269,7 +280,7 @@ mod tests {
         };
 
         // Send initcwnd full MSS packets to become no longer app limited
-        for pn in 0..r.initial_congestion_window_packets {
+        for pn in 0..r.congestion.initial_congestion_window_packets {
             r.on_packet_sent_cc(pn as _, p.size, now);
         }
 
