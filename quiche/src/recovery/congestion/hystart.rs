@@ -95,10 +95,6 @@ impl Hystart {
         }
     }
 
-    pub fn reset(&mut self) {
-        *self = Self::new(self.enabled);
-    }
-
     pub fn enabled(&self) -> bool {
         self.enabled
     }
