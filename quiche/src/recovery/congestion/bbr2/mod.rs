@@ -35,13 +35,13 @@ use crate::recovery::*;
 use std::time::Duration;
 use std::time::Instant;
 
-pub static BBR2: CongestionControlOps = CongestionControlOps {
+use super::CongestionControlOps;
+
+pub(crate) static BBR2: CongestionControlOps = CongestionControlOps {
     on_init,
-    reset,
     on_packet_sent,
     on_packets_acked,
     congestion_event,
-    collapse_cwnd,
     checkpoint,
     rollback,
     has_custom_pacing,
@@ -548,12 +548,6 @@ fn on_init(r: &mut Congestion) {
     init::bbr2_init(r);
 }
 
-fn reset(r: &mut Congestion) {
-    r.bbr2_state = State::new();
-
-    init::bbr2_init(r);
-}
-
 fn on_packet_sent(
     r: &mut Congestion, _sent_bytes: usize, bytes_in_flight: usize, now: Instant,
 ) {
@@ -605,13 +599,6 @@ fn congestion_event(
         // Upon entering Fast Recovery.
         bbr2_enter_recovery(r, bytes_in_flight - lost_bytes, now);
     }
-}
-
-fn collapse_cwnd(r: &mut Congestion, bytes_in_flight: usize) {
-    // BBROnEnterRTO()
-    r.bbr2_state.prior_cwnd = per_ack::bbr2_save_cwnd(r);
-
-    r.congestion_window = bytes_in_flight + r.max_datagram_size;
 }
 
 fn checkpoint(_r: &mut Congestion) {}
@@ -695,19 +682,6 @@ mod tests {
         assert_eq!(r.bytes_in_flight, 0);
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::Startup);
-    }
-
-    #[test]
-    fn bbr2_send() {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
-
-        let mut r = Recovery::new(&cfg);
-        let now = Instant::now();
-
-        r.on_packet_sent_cc(0, 1000, now);
-
-        assert_eq!(r.bytes_in_flight, 1000);
     }
 
     #[test]
