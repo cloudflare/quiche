@@ -381,7 +381,6 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
-                &mut Vec::new(),
             ),
             Ok((0, 0)),
         );

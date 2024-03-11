@@ -735,7 +735,6 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
-                &mut Vec::new(),
             )
             .is_ok());
 
@@ -804,7 +803,6 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
-                &mut Vec::new(),
             )
             .is_ok());
 
@@ -875,7 +873,6 @@ mod tests {
                     HandshakeStatus::default(),
                     now,
                     "",
-                    &mut Vec::new(),
                 )
                 .is_ok());
         }
@@ -929,7 +926,6 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
-                &mut Vec::new(),
             )
             .is_ok());
 
@@ -996,7 +992,6 @@ mod tests {
                     HandshakeStatus::default(),
                     now,
                     "",
-                    &mut Vec::new(),
                 )
                 .is_ok());
         }
@@ -1055,7 +1050,6 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
-                &mut Vec::new(),
             )
             .is_ok());
 
