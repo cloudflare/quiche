@@ -1552,9 +1552,6 @@ pub struct Connection {
     /// Connection IDs when the peer migrates.
     disable_dcid_reuse: bool,
 
-    /// A resusable buffer used by Recovery
-    newly_acked: Vec<recovery::Acked>,
-
     /// The number of streams reset by local.
     reset_stream_local_count: u64,
 
@@ -2003,8 +2000,6 @@ impl Connection {
             emit_dgram: true,
 
             disable_dcid_reuse: config.disable_dcid_reuse,
-
-            newly_acked: Vec::new(),
 
             reset_stream_local_count: 0,
             stopped_stream_local_count: 0,
@@ -6967,7 +6962,6 @@ impl Connection {
                             handshake_status,
                             now,
                             &self.trace_id,
-                            &mut self.newly_acked,
                         )?;
 
                     self.lost_count += lost_packets;

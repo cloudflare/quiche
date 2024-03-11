@@ -348,6 +348,8 @@ pub struct Recovery {
     outstanding_non_ack_eliciting: usize,
 
     congestion: Congestion,
+
+    acked_reuse: Vec<Acked>,
 }
 
 pub struct RecoveryConfig {
@@ -406,6 +408,8 @@ impl Recovery {
             outstanding_non_ack_eliciting: 0,
 
             congestion: Congestion::from_config(recovery_config),
+
+            acked_reuse: Vec::new(),
         }
     }
 
@@ -502,7 +506,7 @@ impl Recovery {
     pub fn on_ack_received(
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
         epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
-        trace_id: &str, newly_acked: &mut Vec<Acked>,
+        trace_id: &str,
     ) -> Result<(usize, usize, usize)> {
         let largest_acked = ranges.last().unwrap();
 
@@ -523,7 +527,7 @@ impl Recovery {
         } = self.epochs[epoch].detect_and_remove_acked_packets(
             now,
             ranges,
-            newly_acked,
+            &mut self.acked_reuse,
             &self.rtt_stats,
             trace_id,
         );
@@ -539,12 +543,12 @@ impl Recovery {
             (self.congestion.cc_ops.rollback)(&mut self.congestion);
         }
 
-        if newly_acked.is_empty() {
+        if self.acked_reuse.is_empty() {
             return Ok((0, 0, 0));
         }
 
         // Check if largest packet is newly acked.
-        let largest_newly_acked = newly_acked.last().unwrap();
+        let largest_newly_acked = self.acked_reuse.last().unwrap();
 
         if largest_newly_acked.pkt_num == largest_acked && has_ack_eliciting {
             let latest_rtt = now - largest_newly_acked.time_sent;
@@ -562,7 +566,7 @@ impl Recovery {
 
         self.congestion.on_packets_acked(
             self.bytes_in_flight,
-            newly_acked,
+            &mut self.acked_reuse,
             &self.rtt_stats,
             now,
         );
@@ -1346,7 +1350,6 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
-                &mut Vec::new(),
             ),
             Ok((0, 0, 2 * 1000))
         );
@@ -1438,7 +1441,6 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
-                &mut Vec::new(),
             ),
             Ok((2, 2000, 2 * 1000))
         );
@@ -1600,7 +1602,6 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
-                &mut Vec::new(),
             ),
             Ok((0, 0, 3 * 1000))
         );
@@ -1772,7 +1773,6 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
-                &mut Vec::new(),
             ),
             Ok((1, 1000, 1000 * 2))
         );
@@ -1792,7 +1792,6 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
-                &mut Vec::new(),
             ),
             Ok((0, 0, 1000))
         );
@@ -1875,7 +1874,6 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
-                &mut Vec::new(),
             ),
             Ok((0, 0, 12000))
         );
@@ -2112,7 +2110,6 @@ mod tests {
                 HandshakeStatus::default(),
                 now,
                 "",
-                &mut Vec::new(),
             ),
             Ok((0, 0, 2 * 1000))
         );
