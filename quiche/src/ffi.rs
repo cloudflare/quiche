@@ -1459,7 +1459,10 @@ pub extern fn quiche_conn_peer_streams_left_uni(conn: &Connection) -> u64 {
 
 #[no_mangle]
 pub extern fn quiche_conn_send_quantum(conn: &Connection) -> size_t {
-    conn.send_quantum() as size_t
+    #[allow(deprecated)]
+    {
+        conn.send_quantum() as size_t
+    }
 }
 
 #[no_mangle]
@@ -1540,7 +1543,10 @@ pub extern fn quiche_conn_send_quantum_on_path(
     let local = std_addr_from_c(local, local_len);
     let peer = std_addr_from_c(peer, peer_len);
 
-    conn.send_quantum_on_path(local, peer) as size_t
+    #[allow(deprecated)]
+    {
+        conn.send_quantum_on_path(local, peer) as size_t
+    }
 }
 
 #[no_mangle]
