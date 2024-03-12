@@ -542,6 +542,7 @@ fn main() {
                 client.loss_rate = loss_rate;
             }
 
+            #[allow(deprecated)]
             let max_send_burst =
                 client.conn.send_quantum().min(client.max_send_burst) /
                     client.max_datagram_size *

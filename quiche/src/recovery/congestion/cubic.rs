@@ -1,4 +1,8 @@
-// Copyright (C) 2019, Cloudflare, Inc.
+// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+// Copyright (C) 2023, Cloudflare, Inc.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -24,794 +28,1090 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//! CUBIC Congestion Control
-//!
-//! This implementation is based on the following draft:
-//! <https://tools.ietf.org/html/draft-ietf-tcpm-rfc8312bis-02>
-//!
-//! Note that Slow Start can use HyStart++ when enabled.
-
-use std::cmp;
+mod cubic_bytes;
+mod hybrid_slow_start;
+mod prr;
 
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::recovery;
-use crate::recovery::rtt::RttStats;
-use crate::recovery::Acked;
-use crate::recovery::Sent;
+use cubic_bytes::CubicBytes;
+use hybrid_slow_start::HybridSlowStart;
+use prr::PrrSender;
 
-use super::reno;
-use super::Congestion;
-use super::CongestionControlOps;
+use super::Acked;
+use super::Bandwidth;
+use super::Lost;
+use super::RttStats;
 
-pub(crate) static CUBIC: CongestionControlOps = CongestionControlOps {
-    on_init,
-    on_packet_sent,
-    on_packets_acked,
-    congestion_event,
-    checkpoint,
-    rollback,
-    has_custom_pacing,
-    debug_fmt,
-};
+use super::CongestionControl;
 
-/// CUBIC Constants.
-///
-/// These are recommended value in RFC8312.
-const BETA_CUBIC: f64 = 0.7;
+const DEFAULT_NUM_CONNECTIONS: usize = 2;
 
-const C: f64 = 0.4;
+const RENO_BETA: f32 = 0.7; // Reno backoff factor.
 
-/// Threshold for rolling back state, as percentage of lost packets relative to
-/// cwnd.
-const ROLLBACK_THRESHOLD_PERCENT: usize = 20;
-
-/// Minimum threshold for rolling back state, as number of packets.
-const MIN_ROLLBACK_THRESHOLD: usize = 2;
-
-/// Default value of alpha_aimd in the beginning of congestion avoidance.
-const ALPHA_AIMD: f64 = 3.0 * (1.0 - BETA_CUBIC) / (1.0 + BETA_CUBIC);
-
-/// CUBIC State Variables.
-///
-/// We need to keep those variables across the connection.
-/// k, w_max, w_est are described in the RFC.
-#[derive(Debug, Default)]
-pub struct State {
-    k: f64,
-
-    w_max: f64,
-
-    w_est: f64,
-
-    alpha_aimd: f64,
-
-    // Used in CUBIC fix (see on_packet_sent())
-    last_sent_time: Option<Instant>,
-
-    // Store cwnd increment during congestion avoidance.
-    cwnd_inc: usize,
-
-    // CUBIC state checkpoint preceding the last congestion event.
-    prior: PriorState,
-}
-
-/// Stores the CUBIC state from before the last congestion event.
-///
-/// <https://tools.ietf.org/id/draft-ietf-tcpm-rfc8312bis-00.html#section-4.9>
-#[derive(Debug, Default)]
-struct PriorState {
+#[derive(Debug)]
+pub(crate) struct Cubic {
+    largest_sent_packet_number: Option<u64>,
     congestion_window: usize,
+    max_congestion_window: usize,
+    initial_tcp_congestion_window: usize,
+    initial_max_tcp_congestion_window: usize,
+    min_slow_start_exit_window: usize,
+    min_congestion_window: usize,
+    slow_start_threshold: usize,
+    mss: usize,
 
-    ssthresh: usize,
+    largest_acked_packet_number: Option<u64>,
+    largest_sent_at_last_cutback: Option<u64>,
+    num_acked_packets: usize,
+    num_connections: usize,
+    last_cutback_exited_slowstart: bool,
+    slow_start_large_reduction: bool,
 
-    w_max: f64,
+    prr: PrrSender,
+    hybrid_slow_start: HybridSlowStart,
+    cubic: CubicBytes,
 
-    k: f64,
-
-    epoch_start: Option<Instant>,
-
-    lost_count: usize,
+    reno: bool,
 }
 
-/// CUBIC Functions.
-///
-/// Note that these calculations are based on a count of cwnd as bytes,
-/// not packets.
-/// Unit of t (duration) and RTT are based on seconds (f64).
-impl State {
-    // K = cubic_root ((w_max - cwnd) / C) (Eq. 2)
-    fn cubic_k(&self, cwnd: usize, max_datagram_size: usize) -> f64 {
-        let w_max = self.w_max / max_datagram_size as f64;
-        let cwnd = cwnd as f64 / max_datagram_size as f64;
-
-        libm::cbrt((w_max - cwnd) / C)
-    }
-
-    // W_cubic(t) = C * (t - K)^3 + w_max (Eq. 1)
-    fn w_cubic(&self, t: Duration, max_datagram_size: usize) -> f64 {
-        let w_max = self.w_max / max_datagram_size as f64;
-
-        (C * (t.as_secs_f64() - self.k).powi(3) + w_max) *
-            max_datagram_size as f64
-    }
-
-    // W_est = W_est + alpha_aimd * (segments_acked / cwnd)  (Eq. 4)
-    fn w_est_inc(
-        &self, acked: usize, cwnd: usize, max_datagram_size: usize,
-    ) -> f64 {
-        self.alpha_aimd * (acked as f64 / cwnd as f64) * max_datagram_size as f64
-    }
-}
-
-fn on_init(_r: &mut Congestion) {}
-
-fn on_packet_sent(
-    r: &mut Congestion, sent_bytes: usize, bytes_in_flight: usize, now: Instant,
-) {
-    // See https://github.com/torvalds/linux/commit/30927520dbae297182990bb21d08762bcc35ce1d
-    // First transmit when no packets in flight
-    let cubic = &mut r.cubic_state;
-
-    if let Some(last_sent_time) = cubic.last_sent_time {
-        if bytes_in_flight == 0 {
-            let delta = now - last_sent_time;
-
-            // We were application limited (idle) for a while.
-            // Shift epoch start to keep cwnd growth to cubic curve.
-            if let Some(recovery_start_time) = r.congestion_recovery_start_time {
-                if delta.as_nanos() > 0 {
-                    r.congestion_recovery_start_time =
-                        Some(recovery_start_time + delta);
-                }
-            }
+impl Cubic {
+    pub(crate) fn new(
+        initial_tcp_congestion_window: usize, max_congestion_window: usize,
+        max_segment_size: usize, reno: bool,
+    ) -> Self {
+        Cubic {
+            largest_sent_packet_number: None,
+            initial_tcp_congestion_window: initial_tcp_congestion_window *
+                max_segment_size,
+            initial_max_tcp_congestion_window: max_congestion_window *
+                max_segment_size,
+            congestion_window: initial_tcp_congestion_window * max_segment_size,
+            max_congestion_window: max_congestion_window * max_segment_size,
+            slow_start_threshold: max_congestion_window * max_segment_size,
+            min_slow_start_exit_window: 2 * max_segment_size,
+            min_congestion_window: 2 * max_segment_size,
+            mss: max_segment_size,
+            largest_acked_packet_number: None,
+            largest_sent_at_last_cutback: None,
+            last_cutback_exited_slowstart: false,
+            slow_start_large_reduction: false,
+            num_acked_packets: 0,
+            num_connections: DEFAULT_NUM_CONNECTIONS * 2,
+            prr: PrrSender::new(max_segment_size),
+            hybrid_slow_start: HybridSlowStart::default(),
+            cubic: CubicBytes::new(max_segment_size),
+            reno,
         }
     }
 
-    cubic.last_sent_time = Some(now);
-
-    reno::on_packet_sent(r, sent_bytes, bytes_in_flight, now);
-}
-
-fn on_packets_acked(
-    r: &mut Congestion, bytes_in_flight: usize, packets: &mut Vec<Acked>,
-    now: Instant, rtt_stats: &RttStats,
-) {
-    for pkt in packets.drain(..) {
-        on_packet_acked(r, bytes_in_flight, &pkt, now, rtt_stats);
-    }
-}
-
-fn on_packet_acked(
-    r: &mut Congestion, bytes_in_flight: usize, packet: &Acked, now: Instant,
-    rtt_stats: &RttStats,
-) {
-    let in_congestion_recovery = r.in_congestion_recovery(packet.time_sent);
-
-    if in_congestion_recovery {
-        r.prr.on_packet_acked(
-            packet.size,
-            bytes_in_flight,
-            r.ssthresh,
-            r.max_datagram_size,
-        );
-
-        return;
+    fn reno_beta(&self) -> f32 {
+        // kNConnectionBeta is the backoff factor after loss for our N-connection
+        // emulation, which emulates the effective backoff of an ensemble of N
+        // TCP-Reno connections on a single loss event. The effective multiplier
+        // is computed as:
+        let num_connections = self.num_connections as f32;
+        (num_connections - 1. + RENO_BETA) / num_connections
     }
 
-    if r.app_limited {
-        return;
+    fn get_slow_start_threshold(&self) -> usize {
+        self.slow_start_threshold
     }
 
-    // Detecting spurious congestion events.
-    // <https://tools.ietf.org/id/draft-ietf-tcpm-rfc8312bis-00.html#section-4.9>
-    //
-    // When the recovery episode ends with recovering
-    // a few packets (less than cwnd / mss * ROLLBACK_THRESHOLD_PERCENT(%)), it's
-    // considered as spurious and restore to the previous state.
-    if r.congestion_recovery_start_time.is_some() {
-        let new_lost = r.lost_count - r.cubic_state.prior.lost_count;
-
-        let rollback_threshold = (r.congestion_window / r.max_datagram_size) *
-            ROLLBACK_THRESHOLD_PERCENT /
-            100;
-
-        let rollback_threshold = rollback_threshold.max(MIN_ROLLBACK_THRESHOLD);
-
-        if new_lost < rollback_threshold {
-            let did_rollback = rollback(r);
-            if did_rollback {
-                return;
-            }
-        }
+    fn is_in_slow_start(&self) -> bool {
+        self.get_congestion_window() < self.get_slow_start_threshold()
     }
 
-    if r.congestion_window < r.ssthresh {
-        // In Slow slart, bytes_acked_sl is used for counting
-        // acknowledged bytes.
-        r.bytes_acked_sl += packet.size;
-
-        if r.bytes_acked_sl >= r.max_datagram_size {
-            if r.hystart.in_css() {
-                r.congestion_window +=
-                    r.hystart.css_cwnd_inc(r.max_datagram_size);
-            } else {
-                r.congestion_window += r.max_datagram_size;
-            }
-
-            r.bytes_acked_sl -= r.max_datagram_size;
+    // Called when we receive an ack. Normal TCP tracks how many packets one ack
+    // represents, but quic has a separate ack for each packet.
+    fn maybe_increase_cwnd(
+        &mut self, _acked_packet_number: u64, acked_bytes: usize,
+        prior_in_flight: usize, event_time: Instant, min_rtt: Duration,
+    ) {
+        // Do not increase the congestion window unless the sender is close to
+        // using the current window.
+        if !self.is_cwnd_limited(prior_in_flight) {
+            self.cubic.on_app_limited();
+            return;
         }
 
-        if r.hystart.on_packet_acked(packet, rtt_stats.latest_rtt, now) {
-            // Exit to congestion avoidance if CSS ends.
-            r.ssthresh = r.congestion_window;
+        if self.congestion_window >= self.max_congestion_window {
+            return;
         }
-    } else {
+
+        if self.is_in_slow_start() {
+            // TCP slow start, exponential growth, increase by one for each ACK.
+            self.congestion_window += self.mss;
+            return;
+        }
+
         // Congestion avoidance.
-        let ca_start_time;
-
-        // In CSS, use css_start_time instead of congestion_recovery_start_time.
-        if r.hystart.in_css() {
-            ca_start_time = r.hystart.css_start_time().unwrap();
-
-            // Reset w_max and k when CSS started.
-            if r.cubic_state.w_max == 0.0 {
-                r.cubic_state.w_max = r.congestion_window as f64;
-                r.cubic_state.k = 0.0;
-
-                r.cubic_state.w_est = r.congestion_window as f64;
-                r.cubic_state.alpha_aimd = ALPHA_AIMD;
+        if self.reno {
+            // Classic Reno congestion avoidance.
+            self.num_acked_packets += 1;
+            // Divide by num_connections to smoothly increase the CWND at a faster
+            // rate than conventional Reno.
+            if self.num_acked_packets * self.num_connections >=
+                self.congestion_window / self.mss
+            {
+                self.congestion_window += self.mss;
+                self.num_acked_packets = 0;
             }
         } else {
-            match r.congestion_recovery_start_time {
-                Some(t) => ca_start_time = t,
-                None => {
-                    // When we come here without congestion_event() triggered,
-                    // initialize congestion_recovery_start_time, w_max and k.
-                    ca_start_time = now;
-                    r.congestion_recovery_start_time = Some(now);
+            self.congestion_window = self.max_congestion_window.min(
+                self.cubic.congestion_window_after_ack(
+                    acked_bytes,
+                    self.congestion_window,
+                    min_rtt,
+                    event_time,
+                ),
+            )
+        }
+    }
 
-                    r.cubic_state.w_max = r.congestion_window as f64;
-                    r.cubic_state.k = 0.0;
+    fn exit_slow_start(&mut self) {
+        self.slow_start_threshold = self.congestion_window;
+    }
 
-                    r.cubic_state.w_est = r.congestion_window as f64;
-                    r.cubic_state.alpha_aimd = ALPHA_AIMD;
-                },
+    fn on_packet_lost(
+        &mut self, packet_number: u64, bytes_lost: usize, prior_in_flight: usize,
+    ) {
+        // TCP NewReno (RFC6582) says that once a loss occurs, any losses in
+        // packets already sent should be treated as a single loss event,
+        // since it's expected.
+        match self.largest_sent_at_last_cutback {
+            Some(largest_sent_at_last_cutback)
+                if packet_number <= largest_sent_at_last_cutback =>
+            {
+                if self.last_cutback_exited_slowstart &&
+                    self.slow_start_large_reduction
+                {
+                    self.congestion_window = self
+                        .min_slow_start_exit_window
+                        .max(self.congestion_window - bytes_lost);
+                    self.slow_start_threshold = self.congestion_window;
+                }
+                return;
+            },
+            _ => {},
+        }
+
+        self.last_cutback_exited_slowstart = self.is_in_slow_start();
+        self.prr.on_packet_lost(prior_in_flight);
+
+        if self.slow_start_large_reduction && self.is_in_slow_start() {
+            assert!(self.mss < self.congestion_window);
+            if self.congestion_window >= 2 * self.initial_tcp_congestion_window {
+                self.min_slow_start_exit_window = self.congestion_window / 2;
             }
+            self.congestion_window -= self.mss;
+        } else if self.reno {
+            self.congestion_window =
+                (self.congestion_window as f32 * self.reno_beta()) as usize;
+        } else {
+            self.congestion_window = self
+                .cubic
+                .congestion_window_after_loss(self.congestion_window);
+        }
+        if self.congestion_window < self.min_congestion_window {
+            self.congestion_window = self.min_congestion_window;
         }
 
-        let t = now.saturating_duration_since(ca_start_time);
+        self.slow_start_threshold = self.congestion_window;
 
-        // target = w_cubic(t + rtt)
-        let target = r
-            .cubic_state
-            .w_cubic(t + *rtt_stats.min_rtt, r.max_datagram_size);
+        self.largest_sent_at_last_cutback = self.largest_sent_packet_number;
+        // Reset packet count from congestion avoidance mode. We start counting
+        // again when we're out of recovery.
+        self.num_acked_packets = 0;
+    }
 
-        // Clipping target to [cwnd, 1.5 x cwnd]
-        let target = f64::max(target, r.congestion_window as f64);
-        let target = f64::min(target, r.congestion_window as f64 * 1.5);
+    fn handle_retransmission_timeout(&mut self) {
+        self.cubic.reset();
+        self.slow_start_threshold = self.congestion_window / 2;
+        self.congestion_window = self.min_congestion_window;
+    }
 
-        // Update w_est.
-        let w_est_inc = r.cubic_state.w_est_inc(
-            packet.size,
-            r.congestion_window,
-            r.max_datagram_size,
+    fn on_packet_acked(
+        &mut self, acked_packet_number: u64, acked_bytes: usize,
+        prior_in_flight: usize, event_time: Instant, min_rtt: Duration,
+    ) {
+        self.largest_acked_packet_number = Some(
+            self.largest_acked_packet_number
+                .unwrap_or_default()
+                .max(acked_packet_number),
         );
-        r.cubic_state.w_est += w_est_inc;
 
-        if r.cubic_state.w_est >= r.cubic_state.w_max {
-            r.cubic_state.alpha_aimd = 1.0;
+        if self.is_in_recovery() {
+            self.prr.on_packet_acked(acked_bytes);
+            return;
         }
 
-        let mut cubic_cwnd = r.congestion_window;
-
-        if r.cubic_state.w_cubic(t, r.max_datagram_size) < r.cubic_state.w_est {
-            // AIMD friendly region (W_cubic(t) < W_est)
-            cubic_cwnd = cmp::max(cubic_cwnd, r.cubic_state.w_est as usize);
-        } else {
-            // Concave region or convex region use same increment.
-            let cubic_inc =
-                r.max_datagram_size * (target as usize - cubic_cwnd) / cubic_cwnd;
-
-            cubic_cwnd += cubic_inc;
-        }
-
-        // Update the increment and increase cwnd by MSS.
-        r.cubic_state.cwnd_inc += cubic_cwnd - r.congestion_window;
-
-        if r.cubic_state.cwnd_inc >= r.max_datagram_size {
-            r.congestion_window += r.max_datagram_size;
-            r.cubic_state.cwnd_inc -= r.max_datagram_size;
-        }
-    }
-}
-
-fn congestion_event(
-    r: &mut Congestion, bytes_in_flight: usize, _lost_bytes: usize,
-    largest_lost_pkt: &Sent, now: Instant,
-) {
-    let time_sent = largest_lost_pkt.time_sent;
-    let in_congestion_recovery = r.in_congestion_recovery(time_sent);
-
-    // Start a new congestion event if packet was sent after the
-    // start of the previous congestion recovery period.
-    if !in_congestion_recovery {
-        r.congestion_recovery_start_time = Some(now);
-
-        // Fast convergence
-        if (r.congestion_window as f64) < r.cubic_state.w_max {
-            r.cubic_state.w_max =
-                r.congestion_window as f64 * (1.0 + BETA_CUBIC) / 2.0;
-        } else {
-            r.cubic_state.w_max = r.congestion_window as f64;
-        }
-
-        r.ssthresh = (r.congestion_window as f64 * BETA_CUBIC) as usize;
-        r.ssthresh = cmp::max(
-            r.ssthresh,
-            r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
+        self.maybe_increase_cwnd(
+            acked_packet_number,
+            acked_bytes,
+            prior_in_flight,
+            event_time,
+            min_rtt,
         );
-        r.congestion_window = r.ssthresh;
 
-        r.cubic_state.k = if r.cubic_state.w_max < r.congestion_window as f64 {
-            0.0
-        } else {
-            r.cubic_state
-                .cubic_k(r.congestion_window, r.max_datagram_size)
-        };
+        if self.is_in_slow_start() {
+            self.hybrid_slow_start.on_packet_acked(acked_packet_number);
+        }
+    }
+}
 
-        r.cubic_state.cwnd_inc =
-            (r.cubic_state.cwnd_inc as f64 * BETA_CUBIC) as usize;
+impl CongestionControl for Cubic {
+    fn get_congestion_window(&self) -> usize {
+        self.congestion_window
+    }
 
-        r.cubic_state.w_est = r.congestion_window as f64;
-        r.cubic_state.alpha_aimd = ALPHA_AIMD;
+    fn get_congestion_window_in_packets(&self) -> usize {
+        self.congestion_window / self.mss
+    }
 
-        if r.hystart.in_css() {
-            r.hystart.congestion_event();
+    fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool {
+        let congestion_window = self.get_congestion_window();
+        if bytes_in_flight >= congestion_window {
+            return true;
+        }
+        let available_bytes = congestion_window - bytes_in_flight;
+        let slow_start_limited =
+            self.is_in_slow_start() && bytes_in_flight > congestion_window / 2;
+        slow_start_limited || available_bytes <= self.mss * 3
+    }
+
+    fn is_in_recovery(&self) -> bool {
+        if let (
+            Some(largest_acked_packet_number),
+            Some(largest_sent_at_last_cutback),
+        ) = (
+            self.largest_acked_packet_number,
+            self.largest_sent_at_last_cutback,
+        ) {
+            return largest_acked_packet_number <= largest_sent_at_last_cutback;
         }
 
-        r.prr.congestion_event(bytes_in_flight);
-    }
-}
-
-fn checkpoint(r: &mut Congestion) {
-    r.cubic_state.prior.congestion_window = r.congestion_window;
-    r.cubic_state.prior.ssthresh = r.ssthresh;
-    r.cubic_state.prior.w_max = r.cubic_state.w_max;
-    r.cubic_state.prior.k = r.cubic_state.k;
-    r.cubic_state.prior.epoch_start = r.congestion_recovery_start_time;
-    r.cubic_state.prior.lost_count = r.lost_count;
-}
-
-fn rollback(r: &mut Congestion) -> bool {
-    // Don't go back to slow start.
-    if r.cubic_state.prior.congestion_window < r.cubic_state.prior.ssthresh {
-        return false;
+        false
     }
 
-    if r.congestion_window >= r.cubic_state.prior.congestion_window {
-        return false;
+    fn can_send(&self, bytes_in_flight: usize) -> bool {
+        if self.is_in_recovery() {
+            // PRR is used when in recovery.
+            return self.prr.can_send(
+                self.get_congestion_window(),
+                bytes_in_flight,
+                self.get_slow_start_threshold(),
+            );
+        }
+
+        self.get_congestion_window() > bytes_in_flight
     }
 
-    r.congestion_window = r.cubic_state.prior.congestion_window;
-    r.ssthresh = r.cubic_state.prior.ssthresh;
-    r.cubic_state.w_max = r.cubic_state.prior.w_max;
-    r.cubic_state.k = r.cubic_state.prior.k;
-    r.congestion_recovery_start_time = r.cubic_state.prior.epoch_start;
+    fn on_packet_sent(
+        &mut self, _sent_time: Instant, _bytes_in_flight: usize,
+        packet_number: u64, bytes: usize, is_retransmissible: bool,
+        _rtt_stats: &RttStats,
+    ) {
+        if !is_retransmissible {
+            return;
+        }
 
-    true
-}
+        if self.is_in_recovery() {
+            // PRR is used when in recovery.
+            self.prr.on_packet_sent(bytes);
+        }
 
-fn has_custom_pacing() -> bool {
-    false
-}
+        self.largest_sent_packet_number = Some(packet_number);
+        self.hybrid_slow_start.on_packet_sent(packet_number);
+    }
 
-fn debug_fmt(r: &Congestion, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-    write!(
-        f,
-        "cubic={{ k={} w_max={} }} ",
-        r.cubic_state.k, r.cubic_state.w_max
-    )
+    fn on_congestion_event(
+        &mut self, rtt_updated: bool, prior_in_flight: usize,
+        _bytes_in_flight: usize, event_time: Instant, acked_packets: &[Acked],
+        lost_packets: &[Lost], _least_unacked: u64, rtt_stats: &RttStats,
+    ) {
+        if rtt_updated &&
+            self.is_in_slow_start() &&
+            self.hybrid_slow_start.should_exit_slow_start(
+                rtt_stats.latest_rtt,
+                *rtt_stats.min_rtt,
+                self.get_congestion_window() / self.mss,
+            )
+        {
+            self.exit_slow_start();
+        }
+
+        for lost in lost_packets {
+            self.on_packet_lost(
+                lost.packet_number,
+                lost.bytes_lost,
+                prior_in_flight,
+            );
+        }
+
+        for acked in acked_packets {
+            self.on_packet_acked(
+                acked.pkt_num,
+                acked.size,
+                prior_in_flight,
+                event_time,
+                *rtt_stats.min_rtt,
+            );
+        }
+    }
+
+    fn on_retransmission_timeout(&mut self, packets_retransmitted: bool) {
+        self.largest_sent_at_last_cutback = None;
+        if !packets_retransmitted {
+            return;
+        }
+        self.hybrid_slow_start.restart();
+        self.handle_retransmission_timeout();
+    }
+
+    fn on_connection_migration(&mut self) {
+        self.hybrid_slow_start.restart();
+        self.prr = PrrSender::new(self.mss);
+        self.largest_acked_packet_number = None;
+        self.largest_acked_packet_number = None;
+        self.largest_sent_at_last_cutback = None;
+        self.last_cutback_exited_slowstart = false;
+        self.cubic.reset();
+        self.num_acked_packets = 0;
+        self.congestion_window = self.initial_tcp_congestion_window;
+        self.max_congestion_window = self.initial_max_tcp_congestion_window;
+        self.slow_start_threshold = self.initial_max_tcp_congestion_window;
+    }
+
+    fn update_mss(&mut self, new_mss: usize) {
+        if self.mss == new_mss {
+            return;
+        }
+
+        self.congestion_window = ((self.congestion_window as u64 *
+            new_mss as u64) /
+            self.mss as u64) as usize;
+        self.min_congestion_window = ((self.min_congestion_window as u64 *
+            new_mss as u64) /
+            self.mss as u64) as usize;
+        self.max_congestion_window = ((self.max_congestion_window as u64 *
+            new_mss as u64) /
+            self.mss as u64) as usize;
+        self.initial_tcp_congestion_window =
+            ((self.initial_tcp_congestion_window as u64 * new_mss as u64) /
+                self.mss as u64) as usize;
+        self.initial_max_tcp_congestion_window =
+            ((self.initial_max_tcp_congestion_window as u64 * new_mss as u64) /
+                self.mss as u64) as usize;
+        self.min_slow_start_exit_window =
+            ((self.min_slow_start_exit_window as u64 * new_mss as u64) /
+                self.mss as u64) as usize;
+        self.cubic.mss = new_mss;
+        self.mss = new_mss;
+    }
+
+    fn pacing_rate(
+        &self, _bytes_in_flight: usize, rtt_stats: &RttStats,
+    ) -> Bandwidth {
+        // We pace at twice the rate of the underlying sender's bandwidth estimate
+        // during slow start and 1.25x during congestion avoidance to ensure
+        // pacing doesn't prevent us from filling the window.
+        let srtt = rtt_stats.smoothed_rtt;
+        let bandwidth = Bandwidth::from_bytes_and_time_delta(
+            self.get_congestion_window(),
+            srtt,
+        );
+        bandwidth * if self.is_in_slow_start() { 2.0 } else { 1.25 }
+    }
+
+    fn bandwidth_estimate(&self, rtt_stats: &RttStats) -> Bandwidth {
+        if rtt_stats.first_rtt_sample.is_none() {
+            // If we haven't measured an rtt, the bandwidth estimate is unknown.
+            Bandwidth::from_kbits_per_second(0)
+        } else {
+            Bandwidth::from_bytes_and_time_delta(
+                self.get_congestion_window(),
+                rtt_stats.smoothed_rtt,
+            )
+        }
+    }
+
+    fn limit_cwnd(&mut self, max_cwnd: usize) {
+        self.congestion_window = self.congestion_window.min(max_cwnd);
+    }
+
+    #[cfg(feature = "qlog")]
+    fn ssthresh(&self) -> Option<u64> {
+        Some(self.slow_start_threshold as u64)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use self::recovery::congestion::reno::test_sender::TestSender;
+    const MAX_SEGMENT_SIZE: usize = 1460;
+
     use super::*;
-    use crate::recovery::congestion::hystart;
-    use crate::recovery::Recovery;
-    use crate::CongestionControlAlgorithm;
 
-    fn test_sender() -> TestSender {
-        TestSender::new(recovery::CongestionControlAlgorithm::CUBIC, false)
+    const INITIAL_CONGESTION_WINDOW_PACKETS: usize = 10;
+    const MAX_CONGESTION_WINDOW_PACKETS: usize = 200;
+    const DEFAULT_WINDOW_TCP: usize =
+        INITIAL_CONGESTION_WINDOW_PACKETS * MAX_SEGMENT_SIZE;
+
+    struct TestSender {
+        sender: Cubic,
+        bytes_in_flight: usize,
+        packet_number: u64,
+        acked_packet_number: u64,
+        clock: Instant,
+        rtt_stats: RttStats,
     }
 
-    fn hystart_test_sender() -> TestSender {
-        TestSender::new(recovery::CongestionControlAlgorithm::CUBIC, true)
-    }
-
-    #[test]
-    fn cubic_init() {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(CongestionControlAlgorithm::CUBIC);
-
-        let r = Recovery::new(&cfg);
-
-        assert!(r.cwnd() > 0);
-        assert_eq!(r.bytes_in_flight, 0);
-    }
-
-    #[test]
-    fn cubic_slow_start() {
-        let mut sender = test_sender();
-        let size = sender.max_datagram_size;
-
-        // Send initcwnd full MSS packets to become no longer app limited
-        for _ in 0..sender.initial_congestion_window_packets {
-            sender.send_packet(size);
-        }
-
-        let cwnd_prev = sender.congestion_window;
-
-        sender.ack_n_packets(1, size);
-
-        // Check if cwnd increased by packet size (slow start)
-        assert_eq!(sender.congestion_window, cwnd_prev + size);
-    }
-
-    #[test]
-    fn cubic_slow_start_multi_acks() {
-        let mut sender = test_sender();
-        let size = sender.max_datagram_size;
-
-        // Send initcwnd full MSS packets to become no longer app limited
-        for _ in 0..sender.initial_congestion_window_packets {
-            sender.send_packet(size);
-        }
-
-        let cwnd_prev = sender.congestion_window;
-
-        sender.ack_n_packets(3, size);
-
-        // Acked 3 packets.
-        assert_eq!(sender.congestion_window, cwnd_prev + size * 3);
-    }
-
-    #[test]
-    fn cubic_congestion_event() {
-        let mut sender = test_sender();
-        let size = sender.max_datagram_size;
-
-        sender.send_packet(size);
-
-        let cwnd_prev = sender.congestion_window;
-
-        sender.lose_n_packets(1, size, None);
-
-        // In CUBIC, after congestion event, cwnd will be reduced by (1 -
-        // CUBIC_BETA)
-        assert_eq!(
-            cwnd_prev as f64 * BETA_CUBIC,
-            sender.congestion_window as f64
-        );
-    }
-
-    #[test]
-    fn cubic_congestion_avoidance() {
-        let mut sender = test_sender();
-        let size = sender.max_datagram_size;
-
-        let prev_cwnd = sender.congestion_window;
-
-        // Send initcwnd full MSS packets to become no longer app limited
-        for _ in 0..sender.initial_congestion_window_packets {
-            sender.send_packet(size);
-        }
-
-        // Trigger congestion event to update ssthresh
-        sender.lose_n_packets(1, size, None);
-
-        // After congestion event, cwnd will be reduced.
-        let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
-        assert_eq!(sender.congestion_window, cur_cwnd);
-
-        // Shift current time by 1 RTT.
-        let rtt = Duration::from_millis(100);
-        sender.update_rtt(rtt);
-        // Exit from the recovery.
-        sender.advance_time(rtt);
-
-        // During Congestion Avoidance, it will take
-        // 5 ACKs to increase cwnd by 1 MSS.
-        for _ in 0..5 {
-            sender.ack_n_packets(1, size);
-            sender.advance_time(rtt);
-        }
-
-        assert_eq!(sender.congestion_window, cur_cwnd + size);
-    }
-
-    #[test]
-    fn cubic_hystart_css_to_ss() {
-        let mut sender = hystart_test_sender();
-        let size = sender.max_datagram_size;
-
-        // 1st round.
-        let n_rtt_sample = hystart::N_RTT_SAMPLE;
-
-        let rtt_1st = Duration::from_millis(50);
-
-        let next_rnd = sender.next_pkt + n_rtt_sample as u64 - 1;
-        sender.hystart.start_round(next_rnd);
-        // Send 1st round packets.
-        for _ in 0..n_rtt_sample {
-            sender.send_packet(size);
-        }
-        sender.update_app_limited(false);
-
-        // Receiving Acks.
-        sender.advance_time(rtt_1st);
-        sender.update_rtt(rtt_1st);
-        sender.ack_n_packets(n_rtt_sample, size);
-
-        // Not in CSS yet.
-        assert!(sender.hystart.css_start_time().is_none());
-
-        // 2nd round.
-        let mut rtt_2nd = Duration::from_millis(100);
-
-        sender.advance_time(rtt_2nd);
-
-        let next_rnd = sender.next_pkt + n_rtt_sample as u64 - 1;
-        sender.hystart.start_round(next_rnd);
-        // Send 2nd round packets.
-        for _ in 0..n_rtt_sample {
-            sender.send_packet(size);
-        }
-        sender.update_app_limited(false);
-
-        // Receiving Acks.
-        // Last ack will cause to exit to CSS.
-        let mut cwnd_prev = sender.congestion_window();
-
-        for _ in 0..n_rtt_sample {
-            cwnd_prev = sender.congestion_window();
-            sender.update_rtt(rtt_2nd);
-            sender.ack_n_packets(1, size);
-            // Keep increasing RTT so that hystart exits to CSS.
-            rtt_2nd += rtt_2nd.saturating_add(Duration::from_millis(4));
-        }
-
-        // Now we are in CSS.
-        assert!(sender.hystart.css_start_time().is_some());
-        assert_eq!(sender.congestion_window(), cwnd_prev + size);
-
-        // 3rd round, which RTT is less than previous round to
-        // trigger back to Slow Start.
-        let rtt_3rd = Duration::from_millis(80);
-        sender.advance_time(rtt_3rd);
-        cwnd_prev = sender.congestion_window();
-
-        let next_rnd = sender.next_pkt + n_rtt_sample as u64 - 1;
-        sender.hystart.start_round(next_rnd);
-        // Send 3nd round packets.
-        for _ in 0..n_rtt_sample {
-            sender.send_packet(size);
-        }
-        sender.update_app_limited(false);
-
-        // Receiving Acks.
-        // Last ack will cause to exit to SS.
-        sender.update_rtt(rtt_3rd);
-        sender.ack_n_packets(n_rtt_sample, size);
-
-        // Now we are back in Slow Start.
-        assert!(sender.hystart.css_start_time().is_none());
-        assert_eq!(
-            sender.congestion_window(),
-            cwnd_prev +
-                size / hystart::CSS_GROWTH_DIVISOR * hystart::N_RTT_SAMPLE
-        );
-    }
-
-    #[test]
-    fn cubic_hystart_css_to_ca() {
-        let mut sender = hystart_test_sender();
-        let size = sender.max_datagram_size;
-
-        // 1st round.
-        let n_rtt_sample = hystart::N_RTT_SAMPLE;
-
-        let rtt_1st = Duration::from_millis(50);
-
-        let next_rnd = sender.next_pkt + n_rtt_sample as u64 - 1;
-        sender.hystart.start_round(next_rnd);
-        // Send 1st round packets.
-        for _ in 0..n_rtt_sample {
-            sender.send_packet(size);
-        }
-        sender.update_app_limited(false);
-
-        // Receiving Acks.
-        sender.advance_time(rtt_1st);
-        sender.update_rtt(rtt_1st);
-        sender.ack_n_packets(n_rtt_sample, size);
-
-        // Not in CSS yet.
-        assert!(sender.hystart.css_start_time().is_none());
-
-        // 2nd round.
-        let mut rtt_2nd = Duration::from_millis(100);
-        sender.advance_time(rtt_2nd);
-        // Send 2nd round packets.
-        let next_rnd = sender.next_pkt + n_rtt_sample as u64 - 1;
-        sender.hystart.start_round(next_rnd);
-        for _ in 0..n_rtt_sample {
-            sender.send_packet(size);
-        }
-        sender.update_app_limited(false);
-
-        // Receiving Acks.
-        // Last ack will cause to exit to CSS.
-        let mut cwnd_prev = sender.congestion_window();
-
-        for _ in 0..n_rtt_sample {
-            cwnd_prev = sender.congestion_window();
-            sender.update_rtt(rtt_2nd);
-            sender.ack_n_packets(1, size);
-            // Keep increasing RTT so that hystart exits to CSS.
-            rtt_2nd += rtt_2nd.saturating_add(Duration::from_millis(4));
-        }
-
-        // Now we are in CSS.
-        assert!(sender.hystart.css_start_time().is_some());
-        assert_eq!(sender.congestion_window(), cwnd_prev + size);
-
-        // Run 5 (CSS_ROUNDS) in CSS, to exit to congestion avoidance.
-        let rtt_css = Duration::from_millis(100);
-        sender.advance_time(rtt_css);
-
-        for _ in 0..hystart::CSS_ROUNDS {
-            // Send a round of packets.
-            let next_rnd = sender.next_pkt + n_rtt_sample as u64 - 1;
-            sender.hystart.start_round(next_rnd);
-            for _ in 0..n_rtt_sample {
-                sender.send_packet(size);
+    impl TestSender {
+        fn new(reno: bool) -> Self {
+            TestSender {
+                sender: Cubic::new(
+                    INITIAL_CONGESTION_WINDOW_PACKETS,
+                    MAX_CONGESTION_WINDOW_PACKETS,
+                    MAX_SEGMENT_SIZE,
+                    reno,
+                ),
+                bytes_in_flight: 0,
+                packet_number: 1,
+                acked_packet_number: 0,
+                clock: Instant::now(),
+                rtt_stats: RttStats::default(),
             }
-            sender.update_app_limited(false);
-
-            // Receiving Acks.
-            sender.update_rtt(rtt_css);
-            sender.ack_n_packets(n_rtt_sample, size);
         }
-        // Now we are in congestion avoidance.
-        assert_eq!(sender.congestion_window(), sender.ssthresh);
+
+        fn send_available_send_window(&mut self, pkt_size: usize) -> usize {
+            let mut packets_sent = 0;
+            while self.can_send(self.bytes_in_flight) {
+                self.sender.on_packet_sent(
+                    self.clock,
+                    self.bytes_in_flight,
+                    self.packet_number,
+                    pkt_size,
+                    true,
+                    &self.rtt_stats,
+                );
+                packets_sent += 1;
+                self.bytes_in_flight += pkt_size;
+                self.packet_number += 1;
+            }
+            packets_sent
+        }
+
+        fn lose_n_packets(&mut self, n: usize, pkt_size: usize) {
+            let mut lost_packets = Vec::new();
+
+            for _ in 0..n {
+                self.acked_packet_number += 1;
+                lost_packets.push(Lost {
+                    packet_number: self.acked_packet_number,
+                    bytes_lost: pkt_size,
+                });
+            }
+
+            self.sender.on_congestion_event(
+                false,
+                self.bytes_in_flight,
+                0,
+                self.clock,
+                &[],
+                &lost_packets,
+                0,
+                &self.rtt_stats,
+            );
+
+            self.bytes_in_flight -= n * pkt_size;
+        }
+
+        fn lose_packet(&mut self, packet_number: u64) {
+            self.sender.on_congestion_event(
+                false,
+                self.bytes_in_flight,
+                0,
+                self.clock,
+                &[],
+                &[Lost {
+                    packet_number,
+                    bytes_lost: MAX_SEGMENT_SIZE,
+                }],
+                0,
+                &self.rtt_stats,
+            );
+
+            self.bytes_in_flight -= MAX_SEGMENT_SIZE;
+        }
+
+        // Normal is that TCP acks every other segment.
+        fn ack_n_packets(&mut self, n: usize) {
+            let latest_rtt = Duration::from_millis(60);
+            self.rtt_stats.update_rtt(
+                latest_rtt,
+                Duration::ZERO,
+                self.clock,
+                false,
+                Duration::ZERO,
+            );
+
+            let mut acked_packets = Vec::new();
+
+            for _ in 0..n {
+                self.acked_packet_number += 1;
+                acked_packets.push(Acked {
+                    pkt_num: self.acked_packet_number,
+                    time_sent: self.clock,
+                    size: MAX_SEGMENT_SIZE,
+                });
+            }
+
+            self.sender.on_congestion_event(
+                true,
+                self.bytes_in_flight,
+                0,
+                self.clock,
+                &acked_packets,
+                &[],
+                0,
+                &self.rtt_stats,
+            );
+
+            self.bytes_in_flight =
+                self.bytes_in_flight.wrapping_sub(n * MAX_SEGMENT_SIZE);
+        }
+
+        fn set_number_of_emulated_connection(&mut self, n: usize) {
+            self.sender.num_connections = n;
+            self.sender.cubic.num_connections = n;
+        }
+    }
+
+    impl std::ops::Deref for TestSender {
+        type Target = Cubic;
+
+        fn deref(&self) -> &Self::Target {
+            &self.sender
+        }
+    }
+
+    impl std::ops::DerefMut for TestSender {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.sender
+        }
     }
 
     #[test]
-    fn cubic_spurious_congestion_event() {
-        let mut sender = test_sender();
-        let size = sender.max_datagram_size;
-
-        let prev_cwnd = sender.congestion_window();
-
-        // Send initcwnd full MSS packets to become no longer app limited
-        for _ in 0..sender.initial_congestion_window_packets {
-            sender.send_packet(size);
-        }
-        sender.lose_n_packets(1, size, None);
-
-        // After congestion event, cwnd will be reduced.
-        let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
-        assert_eq!(sender.congestion_window(), cur_cwnd);
-
-        // Ack more than cwnd bytes with rtt=100ms
-        let rtt = Duration::from_millis(100);
-        sender.update_rtt(rtt);
-
-        let acked = Acked {
-            pkt_num: 0,
-            // To exit from recovery
-            time_sent: sender.time + rtt,
-            size,
-            delivered: 0,
-            delivered_time: sender.time,
-            first_sent_time: sender.time,
-            is_app_limited: false,
-            tx_in_flight: 0,
-            lost: 0,
-            rtt: Duration::ZERO,
-        };
-
-        // Trigger detecting spurious congestion event
-        sender.inject_ack(acked, sender.time + rtt + Duration::from_millis(5));
-
-        // This is from slow start, no rollback.
-        assert_eq!(sender.congestion_window(), cur_cwnd);
-
-        sender.advance_time(rtt);
-
-        let prev_cwnd = sender.congestion_window();
-
-        sender.lose_n_packets(1, size, Some(sender.time));
-
-        // After congestion event, cwnd will be reduced.
-        let cur_cwnd = (cur_cwnd as f64 * BETA_CUBIC) as usize;
-        assert_eq!(sender.congestion_window(), cur_cwnd);
-
-        sender.advance_time(rtt + Duration::from_millis(5));
-
-        let acked = Acked {
-            pkt_num: 0,
-            // To exit from recovery
-            time_sent: sender.time + rtt,
-            size,
-            delivered: 0,
-            delivered_time: sender.time,
-            first_sent_time: sender.time,
-            is_app_limited: false,
-            tx_in_flight: 0,
-            lost: 0,
-            rtt: Duration::ZERO,
-        };
-
-        // Trigger detecting spurious congestion event.
-        sender.inject_ack(acked, sender.time + rtt + Duration::from_millis(5));
-
-        // cwnd is rolled back to the previous one.
-        assert_eq!(sender.congestion_window(), prev_cwnd);
+    fn simple_sender() {
+        let mut sender = TestSender::new(true);
+        // At startup make sure we are at the default.
+        assert_eq!(DEFAULT_WINDOW_TCP, sender.get_congestion_window());
+        // At startup make sure we can send.
+        assert!(sender.can_send(0));
+        // And that window is un-affected.
+        assert_eq!(DEFAULT_WINDOW_TCP, sender.get_congestion_window());
+        // Fill the send window with data, then verify that we can't send.
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        assert!(!sender.can_send(sender.get_congestion_window()));
     }
 
     #[test]
-    fn cubic_fast_convergence() {
-        let mut sender = test_sender();
-        let size = sender.max_datagram_size;
-
-        let prev_cwnd = sender.congestion_window;
-
-        // Send initcwnd full MSS packets to become no longer app limited
-        for _ in 0..sender.initial_congestion_window_packets {
-            sender.send_packet(size);
+    fn application_limited_slow_start() {
+        let mut sender = TestSender::new(true);
+        let number_of_acks = 5;
+        // At startup make sure we can send.
+        assert!(sender.can_send(0));
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        for _ in 0..number_of_acks {
+            sender.ack_n_packets(2);
         }
+        let bytes_to_send = sender.get_congestion_window();
+        // It's expected 2 acks will arrive when the bytes_in_flight are greater
+        // than half the CWND.
+        assert_eq!(DEFAULT_WINDOW_TCP + MAX_SEGMENT_SIZE * 2 * 2, bytes_to_send);
+    }
 
-        // Trigger congestion event to update ssthresh
-        sender.lose_n_packets(1, size, None);
-
-        // After 1st congestion event, cwnd will be reduced.
-        let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
-        assert_eq!(sender.congestion_window, cur_cwnd);
-
-        // Shift current time by 1 RTT.
-        let rtt = Duration::from_millis(100);
-        sender.update_rtt(rtt);
-        // Exit from the recovery.
-        sender.advance_time(rtt);
-
-        // During Congestion Avoidance, it will take
-        // 5 ACKs to increase cwnd by 1 MSS.
-        for _ in 0..5 {
-            sender.ack_n_packets(1, size);
-            sender.advance_time(rtt);
-        }
-
-        assert_eq!(sender.congestion_window, cur_cwnd + size);
-
-        let prev_cwnd = sender.congestion_window;
-
-        // Fast convergence: now there is 2nd congestion event and
-        // cwnd is not fully recovered to w_max, w_max will be
-        // further reduced.
-        sender.lose_n_packets(1, size, None);
-
-        // After 2nd congestion event, cwnd will be reduced.
-        let cur_cwnd = (prev_cwnd as f64 * BETA_CUBIC) as usize;
-        assert_eq!(sender.congestion_window, cur_cwnd);
-
-        // w_max will be further reduced, not prev_cwnd
+    #[test]
+    fn exponential_slow_start() {
+        let mut sender = TestSender::new(true);
+        let number_of_acks = 20;
+        // At startup make sure we can send.
+        assert!(sender.can_send(0));
         assert_eq!(
-            sender.cubic_state.w_max,
-            prev_cwnd as f64 * (1.0 + BETA_CUBIC) / 2.0
+            Bandwidth::from_kbits_per_second(0),
+            sender.bandwidth_estimate(&sender.rtt_stats)
+        );
+        for _ in 0..number_of_acks {
+            // Send our full send window.
+            sender.send_available_send_window(MAX_SEGMENT_SIZE);
+            sender.ack_n_packets(2);
+        }
+        let cwnd = sender.get_congestion_window();
+        assert_eq!(
+            DEFAULT_WINDOW_TCP + MAX_SEGMENT_SIZE * 2 * number_of_acks,
+            cwnd
+        );
+        assert_eq!(
+            Bandwidth::from_bytes_and_time_delta(
+                cwnd,
+                sender.rtt_stats.smoothed_rtt
+            ),
+            sender.bandwidth_estimate(&sender.rtt_stats)
+        );
+    }
+
+    #[test]
+    fn slow_start_packet_loss() {
+        let mut sender = TestSender::new(true);
+        sender.set_number_of_emulated_connection(1);
+        let number_of_acks = 10;
+        for _ in 0..number_of_acks {
+            sender.send_available_send_window(MAX_SEGMENT_SIZE);
+            sender.ack_n_packets(2);
+        }
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        let mut expected_send_window =
+            DEFAULT_WINDOW_TCP + (MAX_SEGMENT_SIZE * 2 * number_of_acks);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Lose a packet to exit slow start.
+        sender.lose_n_packets(1, MAX_SEGMENT_SIZE);
+        let packets_in_recovery_window = expected_send_window / MAX_SEGMENT_SIZE;
+        // We should now have fallen out of slow start with a reduced window.
+        expected_send_window = (expected_send_window as f32 * RENO_BETA) as usize;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Recovery phase. We need to ack every packet in the recovery window
+        // before we exit recovery.
+        let number_of_packets_in_window = expected_send_window / MAX_SEGMENT_SIZE;
+        sender.ack_n_packets(packets_in_recovery_window);
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // We need to ack an entire window before we increase CWND by 1.
+        sender.ack_n_packets(number_of_packets_in_window - 2);
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Next ack should increase cwnd by 1.
+        sender.ack_n_packets(1);
+        expected_send_window += MAX_SEGMENT_SIZE;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Now RTO and ensure slow start gets reset.
+        assert!(sender.hybrid_slow_start.started);
+        sender.on_retransmission_timeout(true);
+        assert!(!sender.hybrid_slow_start.started);
+    }
+
+    #[test]
+    fn slow_start_packet_loss_with_large_reduction() {
+        let mut sender = TestSender::new(true);
+        sender.slow_start_large_reduction = true;
+        sender.set_number_of_emulated_connection(1);
+        let number_of_acks = DEFAULT_WINDOW_TCP / (2 * MAX_SEGMENT_SIZE) - 1;
+        for _ in 0..number_of_acks {
+            sender.send_available_send_window(MAX_SEGMENT_SIZE);
+            sender.ack_n_packets(2);
+        }
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        let mut expected_send_window =
+            DEFAULT_WINDOW_TCP + (MAX_SEGMENT_SIZE * 2 * number_of_acks);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Lose a packet to exit slow start. We should now have fallen out of
+        // slow start with a window reduced by 1.
+        sender.lose_n_packets(1, MAX_SEGMENT_SIZE);
+        expected_send_window -= MAX_SEGMENT_SIZE;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Lose 5 packets in recovery and verify that congestion window is reduced
+        // further.
+        sender.lose_n_packets(5, MAX_SEGMENT_SIZE);
+        expected_send_window -= 5 * MAX_SEGMENT_SIZE;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Lose another 10 packets and ensure it reduces below half the peak CWND,
+        // because we never acked the full IW.
+        sender.lose_n_packets(10, MAX_SEGMENT_SIZE);
+        expected_send_window -= 10 * MAX_SEGMENT_SIZE;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        let packets_in_recovery_window = expected_send_window / MAX_SEGMENT_SIZE;
+        // Recovery phase. We need to ack every packet in the recovery window
+        // before we exit recovery.
+        let number_of_packets_in_window = expected_send_window / MAX_SEGMENT_SIZE;
+        sender.ack_n_packets(packets_in_recovery_window);
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // We need to ack an entire window before we increase CWND by 1.
+        sender.ack_n_packets(number_of_packets_in_window - 1);
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Next ack should increase cwnd by 1.
+        sender.ack_n_packets(1);
+        expected_send_window += MAX_SEGMENT_SIZE;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Now RTO and ensure slow start gets reset.
+        assert!(sender.hybrid_slow_start.started);
+        sender.on_retransmission_timeout(true);
+        assert!(!sender.hybrid_slow_start.started);
+    }
+
+    #[test]
+    fn slow_start_half_packet_loss_with_large_reduction() {
+        let mut sender = TestSender::new(true);
+        sender.slow_start_large_reduction = true;
+        sender.set_number_of_emulated_connection(1);
+        let number_of_acks = 10;
+        for _ in 0..number_of_acks {
+            sender.send_available_send_window(MAX_SEGMENT_SIZE / 2);
+            sender.ack_n_packets(2);
+        }
+        sender.send_available_send_window(MAX_SEGMENT_SIZE / 2);
+        let mut expected_send_window =
+            DEFAULT_WINDOW_TCP + MAX_SEGMENT_SIZE * 2 * number_of_acks;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Lose a packet to exit slow start. We should now have fallen out of
+        // slow start with a window reduced by 1.
+        sender.lose_n_packets(1, MAX_SEGMENT_SIZE);
+        expected_send_window -= MAX_SEGMENT_SIZE;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Lose 10 packets in recovery and verify that congestion window is
+        // reduced by 5 packets.
+        sender.lose_n_packets(10, MAX_SEGMENT_SIZE / 2);
+        expected_send_window -= 5 * MAX_SEGMENT_SIZE;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+    }
+
+    #[test]
+    fn slow_start_packet_loss_with_max_half_reduction() {
+        let mut sender = TestSender::new(true);
+        sender.slow_start_large_reduction = true;
+        sender.set_number_of_emulated_connection(1);
+        let number_of_acks = INITIAL_CONGESTION_WINDOW_PACKETS / 2;
+        for _ in 0..number_of_acks {
+            sender.send_available_send_window(MAX_SEGMENT_SIZE);
+            sender.ack_n_packets(2);
+        }
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        let mut expected_send_window =
+            DEFAULT_WINDOW_TCP + (MAX_SEGMENT_SIZE * 2 * number_of_acks);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Lose a packet to exit slow start. We should now have fallen out of
+        // slow start with a window reduced by 1.
+        sender.lose_n_packets(1, MAX_SEGMENT_SIZE);
+        expected_send_window -= MAX_SEGMENT_SIZE;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Lose half the outstanding packets in recovery and verify the congestion
+        // window is only reduced by a max of half.
+        sender.lose_n_packets(number_of_acks * 2, MAX_SEGMENT_SIZE);
+        expected_send_window -= (number_of_acks * 2 - 1) * MAX_SEGMENT_SIZE;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        sender.lose_n_packets(5, MAX_SEGMENT_SIZE);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+    }
+
+    #[test]
+    fn np_prr_when_less_than_one_packet_in_flight() {
+        let mut sender = TestSender::new(true);
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        sender.lose_n_packets(
+            INITIAL_CONGESTION_WINDOW_PACKETS - 1,
+            MAX_SEGMENT_SIZE,
+        );
+        sender.ack_n_packets(1);
+        // PRR will allow 2 packets for every ack during recovery.
+        assert_eq!(2, sender.send_available_send_window(MAX_SEGMENT_SIZE));
+        // Simulate abandoning all packets by supplying a bytes_in_flight of 0.
+        // PRR should now allow a packet to be sent, even though prr's state
+        // variables believe it has sent enough packets.
+        assert!(sender.can_send(0));
+    }
+
+    #[test]
+    fn slow_start_burst_packet_loss_prr() {
+        let mut sender = TestSender::new(true);
+        sender.set_number_of_emulated_connection(1);
+        // Test based on the second example in RFC6937, though we also implement
+        // forward acknowledgements, so the first two incoming acks will trigger
+        // PRR immediately.
+        // Ack 20 packets in 10 acks to raise the CWND to 30.
+        let number_of_acks = 10;
+        for _ in 0..number_of_acks {
+            sender.send_available_send_window(MAX_SEGMENT_SIZE);
+            sender.ack_n_packets(2);
+        }
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+
+        let mut expected_send_window =
+            DEFAULT_WINDOW_TCP + (MAX_SEGMENT_SIZE * 2 * number_of_acks);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+
+        // Lose one more than the congestion window reduction, so that after loss,
+        // bytes_in_flight is lesser than the congestion window.
+        let send_window_after_loss =
+            (RENO_BETA * expected_send_window as f32) as usize;
+        let num_packets_to_lose = (expected_send_window - send_window_after_loss) /
+            MAX_SEGMENT_SIZE +
+            1;
+        sender.lose_n_packets(num_packets_to_lose, MAX_SEGMENT_SIZE);
+        // Immediately after the loss, ensure at least one packet can be sent.
+        // Losses without subsequent acks can occur with timer based loss
+        // detection.
+        assert!(sender.can_send(sender.bytes_in_flight));
+        sender.ack_n_packets(1);
+        // We should now have fallen out of slow start with a reduced window.
+        expected_send_window = (expected_send_window as f32 * RENO_BETA) as usize;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Only 2 packets should be allowed to be sent, per PRR-SSRB.
+        assert_eq!(2, sender.send_available_send_window(MAX_SEGMENT_SIZE));
+        // Ack the next packet, which triggers another loss.
+        sender.lose_n_packets(1, MAX_SEGMENT_SIZE);
+        sender.ack_n_packets(1);
+        // Send 2 packets to simulate PRR-SSRB.
+        assert_eq!(2, sender.send_available_send_window(MAX_SEGMENT_SIZE));
+        // Ack the next packet, which triggers another loss.
+        sender.lose_n_packets(1, MAX_SEGMENT_SIZE);
+        sender.ack_n_packets(1);
+        // Send 2 packets to simulate PRR-SSRB.
+        assert_eq!(2, sender.send_available_send_window(MAX_SEGMENT_SIZE));
+        // Exit recovery and return to sending at the new rate.
+        for _ in 0..number_of_acks {
+            sender.ack_n_packets(1);
+            assert_eq!(1, sender.send_available_send_window(MAX_SEGMENT_SIZE));
+        }
+    }
+
+    #[test]
+    fn rto_congesion_window() {
+        let mut sender = TestSender::new(true);
+        assert_eq!(DEFAULT_WINDOW_TCP, sender.get_congestion_window());
+        // Expect the window to decrease to the minimum once the RTO fires and
+        // slow start threshold to be set to 1/2 of the CWND.
+        sender.on_retransmission_timeout(true);
+        assert_eq!(2 * MAX_SEGMENT_SIZE, sender.get_congestion_window());
+        assert_eq!(5 * MAX_SEGMENT_SIZE, sender.slow_start_threshold);
+    }
+
+    #[test]
+    fn rto_congestion_window_no_retransmisstion() {
+        let mut sender = TestSender::new(true);
+        // Expect the window to remain unchanged if the RTO fires but no packets
+        // are retransmitted.
+        sender.on_retransmission_timeout(false);
+        assert_eq!(DEFAULT_WINDOW_TCP, sender.get_congestion_window());
+    }
+
+    #[test]
+    fn tcp_cubic_reset_epoch_on_quiescence() {
+        let mut sender = TestSender::new(false);
+        let max_congestion_window = 50;
+        let max_congestion_window_bytes =
+            max_congestion_window * MAX_SEGMENT_SIZE;
+        let mut num_sent = sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        // Make sure we fall out of slow start.
+        let mut saved_cwnd = sender.get_congestion_window();
+        sender.lose_n_packets(1, MAX_SEGMENT_SIZE);
+        assert!(saved_cwnd > sender.get_congestion_window());
+        // Ack the rest of the outstanding packets to get out of recovery.
+        for _ in 1..num_sent {
+            sender.ack_n_packets(1);
+        }
+        assert_eq!(0, sender.bytes_in_flight);
+        // Send a new window of data and ack all; cubic growth should occur.
+        saved_cwnd = sender.get_congestion_window();
+        num_sent = sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        for _ in 0..num_sent {
+            sender.ack_n_packets(1);
+        }
+        assert!(saved_cwnd < sender.get_congestion_window());
+        assert!(max_congestion_window_bytes > sender.get_congestion_window());
+        assert_eq!(0, sender.bytes_in_flight);
+        // Quiescent time of 100 seconds
+        sender.clock += Duration::from_millis(100000);
+        // Send new window of data and ack one packet. Cubic epoch should have
+        // been reset; ensure cwnd increase is not dramatic.
+        saved_cwnd = sender.get_congestion_window();
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        sender.ack_n_packets(1);
+        assert!(
+            saved_cwnd.abs_diff(sender.get_congestion_window()) <
+                MAX_SEGMENT_SIZE
+        );
+        assert!(max_congestion_window_bytes > sender.get_congestion_window());
+    }
+
+    #[test]
+    fn multiple_losses_in_one_window() {
+        let mut sender = TestSender::new(false);
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        let initial_window = sender.get_congestion_window();
+        sender.lose_packet(sender.acked_packet_number + 1);
+        let post_loss_window = sender.get_congestion_window();
+        assert!(initial_window > post_loss_window);
+        sender.lose_packet(sender.acked_packet_number + 3);
+        assert_eq!(post_loss_window, sender.get_congestion_window());
+        sender.lose_packet(sender.packet_number - 1);
+        assert_eq!(post_loss_window, sender.get_congestion_window());
+        // Lose a later packet and ensure the window decreases.
+        sender.lose_packet(sender.packet_number);
+        assert!(post_loss_window > sender.get_congestion_window());
+    }
+
+    #[test]
+    fn two_connection_congestion_avoidance_at_end_of_recovery() {
+        let mut sender = TestSender::new(true);
+        sender.set_number_of_emulated_connection(2);
+        // Ack 10 packets in 5 acks to raise the CWND to 20.
+        let number_of_acks = 5;
+        for _ in 0..number_of_acks {
+            sender.send_available_send_window(MAX_SEGMENT_SIZE);
+            sender.ack_n_packets(2);
+        }
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        let mut expected_send_window =
+            DEFAULT_WINDOW_TCP + (MAX_SEGMENT_SIZE * 2 * number_of_acks);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        sender.lose_n_packets(1, MAX_SEGMENT_SIZE);
+        // We should now have fallen out of slow start with a reduced window.
+        expected_send_window =
+            (expected_send_window as f32 * sender.reno_beta()) as usize;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // No congestion window growth should occur in recovery phase, i.e., until
+        // the currently outstanding 20 packets are acked.
+        for _ in 0..10 {
+            // Send our full send window.
+            sender.send_available_send_window(MAX_SEGMENT_SIZE);
+            assert!(sender.is_in_recovery());
+            sender.ack_n_packets(2);
+            assert_eq!(expected_send_window, sender.get_congestion_window());
+        }
+        assert!(!sender.is_in_recovery());
+        // Out of recovery now. Congestion window should not grow for half an RTT.
+        let mut packets_in_send_window = expected_send_window / MAX_SEGMENT_SIZE;
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        sender.ack_n_packets(packets_in_send_window / 2 - 2);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Next ack should increase congestion window by 1MSS.
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        sender.ack_n_packets(2);
+        expected_send_window += MAX_SEGMENT_SIZE;
+        packets_in_send_window += 1;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Congestion window should remain steady again for half an RTT.
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        sender.ack_n_packets(packets_in_send_window / 2 - 1);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Next ack should cause congestion window to grow by 1MSS.
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        sender.ack_n_packets(2);
+        expected_send_window += MAX_SEGMENT_SIZE;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+    }
+
+    #[test]
+    fn one_connection_congestion_avoidance_at_end_of_recovery() {
+        let mut sender = TestSender::new(true);
+        sender.set_number_of_emulated_connection(1);
+
+        // Ack 10 packets in 5 acks to raise the CWND to 20.
+        let number_of_acks = 5;
+        for _ in 0..number_of_acks {
+            sender.send_available_send_window(MAX_SEGMENT_SIZE);
+            sender.ack_n_packets(2);
+        }
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        let mut expected_send_window =
+            DEFAULT_WINDOW_TCP + (MAX_SEGMENT_SIZE * 2 * number_of_acks);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        sender.lose_n_packets(1, MAX_SEGMENT_SIZE);
+
+        // We should now have fallen out of slow start with a reduced window.
+        expected_send_window =
+            (expected_send_window as f32 * sender.reno_beta()) as usize;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // No congestion window growth should occur in recovery phase, i.e., until
+        // the currently outstanding 20 packets are acked.
+        for _ in 0..10 {
+            // Send our full send window.
+            sender.send_available_send_window(MAX_SEGMENT_SIZE);
+            assert!(sender.is_in_recovery());
+            sender.ack_n_packets(2);
+            assert_eq!(expected_send_window, sender.get_congestion_window());
+        }
+        assert!(!sender.is_in_recovery());
+
+        // Out of recovery now. Congestion window should not grow during RTT.
+        for _ in (0..expected_send_window / MAX_SEGMENT_SIZE - 2).step_by(2) {
+            // Send our full send window.
+            sender.send_available_send_window(MAX_SEGMENT_SIZE);
+            sender.ack_n_packets(2);
+            assert_eq!(expected_send_window, sender.get_congestion_window());
+        }
+
+        // Next ack should cause congestion window to grow by 1MSS.
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        sender.ack_n_packets(2);
+        expected_send_window += MAX_SEGMENT_SIZE;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+    }
+
+    #[test]
+    fn reset_after_connection_migration() {
+        let mut sender = TestSender::new(true);
+        sender.set_number_of_emulated_connection(1);
+        let number_of_acks = 10;
+        for _ in 0..number_of_acks {
+            sender.send_available_send_window(MAX_SEGMENT_SIZE);
+            sender.ack_n_packets(2);
+        }
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        let mut expected_send_window =
+            DEFAULT_WINDOW_TCP + (MAX_SEGMENT_SIZE * 2 * number_of_acks);
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        // Loses a packet to exit slow start.
+        sender.lose_n_packets(1, MAX_SEGMENT_SIZE);
+        // We should now have fallen out of slow start with a reduced window. Slow
+        // start threshold is also updated.
+        expected_send_window = (expected_send_window as f32 * RENO_BETA) as usize;
+        assert_eq!(expected_send_window, sender.get_congestion_window());
+        assert_eq!(expected_send_window, sender.get_slow_start_threshold());
+        // Resets cwnd and slow start threshold on connection migrations.
+        sender.on_connection_migration();
+        assert_eq!(DEFAULT_WINDOW_TCP, sender.get_congestion_window());
+        assert_eq!(
+            MAX_CONGESTION_WINDOW_PACKETS * MAX_SEGMENT_SIZE,
+            sender.get_slow_start_threshold()
+        );
+        assert!(!sender.hybrid_slow_start.started);
+    }
+
+    #[test]
+    fn limit_cwnd_increase_in_congestion_avoidance() {
+        // Enable Cubic.
+        let mut sender = TestSender::new(false);
+        let num_sent = sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        // Make sure we fall out of slow start.
+        let mut saved_cwnd = sender.get_congestion_window();
+        sender.lose_n_packets(1, MAX_SEGMENT_SIZE);
+        assert!(saved_cwnd > sender.get_congestion_window());
+        // Ack the rest of the outstanding packets to get out of recovery.
+        for _ in 1..num_sent {
+            sender.ack_n_packets(1);
+        }
+        assert_eq!(0, sender.bytes_in_flight);
+        // Send a new window of data and ack all; cubic growth should occur.
+        saved_cwnd = sender.get_congestion_window();
+        sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        // Ack packets until the CWND increases.
+        while sender.get_congestion_window() == saved_cwnd {
+            sender.ack_n_packets(1);
+            sender.send_available_send_window(MAX_SEGMENT_SIZE);
+        }
+        // Bytes in flight may be larger than the CWND if the CWND isn't an exact
+        // multiple of the packet sizes being sent.
+        assert!(sender.bytes_in_flight > sender.get_congestion_window());
+        saved_cwnd = sender.get_congestion_window();
+        // Advance time 2 seconds waiting for an ack.
+        sender.clock += Duration::from_secs(2);
+        // Ack two packets. The CWND should increase by only one packet.
+        sender.ack_n_packets(2);
+        assert_eq!(
+            saved_cwnd + MAX_SEGMENT_SIZE,
+            sender.get_congestion_window()
         );
     }
 }
