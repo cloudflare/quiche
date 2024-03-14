@@ -473,6 +473,12 @@ void quiche_conn_application_proto(const quiche_conn *conn, const uint8_t **out,
 // Returns the peer's leaf certificate (if any) as a DER-encoded buffer.
 void quiche_conn_peer_cert(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
+// Returns the nth certificate of the peer's leaf certificate (if any) as a DER-encoded buffer.
+void quiche_conn_peer_cert_chain_index(const quiche_conn *conn, size_t index, const uint8_t **out, size_t *out_len);
+
+// Returns the length of the peer's leaf certificate.
+size_t quiche_conn_peer_cert_chain_len(const quiche_conn *conn);
+
 // Returns the serialized cryptographic session for the connection.
 void quiche_conn_session(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
