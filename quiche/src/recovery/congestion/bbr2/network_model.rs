@@ -185,13 +185,15 @@ pub(super) struct BBRv2NetworkModel {
 }
 
 impl BBRv2NetworkModel {
-    pub(super) fn new(cwnd_gain: f32, pacing_gain: f32) -> Self {
+    pub(super) fn new(
+        cwnd_gain: f32, pacing_gain: f32, overestimate_avoidance: bool,
+    ) -> Self {
         BBRv2NetworkModel {
             min_bytes_in_flight_in_round: usize::MAX,
             inflight_hi_limited_in_round: false,
             bandwidth_sampler: BandwidthSampler::new(
                 PARAMS.initial_max_ack_height_filter_window,
-                false,
+                overestimate_avoidance,
             ),
             round_trip_counter: RoundTripCounter {
                 round_trip_count: 0,

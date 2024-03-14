@@ -132,6 +132,8 @@ struct Params {
     probe_rtt_duration: Duration,
 
     bw_lo_mode: BwLoMode,
+
+    overestimate_avoidance: bool,
 }
 
 const PARAMS: Params = Params {
@@ -158,7 +160,7 @@ const PARAMS: Params = Params {
     startup_full_bw_rounds: 3,
     max_startup_queue_rounds: 0,
     startup_full_loss_count: 6,
-    loss_threshold: 0.02,
+    loss_threshold: 0.015,
 
     probe_bw_probe_base_duration: Duration::from_millis(2000),
 
@@ -174,6 +176,8 @@ const PARAMS: Params = Params {
     probe_rtt_duration: Duration::from_millis(200),
 
     bw_lo_mode: BwLoMode::Default,
+
+    overestimate_avoidance: true,
 };
 
 #[derive(Debug)]
@@ -275,6 +279,7 @@ impl BBRv2 {
             mode: Mode::startup(BBRv2NetworkModel::new(
                 PARAMS.startup_cwnd_gain,
                 PARAMS.startup_pacing_gain,
+                PARAMS.overestimate_avoidance,
             )),
             cwnd,
             pacing_rate: Bandwidth::from_bytes_and_time_delta(cwnd, smoothed_rtt) *
