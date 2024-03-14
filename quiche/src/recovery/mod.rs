@@ -514,10 +514,8 @@ impl Recovery {
 
     pub fn on_packet_sent(
         &mut self, pkt: Sent, epoch: packet::Epoch,
-        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
+        handshake_status: HandshakeStatus, time_sent: Instant, trace_id: &str,
     ) {
-        let time_sent = self.get_next_release_time().time(now).unwrap_or(now);
-
         let epoch = &mut self.epochs[epoch];
 
         let ack_eliciting = pkt.ack_eliciting;
@@ -565,11 +563,6 @@ impl Recovery {
         self.bytes_sent += sent_bytes;
 
         trace!("{} {:?}", trace_id, self);
-    }
-
-    pub fn get_packet_send_time(&self) -> Instant {
-        let now = Instant::now();
-        self.pacer.get_next_release_time().time(now).unwrap_or(now)
     }
 
     pub fn on_ack_received(

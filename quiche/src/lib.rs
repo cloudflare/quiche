@@ -3309,13 +3309,19 @@ impl Connection {
             left = cmp::min(left, send_path.max_send_bytes);
         }
 
+        let time_sent = send_path
+            .recovery
+            .get_next_release_time()
+            .time(now)
+            .unwrap_or(now);
+
         // Generate coalesced packets.
         while left > 0 {
             let (ty, written) = match self.send_single(
                 &mut out[done..done + left],
                 send_pid,
                 has_initial,
-                now,
+                time_sent,
             ) {
                 Ok(v) => v,
 
@@ -3376,7 +3382,7 @@ impl Connection {
             from: send_path.local_addr(),
             to: send_path.peer_addr(),
 
-            at: send_path.recovery.get_packet_send_time(),
+            at: time_sent,
         };
 
         Ok((done, info))
@@ -3384,7 +3390,7 @@ impl Connection {
 
     fn send_single(
         &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
-        now: time::Instant,
+        time_sent: time::Instant,
     ) -> Result<(packet::Type, usize)> {
         if out.is_empty() {
             return Err(Error::BufferTooShort);
@@ -3890,7 +3896,7 @@ impl Connection {
                 };
 
                 // Autotune the stream window size.
-                stream.recv.autotune_window(now, path.recovery.rtt());
+                stream.recv.autotune_window(time_sent, path.recovery.rtt());
 
                 let frame = frame::Frame::MaxStreamData {
                     stream_id,
@@ -3900,7 +3906,7 @@ impl Connection {
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     let recv_win = stream.recv.window();
 
-                    stream.recv.update_max_data(now);
+                    stream.recv.update_max_data(time_sent);
 
                     self.streams.remove_almost_full(stream_id);
 
@@ -3924,7 +3930,7 @@ impl Connection {
                 flow_control.max_data() < flow_control.max_data_next()
             {
                 // Autotune the connection window size.
-                flow_control.autotune_window(now, path.recovery.rtt());
+                flow_control.autotune_window(time_sent, path.recovery.rtt());
 
                 let frame = frame::Frame::MaxData {
                     max: flow_control.max_data_next(),
@@ -3934,7 +3940,7 @@ impl Connection {
                     self.almost_full = false;
 
                     // Commits the new max_rx_data limit.
-                    flow_control.update_max_data(now);
+                    flow_control.update_max_data(time_sent);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -4037,7 +4043,7 @@ impl Connection {
 
                         if push_frame_to_pkt!(b, frames, frame, left) {
                             let pto = path.recovery.pto();
-                            self.draining_timer = Some(now + (pto * 3));
+                            self.draining_timer = Some(time_sent + (pto * 3));
 
                             ack_eliciting = true;
                             in_flight = true;
@@ -4053,7 +4059,7 @@ impl Connection {
 
                     if push_frame_to_pkt!(b, frames, frame, left) {
                         let pto = path.recovery.pto();
-                        self.draining_timer = Some(now + (pto * 3));
+                        self.draining_timer = Some(time_sent + (pto * 3));
 
                         ack_eliciting = true;
                         in_flight = true;
@@ -4443,7 +4449,8 @@ impl Connection {
                 };
 
                 let send_at_time =
-                    now.duration_since(q.start_time()).as_secs_f32() * 1000.0;
+                    time_sent.duration_since(q.start_time()).as_secs_f32() *
+                        1000.0;
 
                 let ev_data =
                     EventData::PacketSent(qlog::events::quic::PacketSent {
@@ -4459,7 +4466,7 @@ impl Connection {
                         trigger: None,
                     });
 
-                q.add_event_data_with_instant(ev_data, now).ok();
+                q.add_event_data_with_instant(ev_data, time_sent).ok();
             }
         });
 
@@ -4500,19 +4507,19 @@ impl Connection {
             sent_pkt,
             epoch,
             handshake_status,
-            now,
+            time_sent,
             &self.trace_id,
         );
 
         qlog_with_type!(QLOG_METRICS, self.qlog, q, {
             if let Some(ev_data) = path.recovery.maybe_qlog() {
-                q.add_event_data_with_instant(ev_data, now).ok();
+                q.add_event_data_with_instant(ev_data, time_sent).ok();
             }
         });
 
         // Record sent packet size if we probe the path.
         if let Some(data) = challenge_data {
-            path.add_challenge_sent(data, written, now);
+            path.add_challenge_sent(data, written, time_sent);
         }
 
         self.sent_count += 1;
@@ -4524,14 +4531,14 @@ impl Connection {
 
         // On the client, drop initial state after sending an Handshake packet.
         if !self.is_server && hdr_ty == packet::Type::Handshake {
-            self.drop_epoch_state(packet::Epoch::Initial, now);
+            self.drop_epoch_state(packet::Epoch::Initial, time_sent);
         }
 
         // (Re)start the idle timer if we are sending the first ack-eliciting
         // packet since last receiving a packet.
         if ack_eliciting && !self.ack_eliciting_sent {
             if let Some(idle_timeout) = self.idle_timeout() {
-                self.idle_timer = Some(now + idle_timeout);
+                self.idle_timer = Some(time_sent + idle_timeout);
             }
         }
 
