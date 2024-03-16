@@ -52,6 +52,7 @@
 // every new min and overwrites 2nd & 3rd choices. The same property
 // holds for 2nd & 3rd best.
 
+use std::ops::Deref;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -63,6 +64,14 @@ struct MinmaxSample<T> {
 
 pub struct Minmax<T> {
     estimate: [MinmaxSample<T>; 3],
+}
+
+impl<T> Deref for Minmax<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.estimate[0].value
+    }
 }
 
 impl<T: PartialOrd + Copy> Minmax<T> {
@@ -102,27 +111,6 @@ impl<T: PartialOrd + Copy> Minmax<T> {
             self.estimate[1] = val;
         } else if val.value <= self.estimate[2].value {
             self.estimate[2] = val;
-        }
-
-        self.subwin_update(win, time, meas)
-    }
-
-    /// Updates the max estimate based on the given measurement, and returns it.
-    pub fn running_max(&mut self, win: Duration, time: Instant, meas: T) -> T {
-        let val = MinmaxSample { time, value: meas };
-
-        let delta_time = time.duration_since(self.estimate[2].time);
-
-        // Reset if there's nothing in the window or a new max value is found.
-        if val.value >= self.estimate[0].value || delta_time > win {
-            return self.reset(time, meas);
-        }
-
-        if val.value >= self.estimate[1].value {
-            self.estimate[2] = val;
-            self.estimate[1] = val;
-        } else if val.value >= self.estimate[2].value {
-            self.estimate[2] = val
         }
 
         self.subwin_update(win, time, meas)
@@ -258,54 +246,6 @@ mod tests {
     }
 
     #[test]
-    fn get_windowed_max_rtt() {
-        let mut f = Minmax::new(Duration::ZERO);
-        let rtt_25 = Duration::from_millis(25);
-        let rtt_24 = Duration::from_millis(24);
-        let win = Duration::from_millis(500);
-        let mut time = Instant::now();
-
-        let mut rtt_max = f.reset(time, rtt_24);
-        assert_eq!(rtt_max, rtt_24);
-
-        time += Duration::from_millis(250);
-        rtt_max = f.running_max(win, time, rtt_25);
-        assert_eq!(rtt_max, rtt_25);
-        assert_eq!(f.estimate[1].value, rtt_25);
-        assert_eq!(f.estimate[2].value, rtt_25);
-
-        time += Duration::from_millis(600);
-        rtt_max = f.running_max(win, time, rtt_24);
-        assert_eq!(rtt_max, rtt_24);
-        assert_eq!(f.estimate[1].value, rtt_24);
-        assert_eq!(f.estimate[2].value, rtt_24);
-    }
-
-    #[test]
-    fn get_windowed_max_bandwidth() {
-        let mut f = Minmax::new(0);
-        let bw_200 = 200;
-        let bw_500 = 500;
-        let win = Duration::from_millis(500);
-        let mut time = Instant::now();
-
-        let mut bw_max = f.reset(time, bw_200);
-        assert_eq!(bw_max, bw_200);
-
-        time += Duration::from_millis(5000);
-        bw_max = f.running_max(win, time, bw_500);
-        assert_eq!(bw_max, bw_500);
-        assert_eq!(f.estimate[1].value, bw_500);
-        assert_eq!(f.estimate[2].value, bw_500);
-
-        time += Duration::from_millis(600);
-        bw_max = f.running_max(win, time, bw_200);
-        assert_eq!(bw_max, bw_200);
-        assert_eq!(f.estimate[1].value, bw_200);
-        assert_eq!(f.estimate[2].value, bw_200);
-    }
-
-    #[test]
     fn get_windowed_min_estimates_rtt() {
         let mut f = Minmax::new(Duration::ZERO);
         let rtt_25 = Duration::from_millis(25);
@@ -367,69 +307,5 @@ mod tests {
         assert_eq!(bw_min, bw_200);
         assert_eq!(f.estimate[1].value, bw_200);
         assert_eq!(f.estimate[2].value, bw_200);
-    }
-
-    #[test]
-    fn get_windowed_max_estimates_rtt() {
-        let mut f = Minmax::new(Duration::ZERO);
-        let rtt_25 = Duration::from_millis(25);
-        let rtt_24 = Duration::from_millis(24);
-        let rtt_23 = Duration::from_millis(23);
-        let rtt_26 = Duration::from_millis(26);
-        let win = Duration::from_secs(1);
-        let mut time = Instant::now();
-
-        let mut rtt_max = f.reset(time, rtt_25);
-        assert_eq!(rtt_max, rtt_25);
-
-        time += Duration::from_millis(300);
-        rtt_max = f.running_max(win, time, rtt_24);
-        assert_eq!(rtt_max, rtt_25);
-        assert_eq!(f.estimate[1].value, rtt_24);
-        assert_eq!(f.estimate[2].value, rtt_24);
-
-        time += Duration::from_millis(300);
-        rtt_max = f.running_max(win, time, rtt_23);
-        assert_eq!(rtt_max, rtt_25);
-        assert_eq!(f.estimate[1].value, rtt_24);
-        assert_eq!(f.estimate[2].value, rtt_23);
-
-        time += Duration::from_millis(300);
-        rtt_max = f.running_max(win, time, rtt_26);
-        assert_eq!(rtt_max, rtt_26);
-        assert_eq!(f.estimate[1].value, rtt_26);
-        assert_eq!(f.estimate[2].value, rtt_26);
-    }
-
-    #[test]
-    fn get_windowed_max_estimates_bandwidth() {
-        let mut f = Minmax::new(0);
-        let bw_500 = 500;
-        let bw_400 = 400;
-        let bw_300 = 300;
-        let bw_600 = 600;
-        let win = Duration::from_secs(1);
-        let mut time = Instant::now();
-
-        let mut bw_max = f.reset(time, bw_500);
-        assert_eq!(bw_max, bw_500);
-
-        time += Duration::from_millis(300);
-        bw_max = f.running_max(win, time, bw_400);
-        assert_eq!(bw_max, bw_500);
-        assert_eq!(f.estimate[1].value, bw_400);
-        assert_eq!(f.estimate[2].value, bw_400);
-
-        time += Duration::from_millis(300);
-        bw_max = f.running_max(win, time, bw_300);
-        assert_eq!(bw_max, bw_500);
-        assert_eq!(f.estimate[1].value, bw_400);
-        assert_eq!(f.estimate[2].value, bw_300);
-
-        time += Duration::from_millis(300);
-        bw_max = f.running_max(win, time, bw_600);
-        assert_eq!(bw_max, bw_600);
-        assert_eq!(f.estimate[1].value, bw_600);
-        assert_eq!(f.estimate[2].value, bw_600);
     }
 }
