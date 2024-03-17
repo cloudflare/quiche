@@ -81,7 +81,7 @@ pub struct Recovery {
     time_of_last_sent_ack_eliciting_pkt:
         [Option<Instant>; packet::Epoch::count()],
 
-    largest_acked_pkt: [u64; packet::Epoch::count()],
+    pub largest_acked_pkt: [u64; packet::Epoch::count()],
 
     largest_sent_pkt: [u64; packet::Epoch::count()],
 
@@ -210,7 +210,7 @@ impl Recovery {
 
             time_of_last_sent_ack_eliciting_pkt: [None; packet::Epoch::count()],
 
-            largest_acked_pkt: [u64::MAX; packet::Epoch::count()],
+            largest_acked_pkt: [0; packet::Epoch::count()],
 
             largest_sent_pkt: [0; packet::Epoch::count()],
 
@@ -449,12 +449,8 @@ impl Recovery {
         // a validating path, then receives an acknowledgment for that packet on
         // the active one.
 
-        if self.largest_acked_pkt[epoch] == u64::MAX {
-            self.largest_acked_pkt[epoch] = largest_acked;
-        } else {
-            self.largest_acked_pkt[epoch] =
-                cmp::max(self.largest_acked_pkt[epoch], largest_acked);
-        }
+        self.largest_acked_pkt[epoch] =
+            cmp::max(self.largest_acked_pkt[epoch], largest_acked);
 
         let mut has_ack_eliciting = false;
 
