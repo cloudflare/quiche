@@ -1707,6 +1707,10 @@ const QLOG_METRICS: EventType =
     EventType::RecoveryEventType(RecoveryEventType::MetricsUpdated);
 
 #[cfg(feature = "qlog")]
+const QLOG_CONNECTION_CLOSED: EventType =
+    EventType::ConnectivityEventType(ConnectivityEventType::ConnectionClosed);
+
+#[cfg(feature = "qlog")]
 struct QlogInfo {
     streamer: Option<qlog::streamer::QlogStreamer>,
     logged_peer_params: bool,
@@ -7687,6 +7691,74 @@ impl Connection {
     fn mark_closed(&mut self) {
         #[cfg(feature = "qlog")]
         {
+            let cc = match (self.is_established(), self.timed_out, &self.peer_error, &self.local_error) {
+                (false, _, _, _) => qlog::events::connectivity::ConnectionClosed {
+                    owner: Some(TransportOwner::Local),
+                    connection_code: None,
+                    application_code: None,
+                    internal_code: None,
+                    reason: Some("Failed to establish connection".to_string()),
+                    trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::HandshakeTimeout)
+                },
+
+                (true, true, _, _) => qlog::events::connectivity::ConnectionClosed {
+                    owner: Some(TransportOwner::Local),
+                    connection_code: None,
+                    application_code: None,
+                    internal_code: None,
+                    reason: Some("Idle timeout".to_string()),
+                    trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::IdleTimeout)
+                },
+
+                (true, false, Some(peer_error), None) => {
+                    let (connection_code, application_code) = if peer_error.is_app {
+                        (None, Some(qlog::events::ApplicationErrorCode::Value(peer_error.error_code)))
+                    } else {
+                        (Some(qlog::events::ConnectionErrorCode::Value(peer_error.error_code)), None)
+                    };
+
+                    qlog::events::connectivity::ConnectionClosed {
+                        owner: Some(TransportOwner::Remote),
+                        connection_code,
+                        application_code,
+                        internal_code: None,
+                        reason: Some(String::from_utf8_lossy(&peer_error.reason).to_string()),
+                        trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::Error),
+                    }
+                },
+
+                (true, false, None, Some(local_error)) => {
+                    let (connection_code, application_code) = if local_error.is_app {
+                        (None, Some(qlog::events::ApplicationErrorCode::Value(local_error.error_code)))
+                    } else {
+                        (Some(qlog::events::ConnectionErrorCode::Value(local_error.error_code)), None)
+                    };
+
+                    qlog::events::connectivity::ConnectionClosed {
+                        owner: Some(TransportOwner::Local),
+                        connection_code,
+                        application_code,
+                        internal_code: None,
+                        reason: Some(String::from_utf8_lossy(&local_error.reason).to_string()),
+                        trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::Error),
+                    }
+                },
+
+                _ => qlog::events::connectivity::ConnectionClosed {
+                    owner: None,
+                    connection_code: None,
+                    application_code: None,
+                    internal_code: None,
+                    reason: None,
+                    trigger: None,
+                },
+            };
+
+            qlog_with_type!(QLOG_CONNECTION_CLOSED, self.qlog, q, {
+                let ev_data = qlog::events::EventData::ConnectionClosed(cc);
+
+                q.add_event_data_now(ev_data).ok();
+            });
             self.qlog.streamer = None;
         }
         self.closed = true;
