@@ -332,8 +332,14 @@
 //!     Some(&dcid),
 //! );
 //!
-//! let ping = qlog::events::quic::QuicFrame::Ping;
-//! let padding = qlog::events::quic::QuicFrame::Padding;
+//! let ping = qlog::events::quic::QuicFrame::Ping {
+//!     length: None,
+//!     payload_length: None,
+//! };
+//! let padding = qlog::events::quic::QuicFrame::Padding {
+//!     length: None,
+//!     payload_length: 1234,
+//! };
 //!
 //! let event_data =
 //!     qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
@@ -790,7 +796,8 @@ mod tests {
     },
     "frames": [
       {
-        "frame_type": "padding"
+        "frame_type": "padding",
+        "payload_length": 1234
       },
       {
         "frame_type": "ping"
@@ -808,14 +815,23 @@ mod tests {
 
         let pkt_hdr = make_pkt_hdr(PacketType::Initial);
 
-        let frames =
-            vec![QuicFrame::Padding, QuicFrame::Ping, QuicFrame::Stream {
+        let frames = vec![
+            QuicFrame::Padding {
+                payload_length: 1234,
+                length: None,
+            },
+            QuicFrame::Ping {
+                payload_length: None,
+                length: None,
+            },
+            QuicFrame::Stream {
                 stream_id: 0,
                 offset: 0,
                 length: 100,
                 fin: Some(true),
                 raw: None,
-            }];
+            },
+        ];
 
         let ev_data = EventData::PacketSent(PacketSent {
             header: pkt_hdr,

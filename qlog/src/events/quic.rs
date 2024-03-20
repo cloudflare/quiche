@@ -384,30 +384,43 @@ pub enum QuicFrameTypeName {
 // ensure it goes out on the wire. This means that deserialization of frames
 // also works automatically.
 pub enum QuicFrame {
-    Padding,
+    Padding {
+        length: Option<u32>,
+        payload_length: u32,
+    },
 
-    Ping,
+    Ping {
+        length: Option<u32>,
+        payload_length: Option<u32>,
+    },
 
     Ack {
         ack_delay: Option<f32>,
         acked_ranges: Option<AckedRanges>,
 
         ect1: Option<u64>,
-
         ect0: Option<u64>,
-
         ce: Option<u64>,
+
+        length: Option<u32>,
+        payload_length: Option<u32>,
     },
 
     ResetStream {
         stream_id: u64,
         error_code: u64,
         final_size: u64,
+
+        length: Option<u32>,
+        payload_length: Option<u32>,
     },
 
     StopSending {
         stream_id: u64,
         error_code: u64,
+
+        length: Option<u32>,
+        payload_length: Option<u32>,
     },
 
     Crypto {
