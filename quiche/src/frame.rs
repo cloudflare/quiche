@@ -835,9 +835,15 @@ impl Frame {
     #[cfg(feature = "qlog")]
     pub fn to_qlog(&self) -> QuicFrame {
         match self {
-            Frame::Padding { .. } => QuicFrame::Padding,
+            Frame::Padding { len } => QuicFrame::Padding {
+                length: None,
+                payload_length: *len as u32,
+            },
 
-            Frame::Ping { .. } => QuicFrame::Ping,
+            Frame::Ping { .. } => QuicFrame::Ping {
+                length: None,
+                payload_length: None,
+            },
 
             Frame::ACK {
                 ack_delay,
@@ -864,6 +870,8 @@ impl Frame {
                     ect1,
                     ect0,
                     ce,
+                    length: None,
+                    payload_length: None,
                 }
             },
 
@@ -875,6 +883,8 @@ impl Frame {
                 stream_id: *stream_id,
                 error_code: *error_code,
                 final_size: *final_size,
+                length: None,
+                payload_length: None,
             },
 
             Frame::StopSending {
@@ -883,6 +893,8 @@ impl Frame {
             } => QuicFrame::StopSending {
                 stream_id: *stream_id,
                 error_code: *error_code,
+                length: None,
+                payload_length: None,
             },
 
             Frame::Crypto { data } => QuicFrame::Crypto {
