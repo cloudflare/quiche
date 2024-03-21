@@ -29,6 +29,7 @@ use std::time::Duration;
 const NUM_MILLIS_PER_SECOND: u64 = 1000;
 const NUM_MICROS_PER_MILLI: u64 = 1000;
 const NUM_MICROS_PER_SECOND: u64 = NUM_MICROS_PER_MILLI * NUM_MILLIS_PER_SECOND;
+const NUM_NANOS_PER_SECOND: u64 = 1000 * NUM_MICROS_PER_SECOND;
 
 #[derive(PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
 pub struct Bandwidth {
@@ -91,19 +92,18 @@ impl Bandwidth {
             return Bandwidth { bits_per_second: 0 };
         }
 
-        let mut micros = time_delta.as_micros() as u64;
-        if micros == 0 {
-            micros = 1;
+        let mut nanos = time_delta.as_nanos() as u64;
+        if nanos == 0 {
+            nanos = 1;
         }
 
-        // 1 bit is 1000000 micro bits.
-        let num_micro_bits = 8 * bytes as u64 * NUM_MICROS_PER_SECOND;
-        if num_micro_bits < micros {
+        let num_nano_bits = 8 * bytes as u64 * NUM_NANOS_PER_SECOND;
+        if num_nano_bits < nanos {
             return Bandwidth { bits_per_second: 1 };
         }
 
         Bandwidth {
-            bits_per_second: num_micro_bits / micros,
+            bits_per_second: num_nano_bits / nanos,
         }
     }
 
@@ -144,16 +144,16 @@ impl Bandwidth {
         if self.bits_per_second == 0 {
             Duration::ZERO
         } else {
-            Duration::from_micros(
-                bytes as u64 * 8 * NUM_MICROS_PER_SECOND / self.bits_per_second,
+            Duration::from_nanos(
+                (bytes as u64 * 8 * NUM_NANOS_PER_SECOND) / self.bits_per_second,
             )
         }
     }
 
     pub fn to_bytes_per_period(self, time_period: Duration) -> u64 {
-        self.bits_per_second * time_period.as_micros() as u64 /
+        self.bits_per_second * time_period.as_nanos() as u64 /
             8 /
-            NUM_MICROS_PER_SECOND
+            NUM_NANOS_PER_SECOND
     }
 }
 
