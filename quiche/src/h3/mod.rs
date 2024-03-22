@@ -395,8 +395,9 @@ pub enum Error {
     TransportError(crate::Error),
 
     /// The underlying QUIC stream (or connection) doesn't have enough capacity
-    /// for the operation to complete. The application should retry later on.
-    StreamBlocked,
+    /// for the operation to complete. The application should retry later on
+    /// once the specified capacity is available.
+    StreamBlocked(usize),
 
     /// Error in the payload of a SETTINGS frame.
     SettingsError,
@@ -438,7 +439,7 @@ impl Error {
             Error::QpackDecompressionFailed => 0x200,
             Error::BufferTooShort => 0x999,
             Error::TransportError { .. } => 0xFF,
-            Error::StreamBlocked => 0xFF,
+            Error::StreamBlocked(_) => 0xFF,
             Error::SettingsError => 0x109,
             Error::RequestRejected => 0x10B,
             Error::RequestCancelled => 0x10C,
@@ -464,7 +465,7 @@ impl Error {
             Error::FrameError => -10,
             Error::QpackDecompressionFailed => -11,
             // -12 was previously used for TransportError, skip it
-            Error::StreamBlocked => -13,
+            Error::StreamBlocked(_) => -13,
             Error::SettingsError => -14,
             Error::RequestRejected => -15,
             Error::RequestCancelled => -16,
@@ -1043,8 +1044,10 @@ impl Connection {
         if let Err(e) = conn.stream_send(stream_id, b"", false) {
             self.streams.remove(&stream_id);
 
+            // This should be impossible since we're only sending a 0 length
+            // buffer
             if e == super::Error::Done {
-                return Err(Error::StreamBlocked);
+                return Err(Error::StreamBlocked(0));
             }
 
             return Err(e.into());
@@ -1160,10 +1163,11 @@ impl Connection {
 
         // Headers need to be sent atomically, so make sure the stream has
         // enough capacity.
-        match conn.stream_writable(stream_id, overhead + header_block.len()) {
+        let to_write = overhead + header_block.len();
+        match conn.stream_writable(stream_id, to_write) {
             Ok(true) => (),
 
-            Ok(false) => return Err(Error::StreamBlocked),
+            Ok(false) => return Err(Error::StreamBlocked(to_write)),
 
             Err(e) => {
                 if conn.stream_finished(stream_id) {
@@ -1492,13 +1496,11 @@ impl Connection {
                 octets::varint_len(frame_payload_len as u64);
 
         // Make sure the control stream has enough capacity.
-        match conn.stream_writable(
-            control_stream_id,
-            overhead + priority_field_value.len(),
-        ) {
+        let to_write = overhead + priority_field_value.len();
+        match conn.stream_writable(control_stream_id, to_write) {
             Ok(true) => (),
 
-            Ok(false) => return Err(Error::StreamBlocked),
+            Ok(false) => return Err(Error::StreamBlocked(to_write)),
 
             Err(e) => {
                 return Err(e.into());
@@ -1726,7 +1728,7 @@ impl Connection {
             let stream_cap = conn.stream_capacity(stream_id)?;
 
             if stream_cap < wire_len {
-                return Err(Error::StreamBlocked);
+                return Err(Error::StreamBlocked(wire_len));
             }
 
             trace!("{} tx frm {:?}", conn.trace_id(), frame);
@@ -4866,7 +4868,7 @@ mod tests {
 
         assert_eq!(
             s.client.send_request(&mut s.pipe.client, &req, true),
-            Err(Error::StreamBlocked)
+            Err(Error::StreamBlocked(21))
         );
 
         // Clear the writable stream queue.
@@ -4925,7 +4927,7 @@ mod tests {
         // blocked.
         assert_eq!(
             s.client.send_request(&mut s.pipe.client, &req, true),
-            Err(Error::StreamBlocked)
+            Err(Error::StreamBlocked(21)),
         );
         assert_eq!(s.pipe.client.stream_writable_next(), None);
 

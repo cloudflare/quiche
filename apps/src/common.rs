@@ -1134,7 +1134,7 @@ impl HttpConn for Http3Conn {
                     break;
                 },
 
-                Err(quiche::h3::Error::StreamBlocked) => {
+                Err(quiche::h3::Error::StreamBlocked(_)) => {
                     debug!("stream is blocked, retry later...");
                     break;
                 },
@@ -1472,7 +1472,7 @@ impl HttpConn for Http3Conn {
                     ) {
                         Ok(v) => v,
 
-                        Err(quiche::h3::Error::StreamBlocked) => {
+                        Err(quiche::h3::Error::StreamBlocked(_)) => {
                             let response = PartialResponse {
                                 headers: Some(headers),
                                 priority: Some(priority),
@@ -1604,7 +1604,7 @@ impl HttpConn for Http3Conn {
             ) {
                 Ok(_) => (),
 
-                Err(quiche::h3::Error::StreamBlocked) => {
+                Err(quiche::h3::Error::StreamBlocked(_)) => {
                     return;
                 },
 
