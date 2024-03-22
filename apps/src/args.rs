@@ -282,6 +282,7 @@ Options:
   --perform-migration      Perform connection migration on another source port.
   -H --header HEADER ...   Add a request header.
   -n --requests REQUESTS   Send the given number of identical requests [default: 1].
+  -m --concurrent-requests REQUESTS    The maximum number of requests to send concurrently [default: 1].
   --send-priority-update   Send HTTP/3 priority updates if the query string params 'u' or 'i' are present in URLs
   --max-field-section-size BYTES    Max size of uncompressed field section. Default is unlimited.
   --qpack-max-table-capacity BYTES  Max capacity of dynamic QPACK decoding.. Any value other that 0 is currently unsupported.
@@ -309,6 +310,7 @@ pub struct ClientArgs {
     pub source_port: u16,
     pub perform_migration: bool,
     pub send_priority_update: bool,
+    pub reqs_concurrent: u64,
 }
 
 impl Args for ClientArgs {
@@ -349,6 +351,9 @@ impl Args for ClientArgs {
 
         let reqs_cardinal = args.get_str("--requests");
         let reqs_cardinal = reqs_cardinal.parse::<u64>().unwrap();
+
+        let reqs_concurrent = args.get_str("--concurrent-requests");
+        let reqs_concurrent = reqs_concurrent.parse::<u64>().unwrap();
 
         let no_verify = args.get_bool("--no-verify");
 
@@ -402,6 +407,7 @@ impl Args for ClientArgs {
             source_port,
             perform_migration,
             send_priority_update,
+            reqs_concurrent,
         }
     }
 }
@@ -424,6 +430,7 @@ impl Default for ClientArgs {
             source_port: 0,
             perform_migration: false,
             send_priority_update: false,
+            reqs_concurrent: u64::MAX,
         }
     }
 }
