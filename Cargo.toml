@@ -2,8 +2,18 @@
 members = [ "apps", "octets", "qlog", "quiche" ]
 exclude = [ "fuzz", "tools/http3_test" ]
 
+[workspace.package]
+repository = "https://bitbucket.cfdata.org/projects/OXY/repos/quiche-gcongestion"
+publish = ["cloudflare"]
+
 [profile.bench]
 debug = true
 
 [profile.release]
 debug = true
+
+[workspace.metadata.release]
+pre-release-commit-message = "Release {{version}}"
+shared-version = true
+tag-name ="{{version}}"
+publish = false

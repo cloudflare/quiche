@@ -2,10 +2,11 @@
 name = "quiche"
 version = "0.21.0"
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
+publish = { workspace = true }
+repository = { workspace = true }
 edition = "2018"
 build = "src/build.rs"
 description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
-repository = "https://github.com/cloudflare/quiche"
 readme = "README.md"
 keywords = ["quic", "http3"]
 categories = ["network-programming"]
@@ -86,3 +87,11 @@ url = "2.5"
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
+
+[package.metadata.release]
+pre-release-hook = [
+  "git-cliff",
+  "-w", "..",
+  "-o", "../RELEASE_NOTES.md",
+  "--tag", "{{version}}"
+]
