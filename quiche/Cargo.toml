@@ -1,6 +1,6 @@
 [package]
 name = "quiche"
-version = "0.20.1-gcongestion"
+version = "0.20.1-gcongestion2"
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
 publish = { workspace = true }
 repository = { workspace = true }
