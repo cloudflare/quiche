@@ -16929,13 +16929,13 @@ mod tests {
 
         // Check that PMTU params are configured correctly
         let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
-        assert_eq!(pmtu_param.get_probe_status(), true);
+        assert!(pmtu_param.get_probe_status());
         assert_eq!(pmtu_param.get_probe_size(), 1350);
         assert_eq!(pipe.advance(), Ok(()));
 
         for (_, p) in pipe.server.paths.iter_mut() {
             assert_eq!(p.pmtud.get_current(), 1350);
-            assert_eq!(p.pmtud.get_probe_status(), false);
+            assert!(!p.pmtud.get_probe_status());
         }
     }
 
@@ -16989,7 +16989,7 @@ mod tests {
         assert_eq!(pmtu_param.get_current(), 1200);
 
         // Continue searching for PMTU
-        assert_eq!(pmtu_param.get_probe_status(), true);
+        assert!(pmtu_param.get_probe_status());
     }
 }
 
