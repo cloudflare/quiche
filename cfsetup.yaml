@@ -1,0 +1,34 @@
+default-flavor: bookworm
+
+builddeps: &builddeps-common
+  ? rust
+  ? cargo-deb
+  ? cf-rust-tools
+  ? cmake
+  ? openssh-client
+  ? libclang-14-dev
+
+builddeps-test: &builddeps-test
+  <<: *builddeps-common
+  ? cargo-to-teamcity
+
+bookworm:
+  build:
+    builddeps:
+      <<: *builddeps-common
+    post-cache:
+      - . cf-cargo-configure.sh
+      - cargo build --release
+  test:
+    builddeps:
+      <<: *builddeps-test
+    post-cache:
+      - . cf-cargo-configure.sh
+      - CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="unshare -Ur" CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="unshare -Ur" RUST_BACKTRACE=1 _RJEM_MALLOC_CONF=prof:true cargo test --workspace | cargo-to-teamcity
+
+  publish:
+    builddeps:
+      <<: *builddeps-common
+    post-cache:
+      - cf-cargo-publish.sh
+
