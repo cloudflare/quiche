@@ -1,0 +1,25 @@
+[changelog]
+header = ""
+body = """
+{% if version %}\
+    {{ version | trim_start_matches(pat="v") }}\
+{% else %}\
+    Unreleased\
+{% endif %}\
+{% for commit in commits %}
+  - {{ commit.author.timestamp | date }} {{ commit.message | split(pat="\n") | first }}\
+{% endfor %}
+
+
+"""
+footer = ""
+
+[git]
+conventional_commits = false
+commit_parsers = [
+  { message = "^Pull request", skip = true },
+  { message = "^Release [^ ]+$", skip = true },
+]
+filter_commits = false
+tag_pattern = "[v?0-9]*"
+sort_commits = "newest"
