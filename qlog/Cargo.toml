@@ -9,6 +9,7 @@ readme = "README.md"
 keywords = ["qlog", "quic", "http3"]
 categories = ["network-programming"]
 license = "BSD-2-Clause"
+publish = false
 
 [dependencies]
 serde = { version = "1.0.139", features = ["derive"] }
