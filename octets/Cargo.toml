@@ -1,6 +1,6 @@
 [package]
 name = "octets-gcongestion"
-version = "0.2.0"
+version = "0.20.2"
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
 edition = "2018"
 description = "Zero-copy abstraction for parsing and constructing network packets"

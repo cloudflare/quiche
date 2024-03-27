@@ -1,0 +1,1838 @@
+0.20.2
+- 2024-03-27 Add -gcongestion suffixes
+
+0.20.1-gcongestion2
+- 2024-03-26 OXY-1343: add git-cliff and release infra
+- 2024-03-26 Remove CODEOWNERS
+- 2024-03-26 OXY-1343: add cfsetup.yaml file
+- 2024-03-25 Bump quiche to 0.20.1
+- 2024-02-14 More pacing adjusments
+- 2023-11-03 Pacing fixes
+- 2023-01-31 Rewrite congestion and recovery code
+- 2024-01-10 quiche fixes #4
+- 2024-01-09 quiche fixes #3, part 3
+- 2024-01-09 quiche fixes #3, part 2
+- 2024-01-09 quiche fixes #3, part 1
+- 2024-01-09 qlog: release qlog 0.11
+- 2024-01-09 clippy fixes for code excluded from workspace
+- 2024-01-09 build(deps): update env_logger to mitigate RUSTSEC-2021-0145
+- 2024-01-08 fix dead code warnings for FFI types
+- 2024-01-08 qlog: support reading JsonEvent too
+- 2023-12-15 qlog: add ex_data to Event (#1692)
+- 2023-12-15 examples: update url dependency
+- 2023-12-13 h3: allow the frame module to be public under a new feature (#1689)
+- 2023-12-13 h3: make grease_value() public (#1688)
+- 2023-12-13 lib: add getter for qlog streamer (#1687)
+- 2023-12-13 qlog: Add QlogSeqReader helper (#1672)
+- 2023-12-13 qlog: extend serializer to support arbitrary types of event (#1675)
+- 2023-12-13 Flush qlog streamer before closing the connection (#1629)
+- 2023-12-13 fix(qlog): update serde rename of PacketsAcked (#1682)
+- 2023-12-13 feat(qlog): extend `From<EventType> for EventImportance` (#1684)
+- 2023-12-12 path: reformat
+- 2023-12-11 0.20.0
+- 2023-10-25 lib: limit queued PATH_CHALLENGE frames
+- 2023-12-11 ffi: add missing config APIs
+- 2023-12-11 ffi: fix const-correctness for quiche_h3_send_* functions
+- 2023-12-07 fix typos
+- 2023-12-06 build(deps): update ring requirement from 0.16 to 0.17
+- 2023-12-06 ffi: add missing quiche_conn_is_dgram_send_queue_full(...) and quiche_conn_is_dgram_recv_queue_full(...) methods
+- 2023-12-05 ffi: add quiche_conn_is_resumed
+- 2023-11-27 ffi: expose functions related to client side connection migration
+- 2023-11-27 ffi: add functions to send packets on a specific path
+- 2023-11-27 ffi: fix quiche_conn_new_scid(...) return value
+- 2023-11-27 ffi: expose C API to handle PathEvent
+- 2023-11-27 ffi: expose connection source IDs
+- 2023-11-27 ffi: expose quiche_conn_retire_dcid(...)
+- 2023-11-24 allow access to a Connection's boring::ssl::SslRef
+- 2023-11-24 ffi: add C API for methods that are required to handle connection migration
+- 2023-11-24 rename CID methods to be more consistent
+- 2023-11-24 cid: remove unused ConnectionIdIter
+- 2023-11-22 quiche.h: use socklen_t when passing sockaddr to C functions
+- 2023-11-20 qlog: add MtuUpdated event missing from EventImportance implementation
+- 2023-11-20 stream: update clippy lint name
+- 2023-11-15 backstage: update catalog entry
+- 2023-11-13 add backstage catalog
+- 2023-11-13 h3: fix event type conversion to FFI enum
+- 2023-11-10 0.19.0
+- 2023-11-10 qlog: release 0.10
+- 2023-11-10 bump boring crate
+- 2023-10-31 crypto: avoid unnecessary allocations when generating keys
+- 2023-11-04 qlog: fixup MTUUpdated event types serialization/parsing
+- 2023-11-02 qlog: add MTUUpdated event
+- 2023-09-13 ci: test both vendored boringssl and boring crate
+- 2023-10-26 lib: count reset and stopped streams
+- 2023-10-26 ffi: remove spurious `paths` field from Stats
+- 2023-10-26 quiche.h: add missing pointer
+- 2023-10-13 stream: properly tidy up reset streams that are read
+- 2023-10-06 ffi: add quiche_h3_send_goaway
+- 2023-10-11 fuzz: refresh corpora
+- 2023-10-11 fuzz: build fuzzers inside docker
+- 2023-10-11 fuzz: update mayhem config to new version
+- 2023-10-11 fuzz: update mayhem URL
+- 2023-10-11 fuzz: enable debug assertions
+- 2023-10-11 avoid padding UDP datagrams when fuzzing
+- 2023-10-11 fuzz: use smaller ECDSA certificate
+- 2023-10-12 chore: address clippy
+- 2023-09-07 stream: split RecvBuf and SendBuf into submodules
+- 2023-09-07 bbr2: comment fixups
+- 2023-09-06 bbr2: fix clippy in tests
+- 2023-09-05 clarify verify_peer() docs regarding anonymous clients
+- 2023-09-05 lib: skip dgram frame size calc when none to send
+- 2023-08-30 add peer_transport_params() API
+- 2023-05-25 bbr2: fixes and enhancements
+- 2022-03-14 cc: initial implementation of BBRv2 congestion control algorithm
+- 2022-03-19 recovery: add tx_in_flight and lost in packet
+- 2022-04-22 delivery_rate: sample_delivered() and sample_prior_delivered()
+- 2022-03-22 cc: pass largest_lost_packet to congestion_event
+- 2023-08-29 fix doc references to `PathEvent::New`
+- 2023-08-29 apps: update to nix 0.27
+- 2023-08-29 clippy fixes
+- 2023-08-24 bbr: fix idle_restart flag
+- 2023-07-23 qlog: packet number is optional
+- 2023-08-22 0.18.0
+- 2023-08-22 correctly account for datagram queue when checking if app limited
+- 2023-08-22 pass a SslContextBuilder instead of SslContext
+- 2023-08-22 exclude paths without DCID from paths_iter()
+- 2022-07-23 h3: remove HTTP/3 datagram API
+- 2022-07-23 h3: add HTTP/3 datagram RFC version
+- 2023-08-22 recovery: make initial CWND configurable
+- 2023-08-21 recovery: correct logic to avoid binary search on ack
+- 2023-08-21 apps: allow passing custom CA PEM to client
+- 2023-08-21 with_tls doesn't require a mutable Config
+- 2023-08-21 bump boring crate version
+- 2023-08-18 Fix goaway frame type id
+- 2023-08-10 http3_test: add tests for mismatched Content-Length (#1586)
+- 2023-07-22 fix broken send_on_path_test
+- 2023-07-22 stream: migrate flushable to RBtree
+- 2023-07-20 remove unnecessary argument to decode_pkt
+- 2023-07-21 fix some clippy errors in tests
+- 2023-07-14 stream: prioritized readable and writable iterators
+- 2023-02-14 nginx: sync patch
+- 2023-07-14 tls: use once_cell instead of lazy_static
+- 2023-07-13 ffi: add missing quiche_config_set_cc_algorithm_name() to header file
+- 2023-07-11 tls: fix a pile of incorrect bindings
+- 2023-07-07 ffi: remove declaration for non-existent function
+- 2023-07-04 stream: split stream mark_* methods
+- 2023-06-12 apps: queue response body writes for better scheduling
+- 2023-02-03 ranges: add an inline version of RangeSet
+- 2023-06-16 automatically limit number of SCIDs that can be provded
+- 2023-06-19 path: progress through SocketAddrIter from front to back
+- 2023-06-19 ffi: explicitly drop Box in _free methods
+- 2023-06-13 stream: progress through StreamIter from front to back
+- 2023-06-08 remove per-stream application data
+- 2023-06-06 remove support for pre-RFC versions
+- 2023-06-08 h3: convert control streams to non-incremental
+- 2023-06-06 apps: fix Instant -> u64 conversion
+- 2023-06-02 add method to return number of retired scids
+- 2023-06-02 add method to expose all source CIDs
+- 2023-06-02 Stop detect lost packets early
+- 2023-06-01 Use binary search to find beginning of unacked block
+- 2023-05-19 build: set rpath when using vendored BoringSSL
+- 2023-05-18 trigger loss recovery as soon as connection migration is complete
+- 2023-05-10 0.17.2
+- 2023-05-09 only call Instant:now once in send_on_path
+- 2023-05-09 Properly clear dgram_event_triggered (#1503)
+- 2023-05-06 Clippy fixes. (#1499)
+- 2023-05-03 build(deps): update serde_with requirement from 2.3.1 to 3.0.0 (#1497)
+- 2023-05-03 github: pin woodsend/setup-winlibs-action
+- 2023-04-27 tls: flush keylog write straight away
+- 2023-04-20 apps: use H3_NO_ERROR in HTTP/3 clients
+- 2023-04-18 ffi: fix conversion of Instant to timespec
+- 2023-04-07 ci: uthash from homebrew, fix Apple Silicon macOS example build
+- 2023-04-11 add accessor for is_server (#1480)
+- 2023-04-06 Provide an API to set max_pacing_rate (#1476)
+- 2023-04-05 bbr: fix cwnd recovery logic during congestion episode
+- 2023-04-05 recovery: reuse the same Vec for newly_acked
+- 2023-04-05 huffman: faster encoding
+- 2023-04-05 qlog: bump serde_with to 2.3.1
+- 2023-04-04 qpack: speed-up static lookups during encoding
+- 2023-04-02 apps: remove siduck
+- 2023-03-30 0.17.1
+- 2023-03-30 support encoding packet numbers in 3 bytes
+- 2023-03-30 expose min_rtt and rttvar in path stats
+- 2023-03-30 qlog: release 0.9
+- 2023-03-27 qlog: update TransportError
+- 2023-03-27 qlog: update the packet dropped event
+- 2023-03-27 qlog: switch to RawInfo where needed
+- 2023-03-27 qlog: update the H3StreamTypeSet event
+- 2023-03-26 qlog: update HTTP/3 settings fields
+- 2023-03-26 quiche.h: add missing transport errors
+- 2023-03-25 qlog: key_retired -> key_discarded
+- 2023-03-25 apps: keep sending packets when a small packet is generated
+- 2021-12-27 handle peer-initiated key update
+- 2023-03-20 h3: set send lowat when sending body is blocked
+- 2023-03-17 apps: add option to disable pacing on the server
+- 2023-03-17 use correct method to check if stream is writable
+- 2023-03-20 fix app limited check for delivery rate
+- 2023-03-15 get rid of unnecessary Result
+- 2023-03-15 fix final_size for RESET_STREAM
+- 2023-03-13 replace deprecated number constants by built-in primitive type constants
+- 2023-03-09 fix handshake confirmation logic
+- 2023-03-10 mark streams as writable when blocked by connection capacity
+- 2023-03-09 qlog: fix derivable_impls clippy warning
+- 2023-03-09 github: bump Android NDK version
+- 2023-03-03 docs: clarify using Config, especially params that can be zero
+- 2023-02-23 downgrade error epoch to Initial if remote peer can't decrypt yet
+- 2023-03-03 ranges: simplify removing first element of list
+- 2023-02-28 h3: reduce capacity requirement when sending partial body
+- 2023-02-27 stream: delete redundant logic
+- 2023-02-14 implement edge-triggered stream pseudo-iterators
+- 2023-02-23 qpack: when huffman inflates use raw literals
+- 2023-02-16 stream: unmark readable/writable streams when collected
+- 2023-02-21 only send opportunistic ACK if there is enough cwnd for PING
+- 2023-02-21 reduce number of path lookups in the hot path on send
+- 2023-02-08 apps: store response priority for retry after block
+- 2023-02-07 ffi: add some missing APIs and documentation
+- 2023-02-02 build: support dynamically linking to BoringSSL in a specified path
+- 2023-01-30 qlog: align reference_time field with qlog spec (#1392)
+- 2023-01-27 more clippy / rustfmt fixes
+- 2023-01-27 bump required rust version
+- 2023-01-24 stream: use BTreeMap instead of BinaryHeap for Recv buffer management
+- 2023-01-24 stream: avoid allocations for StreamIter when only few streams exist
+- 2023-01-06 use SmallVec optimization to avoid allocations when only one frame is sent
+- 2023-01-06 stream: don't remove/insert flushable on every frame
+- 2023-01-27 fix new clippy warnings
+- 2023-01-26 allow sending ACK only packets when the cwnd is full
+- 2023-01-26 h3: exit process_readable_stream() gracefully
+- 2023-01-24 ensure stream_writable() also checks blocked offset
+- 2023-01-18 README: add note about Android DNS over h3
+- 2023-01-17 README: update URL of build badge
+- 2023-01-17 ci: update workflows actions
+- 2023-01-17 initial stateless reset detection
+- 2022-12-23 fix octets comment
+- 2023-01-09 ffi: correct comment for h3 connection structure
+- 2022-12-16 fix clippy warnings
+- 2022-12-14 add timeout_instant() for Instant timeout instead of Duration
+- 2022-11-22 add API for app to elicit ACK from peer
+- 2022-11-16 better Immediate Close during handshake
+- 2022-11-14 fix clippy lints
+- 2022-10-27 packet: refactor Epoch to be an enum instead of usize consts
+- 2022-10-19 recovery: populate pacing rate in qlog metrics
+- 2022-10-10 qlog: add event for acked and dropped stream data
+- 2022-10-17 lib: don't init qlog pkt hdr unilaterally
+- 2022-10-17 ffi: add quiche_config_enable_pacing()
+- 2022-10-17 qlog: add send_at_time to PacketSent event
+- 2022-10-10 0.16.0
+- 2022-09-13 fix server app close before 1RTT never being sent
+- 2022-10-10 tls: set local_error if handshake fails with SSL_ERROR_SSL
+- 2022-10-10 add config option to completely disable pacing
+- 2022-10-10 tls: move map_result_ssl(...) function to Handshake
+- 2022-10-10 h3: fixup for with_transport() with early data
+- 2022-10-10 fix test case when boringssl-boring-crate feature is enabled
+- 2022-10-07 0.15.0
+- 2022-10-07 frame: fix needless-borrow clippy warnings
+- 2022-10-07 h3: exit early if the QUIC connection is not ready
+- 2022-10-07 frame: avoid panics for non-utf8 reasons/errors
+- 2022-10-01 delivery rate: fix where on_packet_sent() hook is called
+- 2022-09-29 refactor processing undecrypted 0-RTT packets
+- 2022-09-27 packet: fix hard-coding constants
+- 2022-09-23 ffi: added const quilifiers to some C API functions
+- 2022-09-23 stream: fix needless-borrow clippy warning
+- 2022-09-16 h3: check and fail 0-length payload frames
+- 2022-09-21 apps: add --disable-gso option
+- 2022-09-12 stream: fix SendBuf length calculation on retransmit
+- 2022-09-14 h3: better support 0-length payload frame parsing
+- 2022-09-15 expose whether or not the dgram queues are full
+- 2022-09-13 consume incoming stream data when stream is draining
+- 2022-09-11 lib: prevent invalid unidirectional stream_shutdown
+- 2022-08-11 h3: return InternalError when flow control blocks control stream
+- 2022-09-08 bound consecutive non ack-eliciting packet sends
+- 2022-06-21 tls: allow retrieving the full certificate chain exposed by the peer
+- 2022-09-07 ffi: clarify that token must be 16 bytes long
+- 2022-09-07 h3: support SETTINGS_ENABLE_CONNECT_PROTOCOL
+- 2022-09-07 get rid of unnecessary &mut
+- 2022-09-06 h3: impl NameValue for byte slice tuple
+- 2022-09-01 octets: make varint len functions const
+- 2021-06-29 apps: add GSO support for server on Linux
+- 2022-08-26 apps: add pacing support for server
+- 2021-05-18 cc: BBR congestion control
+- 2022-08-25 refactor per-path stats
+- 2022-08-24 path: lazily allocate paths slab
+- 2022-08-24 dgram: dont pre-allocate queue
+- 2022-08-24 cid: lazily allocate scids queue
+- 2022-08-01 ffi: fix conversions between SocketAddr and strust sockaddr
+- 2022-08-22 bump qlog to 0.8
+- 2022-08-09 qlog: support new StatelessResetToken type
+- 2022-08-11 apps: display a friendlier message for bad --connect-to
+- 2022-08-11 fix clippy lints (#1295)
+- 2022-08-09 Spelling (#1288)
+- 2022-08-03 h3: avoid needless copy when checking dgram queue
+- 2022-07-19 build: use GNU ABI and fix linking order to build with the MinGW toolchain
+- 2022-07-19 update is_draining guidance
+- 2022-07-11 h3: tweak impl Debug for headers to quote fields and escape embedded quotes
+- 2022-07-01 apps: add limited support for HTTP/3 settings tuning
+- 2022-07-01 rustfmt: remove `report_fixme` and `report_todo`
+- 2022-07-01 h3: make `impl Debug for Header` much easier to read
+- 2022-06-27 quiche-client: add --send-priority-update param
+- 2022-06-29 h3: add send_priority_update_for_request() method
+- 2022-06-27 ffi: change generic struct names to use quiche prefix in FFI
+- 2022-06-24 relax slab dependency
+- 2022-06-22 ci: disable mingw32 test
+- 2022-06-22 tls: process_post_handshake short-circuit
+- 2022-06-21 path: switch addrs_to_paths to BTreeMap
+- 2022-06-16 stream: iterate over streams in the correct order
+- 2022-05-23 add API for setting ALPNs from a slice of byte strings
+- 2022-05-24 bump the MSRV to 1.57
+- 2022-02-22 connection migration support
+- 2022-06-20 ci: fixing MinGW cross build, adding to CI
+- 2022-06-20 forbid duplicate transport params
+- 2022-06-20 build: MSVC generator hack should be only applied to MSVC
+- 2022-06-20 apps: add capability to choose source port from client
+- 2022-05-26 recovery: add GSO-friendly pacer
+- 2022-06-12 remove commented-out code
+- 2022-06-13 fix stream limit enforcement
+- 2022-06-10 bump minimum rust version to 1.56
+- 2022-05-23 octets: relax the lifetime constraints on `Octets`
+- 2022-05-23 dgram: don't allocate full queue upfront
+- 2022-05-23 0.14.0
+- 2022-05-22 qlog: release 0.7
+- 2022-05-18 avoid storing Connection pointer in TLS ex data
+- 2022-05-19 fix overflow at delivery_rate_check_if_app_limited()
+- 2022-05-16 h3: add qlogging support
+- 2022-05-20 qlog: add add_event_data_now() method and tidy up docs
+- 2022-05-16 qlog: update HTTP/3 event definitions
+- 2022-05-20 tls: server_name null ptr check
+- 2022-05-13 only store &mut Connection in SSL ex_data when necessary
+- 2022-05-14 qlog: align to draft-ietf-quic-qlog-quic-events-01
+- 2022-05-16 0.13.0
+- 2022-05-13 h3: make some constructors 'const'
+- 2022-05-11 apps: allow apps to be compiled without sfv feature
+- 2022-01-31 h3: introduce Event::PriorityUpdate
+- 2021-10-15 h3: initial support for PRIORITY_UPDATE frame
+- 2022-05-09 enable 'ws2def' and 'ws2ipdef' features for winapi
+- 2022-04-29 apps: more robust pseudo-header processing
+- 2022-04-13 recovery: update delivery_rate on all sent packets
+- 2022-04-18 h3: change priority type to byte array and use sfv
+- 2022-04-18 qlog: make all streamer event additions atomic
+- 2022-04-09 apps: fix rounding down max_send_burst
+- 2022-04-08 delivery_rate: fix typo of rtt value
+- 2022-04-08 apps: fix single_char_pattern clippy warning
+- 2022-04-08 ci: fix running clippy on workspace packages
+- 2022-03-19 split octets module into its own crate
+- 2022-03-20 use mio::net::UdpSocket::bind method to create UDP sockets
+- 2022-03-20 apps: update mio to v0.8
+- 2022-03-19 examples: use mio-v0.8
+- 2022-03-19 hystart: hystart++ draft-04 (#1195)
+- 2022-03-14 recovery: time_sent can be in the future
+- 2022-03-11 http3_test: read all data when Event::Data fires
+- 2022-03-10 document pacing
+- 2022-03-09 pacing: nanoseconds based calculation
+- 2022-03-08 http3_test: add RESET_STREAM testing capability
+- 2022-03-08 tls: remove `no_mangle` from `new_session`
+- 2022-02-24 recovery: update packet.time_sent with pacing rate
+- 2022-02-16 delivery rate estimation: draft 01
+- 2022-03-04 lib: fix retrans_count again
+- 2022-03-01 cc: on_packets_acked() hook
+- 2022-03-02 document feature flags
+- 2022-02-11 cc: pass lost_bytes to congestion_event() hook
+- 2022-02-28 pacing: get_packet_send_time() is no longer Option<>
+- 2022-02-26 pacing: no pacing can cause out-of-order
+- 2022-02-28 rename 'boring-sys' feature to 'boringssl-boring-crate'
+- 2022-02-28 lib: send STREAM_DATA_BLOCKED frames less often
+- 2022-01-14 add Config constructor that takes boring::SslContext
+- 2022-02-28 lib: fix retrans_count update condition
+- 2022-01-21 apps: use send_quantum API for quiche-server
+- 2022-01-21 cc: add send_quantum API
+- 2022-02-25 reno: fix overflow
+- 2022-02-24 ci: use windows-2019 for windows build
+- 2022-02-18 apps: also print client request headers
+- 2022-02-17 ffi: expose transport-related HTTP/3 errors
+- 2021-10-18 apps: print header lists as strings not bytes
+- 2022-02-04 0.12.0
+- 2022-02-02 ignore *.(s)qlog files
+- 2022-02-04 crypto: check payload size before decryption
+- 2022-02-01 h3: switch to simple stream ID hasher
+- 2022-02-01 stream: switch to simple stream ID hasher
+- 2022-02-01 stream: add a simple hasher for stream collections
+- 2022-02-01 build: fix pkg-config output path
+- 2022-01-31 h3: exit stream state transition earlier on error
+- 2022-01-31 Revert "ffi: remove quiche_conn_session() and quiche_conn_peer_cert() for now"
+- 2022-01-31 don't duplicate memory when returning TLS session and peer certificate
+- 2022-01-28 build: remove cdylib from iOS build
+- 2022-01-28 build: target_os is host os for build script
+- 2022-01-27 ci: reduce CI warning on quiche_multiarch
+- 2022-01-27 0.11.0
+- 2022-01-27 release.sh: update to workspace layout
+- 2022-01-24 qlog: bump to 0.6.0
+- 2022-01-24 qlog: update documents
+- 2022-01-24 README: update the certificate path in the example commands
+- 2021-12-08 qlog: minimise temporary allocations
+- 2021-11-06 qlog: support for JSON-SEQ serialization format
+- 2022-01-21 spell check
+- 2022-01-21 ffi: remove quiche_conn_session() and quiche_conn_peer_cert() for now
+- 2022-01-13 ffi: add missing quiche_config_load_verify_locations_from_directory wrapper
+- 2022-01-18 stream: fix reception of data overlapping several chunks
+- 2021-12-17 build(deps): update boring-sys requirement from 1.0.2 to 2.0.0
+- 2022-01-10 ffi: expose peer certificate to C API
+- 2022-01-05 update recommendation for when to call send()
+- 2022-01-10 README: fix thin C API link
+- 2021-12-10 Revert "cubic: limit cwnd growth based on max bytes-in-flight"
+- 2021-11-25 ensure stream_send returns Ok(0) only when an empty buffer was submitted
+- 2021-12-06 h3: fix headers_blocked_on_conn() test
+- 2021-12-05 use Duration::ZERO constant
+- 2021-12-05 qlog: fmt
+- 2021-11-30 link files from parent crate so they are included in package
+- 2021-11-30 README: update link to examples dir
+- 2021-11-30 build: fix pkg-config target dir
+- 2021-11-05 quiche.h: include missing sys/time.h header
+- 2021-11-15 quiche.h: resolve undefined struct errors on Windows
+- 2021-11-30 clean-up clippy warnings
+- 2021-11-29 convert repo to cargo workspace
+- 2021-11-24 quiche.h: remove stray 3-slash comment lines
+- 2021-11-24 h3: ensure StreamBlocked if send_request() blocked
+- 2021-11-24 frame: prefer arrays for small fixed-size fields
+- 2021-11-16 fix typo *unidirectional
+- 2021-11-15 cc: add debug_fmt() hook
+- 2021-11-12 examples: fix MacOS X C examples and add to CI
+- 2021-05-18 cc: add on_init() hook
+- 2021-11-06 qlog: ensure LossTimerEventType is cased properly
+- 2021-11-06 qlog: protocol_type is an array of values
+- 2021-11-05 qlog: AckedRanges can be a single or double range
+- 2021-11-05 qlog: add time_format to CommonFields
+- 2021-10-27 qlog: stream fin is optional, only record if true
+- 2021-10-27 qlog: KeyUpdated new field is optional
+- 2021-10-27 qlog: fix invalid auto snake case of KeyType
+- 2021-10-27 qlog: fix KeyUpdated / KeyRetired serde name
+- 2021-10-10 qlog: refactor events to events module
+- 2021-10-10 qlog: move streaming code to streamer module
+- 2021-10-26 quiche.h: include correct header on Windows
+- 2021-10-26 fix Rust 1.56/nightly clippy warnings
+- 2021-10-05 cubic: limit cwnd growth based on max bytes-in-flight
+- 2021-10-01 h3: store all received SETTINGS parameters and expose them
+- 2021-10-01 window-based flow control
+- 2021-10-01 quiche.h: include sys/socket.h as well
+- 2021-09-06 h3: when frames are too large, generate H3_EXCESSIVE_LOAD
+- 2021-10-01 qlog: count tag length in QUIC packet length
+- 2021-09-26 cubic: proportional rollback threshold
+- 2021-09-26 cubic: no rollback to slow start
+- 2021-09-23 0.10.0
+- 2021-09-23 qlog: update docs and bump to 0.5.0
+- 2021-09-23 recovery: introduce pacing rate multiplier
+- 2021-09-23 recovery: name time conversion constant
+- 2021-09-23 frame: parse ACKs with ECN counts
+- 2021-09-22 Revert "zero-copy emit scatter API"
+- 2021-09-16 avoid counting reset streams' unsent data towards flow control limit
+- 2021-09-15 add method to check if stream can hold more data
+- 2021-09-13 http3_test: silence unused field warnings
+- 2021-09-13 nginx: link to libm to fix build failure
+- 2021-08-26 deps: bump BoringSSL submodule
+- 2021-09-03 build: drop support for building with Android NDK < 19
+- 2021-09-02 recovery: hystart++ draft 03
+- 2021-07-05 zero-copy emit scatter API
+- 2021-09-01 h3: rename max_header_list to max_field_section
+- 2021-09-01 examples: fix invalid pointer bugs
+- 2021-08-27 allow to query if the connection was timed out
+- 2021-08-18 expose local_error to applications
+- 2021-07-26 add method to return the server name requested by the client
+- 2021-07-30 qlog: update to qlog 02, support event importance levels
+- 2021-07-29 fix needless_borrow clippy warnings
+- 2021-07-09 write DATAGRAM frame data directly into the output packet
+- 2021-07-28 remove outdated sentence in peer_error() docs
+- 2021-07-26 fix typo in ALPN strings used in tests
+- 2021-05-28 crypto: use BoringCrypto for AEAD operations
+- 2021-07-15 add DATAGRAM APIs to work with Vec<u8> directly
+- 2021-07-15 nginx: properly iterate over open HTTP/3 streams
+- 2021-07-12 nginx: don't try to access potentially NULL stream object
+- 2021-07-06 recovery: only log qlog metrics when fields change
+- 2021-07-08 cubic: avoid rollback if cwnd would end up smaller
+- 2021-07-08 recovery: only rollback congestion state for in-flight spurious lost packets
+- 2021-07-08 cubic: avoid rolling back if there was no previous checkpoint
+- 2021-07-05 qlog: convert numbers to actual numbers
+- 2021-07-07 stream: slightly simplify SendBuf::emit() logic
+- 2021-07-08 README: update for recent API changes
+- 2020-04-20 recovery: adaptive reordering thresholds
+- 2021-07-07 avoid calling is_in_early_data() unnecessarily
+- 2021-06-18 tls: try to sanitize use of raw pointers for Context and Handshake
+- 2021-07-02 stream: in-order incoming data fast path
+- 2021-07-05 avoid sending HANDSHAKE_DONE if already acked
+- 2021-07-01 Junho's suggestion
+- 2021-06-30 qlog: align time units to qlog draft 02 style
+- 2021-06-29 nginx: handle Content-Length correctly
+- 2021-06-29 nginx: sync patch
+- 2021-06-28 qlog: add ssthresh to MetricsUpdated event
+- 2021-06-20 recovery: fix more PRR calculation issues
+- 2021-06-19 recovery: fix overflow in PRR limit calculation
+- 2021-06-20 ci: add libm to nightly C example
+- 2021-06-17 recovery: fix overflow in PRR-SSRB limit calculation
+- 2021-06-17 remove spurious link mark-up in docs
+- 2021-06-17 stream_send(...) should return Err(Error::Done) if no bytes are sent
+- 2021-06-15 qlog: add means to provide external event time
+- 2020-12-17 apps: implementing limiting send burst
+- 2021-06-17 recovery:  implement Proportional Rate Reduction (RFC6937)
+- 2021-06-03 lib: add peer Transport Parameters to stats
+- 2021-06-16 test: fix more flappy tests
+- 2021-06-16 add transport byte counters to Stats
+- 2021-06-15 test: fix flappy tests on slow machine
+- 2021-06-08 properly handle incoming RESET_STREAM frames
+- 2021-06-08 0.9.0
+- 2021-06-05 h3: close QUIC connection when unable to initialize HTTP/3
+- 2021-06-01 h3: don't use UTF-8 strings to represent headers
+- 2021-06-01 lib: alternate DATAGRAM and STREAM frame packing
+- 2021-05-29 lib: expose functions to read DATAGRAM frame queue length and size
+- 2021-06-01 lib: add stream ID to InvalidStreamState error
+- 2021-05-27 cubic: fix cwnd growth during congestion avoidance
+- 2021-05-28 don't try to send HANDSHAKE_DONE on the client
+- 2021-05-28 apps/examples/http3_test: use connectionless UDP socket on clients
+- 2021-05-26 recovery: remove ABC_L constant and its logic
+- 2021-05-27 recovery: fixup Debug impl
+- 2021-05-25 doc: the default CC value is cubic
+- 2021-05-25 process post-handshake data only when receiving CRYPTO frames
+- 2020-10-19 recovery: pacing of egress QUIC packets
+- 2021-05-24 network path awareness
+- 2021-05-20 ci: enable examples and all features for all test builds
+- 2021-05-21 stream: undo consistent RangeBuf allocation on send
+- 2021-05-14 calculate max CRYPTO frame length more accurately
+- 2021-05-17 ffi: expose source / destination connection IDs
+- 2021-05-12 stop sending packets if draining
+- 2021-05-11 add PADDING frame to fill up the datagram with Initial packet
+- 2021-05-12 cubic: fast convergence from the rfc8312bis draft
+- 2021-02-24 cubic: AIMD approach for TCP friendly window
+- 2021-05-12 cubic: redefine K equation according to the rfc8312bis draft
+- 2021-05-11 h3: make quiche_h3_recv_dgram signature consistent
+- 2021-05-11 use PAYLOAD_LENGTH_LEN const
+- 2021-05-10 validate protocol version when creating Config
+- 2021-05-06 apps: fix inconsistent struct constructor
+- 2021-05-06 apps: use parse() to convert string to int
+- 2021-05-06 qlog: use map() instead of pattern matching
+- 2021-05-06 h3: use parse() to convert string to int
+- 2021-05-04 ffi: expose client-side session resumption and 0-RTT API
+- 2021-05-03 check the packet length against the buffer size
+- 2021-04-30 github: upgrade to GitHub-native Dependabot
+- 2021-04-28 http3_test: add 0-rtt connection resumption
+- 2021-04-27 support for sending 0-RTT packets on the client
+- 2021-04-28 fix processing peer transport parameters during early data
+- 2021-04-27 qns: fix client test run
+- 2021-04-27 qns: use 'multiconnect' mode for resumption test
+- 2021-04-27 qns: reformat
+- 2021-04-26 buffer undecryptable 0-RTT packets
+- 2021-04-26 nginx: add 0-rtt configuration documentation
+- 2021-04-26 support exporting and importing TLS sessions
+- 2021-04-19 disable the TLS extension for QUIC v1 on the server when downgrading
+- 2021-04-19 h3: emit GOAWAY from client
+- 2021-04-18 h3: update 0-length DATA frame send behavior
+- 2021-04-16 avoid coalescing probes of the same type
+- 2021-04-16 qns: force QUIC v1 on the client
+- 2021-01-28 tls: use new extension codepoint for v1
+- 2021-01-28 packet: update retry key and nonce for v1
+- 2021-01-28 crypto: update initial salt for v1
+- 2021-01-28 bump wire version and ALPN for v1
+- 2021-04-15 0.8.1
+- 2021-04-14 h3: avoid marking a stream as finished multiple times
+- 2021-04-13 make ConnectionError fields public
+- 2021-04-13 0.8.0
+- 2021-04-13 ffi: fix build error from manual merge
+- 2021-03-24 add getters for scid and dcid
+- 2021-03-24 expose incoming CONNECTION_CLOSE information to applications
+- 2021-04-04 cubic: try to detect spurious congestion events
+- 2021-04-06 recovery: add machinery for saving and rolling back congestion control state
+- 2021-04-09 stream: process incoming data when draining
+- 2021-04-01 improve docs of Stats
+- 2021-04-01 expose the max UDP payload size to applications
+- 2021-03-29 reject packets with empty payloads
+- 2021-03-29 reject MAX_STREAM_DATA frame on receive-only streams
+- 2021-03-29 ffi: expose load_verify_locations_from_file()
+- 2021-03-26 tls: handle SSL_ERROR_WANT_CERTIFICATE_VERIFY and SSL_ERROR_PENDING_SESSION
+- 2021-03-26 remove 'redundant slicing' in server examples
+- 2021-03-26 allow 'upper case acronyms'
+- 2021-02-19 h3: make Datagram event's trigger not flow ID specific
+- 2021-02-09 nginx: improve HTTP/3 request body handling
+- 2020-11-30 h3: make all events edge-triggered
+- 2021-03-05 packet: add ConnectionId::into_owned() method
+- 2021-03-04 packet: implement From<ConnectionId<'_>> for Vec<u8>
+- 2021-02-24 send RESET_STREAM frame when stream's write-side is shutdown
+- 2021-02-23 h3: only emit Finished events for request/push streams
+- 2021-02-22 avoid sending STOP_SENDING if stream is already finished
+- 2021-02-22 ensure stream is collected when shutting down read
+- 2021-02-20 h3: use H3_NO_ERROR when shutting down unknown stream
+- 2021-02-19 send STOP_SENDING frame when stream's read-side is shutdown
+- 2021-02-19 avoid sending STREAM frames for stopped streams
+- 2021-02-17 h3: ensure dgram test helper uses role consistently
+- 2021-02-16 coalesce outgoing packets
+- 2021-02-17 README: bump required minimum Rust version to 1.50
+- 2021-02-16 refactor packet sending/receiving in testing framework
+- 2021-02-15 limit send capacity over multiple stream_send() calls
+- 2021-02-12 README: link to instructions for cloning repo before apps examples
+- 2021-02-12 recovery: fix "this URL is not a hyperlink" warning
+- 2021-01-28 tls: update BoringSSL version
+- 2021-02-11 http3_test: fix non_fmt_panic warnings
+- 2021-02-11 apps: fix non_fmt_panic warning
+- 2021-02-11 h3: silence dead code warning as field is used in tests
+- 2021-02-11 delivery_rate: remove unused field
+- 2021-02-11 ci: don't pin nightly version
+- 2021-02-11 ci: actually run quiche tests in CI
+- 2021-02-11 fix / silence new clippy warnings
+- 2021-01-29 cc: fix hystart++ bugs and excessive cwnd growth
+- 2021-02-05 doc: update android cargo-ndk instructions
+- 2021-02-05 enable 'ffi' feature in docs / scripts that need it
+- 2021-02-04 nginx: handle ENOBUFS and incomplete writes
+- 2021-02-02 quiche-server: don't send empty priority header
+- 2021-02-01 0.7.0
+- 2021-01-31 return BufferTooShort when Connection::recv(...) is called with an empty buffer
+- 2021-01-29 tls: use CRYPTO_BUFFER to retrieve the peer certificate
+- 2021-01-29 ffi: remove quiche_rangebuf from quiche.h as it is not used anymore
+- 2021-01-26 examples: remove MacOS build artifacts
+- 2021-01-26 ci: build rust examples
+- 2021-01-26 nginx: slightly refactor quiche build flags
+- 2021-01-26 ci: use HTTP/1.1 to download Android NDK
+- 2021-01-15 ci: use cargo ndk 2
+- 2021-01-26 avoid logging delivery_rate stat
+- 2021-01-25 h3: limit the size of SETTINGS frame that quiche is willing to parse
+- 2021-01-18 http3_test: add some negative test cases
+- 2021-01-26 add peer_streams_left_bidi() and peer_streams_left_uni() methods
+- 2021-01-22 h3: reject HTTP/2 reserved Settings Types
+- 2021-01-20 nginx: pre-allocate HTTP/3 response headers list
+- 2021-01-20 nginx: generate HTTP/3 response headers once
+- 2021-01-20 nginx: terminate HTTP/3 connection on poll errors
+- 2021-01-20 nginx: stop HTTP/3 steam read when skipping request data
+- 2021-01-21 make FFI API optional
+- 2020-12-16 use ConnectionId in public functions
+- 2021-01-15 ffi: add quiche_conn_dgram_recv_front_len()
+- 2021-01-15 h3: close connection when processing HEADERS fails
+- 2020-12-17 ci: run fmt early
+- 2021-01-14 document the unit of the idle_timeout() argument
+- 2020-12-16 README: update mention of test server
+- 2021-01-14 ffi: fix duplicate declaration in quiche.h
+- 2021-01-13 h3: forbid DATA frames before HEADERS
+- 2021-01-11 ffi: don't create slice if odcid_len is 0
+- 2021-01-11 ci: pin version of cargo-ndk until we figure out what's going on
+- 2021-01-11 h3: fix new clippy warnings
+- 2020-11-21 cc: RFC3465 ABC Slow Start
+- 2020-12-14 qlog: bump version
+- 2020-12-14 qlog: always serialize frames field last
+- 2020-12-14 build: disable building vendored BoringSSL if boring-sys is enabled
+- 2020-12-14 apps: support building against boring-sys
+- 2020-12-10 h3: add method to expose if H3 DATAGRAMS were enabled
+- 2020-12-07 lib: fix DATAGRAM fram size calculation in  dgram_max_writable_len()
+- 2020-12-07 qlog: add basic DATAGRAM frame logging
+- 2020-12-07 Cargo: include BoringSSL's .asm files in package
+- 2020-12-07 h3: close GREASE stream
+- 2020-12-05 h3: clean-up streams on fatal send errors
+- 2020-12-05 properly handle incoming STOP_SENDING frames
+- 2020-12-04 turn Error into a Rust enum
+- 2020-12-02 apps: move all arguments into a module
+- 2020-11-23 lib: update max_datagram_size if smaller than peer's max_udp_payload_size
+- 2020-11-29 apps: properly handle partial request body writes in quiche-client
+- 2020-11-28 examples/apps: fix client SCID formatting
+- 2020-11-30 build: support building quiche against boring-sys
+- 2020-11-29 apps: make JSON dump payload size configurable
+- 2020-11-30 qpack: fix typo in comment: Request -> Required
+- 2020-11-27 ci: avoid running duplicate 'push' and 'pull_request' events
+- 2020-11-11 fuzz: build fuzzers in release mode again, but with debug assertions
+- 2020-11-26 nginx: improve idle timeout handling and shutdown
+- 2020-11-27 ffi: fix poll() return value in include file
+- 2020-11-05 h3: add event yielding to poll()
+- 2020-11-25 mark small public APIs as inlineable
+- 2020-11-26 ffi: expose quiche_conn_is_draining()
+- 2020-11-20 use ConnectionId more widely
+- 2020-11-25 ci: run quiche tests with qlog enabled
+- 2020-11-25 qlog: make QlogStreamer Send + Sync
+- 2020-11-24 apps: extract client into a lib that can be used programmatically
+- 2020-11-23 travis: remove configuration
+- 2020-11-23 ci: add Android builds to Github Action
+- 2020-10-26 lib: send MAX_DATA when MAX_STREAM_DATA is sent
+- 2020-11-23 h3: ensure Event::Finished is raised for empty STREAM frames with fin flag
+- 2020-11-23 lib: defer collecting streams when ack'ing empty frames
+- 2020-11-20 add Connection::is_draining() method
+- 2020-11-18 fix deadlock in qlog logs
+- 2020-11-17 ci: remove quiche_x86 build from nightly
+- 2020-11-17 fix deadlock in handshake completion trace log
+- 2020-11-17 ensure HANDSHAKE_DONE frame is sent
+- 2020-11-13 h3: add H3_DATAGRAM setting
+- 2020-11-10 make Config and Connection Send + Sync
+- 2020-11-13 h3: add remaining error codes
+- 2020-11-17 ci: use matrix for building multiple architectures
+- 2020-11-17 build/ci: cross build for ARM
+- 2020-11-17 ffi: expose Connection::stream_priority() in C API
+- 2020-11-16 ffi: expose Connection:trace_id() in C API
+- 2020-11-16 ensure APPLICATION_CLOSE frame is sent
+- 2020-11-10 test: fix a flappy tests::empty_stream_frame
+- 2020-11-11 ensure there is enough space for the minimum payload length
+- 2020-11-04 stream: allocate send RangeBuf with consistent sizes
+- 2020-11-06 stream: avoid allocations when splitting RangeBuf data
+- 2020-10-25 write stream data directly into the output packet
+- 2020-11-05 lib: add is_readable() helper method
+- 2020-11-06 ci: add macOS and iOS builds
+- 2020-11-06 ci: cmake is pre-installed in all environments
+- 2020-11-06 ci: add Windows builds
+- 2020-11-06 ci: add fuzzers builds
+- 2020-11-03 octets: simplify get_varint()
+- 2020-11-06 recovery: configurable max_datagram_size
+- 2020-10-25 stream: use VecDeque to store SendBuf data
+- 2020-10-25 stream: rename RecvBuf::push()/pop()
+- 2020-11-03 ci: fix Docker deployment
+- 2020-11-03 write frames into output packet upon creation
+- 2020-11-02 initial GitHub Actions workflows
+- 2020-10-26 avoid cloning connection IDs when sending packets
+- 2020-11-02 README: bump required Rust version to latest stable
+- 2020-10-26 octets: avoid allocation when parsing varint
+- 2020-10-30 h3: ensure urgency is always shifted
+- 2020-10-28 travis: pin Rust nightly to last with rustfmt
+- 2020-10-26 0.6.0
+- 2020-10-22 nginx: refresh patch
+- 2020-10-23 don't count dup data towards flow control limit
+- 2020-10-23 stream: fix name and documentation of method returning lowest recv offset
+- 2020-10-20 apps: return non-zero status code for incomplete requests
+- 2020-10-19 apps: allow overriding server address from URL in client
+- 2020-10-19 fuzz: use debug fuzzers
+- 2020-10-19 fuzz: update deprecated option in Mayhemfile
+- 2020-03-18 h3: add GOAWAY API
+- 2020-09-29 nginx: don't call ngx_handle_read_event() / ngx_handle_write_event()
+- 2020-10-19 apps: make idle timeout configurable
+- 2020-10-13 apps: add quiche-client JSON dump option
+- 2020-10-15 qns: enable trace logs for transfer tests too
+- 2020-10-15 qns: listen on both IPv4 and IPv6
+- 2020-10-09 remove unecessary logging
+- 2020-10-09 qns: fix --wire-version format for client
+- 2020-10-09 travis: unpin nightly Rust
+- 2020-10-09 Dockerfile: no need to install Go
+- 2020-10-09 dgram: initial support for DATAGRAM extension
+- 2020-10-09 qns: specify wire version in the client
+- 2020-10-08 qlog: use matches! macro
+- 2020-10-08 use matches! macro
+- 2020-10-07 qpack: don't lower-case incoming header names
+- 2020-08-14 refactor open AEAD selection
+- 2020-10-06 qns: explicitly enable ChaCha20 test on the server
+- 2020-10-06 nginx: ngx_msec_t is 32bit in 32bit platform
+- 2020-10-01 h3: allow passing headers by reference
+- 2020-10-02 qpack: avoid multiple copies when decoding literals
+- 2020-10-02 qpack: convert to lowercase during encoding
+- 2020-10-03 fuzz: move Mayhem project under team's organization
+- 2020-10-03 fuzz: sync corpora with mayhem and minimize
+- 2020-10-01 stream: allow RangeBuf to be partially consumed without splitting (#643)
+- 2020-09-21 qns: use certificate generated by interop runner
+- 2020-08-13 cubic: use appropriate byte counting
+- 2020-08-28 build: fix warning with rust 1.46.0
+- 2020-08-07 reno: use accurate byte counting
+- 2020-08-05 ignore failure to parse payload length
+- 2020-07-30 recovery: update calculation of PTO and loss timeout
+- 2020-07-20 fuzz: refresh corpora for draft-28 and -29
+- 2020-07-21 stream: only validate stream id of new streams if they never existed
+- 2020-07-14 recovery: update calculation of PTO when no RTT sample is available
+- 2020-07-17 0.5.1
+- 2020-07-17 Cargo: exclude BoringSSL test file from package
+- 2020-07-16 don't try to create ACK frames if there is nothing to ack
+- 2020-07-16 README: add section on projects and entities using quiche
+- 2020-07-16 build: simplify Android build
+- 2020-07-15 deps: use 'master-with-bazel' branch of BoringSSL
+- 2020-07-16 examples: align retry mechanism with Rust examples (#592)
+- 2020-07-14 Cargo: use no-default-features to disable features when building for docs.rs
+- 2020-07-14 0.5.0
+- 2020-07-14 build: fix Windows build when building for release without debug symbols
+- 2020-06-29 recovery: send PTO probes based on PTO count
+- 2020-06-29 bundle ACK with PTO probes
+- 2020-06-01 recovery: retransmit frames from 2 oldest unacked packets on PTO
+- 2020-07-03 build: move Android helper scripts into a directory
+- 2020-07-01 lib: finish qlog events even on frame error
+- 2020-06-25 nginx: store HTTP3 :schema pseudo header in r->schema
+- 2020-06-23 recovery: rename recovery.rs to recovery/mod.rs
+- 2020-06-23 docker: bump rust image to latest stable
+- 2020-06-15 try to retransmit old frames on PTO
+- 2020-06-18 reject invalid STREAMS_BLOCKED frames
+- 2020-04-16 h3: initial version of extensible priority scheme
+- 2020-06-12 apps: increase max idle timeout
+- 2020-03-31 stream: initial support for prioritization
+- 2020-06-11 correctly log local TPs to qlog
+- 2020-06-11 travis: pin Rust nightly version
+- 2020-06-10 packet: support Retry with older versions too
+- 2020-06-05 packet: update Retry keys for draft-29
+- 2020-06-05 crypto: select initial salt based on negotiated version
+- 2020-06-05 bump wire version and ALPN for draft-29
+- 2020-06-03 improve keylog API
+- 2020-06-05 packet: update Initial encryption/decryption test vectors
+- 2020-06-04 packet: add tests for ChaCha20 packet encryption/decryption
+- 2020-06-04 crypto: add from_secret() constructor for Open and Seal
+- 2020-06-04 crypto: add test for ChaCha20 key derivation
+- 2020-05-27 fuzz: update Docker image name
+- 2020-05-27 fuzz: update corpora
+- 2020-06-05 minmax: make implementation generic
+- 2020-04-19 recovery: refactor sent packets tracking
+- 2020-06-03 Merge pull request #545 from cloudflare/nginx-quiche-opt
+- 2020-06-02 tls: configure early data context
+- 2020-05-15 retransmit MAX_DATA when lost
+- 2020-05-19 apps: handling h3::Error::Done
+- 2020-06-01 authenticate connection IDs
+- 2020-06-01 rename max_packet_size TP -> max_udp_payload_size
+- 2020-06-01 reject active_connection_id_limit values lower than 2
+- 2020-06-01 discard invalid version negotiation packets
+- 2020-06-01 bump wire version and ALPN for draft-28
+- 2020-05-31 h3: update docs to clarify that send_request() and send_response() only send headers
+- 2020-05-18 tls: write SSLKEYLOGFILE line in one syscall
+- 2020-05-18 deps: update BoringSSL
+- 2020-05-30 README: update iOS build instructions
+- 2020-05-15 qlog 0.3.0
+- 2020-05-15 0.4.0
+- 2020-05-15 retransmit MAX_STREAM_DATA frame if lost
+- 2020-05-12 build: fix x86_64 iOS build on Xcode 10.1
+- 2020-05-13 build: remove 32bit iOS support
+- 2020-05-09 cubic: fix HyStart++ cwnd growth during LSS
+- 2020-05-12 qlog: fix flappy test
+- 2020-05-09 quiche.h: ensure size_t and ssize_t are defined
+- 2020-05-11 ffi: support configuring qlog with a file path instead of fd
+- 2020-05-01 limit number of tracked packet number ranges that need to be acked
+- 2020-05-05 lib: allow incoming Initial packets lost/reordered
+- 2020-04-30 lib: fix app_limited to allow cwnd growth
+- 2020-05-06 http3_test: add test for requesting a zero-length chunked resource
+- 2020-05-06 http3_test: make initial_max_data configurable
+- 2020-05-06 h3: return Done instead of Ok(0) when stream is blocked
+- 2020-05-06 nginx: correctly handle 0-length data writes
+- 2020-05-06 qlog: fix flappy test
+- 2020-05-01 allow sending 0.5 RTT data when 0-RTT is used
+- 2020-04-23 drop support for old draft versions
+- 2020-05-05 recovery: implement HyStart++
+- 2020-05-01 use immutable slices when decoding from wire buffers
+- 2020-05-01 octets: add immutable variant of OctetsMut
+- 2020-05-01 octets: rename Octets -> OctetsMut
+- 2020-05-01 don't explicitly check for early 1-RTT packets
+- 2020-04-14 qlog: don't import Deserialize trait
+- 2020-05-01 deps: update BoringSSL
+- 2020-04-30 docker: build quiche-apps within the container
+- 2020-04-29 fuzz: add targets for building Docker image to Makefile
+- 2020-04-29 docker: build images from the local git checkout
+- 2020-04-29 qns: move script under tools/
+- 2020-04-29 apps: add --cc-algorithm option
+- 2020-04-27 h3: correct doc typo
+- 2020-04-24 tls: fix clippy 'import is redundant' warning
+- 2020-04-24 nginx: fix debug log when SCID length is mismatched
+- 2020-04-22 nginx: disable request buffering in config example
+- 2020-03-27 CUBIC congestion control
+- 2020-04-19 recovery: test loss detection
+- 2020-04-19 recovery: reset PTO and loss detection timer when discarding keys
+- 2020-04-19 recovery: correctly apply PTO count to PTO calculation
+- 2020-04-19 recovery: rename Sent.time -> Sent.time_sent
+- 2020-04-22 nginx: use proper format string in debug logging
+- 2020-04-21 apps: do send HTTP/3 request body
+- 2020-04-21 encode generic CryptoFail and TlsFail errors as PROTOCOL_VIOLATION
+- 2020-04-21 do nothing if connection is already closed
+- 2020-04-20 examples: don't set fin=true when sending response in C HTTP/3 server
+- 2020-04-20 examples: point to certificate and key files in current directory in C servers
+- 2020-04-14 lib: add qlog data_moved event
+- 2020-04-14 qlog: update data_moved event
+- 2020-04-15 delivery_rate: fmt
+- 2020-04-15 apps: improve HTTP/3 request processing
+- 2020-04-14 examples/apps: keep processing incoming UDP packets on error
+- 2020-04-14 don't return Error::Done from recv()
+- 2020-04-13 increase anti-amplification limit earlier
+- 2020-04-13 recovery: refactor delivery rate estimation
+- 2020-04-09 don't explicitly check that payload length fits in the input buffer
+- 2020-04-09 immediately mark connection as closed when receiving an invalid first packet
+- 2020-04-07 fuzz: update corpora for draft-27 and minimize
+- 2020-04-06 nginx: initialize 'fc' earlier when closing stream
+- 2020-04-03 stream: send STREAM_DATA_BLOCKED frames when stream writes are blocked
+- 2020-04-03 send DATA_BLOCKED frames when the connection is blocked
+- 2020-04-03 clippy: bump 'cognitive complexity' limit yet again
+- 2020-04-03 qlog: add HANDSHAKE_DONE frame
+- 2020-04-03 qlog: bump qlog version to draft-02-wip
+- 2020-04-03 Cargo: use local qlog crate
+- 2020-04-06 qlog: fix formatting
+- 2020-04-03 qns: don't wait for it when starting the server
+- 2020-04-01 Cargo: remove other mentions of benches
+- 2020-02-11 drop benches
+- 2020-04-01 qlog: make QlogStreamer Send-able
+- 2020-04-01 remove unnecessary if when logging TP to qlog
+- 2020-04-01 remove duplicate qlog finish_frames() call
+- 2020-04-01 implement Send trait for Connection
+- 2020-03-30 apps: make qlog feature default
+- 2020-03-30 nginx: forcibly close HTTP/3 stream when finalizing QUIC connection
+- 2020-04-01 fix qlog metrics_updated on recv
+- 2020-03-31 check connection's send capacity when returning writable streams
+- 2020-03-28 apps: make 'qlog' feature really optional
+- 2020-03-26 libs/apps: add qlog support
+- 2020-03-26 qlog: update to v0.2.0
+- 2020-03-25 apps: handle partial HTTP/0.9 requests on the server
+- 2020-03-24 nginx: delay closure of blocked HTTP/3 streams with no body
+- 2020-03-24 nginx: don't try to send HTTP/3 data after stream is closed
+- 2020-03-18 recovery: convert congestion control API to raw vtable
+- 2020-03-19 support configuring custom roots of trust
+- 2020-03-20 s/initialized/remote_initialized
+- 2020-03-16 h3: prevent DATA before headers
+- 2020-03-16 recovery: change delivery_rate to u64
+- 2020-03-05 recovery: windowed min and max filter implementation
+- 2020-03-13 examples: fix clippy warning in qpack-encode
+- 2020-03-13 recovery: fix clippy warning
+- 2020-03-13 0.3.0
+- 2020-03-11 fix invalid_initial() and invalid_packet() tests
+- 2020-03-11 h3: condense frame type and length sends
+- 2020-03-11 h3: remove remaining DUPICATE_PUSH remanants
+- 2020-03-11 HANDSHAKE_DONE is also ack-eliciting and in-flight
+- 2020-03-10 ensure we can add more frames in the packet
+- 2020-03-09 qns: actually enable 0-RTT in resumption/zerortt tests
+- 2020-03-09 qns: enable 0-RTT test where supported
+- 2020-03-09 qns: disable resumption test on the client
+- 2020-03-09 avoid some needless small allocations when creating packets
+- 2020-03-09 refactor calculation of output packet size limit
+- 2020-03-02 docker: small build time improvement
+- 2020-03-04 apps: downgrade more logs
+- 2020-03-04 deps: update BoringSSL
+- 2020-03-04 recovery: use Duration::from_millis() in tests instead of using nanoseconds
+- 2020-03-04 expose delivery rate in Stats
+- 2020-03-04 recovery: calculate delivery rate as f64 bytes/s
+- 2020-03-04 recovery: make internal fields private
+- 2020-03-04 recovery: don't force Debug unit for Duration values
+- 2020-02-27 recovery: remove some superfluous logging
+- 2020-03-04 nginx: improve response status handling for HTTP/3
+- 2020-03-04 nginx: don't process write timers twice on shutdown
+- 2020-03-04 nginx: properly set log actions
+- 2020-03-04 ignore invalid unauthenticated packets
+- 2020-03-04 recovery: implement delivery rate estimation
+- 2020-03-02 apps: clearer error message when dumping responses
+- 2020-02-27 cc: pass timestamp to hooks
+- 2020-02-26 qlog: remove derived deserialize
+- 2020-02-27 lib: add client version test
+- 2020-02-26 travis: disable cache
+- 2020-02-26 re-encode transport parameters when changing versions on the server too
+- 2020-02-26 fix sending a large amout of data on 32bit architectures
+- 2020-02-20 qlog: add HexSlice::maybe_string()
+- 2020-01-24 qlog: Add remaining EventTypes and helper functions
+- 2020-02-25 don't decrease tx_data when data is lost
+- 2020-02-21 h3: remove duplicate push frame
+- 2020-02-21 encode transport params as varints
+- 2020-02-21 bump wire version and ALPN to draft-27
+- 2020-02-21 derive Debug trait for TransportParams instead of defining it manually
+- 2020-02-19 apps: silence or downgrade some logs in the client
+- 2020-02-20 nginx: handle blocked stream when sending HEADERS
+- 2020-02-18 nginx: refresh patch
+- 2020-02-15 nginx: properly allocate Vary header
+- 2020-02-18 nginx: link to Security framework on macOS
+- 2020-02-17 ffi: expose HTTP/3 errors
+- 2020-02-17 h3: clean-up unused errors
+- 2020-02-17 h3: only consume stream IDs after a successful write
+- 2020-02-17 h3: handle partial writes of HEADERS
+- 2020-02-17 track connection flow control when writing to a stream
+- 2020-02-17 README: add brief examples on how to use the quiche apps
+- 2020-02-10 fuzz: refresh corpora
+- 2020-02-11 coalesce small STREAM frames when fuzzing
+- 2020-02-11 limit stream send capacity with connection flow control and cwnd too
+- 2020-02-14 frame: RESET_STREAM error code is a varint
+- 2020-02-14 apps: process requests ending with '/'
+- 2020-02-13 qns: fix multiconnect and retry test cases and clean-up
+- 2020-02-11 apps: enable debug for release builds
+- 2020-02-11 apps: propagate fuzzing feature to quiche
+- 2020-02-11 gitignore: ignore files in subdirectories as well
+- 2020-02-10 examples: disable logging to terminal
+- 2020-02-10 examples: remove command-line parsing support
+- 2020-02-11 tools: remove quic-trace-log
+- 2020-02-10 Cargo: only depend on criterion when building benchmarks
+- 2020-02-10 tools: add quiche-client and quiche-server
+- 2020-02-06 ignore frames on closed and collected streams
+- 2020-02-03 tls: use SSL_in_init() to check for handshake completion
+- 2020-02-04 examples: deterministically generate source conn ID on servers
+- 2020-02-03 recovery: do lowest unacked packet number check earlier
+- 2020-02-03 choose highest version supported
+- 2020-01-30 build: make clippy happy
+- 2020-01-29 nginx: update example alt-svc configuration
+- 2020-01-29 rename idle_timeout -> max_idle_timeout and update behavior
+- 2020-01-29 packet: correct (over|under)flow checks on packet number decoding algorithm
+- 2020-01-29 packet: retry integrity tag
+- 2020-01-29 crypto: don't hardcode nonce length
+- 2020-01-29 frame: process and send HANDSHAKE_DONE frame
+- 2020-01-29 bump wire version and ALPN to draft-25
+- 2020-01-22 tls: expose peer certificate
+- 2020-01-28 reno: reset to MINIMUM_WINDOW in collapse_cwnd()
+- 2019-12-19 recovery: implement IsAppLimited()
+- 2020-01-27 http3_test: make it possible to select specific QUIC versions
+- 2020-01-22 qlog: fix markdown in README
+- 2020-01-22 build: support newer Android NDK versions
+- 2020-01-22 add test for Config::set_cc_algorithm_name()
+- 2020-01-22 qns: enable multiconnect test and explicitly create the log directory
+- 2020-01-15 travis: enable cargo cache again
+- 2020-01-15 travis: don't do superfluous 'cargo build'
+- 2019-11-19 recovery: configurable congestion control
+- 2020-01-14 travis: split NGINX into its own build
+- 2020-01-14 deps: update boringssl
+- 2020-01-14 travis: disable cache
+- 2020-01-13 travis: simply docker build targets
+- 2020-01-08 travis: tweak build names
+- 2020-01-08 travis: install Windows targets before build
+- 2020-01-08 travis: only build docker images on deploy
+- 2019-12-11 travis: reduce build jobs
+- 2020-01-09 quiche.h: fix indentation
+- 2020-01-08 0.2.0
+- 2020-01-08 qns: disable trace logs for transfer test
+- 2020-01-06 h3: return early from poll() when the connection is closing
+- 2020-01-06 travis: fix Windows x86_64 build
+- 2019-12-19 extras/nginx: sync patch
+- 2020-01-06 tools/http3_test: fix clippy warning
+- 2019-12-12 extras/nginx: update alt-svc header in example config
+- 2019-09-08 tools: add a new crate for qlog data model
+- 2019-12-11 build: fix windows/x86 build
+- 2019-12-06 avoid sending a PING frame if the packet is already ack-eliciting
+- 2019-12-05 recovery: PTO per packet number space
+- 2019-12-03 tools/http3_test: support testing for custom HTTP headers
+- 2019-12-03 tools: add some more documentation of http3_test env vars
+- 2019-12-03 travis: exclude cross-build job from deploy
+- 2019-12-02 build: fix 32bit x86 cross-build
+- 2019-12-03 travis: force installation of cargo-lipo
+- 2019-12-03 extras/nginx: sync patch
+- 2019-09-29 travis: enable cache for cargo
+- 2019-08-22 stream application data API
+- 2019-12-02 build: fix cdylib build with --no-default-features on macOS
+- 2019-11-26 extras/nginx: include the quiche commit hash in the NGINX build
+- 2019-11-27 recovery: slightly optimize detection of duplicate acks
+- 2019-11-30 try to accurately account for the STREAM frame's overhead
+- 2019-11-30 properly account for the payload length overhead
+- 2019-11-27 collect memory from completed streams
+- 2019-11-27 spell 'acked' consistently
+- 2019-11-22 fuzz: opt-level=3
+- 2019-11-22 fuzz: install llvm-symbolizer in fuzz image
+- 2019-11-13 fuzz: qpack_decode now checks encoder as well
+- 2019-11-25 validate incoming max_packet_size transport parameter
+- 2019-11-25 examples: properly check for supported versions in C server examples
+- 2019-11-19 make sure we have enough space in the output buffer for PATH_RESPONSE
+- 2019-11-17 discard 1-RTT packets received before handshake completion
+- 2019-11-25 extras/docker: consolidate COPY in Dockerfile
+- 2019-11-16 travis: disable running tests inside quiche docker image
+- 2019-11-16 qns: enable trace logging by default and save logs to file
+- 2019-11-16 qns: don't explicitly set the wire version on the client
+- 2019-11-16 examples: support both hq-24 and hq-23 in the non-h3 example clients
+- 2019-11-16 examples: support both hq-24 and hq-23 in the non-h3 example servers
+- 2019-11-16 frame: allow PING frame in non-1-RTT packets
+- 2019-11-16 support draft-24 alongside draft-23
+- 2019-11-16 add build for Docker images (base, qns)
+- 2019-11-13 examples: update Dockerfile to Rust 1.39
+- 2019-11-07 pin Connection
+- 2019-11-12 relax the anti-amplification byte count
+- 2019-11-12 don't try to send ACKs or PINGs when closing
+- 2019-11-08 h3: document that app should validate headers
+- 2019-11-07 extras/nginx: sync patch
+- 2019-11-07 silence improper_ctypes warning
+- 2019-11-06 h3: add has_body flag to Headers events (#234)
+- 2019-11-04 don't try to send packets if initial secrets are not available
+- 2019-11-04 packet: don't unwrap()
+- 2019-11-04 README: mention HTTP/3 test server as well
+- 2019-09-11 fix empty STREAM frames
+- 2019-09-10 stream: makes sure the output buffer's offset is set
+- 2019-11-01 frame: CONNECTION_CLOSE is not ack-eliciting
+- 2019-08-19 recovery: merge crypto timeout and PTO
+- 2019-11-01 extras/nginx: sync patch
+- 2019-10-31 don't send 1-RTT packets before the handshake is complete
+- 2019-10-31 deps: point BoringSSL submodule to GitHub mirror
+- 2019-10-30 log cwnd as well
+- 2019-10-24 fuzz: refresh corpora
+- 2019-10-24 update copyritght
+- 2019-10-17 extras/nginx: add Alt-Svc header in example configuration
+- 2019-10-14 initial support for receiving 0-RTT packets
+- 2019-10-16 extras/nginx: add make call in build instructions
+- 2019-10-16 extras/nginx: update build instructions
+- 2019-10-11 travis: test Android builds
+- 2019-10-16 travis: don't deploy docs from NGINX build
+- 2019-10-16 h3: make GREASE numbers more uniform
+- 2019-10-15 extras: add NGINX integration
+- 2019-10-14 Cargo: use include instead of exclude
+- 2019-10-14 travis: test iOS builds
+- 2019-10-14 drop packets that fail decryption again
+- 2019-10-11 travis: add more operating systems and remove beta
+- 2019-10-10 expand documentation for some transport parameters
+- 2019-10-10 log more TLS info when connection is established (#210)
+- 2019-10-09 docs: add some more info on BoringSSL build prerequisites
+- 2019-08-28 expand handshake_confirmation test
+- 2019-10-09 deps: update BoringSSL submodule
+- 2019-10-08 update idle timeout calculation
+- 2019-10-08 reword comment and fix typos
+- 2019-10-07 pick lowest between idle and loss detection timers
+- 2019-10-07 use time:: instead of std::time::
+- 2019-10-04 examples/http3-client: try resending requests that failed due to stream limits
+- 2019-10-04 stream: fix handling of remote max streams limit updates
+- 2019-09-11 increase local max streams limits with MAX_STREAMS
+- 2019-09-12 refactor how MAX_DATA frames are generated
+- 2019-09-11 examples: allow servers to configure max streams limits
+- 2019-10-03 ffi: avoid panic on multiple quiche_enable_debug_logging
+- 2019-09-16 stream: use acked RangeSet instead of tracking ack_off on its own
+- 2019-09-11 stream: track completed streams
+- 2019-09-11 ranges: implement PartialEq between RangeSet and single Range
+- 2019-10-01 fuzz: fix packet_recv_client corpus symlink
+- 2019-10-01 fuzz: update packet_recv_client corpus
+- 2019-10-01 fuzz: use latest docker image on Mayhem
+- 2019-10-01 fuzz: update packet_recv_server corpus
+- 2019-10-01 recovery: ignore invalid ACKs when fuzzing
+- 2019-10-01 build: configure BoringSSL for fuzzing when fuzzing
+- 2019-10-01 crypto: generate all-zero header encryption/decryption masks when fuzzing
+- 2019-10-01 fuzz: use realistic ALPN and SCID length
+- 2019-10-01 examples: add option to dump incoming packets to file
+- 2019-10-01 0.1.0
+- 2019-10-01 Cargo: ignore BoringSSL's go.mod
+- 2019-09-23 fuzz: add fuzzer for the QPACK decoder
+- 2019-09-30 document default values for transport parameters and HTTP/3 settings
+- 2019-09-19 examples: log more connection information in clients
+- 2019-09-29 h3: expose the underlying transport error via Error::TransportError
+- 2019-09-29 h3: don't use #[repr(C)] for Error
+- 2019-09-28 tls: use crate::Error instead of custom error type
+- 2019-09-24 h3: enforce the max header list size setting
+- 2019-09-23 qpack: avoid overflow in shift and addition when decoding int
+- 2019-09-23 qpack: return a proper error when dynamic table is requested
+- 2019-09-29 quic-trace-log: fix unnecessary_unwrap clippy warning
+- 2019-09-29 travis: build quic-trace-log as well
+- 2019-09-27 octets: fix macro parameter expansion inside unsafe block
+- 2019-09-29 examples: remove accidentally committed binaries
+- 2019-09-27 fuzz: add initial fuzzers based on libfuzzer
+- 2019-09-27 tls:: implement std::marker::Send for Context
+- 2019-09-23 crypto: disable encryption/decryption when fuzzing
+- 2019-09-23 Cargo: explicitly enable std feature for log crate
+- 2019-09-29 quiche.h: use (void) in proto to satisfy picky compilers
+- 2019-09-25 h3: prefer config mutation
+- 2019-09-24 h3: remove priority placeholder setting
+- 2019-09-28 remove implementations of Error::description() method
+- 2019-09-27 simplify Connection::readable() usage examples
+- 2019-09-21 README: bump required Rust version to 1.38
+- 2019-09-15 recovery: use proper float operations with Duration
+- 2019-09-15 quic-trace-log: duration_float is now a stable feature
+- 2019-09-18 rename disable_migration -> disable_active_migration
+- 2019-09-22 recovery: reject ACK frames that have a largest ACKed that is too large
+- 2019-09-21 reject undecryptable packets
+- 2019-09-22 avoid overflow when calculating ACK delay
+- 2019-09-22 frame: avoid subtraction underflow when parsing ACK ranges
+- 2019-09-21 packet: prevent underflow in subtraction during packet decryption
+- 2019-09-18 clippy: shut-up about cognitive complexity
+- 2019-09-18 examples/http3-client: print error on timeout
+- 2019-09-16 ffi: update HTTP/3 ALPN to draft-23
+- 2019-09-16 h3: update error codes to draft-23 and remove PRIORITY tests
+- 2019-09-14 crypto: rename Application encryption level to OneRTT
+- 2019-09-14 packet: rename Application packet type to Short
+- 2019-09-14 packet: test initial packet encryption as well
+- 2019-09-14 update to draft 23
+- 2019-09-12 stream: discard incoming data overlapping unread offset
+- 2019-09-11 don't allow configurng stateless reset token
+- 2019-09-11 remove outdated TODO
+- 2019-09-11 http3_test: make idle timeout configurable in runner
+- 2019-09-11 examples: allow configuring max (stream) data on the servers
+- 2019-09-11 ranges: tidy up
+- 2019-09-11 stream: add is_* prefix to Stream bool methods
+- 2019-09-11 http3_test: detect client timeout
+- 2019-09-11 replace some unwrap() calls
+- 2019-09-09 stream: properly propagate fin from zero-length writes
+- 2019-09-10 examples: pass hostname to request in HTTP/3 C client
+- 2019-09-09 stream: fix off-by-one max data check in SendBuf::pop()
+- 2019-09-10 examples: use find instead of glob pattern in Makefile
+- 2019-09-09 stream: prevent shutting down streams multiple times
+- 2019-09-05 (re)start the idle timer when sending an ACK-eliciting packet
+- 2019-09-05 h3: only send GREASE frames once per connection
+- 2019-09-04 http3_test: allow test runner to target different test server address
+- 2019-09-03 tools: initial version of httpbin test tool
+- 2019-08-30 stream: hide From<&HashSet<u64>> implementation for StreamIter from public API
+- 2019-08-27 stream: optimize writable iterator
+- 2019-09-02 quic-trace-log: prevent publishing to crates.io
+- 2019-08-28 examples: validate the destination CID after retry
+- 2019-08-29 ffi: add function to get timeout in milliseconds
+- 2019-08-28 h3: typo
+- 2019-08-23 stream: optimize readable stream iterator
+- 2019-08-23 stream: optimize almost full stream iterator
+- 2019-08-23 stream: refactor MAX_STREAM_DATA checks
+- 2019-08-23 h3: streamline poll()
+- 2019-08-26 build(deps): update criterion requirement from 0.2 to 0.3
+- 2019-08-26 remove unnecessary matches
+- 2019-08-13 limit stream send buffer size
+- 2019-08-22 http3-server: minor clean-up
+- 2019-08-22 stream: merge Readable and Writable into StreamIter
+- 2019-08-22 stream: fix typo in comment
+- 2019-08-17 stream: track stream's send final size
+- 2019-08-15 stream: implement Writable iterator
+- 2019-08-18 stream: implement ExactSizeIterator for Readable and add tests
+- 2019-08-18 build: add feature to generate pkg-config metadata file at build time
+- 2019-08-15 stream: simplify the Readable iterator
+- 2019-08-17 format
+- 2019-08-17 build: replace 'no_bssl' feature with 'boringssl-vendored'
+- 2019-08-17 build: minor clean-up (no functional changes)
+- 2019-08-17 stream: use u64 to represent stream limits
+- 2019-08-17 stream: s/writable/flushable/
+- 2019-08-17 stream: s/off_ack/ack_off/
+- 2019-08-17 octets: replace dereferences of slices with to_vec() in tests
+- 2019-08-17 stream: avoid unnecessary dereferences in tests
+- 2019-08-17 h3: remove unnecessary trailing semicolon
+- 2019-08-15 ffi: remove redundant static lifetime
+- 2019-08-07 h3: make trace logs more consistent
+- 2019-08-13 crypto: update to ring 0.16
+- 2019-08-13 improve documentation of Connection::send()
+- 2019-08-12 use u64 instead of usize as appropriate to support 32bit targets
+- 2019-08-09 http3-client.c/client.c: add SSLKEYLOGFILE support
+- 2019-08-09 examples: use %zd for ssize_t printf() fmt in the C examples
+- 2019-08-07 make sure there is enough space in the output buffer to send a CRYPTO frame
+- 2019-08-08 drop handshake keys when the handshake is confirmed
+- 2019-08-08 examples: fix printf format for size_t variables in C clients
+- 2019-08-08 Cargo: use more specific versions for dependencies
+- 2019-08-08 ffi: fix quiche_conn_application_proto function signature
+- 2019-08-08 build: avoid unreachable code warning for no_bssl feature builds
+- 2019-08-07 examples: shutdown client request streams after reading headers
+- 2019-05-22 examples: respond to non-GET requests with 405
+- 2019-08-07 h3: close connection in more error cases
+- 2019-08-07 h3: limit size of stream state buffer
+- 2019-08-07 ffi: set_application_protos takes pointer to constant
+- 2019-08-06 examples: build against static library file directly to fix build on macOS
+- 2019-08-05 ffi: expose quiche version via FFI function
+- 2019-08-04 avoid per-connection count of sent bytes going negative
+- 2019-08-05 ffi: update QUICHE_MAX_CONN_ID_LEN
+- 2019-08-02 stream: propagate fin from empty STREAM frames
+- 2019-08-04 h3: don't error on QPACK instruction
+- 2019-08-04 examples: update C examples to draft 22
+- 2019-08-04 ffi: update wire version to draft 22
+- 2019-08-02 stream: refactor stream flow control initialization
+- 2019-08-02 update to draft 22
+- 2019-05-21 schedule writable streams fairly
+- 2019-07-20 update outdated comment
+- 2019-07-20 client.c: remove duplicated config
+- 2019-07-19 tls: rename from_void() -> from_ptr() and mark unsafe
+- 2019-07-19 don't export with_tls() constructor
+- 2019-07-19 crypto: remove unused Null algorithm
+- 2019-07-18 0.1.0-alpha4
+- 2019-07-18 release.sh: only match first instance of 'version' in Cargo.toml
+- 2019-07-15 tls: load certs from Windows system store
+- 2019-07-12 http3-client: support sending multiple identical requests
+- 2019-07-12 http3-client: panic on custom header error
+- 2019-07-12 build: add arm-linux-androideabi target
+- 2019-07-11 README: remove spurious parenthesis
+- 2019-07-11 README: explicitly mention minimum supported rust version
+- 2019-07-10 CODEOWNERS: add whole team
+- 2019-07-10 No need to do lowercase field name
+- 2019-07-10 http3-client: add request headers
+- 2019-07-03 add stream_shutdown() API
+- 2019-07-09 README: small tweaks for Android and iOS sections
+- 2019-07-03 build: add support for iOS targets
+- 2019-07-09 build: add support for Android targets
+- 2019-07-08 examples: add Dockerfile
+- 2019-05-08 http3-client: support sending request body
+- 2019-05-08 http3-client: support setting HTTP methods other than GET
+- 2019-07-04 move release.sh scripto to tools/
+- 2019-07-02 examples: handle socket.send() result
+- 2019-07-02 clippy: increase cognitive complexity threshold yet again
+- 2019-06-30 delay processing of frames in Application packets until after the handshake is complete
+- 2019-06-26 refactor incoming frame processing into a separate method
+- 2019-06-25 examples: don't print trace ID in client logs
+- 2019-06-25 examples: use better format for logging IP addresses in clients
+- 2019-06-18 examples: bind to the appropriate IP address on clients
+- 2019-06-25 rustfmt: update config options for latest nightly
+- 2019-06-14 stream: document internal structures
+- 2019-06-02 build: add workaround for cmake on Windows
+- 2019-06-12 format
+- 2019-06-12 h3::stream: fix build error due to too eager merging
+- 2019-06-12 h3::stream: don't resize state buffer for DATA frames
+- 2019-06-12 travis: don't allow failures on nightly anymore
+- 2019-05-28 h3: body recv API
+- 2019-06-11 benches: add additional buffer sizes for stream and http3 benches
+- 2019-06-11 format
+- 2019-06-11 frame: use ..= syntax for inclusive range
+- 2019-06-11 implement source() method instead of the deprecated cause() for Error types
+- 2019-06-10 properly increase connection ingress flow control limit
+- 2019-06-10 use more consistent naming for flow control limits
+- 2019-06-07 examples: bind clients to [::] so connecting to both IPv4 and IPv6 sites works
+- 2019-06-06 server: fix copy-paste error from previous commit
+- 2019-06-06 examples: slightly refactor Rust examples and add some comments
+- 2019-05-21 h3: refactor stream buffering and state machine
+- 2019-05-24 actually make MIN_CLIENT_INITIAL_LEN const public
+- 2019-05-24 ffi: add QUICHE_ prefix to new public const
+- 2019-05-24 rename CLIENT_INITIAL_MIN_LEN const and make it public
+- 2019-05-24 clippy: replace deprecated config option
+- 2019-05-24 simplify handling of draining state
+- 2019-05-21 benches: remove code duplication
+- 2019-05-04 benches: add HTTP/3 request/response benchmark
+- 2019-05-21 octets: fix 'argument never used' warning
+- 2019-05-21 fix infinite loop when Display'ing errors
+- 2019-05-21 h3: add PRIORITY frame tests
+- 2019-05-16 h3: move Session into dedicated module and make public
+- 2019-05-16 h3: more frame and stream validity checks
+- 2019-05-16 frame: add STREAM_DATA_BLOCKED handling
+- 2019-05-16 frame: fix frame type in max_streams_uni test
+- 2019-05-16 frame: add DATA_BLOCKED handling
+- 2019-05-16 frame: add STREAMS_BLOCKED processing
+- 2019-05-16 expose cwnd size in Stats
+- 2019-05-16 ffi: expose stats via a single C structure
+- 2019-05-16 recovery: sync with latest draft
+- 2019-05-15 warn on missing docs for public APIs
+- 2019-05-15 h3: ignore failures when opening QPACK and GREASE streams
+- 2019-05-14 increase anti-amplification byte limit before processing frames
+- 2019-05-14 don't consider client's address verified before processing an Handshake packet
+- 2019-04-10 h3: generate event for stream close
+- 2019-05-08 format
+- 2019-05-07 h3: lower-case header names
+- 2019-05-07 h3::ffi: make header callback fallible
+- 2019-05-07 h3::ffi: add explicit lengths to Header
+- 2019-05-07 only send APPLICATION_CLOSE on Application packets
+- 2019-05-05 README: remove outdated paragraph
+- 2019-04-30 h3: don't close connection on partial frame
+- 2019-04-30 h3: don't convert Done to TransportError
+- 2019-04-26 support draft 20
+- 2019-04-30 travis: build library with release profile
+- 2019-04-10 Cargo: build a dynamic library alongside the static one
+- 2019-04-28 ffi: comment should start with upper-case letter
+- 2019-04-28 h3: document error behavior for poll()
+- 2019-04-28 h3: Error::to_wire() doesn't need to be public anymore
+- 2019-04-28 automatically call close() when processing incoming packets fails
+- 2019-04-28 examples: use unwrap() instead of returning Result from main()
+- 2019-04-28 h3: use new TransportError for errors originated at the transport layer
+- 2019-04-28 octets: define own BufferTooShort error
+- 2019-04-28 add Lucas to code owners for h3
+- 2019-04-28 avoid using unwrap() in doc snippets
+- 2019-04-28 benches: format
+- 2019-04-27 stream: remove unnecessary private methods
+- 2019-04-27 recovery: process ACKed packets in reverse order
+- 2019-04-27 benches: use more realistic packet size in stream bench
+- 2019-04-27 benches: run stream benchmark with multiple buffer sizes
+- 2019-04-27 benches: migrate to criterion
+- 2019-04-27 Cargo: enable debug symbols in bench profile
+- 2019-04-27 benches: add handshake benchmark
+- 2019-04-26 benches: remove useless black_box()
+- 2019-04-26 benches: add benchmark to measure in-memory stream send / recv performance
+- 2019-04-26 octets: align put_varint() return value with other put_* functions
+- 2019-04-26 forbid max_streams greater than 2^60
+- 2019-04-26 do return TlsFail errors when sending alerts
+- 2019-04-26 rename tls_state -> handshake
+- 2019-03-23 h3: support frame and stream varints (draft 19)
+- 2019-04-26 rename VERSION_DRAFT19 -> PROTOCOL_VERSION
+- 2019-04-06 validate peer's ack_delay_exponent and max_ack_delay transport params
+- 2019-04-06 disable idle timer if idle_timeout transport param is zero
+- 2019-04-06 idle_timeout is in milliseconds as per draft-19
+- 2019-04-06 update transport params extension format to draft-19
+- 2019-04-06 bump wire version for draft-19
+- 2019-04-23 examples: fix build errors on macOS and add build instructions
+- 2019-04-26 ffi: reformat
+- 2019-04-25 h3/ffi: rename FFIHeader -> Header
+- 2019-04-25 ffi: fix function name
+- 2019-04-12 expose count of received packets in Stats
+- 2019-04-11 client: remove support for HTTP/1.1
+- 2019-04-08 ffi: don't expose Readable through FFI API
+- 2019-04-11 ffi: consistently use size_t / ssize_t instead of usize / isize
+- 2019-04-11 h3::ffi: fix variable name
+- 2019-04-11 ffi: sanitize buffer length parameter
+- 2019-04-10 just use the maximum connection ID length
+- 2019-04-09 quic-trace-log: print number of events generated
+- 2019-04-09 tools: rename quic-trace-compile -> quic-trace-log
+- 2019-04-09 recovery: bump initial RTT to 500ms
+- 2019-04-09 advance handshake after receiving CRYPTO data
+- 2019-04-09 examples: ignore close() return value
+- 2019-04-09 terminate connection if ALPN negotiation fails
+- 2019-04-09 h3: expose HTTP/3 ALPN token as public constant
+- 2019-04-09 add more examples to public API docs
+- 2019-04-09 include max_ack_delay in transport params debug format
+- 2019-04-08 stream: fix the fix that fixed a typo
+- 2019-04-08 fix some spelling
+- 2019-04-08 h3: small doc tweaks
+- 2019-03-23 h3: add usage docs
+- 2019-04-08 recovery: fix mutable_borrow_reservation_conflict warning from nightly
+- 2019-03-24 h3: add support for GREASE frames
+- 2019-04-07 improve crate documentation and sync README
+- 2019-04-07 README: remove status section
+- 2019-04-07 packet: rename do_ack field to ack_elicited
+- 2019-04-07 packet: don't store crypto level in packet number space
+- 2019-04-05 add tool to convert logs to quic-trace format
+- 2019-04-06 recovery: slightly simplify setting loss_time
+- 2019-04-06 client: add options to control flow control limits
+- 2019-04-05 examples: use nanosecond precision for log times
+- 2019-04-05 fix typo in docs
+- 2019-04-03 recovery: fix clippy warning
+- 2019-04-03 recovery: refactor and and disable persistent congestion detection
+- 2019-04-03 recovery: correctly account for acked in-flight packets
+- 2019-04-03 recovery: remove unused variable
+- 2019-04-02 stream: avoid spurious retransmissions of stream / crypto data
+- 2019-04-02 remove spurious empty line
+- 2019-04-02 prevent reading from local uni streams
+- 2019-04-02 recovery: refactor how packet number spaces are used
+- 2019-04-02 frame: make frames clonable
+- 2019-04-02 recovery: track in-flight vs. ack-eliciting packets
+- 2019-04-02 refactor how packet number spaces are stored in Connection
+- 2019-04-01 h3: add simple request / response test
+- 2019-04-01 no need to expose struct fields with a private method
+- 2019-03-31 crypto: initial salt doesn't need to be public
+- 2019-03-21 server: only read stream data when the connection is established
+- 2019-03-21 http3-client: close connection only once
+- 2019-03-19 Cargo: add 'http3' keyword and reformat
+- 2019-03-19 README: update HTTP/3 status
+- 2019-03-18 h3: expose C API
+- 2019-01-24 h3: initial implementation of HTTP/3
+- 2019-03-18 qpack: move QPACK-related errors to dedicated type
+- 2019-03-18 simplify generation of error strings
+- 2019-03-18 silence warning
+- 2019-03-18 add internal Connection method to check side of the connection
+- 2019-03-18 examples: build C examples with debug
+- 2019-03-18 add stream_finished() method to Connection
+- 2019-03-16 0.1.0-alpha3
+- 2019-03-16 packet: fix typo
+- 2019-03-16 hide h3 module documentation for now
+- 2019-03-16 fixup set_application_protos() documentation
+- 2019-03-16 exponse Pipe to the rest of the crate
+- 2019-03-15 configure ALPN using string in wire-format instead of a list of slices
+- 2019-03-14 server: add support for enabling key logging
+- 2019-03-14 server: do change scid when retry is disabled
+- 2019-03-14 server: simplify generating not found response
+- 2019-03-13 document private Connection fields
+- 2019-03-13 reword comment
+- 2019-03-13 reformat
+- 2019-03-13 limit data sent by server prior to address verification
+- 2019-03-11 travis: don't run clippy on nightly
+- 2019-03-11 examples: reduce MTU size
+- 2019-03-06 ffi: reformat
+- 2019-03-06 server: add flag to disable stateless retry
+- 2019-03-06 server: set initial_max_stream_data_uni TP since it's required by the Ivy test suite
+- 2019-03-05 ffi: expose application_proto() method
+- 2019-03-05 ffi: sync errors and re-order Config methods
+- 2019-03-05 move QPACK erros to the end of the list
+- 2019-02-26 stream: ignore received overlapping data
+- 2019-03-05 client: reformat
+- 2019-03-04 client: record how long it takes to receive full response
+- 2019-03-02 octets: add method to write varint of fixed length
+- 2019-03-01 ffi: fix incorrect value of wire version for draft-18
+- 2019-02-28 use as_nanos() / as_micros() instead of converting DUration manually
+- 2019-02-28 travis: allow nightly builds to fail
+- 2019-02-22 bump wire version for draft-18
+- 2019-02-28 use 3 * PTO as draining timeout
+- 2019-02-28 recovery: refactor PTO calculation
+- 2019-02-28 recovery: fix calculation of PTO
+- 2019-02-28 recovery: make smoothed_rtt an Option
+- 2019-02-26 stream: use fin_off to determine if the stream is finished
+- 2019-02-26 stream: expose SendBuf / RecvBuf directly instead of wrapping
+- 2019-02-26 stream: RecvBuf's len field keeps track of total bytes
+- 2019-02-22 qpack-encode: remove redundant closure
+- 2019-02-22 travis: run clippy on nightly
+- 2019-02-22 stream: remove redundant closures
+- 2019-02-22 examples: build library for C examples in separate directory
+- 2019-02-22 travis: remove unnecessary --all flag
+- 2019-02-22 travis: deny warnings
+- 2019-02-22 examples: allow configuring cc and forbid warnings
+- 2019-02-14 test receive-side of path challenge
+- 2019-02-14 test ALPN negotiation
+- 2019-02-14 stream: properly account for RESET_STREAM final size in flow control
+- 2019-02-14 test receive-side flow control and stream limits
+- 2019-02-14 test version negotiation
+- 2019-02-14 refactor end-to-end tests
+- 2019-02-13 stream: actually reduce stream limits
+- 2019-02-13 return correct error when receiving STOP_SENDING on receive-only stream
+- 2019-02-12 frame: make sure STREAM maximum offset doesn't exceed 2^62
+- 2019-02-12 travis: run clippy on examples
+- 2019-02-12 clippy: increase cyclomatic complexity threshold
+- 2019-02-12 remove no more needed silences for clippy::new_ret_no_self
+- 2019-02-12 stream: allow duplicate fin/reset if final size doesn't change
+- 2019-02-11 qpack-encode/decode: fix clippy warnings
+- 2019-02-11 stream: handle receive side RESET_STREAM
+- 2019-02-11 stream: enforce receive side final size
+- 2019-02-11 octets: add public function to parse varint length
+- 2019-02-09 octets: panic on impossible cases
+- 2019-02-08 rustfmt: don't set license_template_path to avoid warnings
+- 2019-02-08 travis: run clippy with stable and fmt with nightly
+- 2019-02-08 add description for Result
+- 2019-02-08 stream: link to Connection::readable() from Readable's docs
+- 2019-02-08 expand stateless retry documentation
+- 2019-02-08 packet: make protected header fields private
+- 2019-02-08 add script to automate releases
+- 2019-02-08 Revert "README: reference logo by full URL so it appears on crates.io"
+- 2019-02-08 README: reference logo by full URL so it appears on crates.io
+- 2019-02-08 tls: avoid libc:: prefix when possible
+- 2019-02-08 silence clippy warning
+- 2019-02-08 stream: rename some methods
+- 2019-02-08 refactor tracking of streams and add test
+- 2019-02-08 examples: adjust CFLAGS on macOS
+- 2019-02-06 format
+- 2019-02-06 rustfmt: decrease line width
+- 2019-02-06 client: fix log message
+- 2019-02-06 client: set max_streams_uni transport param
+- 2019-02-06 frame: parse RESET_STREAM
+- 2019-02-06 start mentioning HTTP/3
+- 2019-02-06 octets: return early if varint len exceeds capacity
+- 2019-02-04 initial QPACK implementation
+- 2019-02-05 Revert "add Cargo cache to Travis"
+- 2019-02-04 travis: build examples
+- 2019-02-04 add Cargo cache to Travis
+- 2019-01-31 Reuse constant
+- 2019-01-31 drop packets that are undecryptable
+- 2019-02-02 travis: nvm, don't run crago fmt
+- 2019-02-02 travis: actually install rustfmt
+- 2019-02-02 travis: fix running cargo fmt on non-nightly
+- 2019-02-02 travis: check fmt
+- 2019-02-02 format
+- 2018-12-06 add rustfmt config
+- 2019-02-02 don't specify type of static arrays unless required
+- 2019-02-02 crypto: simplify nonce generation
+- 2019-02-02 crypto: don't unwrap() if key creation fails
+- 2019-02-02 pass Error as value now that it is Copy
+- 2019-02-02 examples: return Result from main to avoid unwrap()
+- 2019-02-02 implement Display and Error traits for Error type
+- 2019-01-31 Use repr(C) for error C conversions
+- 2019-02-02 recovery: process ACKed packets in increasing packet number order
+- 2019-01-31 client: don't send h3 ALPN since we don't support it yet
+- 2019-01-30 fix comment to reflect what's really going on
+- 2019-01-29 use saturating_*() instead of checked_*().unwrap_or()
+- 2019-01-29 README: fix type
+- 2019-01-28 cap packet length so we can use a 2-byte varint for the payload length
+- 2019-01-28 remove small code duplication
+- 2019-01-28 server: don't change local CID after Retry
+- 2019-01-28 server: log packets received before connection is created
+- 2019-01-28 log transport params on connection establishment, but use more compact debug format
+- 2019-01-28 don't send packets bigger than 1200 bytes during handshake
+- 2019-01-25 fix typo in docs
+- 2019-01-20 stream: stream_recv writes data to a provided buffer
+- 2019-01-24 README: update badges
+- 2019-01-24 stream: implement DerefMut for RangeBuf
+- 2019-01-24 0.1.0-alpha2
+- 2019-01-24 make accounting of sent and lost packets more accurate
+- 2019-01-24 octets: no need to reference self as mut for copy_from_slice()
+- 2019-01-24 ffi: expose stats via the C API
+- 2019-01-24 improve Stats docs
+- 2019-01-24 shorten names of Stats fields
+- 2019-01-24 travis: don't build all features
+- 2019-01-24 README: add more badges
+- 2019-01-24 build: attempt at disabling BoringSSL build on docs.rs
+- 2019-01-24 README: port to markdown
+- 2019-01-24 add empty line to code example to improve readability
+- 2019-01-24 0.1.0-alpha1
+- 2019-01-24 Cargo: exclude BoringSSL test files to reduce crate size
+- 2019-01-24 add CODEOWNERS file
+- 2019-01-23 README: add section about C API
+- 2019-01-23 README: only show build status from master branch
+- 2019-01-23 README: update git submodules in build instructions
+- 2019-01-23 README: use new banner-y logo
+- 2019-01-23 spell 'stream' correctly
+- 2019-01-23 octets: replace unsafe copy with copy_from_slice()
+- 2019-01-22 crypto: avoid using std::mem::uninitialized()
+- 2019-01-22 server: fix alignment of help option description
+- 2019-01-21 examples: fix handling of --help option
+- 2019-01-22 README: slight wording tweak
+- 2019-01-22 README: expand sentence about blog post
+- 2019-01-22 README: add link to blog post
+- 2019-01-22 port examples from README to rustdoc
+- 2019-01-22 README: fix some of the code examples
+- 2019-01-22 add a little introduction to the API
+- 2019-01-22 README: add logo, will figure out how to align later
+- 2019-01-22 tls: support negotiating an application protocol
+- 2019-01-22 frames: whtelist allowed frames per packet type
+- 2019-01-22 server: index connections by connection ID instead of peer address
+- 2019-01-21 empty commit to trigger build
+- 2019-01-21 properly calculate ACK delay
+- 2019-01-21 examples: twek some log messages
+- 2019-01-21 recovery: simplify setting latest_rtt
+- 2019-01-21 expose connection statistics
+- 2019-01-21 update URLs to repo
+- 2019-01-20 make stateless_reset_token field an Option
+- 2019-01-20 examples: don't hardcode datagram size
+- 2019-01-20 fix link in accept() docs
+- 2019-01-05 add Connection method to check if connection is resumed
+- 2019-01-20 tls: re-enable session tickets
+- 2019-01-20 stream: pre-allocate output buffer when popping SendBuf
+- 2019-01-20 expose MAX_CONN_ID_LEN const in the Rust API as well
+- 2019-01-19 Cargo: add some more fields
+- 2019-01-19 stream: silence warnings about unused functions
+- 2019-01-19 ffi: add missing max_packet_size config setter
+- 2019-01-19 quiche.h: include dependencies
+- 2019-01-19 client.c: don't double reference array
+- 2019-01-19 quiche.h: add include guard
+- 2019-01-18 get negotiated cipher from the TLS state instead of packet number space
+- 2019-01-18 stream: fix clippy warning
+- 2019-01-18 packet: expose and marshal key phase bit
+- 2019-01-18 packet: carry decrypted packet number in Header
+- 2019-01-18 examples: force rebuild on libquiche when Rust sources are touched
+- 2019-01-18 ffi: all TPs are uint64_t
+- 2019-01-18 ffi: export setter functions for config params
+- 2019-01-18 ffi: expose retry machinery
+- 2019-01-18 README: tick stateless retry
+- 2019-01-18 implement stateless retry on the server
+- 2019-01-18 packet: test more types
+- 2019-01-18 packet: fix encoding of Retry and add wrapper fnction
+- 2019-01-18 encode original connection ID transport param
+- 2019-01-17 server: allow unidirectional streams
+- 2019-01-17 client: add option to make an HTTP/1.1 request instead of HTTP/0.9
+- 2019-01-15 ffi: add Connection constructor that takes a tls::Handshake directly
+- 2019-01-15 tls: set QUIC method per-connection
+- 2019-01-15 deps: update boringssl
+- 2019-01-14 remove Pending error code
+- 2019-01-12 client: add option to set custom wire version
+- 2019-01-12 packet: slightly simplify debug formatting
+- 2019-01-12 be stricter when processing version negotiation packets
+- 2019-01-12 process Retry packets on the client
+- 2019-01-11 respond to path challenge
+- 2019-01-11 respect peer's stream limits
+- 2019-01-11 enforce static local stream limits
+- 2019-01-11 forbid receiving STREAM on local unidirectional streams
+- 2019-01-09 build: use latest ring version instead of git revision
+- 2019-01-09 stream: allow zero-length read/write
+- 2019-01-09 ffi: expose API for version negotiation
+- 2019-01-09 ffi: export scid from quiche_header_info()
+- 2019-01-09 packet: take scid and dcid directly in negotiate_version()
+- 2019-01-09 stream: test returning fin flag
+- 2019-01-09 stream: allow limiting amount of bytes returned when reading stream
+- 2019-01-09 stream: fix empty write test
+- 2019-01-08 tls: use libc types in extern functions
+- 2019-01-08 ffi: fix return type in functions that only return error or 0
+- 2019-01-08 packet: update test vectors
+- 2019-01-08 examples: tweak buffer sizes yet again
+- 2019-01-08 frame: APPLICATION_CLOSE doesn't have a frame type field
+- 2019-01-07 build: enable debug in release builds
+- 2019-01-06 move manual Default implementations immediately after struct definition
+- 2019-01-06 add documentation to internal Connection methods
+- 2019-01-06 packet: make is_long() private
+- 2019-01-06 recovery: simplify looping over range of packet numbers
+- 2019-01-06 don't dump transport params when connection is established
+- 2019-01-06 move processing of lost frames back to recv()
+- 2019-01-06 recovery: keep track of crypto packets more efficiently
+- 2019-01-06 packet: fix decoding pkt num and add test
+- 2019-01-06 octets: fix varint encoding
+- 2019-01-06 octets: fix calculation of varint length
+- 2019-01-06 octets: tweak API and document
+- 2019-01-06 Revert "travis: run clippy (but not on examples and tests)"
+- 2019-01-06 Revert "travis: also install clippy"
+- 2019-01-06 travis: don't build all targets
+- 2019-01-06 travis: also install clippy
+- 2019-01-06 travis: run clippy (but not on examples and tests)
+- 2019-01-06 travis: build all features and all targets
+- 2019-01-06 fix PING len
+- 2019-01-06 packet: avoid using hard-coded constants in packet decryption
+- 2019-01-06 add link to timeout() docs
+- 2019-01-05 build: simplify cmake invocation
+- 2019-01-05 build: use upstream ring repo instead of fork
+- 2019-01-05 server: don't pass whole docopt struct to handle_stream()
+- 2019-01-05 only pad Initial if there's anything to pad at all
+- 2019-01-05 packet: ignore Retry packets for now
+- 2019-01-05 refactor selection of egress packet number space
+- 2019-01-05 tls: fix mutability of self for get_write_level()
+- 2019-01-05 move processing of lost frames to recv()
+- 2019-01-05 tls: use unimplemented!() just because
+- 2019-01-05 crypto: silence warning about ZeroRTT not being constructed
+- 2019-01-05 silence clippy warnings about ranges and add TODO
+- 2019-01-05 octets: remove unused function skip()
+- 2019-01-05 0-RTT keys can't be used to send errors / probes / handshake
+- 2019-01-05 add note about in-place decryption modifying input buffer
+- 2019-01-05 frames: simplify parsing of some frames
+- 2019-01-05 avoid borrowing trace_id directly when logging
+- 2019-01-05 fix inbound connection-wide flow control check
+- 2019-01-05 packet: add function to encrypt pkt
+- 2019-01-05 refactor initial state dropping code
+- 2019-01-05 tls: disable server preferences
+- 2019-01-05 recovery: do only log newly acked packets
+- 2019-01-05 simplify accounting of output length
+- 2019-01-05 add TODO
+- 2019-01-04 tls: log SSL error messages from BoringSSL
+- 2019-01-05 documentation fixes
+- 2019-01-04 README: update supported draft version
+- 2019-01-04 fix some clippy warnings
+- 2019-01-04 packet: refactor payload decryption and add test vectors
+- 2019-01-04 examples: use more sensible buffer sizes
+- 2019-01-04 ignore invalid version negotiation packets
+- 2019-01-04 frames: update to draft-17
+- 2019-01-04 update transport params to draft-17
+- 2019-01-04 implement draft-17 header protection
+- 2019-01-04 crypto: update initial salt and HKDF labels to draft-17
+- 2019-01-04 deps: update boringssl
+- 2019-01-04 update version to draft-17
+- 2019-01-03 README: clarify application responsibilities
+- 2018-12-27 implement initial FFI API
+- 2019-01-03 rename Again error -> Pending
+- 2019-01-02 rename stream_iter() to readable()
+- 2019-01-02 remve useless Role enum
+- 2018-12-30 examples: restore setting initial_max_bidi_streams
+- 2018-12-30 tls: fix label used for logging secrets
+- 2018-12-30 ignore undecryptable  packets
+- 2018-12-30 travis: fix path to docs
+- 2018-12-30 travis: only deploy docs when built with stable
+- 2018-12-30 travis: automatically deploy docs
+- 2018-12-30 client: print stream data to stdout
+- 2018-12-30 recovery: don't call DetectLostPackets() if no packet is newly acked
+- 2018-12-30 reset client's recovery state when doing version negotiation
+- 2018-12-30 fix some warnings
+- 2018-12-30 document the rest of the Config methods
+- 2018-12-30 use links to referenced elements in the docs + small fixes
+- 2018-12-30 build: build BoringSSL using the cmake crate instead of the custom script
+- 2018-12-30 make TransportParams private
+- 2018-12-29 drop initial keys early
+- 2018-12-29 shorten long lines
+- 2018-12-29 make recv() process coalesced packets
+- 2018-12-29 add documentation for most of the public API
+- 2018-12-28 packet: add simple tests for Header serialization / deserialization
+- 2018-12-24 recovery: call detect_lost_packets() before resetting pto/crypto_count
+- 2018-12-24 recovery: simplify setting largest_acked_pkt
+- 2018-12-16 limit reception of some frames to after the handshake is completed
+- 2018-12-15 recovery: properly supply 'largest_acked' to DetectLostpackets()
+- 2018-12-15 recovery: use 'pkt' abbreviation consistently
+- 2018-12-15 recovery: don't trigger congestion event if no ACK-eliciting packet was lost
+- 2018-12-15 recovery: retransmit crypto data from 1-RTT pkt num space
+- 2018-12-15 ranges: remove unused function
+- 2018-12-15 recovery: update to latest version of the spec
+- 2018-12-12 return timeout as Duration instead of Instant
+- 2018-12-09 add/remove some TODOs
+- 2018-12-09 examples: use ring::rand instead of rand crate
+- 2018-12-09 recovery: lower log level for lost packet messages
+- 2018-12-09 detect and drop duplicate packets
+- 2018-12-09 ranges: simplify
+- 2018-12-09 fix/silence some clippy warnings/errors
+- 2018-12-08 stream: split writes into multiple RangeBufs
+- 2018-12-08 generate trace id once and reuse it
+- 2018-12-08 make sure there's enough space before enqueueing a frame
+- 2018-12-08 util: don't require latest cmake version
+- 2018-12-08 Revert "travis: use default cmake"
+- 2018-12-08 build: abort if BoringSSL build failed
+- 2018-12-07 util: don't link BoringSSL include directory
+- 2018-12-07 travis: use default cmake
+- 2018-12-07 travis: install a recent cmake
+- 2018-12-07 travis: update dist and install packages via add-ons
+- 2018-12-07 README: note BoringSSL build requirements
+- 2018-12-07 import BoringSSL as submodule and make cargo build it
+- 2018-12-07 remove unnecessary 'extern crate' and 'use'
+- 2018-12-07 README: add some items to status
+- 2018-12-07 enforce connection-level flow control again
+- 2018-12-06 rename NothingToDo error -> Done
+- 2018-12-06 recovery: import DUration and Instant directly
+- 2018-12-06 recovery: don't call Instant::now() directly
+- 2018-12-06 switch to 2018 edition
+- 2018-12-06 tls: add support for logging keys
+- 2018-12-06 tls: use SSL_VERIFY_PEER instead of SSL_VERIFY_FAIL_IF_NO_PEER_CERT
+- 2018-12-05 add wrappers for creating Connection and move negotiate_version() out of Connection
+- 2018-12-05 util: don't build BoringSSL tests
+- 2018-12-05 don't verify peer in self handshake test
+- 2018-12-05 clean-up on_timeout()
+- 2018-12-05 close idle connection after some time
+- 2018-12-05 drain connection before closing
+- 2018-12-05 client: take URL as parameter instead of address and path, and verify peer
+- 2018-12-05 tls: support verifying peer certificate
+- 2018-12-05 tls: rename State to Handshake
+- 2018-12-05 expose SSL_CTX as Config to make it easier to apply TLS-related config
+- 2018-12-01 recovery: log when a packet is acked
+- 2018-12-01 recovery: don't consider resent crypto data as in flight
+- 2018-12-01 fix warnings from clippy
+- 2018-12-01 implement egress flow control in terms of max offset rather than byte count
+- 2018-12-01 recovery: avoid subtraction with overflow when calculating latest_rtt
+- 2018-12-01 recovery: fix increasing cwnd when above sstresh
+- 2018-12-01 recovery: improve retransmission of crypto packets
+- 2018-12-01 recovery: fix adjusting latest RTT by ack delay
+- 2018-12-01 recovery: split write!() in Debug
+- 2018-11-30 recovery: remove Option from smoothed_rtt = minor fixes
+- 2018-11-30 forbid duplicate version negotiation
+- 2018-11-30 recovery: simplify use of Option
+- 2018-11-30 recovery: fix pow() calculation
+- 2018-11-30 recovery: fix debug formatting
+- 2018-11-29 recovery: avoid subtraction with overflow and simplify
+- 2018-11-29 stream: fix send buffer out-of-order push
+- 2018-11-29 update copyright
+- 2018-11-26 probe packets are retransmittable
+- 2018-11-26 recovery: ignore cwnd when sending probe packets
+- 2018-11-26 ranges: add one test
+- 2018-11-26 packet: remove tests decoding from files
+- 2018-11-26 "fix" some clippy warnings
+- 2018-11-26 stream: rename some methods
+- 2018-11-26 recovery: use the actual peer's max_ack_delay
+- 2018-11-25 README: update status
+- 2018-11-25 stream: handle simple case of duplicated data
+- 2018-11-25 ranges: remove unused function
+- 2018-11-25 recovery: send probe packets
+- 2018-11-24 recovery: basic congestion control support
+- 2018-11-22 recovery: initial loss detection and retransmission support
+- 2018-11-22 move recovery into separate module
+- 2018-11-22 keep track of RTT
+- 2018-11-21 server: only Initial should trigger version negotiation
+- 2018-11-21 examples: fix indentation
+- 2018-11-18 increase packet number after a packet is successfully created
+- 2018-11-18 keep track of sent packets
+- 2018-11-18 ranges: implement DoubleEndedIterator for Flatten
+- 2018-11-12 remove unused error
+- 2018-11-12 merge UnknownPacket error into InvalidPacket
+- 2018-11-12 frame: validate packet numbers in ACK frames
+- 2018-11-12 do some transport param validation when decoding
+- 2018-11-12 packet: don't reset packet number on version negotiation
+- 2018-11-11 server: collect closed connection at the end of the loop, not the start
+- 2018-11-11 server: don't try to read more stream data than is available
+- 2018-11-11 frame: fix encoding / decoding NEW_CONNECTION_ID
+- 2018-11-11 pad all Initial packets from the client
+- 2018-11-03 add some more comments
+- 2018-11-03 examples: downgrade 'would block' log to debug
+- 2018-11-02 server: add trailing new line to not found body
+- 2018-11-02 shuffle some things around and add some comments
+- 2018-11-02 forbid STOP_SENDING on receive stream
+- 2018-11-02 send appropriate QUIC error depending on Error
+- 2018-11-02 improve max data limits calculation
+- 2018-11-02 examples: use mio to wait on sockets
+- 2018-11-02 don't send data on non-local unidirectional stream
+- 2018-11-02 create stream on MAX_STREAM_DATA
+- 2018-11-02 avoid loop if there's not space left in the packet
+- 2018-11-02 properly enforce recv side stream limit
+- 2018-11-02 just use _
+- 2018-11-02 simplify conditions and iterations in send()
+- 2018-11-02 replace UnknownStream error with InvalidStreamState
+- 2018-11-02 send errors using the highest crypto level available
+- 2018-11-02 avoid small code duplication
+- 2018-11-02 validate ID before creating a new stream
+- 2018-11-02 tls: update BoringSSL now that QUIC stream changes have been merged
+- 2018-11-01 tls: fix opaque struct definitions
+- 2018-11-01 tls: import libc::c_void directly
+- 2018-10-31 send CONNECTION_CLOSE on other errors
+- 2018-10-31 log peer transport params
+- 2018-10-31 use correct transport param to initialize peer initiated stream
+- 2018-10-31 propagate TLS alert in CONNECTION_CLOSE
+- 2018-10-31 frame: parse STOP_SENDING
+- 2018-10-31 s/Conn/Connection/
+- 2018-10-31 stream: can_read / can_write -> readable / writable
+- 2018-10-31 remove some more unused code
+- 2018-10-31 crypto: remove unused methods
+- 2018-10-31 packet: remove pointless functions
+- 2018-10-31 remove unused local_conn_id() method
+- 2018-10-31 streams: simplify implementation of Readable iterator
+- 2018-10-31 shuffle things around to reduce the public API
+- 2018-10-30 stream: s/StreamIterator/Readable/
+- 2018-10-29 ranges: use .next_back() instead of .rev().next()
+- 2018-10-29 server: remove static flight size limit
+- 2018-10-29 server: increase static egress flight size
+- 2018-10-28 expose closed connection status and support sending APPLICATION_CLOSE
+- 2018-10-28 fix some clippy warnings
+- 2018-10-28 README: add one item to status
+- 2018-10-28 client: negotiate version
+- 2018-10-27 client: take GET request path as command-line argument
+- 2018-10-27 enforce per-connection flow control
+- 2018-10-27 use values from transport params to increase flow control limits
+- 2018-10-27 enforce local flow control
+- 2018-10-27 ack all frames
+- 2018-10-27 update TODO
+- 2018-10-27 server: statically limit size of send flight until proper congestion control
+- 2018-10-27 frame: ack multiple packets in a single ACK frame
+- 2018-10-27 packet: use BinaryHeap for received packet numbers list
+- 2018-10-27 tls: add some logging
+- 2018-10-26 octets: don't recalculate length of buffer
+- 2018-10-25 stream: silence unused function warning
+- 2018-10-25 don't ack *_close frames
+- 2018-10-25 packet: decode truncated packet numbers
+- 2018-10-23 packet: simplify max pkt num len calculation
+- 2018-10-23 initial flow control support
+- 2018-10-25 frame: remove unnecessary ()
+- 2018-10-23 packet: simplify connection ID formatting in Debug
+- 2018-10-23 propagate write!() errors
+- 2018-10-22 octets: add some tests
+- 2018-10-21 packet: fix error message
+- 2018-10-21 remove elidable lifetime
+- 2018-10-21 remove TODO.rst and add inline TODOs
+- 2018-10-21 rename local_conn_id_hex() to trace_id()
+- 2018-10-21 implement logging using log crate
+- 2018-10-21 packet: implement custom Debug for Header
+- 2018-10-21 frame: implement custom Debug for Frame
+- 2018-10-21 frame: coalesce PADDING into a single frame
+- 2018-10-21 tls: set some default options on SSL_CTX
+- 2018-10-21 parse peer's transport params when the handshake is complete
+- 2018-10-20 frame: parse MAX_STREAM_ID
+- 2018-10-20 frame: parse NEW_TOKEN
+- 2018-10-20 initial client support
+- 2018-10-20 packet: don't assume the maximum packet number length is available when decrypting
+- 2018-10-20 initialize peer transport params with default values instead of None
+- 2018-10-20 properly encode transport params on the client side
+- 2018-10-20 create stream on first send
+- 2018-10-20 add API to check if connection is established
+- 2018-10-20 frame: parse MAX_DATA
+- 2018-10-20 README: mention test server
+- 2018-10-20 server: improve logging somewhat
+- 2018-10-20 server: cap input/output buffers to more sane limits
+- 2018-10-20 server: make some options configurable via command-line
+- 2018-10-20 server: parse HTTP/0.9 request and read response from disk
+- 2018-10-20 take frame oerhead into account when generating CRYPTO and STREAM
+- 2018-10-20 use any() instead of fold()
+- 2018-10-20 input buf in stream_send() doesn't need to be mut
+- 2018-10-20 stream: split send buffer if too long and initialize set offset
+- 2018-10-20 server: handle concurrent connections
+- 2018-10-20 stream: don't return offset when pushing data for send
+- 2018-10-20 stream: propagate fin flag in RecvBuf
+- 2018-10-19 lib: use derive to compare TransportParams
+- 2018-10-19 don't send further packets when draining
+- 2018-10-19 use packet type instead of conn state to decide whether to send stream data
+- 2018-10-19 initial support for draft-15
+- 2018-10-18 slightly simplify some code and add comments
+- 2018-10-18 unify stream_send() and send()
+- 2018-10-18 packet: use Stream to send CRYPTO data
+- 2018-10-18 stream: return RangeBuf rather than copying data when reading from stream
+- 2018-10-18 packet: use Stream to receive CRYPTO data in order
+- 2018-10-18 apply some clippy suggestions
+- 2018-10-18 tls: use as_mut to convert pointer to ref
+- 2018-10-18 use std::{option, result} directly
+- 2018-10-18 packet: use slice::from_mut
+- 2018-10-18 lib: use HashMap::or_insert_with
+- 2018-10-18 stream: use Ordering::reverse
+- 2018-10-18 octets: simplify get_/put_ macro
+- 2018-10-18 packet: somewhat improve pkt num decryption
+- 2018-10-17 initial stream API support
+- 2018-10-16 initial commit
+
