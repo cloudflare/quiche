@@ -75,12 +75,29 @@ run_quiche_client_tests () {
     sleep 3
 
     case $1 in
-        multiconnect | resumption | zerortt )
+        multiconnect )
             for req in $REQUESTS
             do
                 $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
                     $CLIENT_PARAMS $req >> $LOG 2>&1
             done
+            ;;
+
+        resumption | zerortt )
+            REQS=($REQUESTS)
+
+            # Run first request in 1-RTT to establish session.
+            FIRST_REQUEST=${REQS[0]}
+
+            $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
+                $CLIENT_PARAMS $FIRST_REQUEST >> $LOG 2>&1
+
+            # Run remaining requests in resumed connection.
+            REMAINING_REQUESTS=${REQS[@]:1}
+
+            $QUICHE_DIR/$QUICHE_CLIENT $QUICHE_CLIENT_OPT \
+                $CLIENT_PARAMS $REMAINING_REQUESTS >& $LOG 2>&1
+
             ;;
 
         *)
