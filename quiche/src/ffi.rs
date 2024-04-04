@@ -863,7 +863,7 @@ pub extern fn quiche_conn_stream_send(
                 Error::StreamStopped(error) => *out_error_code = error,
                 _ => {},
             }
-            return e.to_c();
+            e.to_c()
         },
     }
 }
