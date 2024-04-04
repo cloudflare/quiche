@@ -55,6 +55,9 @@ ffi = ["dep:cdylib-link-lines"]
 # Exposes internal APIs that have no stability guarantees across versions.
 internal = []
 
+# Disable congestion control
+cc_disabled = []
+
 [package.metadata.release]
 tag-prefix = ""
 
