@@ -354,6 +354,8 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
                 debug_panic!("legacy implementation, not gcongestion");
                 &bbr2::BBR2
             },
+            #[cfg(feature = "cc_disabled")]
+            CongestionControlAlgorithm::CcDisabled => &cc_disabled::CC_DISABLED,
         }
     }
 }
@@ -410,6 +412,8 @@ mod tests {
 
 mod bbr;
 mod bbr2;
+#[cfg(feature = "cc_disabled")]
+mod cc_disabled;
 mod cubic;
 mod delivery_rate;
 mod hystart;

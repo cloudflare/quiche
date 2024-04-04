@@ -373,6 +373,9 @@ pub enum CongestionControlAlgorithm {
     /// BBRv2 congestion control algorithm implementation from gcongestion
     /// branch. `bbr2_gcongestion` in a string form.
     Bbr2Gcongestion = 4,
+    /// Disabled congestion control. `cc_disabled` in a string form.
+    #[cfg(feature = "cc_disabled")]
+    CcDisabled      = 5,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -391,6 +394,8 @@ impl FromStr for CongestionControlAlgorithm {
             #[cfg(feature = "gcongestion")]
             "bbr2" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
             "bbr2_gcongestion" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
+            #[cfg(feature = "cc_disabled")]
+            "cc_disabled" => Ok(CongestionControlAlgorithm::CcDisabled),
             _ => Err(crate::Error::CongestionControl),
         }
     }
