@@ -170,9 +170,17 @@ pub fn connect(
     let mut app_proto_selected = false;
 
     // Generate a random source connection ID for the connection.
-    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
     let rng = SystemRandom::new();
-    rng.fill(&mut scid[..]).unwrap();
+
+    let scid = if !cfg!(feature = "fuzzing") {
+        let mut conn_id = [0; quiche::MAX_CONN_ID_LEN];
+        rng.fill(&mut conn_id[..]).unwrap();
+
+        conn_id.to_vec()
+    } else {
+        // When fuzzing use an all zero connection ID.
+        [0; quiche::MAX_CONN_ID_LEN].to_vec()
+    };
 
     let scid = quiche::ConnectionId::from_ref(&scid);
 
