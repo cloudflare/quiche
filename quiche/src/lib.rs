@@ -4339,6 +4339,12 @@ impl Connection {
                     self.streams.insert_flushable(&priority_key);
                 }
 
+                #[cfg(feature = "fuzzing")]
+                // Coalesce STREAM frames when fuzzing.
+                if left > frame::MAX_STREAM_OVERHEAD {
+                    continue;
+                }
+
                 break;
             }
         }
