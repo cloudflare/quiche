@@ -21,7 +21,7 @@ lazy_static! {
         config.load_cert_chain_from_pem_file(&crt_path).unwrap();
         config.load_priv_key_from_pem_file(&key_path).unwrap();
         config
-            .set_application_protos(&[b"hq-23", b"http/0.9"])
+            .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
             .unwrap();
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
