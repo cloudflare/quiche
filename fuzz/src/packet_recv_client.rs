@@ -9,6 +9,7 @@ extern crate lazy_static;
 use std::net::SocketAddr;
 
 use std::sync::Mutex;
+use std::sync::Once;
 
 lazy_static! {
     static ref CONFIG: Mutex<quiche::Config> = {
@@ -31,9 +32,13 @@ lazy_static! {
 static SCID: quiche::ConnectionId<'static> =
     quiche::ConnectionId::from_ref(&[0; quiche::MAX_CONN_ID_LEN]);
 
+static LOG_INIT: Once = Once::new();
+
 fuzz_target!(|data: &[u8]| {
     let from: SocketAddr = "127.0.0.1:1234".parse().unwrap();
     let to: SocketAddr = "127.0.0.1:4321".parse().unwrap();
+
+    LOG_INIT.call_once(|| env_logger::builder().format_timestamp_nanos().init());
 
     let mut buf = data.to_vec();
 
