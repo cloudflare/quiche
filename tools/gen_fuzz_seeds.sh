@@ -17,7 +17,7 @@ SERVER_DIR=$(mktemp -d)
 cargo build --features fuzzing -p quiche_apps
 
 # Run server in the background.
-target/debug/quiche-server --cert fuzz/cert.crt --key fuzz/cert.key --no-retry --dump-packets $SERVER_DIR &
+target/debug/quiche-server --cert fuzz/cert.crt --key fuzz/cert.key --dump-packets $SERVER_DIR &
 
 # Wait for server to be ready.
 sleep 1
