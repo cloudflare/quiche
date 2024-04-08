@@ -31,6 +31,10 @@ lazy_static! {
         config.set_initial_max_streams_bidi(3);
         config.set_initial_max_streams_uni(3);
 
+        config.discover_pmtu(true);
+        config.enable_early_data();
+        config.enable_hystart(true);
+
         Mutex::new(config)
     };
 }
