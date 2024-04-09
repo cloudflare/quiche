@@ -32,13 +32,19 @@ use crate::minmax::Minmax;
 pub(crate) const INITIAL_RTT: Duration = Duration::from_millis(333);
 
 pub(crate) const RTT_WINDOW: Duration = Duration::from_secs(300);
+
 pub struct RttStats {
     pub(super) latest_rtt: Duration,
-    pub(super) min_rtt: Minmax<Duration>,
+
     pub(super) smoothed_rtt: Duration,
+
     pub(super) rttvar: Duration,
-    pub(super) first_rtt_sample: Option<Instant>,
+
+    pub(super) min_rtt: Minmax<Duration>,
+
     pub(super) max_ack_delay: Duration,
+
+    pub(super) first_rtt_sample: Option<Instant>,
 }
 
 impl std::fmt::Debug for RttStats {
@@ -68,8 +74,9 @@ impl RttStats {
         &mut self, latest_rtt: Duration, mut ack_delay: Duration, now: Instant,
         handshake_confirmed: bool,
     ) {
+        self.latest_rtt = latest_rtt;
+
         if self.first_rtt_sample.is_none() {
-            self.latest_rtt = latest_rtt;
             self.min_rtt.reset(now, latest_rtt);
             self.smoothed_rtt = latest_rtt;
             self.rttvar = latest_rtt / 2;
@@ -77,12 +84,10 @@ impl RttStats {
             return;
         }
 
-        self.latest_rtt = latest_rtt;
-
         // min_rtt ignores acknowledgment delay.
         self.min_rtt.running_min(RTT_WINDOW, now, latest_rtt);
-        // Limit ack_delay by max_ack_delay after handshake
-        // confirmation.
+
+        // Limit ack_delay by max_ack_delay after handshake confirmation.
         if handshake_confirmed {
             ack_delay = ack_delay.min(self.max_ack_delay);
         }
@@ -100,6 +105,7 @@ impl RttStats {
                     .abs_diff(adjusted_rtt.as_nanos()) as u64 /
                     4,
             );
+
         self.smoothed_rtt = self.smoothed_rtt * 7 / 8 + adjusted_rtt / 8;
     }
 
