@@ -317,7 +317,7 @@ pub struct Header<'a> {
     pub(crate) key_phase: bool,
 }
 
-impl<'a> Header<'a> {
+impl Header<'static> {
     /// Parses a QUIC packet header from the given buffer.
     ///
     /// The `dcid_len` parameter is the length of the destination connection ID,
@@ -336,16 +336,14 @@ impl<'a> Header<'a> {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     #[inline]
-    pub fn from_slice<'b>(
-        buf: &'b mut [u8], dcid_len: usize,
-    ) -> Result<Header<'a>> {
+    pub fn from_slice(buf: &mut [u8], dcid_len: usize) -> Result<Self> {
         let mut b = octets::OctetsMut::with_slice(buf);
         Header::from_bytes(&mut b, dcid_len)
     }
 
-    pub(crate) fn from_bytes<'b>(
-        b: &'b mut octets::OctetsMut, dcid_len: usize,
-    ) -> Result<Header<'a>> {
+    pub(crate) fn from_bytes(
+        b: &mut octets::OctetsMut, dcid_len: usize,
+    ) -> Result<Self> {
         let first = b.get_u8()?;
 
         if !Header::is_long(first) {
@@ -438,7 +436,9 @@ impl<'a> Header<'a> {
             key_phase: false,
         })
     }
+}
 
+impl<'a> Header<'a> {
     pub(crate) fn to_bytes(&self, out: &mut octets::OctetsMut) -> Result<()> {
         let mut first = 0;
 
