@@ -681,10 +681,6 @@ impl Recovery {
                 self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
         }
 
-        if newly_acked.is_empty() {
-            return Ok((0, 0));
-        }
-
         // Undo congestion window update.
         if spurious_losses > 0 {
             (self.cc_ops.rollback)(self);
