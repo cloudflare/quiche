@@ -615,8 +615,7 @@ impl Recovery {
         if !(self.congestion.cc_ops.has_custom_pacing)() &&
             self.rtt_stats.first_rtt_sample.is_some()
         {
-            let rate = PACING_MULTIPLIER *
-                self.congestion.congestion_window as f64 /
+            let rate = PACING_MULTIPLIER * self.cwnd() as f64 /
                 self.rtt_stats.smoothed_rtt.as_secs_f64();
             self.set_pacing_rate(rate as u64, now);
         }
@@ -641,8 +640,7 @@ impl Recovery {
         &mut self, pkt_num: u64, sent_bytes: usize, now: Instant,
     ) {
         self.update_app_limited(
-            (self.bytes_in_flight + sent_bytes) <
-                self.congestion.congestion_window,
+            (self.bytes_in_flight + sent_bytes) < self.cwnd(),
         );
 
         (self.congestion.cc_ops.on_packet_sent)(
@@ -656,7 +654,7 @@ impl Recovery {
 
         // HyStart++: Start of the round in a slow start.
         if self.congestion.hystart.enabled() &&
-            self.congestion.congestion_window < self.congestion.ssthresh
+            self.cwnd() < self.congestion.ssthresh
         {
             self.congestion.hystart.start_round(pkt_num);
         }
@@ -918,7 +916,7 @@ impl Recovery {
     ) {
         // Congestion Window is updated only when it's not updated already.
         // Update cwnd if it hasn't been updated yet.
-        if self.congestion.congestion_window ==
+        if self.cwnd() ==
             self.max_datagram_size *
                 self.congestion.initial_congestion_window_packets
         {
@@ -928,7 +926,7 @@ impl Recovery {
 
         self.congestion.pacer = pacer::Pacer::new(
             self.congestion.pacer.enabled(),
-            self.congestion.congestion_window,
+            self.cwnd(),
             0,
             new_max_datagram_size,
             self.congestion.pacer.max_pacing_rate(),
@@ -1280,7 +1278,7 @@ impl std::fmt::Debug for Recovery {
         write!(f, "srtt={:?} ", self.rtt_stats.smoothed_rtt)?;
         write!(f, "min_rtt={:?} ", *self.rtt_stats.min_rtt)?;
         write!(f, "rttvar={:?} ", self.rtt_stats.rttvar)?;
-        write!(f, "cwnd={} ", self.congestion.congestion_window)?;
+        write!(f, "cwnd={} ", self.cwnd())?;
         write!(f, "ssthresh={} ", self.congestion.ssthresh)?;
         write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
         write!(f, "app_limited={} ", self.congestion.app_limited)?;
@@ -2230,7 +2228,7 @@ mod tests {
         assert_eq!(r.rtt_stats.smoothed_rtt, Duration::from_millis(50));
 
         // 1 MSS increased.
-        assert_eq!(r.congestion.congestion_window, 12000 + 1200);
+        assert_eq!(r.cwnd(), 12000 + 1200);
 
         // Send out second packet.
         let p = Sent {
@@ -2330,9 +2328,7 @@ mod tests {
 
         // We pace this outgoing packet. as all conditions for pacing
         // are passed.
-        let pacing_rate = (r.congestion.congestion_window as f64 *
-            PACING_MULTIPLIER /
-            0.05) as u64;
+        let pacing_rate = (r.cwnd() as f64 * PACING_MULTIPLIER / 0.05) as u64;
         assert_eq!(r.congestion.pacer.rate(), pacing_rate);
 
         assert_eq!(
