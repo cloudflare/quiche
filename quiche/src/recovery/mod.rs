@@ -116,22 +116,24 @@ impl RecoveryEpoch {
         rtt_stats: &RttStats, trace_id: &str,
     ) -> AckedDetectionResult {
         newly_acked.clear();
+
         let mut acked_bytes = 0;
         let mut spurious_losses = 0;
         let mut spurious_pkt_thresh = None;
         let mut has_ack_eliciting = false;
+
         let largest_acked = self.largest_acked_packet.unwrap();
 
         for ack in acked.iter() {
-            // Because packets always have incermenting numbers, they are always
-            // in sorted order
+            // Because packets always have incrementing numbers, they are always
+            // in sorted order.
             let start = if self
                 .sent_packets
                 .front()
                 .filter(|e| e.pkt_num >= ack.start)
                 .is_some()
             {
-                // Usually it will be the first packet
+                // Usually it will be the first packet.
                 0
             } else {
                 self.sent_packets
@@ -140,49 +142,45 @@ impl RecoveryEpoch {
             };
 
             for unacked in self.sent_packets.range_mut(start..) {
-                if unacked.pkt_num < ack.end {
-                    if unacked.time_acked.is_some() {
-                        // Already acked
-                    } else if unacked.time_lost.is_some() {
-                        // An acked packet was already declared lost
-                        spurious_losses += 1;
-                        spurious_pkt_thresh
-                            .get_or_insert(largest_acked - unacked.pkt_num + 1);
-                        unacked.time_acked = Some(now);
-                    } else {
-                        if unacked.in_flight {
-                            self.in_flight_count -= 1;
-                            acked_bytes += unacked.size;
-                        }
-
-                        newly_acked.push(Acked {
-                            pkt_num: unacked.pkt_num,
-                            time_sent: unacked.time_sent,
-                            size: unacked.size,
-
-                            rtt: now.saturating_duration_since(unacked.time_sent),
-                            delivered: unacked.delivered,
-                            delivered_time: unacked.delivered_time,
-                            first_sent_time: unacked.first_sent_time,
-                            is_app_limited: unacked.is_app_limited,
-                            tx_in_flight: unacked.tx_in_flight,
-                            lost: unacked.lost,
-                        });
-
-                        trace!(
-                            "{} packet newly acked {}",
-                            trace_id,
-                            unacked.pkt_num
-                        );
-
-                        self.acked_frames
-                            .extend(std::mem::take(&mut unacked.frames));
-
-                        has_ack_eliciting |= unacked.ack_eliciting;
-                        unacked.time_acked = Some(now);
-                    }
-                } else {
+                if unacked.pkt_num >= ack.end {
                     break;
+                }
+
+                if unacked.time_acked.is_some() {
+                    // Already acked.
+                } else if unacked.time_lost.is_some() {
+                    // An acked packet was already declared lost.
+                    spurious_losses += 1;
+                    spurious_pkt_thresh
+                        .get_or_insert(largest_acked - unacked.pkt_num + 1);
+                    unacked.time_acked = Some(now);
+                } else {
+                    if unacked.in_flight {
+                        self.in_flight_count -= 1;
+                        acked_bytes += unacked.size;
+                    }
+
+                    newly_acked.push(Acked {
+                        pkt_num: unacked.pkt_num,
+                        time_sent: unacked.time_sent,
+                        size: unacked.size,
+
+                        rtt: now.saturating_duration_since(unacked.time_sent),
+                        delivered: unacked.delivered,
+                        delivered_time: unacked.delivered_time,
+                        first_sent_time: unacked.first_sent_time,
+                        is_app_limited: unacked.is_app_limited,
+                        tx_in_flight: unacked.tx_in_flight,
+                        lost: unacked.lost,
+                    });
+
+                    trace!("{} packet newly acked {}", trace_id, unacked.pkt_num);
+
+                    self.acked_frames
+                        .extend(std::mem::take(&mut unacked.frames));
+
+                    has_ack_eliciting |= unacked.ack_eliciting;
+                    unacked.time_acked = Some(now);
                 }
             }
         }
@@ -660,6 +658,7 @@ impl Recovery {
             .largest_acked_packet
             .unwrap_or(0)
             .max(largest_acked);
+
         self.epochs[epoch].largest_acked_packet = Some(largest_acked);
 
         let AckedDetectionResult {
@@ -690,11 +689,10 @@ impl Recovery {
             return Ok((0, 0));
         }
 
-        // Check if largest packet is newly acked
+        // Check if largest packet is newly acked.
         let largest_newly_acked = newly_acked.last().unwrap();
-        let update_rtt =
-            largest_newly_acked.pkt_num == largest_acked && has_ack_eliciting;
-        if update_rtt {
+
+        if largest_newly_acked.pkt_num == largest_acked && has_ack_eliciting {
             let latest_rtt = now - largest_newly_acked.time_sent;
             self.rtt_stats.update_rtt(
                 latest_rtt,
@@ -706,7 +704,6 @@ impl Recovery {
 
         // Detect and mark lost packets without removing them from the sent
         // packets list.
-
         let loss = self.detect_lost_packets(epoch, now, trace_id);
 
         self.on_packets_acked(newly_acked, now);
