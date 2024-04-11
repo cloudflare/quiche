@@ -101,6 +101,7 @@ struct AckedDetectionResult {
     spurious_losses: usize,
     spurious_pkt_thresh: Option<u64>,
     has_ack_eliciting: bool,
+    has_in_flight_spurious_loss: bool,
 }
 
 struct LossDetectionResult {
@@ -121,6 +122,7 @@ impl RecoveryEpoch {
         let mut spurious_losses = 0;
         let mut spurious_pkt_thresh = None;
         let mut has_ack_eliciting = false;
+        let mut has_in_flight_spurious_loss = false;
 
         let largest_acked = self.largest_acked_packet.unwrap();
 
@@ -154,6 +156,10 @@ impl RecoveryEpoch {
                     spurious_pkt_thresh
                         .get_or_insert(largest_acked - unacked.pkt_num + 1);
                     unacked.time_acked = Some(now);
+
+                    if unacked.in_flight {
+                        has_in_flight_spurious_loss = true;
+                    }
                 } else {
                     if unacked.in_flight {
                         self.in_flight_count -= 1;
@@ -192,6 +198,7 @@ impl RecoveryEpoch {
             spurious_losses,
             spurious_pkt_thresh,
             has_ack_eliciting,
+            has_in_flight_spurious_loss,
         }
     }
 
@@ -666,6 +673,7 @@ impl Recovery {
             spurious_losses,
             spurious_pkt_thresh,
             has_ack_eliciting,
+            has_in_flight_spurious_loss,
         } = self.epochs[epoch].detect_and_remove_acked_packets(
             now,
             ranges,
@@ -681,7 +689,7 @@ impl Recovery {
         }
 
         // Undo congestion window update.
-        if spurious_losses > 0 {
+        if has_in_flight_spurious_loss {
             (self.cc_ops.rollback)(self);
         }
 
