@@ -958,7 +958,18 @@ impl Recovery {
                 self.lost[epoch].extend(unacked.frames.drain(..));
                 unacked.time_lost = Some(now);
 
-                if unacked.in_flight && !unacked.pmtud {
+                if unacked.pmtud {
+                    self.bytes_in_flight =
+                        self.bytes_in_flight.saturating_sub(unacked.size);
+
+                    self.in_flight_count[epoch] =
+                        self.in_flight_count[epoch].saturating_sub(1);
+
+                    // Do not track PMTUD probes losses.
+                    continue;
+                }
+
+                if unacked.in_flight {
                     lost_bytes += unacked.size;
 
                     // Frames have already been removed from the packet, so
@@ -976,11 +987,8 @@ impl Recovery {
                     );
                 }
 
-                if !unacked.pmtud {
-                    // Do not add PMTUD probes to loss statistics
-                    lost_packets += 1;
-                    self.lost_count += 1;
-                }
+                lost_packets += 1;
+                self.lost_count += 1;
             } else {
                 let loss_time = match self.loss_time[epoch] {
                     None => unacked.time_sent + loss_delay,
@@ -997,10 +1005,7 @@ impl Recovery {
         self.bytes_lost += lost_bytes as u64;
 
         if let Some(pkt) = largest_lost_pkt {
-            // Do not track lost PMTUD packets.
-            if !pkt.pmtud {
-                self.on_packets_lost(lost_bytes, &pkt, epoch, now);
-            }
+            self.on_packets_lost(lost_bytes, &pkt, epoch, now);
         }
 
         self.drain_packets(epoch, now);
@@ -2348,6 +2353,8 @@ mod tests {
             now,
             "",
         );
+
+        assert_eq!(r.in_flight_count[packet::Epoch::Application], 1);
         assert_eq!(r.sent[packet::Epoch::Application].len(), 1);
         assert_eq!(r.bytes_in_flight, 1000);
 
@@ -2378,6 +2385,8 @@ mod tests {
             "",
         );
 
+        assert_eq!(r.in_flight_count[packet::Epoch::Application], 2);
+
         let p = Sent {
             pkt_num: 2,
             frames: smallvec![],
@@ -2404,6 +2413,8 @@ mod tests {
             now,
             "",
         );
+
+        assert_eq!(r.in_flight_count[packet::Epoch::Application], 3);
 
         // Wait for 10ms.
         now += Duration::from_millis(10);
@@ -2438,7 +2449,8 @@ mod tests {
         assert_eq!(r.loss_probes[packet::Epoch::Application], 0);
 
         assert_eq!(r.sent[packet::Epoch::Application].len(), 2);
-        assert_eq!(r.bytes_in_flight, 1000);
+        assert_eq!(r.in_flight_count[packet::Epoch::Application], 0);
+        assert_eq!(r.bytes_in_flight, 0);
         assert_eq!(r.congestion_window, 12000);
 
         assert_eq!(r.lost_count, 0);
@@ -2449,6 +2461,9 @@ mod tests {
         r.detect_lost_packets(packet::Epoch::Application, now, "");
 
         assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
+        assert_eq!(r.in_flight_count[packet::Epoch::Application], 0);
+        assert_eq!(r.bytes_in_flight, 0);
+        assert_eq!(r.lost_count, 0);
     }
 }
 
