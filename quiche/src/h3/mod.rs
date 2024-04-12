@@ -425,44 +425,52 @@ pub enum Error {
 
 /// Error codes as defined in https://www.rfc-editor.org/rfc/rfc9114.html#http-error-codes.
 pub enum WireErrorCode {
-    /// No error. This is used when the connection or stream needs to be closed, but there is no error
-    /// to signal.
-    NoError = 0x100,
-    /// Peer violated protocol requirements in a way that does not match a more specific error code or
-    /// endpoint declines to use the more specific error code.
+    /// No error. This is used when the connection or stream needs to be closed,
+    /// but there is no error to signal.
+    NoError              = 0x100,
+    /// Peer violated protocol requirements in a way that does not match a more
+    /// specific error code or endpoint declines to use the more specific
+    /// error code.
     GeneralProtocolError = 0x101,
     /// An internal error has occurred in the HTTP stack.
-    InternalError = 0x102,
-    /// The endpoint detected that its peer created a stream that it will not accept.
-    StreamCreationError = 0x103,
+    InternalError        = 0x102,
+    /// The endpoint detected that its peer created a stream that it will not
+    /// accept.
+    StreamCreationError  = 0x103,
     /// A stream required by the HTTP/3 connection was closed or reset.
     ClosedCriticalStream = 0x104,
-    /// A frame was received that was not permitted in the current state or on the current stream.
-    FrameUnexpected = 0x105,
-    /// A frame that fails to satisfy layout requirements or with an invalid size was received.
-    FrameError = 0x106,
-    /// The endpoint detected that its peer is exhibiting a behavior that might be generating excessive
-    /// load.
-    ExcessiveLoad = 0x107,
-    /// A stream ID or push ID was used incorrectly, such as exceeding a limit, reducing a limit, or
-    /// being reused.
-    IdError = 0x108,
+    /// A frame was received that was not permitted in the current state or on
+    /// the current stream.
+    FrameUnexpected      = 0x105,
+    /// A frame that fails to satisfy layout requirements or with an invalid
+    /// size was received.
+    FrameError           = 0x106,
+    /// The endpoint detected that its peer is exhibiting a behavior that might
+    /// be generating excessive load.
+    ExcessiveLoad        = 0x107,
+    /// A stream ID or push ID was used incorrectly, such as exceeding a limit,
+    /// reducing a limit, or being reused.
+    IdError              = 0x108,
     /// An endpoint detected an error in the payload of a SETTINGS frame.
-    SettingsError = 0x109,
+    SettingsError        = 0x109,
     /// No SETTINGS frame was received at the beginning of the control stream.
-    MissingSettings = 0x10a,
-    /// A server rejected a request without performing any application processing.
-    RequestRejected = 0x10b,
+    MissingSettings      = 0x10a,
+    /// A server rejected a request without performing any application
+    /// processing.
+    RequestRejected      = 0x10b,
     /// The request or its response (including pushed response) is cancelled.
-    RequestCancelled = 0x10c,
-    /// The client's stream terminated without containing a fully formed request.
-    RequestIncomplete = 0x10d,
+    RequestCancelled     = 0x10c,
+    /// The client's stream terminated without containing a fully formed
+    /// request.
+    RequestIncomplete    = 0x10d,
     /// An HTTP message was malformed and cannot be processed.
-    MessageError = 0x10e,
-    /// The TCP connection established in response to a CONNECT request was reset or abnormally closed.
-    ConnectError = 0x10f,
-    /// The requested operation cannot be served over HTTP/3. The peer should retry over HTTP/1.1.
-    VersionFallback = 0x110,
+    MessageError         = 0x10e,
+    /// The TCP connection established in response to a CONNECT request was
+    /// reset or abnormally closed.
+    ConnectError         = 0x10f,
+    /// The requested operation cannot be served over HTTP/3. The peer should
+    /// retry over HTTP/1.1.
+    VersionFallback      = 0x110,
 }
 
 impl Error {
@@ -470,12 +478,10 @@ impl Error {
         match self {
             Error::Done => WireErrorCode::NoError as u64,
             Error::InternalError => WireErrorCode::InternalError as u64,
-            Error::StreamCreationError => {
-                WireErrorCode::StreamCreationError as u64
-            },
-            Error::ClosedCriticalStream => {
-                WireErrorCode::ClosedCriticalStream as u64
-            },
+            Error::StreamCreationError =>
+                WireErrorCode::StreamCreationError as u64,
+            Error::ClosedCriticalStream =>
+                WireErrorCode::ClosedCriticalStream as u64,
             Error::FrameUnexpected => WireErrorCode::FrameUnexpected as u64,
             Error::FrameError => WireErrorCode::FrameError as u64,
             Error::ExcessiveLoad => WireErrorCode::ExcessiveLoad as u64,
