@@ -9633,7 +9633,7 @@ mod tests {
         // add it to its destination connection ID (DCID) list.
         let _ = pipe
             .client
-            .new_source_cid(&client_source_cid, client_source_token, true)
+            .new_scid(&client_source_cid, client_source_token, true)
             .unwrap();
 
         // Forward the NEW_CONNECTION_ID Frame generated above over the pipe
@@ -9657,6 +9657,7 @@ mod tests {
                 1,
                 preferred_address_params.stateless_reset_token,
                 0,
+                &mut SmallVec::new(),
             )
             .unwrap();
 
@@ -9775,14 +9776,14 @@ mod tests {
         // add it to its destination connection ID (DCID) list.
         let _ = pipe
             .server
-            .new_source_cid(&server_source_cid_2, server_source_token_2, true)
+            .new_scid(&server_source_cid_2, server_source_token_2, true)
             .unwrap();
         // Notify the client of its new source connection ID (SCID), this also
         // advertises the ID to the server The server will automatically
         // add it to its destination connection ID (DCID) list.
         let _ = pipe
             .client
-            .new_source_cid(&client_source_cid_2, client_source_token_2, true)
+            .new_scid(&client_source_cid_2, client_source_token_2, true)
             .unwrap();
 
         // Forward the NEW_CONNECTION_ID Frames generated above over the pipe
