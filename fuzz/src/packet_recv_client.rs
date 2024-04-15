@@ -3,16 +3,28 @@
 #[macro_use]
 extern crate libfuzzer_sys;
 
-#[macro_use]
-extern crate lazy_static;
-
 use std::net::SocketAddr;
 
 use std::sync::Mutex;
 use std::sync::Once;
+use std::sync::OnceLock;
 
-lazy_static! {
-    static ref CONFIG: Mutex<quiche::Config> = {
+static CONFIG: OnceLock<Mutex<quiche::Config>> = OnceLock::new();
+
+static SCID: quiche::ConnectionId<'static> =
+    quiche::ConnectionId::from_ref(&[0; quiche::MAX_CONN_ID_LEN]);
+
+static LOG_INIT: Once = Once::new();
+
+fuzz_target!(|data: &[u8]| {
+    let from: SocketAddr = "127.0.0.1:1234".parse().unwrap();
+    let to: SocketAddr = "127.0.0.1:4321".parse().unwrap();
+
+    LOG_INIT.call_once(|| env_logger::builder().format_timestamp_nanos().init());
+
+    let mut buf = data.to_vec();
+
+    let config = CONFIG.get_or_init(|| {
         let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
             .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
@@ -30,28 +42,14 @@ lazy_static! {
         config.enable_hystart(true);
 
         Mutex::new(config)
-    };
-}
-
-static SCID: quiche::ConnectionId<'static> =
-    quiche::ConnectionId::from_ref(&[0; quiche::MAX_CONN_ID_LEN]);
-
-static LOG_INIT: Once = Once::new();
-
-fuzz_target!(|data: &[u8]| {
-    let from: SocketAddr = "127.0.0.1:1234".parse().unwrap();
-    let to: SocketAddr = "127.0.0.1:4321".parse().unwrap();
-
-    LOG_INIT.call_once(|| env_logger::builder().format_timestamp_nanos().init());
-
-    let mut buf = data.to_vec();
+    });
 
     let mut conn = quiche::connect(
         Some("quic.tech"),
         &SCID,
         to,
         from,
-        &mut CONFIG.lock().unwrap(),
+        &mut config.lock().unwrap(),
     )
     .unwrap();
 
