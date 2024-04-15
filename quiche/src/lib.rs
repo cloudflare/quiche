@@ -577,20 +577,88 @@ pub enum Error {
     CryptoBufferExceeded,
 }
 
+/// QUIC error codes sent on the wire.
+///
+/// As defined in [RFC9000](https://www.rfc-editor.org/rfc/rfc9000.html#name-error-codes).
+pub enum WireErrorCode {
+    /// An endpoint uses this with CONNECTION_CLOSE to signal that the
+    /// connection is being closed abruptly in the absence of any error.
+    NoError              = 0x0,
+    /// The endpoint encountered an internal error and cannot continue with the
+    /// connection.
+    InternalError        = 0x1,
+    /// The server refused to accept a new connection.
+    ConnectionRefused    = 0x2,
+    /// An endpoint received more data than it permitted in its advertised data
+    /// limits; see Section 4.
+    FlowControlError     = 0x3,
+    /// An endpoint received a frame for a stream identifier that exceeded its
+    /// advertised stream limit for the corresponding stream type.
+    StreamLimitError     = 0x4,
+    /// An endpoint received a frame for a stream that was not in a state that
+    /// permitted that frame.
+    StreamStateError     = 0x5,
+    /// (1) An endpoint received a STREAM frame containing data that exceeded
+    /// the previously established final size, (2) an endpoint received a
+    /// STREAM frame or a RESET_STREAM frame containing a final size that
+    /// was lower than the size of stream data that was already received, or
+    /// (3) an endpoint received a STREAM frame or a RESET_STREAM frame
+    /// containing a different final size to the one already established.
+    FinalSizeError       = 0x6,
+    /// An endpoint received a frame that was badly formatted -- for instance, a
+    /// frame of an unknown type or an ACK frame that has more
+    /// acknowledgment ranges than the remainder of the packet could carry.
+    FrameEncodingError   = 0x7,
+    /// An endpoint received transport parameters that were badly formatted,
+    /// included an invalid value, omitted a mandatory transport parameter,
+    /// included a forbidden transport parameter, or were otherwise in
+    /// error.
+    TransportParameterError = 0x8,
+    /// An endpoint received transport parameters that were badly formatted,
+    /// included an invalid value, omitted a mandatory transport parameter,
+    /// included a forbidden transport parameter, or were otherwise in
+    /// error.
+    ConnectionIdLimitError = 0x9,
+    /// An endpoint detected an error with protocol compliance that was not
+    /// covered by more specific error codes.
+    ProtocolViolation    = 0xa,
+    /// A server received a client Initial that contained an invalid Token
+    /// field.
+    InvalidToken         = 0xb,
+    /// The application or application protocol caused the connection to be
+    /// closed.
+    ApplicationError     = 0xc,
+    /// An endpoint has received more data in CRYPTO frames than it can buffer.
+    CryptoBufferExceeded = 0xd,
+    /// An endpoint detected errors in performing key updates.
+    KeyUpdateError       = 0xe,
+    /// An endpoint has reached the confidentiality or integrity limit for the
+    /// AEAD algorithm used by the given connection.
+    AeadLimitReached     = 0xf,
+    /// An endpoint has determined that the network path is incapable of
+    /// supporting QUIC. An endpoint is unlikely to receive a
+    /// CONNECTION_CLOSE frame carrying this code except when the path does
+    /// not support a large enough MTU.
+    NoViablePath         = 0x10,
+}
+
 impl Error {
     fn to_wire(self) -> u64 {
         match self {
-            Error::Done => 0x0,
-            Error::InvalidFrame => 0x7,
-            Error::InvalidStreamState(..) => 0x5,
-            Error::InvalidTransportParam => 0x8,
-            Error::FlowControl => 0x3,
-            Error::StreamLimit => 0x4,
-            Error::FinalSize => 0x6,
-            Error::IdLimit => 0x09,
-            Error::KeyUpdate => 0xe,
-            Error::CryptoBufferExceeded => 0x0d,
-            _ => 0xa,
+            Error::Done => WireErrorCode::NoError as u64,
+            Error::InvalidFrame => WireErrorCode::FrameEncodingError as u64,
+            Error::InvalidStreamState(..) =>
+                WireErrorCode::StreamStateError as u64,
+            Error::InvalidTransportParam =>
+                WireErrorCode::TransportParameterError as u64,
+            Error::FlowControl => WireErrorCode::FlowControlError as u64,
+            Error::StreamLimit => WireErrorCode::StreamLimitError as u64,
+            Error::IdLimit => WireErrorCode::ConnectionIdLimitError as u64,
+            Error::FinalSize => WireErrorCode::FinalSizeError as u64,
+            Error::CryptoBufferExceeded =>
+                WireErrorCode::CryptoBufferExceeded as u64,
+            Error::KeyUpdate => WireErrorCode::KeyUpdateError as u64,
+            _ => WireErrorCode::ProtocolViolation as u64,
         }
     }
 
