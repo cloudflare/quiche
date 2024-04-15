@@ -423,7 +423,9 @@ pub enum Error {
     VersionFallback,
 }
 
-/// Error codes as defined in https://www.rfc-editor.org/rfc/rfc9114.html#http-error-codes.
+/// HTTP/3 error codes sent on the wire.
+///
+/// As defined in [RFC9114](https://www.rfc-editor.org/rfc/rfc9114.html#http-error-codes).
 pub enum WireErrorCode {
     /// No error. This is used when the connection or stream needs to be closed,
     /// but there is no error to signal.

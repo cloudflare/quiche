@@ -577,7 +577,9 @@ pub enum Error {
     CryptoBufferExceeded,
 }
 
-/// Error codes as defined in https://www.rfc-editor.org/rfc/rfc9000.html#name-error-codes.
+/// QUIC error codes sent on the wire.
+///
+/// As defined in [RFC9000](https://www.rfc-editor.org/rfc/rfc9000.html#name-error-codes).
 pub enum WireErrorCode {
     /// An endpoint uses this with CONNECTION_CLOSE to signal that the
     /// connection is being closed abruptly in the absence of any error.
