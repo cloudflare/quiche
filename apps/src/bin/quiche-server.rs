@@ -47,6 +47,7 @@ use quiche_apps::args::*;
 
 use quiche_apps::common::*;
 
+use quiche_apps::recvfrom::*;
 use quiche_apps::sendto::*;
 
 const MAX_BUF_SIZE: usize = 65507;
@@ -91,6 +92,12 @@ fn main() {
         .register(&mut socket, mio::Token(0), mio::Interest::READABLE)
         .unwrap();
 
+    let enable_gro = if args.disable_gro {
+        false
+    } else {
+        detect_gro(&socket)
+    };
+
     let max_datagram_size = MAX_DATAGRAM_SIZE;
     let enable_gso = if args.disable_gso {
         false
@@ -98,6 +105,7 @@ fn main() {
         detect_gso(&socket, max_datagram_size)
     };
 
+    trace!("GRO detected: {}", enable_gro);
     trace!("GSO detected: {}", enable_gso);
 
     // Create the configuration for the QUIC connections.
@@ -211,7 +219,7 @@ fn main() {
                 break 'read;
             }
 
-            let (len, from) = match socket.recv_from(&mut buf) {
+            let recv_data = match recv_from(&socket, &mut buf) {
                 Ok(v) => v,
 
                 Err(e) => {
@@ -226,6 +234,8 @@ fn main() {
                 },
             };
 
+            let from = recv_data.peer_addr.expect("Invalid peer IP address");
+            let len = recv_data.bytes;
             trace!("got {} bytes", len);
 
             let pkt_buf = &mut buf[..len];
