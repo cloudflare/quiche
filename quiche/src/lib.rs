@@ -687,6 +687,39 @@ impl Error {
             Error::CryptoBufferExceeded => -20,
         }
     }
+
+    #[cfg(feature = "ffi")]
+    fn from_c(error: libc::ssize_t) -> Error {
+        match error {
+            -1 => Error::Done,
+            -2 => Error::BufferTooShort,
+            -3 => Error::UnknownVersion,
+            -4 => Error::InvalidFrame,
+            -5 => Error::InvalidPacket,
+            -6 => Error::InvalidState,
+            // Let's use a value of 0 as a placeholder as we only use it in the
+            // FFI code and so don't care about it.
+            -7 => Error::InvalidStreamState(0),
+            -8 => Error::InvalidTransportParam,
+            -9 => Error::CryptoFail,
+            -10 => Error::TlsFail,
+            -11 => Error::FlowControl,
+            -12 => Error::StreamLimit,
+            -13 => Error::FinalSize,
+            -14 => Error::CongestionControl,
+            // Let's use a value of 0 as a placeholder as we only use it in the
+            // FFI code and so don't care about it.
+            -15 => Error::StreamStopped(0),
+            // Let's use a value of 0 as a placeholder as we only use it in the
+            // FFI code and so don't care about it.
+            -16 => Error::StreamReset(0),
+            -17 => Error::IdLimit,
+            -18 => Error::OutOfIdentifiers,
+            -19 => Error::KeyUpdate,
+            -20 => Error::CryptoBufferExceeded,
+            _ => panic!("expected error {:?}", error),
+        }
+    }
 }
 
 impl std::fmt::Display for Error {

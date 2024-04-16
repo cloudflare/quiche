@@ -132,6 +132,10 @@ enum quiche_error {
 // Returns a human readable string with the quiche version number.
 const char *quiche_version(void);
 
+// Returns the wire error code for the given error as defined in RFC9000 Section 20. Error Codes.
+// The given error must be a valid quiche_error.
+uint64_t quiche_error_to_wire_error_code(ssize_t error);
+
 // Enables logging. |cb| will be called with log messages
 int quiche_enable_debug_logging(void (*cb)(const char *line, void *argp),
                                 void *argp);

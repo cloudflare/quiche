@@ -105,6 +105,11 @@ pub extern fn quiche_version() -> *const u8 {
     VERSION.as_ptr()
 }
 
+#[no_mangle]
+pub extern fn quiche_error_to_wire_error_code(error: ssize_t) -> u64 {
+    Error::from_c(error).to_wire()
+}
+
 struct Logger {
     cb: extern fn(line: *const u8, argp: *mut c_void),
     argp: std::sync::atomic::AtomicPtr<c_void>,
