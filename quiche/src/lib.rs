@@ -580,6 +580,7 @@ pub enum Error {
 /// QUIC error codes sent on the wire.
 ///
 /// As defined in [RFC9000](https://www.rfc-editor.org/rfc/rfc9000.html#name-error-codes).
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum WireErrorCode {
     /// An endpoint uses this with CONNECTION_CLOSE to signal that the
     /// connection is being closed abruptly in the absence of any error.
