@@ -3615,7 +3615,7 @@ impl Connection {
         let pn = pkt_space.next_pkt_num;
         let largest_acked_pkt =
             path.recovery.get_largest_acked_on_epoch(epoch).unwrap_or(0);
-        let pn_len = packet::pkt_num_len(pn, largest_acked_pkt)?;
+        let pn_len = packet::pkt_num_len(pn, largest_acked_pkt);
 
         // The AEAD overhead at the current encryption level.
         let crypto_overhead = pkt_space.crypto_overhead().ok_or(Error::Done)?;
@@ -12056,7 +12056,7 @@ mod tests {
         let epoch = packet::Type::Initial.to_epoch().unwrap();
 
         let pn = 0;
-        let pn_len = packet::pkt_num_len(pn, 0).unwrap();
+        let pn_len = packet::pkt_num_len(pn, 0);
 
         let dcid = pipe.client.destination_id();
         let scid = pipe.client.source_id();

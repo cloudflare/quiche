@@ -555,12 +555,12 @@ impl<'a> std::fmt::Debug for Header<'a> {
     }
 }
 
-pub fn pkt_num_len(pn: u64, largest_acked: u64) -> Result<usize> {
+pub fn pkt_num_len(pn: u64, largest_acked: u64) -> usize {
     let num_unacked: u64 = pn.checked_sub(largest_acked).map_or(0, |v| v) + 1;
     // computes ceil of num_unacked.log2()
     let min_bits = u64::BITS - num_unacked.leading_zeros();
     // get the num len in bytes
-    Ok((min_bits as f32 / 8.).ceil() as usize)
+    ((min_bits + 7) / 8) as usize
 }
 
 pub fn decrypt_hdr(
@@ -1166,13 +1166,13 @@ mod tests {
 
     #[test]
     fn pkt_num_encode_decode() {
-        let num_len = pkt_num_len(0, 0).unwrap();
+        let num_len = pkt_num_len(0, 0);
         assert_eq!(num_len, 1);
         let pn = decode_pkt_num(0xa82f30ea, 0x9b32, 2);
         assert_eq!(pn, 0xa82f9b32);
         let mut d = [0; 10];
         let mut b = octets::OctetsMut::with_slice(&mut d);
-        let num_len = pkt_num_len(0xac5c02, 0xabe8b3).unwrap();
+        let num_len = pkt_num_len(0xac5c02, 0xabe8b3);
         assert_eq!(num_len, 2);
         encode_pkt_num(0xac5c02, num_len, &mut b).unwrap();
         // reading
@@ -1181,7 +1181,7 @@ mod tests {
         let pn = decode_pkt_num(0xac5c01, hdr_num, num_len);
         assert_eq!(pn, 0xac5c02);
         // sending 0xace8fe while having 0xabe8b3 acked
-        let num_len = pkt_num_len(0xace9fe, 0xabe8b3).unwrap();
+        let num_len = pkt_num_len(0xace9fe, 0xabe8b3);
         assert_eq!(num_len, 3);
         let mut b = octets::OctetsMut::with_slice(&mut d);
         encode_pkt_num(0xace9fe, num_len, &mut b).unwrap();
