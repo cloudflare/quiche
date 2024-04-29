@@ -1994,11 +1994,6 @@ mod tests {
     #[cfg(windows)]
     use winapi::um::ws2tcpip::inet_ntop;
 
-    #[cfg(not(windows))]
-    use libc::c_void;
-    #[cfg(windows)]
-    use winapi::ctypes::c_void;
-
     #[test]
     fn addr_v4() {
         let addr = "127.0.0.1:8080".parse().unwrap();
