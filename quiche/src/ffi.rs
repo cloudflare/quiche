@@ -1987,6 +1987,10 @@ fn std_time_to_c(_time: &std::time::Instant, out: &mut timespec) {
 mod tests {
     use super::*;
 
+    #[cfg(not(windows))]
+    use libc::c_void;
+    #[cfg(windows)]
+    use winapi::ctypes::c_void;
     #[cfg(windows)]
     use winapi::um::ws2tcpip::inet_ntop;
 
