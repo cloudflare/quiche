@@ -378,7 +378,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 fprintf(stderr, "stream %" PRIu64 " is readable\n", s);
 
                 bool fin = false;
-                uint64_t out_error_code;
+                uint64_t error_code;
                 ssize_t recv_len = quiche_conn_stream_recv(conn_io->conn, s,
                                                            buf, sizeof(buf),
                                                            &fin, &error_code);
