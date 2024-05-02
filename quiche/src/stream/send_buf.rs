@@ -356,12 +356,12 @@ impl SendBuf {
         // Drop all buffered data.
         self.data.clear();
 
-        // Mark all data as acked.
+        // Mark relevant data as acked.
+        self.off = unsent_off;
         self.ack(0, self.off as usize);
 
         self.pos = 0;
         self.len = 0;
-        self.off = unsent_off;
 
         (self.emit_off, unsent_len)
     }
