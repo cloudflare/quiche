@@ -852,8 +852,6 @@ pub struct PktNumSpace {
 
     pub largest_rx_non_probing_pkt_num: u64,
 
-    pub next_pkt_num: u64,
-
     pub recv_pkt_need_ack: ranges::RangeSet,
 
     pub recv_pkt_num: PktNumWindow,
@@ -878,8 +876,6 @@ impl PktNumSpace {
             largest_rx_pkt_time: time::Instant::now(),
 
             largest_rx_non_probing_pkt_num: 0,
-
-            next_pkt_num: 0,
 
             recv_pkt_need_ack: ranges::RangeSet::new(crate::MAX_ACK_RANGES),
 
