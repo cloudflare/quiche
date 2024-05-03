@@ -37,7 +37,6 @@ use crate::Config;
 use crate::Result;
 
 use crate::frame;
-use crate::minmax;
 use crate::packet;
 use crate::ranges;
 
@@ -45,6 +44,8 @@ use crate::ranges;
 use qlog::events::EventData;
 
 use smallvec::SmallVec;
+
+use self::rtt::RttStats;
 
 // Loss Recovery
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
@@ -55,11 +56,7 @@ const INITIAL_TIME_THRESHOLD: f64 = 9.0 / 8.0;
 
 const GRANULARITY: Duration = Duration::from_millis(1);
 
-const INITIAL_RTT: Duration = Duration::from_millis(333);
-
 const PERSISTENT_CONGESTION_THRESHOLD: u32 = 3;
-
-const RTT_WINDOW: Duration = Duration::from_secs(300);
 
 const MAX_PTO_PROBES_COUNT: usize = 2;
 
@@ -85,17 +82,7 @@ pub struct Recovery {
 
     largest_sent_pkt: [u64; packet::Epoch::count()],
 
-    latest_rtt: Duration,
-
-    smoothed_rtt: Option<Duration>,
-
-    rttvar: Duration,
-
-    minmax_filter: minmax::Minmax<Duration>,
-
-    min_rtt: Duration,
-
-    pub max_ack_delay: Duration,
+    rtt_stats: RttStats,
 
     loss_time: [Option<Instant>; packet::Epoch::count()],
 
@@ -214,21 +201,7 @@ impl Recovery {
 
             largest_sent_pkt: [0; packet::Epoch::count()],
 
-            latest_rtt: Duration::ZERO,
-
-            // This field should be initialized to `INITIAL_RTT` for the initial
-            // PTO calculation, but it also needs to be an `Option` to track
-            // whether any RTT sample was received, so the initial value is
-            // handled by the `rtt()` method instead.
-            smoothed_rtt: None,
-
-            minmax_filter: minmax::Minmax::new(Duration::ZERO),
-
-            min_rtt: Duration::ZERO,
-
-            rttvar: INITIAL_RTT / 2,
-
-            max_ack_delay: recovery_config.max_ack_delay,
+            rtt_stats: RttStats::new(recovery_config.max_ack_delay),
 
             loss_time: [None; packet::Epoch::count()],
 
@@ -376,7 +349,7 @@ impl Recovery {
 
         // Pacing: Set the pacing rate if CC doesn't do its own.
         if !(self.cc_ops.has_custom_pacing)() {
-            if let Some(srtt) = self.smoothed_rtt {
+            if let Some(srtt) = self.rtt_stats.smoothed_rtt {
                 let rate = PACING_MULTIPLIER * self.congestion_window as f64 /
                     srtt.as_secs_f64();
                 self.set_pacing_rate(rate as u64, now);
@@ -463,7 +436,7 @@ impl Recovery {
 
         let mut undo_cwnd = false;
 
-        let max_rtt = cmp::max(self.latest_rtt, self.rtt());
+        let max_rtt = cmp::max(self.rtt_stats.latest_rtt, self.rtt());
 
         let sent = &mut self.sent[epoch];
 
@@ -589,7 +562,7 @@ impl Recovery {
 
             // Don't update srtt if rtt is zero.
             if !latest_rtt.is_zero() {
-                self.update_rtt(latest_rtt, ack_delay, now);
+                self.rtt_stats.update_rtt(latest_rtt, ack_delay, now);
             }
         }
 
@@ -726,23 +699,19 @@ impl Recovery {
     }
 
     pub fn rtt(&self) -> Duration {
-        self.smoothed_rtt.unwrap_or(INITIAL_RTT)
+        self.rtt_stats.rtt()
     }
 
     pub fn min_rtt(&self) -> Option<Duration> {
-        if self.min_rtt == Duration::ZERO {
-            return None;
-        }
-
-        Some(self.min_rtt)
+        self.rtt_stats.min_rtt()
     }
 
     pub fn rttvar(&self) -> Duration {
-        self.rttvar
+        self.rtt_stats.rttvar
     }
 
     pub fn pto(&self) -> Duration {
-        self.rtt() + cmp::max(self.rttvar * 4, GRANULARITY)
+        self.rtt() + cmp::max(self.rtt_stats.rttvar * 4, GRANULARITY)
     }
 
     pub fn delivery_rate(&self) -> u64 {
@@ -797,44 +766,6 @@ impl Recovery {
         self.max_datagram_size = max_datagram_size;
     }
 
-    fn update_rtt(
-        &mut self, latest_rtt: Duration, ack_delay: Duration, now: Instant,
-    ) {
-        self.latest_rtt = latest_rtt;
-
-        match self.smoothed_rtt {
-            // First RTT sample.
-            None => {
-                self.min_rtt = self.minmax_filter.reset(now, latest_rtt);
-
-                self.smoothed_rtt = Some(latest_rtt);
-
-                self.rttvar = latest_rtt / 2;
-            },
-
-            Some(srtt) => {
-                self.min_rtt =
-                    self.minmax_filter.running_min(RTT_WINDOW, now, latest_rtt);
-
-                let ack_delay = cmp::min(self.max_ack_delay, ack_delay);
-
-                // Adjust for ack delay if plausible.
-                let adjusted_rtt = if latest_rtt > self.min_rtt + ack_delay {
-                    latest_rtt - ack_delay
-                } else {
-                    latest_rtt
-                };
-
-                self.rttvar = self.rttvar.mul_f64(3.0 / 4.0) +
-                    sub_abs(srtt, adjusted_rtt).mul_f64(1.0 / 4.0);
-
-                self.smoothed_rtt = Some(
-                    srtt.mul_f64(7.0 / 8.0) + adjusted_rtt.mul_f64(1.0 / 8.0),
-                );
-            },
-        }
-    }
-
     fn loss_time_and_space(&self) -> (Option<Instant>, packet::Epoch) {
         let mut epoch = packet::Epoch::Initial;
         let mut time = self.loss_time[epoch];
@@ -886,7 +817,8 @@ impl Recovery {
                 }
 
                 // Include max_ack_delay and backoff for Application Data.
-                duration += self.max_ack_delay * 2_u32.pow(self.pto_count);
+                duration +=
+                    self.rtt_stats.max_ack_delay * 2_u32.pow(self.pto_count);
             }
 
             let new_time =
@@ -929,8 +861,8 @@ impl Recovery {
 
         self.loss_time[epoch] = None;
 
-        let loss_delay =
-            cmp::max(self.latest_rtt, self.rtt()).mul_f64(self.time_thresh);
+        let loss_delay = cmp::max(self.rtt_stats.latest_rtt, self.rtt())
+            .mul_f64(self.time_thresh);
 
         // Minimum time of kGranularity before packets are deemed lost.
         let loss_delay = cmp::max(loss_delay, GRANULARITY);
@@ -1053,7 +985,8 @@ impl Recovery {
         }
 
         // Fill in a rate sample.
-        self.delivery_rate.generate_rate_sample(self.min_rtt);
+        self.delivery_rate
+            .generate_rate_sample(self.rtt_stats.min_rtt);
 
         // Call congestion control hooks.
         (self.cc_ops.on_packets_acked)(self, acked, epoch, now);
@@ -1123,13 +1056,17 @@ impl Recovery {
         self.delivery_rate.update_app_limited(v);
     }
 
+    pub fn update_max_ack_delay(&mut self, max_ack_delay: Duration) {
+        self.rtt_stats.max_ack_delay = max_ack_delay;
+    }
+
     #[cfg(feature = "qlog")]
     pub fn maybe_qlog(&mut self) -> Option<EventData> {
         let qlog_metrics = QlogMetrics {
-            min_rtt: self.min_rtt,
+            min_rtt: self.rtt_stats.min_rtt,
             smoothed_rtt: self.rtt(),
-            latest_rtt: self.latest_rtt,
-            rttvar: self.rttvar,
+            latest_rtt: self.rtt_stats.latest_rtt,
+            rttvar: self.rtt_stats.rttvar,
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight as u64,
             ssthresh: self.ssthresh as u64,
@@ -1243,10 +1180,10 @@ impl std::fmt::Debug for Recovery {
             },
         };
 
-        write!(f, "latest_rtt={:?} ", self.latest_rtt)?;
-        write!(f, "srtt={:?} ", self.smoothed_rtt)?;
-        write!(f, "min_rtt={:?} ", self.min_rtt)?;
-        write!(f, "rttvar={:?} ", self.rttvar)?;
+        write!(f, "latest_rtt={:?} ", self.rtt_stats.latest_rtt)?;
+        write!(f, "srtt={:?} ", self.rtt_stats.smoothed_rtt)?;
+        write!(f, "min_rtt={:?} ", self.rtt_stats.min_rtt)?;
+        write!(f, "rttvar={:?} ", self.rtt_stats.rttvar)?;
         write!(f, "loss_time={:?} ", self.loss_time)?;
         write!(f, "loss_probes={:?} ", self.loss_probes)?;
         write!(f, "cwnd={} ", self.congestion_window)?;
@@ -1367,14 +1304,6 @@ impl Default for HandshakeStatus {
 
             completed: true,
         }
-    }
-}
-
-fn sub_abs(lhs: Duration, rhs: Duration) -> Duration {
-    if lhs > rhs {
-        lhs - rhs
-    } else {
-        rhs - lhs
     }
 }
 
@@ -2202,7 +2131,7 @@ mod tests {
 
         assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
         assert_eq!(r.bytes_in_flight, 0);
-        assert_eq!(r.smoothed_rtt.unwrap(), Duration::from_millis(50));
+        assert_eq!(r.rtt_stats.smoothed_rtt.unwrap(), Duration::from_millis(50));
 
         // 1 MSS increased.
         assert_eq!(r.congestion_window, 12000 + 1200);
@@ -2475,3 +2404,4 @@ mod hystart;
 mod pacer;
 mod prr;
 mod reno;
+mod rtt;
