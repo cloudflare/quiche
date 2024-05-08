@@ -721,8 +721,6 @@ mod tests {
             delivered_time: sender.time,
             first_sent_time: sender.time,
             is_app_limited: false,
-            tx_in_flight: 0,
-            lost: 0,
             rtt: Duration::ZERO,
         };
 
@@ -753,8 +751,6 @@ mod tests {
             delivered_time: sender.time,
             first_sent_time: sender.time,
             is_app_limited: false,
-            tx_in_flight: 0,
-            lost: 0,
             rtt: Duration::ZERO,
         };
 

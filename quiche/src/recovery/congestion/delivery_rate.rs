@@ -270,8 +270,6 @@ mod tests {
                 delivered_time: now,
                 first_sent_time: now.checked_sub(rtt).unwrap(),
                 is_app_limited: false,
-                tx_in_flight: 0,
-                lost: 0,
             };
 
             r.congestion.delivery_rate.update_rate_sample(&acked, now);

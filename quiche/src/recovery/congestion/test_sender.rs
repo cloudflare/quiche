@@ -127,8 +127,6 @@ impl TestSender {
                 delivered_time: unacked.delivered_time,
                 first_sent_time: unacked.first_sent_time,
                 is_app_limited: unacked.is_app_limited,
-                tx_in_flight: unacked.tx_in_flight,
-                lost: unacked.lost,
             });
 
             self.next_ack += 1;

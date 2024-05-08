@@ -173,8 +173,6 @@ impl RecoveryEpoch {
                         delivered_time: unacked.delivered_time,
                         first_sent_time: unacked.first_sent_time,
                         is_app_limited: unacked.is_app_limited,
-                        tx_in_flight: unacked.tx_in_flight,
-                        lost: unacked.lost,
                     });
 
                     trace!("{} packet newly acked {}", trace_id, unacked.pkt_num);
@@ -1045,10 +1043,6 @@ pub struct Acked {
     pub first_sent_time: Instant,
 
     pub is_app_limited: bool,
-
-    pub tx_in_flight: usize,
-
-    pub lost: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
