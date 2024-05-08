@@ -417,11 +417,13 @@ fn debug_fmt(r: &Congestion, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 
 #[cfg(test)]
 mod tests {
-    use self::recovery::congestion::reno::test_sender::TestSender;
     use super::*;
-    use crate::recovery::congestion::hystart;
-    use crate::recovery::Recovery;
+
     use crate::CongestionControlAlgorithm;
+
+    use crate::recovery::congestion::hystart;
+    use crate::recovery::congestion::test_sender::TestSender;
+    use crate::recovery::Recovery;
 
     fn test_sender() -> TestSender {
         TestSender::new(recovery::CongestionControlAlgorithm::CUBIC, false)

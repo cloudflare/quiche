@@ -349,11 +349,11 @@ fn debug_fmt(r: &Congestion, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 
 #[cfg(test)]
 mod tests {
-    use self::congestion::reno::test_sender::TestSender;
-
     use super::*;
 
     use crate::recovery;
+
+    use self::congestion::test_sender::TestSender;
 
     use smallvec::smallvec;
 
