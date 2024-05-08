@@ -162,7 +162,7 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         const static uint8_t r[] = "GET /index.html\r\n";
         uint64_t error_code;
         if (quiche_conn_stream_send(conn_io->conn, 4, r, sizeof(r), true, &error_code) < 0) {
-            fprintf(stderr, "failed to send HTTP request");
+            fprintf(stderr, "failed to send HTTP request: %" PRIu64 "\n", error_code);
             return;
         }
 
