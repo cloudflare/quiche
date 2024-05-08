@@ -349,7 +349,8 @@ pub struct Recovery {
 
     congestion: Congestion,
 
-    acked_reuse: Vec<Acked>,
+    /// A resusable list of acks.
+    newly_acked: Vec<Acked>,
 }
 
 pub struct RecoveryConfig {
@@ -409,7 +410,7 @@ impl Recovery {
 
             congestion: Congestion::from_config(recovery_config),
 
-            acked_reuse: Vec::new(),
+            newly_acked: Vec::new(),
         }
     }
 
@@ -527,7 +528,7 @@ impl Recovery {
         } = self.epochs[epoch].detect_and_remove_acked_packets(
             now,
             ranges,
-            &mut self.acked_reuse,
+            &mut self.newly_acked,
             &self.rtt_stats,
             trace_id,
         );
@@ -543,12 +544,12 @@ impl Recovery {
             (self.congestion.cc_ops.rollback)(&mut self.congestion);
         }
 
-        if self.acked_reuse.is_empty() {
+        if self.newly_acked.is_empty() {
             return Ok((0, 0, 0));
         }
 
         // Check if largest packet is newly acked.
-        let largest_newly_acked = self.acked_reuse.last().unwrap();
+        let largest_newly_acked = self.newly_acked.last().unwrap();
 
         if largest_newly_acked.pkt_num == largest_acked && has_ack_eliciting {
             let latest_rtt = now - largest_newly_acked.time_sent;
@@ -566,7 +567,7 @@ impl Recovery {
 
         self.congestion.on_packets_acked(
             self.bytes_in_flight,
-            &mut self.acked_reuse,
+            &mut self.newly_acked,
             &self.rtt_stats,
             now,
         );
