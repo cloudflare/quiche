@@ -359,17 +359,18 @@
 //! quiche defines a number of [feature flags] to reduce the amount of compiled
 //! code and dependencies:
 //!
-//! * `boringssl-vendored` (default): Build the vendored BoringSSL library.
-//!
-//! * `boringssl-boring-crate`: Use the BoringSSL library provided by the
-//!   [boring] crate. It takes precedence over `boringssl-vendored` if both
-//!   features are enabled.
+//! * `boringssl-boring-crate` (default): Use the BoringSSL library provided by
+//!   the [boring] crate.
 //!
 //! * `pkg-config-meta`: Generate pkg-config metadata file for libquiche.
 //!
 //! * `ffi`: Build and expose the FFI API.
 //!
 //! * `qlog`: Enable support for the [qlog] logging format.
+//!
+//! * `custom-client-dcid`: Allow clients to supply a custom DCID when
+//!   initiating a connection. Dangerous if the DCID does not meet QUIC's
+//!   unpredictability and length requirements.
 //!
 //! [feature flags]: https://doc.rust-lang.org/cargo/reference/manifest.html#the-features-section
 //! [boring]: https://crates.io/crates/boring
