@@ -30,7 +30,9 @@ extern crate log;
 use std::io;
 
 use std::net::SocketAddr;
-use std::net::{self,};
+use std::net::{
+    self,
+};
 
 use std::io::prelude::*;
 
@@ -620,11 +622,7 @@ fn main() {
                 while client.conn.scids_left() > 0 {
                     trace!("Generating new source cids");
                     let (scid, reset_token) = generate_cid_and_reset_token(&rng);
-                    if client
-                        .conn
-                        .new_scid(&scid, reset_token, false)
-                        .is_err()
-                    {
+                    if client.conn.new_scid(&scid, reset_token, false).is_err() {
                         break;
                     }
 

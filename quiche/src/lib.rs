@@ -6211,9 +6211,15 @@ impl Connection {
     /// be automatically added.
     pub fn new_destination_cid(
         &mut self, dcid: ConnectionId<'static>, seq: u64, reset_token: u128,
-        retire_prior_to: u64, retired_path_ids: &mut SmallVec<[(u64, usize); 1]>
+        retire_prior_to: u64, retired_path_ids: &mut SmallVec<[(u64, usize); 1]>,
     ) -> Result<()> {
-        self.ids.new_dcid(dcid, seq, reset_token, retire_prior_to, retired_path_ids)
+        self.ids.new_dcid(
+            dcid,
+            seq,
+            reset_token,
+            retire_prior_to,
+            retired_path_ids,
+        )
     }
 
     /// Returns the number of source Connection IDs that are active. This is
