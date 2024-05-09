@@ -4,7 +4,7 @@ name: Stable
 
 env:
   RUSTFLAGS: "-D warnings"
-  TOOLCHAIN: "stable"
+  RUSTTOOLCHAIN: "stable"
 
 jobs:
   quiche:
@@ -25,12 +25,10 @@ jobs:
           submodules: 'recursive'
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
+          toolchain: ${{ env.RUSTTOOLCHAIN }}
           components: clippy
-          override: true
 
       - name: Build OpenSSL
         if: ${{ matrix.tls-feature == 'openssl' }}
@@ -44,42 +42,24 @@ jobs:
           echo "LD_LIBRARY_PATH=$PWD" >> "$GITHUB_ENV"
 
       - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --all-targets --features=ffi,qlog,${{ matrix.tls-feature }}
+        run: cargo test --verbose --all-targets --features=ffi,qlog,${{ matrix.tls-feature }}
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
       - name: Run cargo doc test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --doc --features=ffi,qlog,${{ matrix.tls-feature }}
+        run: cargo test --verbose --doc --features=ffi,qlog,${{ matrix.tls-feature }}
 
       - name: Run cargo package
-        uses: actions-rs/cargo@v1
-        with:
-          command: package
-          args: --verbose --workspace --exclude=quiche_apps --allow-dirty
+        run: cargo package --verbose --workspace --exclude=quiche_apps --allow-dirty
 
       - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --features=ffi,qlog,${{ matrix.tls-feature }} -- -D warnings
+        run: cargo clippy --features=ffi,qlog,${{ matrix.tls-feature }} -- -D warnings
 
       - name: Run cargo clippy on examples
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --examples --features=ffi,qlog,${{ matrix.tls-feature }} -- -D warnings
+        run: cargo clippy --examples --features=ffi,qlog,${{ matrix.tls-feature }} -- -D warnings
 
       - name: Run cargo doc
-        uses: actions-rs/cargo@v1
-        with:
-          command: doc
-          args: --no-deps --all-features --document-private-items
+        run: cargo doc --no-deps --all-features --document-private-items
 
       - name: Build C examples
         run: |
@@ -103,17 +83,12 @@ jobs:
           submodules: 'recursive'
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          override: true
+          toolchain: ${{ env.RUSTTOOLCHAIN }}
 
       - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --all-targets --features ffi,qlog
+        run: cargo test --verbose --all-targets --features ffi,qlog
 
       - name: Build C examples
         run: |
@@ -135,22 +110,17 @@ jobs:
           submodules: 'recursive'
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          target: ${{ matrix.target }}
-          override: true
+          toolchain: ${{ env.RUSTTOOLCHAIN }}
+          targets: ${{ matrix.target }}
 
       - name: Remove cdylib from iOS build
         run: |
           sed -i -e 's/, "cdylib"//g' quiche/Cargo.toml
 
       - name: Run cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --target=${{ matrix.target }} --verbose
+        run: cargo build --target=${{ matrix.target }} --verbose
 
   quiche_windows:
     runs-on: windows-2019
@@ -167,12 +137,13 @@ jobs:
           submodules: 'recursive'
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}-${{ matrix.target }}
-          target: ${{ matrix.target }}
-          override: true
+          toolchain: ${{ env.RUSTTOOLCHAIN }}
+          targets: ${{ matrix.target }}
+
+      - name: Set default toolchain
+        run: rustup default ${{ env.RUSTTOOLCHAIN }}-${{ matrix.target }}
 
       - name: Set up MinGW for 64 bit
         if: matrix.target == 'x86_64-pc-windows-gnu'
@@ -194,17 +165,11 @@ jobs:
 
       - name: Run cargo build
         if: endsWith(matrix.target, '-gnu')
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
+        run: cargo build --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
 
       - name: Run cargo test
         if: endsWith(matrix.target, '-msvc')
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
+        run: cargo test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
 
   quiche_multiarch:
     runs-on: ubuntu-latest
@@ -220,12 +185,19 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
-          command: test
-          args: --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
-          use-cross: true
+          toolchain: ${{ env.RUSTTOOLCHAIN }}
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install cross
+        run: cargo-binstall -y cross
+
+      - name: Run cargo test using cross
+        run: cross test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
 
   http3_test:
     runs-on: ubuntu-latest
@@ -239,23 +211,16 @@ jobs:
           submodules: 'recursive'
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          override: true
+          toolchain: ${{ env.RUSTTOOLCHAIN }}
+          components: clippy
 
       - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --no-run --verbose --manifest-path=tools/http3_test/Cargo.toml
+        run: cargo test --no-run --verbose --manifest-path=tools/http3_test/Cargo.toml
 
       - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --manifest-path=tools/http3_test/Cargo.toml -- -D warnings
+        run: cargo clippy --manifest-path=tools/http3_test/Cargo.toml -- -D warnings
 
   nginx:
     runs-on: ubuntu-latest
@@ -272,11 +237,9 @@ jobs:
           submodules: 'recursive'
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          override: true
+          toolchain: ${{ env.RUSTTOOLCHAIN }}
 
       - name: Install dependencies
         run: sudo apt-get install libpcre3-dev zlib1g-dev
@@ -291,7 +254,13 @@ jobs:
         run: |
           cd nginx-${{ matrix.version }} &&
           patch -p01 < ../nginx/nginx-1.16.patch &&
-          ./configure --with-http_ssl_module --with-http_v2_module --with-http_v3_module --with-openssl="${{ github.workspace }}/quiche/deps/boringssl" --with-quiche="${{ github.workspace }}" --with-debug &&
+          ./configure \
+              --with-http_ssl_module \
+              --with-http_v2_module \
+              --with-http_v3_module \
+              --with-openssl="${{ github.workspace }}/quiche/deps/boringssl" \
+              --with-quiche="${{ github.workspace }}" \
+              --with-debug &&
           make -j`nproc` &&
           objs/nginx -V
 
@@ -336,17 +305,13 @@ jobs:
           submodules: 'recursive'
 
       - name: Install stable toolchain for the target
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
-          target: ${{ matrix.target }}
-          override: true
+          toolchain: ${{ env.RUSTTOOLCHAIN }}
+          targets: ${{ matrix.target }}
 
       - name: Install cargo-ndk
-        uses: actions-rs/install@v0.1
-        with:
-          crate: cargo-ndk
+        run: cargo install cargo-ndk
 
       - name: Download NDK
         run: curl --http1.1 -O https://dl.google.com/android/repository/android-ndk-r${{ env.NDK_LTS_VER }}-linux.zip
@@ -355,9 +320,6 @@ jobs:
         run: unzip -q android-ndk-r${{ env.NDK_LTS_VER }}-linux.zip
 
       - name: Run cargo ndk
-        uses: actions-rs/cargo@v1
-        with:
-          command: ndk
-          args: -t ${{ matrix.arch }} -p ${{ env.API_LEVEL }} -- build --verbose --features ffi
+        run: cargo ndk -t ${{ matrix.arch }} -p ${{ env.API_LEVEL }} -- build --verbose --features ffi
         env:
           ANDROID_NDK_HOME: ${{ github.workspace }}/android-ndk-r${{ env.NDK_LTS_VER  }}

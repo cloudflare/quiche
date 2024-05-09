@@ -5,7 +5,7 @@ name: Nightly
 env:
   RUSTFLAGS: "-D warnings"
   RUSTDOCFLAGS: "--cfg docsrs"
-  TOOLCHAIN: "nightly"
+  RUSTTOOLCHAIN: "nightly"
 
 jobs:
   quiche:
@@ -20,44 +20,27 @@ jobs:
           submodules: 'recursive'
 
       - name: Install nightly toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
+          toolchain: ${{ env.RUSTTOOLCHAIN }}
           components: rustfmt
-          override: true
 
       - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: -- --check
+        run: cargo fmt -- --check
 
       - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --all-targets --features=ffi,qlog
+        run: cargo test --verbose --all-targets --features=ffi,qlog
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
       - name: Run cargo doc test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --doc --features=ffi,qlog
+        run: cargo test --verbose --doc --features=ffi,qlog
 
       - name: Run cargo package
-        uses: actions-rs/cargo@v1
-        with:
-          command: package
-          args: --verbose --workspace --exclude=quiche_apps --allow-dirty
+        run: cargo package --verbose --workspace --exclude=quiche_apps --allow-dirty
 
       - name: Run cargo doc
-        uses: actions-rs/cargo@v1
-        with:
-          command: doc
-          args: --no-deps --all-features --document-private-items
+        run: cargo doc --no-deps --all-features --document-private-items
 
       - name: Build C examples
         run: |
@@ -76,39 +59,25 @@ jobs:
           submodules: 'recursive'
 
       - name: Install nightly toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
+          toolchain: ${{ env.RUSTTOOLCHAIN }}
           components: rustfmt
-          override: true
 
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz
 
       - name: Run cargo fuzz for packet_recv_client
-        uses: actions-rs/cargo@v1
-        with:
-          command: fuzz
-          args: run packet_recv_client -- -runs=1
+        run: cargo fuzz run packet_recv_client -- -runs=1
 
       - name: Run cargo fuzz for packet_recv_server
-        uses: actions-rs/cargo@v1
-        with:
-          command: fuzz
-          args: run packet_recv_server -- -runs=1
+        run: cargo fuzz run packet_recv_server -- -runs=1
 
       - name: Run cargo fuzz for qpack_decode
-        uses: actions-rs/cargo@v1
-        with:
-          command: fuzz
-          args: run qpack_decode -- -runs=1
+        run: cargo fuzz run qpack_decode -- -runs=1
 
       - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --manifest-path=fuzz/Cargo.toml -- --check
+        run: cargo fmt --manifest-path=fuzz/Cargo.toml -- --check
 
   http3_test:
     runs-on: ubuntu-latest
@@ -122,21 +91,13 @@ jobs:
           submodules: 'recursive'
 
       - name: Install nightly toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
-          toolchain: ${{ env.TOOLCHAIN }}
+          toolchain: ${{ env.RUSTTOOLCHAIN }}
           components: rustfmt
-          override: true
 
       - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --no-run --verbose --manifest-path=tools/http3_test/Cargo.toml
+        run: cargo test --no-run --verbose --manifest-path=tools/http3_test/Cargo.toml
 
       - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --manifest-path=tools/http3_test/Cargo.toml -- --check
+        run: cargo fmt --manifest-path=tools/http3_test/Cargo.toml -- --check

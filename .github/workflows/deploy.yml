@@ -18,17 +18,10 @@ jobs:
           submodules: 'recursive'
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          override: true
+        uses: dtolnay/rust-toolchain@nightly
 
       - name: Run cargo doc
-        uses: actions-rs/cargo@v1
-        with:
-          command: doc
-          args: --no-deps --all-features
+        run: cargo doc --no-deps --all-features
 
       - name: Deploy to GitHub Pages
         uses: crazy-max/ghaction-github-pages@v3
