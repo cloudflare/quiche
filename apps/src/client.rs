@@ -559,19 +559,17 @@ pub fn connect(
                         std::net::SocketAddr::V4(addr_v4),
                     )
                     .unwrap();
-                } else {
-                    if let Some(addr_v6) = preferred_address_params.addr_v6 {
-                        info!("Performing server side connection migration - kicked off by client.");
-                        info!(
-                            "New path to be probed: {:?} -> {:?}",
-                            local_addr, addr_v6
-                        );
-                        conn.probe_path(
-                            local_addr,
-                            std::net::SocketAddr::V6(addr_v6),
-                        )
-                        .unwrap();
-                    }
+                } else if let Some(addr_v6) = preferred_address_params.addr_v6 {
+                    info!("Performing server side connection migration - kicked off by client.");
+                    info!(
+                        "New path to be probed: {:?} -> {:?}",
+                        local_addr, addr_v6
+                    );
+                    conn.probe_path(
+                        local_addr,
+                        std::net::SocketAddr::V6(addr_v6),
+                    )
+                    .unwrap();
                 }
 
                 server_preferred_address_probed = true;

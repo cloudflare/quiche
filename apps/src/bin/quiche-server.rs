@@ -92,7 +92,7 @@ fn main() {
         // Set SO_TXTIME socket option on the listening UDP socket for pacing
         // outgoing packets.
         if !args.disable_pacing {
-            match set_txtime_sockopt(&socket) {
+            match set_txtime_sockopt(socket) {
                 Ok(_) => {
                     pacing = true;
                     debug!("successfully set SO_TXTIME socket option");
@@ -696,7 +696,7 @@ fn main() {
                 }
 
                 if let Err(e) = send_to(
-                    &socket,
+                    socket,
                     &out[..total_write],
                     &dst_info.unwrap(),
                     client.max_datagram_size,

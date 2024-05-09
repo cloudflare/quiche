@@ -9655,7 +9655,7 @@ mod tests {
 
         // Notify the client of its new DCID that came over the transport
         // parameter for perferred addressing
-        let _ = pipe
+        pipe
             .client
             .ids
             .new_dcid(
