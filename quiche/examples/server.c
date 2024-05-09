@@ -378,17 +378,19 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 fprintf(stderr, "stream %" PRIu64 " is readable\n", s);
 
                 bool fin = false;
+                uint64_t error_code;
                 ssize_t recv_len = quiche_conn_stream_recv(conn_io->conn, s,
                                                            buf, sizeof(buf),
-                                                           &fin);
+                                                           &fin, &error_code);
                 if (recv_len < 0) {
                     break;
                 }
 
                 if (fin) {
                     static const char *resp = "byez\n";
+                    uint64_t error_code;
                     quiche_conn_stream_send(conn_io->conn, s, (uint8_t *) resp,
-                                            5, true);
+                                            5, true, &error_code);
                 }
             }
 

@@ -52,6 +52,8 @@
 // every new min and overwrites 2nd & 3rd choices. The same property
 // holds for 2nd & 3rd best.
 
+use std::ops::Deref;
+
 use std::time::Duration;
 use std::time::Instant;
 
@@ -63,6 +65,14 @@ struct MinmaxSample<T> {
 
 pub struct Minmax<T> {
     estimate: [MinmaxSample<T>; 3],
+}
+
+impl<T> Deref for Minmax<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.estimate[0].value
+    }
 }
 
 impl<T: PartialOrd + Copy> Minmax<T> {

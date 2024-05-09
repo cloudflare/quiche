@@ -817,7 +817,7 @@ pub extern fn quiche_conn_send_on_path(
 #[no_mangle]
 pub extern fn quiche_conn_stream_recv(
     conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: size_t,
-    fin: &mut bool,
+    fin: &mut bool, out_error_code: &mut u64,
 ) -> ssize_t {
     if out_len > <ssize_t>::max_value() as usize {
         panic!("The provided buffer is too large");
@@ -828,7 +828,14 @@ pub extern fn quiche_conn_stream_recv(
     let (out_len, out_fin) = match conn.stream_recv(stream_id, out) {
         Ok(v) => v,
 
-        Err(e) => return e.to_c(),
+        Err(e) => {
+            match e {
+                Error::StreamReset(error) => *out_error_code = error,
+                Error::StreamStopped(error) => *out_error_code = error,
+                _ => {},
+            }
+            return e.to_c();
+        },
     };
 
     *fin = out_fin;
@@ -839,7 +846,7 @@ pub extern fn quiche_conn_stream_recv(
 #[no_mangle]
 pub extern fn quiche_conn_stream_send(
     conn: &mut Connection, stream_id: u64, buf: *const u8, buf_len: size_t,
-    fin: bool,
+    fin: bool, out_error_code: &mut u64,
 ) -> ssize_t {
     if buf_len > <ssize_t>::max_value() as usize {
         panic!("The provided buffer is too large");
@@ -850,7 +857,14 @@ pub extern fn quiche_conn_stream_send(
     match conn.stream_send(stream_id, buf, fin) {
         Ok(v) => v as ssize_t,
 
-        Err(e) => e.to_c(),
+        Err(e) => {
+            match e {
+                Error::StreamReset(error) => *out_error_code = error,
+                Error::StreamStopped(error) => *out_error_code = error,
+                _ => {},
+            }
+            e.to_c()
+        },
     }
 }
 

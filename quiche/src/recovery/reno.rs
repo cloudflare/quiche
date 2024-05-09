@@ -31,7 +31,6 @@
 use std::cmp;
 use std::time::Instant;
 
-use crate::packet;
 use crate::recovery;
 
 use crate::recovery::Acked;
@@ -56,24 +55,15 @@ pub fn on_init(_r: &mut Recovery) {}
 
 pub fn reset(_r: &mut Recovery) {}
 
-pub fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
-    r.bytes_in_flight += sent_bytes;
-}
+pub fn on_packet_sent(_r: &mut Recovery, _sent_bytes: usize, _now: Instant) {}
 
-fn on_packets_acked(
-    r: &mut Recovery, packets: &mut Vec<Acked>, epoch: packet::Epoch,
-    now: Instant,
-) {
+fn on_packets_acked(r: &mut Recovery, packets: &mut Vec<Acked>, now: Instant) {
     for pkt in packets.drain(..) {
-        on_packet_acked(r, &pkt, epoch, now);
+        on_packet_acked(r, &pkt, now);
     }
 }
 
-fn on_packet_acked(
-    r: &mut Recovery, packet: &Acked, epoch: packet::Epoch, now: Instant,
-) {
-    r.bytes_in_flight = r.bytes_in_flight.saturating_sub(packet.size);
-
+fn on_packet_acked(r: &mut Recovery, packet: &Acked, now: Instant) {
     if r.in_congestion_recovery(packet.time_sent) {
         return;
     }
@@ -87,13 +77,15 @@ fn on_packet_acked(
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
 
-        if r.hystart.in_css(epoch) {
+        if r.hystart.in_css() {
             r.congestion_window += r.hystart.css_cwnd_inc(r.max_datagram_size);
         } else {
             r.congestion_window += r.max_datagram_size;
         }
 
-        if r.hystart.on_packet_acked(epoch, packet, r.latest_rtt, now) {
+        if r.hystart
+            .on_packet_acked(packet, r.rtt_stats.latest_rtt, now)
+        {
             // Exit to congestion avoidance if CSS ends.
             r.ssthresh = r.congestion_window;
         }
@@ -109,8 +101,7 @@ fn on_packet_acked(
 }
 
 fn congestion_event(
-    r: &mut Recovery, _lost_bytes: usize, largest_lost_pkt: &Sent,
-    epoch: packet::Epoch, now: Instant,
+    r: &mut Recovery, _lost_bytes: usize, largest_lost_pkt: &Sent, now: Instant,
 ) {
     // Start a new congestion event if packet was sent after the
     // start of the previous congestion recovery period.
@@ -133,7 +124,7 @@ fn congestion_event(
 
         r.ssthresh = r.congestion_window;
 
-        if r.hystart.in_css(epoch) {
+        if r.hystart.in_css() {
             r.hystart.congestion_event();
         }
     }
@@ -190,7 +181,7 @@ mod tests {
 
         let now = Instant::now();
 
-        r.on_packet_sent_cc(1000, now);
+        r.on_packet_sent_cc(0, 1000, now);
 
         assert_eq!(r.bytes_in_flight, 1000);
     }
@@ -224,8 +215,8 @@ mod tests {
         };
 
         // Send initcwnd full MSS packets to become no longer app limited
-        for _ in 0..r.initial_congestion_window_packets {
-            r.on_packet_sent_cc(p.size, now);
+        for pn in 0..r.initial_congestion_window_packets {
+            r.on_packet_sent_cc(pn as _, p.size, now);
         }
 
         let cwnd_prev = r.cwnd();
@@ -243,7 +234,7 @@ mod tests {
             rtt: Duration::ZERO,
         }];
 
-        r.on_packets_acked(&mut acked, packet::Epoch::Application, now);
+        r.on_packets_acked(&mut acked, now);
 
         // Check if cwnd increased by packet size (slow start).
         assert_eq!(r.cwnd(), cwnd_prev + p.size);
@@ -278,8 +269,8 @@ mod tests {
         };
 
         // Send initcwnd full MSS packets to become no longer app limited
-        for _ in 0..r.initial_congestion_window_packets {
-            r.on_packet_sent_cc(p.size, now);
+        for pn in 0..r.initial_congestion_window_packets {
+            r.on_packet_sent_cc(pn as _, p.size, now);
         }
 
         let cwnd_prev = r.cwnd();
@@ -323,7 +314,7 @@ mod tests {
             },
         ];
 
-        r.on_packets_acked(&mut acked, packet::Epoch::Application, now);
+        r.on_packets_acked(&mut acked, now);
 
         // Acked 3 packets.
         assert_eq!(r.cwnd(), cwnd_prev + p.size * 3);
@@ -359,12 +350,7 @@ mod tests {
             pmtud: false,
         };
 
-        r.congestion_event(
-            r.max_datagram_size,
-            &p,
-            packet::Epoch::Application,
-            now,
-        );
+        r.congestion_event(r.max_datagram_size, &p, now);
 
         // In Reno, after congestion event, cwnd will be cut in half.
         assert_eq!(prev_cwnd / 2, r.cwnd());
@@ -380,7 +366,7 @@ mod tests {
         let prev_cwnd = r.cwnd();
 
         // Fill up bytes_in_flight to avoid app_limited=true
-        r.on_packet_sent_cc(20000, now);
+        r.on_packet_sent_cc(0, 20000, now);
 
         let p = recovery::Sent {
             pkt_num: 0,
@@ -402,12 +388,7 @@ mod tests {
         };
 
         // Trigger congestion event to update ssthresh
-        r.congestion_event(
-            r.max_datagram_size,
-            &p,
-            packet::Epoch::Application,
-            now,
-        );
+        r.congestion_event(r.max_datagram_size, &p, now);
 
         // After congestion event, cwnd will be reduced.
         let cur_cwnd =
@@ -432,8 +413,9 @@ mod tests {
         }];
 
         // Ack more than cwnd bytes with rtt=100ms
-        r.update_rtt(rtt, Duration::from_millis(0), now);
-        r.on_packets_acked(&mut acked, packet::Epoch::Application, now + rtt * 2);
+        r.rtt_stats
+            .update_rtt(rtt, Duration::from_millis(0), now, true);
+        r.on_packets_acked(&mut acked, now + rtt * 2);
 
         // After acking more than cwnd, expect cwnd increased by MSS
         assert_eq!(r.cwnd(), cur_cwnd + r.max_datagram_size);

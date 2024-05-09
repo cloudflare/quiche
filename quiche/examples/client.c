@@ -160,8 +160,9 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
                 (int) app_proto_len, app_proto);
 
         const static uint8_t r[] = "GET /index.html\r\n";
-        if (quiche_conn_stream_send(conn_io->conn, 4, r, sizeof(r), true) < 0) {
-            fprintf(stderr, "failed to send HTTP request\n");
+        uint64_t error_code;
+        if (quiche_conn_stream_send(conn_io->conn, 4, r, sizeof(r), true, &error_code) < 0) {
+            fprintf(stderr, "failed to send HTTP request: %" PRIu64 "\n", error_code);
             return;
         }
 
@@ -179,9 +180,10 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
             fprintf(stderr, "stream %" PRIu64 " is readable\n", s);
 
             bool fin = false;
+            uint64_t error_code;
             ssize_t recv_len = quiche_conn_stream_recv(conn_io->conn, s,
                                                        buf, sizeof(buf),
-                                                       &fin);
+                                                       &fin, &error_code);
             if (recv_len < 0) {
                 break;
             }

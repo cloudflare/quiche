@@ -250,10 +250,10 @@ impl State {
 }
 
 // When entering the recovery episode.
-fn bbr_enter_recovery(r: &mut Recovery, now: Instant) {
+fn bbr_enter_recovery(r: &mut Recovery, in_flight: usize, now: Instant) {
     r.bbr_state.prior_cwnd = per_ack::bbr_save_cwnd(r);
 
-    r.congestion_window = r.bytes_in_flight.max(r.max_datagram_size);
+    r.congestion_window = in_flight.max(r.max_datagram_size);
     r.congestion_recovery_start_time = Some(now);
 
     r.bbr_state.packet_conservation = true;
@@ -287,23 +287,18 @@ fn reset(r: &mut Recovery) {
     init::bbr_init(r);
 }
 
-fn on_packet_sent(r: &mut Recovery, sent_bytes: usize, _now: Instant) {
+fn on_packet_sent(r: &mut Recovery, _sent_bytes: usize, _now: Instant) {
     per_transmit::bbr_on_transmit(r);
-
-    r.bytes_in_flight += sent_bytes;
 }
 
-fn on_packets_acked(
-    r: &mut Recovery, packets: &mut Vec<Acked>, _epoch: packet::Epoch,
-    now: Instant,
-) {
+fn on_packets_acked(r: &mut Recovery, packets: &mut Vec<Acked>, now: Instant) {
+    r.bbr_state.prior_bytes_in_flight = r.bytes_in_flight;
+
     r.bbr_state.newly_acked_bytes =
         packets.drain(..).fold(0, |acked_bytes, p| {
-            r.bbr_state.prior_bytes_in_flight = r.bytes_in_flight;
+            r.bbr_state.prior_bytes_in_flight -= p.size;
 
             per_ack::bbr_update_model_and_state(r, &p, now);
-
-            r.bytes_in_flight = r.bytes_in_flight.saturating_sub(p.size);
 
             acked_bytes + p.size
         });
@@ -321,15 +316,14 @@ fn on_packets_acked(
 }
 
 fn congestion_event(
-    r: &mut Recovery, lost_bytes: usize, largest_lost_pkt: &Sent,
-    _epoch: packet::Epoch, now: Instant,
+    r: &mut Recovery, lost_bytes: usize, largest_lost_pkt: &Sent, now: Instant,
 ) {
     r.bbr_state.newly_lost_bytes = lost_bytes;
 
     // Upon entering Fast Recovery.
     if !r.in_congestion_recovery(largest_lost_pkt.time_sent) {
         // Upon entering Fast Recovery.
-        bbr_enter_recovery(r, now);
+        bbr_enter_recovery(r, r.bytes_in_flight - lost_bytes, now);
     }
 }
 
@@ -396,7 +390,7 @@ mod tests {
         let now = Instant::now();
 
         r.on_init();
-        r.on_packet_sent_cc(1000, now);
+        r.on_packet_sent_cc(0, 1000, now);
 
         assert_eq!(r.bytes_in_flight, 1000);
     }
