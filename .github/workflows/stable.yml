@@ -70,8 +70,8 @@ jobs:
     strategy:
       matrix:
         target:
-          - "macos-latest" # Intel (x86_64)
-          - "macos-14"     # Apple Silicon (M1)
+          - "macos-13"     # Intel (x86_64)
+          - "macos-latest" # Apple Silicon (M1)
     runs-on: ${{ matrix.target }}
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
