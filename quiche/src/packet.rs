@@ -556,7 +556,7 @@ impl<'a> std::fmt::Debug for Header<'a> {
 }
 
 pub fn pkt_num_len(pn: u64, largest_acked: u64) -> usize {
-    let num_unacked: u64 = pn.checked_sub(largest_acked).map_or(0, |v| v) + 1;
+    let num_unacked: u64 = pn.saturating_sub(largest_acked) + 1;
     // computes ceil of num_unacked.log2()
     let min_bits = u64::BITS - num_unacked.leading_zeros();
     // get the num len in bytes
