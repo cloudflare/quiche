@@ -9655,8 +9655,7 @@ mod tests {
 
         // Notify the client of its new DCID that came over the transport
         // parameter for perferred addressing
-        pipe
-            .client
+        pipe.client
             .ids
             .new_dcid(
                 preferred_address_params.connection_id,
