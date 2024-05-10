@@ -62,7 +62,7 @@ impl RttStats {
     pub(crate) fn new(max_ack_delay: Duration) -> Self {
         RttStats {
             latest_rtt: Duration::ZERO,
-            min_rtt: Minmax::new(Duration::MAX),
+            min_rtt: Minmax::new(Duration::ZERO),
             smoothed_rtt: INITIAL_RTT,
             rttvar: INITIAL_RTT / 2,
             first_rtt_sample: None,
@@ -114,6 +114,6 @@ impl RttStats {
     }
 
     pub(crate) fn min_rtt(&self) -> Option<Duration> {
-        self.min_rtt.ne(&Duration::MAX).then_some(*self.min_rtt)
+        self.min_rtt.ne(&Duration::ZERO).then_some(*self.min_rtt)
     }
 }
