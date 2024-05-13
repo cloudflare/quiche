@@ -241,6 +241,13 @@ pub extern fn quiche_config_set_application_protos(
 }
 
 #[no_mangle]
+pub extern fn quiche_config_set_max_amplification_factor(
+    config: &mut Config, v: usize,
+) {
+    config.set_max_amplification_factor(v);
+}
+
+#[no_mangle]
 pub extern fn quiche_config_set_max_idle_timeout(config: &mut Config, v: u64) {
     config.set_max_idle_timeout(v);
 }

@@ -810,6 +810,8 @@ pub struct Config {
     max_connection_window: u64,
     max_stream_window: u64,
 
+    max_amplification_factor: usize,
+
     disable_dcid_reuse: bool,
 }
 
@@ -875,6 +877,8 @@ impl Config {
 
             max_connection_window: MAX_CONNECTION_WINDOW,
             max_stream_window: stream::MAX_STREAM_WINDOW,
+
+            max_amplification_factor: MAX_AMPLIFICATION_FACTOR,
 
             disable_dcid_reuse: false,
         })
@@ -1060,6 +1064,13 @@ impl Config {
         }
 
         self.set_application_protos(&protos_list)
+    }
+
+    /// Sets the anti-amplification limit factor.
+    ///
+    /// The default value is `3`.
+    pub fn set_max_amplification_factor(&mut self, v: usize) {
+        self.max_amplification_factor = v;
     }
 
     /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
@@ -1515,7 +1526,7 @@ pub struct Connection {
     /// Whether the connection is closed.
     closed: bool,
 
-    // Whether the connection was timed out
+    /// Whether the connection was timed out.
     timed_out: bool,
 
     /// Whether to send GREASE.
@@ -1552,6 +1563,9 @@ pub struct Connection {
 
     /// The number of streams stopped by remote.
     stopped_stream_remote_count: u64,
+
+    /// The anti-amplification limit factor.
+    max_amplification_factor: usize,
 }
 
 /// Creates a new server-side connection.
@@ -1992,6 +2006,8 @@ impl Connection {
             stopped_stream_local_count: 0,
             reset_stream_remote_count: 0,
             stopped_stream_remote_count: 0,
+
+            max_amplification_factor: config.max_amplification_factor,
         };
 
         if let Some(odcid) = odcid {
@@ -2246,7 +2262,7 @@ impl Connection {
             // Note that we also need to limit the number of bytes we sent on a
             // path if we are not the host that initiated its usage.
             if self.is_server && !recv_path.verified_peer_address {
-                recv_path.max_send_bytes += len * MAX_AMPLIFICATION_FACTOR;
+                recv_path.max_send_bytes += len * self.max_amplification_factor;
             }
         } else if !self.is_server {
             // If a client receives packets from an unknown server address,
@@ -7622,7 +7638,7 @@ impl Connection {
             false,
         );
 
-        path.max_send_bytes = buf_len * MAX_AMPLIFICATION_FACTOR;
+        path.max_send_bytes = buf_len * self.max_amplification_factor;
         path.active_scid_seq = Some(in_scid_seq);
 
         // Automatically probes the new path.
@@ -9666,6 +9682,34 @@ mod tests {
         let server_sent = flight.iter().fold(0, |out, p| out + p.0.len());
 
         assert_eq!(server_sent, client_sent * MAX_AMPLIFICATION_FACTOR);
+    }
+
+    #[test]
+    fn custom_limit_handshake_data() {
+        const CUSTOM_AMPLIFICATION_FACTOR: usize = 2;
+
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert-big.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_max_amplification_factor(CUSTOM_AMPLIFICATION_FACTOR);
+
+        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
+
+        let flight = testing::emit_flight(&mut pipe.client).unwrap();
+        let client_sent = flight.iter().fold(0, |out, p| out + p.0.len());
+        testing::process_flight(&mut pipe.server, flight).unwrap();
+
+        let flight = testing::emit_flight(&mut pipe.server).unwrap();
+        let server_sent = flight.iter().fold(0, |out, p| out + p.0.len());
+
+        assert_eq!(server_sent, client_sent * CUSTOM_AMPLIFICATION_FACTOR);
     }
 
     #[test]
