@@ -178,6 +178,9 @@ int quiche_config_set_application_protos(quiche_config *config,
                                          const uint8_t *protos,
                                          size_t protos_len);
 
+// Sets the anti-amplification limit factor.
+void quiche_config_set_max_amplification_factor(quiche_config *config, size_t v);
+
 // Sets the `max_idle_timeout` transport parameter, in milliseconds, default is
 // no timeout.
 void quiche_config_set_max_idle_timeout(quiche_config *config, uint64_t v);
