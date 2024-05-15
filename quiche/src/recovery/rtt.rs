@@ -47,7 +47,7 @@ impl Default for RttStats {
     fn default() -> Self {
         RttStats {
             latest_rtt: Duration::ZERO,
-            min_rtt: Minmax::new(Duration::MAX),
+            min_rtt: Minmax::new(INITIAL_RTT),
             smoothed_rtt: INITIAL_RTT,
             rttvar: INITIAL_RTT / 2,
             first_rtt_sample: None,
