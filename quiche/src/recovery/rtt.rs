@@ -63,7 +63,7 @@ impl RttStats {
     pub(crate) fn new(max_ack_delay: Duration) -> Self {
         RttStats {
             latest_rtt: Duration::ZERO,
-            min_rtt: Minmax::new(Duration::ZERO),
+            min_rtt: Minmax::new(INITIAL_RTT),
             smoothed_rtt: INITIAL_RTT,
             rttvar: INITIAL_RTT / 2,
             first_rtt_sample: None,
