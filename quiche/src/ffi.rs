@@ -1210,6 +1210,7 @@ pub struct Stats {
     retrans: usize,
     sent_bytes: u64,
     recv_bytes: u64,
+    acked_bytes: u64,
     lost_bytes: u64,
     stream_retrans_bytes: u64,
     paths_count: usize,
@@ -1245,6 +1246,7 @@ pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.retrans = stats.retrans;
     out.sent_bytes = stats.sent_bytes;
     out.recv_bytes = stats.recv_bytes;
+    out.acked_bytes = stats.acked_bytes;
     out.lost_bytes = stats.lost_bytes;
     out.stream_retrans_bytes = stats.stream_retrans_bytes;
     out.paths_count = stats.paths_count;

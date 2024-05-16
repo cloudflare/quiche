@@ -453,7 +453,7 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((0, 0)),
+            Ok((0, 0, mss * 5)),
         );
 
         assert_eq!(r.bbr_state.state, BBRStateMachine::Startup);
@@ -514,7 +514,7 @@ mod tests {
         let mut acked = ranges::RangeSet::default();
         acked.insert(4..5);
 
-        // 2 acked, 2 x MSS lost.
+        // 1 acked, 2 x MSS lost.
         assert_eq!(
             r.on_ack_received(
                 &acked,
@@ -525,7 +525,7 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((2, 2400)),
+            Ok((2, 2 * mss, mss)),
         );
 
         // Sent: 0, 1, 2, 3, 4, Acked 4.
@@ -595,7 +595,7 @@ mod tests {
                     "",
                     &mut Vec::new(),
                 ),
-                Ok((0, 0)),
+                Ok((0, 0, mss)),
             );
         }
 
@@ -650,7 +650,7 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((0, 0)),
+            Ok((0, 0, mss)),
         );
 
         // Now we are in Drain state.
@@ -717,7 +717,7 @@ mod tests {
                     "",
                     &mut Vec::new(),
                 ),
-                Ok((0, 0)),
+                Ok((0, 0, mss)),
             );
         }
 
@@ -791,7 +791,7 @@ mod tests {
                     "",
                     &mut Vec::new(),
                 ),
-                Ok((0, 0)),
+                Ok((0, 0, mss)),
             );
         }
 
@@ -848,7 +848,7 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((0, 0)),
+            Ok((0, 0, mss)),
         );
 
         assert_eq!(r.bbr_state.state, BBRStateMachine::ProbeRTT);

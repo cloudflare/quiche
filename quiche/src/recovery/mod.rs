@@ -657,7 +657,7 @@ impl Recovery {
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
         epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
         trace_id: &str, newly_acked: &mut Vec<Acked>,
-    ) -> Result<(usize, usize)> {
+    ) -> Result<(usize, usize, usize)> {
         let largest_acked = ranges.last().unwrap();
 
         // Update the largest acked packet.
@@ -694,7 +694,7 @@ impl Recovery {
         }
 
         if newly_acked.is_empty() {
-            return Ok((0, 0));
+            return Ok((0, 0, 0));
         }
 
         // Check if largest packet is newly acked.
@@ -725,7 +725,7 @@ impl Recovery {
         self.epochs[epoch]
             .drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
 
-        Ok(loss)
+        Ok((loss.0, loss.1, acked_bytes))
     }
 
     pub fn on_loss_detection_timeout(
@@ -1642,7 +1642,7 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((0, 0))
+            Ok((0, 0, 2 * 1000))
         );
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 2);
@@ -1734,7 +1734,7 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((2, 2000))
+            Ok((2, 2000, 2 * 1000))
         );
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 4);
@@ -1896,7 +1896,7 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((0, 0))
+            Ok((0, 0, 3 * 1000))
         );
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 2);
@@ -2068,7 +2068,7 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((1, 1000))
+            Ok((1, 1000, 1000 * 2))
         );
 
         now += Duration::from_millis(10);
@@ -2088,7 +2088,7 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((0, 0))
+            Ok((0, 0, 1000))
         );
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 0);
@@ -2171,7 +2171,7 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((0, 0))
+            Ok((0, 0, 12000))
         );
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 0);
@@ -2408,7 +2408,7 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((0, 0))
+            Ok((0, 0, 2 * 1000))
         );
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 2);

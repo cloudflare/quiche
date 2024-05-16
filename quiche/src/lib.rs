@@ -1442,6 +1442,9 @@ pub struct Connection {
     /// Total number of bytes received over the connection.
     recv_bytes: u64,
 
+    /// Total number of bytes sent acked over the connection.
+    acked_bytes: u64,
+
     /// Total number of bytes sent lost over the connection.
     lost_bytes: u64,
 
@@ -1905,6 +1908,7 @@ impl Connection {
             retrans_count: 0,
             sent_bytes: 0,
             recv_bytes: 0,
+            acked_bytes: 0,
             lost_bytes: 0,
 
             rx_data: 0,
@@ -6575,6 +6579,7 @@ impl Connection {
             retrans: self.retrans_count,
             sent_bytes: self.sent_bytes,
             recv_bytes: self.recv_bytes,
+            acked_bytes: self.acked_bytes,
             lost_bytes: self.lost_bytes,
             stream_retrans_bytes: self.stream_retrans_bytes,
             paths_count: self.paths.len(),
@@ -6956,18 +6961,20 @@ impl Connection {
                         p.recovery.delivery_rate_update_app_limited(true);
                     }
 
-                    let (lost_packets, lost_bytes) = p.recovery.on_ack_received(
-                        &ranges,
-                        ack_delay,
-                        epoch,
-                        handshake_status,
-                        now,
-                        &self.trace_id,
-                        &mut self.newly_acked,
-                    )?;
+                    let (lost_packets, lost_bytes, acked_bytes) =
+                        p.recovery.on_ack_received(
+                            &ranges,
+                            ack_delay,
+                            epoch,
+                            handshake_status,
+                            now,
+                            &self.trace_id,
+                            &mut self.newly_acked,
+                        )?;
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
+                    self.acked_bytes += acked_bytes as u64;
                 }
             },
 
@@ -7935,6 +7942,9 @@ pub struct Stats {
 
     /// The number of received bytes.
     pub recv_bytes: u64,
+
+    /// The number of bytes sent acked.
+    pub acked_bytes: u64,
 
     /// The number of bytes sent lost.
     pub lost_bytes: u64,
