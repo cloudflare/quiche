@@ -8,7 +8,7 @@ env:
 
 jobs:
   quiche:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         tls-feature:
@@ -174,7 +174,7 @@ jobs:
         run: cargo test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
 
   quiche_multiarch:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         target: ["aarch64-unknown-linux-gnu","armv7-unknown-linux-gnueabihf","i686-unknown-linux-gnu"]
@@ -202,7 +202,7 @@ jobs:
         run: cross test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
 
   http3_test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -225,7 +225,7 @@ jobs:
         run: cargo clippy --manifest-path=tools/http3_test/Cargo.toml -- -D warnings
 
   nginx:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         version: ["1.16.1"]
@@ -267,7 +267,7 @@ jobs:
           objs/nginx -V
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -281,7 +281,7 @@ jobs:
         run: make docker-build
 
   android_ndk_lts:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       API_LEVEL: "21"
     strategy:

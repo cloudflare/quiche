@@ -9,7 +9,7 @@ env:
 
 jobs:
   quiche:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -48,7 +48,7 @@ jobs:
           make -C quiche/examples
 
   fuzz:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -80,7 +80,7 @@ jobs:
         run: cargo fmt --manifest-path=fuzz/Cargo.toml -- --check
 
   http3_test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
