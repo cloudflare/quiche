@@ -281,7 +281,6 @@ jobs:
   android_ndk_lts:
     runs-on: ubuntu-latest
     env:
-      NDK_LTS_VER: "25"
       API_LEVEL: "21"
     strategy:
       matrix:
@@ -313,13 +312,5 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
 
-      - name: Download NDK
-        run: curl --http1.1 -O https://dl.google.com/android/repository/android-ndk-r${{ env.NDK_LTS_VER }}-linux.zip
-
-      - name: Extract NDK
-        run: unzip -q android-ndk-r${{ env.NDK_LTS_VER }}-linux.zip
-
       - name: Run cargo ndk
-        run: cargo ndk -t ${{ matrix.arch }} -p ${{ env.API_LEVEL }} -- build --verbose --features ffi
-        env:
-          ANDROID_NDK_HOME: ${{ github.workspace }}/android-ndk-r${{ env.NDK_LTS_VER  }}
+        run: cargo ndk --manifest-path quiche/Cargo.toml -t ${{ matrix.arch }} -p ${{ env.API_LEVEL }} -- build --verbose --features ffi
