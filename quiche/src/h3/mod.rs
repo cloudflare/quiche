@@ -1164,6 +1164,8 @@ impl Connection {
             return Err(Error::FrameUnexpected);
         }
 
+        self.send_headers(conn, stream_id, headers, fin)?;
+
         // Clamp and shift urgency into quiche-priority space
         let urgency = priority
             .urgency
@@ -1171,8 +1173,6 @@ impl Connection {
             PRIORITY_URGENCY_OFFSET;
 
         conn.stream_priority(stream_id, urgency, priority.incremental)?;
-
-        self.send_headers(conn, stream_id, headers, fin)?;
 
         Ok(())
     }
