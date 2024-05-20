@@ -383,7 +383,7 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((0, 0)),
+            Ok((0, 0, mss * 5)),
         );
 
         assert!(r.app_limited());

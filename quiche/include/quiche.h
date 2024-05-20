@@ -557,6 +557,9 @@ typedef struct {
     // The number of received bytes.
     uint64_t recv_bytes;
 
+    // The number of bytes acked.
+    uint64_t acked_bytes;
+
     // The number of bytes lost.
     uint64_t lost_bytes;
 
