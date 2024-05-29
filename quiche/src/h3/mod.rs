@@ -285,7 +285,6 @@
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
-#[cfg(feature = "sfv")]
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Write;
@@ -474,6 +473,48 @@ pub enum WireErrorCode {
     /// The requested operation cannot be served over HTTP/3. The peer should
     /// retry over HTTP/1.1.
     VersionFallback      = 0x110,
+}
+
+/// Errors for conversions related to [WireErrorCode].
+#[derive(Debug, Eq, PartialEq)]
+pub enum FromWireConversionError {
+    /// The value was larger than the maximum encodable length.
+    TooBig,
+    /// The value was unknown by quiche, possibly a private extension or grease.
+    Unknown,
+}
+
+impl TryFrom<u64> for WireErrorCode {
+    type Error = FromWireConversionError;
+
+    fn try_from(value: u64) -> std::result::Result<Self, Self::Error> {
+        if value >= 1 << 62 {
+            return Err(FromWireConversionError::TooBig);
+        }
+
+        let res = match value {
+            0x100 => WireErrorCode::NoError,
+            0x101 => WireErrorCode::GeneralProtocolError,
+            0x102 => WireErrorCode::InternalError,
+            0x103 => WireErrorCode::StreamCreationError,
+            0x104 => WireErrorCode::ClosedCriticalStream,
+            0x105 => WireErrorCode::FrameUnexpected,
+            0x106 => WireErrorCode::FrameError,
+            0x107 => WireErrorCode::ExcessiveLoad,
+            0x108 => WireErrorCode::IdError,
+            0x109 => WireErrorCode::SettingsError,
+            0x10a => WireErrorCode::MissingSettings,
+            0x10b => WireErrorCode::RequestRejected,
+            0x10c => WireErrorCode::RequestCancelled,
+            0x10d => WireErrorCode::RequestIncomplete,
+            0x10e => WireErrorCode::MessageError,
+            0x10f => WireErrorCode::ConnectError,
+            0x110 => WireErrorCode::VersionFallback,
+            _ => return Err(FromWireConversionError::Unknown),
+        };
+
+        Ok(res)
+    }
 }
 
 impl Error {
@@ -6481,6 +6522,19 @@ mod tests {
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
         assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    fn wire_error_convert() {
+        assert_eq!(WireErrorCode::try_from(0x100), Ok(WireErrorCode::NoError));
+        assert_eq!(
+            WireErrorCode::try_from(u64::MAX),
+            Err(FromWireConversionError::TooBig)
+        );
+        assert_eq!(
+            WireErrorCode::try_from(0),
+            Err(FromWireConversionError::Unknown)
+        );
     }
 }
 
