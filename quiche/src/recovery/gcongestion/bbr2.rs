@@ -235,7 +235,7 @@ const PARAMS: Params = Params {
 
     overestimate_avoidance: true,
 
-    bw_lo_mode: BwLoMode::Default,
+    bw_lo_mode: BwLoMode::InflightReduction,
 };
 
 #[derive(Debug)]
