@@ -26,9 +26,9 @@ env_logger = "0.10"
 mio = { version = "0.8", features = ["net", "os-poll"] }
 url = "1"
 log = "0.4"
-octets = { version = "0.3.0-gcongestion3", path = "../octets", registry = "cloudflare" }
+octets = { version = "0.3.0-gcongestion4", path = "../octets", registry = "cloudflare" }
 ring = "0.17"
-quiche = { version = "0.21.0-gcongestion3", path = "../quiche", registry = "cloudflare" }
+quiche = { version = "0.21.0-gcongestion4", path = "../quiche", registry = "cloudflare" }
 libc = "0.2"
 nix = { version = "0.27", features = ["net", "socket", "uio"] }
 
