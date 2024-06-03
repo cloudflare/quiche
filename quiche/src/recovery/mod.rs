@@ -603,7 +603,7 @@ impl Recovery {
     pub fn on_ack_received(
         &mut self, ranges: &RangeSet, ack_delay: u64, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
-    ) -> (usize, usize) {
+    ) -> (usize, usize, usize) {
         let prior_in_flight = self.bytes_in_flight;
 
         let AckedDetectionResult {
@@ -624,7 +624,7 @@ impl Recovery {
         }
 
         if self.acked_reuse.is_empty() {
-            return (0, 0);
+            return (0, 0, 0);
         }
 
         self.bytes_in_flight -= acked_bytes;
@@ -666,7 +666,7 @@ impl Recovery {
 
         trace!("{} {:?}", trace_id, self);
 
-        (lost_packets, lost_bytes)
+        (lost_packets, lost_bytes, acked_bytes)
     }
 
     fn detect_and_remove_lost_packets(
@@ -1333,7 +1333,7 @@ mod tests {
                 now,
                 ""
             ),
-            (0, 0)
+            (0, 0, 2000)
         );
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 2);
@@ -1406,7 +1406,7 @@ mod tests {
                 now,
                 ""
             ),
-            (2, 2000)
+            (2, 2000, 2000)
         );
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 4);
@@ -1531,7 +1531,7 @@ mod tests {
                 now,
                 ""
             ),
-            (0, 0)
+            (0, 0, 3000)
         );
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 2);
@@ -1666,7 +1666,7 @@ mod tests {
                 now,
                 ""
             ),
-            (1, 1000)
+            (1, 1000, 2000)
         );
 
         now += Duration::from_millis(10);
@@ -1685,7 +1685,7 @@ mod tests {
                 now,
                 ""
             ),
-            (0, 0)
+            (0, 0, 1000)
         );
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 0);
@@ -1785,7 +1785,7 @@ mod tests {
                 now,
                 "",
             ),
-            (0, 0)
+            (0, 0, 2000)
         );
 
         assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 2);
