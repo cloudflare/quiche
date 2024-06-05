@@ -786,7 +786,8 @@ impl RecoveryApi for GRecovery {
                 }
             })
             .take(epoch.loss_probes)
-            .flatten();
+            .flatten()
+            .filter(|f| !matches!(f, frame::Frame::DatagramHeader { .. }));
 
         // Retransmit the frames from the oldest sent packets on PTO. However
         // the packets are not actually declared lost (so there is no effect to
