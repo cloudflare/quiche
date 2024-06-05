@@ -4799,7 +4799,7 @@ impl Connection {
             is_app_limited: false,
             tx_in_flight: 0,
             lost: 0,
-            has_data,
+            has_data: has_data | dgram_emitted,
             pmtud: pmtud_probe,
         };
 
