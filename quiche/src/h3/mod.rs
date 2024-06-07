@@ -1732,7 +1732,7 @@ impl Connection {
         // flag set.
         if let Some(finished) = self.finished_streams.pop_front() {
             if conn.stream_readable(finished) {
-                // The connection is finished, but is still readable, it may
+                // The stream is finished, but is still readable, it may
                 // indicate that there is a pending error, such as reset.
                 if let Err(crate::Error::StreamReset(e)) =
                     conn.stream_recv(finished, &mut [])
@@ -6416,7 +6416,7 @@ mod tests {
         let mut s = Session::new().unwrap();
         s.handshake().unwrap();
 
-        // Client sends HEADERS and doesn't fin
+        // Client sends HEADERS and doesn't fin.
         let (stream, req) = s.send_request(false).unwrap();
 
         assert!(s.send_body_client(stream, false).is_ok());
@@ -6428,11 +6428,11 @@ mod tests {
             has_body: true,
         };
 
-        // Server receives headers and data
+        // Server receives headers and data...
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
 
-        // ..then Client sends RESET_STREAM
+        // ..then Client sends RESET_STREAM.
         assert_eq!(
             s.pipe
                 .client
@@ -6442,7 +6442,7 @@ mod tests {
 
         assert_eq!(s.pipe.advance(), Ok(()));
 
-        // Server receives the reset and there are no more readable streams
+        // Server receives the reset and there are no more readable streams.
         assert_eq!(s.poll_server(), Ok((stream, Event::Reset(0))));
         assert_eq!(s.poll_server(), Err(Error::Done));
         assert_eq!(s.pipe.server.readable().len(), 0);
