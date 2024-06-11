@@ -1731,6 +1731,15 @@ impl Connection {
         // events are returned when receiving empty stream frames with the fin
         // flag set.
         if let Some(finished) = self.finished_streams.pop_front() {
+            if conn.stream_readable(finished) {
+                // The stream is finished, but is still readable, it may
+                // indicate that there is a pending error, such as reset.
+                if let Err(crate::Error::StreamReset(e)) =
+                    conn.stream_recv(finished, &mut [])
+                {
+                    return Ok((finished, Event::Reset(e)));
+                }
+            }
             return Ok((finished, Event::Finished));
         }
 
@@ -6400,6 +6409,43 @@ mod tests {
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
         assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
+    fn reset_finished_at_server_with_data_pending() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        // Client sends HEADERS and doesn't fin.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        assert!(s.send_body_client(stream, false).is_ok());
+
+        assert_eq!(s.pipe.advance(), Ok(()));
+
+        let ev_headers = Event::Headers {
+            list: req,
+            has_body: true,
+        };
+
+        // Server receives headers and data...
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+
+        // ..then Client sends RESET_STREAM.
+        assert_eq!(
+            s.pipe
+                .client
+                .stream_shutdown(stream, crate::Shutdown::Write, 0),
+            Ok(())
+        );
+
+        assert_eq!(s.pipe.advance(), Ok(()));
+
+        // Server receives the reset and there are no more readable streams.
+        assert_eq!(s.poll_server(), Ok((stream, Event::Reset(0))));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(s.pipe.server.readable().len(), 0);
     }
 
     #[test]
