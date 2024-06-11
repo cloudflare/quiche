@@ -57,6 +57,8 @@ pub fn stdout_sink(out: String) {
 
 const H3_MESSAGE_ERROR: u64 = 0x10E;
 
+pub const MAX_DATAGRAM_SIZE: usize = 1350;
+
 /// ALPN helpers.
 ///
 /// This module contains constants and functions for working with ALPN.
@@ -1639,4 +1641,15 @@ impl HttpConn for Http3Conn {
             partial_responses.remove(&stream_id);
         }
     }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn set_txtime_sockopt(_: &mio::net::UdpSocket) -> std::io::Result<()> {
+    use std::io::Error;
+    use std::io::ErrorKind;
+
+    Err(Error::new(
+        ErrorKind::Other,
+        "Not supported on this platform",
+    ))
 }

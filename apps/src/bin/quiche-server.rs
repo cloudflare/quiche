@@ -27,8 +27,6 @@
 #[macro_use]
 extern crate log;
 
-use std::io;
-
 use std::net;
 
 use std::io::prelude::*;
@@ -50,8 +48,6 @@ use quiche_apps::common::*;
 use quiche_apps::sendto::*;
 
 const MAX_BUF_SIZE: usize = 65507;
-
-const MAX_DATAGRAM_SIZE: usize = 1350;
 
 fn main() {
     let mut buf = [0; MAX_BUF_SIZE];
@@ -778,15 +774,4 @@ fn set_txtime_sockopt(sock: &mio::net::UdpSocket) -> io::Result<()> {
     setsockopt(&fd, TxTime, &config)?;
 
     Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-fn set_txtime_sockopt(_: &mio::net::UdpSocket) -> io::Result<()> {
-    use std::io::Error;
-    use std::io::ErrorKind;
-
-    Err(Error::new(
-        ErrorKind::Other,
-        "Not supported on this platform",
-    ))
 }

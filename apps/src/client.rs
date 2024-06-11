@@ -26,6 +26,7 @@
 
 use crate::args::*;
 use crate::common::*;
+use crate::sendto::*;
 
 use std::net::ToSocketAddrs;
 
@@ -36,8 +37,6 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 use ring::rand::*;
-
-const MAX_DATAGRAM_SIZE: usize = 1350;
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -96,6 +95,25 @@ pub fn connect(
         Some(socket)
     } else {
         None
+    };
+
+    let mut pacing = false;
+    // Set SO_TXTIME socket option on the listening UDP socket for pacing
+    // outgoing packets.
+    if !args.disable_pacing {
+        match set_txtime_sockopt(&socket) {
+            Ok(_) => {
+                pacing = true;
+                debug!("successfully set SO_TXTIME socket option");
+            },
+            Err(e) => debug!("setsockopt failed {:?}", e),
+        };
+    }
+
+    let enable_gso = if args.disable_gso {
+        false
+    } else {
+        detect_gso(&socket, MAX_DATAGRAM_SIZE)
     };
 
     // Create the configuration for the QUIC connection.
@@ -232,7 +250,14 @@ pub fn connect(
 
     let (write, send_info) = conn.send(&mut out).expect("initial send failed");
 
-    while let Err(e) = socket.send_to(&out[..write], send_info.to) {
+    while let Err(e) = send_to(
+        &socket,
+        &mut out,
+        &send_info,
+        MAX_DATAGRAM_SIZE,
+        pacing,
+        enable_gso,
+    ) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
             trace!(
                 "{} -> {}: send() would block",
@@ -536,7 +561,14 @@ pub fn connect(
                         },
                     };
 
-                    if let Err(e) = socket.send_to(&out[..write], send_info.to) {
+                    if let Err(e) = send_to(
+                        &socket,
+                        &mut out,
+                        &send_info,
+                        MAX_DATAGRAM_SIZE,
+                        pacing,
+                        enable_gso,
+                    ) {
                         if e.kind() == std::io::ErrorKind::WouldBlock {
                             trace!(
                                 "{} -> {}: send() would block",
