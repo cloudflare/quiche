@@ -161,7 +161,8 @@ mod tests {
         let mut enc = Encoder::new();
 
         // Indexed name with literal value
-        let headers1 = vec![crate::h3::Header::new(b"location", b"															")];
+        let headers1 =
+            vec![crate::h3::Header::new(b"location", b"															")];
         assert_eq!(enc.encode(&headers1, &mut encoded), Ok(19));
 
         // Literal name and value
