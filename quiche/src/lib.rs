@@ -17357,6 +17357,10 @@ mod flowcontrol;
 mod frame;
 pub mod h3;
 mod minmax;
+#[cfg(feature = "internal")]
+#[doc(hidden)]
+pub mod packet;
+#[cfg(not(feature = "internal"))]
 mod packet;
 mod path;
 mod pmtud;
