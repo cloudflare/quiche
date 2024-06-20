@@ -2878,9 +2878,22 @@ pub mod testing {
 
     impl Session {
         pub fn new() -> Result<Session> {
+            fn path_relative_to_manifest_dir(path: &str) -> String {
+                std::fs::canonicalize(
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path),
+                )
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+            }
+
             let mut config = crate::Config::new(crate::PROTOCOL_VERSION)?;
-            config.load_cert_chain_from_pem_file("examples/cert.crt")?;
-            config.load_priv_key_from_pem_file("examples/cert.key")?;
+            config.load_cert_chain_from_pem_file(
+                &path_relative_to_manifest_dir("examples/cert.crt"),
+            )?;
+            config.load_priv_key_from_pem_file(
+                &path_relative_to_manifest_dir("examples/cert.key"),
+            )?;
             config.set_application_protos(&[b"h3"])?;
             config.set_initial_max_data(1500);
             config.set_initial_max_stream_data_bidi_local(150);
