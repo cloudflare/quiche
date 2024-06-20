@@ -47,7 +47,7 @@ pub fn rand_u64() -> u64 {
 }
 
 pub fn rand_u64_uniform(max: u64) -> u64 {
-    let chunk_size = u64::max_value() / max;
+    let chunk_size = u64::MAX / max;
     let end_of_last_chunk = chunk_size * max;
 
     let mut r = rand_u64();

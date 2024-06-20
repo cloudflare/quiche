@@ -746,7 +746,7 @@ impl<'a> From<&RecvInfo<'a>> for crate::RecvInfo {
 pub extern fn quiche_conn_recv(
     conn: &mut Connection, buf: *mut u8, buf_len: size_t, info: &RecvInfo,
 ) -> ssize_t {
-    if buf_len > <ssize_t>::max_value() as usize {
+    if buf_len > <ssize_t>::MAX as usize {
         panic!("The provided buffer is too large");
     }
 
@@ -773,7 +773,7 @@ pub struct SendInfo {
 pub extern fn quiche_conn_send(
     conn: &mut Connection, out: *mut u8, out_len: size_t, out_info: &mut SendInfo,
 ) -> ssize_t {
-    if out_len > <ssize_t>::max_value() as usize {
+    if out_len > <ssize_t>::MAX as usize {
         panic!("The provided buffer is too large");
     }
 
@@ -799,7 +799,7 @@ pub extern fn quiche_conn_send_on_path(
     from_len: socklen_t, to: *const sockaddr, to_len: socklen_t,
     out_info: &mut SendInfo,
 ) -> ssize_t {
-    if out_len > <ssize_t>::max_value() as usize {
+    if out_len > <ssize_t>::MAX as usize {
         panic!("The provided buffer is too large");
     }
 
@@ -826,7 +826,7 @@ pub extern fn quiche_conn_stream_recv(
     conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: size_t,
     fin: &mut bool, out_error_code: &mut u64,
 ) -> ssize_t {
-    if out_len > <ssize_t>::max_value() as usize {
+    if out_len > <ssize_t>::MAX as usize {
         panic!("The provided buffer is too large");
     }
 
@@ -855,7 +855,7 @@ pub extern fn quiche_conn_stream_send(
     conn: &mut Connection, stream_id: u64, buf: *const u8, buf_len: size_t,
     fin: bool, out_error_code: &mut u64,
 ) -> ssize_t {
-    if buf_len > <ssize_t>::max_value() as usize {
+    if buf_len > <ssize_t>::MAX as usize {
         panic!("The provided buffer is too large");
     }
 
@@ -1390,7 +1390,7 @@ pub extern fn quiche_conn_dgram_send_queue_byte_size(
 pub extern fn quiche_conn_dgram_send(
     conn: &mut Connection, buf: *const u8, buf_len: size_t,
 ) -> ssize_t {
-    if buf_len > <ssize_t>::max_value() as usize {
+    if buf_len > <ssize_t>::MAX as usize {
         panic!("The provided buffer is too large");
     }
 
@@ -1407,7 +1407,7 @@ pub extern fn quiche_conn_dgram_send(
 pub extern fn quiche_conn_dgram_recv(
     conn: &mut Connection, out: *mut u8, out_len: size_t,
 ) -> ssize_t {
-    if out_len > <ssize_t>::max_value() as usize {
+    if out_len > <ssize_t>::MAX as usize {
         panic!("The provided buffer is too large");
     }
 
