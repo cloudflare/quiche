@@ -277,4 +277,9 @@ fn main() {
     if cfg!(feature = "pkg-config-meta") {
         write_pkg_config();
     }
+
+    #[cfg(feature = "ffi")]
+    if target_os != "windows" {
+        cdylib_link_lines::metabuild();
+    }
 }

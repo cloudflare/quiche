@@ -46,7 +46,7 @@ pkg-config-meta = []
 fuzzing = []
 
 # Build and expose the FFI API.
-ffi = []
+ffi = ["dep:cdylib-link-lines"]
 
 # Exposes internal APIs that have no stability guarantees across versions.
 internal = []
@@ -59,6 +59,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [build-dependencies]
 cmake = "0.1"
 pkg-config = { version = "0.3", optional = true }
+cdylib-link-lines = { version = "0.1", optional = true }
 
 [dependencies]
 either = { version = "1.8", default-features = false }
