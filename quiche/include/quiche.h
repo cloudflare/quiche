@@ -27,10 +27,6 @@
 #ifndef QUICHE_H
 #define QUICHE_H
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
-
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -50,6 +46,10 @@ extern "C" {
 #ifdef _MSC_VER
 #include <BaseTsd.h>
 #define ssize_t SSIZE_T
+#endif
+
+#if defined(__cplusplus)
+extern "C" {
 #endif
 
 // QUIC transport API.
