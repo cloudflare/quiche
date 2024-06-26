@@ -555,20 +555,12 @@ impl<'a> std::fmt::Debug for Header<'a> {
     }
 }
 
-pub fn pkt_num_len(pn: u64) -> Result<usize> {
-    let len = if pn < u64::from(u8::MAX) {
-        1
-    } else if pn < u64::from(u16::MAX) {
-        2
-    } else if pn < 16_777_215u64 {
-        3
-    } else if pn < u64::from(u32::MAX) {
-        4
-    } else {
-        return Err(Error::InvalidPacket);
-    };
-
-    Ok(len)
+pub fn pkt_num_len(pn: u64, largest_acked: u64) -> usize {
+    let num_unacked: u64 = pn.saturating_sub(largest_acked) + 1;
+    // computes ceil of num_unacked.log2()
+    let min_bits = u64::BITS - num_unacked.leading_zeros();
+    // get the num len in bytes
+    ((min_bits + 7) / 8) as usize
 }
 
 pub fn decrypt_hdr(
@@ -713,10 +705,10 @@ pub fn encrypt_pkt(
     Ok(payload_offset + ciphertext_len)
 }
 
-pub fn encode_pkt_num(pn: u64, b: &mut octets::OctetsMut) -> Result<()> {
-    let len = pkt_num_len(pn)?;
-
-    match len {
+pub fn encode_pkt_num(
+    pn: u64, pn_len: usize, b: &mut octets::OctetsMut,
+) -> Result<()> {
+    match pn_len {
         1 => b.put_u8(pn as u8)?,
 
         2 => b.put_u16(pn as u16)?,
@@ -1173,9 +1165,31 @@ mod tests {
     }
 
     #[test]
-    fn pkt_num_decode() {
+    fn pkt_num_encode_decode() {
+        let num_len = pkt_num_len(0, 0);
+        assert_eq!(num_len, 1);
         let pn = decode_pkt_num(0xa82f30ea, 0x9b32, 2);
         assert_eq!(pn, 0xa82f9b32);
+        let mut d = [0; 10];
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+        let num_len = pkt_num_len(0xac5c02, 0xabe8b3);
+        assert_eq!(num_len, 2);
+        encode_pkt_num(0xac5c02, num_len, &mut b).unwrap();
+        // reading
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+        let hdr_num = u64::from(b.get_u16().unwrap());
+        let pn = decode_pkt_num(0xac5c01, hdr_num, num_len);
+        assert_eq!(pn, 0xac5c02);
+        // sending 0xace8fe while having 0xabe8b3 acked
+        let num_len = pkt_num_len(0xace9fe, 0xabe8b3);
+        assert_eq!(num_len, 3);
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+        encode_pkt_num(0xace9fe, num_len, &mut b).unwrap();
+        // reading
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+        let hdr_num = u64::from(b.get_u24().unwrap());
+        let pn = decode_pkt_num(0xace9fa, hdr_num, num_len);
+        assert_eq!(pn, 0xace9fe);
     }
 
     #[test]
