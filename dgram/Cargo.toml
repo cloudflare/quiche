@@ -1,0 +1,13 @@
+[package]
+name = "dgram"
+version = "0.1.0"
+edition = "2021"
+
+ [features]
+ async = ["dep:tokio"]
+
+[dependencies]
+libc = "0.2.76"
+nix = { version = "0.27", features = ["net", "socket", "uio"] }
+smallvec = { version = "1.10", features = ["union"] }
+tokio = { version = "1.29", features = ["full", "test-util"], optional = true }
