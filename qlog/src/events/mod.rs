@@ -38,6 +38,8 @@ use std::collections::BTreeMap;
 
 pub type ExData = BTreeMap<String, serde_json::Value>;
 
+pub const LOGLEVEL_URI: &str = "urn:ietf:params:qlog:events:gen#loglevel-09";
+
 pub const CONNECTIVITY_URI: &str = "urn:ietf:params:qlog:events:quic#connectivity-08";
 pub const SECURITY_URI: &str = "urn:ietf:params:qlog:events:quic#security-08";
 pub const QUIC_URI: &str = "urn:ietf:params:qlog:events:quic#quic-08";
@@ -58,7 +60,7 @@ pub enum EventType {
 
     Http3EventType(Http3EventType),
 
-    GenericEventType(GenericEventType),
+    LogLevelEventType(LogLevelEventType),
 
     #[default]
     None,
@@ -458,18 +460,16 @@ impl From<&EventData> for EventType {
             EventData::H3PushResolved { .. } =>
                 EventType::Http3EventType(Http3EventType::PushResolved),
 
-            EventData::ConnectionError { .. } =>
-                EventType::GenericEventType(GenericEventType::ConnectionError),
-            EventData::ApplicationError { .. } =>
-                EventType::GenericEventType(GenericEventType::ApplicationError),
-            EventData::InternalError { .. } =>
-                EventType::GenericEventType(GenericEventType::InternalError),
-            EventData::InternalWarning { .. } =>
-                EventType::GenericEventType(GenericEventType::InternalError),
-            EventData::Message { .. } =>
-                EventType::GenericEventType(GenericEventType::Message),
-            EventData::Marker { .. } =>
-                EventType::GenericEventType(GenericEventType::Marker),
+            EventData::LogLevelError { .. } =>
+                EventType::LogLevelEventType(LogLevelEventType::Error),
+            EventData::LogLevelWarning { .. } =>
+                EventType::LogLevelEventType(LogLevelEventType::Warning),
+            EventData::LogLevelInfo { .. } =>
+                EventType::LogLevelEventType(LogLevelEventType::Info),
+            EventData::LogLevelDebug { .. } =>
+                EventType::LogLevelEventType(LogLevelEventType::Debug),
+            EventData::LogLevelVerbose { .. } =>
+                EventType::LogLevelEventType(LogLevelEventType::Verbose),
         }
     }
 }
@@ -611,38 +611,35 @@ pub enum EventData {
     #[serde(rename = "http:push_resolved")]
     H3PushResolved(h3::H3PushResolved),
 
-    // Generic
-    #[serde(rename = "generic:connection_error")]
-    ConnectionError {
-        code: Option<ConnectionErrorCode>,
-        description: Option<String>,
-    },
-
-    #[serde(rename = "generic:application_error")]
-    ApplicationError {
-        code: Option<ApplicationErrorCode>,
-        description: Option<String>,
-    },
-
-    #[serde(rename = "generic:internal_error")]
-    InternalError {
+    // LogLevel
+    #[serde(rename = "loglevel:error")]
+    LogLevelError {
         code: Option<u64>,
         description: Option<String>,
     },
 
-    #[serde(rename = "generic:internal_warning")]
-    InternalWarning {
+    #[serde(rename = "loglevel:warning")]
+    LogLevelWarning {
         code: Option<u64>,
         description: Option<String>,
     },
 
-    #[serde(rename = "generic:message")]
-    Message { message: String },
+    #[serde(rename = "loglevel:info")]
+    LogLevelInfo {
+        code: Option<u64>,
+        description: Option<String>,
+    },
 
-    #[serde(rename = "generic:marker")]
-    Marker {
-        marker_type: String,
-        message: Option<String>,
+    #[serde(rename = "loglevel:debug")]
+    LogLevelDebug {
+        code: Option<u64>,
+        description: Option<String>,
+    },
+
+    #[serde(rename = "loglevel:verbose")]
+    LogLevelVerbose {
+        code: Option<u64>,
+        description: Option<String>,
     },
 }
 
@@ -669,14 +666,12 @@ impl EventData {
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum GenericEventType {
-    ConnectionError,
-    ApplicationError,
-    InternalError,
-    InternalWarning,
-
-    Message,
-    Marker,
+pub enum LogLevelEventType {
+    Error,
+    Warning,
+    Info,
+    Debug,
+    Verbose,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
