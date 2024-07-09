@@ -135,12 +135,11 @@
 //!     qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
 //!         header: pkt_hdr,
 //!         frames: Some(frames.into()),
-//!         is_coalesced: None,
-//!         retry_token: None,
 //!         stateless_reset_token: None,
 //!         supported_versions: None,
 //!         raw: Some(raw),
 //!         datagram_id: None,
+//!         is_mtu_probe_packet: None,
 //!         send_at_time: None,
 //!         trigger: None,
 //!     });
@@ -189,7 +188,7 @@
 //!   "events": [
 //!     {
 //!       "time": 0.0,
-//!       "name": "transport:packet_sent",
+//!       "name": "quic:packet_sent",
 //!       "data": {
 //!         "header": {
 //!           "packet_type": "initial",
@@ -274,10 +273,8 @@
 //! # );
 //! # let mut file = std::fs::File::create("foo.sqlog").unwrap();
 //! let mut streamer = qlog::streamer::QlogStreamer::new(
-//!     qlog::QLOG_VERSION.to_string(),
 //!     Some("Example qlog".to_string()),
 //!     Some("Example qlog description".to_string()),
-//!     None,
 //!     std::time::Instant::now(),
 //!     trace,
 //!     qlog::events::EventImportance::Base,
@@ -311,10 +308,8 @@
 //! # );
 //! # let mut file = std::fs::File::create("foo.qlog").unwrap();
 //! # let mut streamer = qlog::streamer::QlogStreamer::new(
-//! #     qlog::QLOG_VERSION.to_string(),
 //! #     Some("Example qlog".to_string()),
 //! #     Some("Example qlog description".to_string()),
-//! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
 //! #     qlog::events::EventImportance::Base,
@@ -345,12 +340,11 @@
 //!     qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
 //!         header: pkt_hdr,
 //!         frames: Some(vec![ping, padding].into()),
-//!         is_coalesced: None,
-//!         retry_token: None,
 //!         stateless_reset_token: None,
 //!         supported_versions: None,
 //!         raw: None,
 //!         datagram_id: None,
+//!         is_mtu_probe_packet: None,
 //!         send_at_time: None,
 //!         trigger: None,
 //!     });
@@ -380,10 +374,8 @@
 //! # );
 //! # let mut file = std::fs::File::create("foo.qlog").unwrap();
 //! # let mut streamer = qlog::streamer::QlogStreamer::new(
-//! #     qlog::QLOG_VERSION.to_string(),
 //! #     Some("Example qlog".to_string()),
 //! #     Some("Example qlog description".to_string()),
-//! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
 //! #     qlog::events::EventImportance::Base,
@@ -454,7 +446,8 @@ impl std::convert::From<std::io::Error> for Error {
     }
 }
 
-pub const QLOG_VERSION: &str = "0.3";
+pub const QLOGFILE_URI: &str = "urn:ietf:params:qlog:file:contained";
+pub const QLOGFILESEQ_URI: &str = "urn:ietf:params:qlog:file:sequential";
 
 pub type Bytes = String;
 pub type StatelessResetToken = Bytes;
@@ -470,22 +463,22 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Qlog {
-    pub qlog_version: String,
-    pub qlog_format: String,
+    pub file_schema: String,
+    pub serialization_format: String,
     pub title: Option<String>,
     pub description: Option<String>,
-    pub summary: Option<String>,
+    pub event_schemas: Vec<String>,
 
     pub traces: Vec<Trace>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct QlogSeq {
-    pub qlog_version: String,
-    pub qlog_format: String,
+    pub file_schema: String,
+    pub serialization_format: String,
     pub title: Option<String>,
     pub description: Option<String>,
-    pub summary: Option<String>,
+    pub event_schemas: Vec<String>,
 
     pub trace: TraceSeq,
 }
@@ -734,7 +727,7 @@ mod tests {
     fn packet_sent_event_no_frames() {
         let log_string = r#"{
   "time": 0.0,
-  "name": "transport:packet_sent",
+  "name": "quic:packet_sent",
   "data": {
     "header": {
       "packet_type": "initial",
@@ -772,7 +765,7 @@ mod tests {
     fn packet_sent_event_some_frames() {
         let log_string = r#"{
   "time": 0.0,
-  "name": "transport:packet_sent",
+  "name": "quic:packet_sent",
   "data": {
     "header": {
       "packet_type": "initial",
@@ -900,7 +893,7 @@ mod tests {
   "events": [
     {
       "time": 0.0,
-      "name": "transport:packet_sent",
+      "name": "quic:packet_sent",
       "data": {
         "header": {
           "packet_type": "initial",
