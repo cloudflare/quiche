@@ -2135,10 +2135,8 @@ impl Connection {
         );
 
         let mut streamer = qlog::streamer::QlogStreamer::new(
-            qlog::QLOG_VERSION.to_string(),
             Some(title),
             Some(description),
-            None,
             time::Instant::now(),
             trace,
             self.qlog.level,

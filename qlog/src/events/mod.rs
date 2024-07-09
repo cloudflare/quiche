@@ -27,7 +27,6 @@
 use crate::Bytes;
 use crate::Token;
 use h3::*;
-use qpack::*;
 use quic::*;
 
 use connectivity::ConnectivityEventType;
@@ -58,8 +57,6 @@ pub enum EventType {
     RecoveryEventType(RecoveryEventType),
 
     Http3EventType(Http3EventType),
-
-    QpackEventType(QpackEventType),
 
     GenericEventType(GenericEventType),
 
@@ -294,21 +291,6 @@ impl From<EventType> for EventImportance {
             EventType::Http3EventType(Http3EventType::PushResolved) =>
                 EventImportance::Extra,
 
-            EventType::QpackEventType(QpackEventType::StateUpdated) =>
-                EventImportance::Base,
-            EventType::QpackEventType(QpackEventType::StreamStateUpdated) =>
-                EventImportance::Base,
-            EventType::QpackEventType(QpackEventType::DynamicTableUpdated) =>
-                EventImportance::Extra,
-            EventType::QpackEventType(QpackEventType::HeadersEncoded) =>
-                EventImportance::Base,
-            EventType::QpackEventType(QpackEventType::HeadersDecoded) =>
-                EventImportance::Base,
-            EventType::QpackEventType(QpackEventType::InstructionCreated) =>
-                EventImportance::Base,
-            EventType::QpackEventType(QpackEventType::InstructionParsed) =>
-                EventImportance::Base,
-
             _ => unimplemented!(),
         }
     }
@@ -367,7 +349,6 @@ impl From<EventType> for EventCategory {
             EventType::TransportEventType(_) => EventCategory::Transport,
             EventType::RecoveryEventType(_) => EventCategory::Recovery,
             EventType::Http3EventType(_) => EventCategory::Http,
-            EventType::QpackEventType(_) => EventCategory::Qpack,
 
             _ => unimplemented!(),
         }
@@ -476,21 +457,6 @@ impl From<&EventData> for EventType {
                 EventType::Http3EventType(Http3EventType::FrameParsed),
             EventData::H3PushResolved { .. } =>
                 EventType::Http3EventType(Http3EventType::PushResolved),
-
-            EventData::QpackStateUpdated { .. } =>
-                EventType::QpackEventType(QpackEventType::StateUpdated),
-            EventData::QpackStreamStateUpdated { .. } =>
-                EventType::QpackEventType(QpackEventType::StreamStateUpdated),
-            EventData::QpackDynamicTableUpdated { .. } =>
-                EventType::QpackEventType(QpackEventType::DynamicTableUpdated),
-            EventData::QpackHeadersEncoded { .. } =>
-                EventType::QpackEventType(QpackEventType::HeadersEncoded),
-            EventData::QpackHeadersDecoded { .. } =>
-                EventType::QpackEventType(QpackEventType::HeadersDecoded),
-            EventData::QpackInstructionCreated { .. } =>
-                EventType::QpackEventType(QpackEventType::InstructionCreated),
-            EventData::QpackInstructionParsed { .. } =>
-                EventType::QpackEventType(QpackEventType::InstructionParsed),
 
             EventData::ConnectionError { .. } =>
                 EventType::GenericEventType(GenericEventType::ConnectionError),
@@ -645,28 +611,6 @@ pub enum EventData {
     #[serde(rename = "http:push_resolved")]
     H3PushResolved(h3::H3PushResolved),
 
-    // QPACK
-    #[serde(rename = "qpack:state_updated")]
-    QpackStateUpdated(qpack::QpackStateUpdated),
-
-    #[serde(rename = "qpack:stream_state_updated")]
-    QpackStreamStateUpdated(qpack::QpackStreamStateUpdated),
-
-    #[serde(rename = "qpack:dynamic_table_updated")]
-    QpackDynamicTableUpdated(qpack::QpackDynamicTableUpdated),
-
-    #[serde(rename = "qpack:headers_encoded")]
-    QpackHeadersEncoded(qpack::QpackHeadersEncoded),
-
-    #[serde(rename = "qpack:headers_decoded")]
-    QpackHeadersDecoded(qpack::QpackHeadersDecoded),
-
-    #[serde(rename = "qpack:instruction_created")]
-    QpackInstructionCreated(qpack::QpackInstructionCreated),
-
-    #[serde(rename = "qpack:instruction_parsed")]
-    QpackInstructionParsed(qpack::QpackInstructionParsed),
-
     // Generic
     #[serde(rename = "generic:connection_error")]
     ConnectionError {
@@ -761,5 +705,4 @@ pub mod quic;
 
 pub mod connectivity;
 pub mod h3;
-pub mod qpack;
 pub mod security;
