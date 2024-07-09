@@ -24,6 +24,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use events::CONNECTIVITY_URI;
+use events::H3_URI;
+use events::QUIC_URI;
+use events::RECOVERY_URI;
+use events::SECURITY_URI;
+
 use crate::events::EventData;
 use crate::events::EventImportance;
 use crate::events::EventType;
@@ -69,18 +75,18 @@ impl QlogStreamer {
     /// [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        qlog_version: String, title: Option<String>, description: Option<String>,
-        summary: Option<String>, start_time: std::time::Instant, trace: TraceSeq,
+        title: Option<String>, description: Option<String>,
+        start_time: std::time::Instant, trace: TraceSeq,
         log_level: EventImportance,
         writer: Box<dyn std::io::Write + Send + Sync>,
     ) -> Self {
         let qlog = QlogSeq {
-            qlog_version,
-            qlog_format: "JSON-SEQ".to_string(),
+            file_schema: QLOGFILESEQ_URI.to_string(),
+            serialization_format: "JSON-SEQ".to_string(),
             title,
             description,
-            summary,
             trace,
+            event_schemas: vec![CONNECTIVITY_URI.to_string(), SECURITY_URI.to_string(), QUIC_URI.to_string(), RECOVERY_URI.to_string(), H3_URI.to_string()]
         };
 
         QlogStreamer {

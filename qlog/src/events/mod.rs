@@ -39,6 +39,13 @@ use std::collections::BTreeMap;
 
 pub type ExData = BTreeMap<String, serde_json::Value>;
 
+pub const CONNECTIVITY_URI: &str = "urn:ietf:params:qlog:events:quic#connectivity-08";
+pub const SECURITY_URI: &str = "urn:ietf:params:qlog:events:quic#security-08";
+pub const QUIC_URI: &str = "urn:ietf:params:qlog:events:quic#quic-08";
+pub const RECOVERY_URI: &str = "urn:ietf:params:qlog:events:quic#recovery-08";
+
+pub const H3_URI: &str = "urn:ietf:params:qlog:events:http#h3-08";
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(untagged)]
 pub enum EventType {

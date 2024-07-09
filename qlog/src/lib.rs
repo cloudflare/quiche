@@ -454,7 +454,8 @@ impl std::convert::From<std::io::Error> for Error {
     }
 }
 
-pub const QLOG_VERSION: &str = "0.3";
+pub const QLOGFILE_URI: &str = "urn:ietf:params:qlog:file:contained";
+pub const QLOGFILESEQ_URI: &str = "urn:ietf:params:qlog:file:sequential";
 
 pub type Bytes = String;
 pub type StatelessResetToken = Bytes;
@@ -470,22 +471,22 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Qlog {
-    pub qlog_version: String,
-    pub qlog_format: String,
+    pub file_schema: String,
+    pub serialization_format: String,
     pub title: Option<String>,
     pub description: Option<String>,
-    pub summary: Option<String>,
+    pub event_schemas: Vec<String>,
 
     pub traces: Vec<Trace>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct QlogSeq {
-    pub qlog_version: String,
-    pub qlog_format: String,
+    pub file_schema: String,
+    pub serialization_format: String,
     pub title: Option<String>,
     pub description: Option<String>,
-    pub summary: Option<String>,
+    pub event_schemas: Vec<String>,
 
     pub trace: TraceSeq,
 }
