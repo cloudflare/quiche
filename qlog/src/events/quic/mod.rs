@@ -145,6 +145,8 @@ impl PacketHeader {
 }
 
 pub mod connectivity;
+// qlog has the category quic#quic so the inception lies there
+#[allow(clippy::module_inception)]
 pub mod quic;
 pub mod recovery;
 pub mod security;
