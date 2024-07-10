@@ -26,13 +26,13 @@
 
 use crate::Bytes;
 use crate::Token;
-use http::h3::*;
 use http::h3;
+use http::h3::*;
 use quic::connectivity;
 use quic::connectivity::*;
 use quic::quic::*;
-use quic::recovery::*;
 use quic::recovery;
+use quic::recovery::*;
 use quic::security;
 
 use serde::Deserialize;
@@ -44,7 +44,8 @@ pub type ExData = BTreeMap<String, serde_json::Value>;
 
 pub const LOGLEVEL_URI: &str = "urn:ietf:params:qlog:events:gen#loglevel-09";
 
-pub const CONNECTIVITY_URI: &str = "urn:ietf:params:qlog:events:quic#connectivity-08";
+pub const CONNECTIVITY_URI: &str =
+    "urn:ietf:params:qlog:events:quic#connectivity-08";
 pub const SECURITY_URI: &str = "urn:ietf:params:qlog:events:quic#security-08";
 pub const QUIC_URI: &str = "urn:ietf:params:qlog:events:quic#quic-08";
 pub const RECOVERY_URI: &str = "urn:ietf:params:qlog:events:quic#recovery-08";
@@ -236,25 +237,20 @@ impl From<EventType> for EventImportance {
             EventType::SecurityEventType(SecurityEventType::KeyDiscarded) =>
                 EventImportance::Base,
 
-            EventType::QuicEventType(
-                QuicEventType::VersionInformation,
-            ) => EventImportance::Core,
-            EventType::QuicEventType(
-                QuicEventType::AlpnInformation,
-            ) => EventImportance::Core,
+            EventType::QuicEventType(QuicEventType::VersionInformation) =>
+                EventImportance::Core,
+            EventType::QuicEventType(QuicEventType::AlpnInformation) =>
+                EventImportance::Core,
             EventType::QuicEventType(QuicEventType::ParametersSet) =>
                 EventImportance::Core,
-            EventType::QuicEventType(
-                QuicEventType::ParametersRestored,
-            ) => EventImportance::Base,
-            EventType::QuicEventType(
-                QuicEventType::UdpDatagramsReceived,
-            ) => EventImportance::Extra,
+            EventType::QuicEventType(QuicEventType::ParametersRestored) =>
+                EventImportance::Base,
+            EventType::QuicEventType(QuicEventType::UdpDatagramsReceived) =>
+                EventImportance::Extra,
             EventType::QuicEventType(QuicEventType::UdpDatagramsSent) =>
                 EventImportance::Extra,
-            EventType::QuicEventType(
-                QuicEventType::UdpDatagramDropped,
-            ) => EventImportance::Extra,
+            EventType::QuicEventType(QuicEventType::UdpDatagramDropped) =>
+                EventImportance::Extra,
             EventType::QuicEventType(QuicEventType::PacketReceived) =>
                 EventImportance::Core,
             EventType::QuicEventType(QuicEventType::PacketSent) =>
@@ -265,12 +261,10 @@ impl From<EventType> for EventImportance {
                 EventImportance::Base,
             EventType::QuicEventType(QuicEventType::PacketsAcked) =>
                 EventImportance::Extra,
-            EventType::QuicEventType(
-                QuicEventType::StreamStateUpdated,
-            ) => EventImportance::Base,
-            EventType::QuicEventType(
-                QuicEventType::FramesProcessed,
-            ) => EventImportance::Extra,
+            EventType::QuicEventType(QuicEventType::StreamStateUpdated) =>
+                EventImportance::Base,
+            EventType::QuicEventType(QuicEventType::FramesProcessed) =>
+                EventImportance::Extra,
             EventType::QuicEventType(QuicEventType::StreamDataMoved) =>
                 EventImportance::Base,
             EventType::QuicEventType(QuicEventType::DatagramDataMoved) =>
@@ -396,7 +390,7 @@ impl From<&EventData> for EventType {
                 ),
             EventData::PathAssigned { .. } => EventType::ConnectivityEventType(
                 ConnectivityEventType::PathAssigned,
-                ),
+            ),
             EventData::MtuUpdated { .. } => EventType::ConnectivityEventType(
                 ConnectivityEventType::MtuUpdated,
             ),
@@ -407,20 +401,15 @@ impl From<&EventData> for EventType {
                 EventType::SecurityEventType(SecurityEventType::KeyDiscarded),
 
             EventData::VersionInformation { .. } =>
-                EventType::QuicEventType(
-                    QuicEventType::VersionInformation,
-                ),
+                EventType::QuicEventType(QuicEventType::VersionInformation),
             EventData::AlpnInformation { .. } =>
                 EventType::QuicEventType(QuicEventType::AlpnInformation),
             EventData::ParametersSet { .. } =>
                 EventType::QuicEventType(QuicEventType::ParametersSet),
             EventData::ParametersRestored { .. } =>
-                EventType::QuicEventType(
-                    QuicEventType::ParametersRestored,
-                ),
-            EventData::UdpDatagramsReceived { .. } => EventType::QuicEventType(
-                QuicEventType::UdpDatagramsReceived,
-            ),
+                EventType::QuicEventType(QuicEventType::ParametersRestored),
+            EventData::UdpDatagramsReceived { .. } =>
+                EventType::QuicEventType(QuicEventType::UdpDatagramsReceived),
             EventData::UdpDatagramsSent { .. } =>
                 EventType::QuicEventType(QuicEventType::UdpDatagramsSent),
             EventData::UdpDatagramDropped { .. } =>
@@ -436,9 +425,7 @@ impl From<&EventData> for EventType {
             EventData::PacketsAcked { .. } =>
                 EventType::QuicEventType(QuicEventType::PacketsAcked),
             EventData::StreamStateUpdated { .. } =>
-                EventType::QuicEventType(
-                    QuicEventType::StreamStateUpdated,
-                ),
+                EventType::QuicEventType(QuicEventType::StreamStateUpdated),
             EventData::FramesProcessed { .. } =>
                 EventType::QuicEventType(QuicEventType::FramesProcessed),
             EventData::StreamDataMoved { .. } =>
@@ -734,5 +721,5 @@ pub struct PathEndpointInfo {
     pub connection_ids: Vec<Bytes>,
 }
 
-pub mod quic;
 pub mod http;
+pub mod quic;

@@ -31,11 +31,11 @@ use smallvec::SmallVec;
 
 use super::connectivity::TransportOwner;
 use super::PacketHeader;
-use crate::Bytes;
 use crate::events::DataRecipient;
 use crate::events::PathEndpointInfo;
 use crate::events::RawInfo;
 use crate::events::Token;
+use crate::Bytes;
 use crate::StatelessResetToken;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -180,11 +180,6 @@ pub enum SecurityEventType {
     KeyUpdated,
     KeyDiscarded,
 }
-
-
-
-
-
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(untagged)]
@@ -426,7 +421,7 @@ pub struct ParametersSet {
 
     pub max_datagram_frame_size: Option<u64>,
 
-    pub grease_quic_bit: Option<bool>
+    pub grease_quic_bit: Option<bool>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -489,7 +484,6 @@ pub struct PacketReceived {
     // `frames` is defined here in the QLog schema specification. However,
     // our streaming serializer requires serde to put the object at the end,
     // so we define it there and depend on serde's preserve_order feature.
-
     pub stateless_reset_token: Option<StatelessResetToken>,
 
     pub raw: Option<RawInfo>,
@@ -507,7 +501,6 @@ pub struct PacketSent {
     // `frames` is defined here in the QLog schema specification. However,
     // our streaming serializer requires serde to put the object at the end,
     // so we define it there and depend on serde's preserve_order feature.
-
     pub stateless_reset_token: Option<StatelessResetToken>,
 
     pub supported_versions: Option<Vec<Bytes>>,
@@ -631,8 +624,8 @@ pub struct MigrationStateUpdated {
 #[cfg(test)]
 mod tests {
 
-    use crate::testing::*;
     use crate::events::quic::PacketType;
+    use crate::testing::*;
 
     #[test]
     fn packet_header() {

@@ -389,9 +389,9 @@ use qlog::events::quic::connectivity::TransportOwner;
 #[cfg(feature = "qlog")]
 use qlog::events::quic::quic::DataMovedAdditionalInfo;
 #[cfg(feature = "qlog")]
-use qlog::events::quic::recovery::RecoveryEventType;
-#[cfg(feature = "qlog")]
 use qlog::events::quic::quic::QuicEventType;
+#[cfg(feature = "qlog")]
+use qlog::events::quic::recovery::RecoveryEventType;
 #[cfg(feature = "qlog")]
 use qlog::events::DataRecipient;
 #[cfg(feature = "qlog")]
@@ -2906,15 +2906,16 @@ impl Connection {
                 data: None,
             };
 
-            let ev_data =
-                EventData::PacketReceived(qlog::events::quic::quic::PacketReceived {
+            let ev_data = EventData::PacketReceived(
+                qlog::events::quic::quic::PacketReceived {
                     header: qlog_pkt_hdr,
                     frames: Some(qlog_frames),
                     stateless_reset_token: None,
                     raw: Some(qlog_raw_info),
                     datagram_id: None,
                     trigger: None,
-                });
+                },
+            );
 
             q.add_event_data_with_instant(ev_data, now).ok();
         });
@@ -4795,15 +4796,18 @@ impl Connection {
         }
 
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-            let ev_data = EventData::StreamDataMoved(qlog::events::quic::quic::StreamDataMoved {
-                stream_id: Some(stream_id),
-                offset: Some(offset),
-                length: Some(read as u64),
-                from: Some(DataRecipient::Transport),
-                to: Some(DataRecipient::Application),
-                additional_info: fin.then_some(DataMovedAdditionalInfo::FinSet),
-                raw: None,
-            });
+            let ev_data = EventData::StreamDataMoved(
+                qlog::events::quic::quic::StreamDataMoved {
+                    stream_id: Some(stream_id),
+                    offset: Some(offset),
+                    length: Some(read as u64),
+                    from: Some(DataRecipient::Transport),
+                    to: Some(DataRecipient::Application),
+                    additional_info: fin
+                        .then_some(DataMovedAdditionalInfo::FinSet),
+                    raw: None,
+                },
+            );
 
             let now = time::Instant::now();
             q.add_event_data_with_instant(ev_data, now).ok();
@@ -4985,15 +4989,18 @@ impl Connection {
         self.tx_buffered += sent;
 
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-            let ev_data = EventData::StreamDataMoved(qlog::events::quic::quic::StreamDataMoved {
-                stream_id: Some(stream_id),
-                offset: Some(offset),
-                length: Some(sent as u64),
-                from: Some(DataRecipient::Application),
-                to: Some(DataRecipient::Transport),
-                additional_info: fin.then_some(DataMovedAdditionalInfo::FinSet),
-                raw: None,
-            });
+            let ev_data = EventData::StreamDataMoved(
+                qlog::events::quic::quic::StreamDataMoved {
+                    stream_id: Some(stream_id),
+                    offset: Some(offset),
+                    length: Some(sent as u64),
+                    from: Some(DataRecipient::Application),
+                    to: Some(DataRecipient::Transport),
+                    additional_info: fin
+                        .then_some(DataMovedAdditionalInfo::FinSet),
+                    raw: None,
+                },
+            );
 
             let now = time::Instant::now();
             q.add_event_data_with_instant(ev_data, now).ok();
@@ -8375,45 +8382,39 @@ impl TransportParams {
             self.stateless_reset_token.map(|s| s.to_be_bytes()).as_ref(),
         );
 
-        EventData::ParametersSet(
-            qlog::events::quic::quic::ParametersSet {
-                owner: Some(owner),
-                resumption_allowed: None,
-                early_data_enabled: None,
-                tls_cipher: Some(format!("{cipher:?}")),
-                original_destination_connection_id,
-                initial_source_connection_id: None,
-                retry_source_connection_id: None,
-                stateless_reset_token,
-                disable_active_migration: Some(self.disable_active_migration),
-                max_idle_timeout: Some(self.max_idle_timeout),
-                max_udp_payload_size: Some(self.max_udp_payload_size as u32),
-                ack_delay_exponent: Some(self.ack_delay_exponent as u16),
-                max_ack_delay: Some(self.max_ack_delay as u16),
-                active_connection_id_limit: Some(
-                    self.active_conn_id_limit as u32,
-                ),
+        EventData::ParametersSet(qlog::events::quic::quic::ParametersSet {
+            owner: Some(owner),
+            resumption_allowed: None,
+            early_data_enabled: None,
+            tls_cipher: Some(format!("{cipher:?}")),
+            original_destination_connection_id,
+            initial_source_connection_id: None,
+            retry_source_connection_id: None,
+            stateless_reset_token,
+            disable_active_migration: Some(self.disable_active_migration),
+            max_idle_timeout: Some(self.max_idle_timeout),
+            max_udp_payload_size: Some(self.max_udp_payload_size as u32),
+            ack_delay_exponent: Some(self.ack_delay_exponent as u16),
+            max_ack_delay: Some(self.max_ack_delay as u16),
+            active_connection_id_limit: Some(self.active_conn_id_limit as u32),
 
-                initial_max_data: Some(self.initial_max_data),
-                initial_max_stream_data_bidi_local: Some(
-                    self.initial_max_stream_data_bidi_local,
-                ),
-                initial_max_stream_data_bidi_remote: Some(
-                    self.initial_max_stream_data_bidi_remote,
-                ),
-                initial_max_stream_data_uni: Some(
-                    self.initial_max_stream_data_uni,
-                ),
-                initial_max_streams_bidi: Some(self.initial_max_streams_bidi),
-                initial_max_streams_uni: Some(self.initial_max_streams_uni),
+            initial_max_data: Some(self.initial_max_data),
+            initial_max_stream_data_bidi_local: Some(
+                self.initial_max_stream_data_bidi_local,
+            ),
+            initial_max_stream_data_bidi_remote: Some(
+                self.initial_max_stream_data_bidi_remote,
+            ),
+            initial_max_stream_data_uni: Some(self.initial_max_stream_data_uni),
+            initial_max_streams_bidi: Some(self.initial_max_streams_bidi),
+            initial_max_streams_uni: Some(self.initial_max_streams_uni),
 
-                preferred_address: None,
+            preferred_address: None,
 
-                max_datagram_frame_size: self.max_datagram_frame_size,
+            max_datagram_frame_size: self.max_datagram_frame_size,
 
-                grease_quic_bit: None,
-            },
-        )
+            grease_quic_bit: None,
+        })
     }
 }
 

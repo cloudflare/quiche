@@ -86,7 +86,13 @@ impl QlogStreamer {
             title,
             description,
             trace,
-            event_schemas: vec![CONNECTIVITY_URI.to_string(), SECURITY_URI.to_string(), QUIC_URI.to_string(), RECOVERY_URI.to_string(), H3_URI.to_string()]
+            event_schemas: vec![
+                CONNECTIVITY_URI.to_string(),
+                SECURITY_URI.to_string(),
+                QUIC_URI.to_string(),
+                RECOVERY_URI.to_string(),
+                H3_URI.to_string(),
+            ],
         };
 
         QlogStreamer {

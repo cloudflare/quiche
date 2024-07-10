@@ -295,6 +295,10 @@ use qlog::events::http::h3::FrameCreated;
 #[cfg(feature = "qlog")]
 use qlog::events::http::h3::FrameParsed;
 #[cfg(feature = "qlog")]
+use qlog::events::http::h3::Http3EventType;
+#[cfg(feature = "qlog")]
+use qlog::events::http::h3::Http3Frame;
+#[cfg(feature = "qlog")]
 use qlog::events::http::h3::Owner;
 #[cfg(feature = "qlog")]
 use qlog::events::http::h3::PriorityTargetStreamType;
@@ -302,10 +306,6 @@ use qlog::events::http::h3::PriorityTargetStreamType;
 use qlog::events::http::h3::StreamType;
 #[cfg(feature = "qlog")]
 use qlog::events::http::h3::StreamTypeSet;
-#[cfg(feature = "qlog")]
-use qlog::events::http::h3::Http3EventType;
-#[cfg(feature = "qlog")]
-use qlog::events::http::h3::Http3Frame;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 #[cfg(feature = "qlog")]
@@ -2336,14 +2336,13 @@ impl Connection {
                             None
                         };
 
-                        let ev_data =
-                            EventData::H3StreamTypeSet(StreamTypeSet {
-                                stream_id,
-                                owner: Some(Owner::Remote),
-                                stream_type: ty.to_qlog(),
-                                stream_type_value: ty_val,
-                                associated_push_id: None,
-                            });
+                        let ev_data = EventData::H3StreamTypeSet(StreamTypeSet {
+                            stream_id,
+                            owner: Some(Owner::Remote),
+                            stream_type: ty.to_qlog(),
+                            stream_type_value: ty_val,
+                            associated_push_id: None,
+                        });
 
                         q.add_event_data_now(ev_data).ok();
                     });
@@ -2511,13 +2510,12 @@ impl Connection {
                         qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
                             let frame = Http3Frame::Data { raw: None };
 
-                            let ev_data =
-                                EventData::H3FrameParsed(FrameParsed {
-                                    stream_id,
-                                    length: Some(payload_len),
-                                    frame,
-                                    raw: None,
-                                });
+                            let ev_data = EventData::H3FrameParsed(FrameParsed {
+                                stream_id,
+                                length: Some(payload_len),
+                                frame,
+                                raw: None,
+                            });
 
                             q.add_event_data_now(ev_data).ok();
                         });

@@ -131,8 +131,8 @@
 //!     data: None,
 //! };
 //!
-//! let event_data =
-//!     qlog::events::EventData::PacketSent(qlog::events::quic::quic::PacketSent {
+//! let event_data = qlog::events::EventData::PacketSent(
+//!     qlog::events::quic::quic::PacketSent {
 //!         header: pkt_hdr,
 //!         frames: Some(frames.into()),
 //!         stateless_reset_token: None,
@@ -142,7 +142,8 @@
 //!         is_mtu_probe_packet: None,
 //!         send_at_time: None,
 //!         trigger: None,
-//!     });
+//!     },
+//! );
 //!
 //! trace.push_event(qlog::events::Event::with_time(0.0, event_data));
 //! ```
@@ -336,8 +337,8 @@
 //!     payload_length: 1234,
 //! };
 //!
-//! let event_data =
-//!     qlog::events::EventData::PacketSent(qlog::events::quic::quic::PacketSent {
+//! let event_data = qlog::events::EventData::PacketSent(
+//!     qlog::events::quic::quic::PacketSent {
 //!         header: pkt_hdr,
 //!         frames: Some(vec![ping, padding].into()),
 //!         stateless_reset_token: None,
@@ -347,7 +348,8 @@
 //!         is_mtu_probe_packet: None,
 //!         send_at_time: None,
 //!         trigger: None,
-//!     });
+//!     },
+//! );
 //!
 //! let event = qlog::events::Event::with_time(0.0, event_data);
 //!
@@ -717,8 +719,8 @@ pub mod testing {
 mod tests {
     use super::*;
     use crate::events::quic::quic::PacketSent;
-    use crate::events::quic::PacketType;
     use crate::events::quic::quic::QuicFrame;
+    use crate::events::quic::PacketType;
     use crate::events::EventData;
     use crate::events::RawInfo;
     use testing::*;

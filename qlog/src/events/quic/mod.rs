@@ -144,7 +144,7 @@ impl PacketHeader {
     }
 }
 
-pub mod quic;
 pub mod connectivity;
+pub mod quic;
 pub mod recovery;
 pub mod security;
