@@ -386,10 +386,11 @@ extern crate log;
 use qlog::events::connectivity::ConnectivityEventType;
 #[cfg(feature = "qlog")]
 use qlog::events::connectivity::TransportOwner;
+use qlog::events::quic::DataMovedAdditionalInfo;
 #[cfg(feature = "qlog")]
 use qlog::events::quic::RecoveryEventType;
 #[cfg(feature = "qlog")]
-use qlog::events::quic::TransportEventType;
+use qlog::events::quic::QuicEventType;
 #[cfg(feature = "qlog")]
 use qlog::events::DataRecipient;
 #[cfg(feature = "qlog")]
@@ -1771,19 +1772,19 @@ macro_rules! qlog_with_type {
 
 #[cfg(feature = "qlog")]
 const QLOG_PARAMS_SET: EventType =
-    EventType::TransportEventType(TransportEventType::ParametersSet);
+    EventType::QuicEventType(QuicEventType::ParametersSet);
 
 #[cfg(feature = "qlog")]
 const QLOG_PACKET_RX: EventType =
-    EventType::TransportEventType(TransportEventType::PacketReceived);
+    EventType::QuicEventType(QuicEventType::PacketReceived);
 
 #[cfg(feature = "qlog")]
 const QLOG_PACKET_TX: EventType =
-    EventType::TransportEventType(TransportEventType::PacketSent);
+    EventType::QuicEventType(QuicEventType::PacketSent);
 
 #[cfg(feature = "qlog")]
 const QLOG_DATA_MV: EventType =
-    EventType::TransportEventType(TransportEventType::DataMoved);
+    EventType::QuicEventType(QuicEventType::StreamDataMoved);
 
 #[cfg(feature = "qlog")]
 const QLOG_METRICS: EventType =
@@ -2908,10 +2909,7 @@ impl Connection {
                 EventData::PacketReceived(qlog::events::quic::PacketReceived {
                     header: qlog_pkt_hdr,
                     frames: Some(qlog_frames),
-                    is_coalesced: None,
-                    retry_token: None,
                     stateless_reset_token: None,
-                    supported_versions: None,
                     raw: Some(qlog_raw_info),
                     datagram_id: None,
                     trigger: None,
@@ -3010,13 +3008,14 @@ impl Connection {
                             self.tx_buffered.saturating_sub(length);
 
                         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-                            let ev_data = EventData::DataMoved(
-                                qlog::events::quic::DataMoved {
+                            let ev_data = EventData::StreamDataMoved(
+                                qlog::events::quic::StreamDataMoved {
                                     stream_id: Some(stream_id),
                                     offset: Some(offset),
                                     length: Some(length as u64),
                                     from: Some(DataRecipient::Transport),
                                     to: Some(DataRecipient::Dropped),
+                                    additional_info: None,
                                     raw: None,
                                 },
                             );
@@ -4550,12 +4549,11 @@ impl Connection {
                     EventData::PacketSent(qlog::events::quic::PacketSent {
                         header,
                         frames: Some(qlog_frames),
-                        is_coalesced: None,
-                        retry_token: None,
                         stateless_reset_token: None,
                         supported_versions: None,
                         raw: Some(qlog_raw_info),
                         datagram_id: None,
+                        is_mtu_probe_packet: Some(pmtud_probe),
                         send_at_time: Some(send_at_time),
                         trigger: None,
                     });
@@ -4796,12 +4794,13 @@ impl Connection {
         }
 
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-            let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
+            let ev_data = EventData::StreamDataMoved(qlog::events::quic::StreamDataMoved {
                 stream_id: Some(stream_id),
                 offset: Some(offset),
                 length: Some(read as u64),
                 from: Some(DataRecipient::Transport),
                 to: Some(DataRecipient::Application),
+                additional_info: fin.then_some(DataMovedAdditionalInfo::FinSet),
                 raw: None,
             });
 
@@ -4985,12 +4984,13 @@ impl Connection {
         self.tx_buffered += sent;
 
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-            let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
+            let ev_data = EventData::StreamDataMoved(qlog::events::quic::StreamDataMoved {
                 stream_id: Some(stream_id),
                 offset: Some(offset),
                 length: Some(sent as u64),
                 from: Some(DataRecipient::Application),
                 to: Some(DataRecipient::Transport),
+                additional_info: fin.then_some(DataMovedAdditionalInfo::FinSet),
                 raw: None,
             });
 
@@ -8374,13 +8374,12 @@ impl TransportParams {
             self.stateless_reset_token.map(|s| s.to_be_bytes()).as_ref(),
         );
 
-        EventData::TransportParametersSet(
-            qlog::events::quic::TransportParametersSet {
+        EventData::ParametersSet(
+            qlog::events::quic::ParametersSet {
                 owner: Some(owner),
                 resumption_allowed: None,
                 early_data_enabled: None,
                 tls_cipher: Some(format!("{cipher:?}")),
-                aead_tag_length: None,
                 original_destination_connection_id,
                 initial_source_connection_id: None,
                 retry_source_connection_id: None,
@@ -8408,6 +8407,10 @@ impl TransportParams {
                 initial_max_streams_uni: Some(self.initial_max_streams_uni),
 
                 preferred_address: None,
+
+                max_datagram_frame_size: self.max_datagram_frame_size,
+
+                grease_quic_bit: None,
             },
         )
     }

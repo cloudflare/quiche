@@ -30,6 +30,7 @@ use serde::Serialize;
 use super::ApplicationErrorCode;
 use super::Bytes;
 use super::ConnectionErrorCode;
+use super::PathEndpointInfo;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -142,7 +143,7 @@ pub struct ConnectionStateUpdated {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct PathAssigned {
-    pub path_id: Option<u16>,
+    pub path_id: String,
     pub path_remote: Option<PathEndpointInfo>,
     pub path_local: Option<PathEndpointInfo>,
 }
@@ -153,15 +154,4 @@ pub struct MtuUpdated {
     pub old: Option<u32>,
     pub new: u32,
     pub done: Option<bool>,
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct PathEndpointInfo {
-    pub ip_v4: Option<String>,
-    pub ip_v6: Option<String>,
-    pub port_v4: Option<u16>,
-    pub port_v6: Option<u16>,
-
-    pub connection_ids: Vec<Bytes>,
 }
