@@ -383,15 +383,15 @@
 extern crate log;
 
 #[cfg(feature = "qlog")]
-use qlog::events::connectivity::ConnectivityEventType;
+use qlog::events::quic::connectivity::ConnectivityEventType;
 #[cfg(feature = "qlog")]
-use qlog::events::connectivity::TransportOwner;
+use qlog::events::quic::connectivity::TransportOwner;
 #[cfg(feature = "qlog")]
-use qlog::events::quic::DataMovedAdditionalInfo;
+use qlog::events::quic::quic::DataMovedAdditionalInfo;
 #[cfg(feature = "qlog")]
-use qlog::events::recovery::RecoveryEventType;
+use qlog::events::quic::recovery::RecoveryEventType;
 #[cfg(feature = "qlog")]
-use qlog::events::quic::QuicEventType;
+use qlog::events::quic::quic::QuicEventType;
 #[cfg(feature = "qlog")]
 use qlog::events::DataRecipient;
 #[cfg(feature = "qlog")]
@@ -2794,13 +2794,13 @@ impl Connection {
 
             qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
                 let trigger = Some(
-                    qlog::events::security::KeyUpdateOrRetiredTrigger::RemoteUpdate,
+                    qlog::events::quic::security::KeyUpdateOrRetiredTrigger::RemoteUpdate,
                 );
 
                 let ev_data_client =
-                    EventData::KeyUpdated(qlog::events::security::KeyUpdated {
+                    EventData::KeyUpdated(qlog::events::quic::security::KeyUpdated {
                         key_type:
-                            qlog::events::security::KeyType::Client1RttSecret,
+                            qlog::events::quic::security::KeyType::Client1RttSecret,
                         old: None,
                         new: String::new(),
                         generation: None,
@@ -2810,9 +2810,9 @@ impl Connection {
                 q.add_event_data_with_instant(ev_data_client, now).ok();
 
                 let ev_data_server =
-                    EventData::KeyUpdated(qlog::events::security::KeyUpdated {
+                    EventData::KeyUpdated(qlog::events::quic::security::KeyUpdated {
                         key_type:
-                            qlog::events::security::KeyType::Server1RttSecret,
+                            qlog::events::quic::security::KeyType::Server1RttSecret,
                         old: None,
                         new: String::new(),
                         generation: None,
@@ -2907,7 +2907,7 @@ impl Connection {
             };
 
             let ev_data =
-                EventData::PacketReceived(qlog::events::quic::PacketReceived {
+                EventData::PacketReceived(qlog::events::quic::quic::PacketReceived {
                     header: qlog_pkt_hdr,
                     frames: Some(qlog_frames),
                     stateless_reset_token: None,
@@ -3010,7 +3010,7 @@ impl Connection {
 
                         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
                             let ev_data = EventData::StreamDataMoved(
-                                qlog::events::quic::StreamDataMoved {
+                                qlog::events::quic::quic::StreamDataMoved {
                                     stream_id: Some(stream_id),
                                     offset: Some(offset),
                                     length: Some(length as u64),
@@ -3077,7 +3077,7 @@ impl Connection {
                     q,
                     {
                         let pmtu_data = EventData::MtuUpdated(
-                            qlog::events::connectivity::MtuUpdated {
+                            qlog::events::quic::connectivity::MtuUpdated {
                                 old: Some(p.recovery.max_datagram_size() as u32),
                                 new: p.pmtud.get_current() as u32,
                                 done: Some(pmtud_probe),
@@ -4519,7 +4519,7 @@ impl Connection {
 
         #[cfg(feature = "qlog")]
         let mut qlog_frames: SmallVec<
-            [qlog::events::quic::QuicFrame; 1],
+            [qlog::events::quic::quic::QuicFrame; 1],
         > = SmallVec::with_capacity(frames.len());
 
         for frame in &mut frames {
@@ -4547,7 +4547,7 @@ impl Connection {
                     now.duration_since(q.start_time()).as_secs_f32() * 1000.0;
 
                 let ev_data =
-                    EventData::PacketSent(qlog::events::quic::PacketSent {
+                    EventData::PacketSent(qlog::events::quic::quic::PacketSent {
                         header,
                         frames: Some(qlog_frames),
                         stateless_reset_token: None,
@@ -4795,7 +4795,7 @@ impl Connection {
         }
 
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-            let ev_data = EventData::StreamDataMoved(qlog::events::quic::StreamDataMoved {
+            let ev_data = EventData::StreamDataMoved(qlog::events::quic::quic::StreamDataMoved {
                 stream_id: Some(stream_id),
                 offset: Some(offset),
                 length: Some(read as u64),
@@ -4985,7 +4985,7 @@ impl Connection {
         self.tx_buffered += sent;
 
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-            let ev_data = EventData::StreamDataMoved(qlog::events::quic::StreamDataMoved {
+            let ev_data = EventData::StreamDataMoved(qlog::events::quic::quic::StreamDataMoved {
                 stream_id: Some(stream_id),
                 offset: Some(offset),
                 length: Some(sent as u64),
@@ -7782,22 +7782,22 @@ impl Connection {
         #[cfg(feature = "qlog")]
         {
             let cc = match (self.is_established(), self.timed_out, &self.peer_error, &self.local_error) {
-                (false, _, _, _) => qlog::events::connectivity::ConnectionClosed {
+                (false, _, _, _) => qlog::events::quic::connectivity::ConnectionClosed {
                     owner: Some(TransportOwner::Local),
                     connection_code: None,
                     application_code: None,
                     internal_code: None,
                     reason: Some("Failed to establish connection".to_string()),
-                    trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::HandshakeTimeout)
+                    trigger: Some(qlog::events::quic::connectivity::ConnectionClosedTrigger::HandshakeTimeout)
                 },
 
-                (true, true, _, _) => qlog::events::connectivity::ConnectionClosed {
+                (true, true, _, _) => qlog::events::quic::connectivity::ConnectionClosed {
                     owner: Some(TransportOwner::Local),
                     connection_code: None,
                     application_code: None,
                     internal_code: None,
                     reason: Some("Idle timeout".to_string()),
-                    trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::IdleTimeout)
+                    trigger: Some(qlog::events::quic::connectivity::ConnectionClosedTrigger::IdleTimeout)
                 },
 
                 (true, false, Some(peer_error), None) => {
@@ -7807,13 +7807,13 @@ impl Connection {
                         (Some(qlog::events::ConnectionErrorCode::Value(peer_error.error_code)), None)
                     };
 
-                    qlog::events::connectivity::ConnectionClosed {
+                    qlog::events::quic::connectivity::ConnectionClosed {
                         owner: Some(TransportOwner::Remote),
                         connection_code,
                         application_code,
                         internal_code: None,
                         reason: Some(String::from_utf8_lossy(&peer_error.reason).to_string()),
-                        trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::Error),
+                        trigger: Some(qlog::events::quic::connectivity::ConnectionClosedTrigger::Error),
                     }
                 },
 
@@ -7824,17 +7824,17 @@ impl Connection {
                         (Some(qlog::events::ConnectionErrorCode::Value(local_error.error_code)), None)
                     };
 
-                    qlog::events::connectivity::ConnectionClosed {
+                    qlog::events::quic::connectivity::ConnectionClosed {
                         owner: Some(TransportOwner::Local),
                         connection_code,
                         application_code,
                         internal_code: None,
                         reason: Some(String::from_utf8_lossy(&local_error.reason).to_string()),
-                        trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::Error),
+                        trigger: Some(qlog::events::quic::connectivity::ConnectionClosedTrigger::Error),
                     }
                 },
 
-                _ => qlog::events::connectivity::ConnectionClosed {
+                _ => qlog::events::quic::connectivity::ConnectionClosed {
                     owner: None,
                     connection_code: None,
                     application_code: None,
@@ -8376,7 +8376,7 @@ impl TransportParams {
         );
 
         EventData::ParametersSet(
-            qlog::events::quic::ParametersSet {
+            qlog::events::quic::quic::ParametersSet {
                 owner: Some(owner),
                 resumption_allowed: None,
                 early_data_enabled: None,

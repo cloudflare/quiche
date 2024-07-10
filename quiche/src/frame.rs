@@ -34,13 +34,13 @@ use crate::ranges;
 use crate::stream;
 
 #[cfg(feature = "qlog")]
-use qlog::events::quic::AckedRanges;
+use qlog::events::quic::quic::AckedRanges;
 #[cfg(feature = "qlog")]
-use qlog::events::quic::ErrorSpace;
+use qlog::events::quic::quic::ErrorSpace;
 #[cfg(feature = "qlog")]
-use qlog::events::quic::QuicFrame;
+use qlog::events::quic::quic::QuicFrame;
 #[cfg(feature = "qlog")]
-use qlog::events::quic::StreamType;
+use qlog::events::quic::quic::StreamType;
 
 pub const MAX_CRYPTO_OVERHEAD: usize = 8;
 pub const MAX_DGRAM_OVERHEAD: usize = 2;

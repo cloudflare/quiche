@@ -30,30 +30,13 @@ use serde::Serialize;
 use smallvec::SmallVec;
 
 use super::connectivity::TransportOwner;
-use super::Bytes;
-use super::DataRecipient;
-use super::PathEndpointInfo;
-use super::RawInfo;
-use super::Token;
-use crate::HexSlice;
+use super::PacketHeader;
+use crate::Bytes;
+use crate::events::DataRecipient;
+use crate::events::PathEndpointInfo;
+use crate::events::RawInfo;
+use crate::events::Token;
 use crate::StatelessResetToken;
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum PacketType {
-    Initial,
-    Handshake,
-
-    #[serde(rename = "0RTT")]
-    ZeroRtt,
-
-    #[serde(rename = "1RTT")]
-    OneRtt,
-
-    Retry,
-    VersionNegotiation,
-    Unknown,
-}
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -61,102 +44,6 @@ pub enum PacketNumberSpace {
     Initial,
     Handshake,
     ApplicationData,
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub struct PacketHeader {
-    pub packet_type: PacketType,
-    pub packet_number: Option<u64>,
-
-    pub flags: Option<u8>,
-    pub token: Option<Token>,
-
-    pub length: Option<u16>,
-
-    pub version: Option<Bytes>,
-
-    pub scil: Option<u8>,
-    pub dcil: Option<u8>,
-    pub scid: Option<Bytes>,
-    pub dcid: Option<Bytes>,
-}
-
-impl PacketHeader {
-    #[allow(clippy::too_many_arguments)]
-    /// Creates a new PacketHeader.
-    pub fn new(
-        packet_type: PacketType, packet_number: Option<u64>, flags: Option<u8>,
-        token: Option<Token>, length: Option<u16>, version: Option<u32>,
-        scid: Option<&[u8]>, dcid: Option<&[u8]>,
-    ) -> Self {
-        let (scil, scid) = match scid {
-            Some(cid) => (
-                Some(cid.len() as u8),
-                Some(format!("{}", HexSlice::new(&cid))),
-            ),
-
-            None => (None, None),
-        };
-
-        let (dcil, dcid) = match dcid {
-            Some(cid) => (
-                Some(cid.len() as u8),
-                Some(format!("{}", HexSlice::new(&cid))),
-            ),
-
-            None => (None, None),
-        };
-
-        let version = version.map(|v| format!("{v:x?}"));
-
-        PacketHeader {
-            packet_type,
-            packet_number,
-            flags,
-            token,
-            length,
-            version,
-            scil,
-            dcil,
-            scid,
-            dcid,
-        }
-    }
-
-    /// Creates a new PacketHeader.
-    ///
-    /// Once a QUIC connection has formed, version, dcid and scid are stable, so
-    /// there are space benefits to not logging them in every packet, especially
-    /// PacketType::OneRtt.
-    pub fn with_type(
-        ty: PacketType, packet_number: Option<u64>, version: Option<u32>,
-        scid: Option<&[u8]>, dcid: Option<&[u8]>,
-    ) -> Self {
-        match ty {
-            PacketType::OneRtt => PacketHeader::new(
-                ty,
-                packet_number,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ),
-
-            _ => PacketHeader::new(
-                ty,
-                packet_number,
-                None,
-                None,
-                None,
-                version,
-                scid,
-                dcid,
-            ),
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]

@@ -28,8 +28,8 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::PacketHeader;
-use super::PacketNumberSpace;
-use super::QuicFrame;
+use crate::events::PacketNumberSpace;
+use crate::events::QuicFrame;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]

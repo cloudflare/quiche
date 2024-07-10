@@ -27,10 +27,10 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::ApplicationErrorCode;
-use super::Bytes;
-use super::ConnectionErrorCode;
-use super::PathEndpointInfo;
+use crate::events::ApplicationErrorCode;
+use crate::events::Bytes;
+use crate::events::ConnectionErrorCode;
+use crate::events::PathEndpointInfo;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]

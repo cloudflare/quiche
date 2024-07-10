@@ -26,11 +26,14 @@
 
 use crate::Bytes;
 use crate::Token;
-use h3::*;
-use quic::*;
-use recovery::*;
-
-use connectivity::ConnectivityEventType;
+use http::h3::*;
+use http::h3;
+use quic::connectivity;
+use quic::connectivity::*;
+use quic::quic::*;
+use quic::recovery::*;
+use quic::recovery;
+use quic::security;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -547,55 +550,55 @@ pub enum EventData {
 
     // Transport
     #[serde(rename = "quic:version_information")]
-    VersionInformation(quic::QuicVersionInformation),
+    VersionInformation(quic::quic::QuicVersionInformation),
 
     #[serde(rename = "quic:alpn_information")]
-    AlpnInformation(quic::AlpnInformation),
+    AlpnInformation(quic::quic::AlpnInformation),
 
     #[serde(rename = "quic:parameters_set")]
-    ParametersSet(quic::ParametersSet),
+    ParametersSet(quic::quic::ParametersSet),
 
     #[serde(rename = "quic:parameters_restored")]
-    ParametersRestored(quic::ParametersRestored),
+    ParametersRestored(quic::quic::ParametersRestored),
 
     #[serde(rename = "quic:datagrams_received")]
-    UdpDatagramsReceived(quic::UdpDatagramsReceived),
+    UdpDatagramsReceived(quic::quic::UdpDatagramsReceived),
 
     #[serde(rename = "quic:datagrams_sent")]
-    UdpDatagramsSent(quic::UdpDatagramsSent),
+    UdpDatagramsSent(quic::quic::UdpDatagramsSent),
 
     #[serde(rename = "quic:datagram_dropped")]
-    UdpDatagramDropped(quic::UdpDatagramDropped),
+    UdpDatagramDropped(quic::quic::UdpDatagramDropped),
 
     #[serde(rename = "quic:packet_received")]
-    PacketReceived(quic::PacketReceived),
+    PacketReceived(quic::quic::PacketReceived),
 
     #[serde(rename = "quic:packet_sent")]
-    PacketSent(quic::PacketSent),
+    PacketSent(quic::quic::PacketSent),
 
     #[serde(rename = "quic:packet_dropped")]
-    PacketDropped(quic::PacketDropped),
+    PacketDropped(quic::quic::PacketDropped),
 
     #[serde(rename = "quic:packet_buffered")]
-    PacketBuffered(quic::PacketBuffered),
+    PacketBuffered(quic::quic::PacketBuffered),
 
     #[serde(rename = "quic:packets_acked")]
-    PacketsAcked(quic::PacketsAcked),
+    PacketsAcked(quic::quic::PacketsAcked),
 
     #[serde(rename = "quic:stream_state_updated")]
-    StreamStateUpdated(quic::StreamStateUpdated),
+    StreamStateUpdated(quic::quic::StreamStateUpdated),
 
     #[serde(rename = "quic:frames_processed")]
-    FramesProcessed(quic::FramesProcessed),
+    FramesProcessed(quic::quic::FramesProcessed),
 
     #[serde(rename = "quic:stream_data_moved")]
-    StreamDataMoved(quic::StreamDataMoved),
+    StreamDataMoved(quic::quic::StreamDataMoved),
 
     #[serde(rename = "quic:datagram_data_moved")]
-    DatagramDataMoved(quic::DatagramDataMoved),
+    DatagramDataMoved(quic::quic::DatagramDataMoved),
 
     #[serde(rename = "quic:migration_state_updated")]
-    MigrationStateUpdated(quic::MigrationStateUpdated),
+    MigrationStateUpdated(quic::quic::MigrationStateUpdated),
 
     // Recovery
     #[serde(rename = "recovery:parameters_set")]
@@ -618,22 +621,22 @@ pub enum EventData {
 
     // HTTP/3
     #[serde(rename = "http:parameters_set")]
-    H3ParametersSet(h3::H3ParametersSet),
+    H3ParametersSet(h3::ParametersSet),
 
     #[serde(rename = "http:parameters_restored")]
-    H3ParametersRestored(h3::H3ParametersRestored),
+    H3ParametersRestored(h3::ParametersRestored),
 
     #[serde(rename = "http:stream_type_set")]
-    H3StreamTypeSet(h3::H3StreamTypeSet),
+    H3StreamTypeSet(h3::StreamTypeSet),
 
     #[serde(rename = "http:frame_created")]
-    H3FrameCreated(h3::H3FrameCreated),
+    H3FrameCreated(h3::FrameCreated),
 
     #[serde(rename = "http:frame_parsed")]
-    H3FrameParsed(h3::H3FrameParsed),
+    H3FrameParsed(h3::FrameParsed),
 
     #[serde(rename = "http:push_resolved")]
-    H3PushResolved(h3::H3PushResolved),
+    H3PushResolved(h3::PushResolved),
 
     // LogLevel
     #[serde(rename = "loglevel:error")]
@@ -732,8 +735,4 @@ pub struct PathEndpointInfo {
 }
 
 pub mod quic;
-
-pub mod connectivity;
-pub mod h3;
-pub mod recovery;
-pub mod security;
+pub mod http;

@@ -1173,7 +1173,7 @@ impl QlogMetrics {
         if emit_event {
             // QVis can't use all these fields and they can be large.
             return Some(EventData::MetricsUpdated(
-                qlog::events::recovery::MetricsUpdated {
+                qlog::events::quic::recovery::MetricsUpdated {
                     min_rtt: new_min_rtt,
                     smoothed_rtt: new_smoothed_rtt,
                     latest_rtt: new_latest_rtt,
