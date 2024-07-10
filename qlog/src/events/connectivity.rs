@@ -61,6 +61,7 @@ pub enum ConnectivityEventType {
     ConnectionIdUpdated,
     SpinBitUpdated,
     ConnectionStateUpdated,
+    PathAssigned,
     MtuUpdated,
 }
 
@@ -140,8 +141,27 @@ pub struct ConnectionStateUpdated {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PathAssigned {
+    pub path_id: Option<u16>,
+    pub path_remote: Option<PathEndpointInfo>,
+    pub path_local: Option<PathEndpointInfo>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct MtuUpdated {
-    pub old: Option<u16>,
-    pub new: u16,
+    pub old: Option<u32>,
+    pub new: u32,
     pub done: Option<bool>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PathEndpointInfo {
+    pub ip_v4: Option<String>,
+    pub ip_v6: Option<String>,
+    pub port_v4: Option<u16>,
+    pub port_v6: Option<u16>,
+
+    pub connection_ids: Vec<Bytes>,
 }

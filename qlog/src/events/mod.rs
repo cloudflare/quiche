@@ -221,6 +221,9 @@ impl From<EventType> for EventImportance {
                 ConnectivityEventType::ConnectionStateUpdated,
             ) => EventImportance::Base,
             EventType::ConnectivityEventType(
+                ConnectivityEventType::PathAssigned,
+            ) => EventImportance::Extra,
+            EventType::ConnectivityEventType(
                 ConnectivityEventType::MtuUpdated,
             ) => EventImportance::Extra,
 
@@ -383,6 +386,9 @@ impl From<&EventData> for EventType {
                 EventType::ConnectivityEventType(
                     ConnectivityEventType::ConnectionStateUpdated,
                 ),
+            EventData::PathAssigned { .. } => EventType::ConnectivityEventType(
+                ConnectivityEventType::PathAssigned,
+                ),
             EventData::MtuUpdated { .. } => EventType::ConnectivityEventType(
                 ConnectivityEventType::MtuUpdated,
             ),
@@ -516,6 +522,9 @@ pub enum EventData {
 
     #[serde(rename = "connectivity:connection_state_updated")]
     ConnectionStateUpdated(connectivity::ConnectionStateUpdated),
+
+    #[serde(rename = "connectivity:path_assigned")]
+    PathAssigned(connectivity::PathAssigned),
 
     #[serde(rename = "connectivity:mtu_updated")]
     MtuUpdated(connectivity::MtuUpdated),

@@ -3078,8 +3078,8 @@ impl Connection {
                     {
                         let pmtu_data = EventData::MtuUpdated(
                             qlog::events::connectivity::MtuUpdated {
-                                old: Some(p.recovery.max_datagram_size() as u16),
-                                new: p.pmtud.get_current() as u16,
+                                old: Some(p.recovery.max_datagram_size() as u32),
+                                new: p.pmtud.get_current() as u32,
                                 done: Some(pmtud_probe),
                             },
                         );
