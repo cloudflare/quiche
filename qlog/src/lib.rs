@@ -120,7 +120,7 @@
 //!     Some(&dcid),
 //! );
 //!
-//! let frames = vec![qlog::events::quic::QuicFrame::Crypto {
+//! let frames = vec![qlog::events::quic::quic::QuicFrame::Crypto {
 //!     offset: 0,
 //!     length: 0,
 //! }];
@@ -132,15 +132,14 @@
 //! };
 //!
 //! let event_data =
-//!     qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
+//!     qlog::events::EventData::PacketSent(qlog::events::quic::quic::PacketSent {
 //!         header: pkt_hdr,
 //!         frames: Some(frames.into()),
-//!         is_coalesced: None,
-//!         retry_token: None,
 //!         stateless_reset_token: None,
 //!         supported_versions: None,
 //!         raw: Some(raw),
 //!         datagram_id: None,
+//!         is_mtu_probe_packet: None,
 //!         send_at_time: None,
 //!         trigger: None,
 //!     });
@@ -189,7 +188,7 @@
 //!   "events": [
 //!     {
 //!       "time": 0.0,
-//!       "name": "transport:packet_sent",
+//!       "name": "quic:packet_sent",
 //!       "data": {
 //!         "header": {
 //!           "packet_type": "initial",
@@ -274,10 +273,8 @@
 //! # );
 //! # let mut file = std::fs::File::create("foo.sqlog").unwrap();
 //! let mut streamer = qlog::streamer::QlogStreamer::new(
-//!     qlog::QLOG_VERSION.to_string(),
 //!     Some("Example qlog".to_string()),
 //!     Some("Example qlog description".to_string()),
-//!     None,
 //!     std::time::Instant::now(),
 //!     trace,
 //!     qlog::events::EventImportance::Base,
@@ -311,10 +308,8 @@
 //! # );
 //! # let mut file = std::fs::File::create("foo.qlog").unwrap();
 //! # let mut streamer = qlog::streamer::QlogStreamer::new(
-//! #     qlog::QLOG_VERSION.to_string(),
 //! #     Some("Example qlog".to_string()),
 //! #     Some("Example qlog description".to_string()),
-//! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
 //! #     qlog::events::EventImportance::Base,
@@ -332,25 +327,24 @@
 //!     Some(&dcid),
 //! );
 //!
-//! let ping = qlog::events::quic::QuicFrame::Ping {
+//! let ping = qlog::events::quic::quic::QuicFrame::Ping {
 //!     length: None,
 //!     payload_length: None,
 //! };
-//! let padding = qlog::events::quic::QuicFrame::Padding {
+//! let padding = qlog::events::quic::quic::QuicFrame::Padding {
 //!     length: None,
 //!     payload_length: 1234,
 //! };
 //!
 //! let event_data =
-//!     qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
+//!     qlog::events::EventData::PacketSent(qlog::events::quic::quic::PacketSent {
 //!         header: pkt_hdr,
 //!         frames: Some(vec![ping, padding].into()),
-//!         is_coalesced: None,
-//!         retry_token: None,
 //!         stateless_reset_token: None,
 //!         supported_versions: None,
 //!         raw: None,
 //!         datagram_id: None,
+//!         is_mtu_probe_packet: None,
 //!         send_at_time: None,
 //!         trigger: None,
 //!     });
@@ -380,10 +374,8 @@
 //! # );
 //! # let mut file = std::fs::File::create("foo.qlog").unwrap();
 //! # let mut streamer = qlog::streamer::QlogStreamer::new(
-//! #     qlog::QLOG_VERSION.to_string(),
 //! #     Some("Example qlog".to_string()),
 //! #     Some("Example qlog description".to_string()),
-//! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
 //! #     qlog::events::EventImportance::Base,
@@ -724,9 +716,9 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::quic::PacketSent;
+    use crate::events::quic::quic::PacketSent;
     use crate::events::quic::PacketType;
-    use crate::events::quic::QuicFrame;
+    use crate::events::quic::quic::QuicFrame;
     use crate::events::EventData;
     use crate::events::RawInfo;
     use testing::*;
@@ -735,7 +727,7 @@ mod tests {
     fn packet_sent_event_no_frames() {
         let log_string = r#"{
   "time": 0.0,
-  "name": "transport:packet_sent",
+  "name": "quic:packet_sent",
   "data": {
     "header": {
       "packet_type": "initial",
@@ -757,8 +749,6 @@ mod tests {
         let ev_data = EventData::PacketSent(PacketSent {
             header: pkt_hdr,
             frames: None,
-            is_coalesced: None,
-            retry_token: None,
             stateless_reset_token: None,
             supported_versions: None,
             raw: Some(RawInfo {
@@ -767,6 +757,7 @@ mod tests {
                 data: None,
             }),
             datagram_id: None,
+            is_mtu_probe_packet: None,
             send_at_time: None,
             trigger: None,
         });
@@ -780,7 +771,7 @@ mod tests {
     fn packet_sent_event_some_frames() {
         let log_string = r#"{
   "time": 0.0,
-  "name": "transport:packet_sent",
+  "name": "quic:packet_sent",
   "data": {
     "header": {
       "packet_type": "initial",
@@ -837,8 +828,6 @@ mod tests {
         let ev_data = EventData::PacketSent(PacketSent {
             header: pkt_hdr,
             frames: Some(frames.into()),
-            is_coalesced: None,
-            retry_token: None,
             stateless_reset_token: None,
             supported_versions: None,
             raw: Some(RawInfo {
@@ -847,6 +836,7 @@ mod tests {
                 data: None,
             }),
             datagram_id: None,
+            is_mtu_probe_packet: None,
             send_at_time: None,
             trigger: None,
         });
@@ -914,7 +904,7 @@ mod tests {
   "events": [
     {
       "time": 0.0,
-      "name": "transport:packet_sent",
+      "name": "quic:packet_sent",
       "data": {
         "header": {
           "packet_type": "initial",
@@ -957,8 +947,6 @@ mod tests {
         let event_data = EventData::PacketSent(PacketSent {
             header: pkt_hdr,
             frames: Some(frames.into()),
-            is_coalesced: None,
-            retry_token: None,
             stateless_reset_token: None,
             supported_versions: None,
             raw: Some(RawInfo {
@@ -967,6 +955,7 @@ mod tests {
                 data: None,
             }),
             datagram_id: None,
+            is_mtu_probe_packet: None,
             send_at_time: None,
             trigger: None,
         });

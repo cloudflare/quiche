@@ -630,8 +630,9 @@ pub struct MigrationStateUpdated {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
     use crate::testing::*;
+    use crate::events::quic::PacketType;
 
     #[test]
     fn packet_header() {
