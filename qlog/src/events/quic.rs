@@ -294,46 +294,10 @@ pub enum SecurityEventType {
     KeyDiscarded,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum RecoveryEventType {
-    ParametersSet,
-    MetricsUpdated,
-    CongestionStateUpdated,
-    LossTimerUpdated,
-    PacketLost,
-    MarkedForRetransmit,
-}
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum CongestionStateUpdatedTrigger {
-    PersistentCongestion,
-    Ecn,
-}
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum PacketLostTrigger {
-    ReorderingThreshold,
-    TimeThreshold,
-    PtoExpired,
-}
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum LossTimerEventType {
-    Set,
-    Expired,
-    Cancelled,
-}
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum TimerType {
-    Ack,
-    Pto,
-}
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(untagged)]
@@ -775,78 +739,6 @@ pub struct MigrationStateUpdated {
 
     pub path_remote: Option<PathEndpointInfo>,
     pub path_local: Option<PathEndpointInfo>,
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-pub struct RecoveryParametersSet {
-    pub reordering_threshold: Option<u16>,
-    pub time_threshold: Option<f32>,
-    pub timer_granularity: Option<u16>,
-    pub initial_rtt: Option<f32>,
-
-    pub max_datagram_size: Option<u32>,
-    pub initial_congestion_window: Option<u64>,
-    pub minimum_congestion_window: Option<u32>,
-    pub loss_reduction_factor: Option<f32>,
-    pub persistent_congestion_threshold: Option<u16>,
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-pub struct MetricsUpdated {
-    pub min_rtt: Option<f32>,
-    pub smoothed_rtt: Option<f32>,
-    pub latest_rtt: Option<f32>,
-    pub rtt_variance: Option<f32>,
-
-    pub pto_count: Option<u16>,
-
-    pub congestion_window: Option<u64>,
-    pub bytes_in_flight: Option<u64>,
-
-    pub ssthresh: Option<u64>,
-
-    // qlog defined
-    pub packets_in_flight: Option<u64>,
-
-    pub pacing_rate: Option<u64>,
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct CongestionStateUpdated {
-    pub old: Option<String>,
-    pub new: String,
-
-    pub trigger: Option<CongestionStateUpdatedTrigger>,
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-pub struct LossTimerUpdated {
-    pub timer_type: Option<TimerType>,
-    pub packet_number_space: Option<PacketNumberSpace>,
-
-    pub event_type: LossTimerEventType,
-
-    pub delta: Option<f32>,
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-pub struct PacketLost {
-    pub header: Option<PacketHeader>,
-
-    pub frames: Option<Vec<QuicFrame>>,
-
-    pub trigger: Option<PacketLostTrigger>,
-}
-
-#[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-pub struct MarkedForRetransmit {
-    pub frames: Vec<QuicFrame>,
 }
 
 #[cfg(test)]

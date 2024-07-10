@@ -386,9 +386,10 @@ extern crate log;
 use qlog::events::connectivity::ConnectivityEventType;
 #[cfg(feature = "qlog")]
 use qlog::events::connectivity::TransportOwner;
+#[cfg(feature = "qlog")]
 use qlog::events::quic::DataMovedAdditionalInfo;
 #[cfg(feature = "qlog")]
-use qlog::events::quic::RecoveryEventType;
+use qlog::events::recovery::RecoveryEventType;
 #[cfg(feature = "qlog")]
 use qlog::events::quic::QuicEventType;
 #[cfg(feature = "qlog")]

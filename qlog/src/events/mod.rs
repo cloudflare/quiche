@@ -28,6 +28,7 @@ use crate::Bytes;
 use crate::Token;
 use h3::*;
 use quic::*;
+use recovery::*;
 
 use connectivity::ConnectivityEventType;
 
@@ -598,22 +599,22 @@ pub enum EventData {
 
     // Recovery
     #[serde(rename = "recovery:parameters_set")]
-    RecoveryParametersSet(quic::RecoveryParametersSet),
+    RecoveryParametersSet(recovery::ParametersSet),
 
     #[serde(rename = "recovery:metrics_updated")]
-    MetricsUpdated(quic::MetricsUpdated),
+    MetricsUpdated(recovery::MetricsUpdated),
 
     #[serde(rename = "recovery:congestion_state_updated")]
-    CongestionStateUpdated(quic::CongestionStateUpdated),
+    CongestionStateUpdated(recovery::CongestionStateUpdated),
 
     #[serde(rename = "recovery:loss_timer_updated")]
-    LossTimerUpdated(quic::LossTimerUpdated),
+    LossTimerUpdated(recovery::LossTimerUpdated),
 
     #[serde(rename = "recovery:packet_lost")]
-    PacketLost(quic::PacketLost),
+    PacketLost(recovery::PacketLost),
 
     #[serde(rename = "recovery:marked_for_retransmit")]
-    MarkedForRetransmit(quic::MarkedForRetransmit),
+    MarkedForRetransmit(recovery::MarkedForRetransmit),
 
     // HTTP/3
     #[serde(rename = "http:parameters_set")]
@@ -734,4 +735,5 @@ pub mod quic;
 
 pub mod connectivity;
 pub mod h3;
+pub mod recovery;
 pub mod security;
