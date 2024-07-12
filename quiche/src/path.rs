@@ -826,9 +826,10 @@ impl PathMap {
 
 /// Statistics about the path of a connection.
 ///
-/// It is part of the `Stats` structure returned by the [`stats()`] method.
+/// A connection’s path statistics can be collected using the [`path_stats()`]
+/// method.
 ///
-/// [`stats()`]: struct.Connection.html#method.stats
+/// [`path_stats()`]: struct.Connection.html#method.path_stats
 #[derive(Clone)]
 pub struct PathStats {
     /// The local address of the path.
