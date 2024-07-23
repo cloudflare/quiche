@@ -329,18 +329,10 @@ impl Serialize for ConnectionCloseDetails {
 #[doc(hidden)]
 /// A record that will be inserted into the [ConnectionSummary].
 pub enum ConnectionRecord {
-    StreamedFrame(StreamedFrame),
+    StreamedFrame { stream_id: u64, frame: H3iFrame },
     ConnectionStats(Stats),
     PathStats(Vec<PathStats>),
-    Error(ConnectionCloseDetails),
-}
-
-// async only for now, will be removed
-#[doc(hidden)]
-#[derive(Debug)]
-pub struct StreamedFrame {
-    pub frame: H3iFrame,
-    pub stream_id: u64,
+    Close(ConnectionCloseDetails),
 }
 
 /// A wrapper to help serialize [quiche::PathStats]

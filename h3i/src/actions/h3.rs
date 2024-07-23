@@ -163,7 +163,6 @@ impl WaitingFor {
         self.0.values().all(|v| v.is_empty())
     }
 
-    // TODO: abstract HashMap<u64, Vec<T>> to a type (StreamMap is the same)
     pub(crate) fn add_wait(&mut self, stream_event: &StreamEvent) {
         self.0
             .entry(stream_event.stream_id)
