@@ -1,7 +1,15 @@
 [package]
 name = "h3i"
 version = "0.1.0"
+authors = ["Lucas Pardue <lucas@lucaspardue.com>", "Evan Rittenhouse"]
 edition = "2018"
+description = "Low-level HTTP/3 debugging and testing"
+repository = "https://github.com/cloudflare/quiche"
+readme = "README.md"
+keywords = ["quic", "http3"]
+categories = ["network-programming"]
+license = "BSD-2-Clause"
+rust-version = "1.67"
 
 [dependencies]
 clap = "3"
