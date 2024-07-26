@@ -32,7 +32,9 @@ use std::io;
 pub struct Config {
     /// A string representing the host and port to connect to using the format
     /// `<host>:<port>`.
-    pub host_port: String,
+    ///
+    /// If value of `host_port` is `None`, the `connect_to` option must be used.
+    pub host_port: Option<String>,
     /// Set a specific IP address to connect to, rather than use DNS resolution.
     pub connect_to: Option<String>,
     /// The source port to use when connecting to a server.
@@ -67,7 +69,7 @@ impl Config {
         Self::default()
     }
 
-    pub fn with_host_port(mut self, host_port: String) -> Self {
+    pub fn with_host_port(mut self, host_port: Option<String>) -> Self {
         self.host_port = host_port;
         self
     }
@@ -137,7 +139,9 @@ impl Config {
     }
 
     pub fn build(self) -> Result<Self, io::Error> {
-        if self.host_port.is_empty() {
+        let no_host_port = self.host_port.is_none() ||
+            self.host_port.as_ref().filter(|s| *s == "").is_some();
+        if no_host_port && self.connect_to.is_none() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Must provide a <host:port> to connect".to_string(),
