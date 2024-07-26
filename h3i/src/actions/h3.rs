@@ -33,9 +33,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use qlog::events::EventData;
-use qlog::events::ExData;
-use qlog::events::JsonEvent;
 use quiche;
 use quiche::h3::frame::Frame;
 use quiche::h3::Header;
@@ -44,19 +41,6 @@ use serde::Serialize;
 use serde_with::serde_as;
 
 use crate::encode_header_block;
-
-pub const HTTP3_CONTROL_STREAM_TYPE_ID: u64 = 0x0;
-pub const HTTP3_PUSH_STREAM_TYPE_ID: u64 = 0x1;
-pub const QPACK_ENCODER_STREAM_TYPE_ID: u64 = 0x2;
-pub const QPACK_DECODER_STREAM_TYPE_ID: u64 = 0x3;
-
-pub enum QlogEvent {
-    Event {
-        data: Box<EventData>,
-        ex_data: ExData,
-    },
-    JsonEvent(JsonEvent),
-}
 
 /// An action which the HTTP/3 client should take.
 ///
