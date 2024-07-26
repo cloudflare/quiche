@@ -42,13 +42,12 @@ use super::SuggestionResult;
 use super::AUTO_PICK;
 use super::EMPTY_PICKS;
 use super::ESC_TO_RET;
-use super::HOST_PORT;
 use super::PUSH_ID_PROMPT;
 use super::STREAM_ID_PROMPT;
 use crate::actions::h3::Action;
 
 pub fn prompt_headers(
-    sid_alloc: &mut StreamIdAllocator, raw: bool,
+    sid_alloc: &mut StreamIdAllocator, host_port: &str, raw: bool,
 ) -> InquireResult<Action> {
     let stream_id = Text::new(STREAM_ID_PROMPT)
         .with_placeholder(EMPTY_PICKS)
@@ -69,7 +68,7 @@ pub fn prompt_headers(
     let mut headers = vec![];
 
     if !raw {
-        headers.extend_from_slice(&pseudo_headers()?);
+        headers.extend_from_slice(&pseudo_headers(host_port)?);
     }
 
     headers.extend_from_slice(&headers_read_loop()?);
@@ -115,15 +114,16 @@ pub fn prompt_push_promise() -> InquireResult<Action> {
     Ok(action)
 }
 
-fn pseudo_headers() -> InquireResult<Vec<quiche::h3::Header>> {
+fn pseudo_headers(host_port: &str) -> InquireResult<Vec<quiche::h3::Header>> {
     let method = Text::new("method:")
         .with_autocomplete(&method_suggester)
         .with_help_message(ESC_TO_RET)
         .prompt()?;
 
+    let help = format!("Press enter/return for default ({host_port}");
     let authority = Text::new("authority:")
-        .with_autocomplete(&authority_suggester)
-        .with_help_message(ESC_TO_RET)
+        .with_default(host_port)
+        .with_help_message(&help)
         .prompt()?;
 
     let path = Text::new("path:").prompt()?;
@@ -166,12 +166,6 @@ fn headers_read_loop() -> InquireResult<Vec<quiche::h3::Header>> {
 
 fn method_suggester(val: &str) -> SuggestionResult<Vec<String>> {
     let suggestions = ["GET", "POST", "PUT", "DELETE"];
-
-    squish_suggester(&suggestions, val)
-}
-
-fn authority_suggester(val: &str) -> SuggestionResult<Vec<String>> {
-    let suggestions = [HOST_PORT.get().unwrap().as_str()];
 
     squish_suggester(&suggestions, val)
 }

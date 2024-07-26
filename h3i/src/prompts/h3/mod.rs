@@ -40,7 +40,7 @@ use crate::prompts::h3;
 use crate::prompts::h3::headers::prompt_push_promise;
 use crate::StreamIdAllocator;
 
-use std::sync::OnceLock;
+use std::cell::RefCell;
 
 use quiche;
 
@@ -73,8 +73,7 @@ type SuggestionResult<T> = std::result::Result<T, CustomUserError>;
 /// A tuple of stream ID and quiche HTTP/3 frame.
 pub type PromptedFrame = (u64, quiche::h3::frame::Frame);
 
-static HOST_PORT: OnceLock<String> = OnceLock::new();
-static CONNECTION_IDLE_TIMEOUT: OnceLock<u64> = OnceLock::new();
+thread_local! {static CONNECTION_IDLE_TIMEOUT: RefCell<u64> = const { RefCell::new(0) }}
 
 const HEADERS: &str = "headers";
 const HEADERS_NO_PSEUDO: &str = "headers_no_pseudo";
@@ -113,6 +112,7 @@ enum PromptOutcome {
 
 /// The main prompter interface and state management.
 pub struct Prompter {
+    host_port: String,
     bidi_sid_alloc: StreamIdAllocator,
     uni_sid_alloc: StreamIdAllocator,
 }
@@ -120,10 +120,10 @@ pub struct Prompter {
 impl Prompter {
     /// Construct a prompter with the provided `config`.
     pub fn with_config(config: &Config) -> Self {
-        HOST_PORT.set(config.host_port.clone()).unwrap();
-        CONNECTION_IDLE_TIMEOUT.set(config.idle_timeout).unwrap();
+        CONNECTION_IDLE_TIMEOUT.with(|v| *v.borrow_mut() = config.idle_timeout);
 
         Self {
+            host_port: config.host_port.clone(),
             bidi_sid_alloc: StreamIdAllocator { id: 0 },
             uni_sid_alloc: StreamIdAllocator { id: 2 },
         }
@@ -133,7 +133,7 @@ impl Prompter {
         let res = match action {
             HEADERS | HEADERS_NO_PSEUDO => {
                 let raw = action == HEADERS_NO_PSEUDO;
-                headers::prompt_headers(&mut self.bidi_sid_alloc, raw)
+                headers::prompt_headers(&mut self.bidi_sid_alloc, &self.host_port, raw)
             },
 
             DATA => prompt_data(),
@@ -424,7 +424,7 @@ fn validate_wait_period(period: &str) -> SuggestionResult<Validation> {
 
     match x {
         Ok(v) => {
-            let local_conn_timeout = *CONNECTION_IDLE_TIMEOUT.get().unwrap();
+            let local_conn_timeout = CONNECTION_IDLE_TIMEOUT.with(|v| *v.borrow());
             if v >= local_conn_timeout {
                 return Ok(Validation::Invalid(ErrorMessage::Custom(format!(
                     "wait time >= local connection idle timeout {}",
