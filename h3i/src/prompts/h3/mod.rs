@@ -116,7 +116,7 @@ enum PromptOutcome {
 
 /// The main prompter interface and state management.
 pub struct Prompter {
-    host_port: String,
+    host_port: Option<String>,
     bidi_sid_alloc: StreamIdAllocator,
     uni_sid_alloc: StreamIdAllocator,
 }
@@ -139,7 +139,7 @@ impl Prompter {
                 let raw = action == HEADERS_NO_PSEUDO;
                 headers::prompt_headers(
                     &mut self.bidi_sid_alloc,
-                    &self.host_port,
+                    self.host_port.as_ref(),
                     raw,
                 )
             },
