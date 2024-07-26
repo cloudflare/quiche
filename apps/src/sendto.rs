@@ -94,8 +94,9 @@ fn send_to_gso_pacing(
 }
 
 /// A wrapper function of send_to().
-/// - when GSO and SO_TXTIME enabled, send a packet using send_to_gso().
-/// Otherwise, send packet using socket.send_to().
+///
+/// When GSO and SO_TXTIME are enabled, send packets using send_to_gso().
+/// Otherwise, send packets using socket.send_to().
 pub fn send_to(
     socket: &mio::net::UdpSocket, buf: &[u8], send_info: &quiche::SendInfo,
     segment_size: usize, pacing: bool, enable_gso: bool,
