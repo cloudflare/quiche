@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["varint_len","varint_parse_len"],"struct":["BufferTooShortError","Octets","OctetsMut"],"type":["Result"]};
