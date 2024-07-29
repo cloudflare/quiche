@@ -24,6 +24,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use events::CONNECTIVITY_URI;
+use events::H3_URI;
+use events::QUIC_URI;
+use events::RECOVERY_URI;
+use events::SECURITY_URI;
+
 use crate::events::EventData;
 use crate::events::EventImportance;
 use crate::events::EventType;
@@ -69,18 +75,24 @@ impl QlogStreamer {
     /// [`Write`]: https://doc.rust-lang.org/std/io/trait.Write.html
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        qlog_version: String, title: Option<String>, description: Option<String>,
-        summary: Option<String>, start_time: std::time::Instant, trace: TraceSeq,
+        title: Option<String>, description: Option<String>,
+        start_time: std::time::Instant, trace: TraceSeq,
         log_level: EventImportance,
         writer: Box<dyn std::io::Write + Send + Sync>,
     ) -> Self {
         let qlog = QlogSeq {
-            qlog_version,
-            qlog_format: "JSON-SEQ".to_string(),
+            file_schema: QLOGFILESEQ_URI.to_string(),
+            serialization_format: "JSON-SEQ".to_string(),
             title,
             description,
-            summary,
             trace,
+            event_schemas: vec![
+                CONNECTIVITY_URI.to_string(),
+                SECURITY_URI.to_string(),
+                QUIC_URI.to_string(),
+                RECOVERY_URI.to_string(),
+                H3_URI.to_string(),
+            ],
         };
 
         QlogStreamer {
@@ -265,7 +277,7 @@ mod tests {
 
     use super::*;
     use crate::events::quic;
-    use crate::events::quic::QuicFrame;
+    use crate::events::quic::quic::QuicFrame;
     use crate::events::RawInfo;
     use smallvec::smallvec;
     use testing::*;
@@ -294,15 +306,14 @@ mod tests {
             raw: None,
         };
 
-        let event_data1 = EventData::PacketSent(quic::PacketSent {
+        let event_data1 = EventData::PacketSent(quic::quic::PacketSent {
             header: pkt_hdr.clone(),
             frames: Some(smallvec![frame1]),
-            is_coalesced: None,
-            retry_token: None,
             stateless_reset_token: None,
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
+            is_mtu_probe_packet: None,
             send_at_time: None,
             trigger: None,
         });
@@ -325,30 +336,28 @@ mod tests {
             raw: None,
         };
 
-        let event_data2 = EventData::PacketSent(quic::PacketSent {
+        let event_data2 = EventData::PacketSent(quic::quic::PacketSent {
             header: pkt_hdr.clone(),
             frames: Some(smallvec![frame2]),
-            is_coalesced: None,
-            retry_token: None,
             stateless_reset_token: None,
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
+            is_mtu_probe_packet: None,
             send_at_time: None,
             trigger: None,
         });
 
         let ev2 = Event::with_time(0.0, event_data2);
 
-        let event_data3 = EventData::PacketSent(quic::PacketSent {
+        let event_data3 = EventData::PacketSent(quic::quic::PacketSent {
             header: pkt_hdr,
             frames: Some(smallvec![frame3]),
-            is_coalesced: None,
-            retry_token: None,
             stateless_reset_token: Some("reset_token".to_string()),
             supported_versions: None,
             raw,
             datagram_id: None,
+            is_mtu_probe_packet: None,
             send_at_time: None,
             trigger: None,
         });
@@ -356,10 +365,8 @@ mod tests {
         let ev3 = Event::with_time(0.0, event_data3);
 
         let mut s = streamer::QlogStreamer::new(
-            "version".to_string(),
             Some("title".to_string()),
             Some("description".to_string()),
-            None,
             std::time::Instant::now(),
             trace,
             EventImportance::Base,
@@ -391,11 +398,11 @@ mod tests {
         #[allow(clippy::borrowed_box)]
         let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
 
-        let log_string = r#"{"qlog_version":"version","qlog_format":"JSON-SEQ","title":"title","description":"description","trace":{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0}}}
-{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":40,"offset":40,"length":400,"fin":true}]}}
-{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}}
-{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}}
-{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}}
+        let log_string = r#"{"file_schema":"urn:ietf:params:qlog:file:sequential","serialization_format":"JSON-SEQ","title":"title","description":"description","event_schemas":["urn:ietf:params:qlog:events:quic#connectivity-08","urn:ietf:params:qlog:events:quic#security-08","urn:ietf:params:qlog:events:quic#quic-08","urn:ietf:params:qlog:events:quic#recovery-08","urn:ietf:params:qlog:events:http#h3-08"],"trace":{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0}}}
+{"time":0.0,"name":"quic:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":40,"offset":40,"length":400,"fin":true}]}}
+{"time":0.0,"name":"quic:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}}
+{"time":0.0,"name":"quic:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}}
+{"time":0.0,"name":"quic:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"length":100,"fin":true}]}}
 "#;
 
         let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
@@ -420,10 +427,8 @@ mod tests {
         let trace = make_trace_seq();
 
         let mut s = streamer::QlogStreamer::new(
-            "version".to_string(),
             Some("title".to_string()),
             Some("description".to_string()),
-            None,
             std::time::Instant::now(),
             trace,
             EventImportance::Base,
@@ -438,7 +443,7 @@ mod tests {
         #[allow(clippy::borrowed_box)]
         let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
 
-        let log_string = r#"{"qlog_version":"version","qlog_format":"JSON-SEQ","title":"title","description":"description","trace":{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0}}}
+        let log_string = r#"{"file_schema":"urn:ietf:params:qlog:file:sequential","serialization_format":"JSON-SEQ","title":"title","description":"description","event_schemas":["urn:ietf:params:qlog:events:quic#connectivity-08","urn:ietf:params:qlog:events:quic#security-08","urn:ietf:params:qlog:events:quic#quic-08","urn:ietf:params:qlog:events:quic#recovery-08","urn:ietf:params:qlog:events:http#h3-08"],"trace":{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0}}}
 {"time":0.0,"name":"jsonevent:sample","data":{"foo":"Bar","hello":123}}
 "#;
 
@@ -469,15 +474,14 @@ mod tests {
             raw: None,
         };
 
-        let event_data1 = EventData::PacketSent(quic::PacketSent {
+        let event_data1 = EventData::PacketSent(quic::quic::PacketSent {
             header: pkt_hdr.clone(),
             frames: Some(smallvec![frame1]),
-            is_coalesced: None,
-            retry_token: None,
             stateless_reset_token: None,
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
+            is_mtu_probe_packet: None,
             send_at_time: None,
             trigger: None,
         });
@@ -497,15 +501,14 @@ mod tests {
             raw: None,
         };
 
-        let event_data2 = EventData::PacketSent(quic::PacketSent {
+        let event_data2 = EventData::PacketSent(quic::quic::PacketSent {
             header: pkt_hdr.clone(),
             frames: Some(smallvec![frame2]),
-            is_coalesced: None,
-            retry_token: None,
             stateless_reset_token: None,
             supported_versions: None,
             raw: raw.clone(),
             datagram_id: None,
+            is_mtu_probe_packet: None,
             send_at_time: None,
             trigger: None,
         });
@@ -513,10 +516,8 @@ mod tests {
         let ev2 = Event::with_time(0.0, event_data2);
 
         let mut s = streamer::QlogStreamer::new(
-            "version".to_string(),
             Some("title".to_string()),
             Some("description".to_string()),
-            None,
             std::time::Instant::now(),
             trace,
             EventImportance::Base,
@@ -532,9 +533,9 @@ mod tests {
         #[allow(clippy::borrowed_box)]
         let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
 
-        let log_string = r#"{"qlog_version":"version","qlog_format":"JSON-SEQ","title":"title","description":"description","trace":{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0}}}
-{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":40,"offset":40,"length":400,"fin":true}]},"first":{"foo":"Bar","hello":123},"second":{"baz":[1,2,3,4]}}
-{"time":0.0,"name":"transport:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":1,"offset":0,"length":100,"fin":true}]}}
+        let log_string = r#"{"file_schema":"urn:ietf:params:qlog:file:sequential","serialization_format":"JSON-SEQ","title":"title","description":"description","event_schemas":["urn:ietf:params:qlog:events:quic#connectivity-08","urn:ietf:params:qlog:events:quic#security-08","urn:ietf:params:qlog:events:quic#quic-08","urn:ietf:params:qlog:events:quic#recovery-08","urn:ietf:params:qlog:events:http#h3-08"],"trace":{"vantage_point":{"type":"server"},"title":"Quiche qlog trace","description":"Quiche qlog trace description","configuration":{"time_offset":0.0}}}
+{"time":0.0,"name":"quic:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":40,"offset":40,"length":400,"fin":true}]},"first":{"foo":"Bar","hello":123},"second":{"baz":[1,2,3,4]}}
+{"time":0.0,"name":"quic:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":1,"offset":0,"length":100,"fin":true}]}}
 "#;
 
         let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
