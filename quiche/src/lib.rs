@@ -6154,14 +6154,35 @@ impl Connection {
 
     /// Returns the server's preferred address transport parameters which can be
     /// used to perform a connection migration.
+    /// *Side Effect:* This function will automatically track the Connection ID and Stateless Reset Token that are provided in the preferred address parameters.
+    /// Calling this function repeatedly will **not** repeatedly add the Connection ID/Stateless Reset Token.
     pub fn server_preferred_address_params(
         &mut self,
-    ) -> Result<Option<&PreferredAddressParams>> {
+    ) -> Result<Option<PreferredAddressParams>> {
         if self.is_server {
             return Err(Error::InvalidState);
         }
 
-        Ok(self.peer_transport_params.preferred_address_params.as_ref())
+        // Get the preferred address parameters from the transport parameters
+        let preferred_address_params = self.peer_transport_params.preferred_address_params.clone();
+
+        match preferred_address_params {
+            Some(preferred_address_params) => {
+                // Track the new Destination Connection ID and reset token of the preferred address.
+                // Repeatedly calling this function results in a no-op.
+                self.new_destination_cid(
+                    preferred_address_params.connection_id.clone(),
+                    1,
+                    preferred_address_params.stateless_reset_token,
+                    0,
+                    &mut SmallVec::new(),
+                )
+                .unwrap();
+
+                Ok(Some(preferred_address_params))
+            },
+            None => Ok(None),
+        }
     }
 
     /// Provides additional source Connection IDs that the peer can use to reach

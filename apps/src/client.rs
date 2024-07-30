@@ -530,19 +530,6 @@ pub fn connect(
             if let Ok(Some(preferred_address_params)) =
                 conn.server_preferred_address_params()
             {
-                let preferred_address_params = preferred_address_params.clone();
-
-                // Manually track the new Destination Connection ID and reset
-                // token of the preferred address.
-                conn.new_destination_cid(
-                    preferred_address_params.connection_id,
-                    1,
-                    preferred_address_params.stateless_reset_token,
-                    0,
-                    &mut SmallVec::new(),
-                )
-                .unwrap();
-
                 // Probe the path. If it successfully validates then the event
                 // handler will see the `PathEvent::Validated`
                 // event occur and begin migration. The server will see
