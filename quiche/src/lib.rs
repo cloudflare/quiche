@@ -2064,6 +2064,7 @@ impl Connection {
 
         // A server that chooses a zero-length connection ID MUST NOT provide a
         // preferred address.
+        // RFC: https://datatracker.ietf.org/doc/html/rfc9000#section-18.2-4.32.1
         if conn.ids.zero_length_scid() &&
             conn.local_transport_params
                 .preferred_address_params
