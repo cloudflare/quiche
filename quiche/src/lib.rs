@@ -8670,13 +8670,14 @@ impl PreferredAddressParams {
     /// 
     /// * A buffer of constant length and the amount written to that buffer
     fn encode(preferred_address_params: &PreferredAddressParams) -> Result<([u8; 61], usize)> {
-        /// IPv4: 4 bytes
-        /// Port: 2 bytes
-        /// IPv6: 16 bytes
-        /// Port: 2 bytes
-        /// ConnectionID.len(): 1 byte
-        /// ConnectionID: up to 20 bytes
-        /// Stateless Reset Token: 16 bytes
+        /// Constant size is determined as follows:    
+        /// IPv4: 4 bytes    
+        /// Port: 2 bytes    
+        /// IPv6: 16 bytes  
+        /// Port: 2 bytes   
+        /// ConnectionID.len(): 1 byte  
+        /// ConnectionID: up to 20 bytes    
+        /// Stateless Reset Token: 16 bytes 
         const PREFERRED_ADDRESS_PARAM_MAX_SIZE: usize = 61;
         let mut buffer = [0; PREFERRED_ADDRESS_PARAM_MAX_SIZE];
 
