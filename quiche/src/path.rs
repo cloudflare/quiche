@@ -167,6 +167,12 @@ pub struct Path {
     /// Total number of packets sent with data retransmitted from this path.
     pub retrans_count: usize,
 
+    /// Number of DATAGRAM frames sent on this path.
+    pub dgram_sent_count: usize,
+
+    /// Number of DATAGRAM frames received on this path.
+    pub dgram_recv_count: usize,
+
     /// Total number of sent bytes over this path.
     pub sent_bytes: u64,
 
@@ -236,6 +242,8 @@ impl Path {
             sent_count: 0,
             recv_count: 0,
             retrans_count: 0,
+            dgram_sent_count: 0,
+            dgram_recv_count: 0,
             sent_bytes: 0,
             recv_bytes: 0,
             stream_retrans_bytes: 0,
@@ -483,6 +491,8 @@ impl Path {
             sent: self.sent_count,
             lost: self.recovery.lost_count(),
             retrans: self.retrans_count,
+            dgram_recv: self.dgram_recv_count,
+            dgram_sent: self.dgram_sent_count,
             rtt: self.recovery.rtt(),
             min_rtt: self.recovery.min_rtt(),
             rttvar: self.recovery.rttvar(),
@@ -855,6 +865,12 @@ pub struct PathStats {
 
     /// The number of sent QUIC packets with retransmitted data.
     pub retrans: usize,
+
+    /// The number of DATAGRAM frames received.
+    pub dgram_recv: usize,
+
+    /// The number of DATAGRAM frames sent.
+    pub dgram_sent: usize,
 
     /// The estimated round-trip time of the connection.
     pub rtt: time::Duration,
