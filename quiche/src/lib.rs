@@ -8448,20 +8448,7 @@ impl TransportParams {
 
         if is_server {
             if let Some(preferred_address_params) = &tp.preferred_address_params {
-                /// IPv4: 4 bytes
-                /// Port: 2 bytes
-                /// IPv6: 16 bytes
-                /// Port: 2 bytes
-                /// ConnectionID.len(): 1 byte
-                /// ConnectionID: up to 20 bytes
-                /// Stateless Reset Token: 16 bytes
-                const PREFERRED_ADDRESS_PARAM_MAX_SIZE: usize = 61;
-
-                let mut buffer = [0; PREFERRED_ADDRESS_PARAM_MAX_SIZE];
-                let written_to_buffer = PreferredAddressParams::encode(
-                    preferred_address_params,
-                    &mut buffer,
-                )?;
+                let (buffer, written_to_buffer) = PreferredAddressParams::encode(preferred_address_params)?;
                 TransportParams::encode_param(&mut b, 0x000d, written_to_buffer)?;
                 b.put_bytes(&buffer[0..written_to_buffer])?;
             }
@@ -8678,12 +8665,22 @@ impl PreferredAddressParams {
     ///
     /// * `preferred_address_params` - A reference to the preferred address
     ///   parameters to be encoded.
-    /// * `buffer` - A reference to a buffer to encode the
-    ///   `preferred_address_params` into.
-    fn encode(
-        preferred_address_params: &PreferredAddressParams, buffer: &mut [u8],
-    ) -> Result<usize> {
-        let mut b = octets::OctetsMut::with_slice(buffer);
+    /// 
+    /// # Returns
+    /// 
+    /// * A buffer of constant length and the amount written to that buffer
+    fn encode(preferred_address_params: &PreferredAddressParams) -> Result<([u8; 61], usize)> {
+        /// IPv4: 4 bytes
+        /// Port: 2 bytes
+        /// IPv6: 16 bytes
+        /// Port: 2 bytes
+        /// ConnectionID.len(): 1 byte
+        /// ConnectionID: up to 20 bytes
+        /// Stateless Reset Token: 16 bytes
+        const PREFERRED_ADDRESS_PARAM_MAX_SIZE: usize = 61;
+        let mut buffer = [0; PREFERRED_ADDRESS_PARAM_MAX_SIZE];
+
+        let mut b = octets::OctetsMut::with_slice(&mut buffer);
 
         let (ip_v4, port_v4) = match preferred_address_params.addr_v4 {
             Some(ip) => (ip.ip().octets(), ip.port()),
@@ -8708,7 +8705,9 @@ impl PreferredAddressParams {
             &preferred_address_params.stateless_reset_token.to_be_bytes(),
         )?;
 
-        Ok(b.off())
+        let length = b.off();
+
+        Ok((buffer, length))
     }
 }
 
