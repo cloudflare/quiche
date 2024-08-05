@@ -985,6 +985,8 @@ pub struct Connection {
 
     local_goaway_id: Option<u64>,
     peer_goaway_id: Option<u64>,
+
+    qpack_buffer: Vec<u8>,
 }
 
 impl Connection {
@@ -1047,6 +1049,8 @@ impl Connection {
 
             local_goaway_id: None,
             peer_goaway_id: None,
+
+            qpack_buffer: vec![0; 4096],
         })
     }
 
@@ -2465,11 +2469,9 @@ impl Connection {
                 },
 
                 stream::State::QpackInstruction => {
-                    let mut d = [0; 4096];
-
                     // Read data from the stream and discard immediately.
                     loop {
-                        conn.stream_recv(stream_id, &mut d)?;
+                        conn.stream_recv(stream_id, &mut self.qpack_buffer)?;
                     }
                 },
 
