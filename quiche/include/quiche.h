@@ -382,14 +382,14 @@ size_t quiche_conn_send_quantum_on_path(const quiche_conn *conn,
 
 // Reads contiguous data from a stream.
 // out_error_code is only set when STREAM_STOPPED or STREAM_RESET are returned.
-// Set to the reported error code associated with STOP_SENDING or STREAM_RESET. 
+// Set to the reported error code associated with STOP_SENDING or STREAM_RESET.
 ssize_t quiche_conn_stream_recv(quiche_conn *conn, uint64_t stream_id,
                                 uint8_t *out, size_t buf_len, bool *fin,
                                 uint64_t *out_error_code);
 
 // Writes data to a stream.
 // out_error_code is only set when STREAM_STOPPED or STREAM_RESET are returned.
-// Set to the reported error code associated with STOP_SENDING or STREAM_RESET. 
+// Set to the reported error code associated with STOP_SENDING or STREAM_RESET.
 ssize_t quiche_conn_stream_send(quiche_conn *conn, uint64_t stream_id,
                                 const uint8_t *buf, size_t buf_len, bool fin,
                                 uint64_t *out_error_code);
@@ -1139,6 +1139,17 @@ int quiche_h3_take_last_priority_update(quiche_h3_conn *conn,
 // Returns whether the peer enabled HTTP/3 DATAGRAM frame support.
 bool quiche_h3_dgram_enabled_by_peer(quiche_h3_conn *conn,
                                      quiche_conn *quic_conn);
+
+typedef struct {
+    // The number of bytes received on the QPACK encoder stream.
+    uint64_t qpack_encoder_stream_recv_bytes;
+
+    // The number of bytes received on the QPACK decoder stream.
+    uint64_t qpack_decoder_stream_recv_bytes;
+} quiche_h3_stats;
+
+// Collects and returns statistics about the connection.
+void quiche_h3_conn_stats(const quiche_h3_conn *conn, quiche_h3_stats *out);
 
 // Frees the HTTP/3 connection object.
 void quiche_h3_conn_free(quiche_h3_conn *conn);

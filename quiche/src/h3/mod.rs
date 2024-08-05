@@ -910,9 +910,25 @@ struct ConnectionSettings {
     pub raw: Option<Vec<(u64, u64)>>,
 }
 
+#[derive(Default)]
 struct QpackStreams {
     pub encoder_stream_id: Option<u64>,
+    pub encoder_stream_bytes: u64,
     pub decoder_stream_id: Option<u64>,
+    pub decoder_stream_bytes: u64,
+}
+
+/// Statistics about the connection.
+///
+/// A connection's statistics can be collected using the [`stats()`] method.
+///
+/// [`stats()`]: struct.Connection.html#method.stats
+#[derive(Clone, Default)]
+pub struct Stats {
+    /// The number of bytes received on the QPACK encoder stream.
+    pub qpack_encoder_stream_recv_bytes: u64,
+    /// The number of bytes received on the QPACK decoder stream.
+    pub qpack_decoder_stream_recv_bytes: u64,
 }
 
 /// An HTTP/3 connection.
@@ -988,15 +1004,8 @@ impl Connection {
             qpack_encoder: qpack::Encoder::new(),
             qpack_decoder: qpack::Decoder::new(),
 
-            local_qpack_streams: QpackStreams {
-                encoder_stream_id: None,
-                decoder_stream_id: None,
-            },
-
-            peer_qpack_streams: QpackStreams {
-                encoder_stream_id: None,
-                decoder_stream_id: None,
-            },
+            local_qpack_streams: Default::default(),
+            peer_qpack_streams: Default::default(),
 
             max_push_id: 0,
 
@@ -2432,7 +2441,17 @@ impl Connection {
 
                     // Read data from the stream and discard immediately.
                     loop {
-                        conn.stream_recv(stream_id, &mut d)?;
+                        let (recv, _) = conn.stream_recv(stream_id, &mut d)?;
+
+                        match stream.ty() {
+                            Some(stream::Type::QpackEncoder) =>
+                                self.peer_qpack_streams.encoder_stream_bytes +=
+                                    recv as u64,
+                            Some(stream::Type::QpackDecoder) =>
+                                self.peer_qpack_streams.decoder_stream_bytes +=
+                                    recv as u64,
+                            _ => unreachable!(),
+                        };
                     }
                 },
 
@@ -2845,6 +2864,19 @@ impl Connection {
         }
 
         Err(Error::Done)
+    }
+
+    /// Collects and returns statistics about the connection.
+    #[inline]
+    pub fn stats(&self) -> Stats {
+        Stats {
+            qpack_encoder_stream_recv_bytes: self
+                .peer_qpack_streams
+                .encoder_stream_bytes,
+            qpack_decoder_stream_recv_bytes: self
+                .peer_qpack_streams
+                .decoder_stream_bytes,
+        }
     }
 }
 
@@ -4636,19 +4668,22 @@ mod tests {
         s.pipe.client.stream_send(d_stream_id, &d, false).unwrap();
         s.advance().ok();
 
-        loop {
-            match s.server.poll(&mut s.pipe.server) {
-                Ok(_) => (),
+        match s.server.poll(&mut s.pipe.server) {
+            Ok(_) => panic!(),
 
-                Err(Error::Done) => {
-                    break;
-                },
+            Err(Error::Done) => {
+                assert_eq!(s.server.peer_qpack_streams.encoder_stream_bytes, 20);
+                assert_eq!(s.server.peer_qpack_streams.decoder_stream_bytes, 20);
+            },
 
-                Err(_) => {
-                    panic!();
-                },
-            }
+            Err(_) => {
+                panic!();
+            },
         }
+
+        let stats = s.server.stats();
+        assert_eq!(stats.qpack_encoder_stream_recv_bytes, 20);
+        assert_eq!(stats.qpack_decoder_stream_recv_bytes, 20);
     }
 
     #[test]

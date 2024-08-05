@@ -397,3 +397,17 @@ fn headers_from_ptr<'a>(
 
     out
 }
+
+#[repr(C)]
+pub struct Stats {
+    qpack_encoder_stream_recv_bytes: u64,
+    qpack_decoder_stream_recv_bytes: u64,
+}
+
+#[no_mangle]
+pub extern fn quiche_h3_conn_stats(conn: &h3::Connection, out: &mut Stats) {
+    let stats = conn.stats();
+
+    out.qpack_encoder_stream_recv_bytes = stats.qpack_encoder_stream_recv_bytes;
+    out.qpack_decoder_stream_recv_bytes = stats.qpack_decoder_stream_recv_bytes;
+}
