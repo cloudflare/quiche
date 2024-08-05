@@ -93,14 +93,15 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         .arg(
             Arg::with_name("host:port")
                 .help("Hostname and port of the HTTP/3 server")
-                .required(true)
+                .required(false)
                 .index(1),
         )
         .arg(
             Arg::with_name("connect-to")
                 .long("connect-to")
                 .help("Set a specific IP address to connect to, rather than use DNS resolution")
-                .takes_value(true),
+                .takes_value(true)
+                .required_unless_present("host:port"),
         )
         .arg(
             Arg::with_name("no-verify")
@@ -183,7 +184,7 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         )
         .get_matches();
 
-    let host_port = matches.value_of("host:port").unwrap().to_string();
+    let host_port = matches.value_of("host:port").map(str::to_string);
     let connect_to: Option<String> =
         matches.value_of("connect-to").map(|s| s.to_string());
     let verify_peer = !matches.is_present("no-verify");

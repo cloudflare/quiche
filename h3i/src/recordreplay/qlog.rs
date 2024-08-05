@@ -49,8 +49,8 @@ use crate::actions::h3::WaitType;
 use crate::encode_header_block;
 use crate::fake_packet_sent;
 use crate::fake_packet_with_stream_fin;
+use crate::HTTP3_CONTROL_STREAM_TYPE_ID;
 
-const HTTP3_CONTROL_STREAM_TYPE_ID: u64 = 0x0;
 const HTTP3_PUSH_STREAM_TYPE_ID: u64 = 0x1;
 const QPACK_ENCODER_STREAM_TYPE_ID: u64 = 0x2;
 const QPACK_DECODER_STREAM_TYPE_ID: u64 = 0x3;

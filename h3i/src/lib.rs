@@ -54,6 +54,11 @@ use quiche::h3::NameValue;
 use smallvec::smallvec;
 use smallvec::SmallVec;
 
+/// The ID for an HTTP/3 control stream type.
+///
+/// See https://datatracker.ietf.org/doc/html/rfc9114#name-control-streams.
+pub const HTTP3_CONTROL_STREAM_TYPE_ID: u64 = 0x0;
+
 #[derive(Default)]
 struct StreamIdAllocator {
     id: u64,

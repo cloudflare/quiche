@@ -47,7 +47,7 @@ use super::STREAM_ID_PROMPT;
 use crate::actions::h3::Action;
 
 pub fn prompt_headers(
-    sid_alloc: &mut StreamIdAllocator, host_port: &str, raw: bool,
+    sid_alloc: &mut StreamIdAllocator, host_port: Option<&String>, raw: bool,
 ) -> InquireResult<Action> {
     let stream_id = Text::new(STREAM_ID_PROMPT)
         .with_placeholder(EMPTY_PICKS)
@@ -114,15 +114,18 @@ pub fn prompt_push_promise() -> InquireResult<Action> {
     Ok(action)
 }
 
-fn pseudo_headers(host_port: &str) -> InquireResult<Vec<quiche::h3::Header>> {
+fn pseudo_headers(
+    host_port: Option<&String>,
+) -> InquireResult<Vec<quiche::h3::Header>> {
     let method = Text::new("method:")
         .with_autocomplete(&method_suggester)
         .with_help_message(ESC_TO_RET)
         .prompt()?;
 
-    let help = format!("Press enter/return for default ({host_port}");
+    let help = format!("Press enter/return for default ({host_port:?}");
     let authority = Text::new("authority:")
-        .with_default(host_port)
+        // unwrap_or prevents `Some()` from showing up when we have a host_port passed
+        .with_default(host_port.unwrap_or(&"N/A".to_string()))
         .with_help_message(&help)
         .prompt()?;
 
