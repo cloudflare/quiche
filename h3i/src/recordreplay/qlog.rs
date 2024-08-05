@@ -428,6 +428,15 @@ impl From<H3FrameCreatedEx> for H3Actions {
                 });
             },
 
+            Http3Frame::Data { raw } => {
+                let mut payload = vec![];
+                if let Some(r) = raw {
+                    payload = r.data.clone().unwrap_or("".to_string()).as_bytes().to_vec();
+                }
+
+                actions.push(Action::SendFrame { stream_id, fin_stream, frame: Frame::Data { payload } })
+            }
+
             Http3Frame::Goaway { id } => {
                 actions.push(Action::SendFrame {
                     stream_id,
