@@ -67,13 +67,15 @@ pub fn connect(
     let mut events = mio::Events::with_capacity(1024);
 
     // We'll only connect to one server.
-    let connect_url = args.host_port.split(':').next().unwrap();
+    let host_port = args.host_port.clone();
+    let connect_url = host_port.as_ref().map(|hp| hp.split(':').next()).flatten();
 
     // Resolve server address.
     let peer_addr = if let Some(addr) = &args.connect_to {
         addr.parse().expect("--connect-to is expected to be a string containing an IPv4 or IPv6 address with a port. E.g. 192.0.2.0:443")
     } else {
-        let x = format!("https://{}", args.host_port);
+        // If connect_to wasn't provided, host_port must've been
+        let x = format!("https://{}", args.host_port.as_ref().unwrap());
         url::Url::parse(&x)
             .unwrap()
             .to_socket_addrs()
@@ -148,14 +150,9 @@ pub fn connect(
     let local_addr = socket.local_addr().unwrap();
 
     // Create a QUIC connection and initiate handshake.
-    let mut conn = quiche::connect(
-        Some(connect_url),
-        &scid,
-        local_addr,
-        peer_addr,
-        &mut config,
-    )
-    .unwrap();
+    let mut conn =
+        quiche::connect(connect_url, &scid, local_addr, peer_addr, &mut config)
+            .unwrap();
 
     if let Some(keylog) = &mut keylog {
         if let Ok(keylog) = keylog.try_clone() {
