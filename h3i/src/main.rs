@@ -99,7 +99,7 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         .arg(
             Arg::with_name("omit-sni")
                 .long("omit-sni")
-                .help("Send an empty SNI in the TLS handshake.")
+                .help("Omit the SNI from the TLS handshake")
                 // Requires an OsStr, so we can parse to empty later on
                 .takes_value(false)
         )
