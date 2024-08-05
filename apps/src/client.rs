@@ -461,7 +461,6 @@ pub fn connect(
                 quiche::PathEvent::New(..) => unreachable!(),
 
                 quiche::PathEvent::Validated(local_addr, peer_addr) => {
-                    trace!("PathEvent::Validated");
                     info!(
                         "Path ({}, {}) is now validated",
                         local_addr, peer_addr

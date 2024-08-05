@@ -6053,7 +6053,10 @@ impl Connection {
     ) -> Result<u64> {
         // We may want to probe an existing path.
         let pid = match self.paths.path_id_from_addrs(&(local_addr, peer_addr)) {
-            Some(pid) => pid,
+            Some(pid) => {
+                trace!("Probing existing path.");
+                pid
+            },
             None => self.create_path_on_client(local_addr, peer_addr)?,
         };
 

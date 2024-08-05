@@ -77,9 +77,11 @@ fn main() {
     let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
+    let starting_address: SocketAddr = args.listen.parse().unwrap();
+
     // Create the UDP listening socket, and register it with the event loop.
     let mut starting_socket =
-        mio::net::UdpSocket::bind(args.listen.parse().unwrap()).unwrap();
+        mio::net::UdpSocket::bind(starting_address).unwrap();
 
     // Create another preferred UDP listening socket that can be used for server
     // migration.
