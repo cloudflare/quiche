@@ -531,39 +531,29 @@ pub fn connect(
             conn.available_dcids() > 0
         {
             // Probe the transport parameter's server preferred address.
+            // If it successfully validates then the event
+            // handler will see the `PathEvent::Validated`
+            // event occur and begin migration. The server will see
+            // `PathEvent::PeerMigrated` upon successful
+            // migration.
             if let Ok(Some(preferred_address_params)) =
                 conn.server_preferred_address_params()
             {
-                // Probe the path. If it successfully validates then the event
-                // handler will see the `PathEvent::Validated`
-                // event occur and begin migration. The server will see
-                // `PathEvent::PeerMigrated` upon successful
-                // migration.
-                if let Some(addr_v4) = preferred_address_params.addr_v4 {
+                // Select the preferred address and probe it, preference for v4.
+                if let Some(server_preferred_addr) = preferred_address_params.addr_v4.map_or_else(|| preferred_address_params.addr_v6.map_or(None, |v6| Some(SocketAddr::V6(v6))), |addr_v4| Some(SocketAddr::V4(addr_v4))) {
                     info!("Performing server side connection migration - kicked off by client.");
                     info!(
                         "New path to be probed: {:?} -> {:?}",
-                        local_addr, addr_v4
+                        local_addr, server_preferred_addr
                     );
                     conn.probe_path(
                         local_addr,
-                        std::net::SocketAddr::V4(addr_v4),
+                        server_preferred_addr,
                     )
                     .unwrap();
-                } else if let Some(addr_v6) = preferred_address_params.addr_v6 {
-                    info!("Performing server side connection migration - kicked off by client.");
-                    info!(
-                        "New path to be probed: {:?} -> {:?}",
-                        local_addr, addr_v6
-                    );
-                    conn.probe_path(
-                        local_addr,
-                        std::net::SocketAddr::V6(addr_v6),
-                    )
-                    .unwrap();
-                }
 
-                server_preferred_address_probed = true;
+                    server_preferred_address_probed = true;
+                }
             }
         }
 
