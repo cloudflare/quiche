@@ -119,6 +119,7 @@ fn pseudo_headers(
 ) -> InquireResult<Vec<quiche::h3::Header>> {
     let method = Text::new("method:")
         .with_autocomplete(&method_suggester)
+        .with_default("GET")
         .with_help_message(ESC_TO_RET)
         .prompt()?;
 
@@ -129,10 +130,10 @@ fn pseudo_headers(
         .with_help_message(&help)
         .prompt()?;
 
-    let path = Text::new("path:").prompt()?;
+    let path = Text::new("path:").with_default("/").prompt()?;
 
     let scheme = Text::new("scheme:")
-        .with_autocomplete(&scheme_suggester)
+        .with_default("https")
         .with_help_message(ESC_TO_RET)
         .prompt()?;
 
@@ -169,12 +170,6 @@ fn headers_read_loop() -> InquireResult<Vec<quiche::h3::Header>> {
 
 fn method_suggester(val: &str) -> SuggestionResult<Vec<String>> {
     let suggestions = ["GET", "POST", "PUT", "DELETE"];
-
-    squish_suggester(&suggestions, val)
-}
-
-fn scheme_suggester(val: &str) -> SuggestionResult<Vec<String>> {
-    let suggestions = ["https"];
 
     squish_suggester(&suggestions, val)
 }
