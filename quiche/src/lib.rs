@@ -8628,7 +8628,7 @@ impl PreferredAddressParams {
 
         let cid = b.get_bytes_with_varint_length()?.to_vec().into();
         let stateless_reset_token = u128::from_be_bytes(
-            // Since a 128 bit vector has just successfully been created above,
+            // Since this creates a 128 bit vector 
             // this should never panic
             b.get_bytes(16)?.to_vec().try_into().unwrap(), 
         );
