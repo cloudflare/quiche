@@ -466,8 +466,13 @@ pub fn connect(
                         local_addr, peer_addr
                     );
                     if migrated {
+                        info!("Migrating path's client address to {}", local_addr);
                         conn.migrate_source(local_addr).unwrap();
                     } else {
+                        info!(
+                            "Migrating path to ({}, {})",
+                            local_addr, peer_addr
+                        );
                         conn.migrate(local_addr, peer_addr).unwrap();
                     }
                     migrated_peer_addr = Some(peer_addr);
