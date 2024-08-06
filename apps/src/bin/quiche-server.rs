@@ -104,8 +104,8 @@ fn main() {
         }
     }
 
-    info!("listening on {:}", starting_socket.local_addr().unwrap());
-    info!("listening on {:}", preferred_socket.local_addr().unwrap());
+    info!("listening on starting socket {:}", starting_socket.local_addr().unwrap());
+    info!("listening on preferred socket {:}", preferred_socket.local_addr().unwrap());
 
     // Register starting socket with event loop
     poll.registry()
