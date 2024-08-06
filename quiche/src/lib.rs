@@ -1366,7 +1366,7 @@ impl Config {
         connection_id: ConnectionId<'static>, stateless_reset_token: u128,
     ) -> Result<()> {
         if (v4.is_none() && v6.is_none()) || connection_id.is_empty() {
-            return Err(Error::TlsFail);
+            return Err(Error::InvalidTransportParam);
         }
 
         self.local_transport_params.preferred_address_params =
