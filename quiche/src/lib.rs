@@ -6157,8 +6157,10 @@ impl Connection {
 
     /// Returns the server's preferred address transport parameters which can be
     /// used to perform a connection migration.
-    /// *Side Effect:* This function will automatically track the Connection ID and Stateless Reset Token that are provided in the preferred address parameters.
-    /// Calling this function repeatedly will **not** repeatedly add the Connection ID/Stateless Reset Token.
+    /// *Side Effect:* This function will automatically track the Connection ID
+    /// and Stateless Reset Token that are provided in the preferred address
+    /// parameters. Calling this function repeatedly will **not** repeatedly
+    /// add the Connection ID/Stateless Reset Token.
     pub fn server_preferred_address_params(
         &mut self,
     ) -> Result<Option<PreferredAddressParams>> {
@@ -6167,12 +6169,14 @@ impl Connection {
         }
 
         // Get the preferred address parameters from the transport parameters
-        let preferred_address_params = self.peer_transport_params.preferred_address_params.clone();
+        let preferred_address_params =
+            self.peer_transport_params.preferred_address_params.clone();
 
         match preferred_address_params {
             Some(preferred_address_params) => {
-                // Track the new Destination Connection ID and reset token of the preferred address.
-                // Repeatedly calling this function results in a no-op.
+                // Track the new Destination Connection ID and reset token of the
+                // preferred address. Repeatedly calling this
+                // function results in a no-op.
                 self.new_destination_cid(
                     preferred_address_params.connection_id.clone(),
                     1,
@@ -8473,7 +8477,8 @@ impl TransportParams {
 
         if is_server {
             if let Some(preferred_address_params) = &tp.preferred_address_params {
-                let (buffer, written_to_buffer) = PreferredAddressParams::encode(preferred_address_params)?;
+                let (buffer, written_to_buffer) =
+                    PreferredAddressParams::encode(preferred_address_params)?;
                 TransportParams::encode_param(&mut b, 0x000d, written_to_buffer)?;
                 b.put_bytes(&buffer[0..written_to_buffer])?;
             }
@@ -8628,9 +8633,9 @@ impl PreferredAddressParams {
 
         let cid = b.get_bytes_with_varint_length()?.to_vec().into();
         let stateless_reset_token = u128::from_be_bytes(
-            // Since this creates a 128 bit vector 
+            // Since this creates a 128 bit vector
             // this should never panic
-            b.get_bytes(16)?.to_vec().try_into().unwrap(), 
+            b.get_bytes(16)?.to_vec().try_into().unwrap(),
         );
 
         Ok(PreferredAddressParams::new(
@@ -8686,11 +8691,13 @@ impl PreferredAddressParams {
     ///
     /// * `preferred_address_params` - A reference to the preferred address
     ///   parameters to be encoded.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// * A buffer of constant length and the amount written to that buffer
-    fn encode(preferred_address_params: &PreferredAddressParams) -> Result<([u8; 61], usize)> {
+    fn encode(
+        preferred_address_params: &PreferredAddressParams,
+    ) -> Result<([u8; 61], usize)> {
         /// Constant size is determined as follows:    
         /// IPv4: 4 bytes    
         /// Port: 2 bytes    
@@ -8698,7 +8705,7 @@ impl PreferredAddressParams {
         /// Port: 2 bytes   
         /// ConnectionID.len(): 1 byte  
         /// ConnectionID: up to 20 bytes    
-        /// Stateless Reset Token: 16 bytes 
+        /// Stateless Reset Token: 16 bytes
         const PREFERRED_ADDRESS_PARAM_MAX_SIZE: usize = 61;
         let mut buffer = [0; PREFERRED_ADDRESS_PARAM_MAX_SIZE];
 

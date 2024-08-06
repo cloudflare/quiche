@@ -466,7 +466,10 @@ pub fn connect(
                         local_addr, peer_addr
                     );
                     if migrated {
-                        info!("Migrating path's client address to {}", local_addr);
+                        info!(
+                            "Migrating path's client address to {}",
+                            local_addr
+                        );
                         conn.migrate_source(local_addr).unwrap();
                     } else {
                         info!(
@@ -540,17 +543,22 @@ pub fn connect(
                 conn.server_preferred_address_params()
             {
                 // Select the preferred address and probe it, preference for v4.
-                if let Some(server_preferred_addr) = preferred_address_params.addr_v4.map_or_else(|| preferred_address_params.addr_v6.map_or(None, |v6| Some(SocketAddr::V6(v6))), |addr_v4| Some(SocketAddr::V4(addr_v4))) {
+                if let Some(server_preferred_addr) =
+                    preferred_address_params.addr_v4.map_or_else(
+                        || {
+                            preferred_address_params
+                                .addr_v6
+                                .map_or(None, |v6| Some(SocketAddr::V6(v6)))
+                        },
+                        |addr_v4| Some(SocketAddr::V4(addr_v4)),
+                    )
+                {
                     info!("Performing server side connection migration - kicked off by client.");
                     info!(
                         "New path to be probed: {:?} -> {:?}",
                         local_addr, server_preferred_addr
                     );
-                    conn.probe_path(
-                        local_addr,
-                        server_preferred_addr,
-                    )
-                    .unwrap();
+                    conn.probe_path(local_addr, server_preferred_addr).unwrap();
 
                     server_preferred_address_probed = true;
                 }
