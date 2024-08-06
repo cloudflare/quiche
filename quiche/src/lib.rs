@@ -842,7 +842,7 @@ impl Config {
         Self::with_tls_ctx(version, tls::Context::new()?)
     }
 
-    /// Creates a config object with the given version and 
+    /// Creates a config object with the given version and
     /// [`SslContextBuilder`].
     ///
     /// This is useful for applications that wish to manually configure
@@ -1361,17 +1361,24 @@ impl Config {
     }
 
     /// Sets the server's preferred address.
-    /// 
-    /// The provided preferred address will be encoded by the server into the transport parameters and sent to the client.
-    /// The client will then decode the transport parameters and decide whether or not to perform a connection migration
-    /// to the server's preferred address. The client will require an available connection ID to make this migration.
-    /// 
+    ///
+    /// The provided preferred address will be encoded by the server into the
+    /// transport parameters and sent to the client. The client will then
+    /// decode the transport parameters and decide whether or not to perform a
+    /// connection migration to the server's preferred address. The client
+    /// will require an available connection ID to make this migration.
+    ///
     /// **Arguments**: \
-    /// *v4*: An IPv4 socket address representing the preferred address. Either this or *v6* must be `Some()` \
-    /// *v6*: An IPv6 socket address representing the preferred address. Either this or *v4* must be `Some()` \
-    /// *connection_id*: A new `ConnectionID`. This will be provided to the client to ensure they have an available connection ID to migrate on. This must not be empty. \
-    /// *stateless_reset_token*: The *connection_id's* associated stateless reset token.
-    /// 
+    /// *v4*: An IPv4 socket address representing the preferred address. Either
+    ///     this or *v6* must be `Some()` \
+    /// *v6*: An IPv6 socket address representing the preferred address. Either
+    ///     this or *v4* must be `Some()` \
+    /// *connection_id*: A new `ConnectionID`. This will be provided to
+    ///     the client to ensure they have an available connection ID to
+    ///     migrate on. This must not be empty. \
+    /// *stateless_reset_token*: The *connection_id's* associated stateless
+    /// reset token.
+    ///
     /// RFC: https://datatracker.ietf.org/doc/html/rfc9000#section-18.2-4.32.1
     pub fn set_preferred_address(
         &mut self, v4: Option<SocketAddrV4>, v6: Option<SocketAddrV6>,
