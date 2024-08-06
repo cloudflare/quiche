@@ -249,15 +249,15 @@ fn main() {
         // until there are no more packets to read.
         for event in &events {
             // Match the event to the correct socket
-            let socket = match event.token() {
+            let (socket, socket_name) = match event.token() {
                 mio::Token(0) => {
                     trace!("Event for starting socket occurred");
-                    &starting_socket
+                    (&starting_socket, "starting")
                 },
 
                 mio::Token(1) => {
                     trace!("Event for preferred socket occured: {:?}", event);
-                    &preferred_socket
+                    (&preferred_socket, "preferred")
                 },
 
                 _ => unreachable!(),
@@ -265,7 +265,7 @@ fn main() {
 
             let local_addr = socket.local_addr().unwrap();
 
-            trace!("Read loop starting up for {:?}", socket);
+            trace!("Read loop starting up for {:?} socket {:?}", socket_name, socket);
             'read: loop {
                 let (len, from) = match socket.recv_from(&mut buf) {
                     Ok(v) => v,
