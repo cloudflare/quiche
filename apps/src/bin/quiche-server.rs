@@ -821,7 +821,6 @@ fn validate_token<'a>(
 
 fn handle_path_events(client: &mut Client) {
     while let Some(qe) = client.conn.path_event_next() {
-        trace!("There was an event");
         match qe {
             // The Client may be trying to probe the new preferred path given to
             // it by the server.
