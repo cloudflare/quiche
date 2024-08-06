@@ -8704,16 +8704,6 @@ impl PreferredAddressParams {
         Ok(addr_v6)
     }
 
-    /// Encode the preferred address parameters into a buffer.
-    ///
-    /// # Arguments
-    ///
-    /// * `preferred_address_params` - A reference to the preferred address
-    ///   parameters to be encoded.
-    ///
-    /// # Returns
-    ///
-    /// * A buffer of constant length and the amount written to that buffer
     fn encode(
         preferred_address_params: &PreferredAddressParams,
     ) -> Result<([u8; 61], usize)> {
