@@ -38,7 +38,6 @@ use std::cell::RefCell;
 
 use ring::rand::*;
 
-use smallvec::SmallVec;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
@@ -547,8 +546,7 @@ pub fn connect(
                     preferred_address_params.addr_v4.map_or_else(
                         || {
                             preferred_address_params
-                                .addr_v6
-                                .map_or(None, |v6| Some(SocketAddr::V6(v6)))
+                                .addr_v6.map(SocketAddr::V6)
                         },
                         |addr_v4| Some(SocketAddr::V4(addr_v4)),
                     )
