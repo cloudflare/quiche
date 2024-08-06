@@ -225,7 +225,6 @@ fn main() {
             false => clients.values().filter_map(|c| c.conn.timeout()).min(),
         };
 
-        trace!("Polling the event loop for I/O events");
         let mut poll_res = poll.poll(&mut events, timeout);
         while let Err(e) = poll_res.as_ref() {
             if e.kind() == std::io::ErrorKind::Interrupted {
@@ -736,8 +735,6 @@ fn main() {
         // Part 3/3:
         // Garbage collect closed connections.
         clients.retain(|_, ref mut c| {
-            trace!("Collecting garbage");
-
             if c.conn.is_closed() {
                 info!(
                     "{} connection collected {:?} {:?}",
