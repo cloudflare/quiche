@@ -265,7 +265,11 @@ fn main() {
 
             let local_addr = socket.local_addr().unwrap();
 
-            trace!("Read loop starting up for {:?} socket {:?}", socket_name, socket);
+            trace!(
+                "Read loop starting up for {:?} socket {:?}",
+                socket_name,
+                socket
+            );
             'read: loop {
                 let (len, from) = match socket.recv_from(&mut buf) {
                     Ok(v) => v,
@@ -328,8 +332,6 @@ fn main() {
                 let client = if !clients_ids.contains_key(&hdr.dcid) &&
                     !clients_ids.contains_key(&conn_id)
                 {
-                    trace!("A new connection!");
-
                     if hdr.ty != quiche::Type::Initial {
                         error!("Packet is not Initial");
                         continue 'read;
@@ -417,7 +419,10 @@ fn main() {
 
                     let scid = quiche::ConnectionId::from_vec(scid.to_vec());
 
-                    trace!("New connection: dcid={:?} scid={:?}", hdr.dcid, scid);
+                    info!(
+                        "A new connection has occurred. dcid={:?} scid={:?}",
+                        hdr.dcid, scid
+                    );
 
                     let client_id = next_client_id;
 
@@ -502,12 +507,16 @@ fn main() {
 
                     clients.get_mut(&client_id).unwrap()
                 } else {
-                    trace!("We've seen this connection before!");
                     let client_id = match clients_ids.get(&hdr.dcid) {
                         Some(v) => v,
 
                         None => clients_ids.get(&conn_id).unwrap(),
                     };
+
+                    info!(
+                        "A repeat connection has occurred. Client ID={:?}",
+                        client_id
+                    );
 
                     // Get the client connection for this client id for this
                     // connection id
