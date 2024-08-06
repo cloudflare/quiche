@@ -842,7 +842,8 @@ impl Config {
         Self::with_tls_ctx(version, tls::Context::new()?)
     }
 
-    /// Creates a config object with the given version and [`SslContext`].
+    /// Creates a config object with the given version and 
+    /// [`SslContextBuilder`].
     ///
     /// This is useful for applications that wish to manually configure
     /// [`SslContextBuilder`].
