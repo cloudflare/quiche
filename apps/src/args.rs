@@ -434,6 +434,7 @@ pub const SERVER_USAGE: &str = "Usage:
 
 Options:
   --listen <addr>             Listen on the given IP:port [default: 127.0.0.1:4433]
+  --preferred-address <addr>  Preferred IP:port for server migration [default: 127.0.0.1:4434]
   --cert <file>               TLS certificate path [default: src/bin/cert.crt]
   --key <file>                TLS certificate key path [default: src/bin/cert.key]
   --root <dir>                Root directory [default: src/bin/root/]
@@ -470,6 +471,7 @@ Options:
 // Application-specific arguments that compliment the `CommonArgs`.
 pub struct ServerArgs {
     pub listen: String,
+    pub preferred_address: String,
     pub no_retry: bool,
     pub root: String,
     pub index: String,
@@ -485,6 +487,7 @@ impl Args for ServerArgs {
         let args = docopt.parse().unwrap_or_else(|e| e.exit());
 
         let listen = args.get_str("--listen").to_string();
+        let preferred_address = args.get_str("--preferred-address").to_string();
         let no_retry = args.get_bool("--no-retry");
         let root = args.get_str("--root").to_string();
         let index = args.get_str("--index").to_string();
@@ -496,6 +499,7 @@ impl Args for ServerArgs {
 
         ServerArgs {
             listen,
+            preferred_address,
             no_retry,
             root,
             index,
