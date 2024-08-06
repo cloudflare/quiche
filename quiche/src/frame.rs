@@ -1012,15 +1012,14 @@ impl Frame {
                 trigger_frame_type: None, // don't know trigger type
             },
 
-            Frame::ApplicationClose { error_code, reason } => {
+            Frame::ApplicationClose { error_code, reason } =>
                 QuicFrame::ConnectionClose {
                     error_space: Some(ErrorSpace::ApplicationError),
                     error_code: Some(*error_code),
                     error_code_value: None, // raw error is no different for us
                     reason: Some(String::from_utf8_lossy(reason).into_owned()),
                     trigger_frame_type: None, // don't know trigger type
-                }
-            },
+                },
 
             Frame::HandshakeDone => QuicFrame::HandshakeDone,
 
