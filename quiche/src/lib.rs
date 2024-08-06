@@ -1916,7 +1916,8 @@ impl Connection {
             reset_token,
         );
 
-        // If we aren't using a zero-length SCID, assign a new one to server's preferred address.
+        // If we aren't using a zero-length SCID, assign a new one to server's
+        // preferred address.
         if !scid.is_empty() {
             Self::assign_new_scid_to_preferred_address(
                 config, is_server, &mut ids,
