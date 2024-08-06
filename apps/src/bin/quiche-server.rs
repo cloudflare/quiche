@@ -877,7 +877,6 @@ fn handle_path_events(client: &mut Client) {
             },
 
             quiche::PathEvent::PeerMigrated(local_addr, peer_addr) => {
-                trace!("PathEvent::PeerMigrated");
                 info!(
                     "{} Connection migrated to ({}, {})",
                     client.conn.trace_id(),
