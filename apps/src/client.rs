@@ -38,7 +38,6 @@ use std::cell::RefCell;
 
 use ring::rand::*;
 
-
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
 #[derive(Debug)]
@@ -544,10 +543,7 @@ pub fn connect(
                 // Select the preferred address and probe it, preference for v4.
                 if let Some(server_preferred_addr) =
                     preferred_address_params.addr_v4.map_or_else(
-                        || {
-                            preferred_address_params
-                                .addr_v6.map(SocketAddr::V6)
-                        },
+                        || preferred_address_params.addr_v6.map(SocketAddr::V6),
                         |addr_v4| Some(SocketAddr::V4(addr_v4)),
                     )
                 {
