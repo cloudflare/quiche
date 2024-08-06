@@ -1385,6 +1385,7 @@ impl Config {
         connection_id: ConnectionId<'static>, stateless_reset_token: u128,
     ) -> Result<()> {
         if (v4.is_none() && v6.is_none()) || connection_id.is_empty() {
+            error!("To set a preferred address either an Ipv4 or IPv6 address must be provided along with a non-zero length connedtion ID.");
             return Err(Error::InvalidTransportParam);
         }
 
@@ -9560,12 +9561,46 @@ mod tests {
     }
 
     #[test]
+    fn server_preferred_address_rejects_empty_v4_and_empty_v6_preferred_addresses(
+    ) {
+        let mut preferred_addr_v4 = None;
+        let preferred_addr_v6 = None;
+        let connection_id = ConnectionId::from_vec(vec![0; MAX_CONN_ID_LEN]);
+        let stateless_reset_token = u128::from_be_bytes([0xba; 16]);
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+
+        // Either v4 or v6 must be some, both cannot be None.
+        assert_eq!(
+            config.set_preferred_address(
+                preferred_addr_v4,
+                preferred_addr_v6,
+                connection_id.into_owned(),
+                stateless_reset_token,
+            ),
+            Err(Error::InvalidTransportParam)
+        );
+
+        // Try again with a valid v4 address
+        preferred_addr_v4 = Some(SocketAddrV4::from_str("0.0.0.1:8080").unwrap());
+        let connection_id = ConnectionId::from_vec(vec![0; MAX_CONN_ID_LEN]);
+        config
+            .set_preferred_address(
+                preferred_addr_v4,
+                preferred_addr_v6,
+                connection_id.into_owned(),
+                stateless_reset_token,
+            )
+            .unwrap();
+    }
+
+    #[test]
     fn server_preferred_address_rejects_zero_len_cid() {
         let preferred_addr_v4 = SocketAddrV4::from_str("0.0.0.1:8080").unwrap();
         let preferred_addr_v6 = SocketAddrV6::from_str("[::1]:8080").unwrap();
+        // Zero length source connection ID.
+        let mut connection_id = ConnectionId::default();
         let stateless_reset_token = u128::from_be_bytes([0xba; 16]);
-        // Given a zero length cid.
-        let connection_id = ConnectionId::default();
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         config
@@ -9595,10 +9630,11 @@ mod tests {
                 connection_id.into_owned(),
                 stateless_reset_token,
             ),
-            Err(Error::TlsFail)
+            Err(Error::InvalidTransportParam)
         );
 
-        let connection_id = ConnectionId::from_vec(vec![0; MAX_CONN_ID_LEN]);
+        // Try again with a valid connection ID.
+        connection_id = ConnectionId::from_vec(vec![0; MAX_CONN_ID_LEN]);
         config
             .set_preferred_address(
                 Some(preferred_addr_v4),
@@ -9608,6 +9644,8 @@ mod tests {
             )
             .unwrap();
 
+        // The server cannot set its SCID length to 0 and also try to set a
+        // preferred address.
         assert_eq!(
             testing::PipeBuilder::new()
                 .server_config(config)
