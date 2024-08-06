@@ -725,34 +725,6 @@ fn main() {
                     break;
                 }
             }
-
-            // if total_write == 0 || dst_info.is_none() {
-            //     continue;
-            // }
-
-            // if let Err(e) = send_to(
-            //     &socket,
-            //     &out[..total_write],
-            //     &dst_info.unwrap(),
-            //     client.max_datagram_size,
-            //     pacing,
-            //     enable_gso,
-            // ) {
-            //     if e.kind() == std::io::ErrorKind::WouldBlock {
-            //         trace!("send() would block");
-            //         break;
-            //     }
-
-            //     panic!("send_to() failed: {:?}", e);
-            // }
-
-            // trace!("{} written {} bytes", client.conn.trace_id(), total_write);
-
-            // if total_write >= max_send_burst {
-            //     trace!("{} pause writing", client.conn.trace_id(),);
-            //     continue_write = true;
-            //     break;
-            // }
         }
 
         // Part 3/3:
