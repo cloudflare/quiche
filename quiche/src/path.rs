@@ -829,7 +829,7 @@ impl PathMap {
 /// It is part of the `Stats` structure returned by the [`stats()`] method.
 ///
 /// [`stats()`]: struct.Connection.html#method.stats
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct PathStats {
     /// The local address of the path.
     pub local_addr: SocketAddr,
