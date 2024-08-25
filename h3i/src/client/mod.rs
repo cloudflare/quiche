@@ -35,6 +35,7 @@ pub mod sync_client;
 
 use connection_summary::*;
 use qlog::events::h3::HttpHeader;
+use quiche::ConnectionError;
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -295,6 +296,17 @@ pub(crate) fn execute_action(
             stream_parsers
                 .entry(*stream_id)
                 .or_insert_with(|| FrameParser::new(*stream_id));
+        },
+
+        Action::ConnectionClose { error } => {
+            let ConnectionError {
+                is_app,
+                error_code,
+                reason,
+            } = error;
+
+            log::info!("connection_close={error:?}");
+            let _ = conn.close(*is_app, *error_code, reason);
         },
 
         // Neither of these actions will manipulate the Quiche connection

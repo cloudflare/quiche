@@ -33,6 +33,7 @@ use inquire::validator::Validation;
 use inquire::InquireError;
 use inquire::Select;
 use inquire::Text;
+use quiche::ConnectionError;
 
 use crate::actions::h3::Action;
 use crate::config::Config;
@@ -89,6 +90,8 @@ const EXTENSION: &str = "extension_frame";
 const OPEN_UNI_STREAM: &str = "open_uni_stream";
 const RESET_STREAM: &str = "reset_stream";
 const STOP_SENDING: &str = "stop_sending";
+const CONNECTION_CLOSE: &str = "connection_close";
+
 const COMMIT: &str = "commit";
 const FLUSH_PACKETS: &str = "flush_packets";
 const WAIT: &str = "wait";
@@ -153,6 +156,7 @@ impl Prompter {
             CANCEL_PUSH => prompt_cancel_push(),
             PUSH_PROMISE => prompt_push_promise(),
             PRIORITY_UPDATE => priority::prompt_priority(),
+            CONNECTION_CLOSE => prompt_connection_close(),
             FLUSH_PACKETS => return PromptOutcome::Action(Action::FlushPackets),
             COMMIT => return PromptOutcome::Commit,
             WAIT => prompt_wait(),
@@ -232,6 +236,7 @@ fn prompt_action() -> InquireResult<String> {
 }
 
 fn action_suggester(val: &str) -> SuggestionResult<Vec<String>> {
+    // TODO: make this an enum to automatically pick up new actions
     let suggestions = [
         HEADERS,
         HEADERS_NO_PSEUDO,
@@ -247,6 +252,7 @@ fn action_suggester(val: &str) -> SuggestionResult<Vec<String>> {
         OPEN_UNI_STREAM,
         RESET_STREAM,
         STOP_SENDING,
+        CONNECTION_CLOSE,
         FLUSH_PACKETS,
         COMMIT,
         WAIT,
@@ -421,6 +427,23 @@ fn prompt_extension() -> InquireResult<Action> {
     };
 
     Ok(action)
+}
+
+pub fn prompt_connection_close() -> InquireResult<Action> {
+    let is_app = prompt_yes_no("application close:")?;
+    let error_code = prompt_varint("error code:")?;
+    let reason = Text::new("reason:")
+        .with_placeholder("empty")
+        .prompt()
+        .unwrap_or(String::new());
+
+    Ok(Action::ConnectionClose {
+        error: ConnectionError {
+            is_app,
+            error_code,
+            reason: reason.as_bytes().to_vec(),
+        },
+    })
 }
 
 fn validate_wait_period(period: &str) -> SuggestionResult<Validation> {
