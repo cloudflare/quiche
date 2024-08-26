@@ -433,9 +433,9 @@ fn prompt_extension() -> InquireResult<Action> {
 pub fn prompt_connection_close() -> InquireResult<Action> {
     let (error_space, error_code) = errors::prompt_transport_or_app_error()?;
     let reason = Text::new("reason phrase:")
-        .with_placeholder(".")
+        .with_placeholder("optional reason phrase")
         .prompt()
-        .unwrap_or(String::new());
+        .unwrap_or_default();
 
     Ok(Action::ConnectionClose {
         error: ConnectionError {
