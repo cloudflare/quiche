@@ -33,6 +33,7 @@ use inquire::validator::Validation;
 use inquire::InquireError;
 use inquire::Select;
 use inquire::Text;
+use qlog::events::quic::ErrorSpace;
 use quiche::ConnectionError;
 
 use crate::actions::h3::Action;
@@ -430,16 +431,15 @@ fn prompt_extension() -> InquireResult<Action> {
 }
 
 pub fn prompt_connection_close() -> InquireResult<Action> {
-    let is_app = prompt_yes_no("application close:")?;
-    let error_code = prompt_varint("error code:")?;
-    let reason = Text::new("reason:")
-        .with_placeholder("empty")
+    let (error_space, error_code) = errors::prompt_transport_or_app_error()?;
+    let reason = Text::new("reason phrase:")
+        .with_placeholder(".")
         .prompt()
         .unwrap_or(String::new());
 
     Ok(Action::ConnectionClose {
         error: ConnectionError {
-            is_app,
+            is_app: matches!(error_space, ErrorSpace::ApplicationError),
             error_code,
             reason: reason.as_bytes().to_vec(),
         },
@@ -473,6 +473,7 @@ fn prompt_yes_no(msg: &str) -> InquireResult<bool> {
     Ok(res == YES)
 }
 
+mod errors;
 mod headers;
 mod priority;
 mod settings;

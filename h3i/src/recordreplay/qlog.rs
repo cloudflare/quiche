@@ -273,7 +273,7 @@ impl From<&Action> for QlogEvents {
                         error_space: Some(error_space),
                         error_code: Some(error.error_code),
                         // https://github.com/cloudflare/quiche/issues/1731
-                        error_code_value: Some(0),
+                        error_code_value: None,
                         reason,
                         trigger_frame_type: None
                     }
@@ -375,19 +375,19 @@ impl From<&PacketSent> for H3Actions {
                         reason,
                         ..
                     } => {
-                        let is_app = error_space
-                            .as_ref()
-                            .filter(|space| {
-                                matches!(space, ErrorSpace::ApplicationError)
-                            })
-                            .is_some();
+                        let is_app = matches!(
+                            error_space.as_ref().expect(
+                                "invalid CC frame in qlog input, no error space"
+                            ),
+                            ErrorSpace::ApplicationError
+                        );
 
                         actions.push(Action::ConnectionClose {
                             error: quiche::ConnectionError {
                                 is_app,
                                 // TODO: remove unwrap when https://github.com/cloudflare/quiche/issues/1731
                                 // is done
-                                error_code: error_code.unwrap(),
+                                error_code: error_code.expect("invalid CC frame in qlog input, no error code"),
                                 reason: reason
                                     .as_ref()
                                     .map(|s| s.as_bytes().to_vec())

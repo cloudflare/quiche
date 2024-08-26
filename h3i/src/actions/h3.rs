@@ -92,7 +92,7 @@ pub enum Action {
         error_code: u64,
     },
 
-    /// Send a CONNECTION_CLOSE frame witht the given [`ConnectionError`].
+    /// Send a CONNECTION_CLOSE frame with the given [`ConnectionError`].
     ConnectionClose {
         error: ConnectionError,
     },
