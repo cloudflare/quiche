@@ -30,6 +30,7 @@ use qlog::events::h3::H3FrameCreated;
 use qlog::events::h3::H3Owner;
 use qlog::events::h3::H3StreamTypeSet;
 use qlog::events::h3::Http3Frame;
+use qlog::events::quic::ErrorSpace;
 use qlog::events::quic::PacketSent;
 use qlog::events::quic::QuicFrame;
 use qlog::events::Event;
@@ -254,7 +255,39 @@ impl From<&Action> for QlogEvents {
                 })]
             },
 
-            _ => vec![],
+            Action::ConnectionClose { error } => {
+                let error_space = if error.is_app {
+                    ErrorSpace::ApplicationError
+                } else {
+                    ErrorSpace::TransportError
+                };
+
+                let reason = if error.reason.is_empty() {
+                    None
+                } else {
+                    Some(String::from_utf8(error.reason.clone()).unwrap())
+                };
+
+                let ev = fake_packet_sent(Some(smallvec![
+                    QuicFrame::ConnectionClose {
+                        error_space: Some(error_space),
+                        error_code: Some(error.error_code),
+                        // https://github.com/cloudflare/quiche/issues/1731
+                        error_code_value: None,
+                        reason,
+                        trigger_frame_type: None
+                    }
+                ]));
+
+                vec![QlogEvent::Event {
+                    data: Box::new(ev),
+                    ex_data: BTreeMap::new(),
+                }]
+            },
+
+            Action::FlushPackets => {
+                vec![]
+            },
         }
     }
 }
@@ -335,6 +368,33 @@ impl From<&PacketSent> for H3Actions {
                         stream_id: *stream_id,
                         error_code: *error_code,
                     }),
+
+                    QuicFrame::ConnectionClose {
+                        error_space,
+                        error_code,
+                        reason,
+                        ..
+                    } => {
+                        let is_app = matches!(
+                            error_space.as_ref().expect(
+                                "invalid CC frame in qlog input, no error space"
+                            ),
+                            ErrorSpace::ApplicationError
+                        );
+
+                        actions.push(Action::ConnectionClose {
+                            error: quiche::ConnectionError {
+                                is_app,
+                                // TODO: remove unwrap when https://github.com/cloudflare/quiche/issues/1731
+                                // is done
+                                error_code: error_code.expect("invalid CC frame in qlog input, no error code"),
+                                reason: reason
+                                    .as_ref()
+                                    .map(|s| s.as_bytes().to_vec())
+                                    .unwrap_or_default(),
+                            },
+                        })
+                    },
 
                     QuicFrame::Stream { stream_id, fin, .. } => {
                         let fin = fin.unwrap_or_default();
@@ -431,11 +491,20 @@ impl From<H3FrameCreatedEx> for H3Actions {
             Http3Frame::Data { raw } => {
                 let mut payload = vec![];
                 if let Some(r) = raw {
-                    payload = r.data.clone().unwrap_or("".to_string()).as_bytes().to_vec();
+                    payload = r
+                        .data
+                        .clone()
+                        .unwrap_or("".to_string())
+                        .as_bytes()
+                        .to_vec();
                 }
 
-                actions.push(Action::SendFrame { stream_id, fin_stream, frame: Frame::Data { payload } })
-            }
+                actions.push(Action::SendFrame {
+                    stream_id,
+                    fin_stream,
+                    frame: Frame::Data { payload },
+                })
+            },
 
             Http3Frame::Goaway { id } => {
                 actions.push(Action::SendFrame {

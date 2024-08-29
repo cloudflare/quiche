@@ -36,6 +36,7 @@ use std::time::Duration;
 use quiche;
 use quiche::h3::frame::Frame;
 use quiche::h3::Header;
+use quiche::ConnectionError;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::serde_as;
@@ -89,6 +90,11 @@ pub enum Action {
     StopSending {
         stream_id: u64,
         error_code: u64,
+    },
+
+    /// Send a CONNECTION_CLOSE frame with the given [`ConnectionError`].
+    ConnectionClose {
+        error: ConnectionError,
     },
 
     FlushPackets,
