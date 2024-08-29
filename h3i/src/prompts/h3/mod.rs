@@ -77,6 +77,7 @@ pub type PromptedFrame = (u64, quiche::h3::frame::Frame);
 
 thread_local! {static CONNECTION_IDLE_TIMEOUT: RefCell<u64> = const { RefCell::new(0) }}
 
+// TODO(erittenhouse): exploring generating prompts at compile-time
 const HEADERS: &str = "headers";
 const HEADERS_NO_PSEUDO: &str = "headers_no_pseudo";
 const DATA: &str = "data";
@@ -92,6 +93,7 @@ const OPEN_UNI_STREAM: &str = "open_uni_stream";
 const RESET_STREAM: &str = "reset_stream";
 const STOP_SENDING: &str = "stop_sending";
 const CONNECTION_CLOSE: &str = "connection_close";
+const STREAM_BYTES: &str = "stream_bytes";
 
 const COMMIT: &str = "commit";
 const FLUSH_PACKETS: &str = "flush_packets";
@@ -158,6 +160,7 @@ impl Prompter {
             PUSH_PROMISE => prompt_push_promise(),
             PRIORITY_UPDATE => priority::prompt_priority(),
             CONNECTION_CLOSE => prompt_connection_close(),
+            STREAM_BYTES => prompt_stream_bytes(),
             FLUSH_PACKETS => return PromptOutcome::Action(Action::FlushPackets),
             COMMIT => return PromptOutcome::Commit,
             WAIT => prompt_wait(),
@@ -254,6 +257,7 @@ fn action_suggester(val: &str) -> SuggestionResult<Vec<String>> {
         RESET_STREAM,
         STOP_SENDING,
         CONNECTION_CLOSE,
+        STREAM_BYTES,
         FLUSH_PACKETS,
         COMMIT,
         WAIT,
@@ -443,6 +447,18 @@ pub fn prompt_connection_close() -> InquireResult<Action> {
             error_code,
             reason: reason.as_bytes().to_vec(),
         },
+    })
+}
+
+pub fn prompt_stream_bytes() -> InquireResult<Action> {
+    let stream_id = h3::prompt_stream_id()?;
+    let bytes = Text::new("bytes:").prompt()?;
+    let fin_stream = prompt_fin_stream()?;
+
+    Ok(Action::StreamBytes {
+        stream_id,
+        fin_stream,
+        bytes: bytes.as_bytes().to_vec(),
     })
 }
 
