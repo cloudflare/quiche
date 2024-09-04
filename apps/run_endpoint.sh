@@ -120,7 +120,7 @@ mkdir -p $LOG_DIR
 
 if [ "$ROLE" == "client" ]; then
     # Wait for the simulator to start up.
-    /wait-for-it.sh sim:57832 -s -t 30
+    wait-for-it sim:57832 -s -t 30
     echo "## Starting quiche client..."
     echo "## Client params: $CLIENT_PARAMS"
     echo "## Requests: $REQUESTS"
