@@ -70,10 +70,6 @@ check_testcase () {
 }
 
 run_quiche_client_tests () {
-    # TODO: https://github.com/marten-seemann/quic-interop-runner/issues/61
-    # remove this sleep when the issue above is resolved.
-    sleep 3
-
     case $1 in
         multiconnect )
             for req in $REQUESTS
