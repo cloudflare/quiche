@@ -36,6 +36,8 @@ FROM martenseemann/quic-network-simulator-endpoint:latest as quiche-qns
 
 WORKDIR /quiche
 
+RUN apt-get update && apt-get install -y wait-for-it && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build \
      /build/apps/target/debug/quiche-client \
      /build/apps/target/debug/quiche-server \
