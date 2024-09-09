@@ -1451,11 +1451,8 @@ impl HttpConn for Http3Conn {
 
                     #[cfg(feature = "sfv")]
                     let priority =
-                        match quiche::h3::Priority::try_from(priority.as_slice())
-                        {
-                            Ok(v) => v,
-                            Err(_) => quiche::h3::Priority::default(),
-                        };
+                        quiche::h3::Priority::try_from(priority.as_slice())
+                            .unwrap_or_default();
 
                     #[cfg(not(feature = "sfv"))]
                     let priority = quiche::h3::Priority::default();
