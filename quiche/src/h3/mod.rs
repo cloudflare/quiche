@@ -2130,6 +2130,10 @@ impl Connection {
             return Err(Error::ClosedCriticalStream);
         }
 
+        if !conn.stream_readable(stream_id) {
+            return Err(Error::Done);
+        }
+
         match self.process_readable_stream(conn, stream_id, true) {
             Ok(ev) => return Ok(ev),
 
