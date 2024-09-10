@@ -33,6 +33,8 @@ pub struct Config {
     /// A string representing the host and port to connect to using the format
     /// `<host>:<port>`.
     pub host_port: String,
+    /// If the SNI should be omitted during the TLS handshake.
+    pub omit_sni: bool,
     /// Set a specific IP address to connect to, rather than use DNS resolution.
     pub connect_to: Option<String>,
     /// The source port to use when connecting to a server.
@@ -69,6 +71,11 @@ impl Config {
 
     pub fn with_host_port(mut self, host_port: String) -> Self {
         self.host_port = host_port;
+        self
+    }
+
+    pub fn omit_sni(mut self) -> Self {
+        self.omit_sni = true;
         self
     }
 
@@ -146,6 +153,7 @@ impl Config {
 
         Ok(Config {
             host_port: self.host_port,
+            omit_sni: self.omit_sni,
             connect_to: self.connect_to,
             source_port: self.source_port,
             verify_peer: self.verify_peer,
