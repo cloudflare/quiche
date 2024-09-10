@@ -405,6 +405,7 @@ use qlog::events::RawInfo;
 use stream::StreamPriorityKey;
 
 use std::cmp;
+use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::time;
 
@@ -641,6 +642,51 @@ pub enum WireErrorCode {
     /// CONNECTION_CLOSE frame carrying this code except when the path does
     /// not support a large enough MTU.
     NoViablePath         = 0x10,
+}
+
+/// Errors for conversions related to [WireErrorCode].
+#[derive(Debug, Eq, PartialEq)]
+pub enum FromWireConversionError {
+    /// The value was larger than the maximum encodable length.
+    TooBig,
+    /// The value was in the crypto error range.
+    CryptoRange,
+    /// The value was unknown by quiche, possibly a private extension or grease.
+    Unknown,
+}
+
+impl TryFrom<u64> for WireErrorCode {
+    type Error = FromWireConversionError;
+
+    fn try_from(value: u64) -> std::result::Result<Self, Self::Error> {
+        if value >= 1 << 62 {
+            return Err(FromWireConversionError::TooBig);
+        }
+
+        let res = match value {
+            0x0 => WireErrorCode::NoError,
+            0x1 => WireErrorCode::InternalError,
+            0x2 => WireErrorCode::ConnectionRefused,
+            0x3 => WireErrorCode::FlowControlError,
+            0x4 => WireErrorCode::StreamLimitError,
+            0x5 => WireErrorCode::StreamStateError,
+            0x6 => WireErrorCode::FinalSizeError,
+            0x7 => WireErrorCode::FrameEncodingError,
+            0x8 => WireErrorCode::TransportParameterError,
+            0x9 => WireErrorCode::ConnectionIdLimitError,
+            0xa => WireErrorCode::ProtocolViolation,
+            0xb => WireErrorCode::InvalidToken,
+            0xc => WireErrorCode::ApplicationError,
+            0xd => WireErrorCode::CryptoBufferExceeded,
+            0xe => WireErrorCode::KeyUpdateError,
+            0xf => WireErrorCode::AeadLimitReached,
+            0x10 => WireErrorCode::NoViablePath,
+            0x100..=0x1ff => return Err(FromWireConversionError::CryptoRange),
+            _ => return Err(FromWireConversionError::Unknown),
+        };
+
+        Ok(res)
+    }
 }
 
 impl Error {
@@ -17327,6 +17373,23 @@ mod tests {
 
         // Continue searching for PMTU
         assert!(pmtu_param.get_probe_status());
+    }
+
+    #[test]
+    fn wire_error_convert() {
+        assert_eq!(WireErrorCode::try_from(0), Ok(WireErrorCode::NoError));
+        assert_eq!(
+            WireErrorCode::try_from(u64::MAX),
+            Err(FromWireConversionError::TooBig)
+        );
+        assert_eq!(
+            WireErrorCode::try_from(0x100),
+            Err(FromWireConversionError::CryptoRange)
+        );
+        assert_eq!(
+            WireErrorCode::try_from(0x200),
+            Err(FromWireConversionError::Unknown)
+        );
     }
 }
 
