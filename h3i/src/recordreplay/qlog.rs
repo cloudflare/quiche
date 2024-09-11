@@ -37,6 +37,7 @@ use qlog::events::Event;
 use qlog::events::EventData;
 use qlog::events::ExData;
 use qlog::events::JsonEvent;
+use qlog::events::RawInfo;
 use quiche;
 use quiche::h3::frame::Frame;
 use quiche::h3::NameValue;
@@ -49,7 +50,6 @@ use crate::actions::h3::Action;
 use crate::actions::h3::WaitType;
 use crate::encode_header_block;
 use crate::fake_packet_sent;
-use crate::fake_packet_with_stream_fin;
 
 const HTTP3_CONTROL_STREAM_TYPE_ID: u64 = 0x0;
 const HTTP3_PUSH_STREAM_TYPE_ID: u64 = 0x1;
@@ -188,18 +188,26 @@ impl From<&Action> for QlogEvents {
             Action::StreamBytes {
                 stream_id,
                 fin_stream,
-                bytes: _,
+                bytes,
             } => {
-                if let Some(dummy) =
-                    fake_packet_with_stream_fin(*stream_id, *fin_stream)
-                {
-                    vec![QlogEvent::Event {
-                        data: Box::new(dummy),
-                        ex_data: BTreeMap::new(),
-                    }]
-                } else {
-                    vec![]
-                }
+                let len = bytes.len() as u64;
+                let ev = fake_packet_sent(Some(smallvec![QuicFrame::Stream {
+                    stream_id: *stream_id,
+                    fin: Some(*fin_stream),
+                    // ignore offset
+                    offset: 0,
+                    length: len,
+                    raw: Some(RawInfo {
+                        length: Some(len),
+                        payload_length: Some(len),
+                        data: String::from_utf8(bytes.clone()).ok()
+                    })
+                }]));
+
+                vec![QlogEvent::Event {
+                    data: Box::new(ev),
+                    ex_data: BTreeMap::new(),
+                }]
             },
 
             Action::ResetStream {

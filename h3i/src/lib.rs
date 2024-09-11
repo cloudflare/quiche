@@ -51,7 +51,6 @@ use qlog::events::EventData;
 pub use quiche;
 use quiche::h3::NameValue;
 
-use smallvec::smallvec;
 use smallvec::SmallVec;
 
 #[derive(Default)]
@@ -104,22 +103,6 @@ fn fake_packet_header() -> PacketHeader {
         scid: None,
         dcid: None,
     }
-}
-
-fn fake_packet_with_stream_fin(stream_id: u64, fin: bool) -> Option<EventData> {
-    if !fin {
-        return None;
-    }
-
-    let frames = Some(smallvec![QuicFrame::Stream {
-        stream_id,
-        offset: 0,
-        length: 0,
-        fin: Some(fin),
-        raw: None
-    }]);
-
-    Some(fake_packet_sent(frames))
 }
 
 fn fake_packet_sent(frames: Option<SmallVec<[QuicFrame; 1]>>) -> EventData {
