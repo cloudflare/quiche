@@ -43,8 +43,10 @@ and then sent to the server in sequence. The available options are
 - `grease` - an HTTP/3 GREASE frame
 - `extension_frame` - an HTTP/3 extension frame
 - `open_uni_stream` - opens an HTTP/3 unidirectional stream with a type
+- `stream_bytes` - send arbitrary data on a stream
 - `reset_stream` - resets a uni or bidi stream
 - `stop_sending` - stops a bidi stream
+- `connection_close` - closes the QUIC connection
 - `flush_packets` - force a QUIC packet flush, to emit any buffered actions
 - `commit` - finish action input, open the connection and execute all actions
 - `wait` - specify a client-side wait, in order to provide some delay between action emits
@@ -67,7 +69,7 @@ option can be used to specificy the desired IP and port.
 
 ## Record and Replay
 
-By default, h3i records all of the actions to a qlog file
+By default, h3i records all of the actions to a [qlog] file
 `<timestamp>-qlog.sqlog`. This can be replayed against the same server, or a
 different server, using the `--qlog-input` option. For example:
 
@@ -77,6 +79,9 @@ cargo run blog.cloudflare.com --qlog-input <timestamp>-qlog.sqlog
 ```
 
 Note that `:authority` or `host` headers may need to be re-written to match the target server, depending on the use case.
+
+The file uses a custom qlog schema that augments the [QUIC schema] and [HTTP/3
+schema].
 
 # Library
 
@@ -129,8 +134,23 @@ The `StreamMap` is the second core struct in the library. It is a map of receive
 
 These frames are of type H3iFrame, which abstract or wrap Quiche's own `quiche::h3::Frame` type to make them easier to work with. For example, the `H3iFrame::Headers` variant contains a headers list without QPACK encoding, making it easy to read or validate. Some frames have no additional features; these are simply wrapped in the `H3iFrame::QuicheH3` variant.
 
+# Inspiration
+
+h3i has been inspired by several other tools and techniques used across the HTTP and QUIC ecosystem:
+
+* [h2i](https://pkg.go.dev/golang.org/x/net/http2/h2i) - an interactive console debugger for HTTP/2. Provided as part of the Go HTTP/2 implementation
+
+* [h2spec](https://github.com/summerwind/h2spec) - a conformance testing tool for
+HTTP/2. Written and maintained by Moto Ishizawa.
+
+* [h3spec](https://github.com/kazu-yamamoto/h3spec) - a conformance testing tool
+for QUIC and HTTP/3. Written and maintained by Kazu Yamamato.
+
 [RFC 9000]: https://www.rfc-editor.org/rfc/rfc9000.html
 [RFC 9110]: https://www.rfc-editor.org/rfc/rfc9110.html
 [RFC 9114]: https://www.rfc-editor.org/rfc/rfc9114.html
 [RFC 9204]: https://www.rfc-editor.org/rfc/rfc9204.html
+[qlog]: https://datatracker.ietf.org/doc/draft-ietf-quic-qlog-main-schema/
+[QUIC schema]: https://datatracker.ietf.org/doc/draft-ietf-quic-qlog-quic-events
+[HTTP/3 schema]: https://datatracker.ietf.org/doc/draft-ietf-quic-qlog-h3-events
 
