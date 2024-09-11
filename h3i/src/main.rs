@@ -97,6 +97,13 @@ fn config_from_clap() -> std::result::Result<Config, String> {
                 .index(1),
         )
         .arg(
+            Arg::with_name("omit-sni")
+                .long("omit-sni")
+                .help("Omit the SNI from the TLS handshake")
+                // Requires an OsStr, so we can parse to empty later on
+                .takes_value(false)
+        )
+        .arg(
             Arg::with_name("connect-to")
                 .long("connect-to")
                 .help("Set a specific IP address to connect to, rather than use DNS resolution")
@@ -184,6 +191,7 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         .get_matches();
 
     let host_port = matches.value_of("host:port").unwrap().to_string();
+    let omit_sni = matches.is_present("omit-sni");
     let connect_to: Option<String> =
         matches.value_of("connect-to").map(|s| s.to_string());
     let verify_peer = !matches.is_present("no-verify");
@@ -252,6 +260,7 @@ fn config_from_clap() -> std::result::Result<Config, String> {
 
     let library_config = h3i::config::Config {
         host_port,
+        omit_sni,
         connect_to,
         source_port: 0,
         verify_peer,
