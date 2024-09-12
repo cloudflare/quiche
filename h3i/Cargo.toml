@@ -1,0 +1,29 @@
+[package]
+name = "h3i"
+version = "0.1.0"
+authors = ["Lucas Pardue <lucas@lucaspardue.com>", "Evan Rittenhouse <evanrittenhouse@gmail.com>"]
+edition = "2018"
+description = "Low-level HTTP/3 debugging and testing"
+repository = "https://github.com/cloudflare/quiche"
+readme = "README.md"
+keywords = ["quic", "http3"]
+categories = ["network-programming"]
+license = "BSD-2-Clause"
+rust-version = "1.67"
+
+[dependencies]
+clap = "3"
+env_logger = "0.6"
+http = "1.1.0"
+inquire = "0.6.2"
+log = { version = "0.4", features = ["std"] }
+mio = { version = "0.8", features = ["net", "os-poll"] }
+octets = { version = "0.3", path = "../octets"}
+qlog = { version = "0.13.0", path = "../qlog" }
+quiche = { version = "0.22", path = "../quiche", features = ["internal", "qlog"] }
+rand = "0.8.5"
+smallvec = "1.11.2"
+serde_with = "1"
+serde_json = "1"
+serde = "1"
+url = "1"
