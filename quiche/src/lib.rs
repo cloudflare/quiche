@@ -1408,6 +1408,12 @@ pub struct Connection {
     /// Total number of packets sent with data retransmitted.
     retrans_count: usize,
 
+    /// Total number of sent DATAGRAM frames.
+    dgram_sent_count: usize,
+
+    /// Total number of received DATAGRAM frames.
+    dgram_recv_count: usize,
+
     /// Total number of bytes received from the peer.
     rx_data: u64,
 
@@ -1903,6 +1909,8 @@ impl Connection {
             sent_count: 0,
             lost_count: 0,
             retrans_count: 0,
+            dgram_sent_count: 0,
+            dgram_recv_count: 0,
             sent_bytes: 0,
             recv_bytes: 0,
             acked_bytes: 0,
@@ -4306,6 +4314,8 @@ impl Connection {
                                     ack_eliciting = true;
                                     in_flight = true;
                                     dgram_emitted = true;
+                                    self.dgram_sent_count += 1;
+                                    path.dgram_sent_count += 1;
                                 }
                             },
 
@@ -6577,6 +6587,8 @@ impl Connection {
             acked_bytes: self.acked_bytes,
             lost_bytes: self.lost_bytes,
             stream_retrans_bytes: self.stream_retrans_bytes,
+            dgram_recv: self.dgram_recv_count,
+            dgram_sent: self.dgram_sent_count,
             paths_count: self.paths.len(),
             reset_stream_count_local: self.reset_stream_local_count,
             stopped_stream_count_local: self.stopped_stream_local_count,
@@ -7399,6 +7411,9 @@ impl Connection {
                 }
 
                 self.dgram_recv_queue.push(data)?;
+
+                self.dgram_recv_count += 1;
+                self.paths.get_mut(recv_path_id)?.dgram_recv_count += 1;
             },
 
             frame::Frame::DatagramHeader { .. } => unreachable!(),
@@ -7945,6 +7960,12 @@ pub struct Stats {
 
     /// The number of stream bytes retransmitted.
     pub stream_retrans_bytes: u64,
+
+    /// The number of DATAGRAM frames received.
+    pub dgram_recv: usize,
+
+    /// The number of DATAGRAM frames sent.
+    pub dgram_sent: usize,
 
     /// The number of known paths for the connection.
     pub paths_count: usize,
