@@ -50,11 +50,10 @@ use crate::actions::h3::Action;
 use crate::actions::h3::WaitType;
 use crate::encode_header_block;
 use crate::fake_packet_sent;
-
-const HTTP3_CONTROL_STREAM_TYPE_ID: u64 = 0x0;
-const HTTP3_PUSH_STREAM_TYPE_ID: u64 = 0x1;
-const QPACK_ENCODER_STREAM_TYPE_ID: u64 = 0x2;
-const QPACK_DECODER_STREAM_TYPE_ID: u64 = 0x3;
+use crate::HTTP3_CONTROL_STREAM_TYPE_ID;
+use crate::HTTP3_PUSH_STREAM_TYPE_ID;
+use crate::QPACK_DECODER_STREAM_TYPE_ID;
+use crate::QPACK_ENCODER_STREAM_TYPE_ID;
 
 /// A qlog event representation using either the official RFC format or the
 /// catch-al JSON event.
