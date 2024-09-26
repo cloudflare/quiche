@@ -442,7 +442,35 @@ impl Stream {
         let buf = &mut self.state_buf[self.state_off..self.state_len];
 
         let read = match conn.stream_recv(self.id, buf) {
-            Ok((len, _)) => len,
+            Ok((len, fin)) => {
+                // Check whether one of the critical stream was closed.
+                if fin &&
+                    matches!(
+                        self.ty,
+                        Some(Type::Control) |
+                            Some(Type::QpackEncoder) |
+                            Some(Type::QpackDecoder)
+                    )
+                {
+                    super::close_conn_critical_stream(conn)?;
+                }
+
+                len
+            },
+
+            Err(e @ crate::Error::StreamReset(_)) => {
+                // Check whether one of the critical stream was closed.
+                if matches!(
+                    self.ty,
+                    Some(Type::Control) |
+                        Some(Type::QpackEncoder) |
+                        Some(Type::QpackDecoder)
+                ) {
+                    super::close_conn_critical_stream(conn)?;
+                }
+
+                return Err(e.into());
+            },
 
             Err(e) => {
                 // The stream is not readable anymore, so re-arm the Data event.
