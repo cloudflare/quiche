@@ -75,7 +75,7 @@ pub fn prompt_headers(
 
     sid_alloc.take_next_id();
 
-    let header_block = encode_header_block(&headers).unwrap();
+    let header_block = encode_header_block(&headers).unwrap_or_default();
 
     let fin_stream = prompt_fin_stream()?;
 
