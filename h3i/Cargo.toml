@@ -1,6 +1,6 @@
 [package]
 name = "h3i"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Lucas Pardue <lucas@lucaspardue.com>", "Evan Rittenhouse <evanrittenhouse@gmail.com>"]
 edition = "2018"
 description = "Low-level HTTP/3 debugging and testing"
