@@ -931,6 +931,26 @@ pub struct Stats {
     pub qpack_decoder_stream_recv_bytes: u64,
 }
 
+fn close_conn_critical_stream(conn: &mut super::Connection) -> Result<()> {
+    conn.close(
+        true,
+        Error::ClosedCriticalStream.to_wire(),
+        b"Critical stream closed.",
+    )?;
+
+    Err(Error::ClosedCriticalStream)
+}
+
+fn close_conn_if_critical_stream_finished(
+    conn: &mut super::Connection, stream_id: u64,
+) -> Result<()> {
+    if conn.stream_finished(stream_id) {
+        close_conn_critical_stream(conn)?;
+    }
+
+    Ok(())
+}
+
 /// An HTTP/3 connection.
 pub struct Connection {
     is_server: bool,
@@ -2192,15 +2212,7 @@ impl Connection {
     fn process_control_stream(
         &mut self, conn: &mut super::Connection, stream_id: u64,
     ) -> Result<(u64, Event)> {
-        if conn.stream_finished(stream_id) {
-            conn.close(
-                true,
-                Error::ClosedCriticalStream.to_wire(),
-                b"Critical stream closed.",
-            )?;
-
-            return Err(Error::ClosedCriticalStream);
-        }
+        close_conn_if_critical_stream_finished(conn, stream_id)?;
 
         if !conn.stream_readable(stream_id) {
             return Err(Error::Done);
@@ -2214,15 +2226,7 @@ impl Connection {
             Err(e) => return Err(e),
         };
 
-        if conn.stream_finished(stream_id) {
-            conn.close(
-                true,
-                Error::ClosedCriticalStream.to_wire(),
-                b"Critical stream closed.",
-            )?;
-
-            return Err(Error::ClosedCriticalStream);
-        }
+        close_conn_if_critical_stream_finished(conn, stream_id)?;
 
         Err(Error::Done)
     }
@@ -2294,6 +2298,10 @@ impl Connection {
                                 stream_id
                             );
 
+                            close_conn_if_critical_stream_finished(
+                                conn, stream_id,
+                            )?;
+
                             self.peer_control_stream_id = Some(stream_id);
                         },
 
@@ -2323,6 +2331,10 @@ impl Connection {
                                 return Err(Error::StreamCreationError);
                             }
 
+                            close_conn_if_critical_stream_finished(
+                                conn, stream_id,
+                            )?;
+
                             self.peer_qpack_streams.encoder_stream_id =
                                 Some(stream_id);
                         },
@@ -2339,6 +2351,10 @@ impl Connection {
 
                                 return Err(Error::StreamCreationError);
                             }
+
+                            close_conn_if_critical_stream_finished(
+                                conn, stream_id,
+                            )?;
 
                             self.peer_qpack_streams.decoder_stream_id =
                                 Some(stream_id);
@@ -2504,7 +2520,7 @@ impl Connection {
 
                     // Read data from the stream and discard immediately.
                     loop {
-                        let (recv, _) = conn.stream_recv(stream_id, &mut d)?;
+                        let (recv, fin) = conn.stream_recv(stream_id, &mut d)?;
 
                         match stream.ty() {
                             Some(stream::Type::QpackEncoder) =>
@@ -2515,6 +2531,10 @@ impl Connection {
                                     recv as u64,
                             _ => unreachable!(),
                         };
+
+                        if fin {
+                            close_conn_critical_stream(conn)?;
+                        }
                     }
                 },
 
@@ -4850,11 +4870,30 @@ mod tests {
 
     #[test]
     /// Client closes the control stream, which is forbidden.
-    fn close_control_stream() {
+    fn close_control_stream_after_type() {
         let mut s = Session::new().unwrap();
         s.handshake().unwrap();
 
-        let mut control_stream_closed = false;
+        s.pipe
+            .client
+            .stream_send(s.client.control_stream_id.unwrap(), &vec![], true)
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(
+            Err(Error::ClosedCriticalStream),
+            s.server.poll(&mut s.pipe.server)
+        );
+        assert_eq!(Err(Error::Done), s.server.poll(&mut s.pipe.server));
+    }
+
+    #[test]
+    /// Client closes the control stream after a frame is sent, which is
+    /// forbidden.
+    fn close_control_stream_after_frame() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
 
         s.send_frame_client(
             frame::Frame::MaxPushId { push_id: 1 },
@@ -4863,33 +4902,100 @@ mod tests {
         )
         .unwrap();
 
-        loop {
-            match s.server.poll(&mut s.pipe.server) {
-                Ok(_) => (),
+        assert_eq!(
+            Err(Error::ClosedCriticalStream),
+            s.server.poll(&mut s.pipe.server)
+        );
+        assert_eq!(Err(Error::Done), s.server.poll(&mut s.pipe.server));
+    }
 
-                Err(Error::Done) => {
-                    break;
-                },
+    #[test]
+    /// Client resets the control stream, which is forbidden.
+    fn reset_control_stream_after_type() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
 
-                Err(Error::ClosedCriticalStream) => {
-                    control_stream_closed = true;
-                    break;
-                },
+        s.pipe
+            .client
+            .stream_shutdown(
+                s.client.control_stream_id.unwrap(),
+                crate::Shutdown::Write,
+                0,
+            )
+            .unwrap();
 
-                Err(_) => (),
-            }
-        }
+        s.advance().ok();
 
-        assert!(control_stream_closed);
+        assert_eq!(
+            Err(Error::ClosedCriticalStream),
+            s.server.poll(&mut s.pipe.server)
+        );
+        assert_eq!(Err(Error::Done), s.server.poll(&mut s.pipe.server));
+    }
+
+    #[test]
+    /// Client resets the control stream after a frame is sent, which is
+    /// forbidden.
+    fn reset_control_stream_after_frame() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        s.send_frame_client(
+            frame::Frame::MaxPushId { push_id: 1 },
+            s.client.control_stream_id.unwrap(),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(Err(Error::Done), s.server.poll(&mut s.pipe.server));
+
+        s.pipe
+            .client
+            .stream_shutdown(
+                s.client.control_stream_id.unwrap(),
+                crate::Shutdown::Write,
+                0,
+            )
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(
+            Err(Error::ClosedCriticalStream),
+            s.server.poll(&mut s.pipe.server)
+        );
+        assert_eq!(Err(Error::Done), s.server.poll(&mut s.pipe.server));
     }
 
     #[test]
     /// Client closes QPACK stream, which is forbidden.
-    fn close_qpack_stream() {
+    fn close_qpack_stream_after_type() {
         let mut s = Session::new().unwrap();
         s.handshake().unwrap();
 
-        let mut qpack_stream_closed = false;
+        s.pipe
+            .client
+            .stream_send(
+                s.client.local_qpack_streams.encoder_stream_id.unwrap(),
+                &vec![],
+                true,
+            )
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(
+            Err(Error::ClosedCriticalStream),
+            s.server.poll(&mut s.pipe.server)
+        );
+        assert_eq!(Err(Error::Done), s.server.poll(&mut s.pipe.server));
+    }
+
+    #[test]
+    /// Client closes QPACK stream after sending some stuff, which is forbidden.
+    fn close_qpack_stream_after_data() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
 
         let stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
         let d = [0; 1];
@@ -4899,24 +5005,65 @@ mod tests {
 
         s.advance().ok();
 
-        loop {
-            match s.server.poll(&mut s.pipe.server) {
-                Ok(_) => (),
+        assert_eq!(
+            Err(Error::ClosedCriticalStream),
+            s.server.poll(&mut s.pipe.server)
+        );
+        assert_eq!(Err(Error::Done), s.server.poll(&mut s.pipe.server));
+    }
 
-                Err(Error::Done) => {
-                    break;
-                },
+    #[test]
+    /// Client resets QPACK stream, which is forbidden.
+    fn reset_qpack_stream_after_type() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
 
-                Err(Error::ClosedCriticalStream) => {
-                    qpack_stream_closed = true;
-                    break;
-                },
+        s.pipe
+            .client
+            .stream_shutdown(
+                s.client.local_qpack_streams.encoder_stream_id.unwrap(),
+                crate::Shutdown::Write,
+                0,
+            )
+            .unwrap();
 
-                Err(_) => (),
-            }
-        }
+        s.advance().ok();
 
-        assert!(qpack_stream_closed);
+        assert_eq!(
+            Err(Error::ClosedCriticalStream),
+            s.server.poll(&mut s.pipe.server)
+        );
+        assert_eq!(Err(Error::Done), s.server.poll(&mut s.pipe.server));
+    }
+
+    #[test]
+    /// Client resets QPACK stream after sending some stuff, which is forbidden.
+    fn reset_qpack_stream_after_data() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
+        let d = [0; 1];
+
+        s.pipe.client.stream_send(stream_id, &d, false).unwrap();
+        s.pipe.client.stream_send(stream_id, &d, false).unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(Err(Error::Done), s.server.poll(&mut s.pipe.server));
+
+        s.pipe
+            .client
+            .stream_shutdown(stream_id, crate::Shutdown::Write, 0)
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(
+            Err(Error::ClosedCriticalStream),
+            s.server.poll(&mut s.pipe.server)
+        );
+        assert_eq!(Err(Error::Done), s.server.poll(&mut s.pipe.server));
     }
 
     #[test]
