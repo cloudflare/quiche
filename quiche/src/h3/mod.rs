@@ -139,7 +139,7 @@
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! loop {
 //!     match h3_conn.poll(&mut conn) {
-//!         Ok((stream_id, quiche::h3::Event::Headers{list, has_body})) => {
+//!         Ok((stream_id, quiche::h3::Event::Headers{list, more_frames})) => {
 //!             let mut headers = list.into_iter();
 //!
 //!             // Look for the request's method.
@@ -206,7 +206,7 @@
 //! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! loop {
 //!     match h3_conn.poll(&mut conn) {
-//!         Ok((stream_id, quiche::h3::Event::Headers{list, has_body})) => {
+//!         Ok((stream_id, quiche::h3::Event::Headers{list, more_frames})) => {
 //!             let status = list.iter().find(|h| h.name() == b":status").unwrap();
 //!             println!("Received {} response on stream {}",
 //!                      std::str::from_utf8(status.value()).unwrap(),
@@ -758,8 +758,8 @@ pub enum Event {
         /// pseudo-headers and headers.
         list: Vec<Header>,
 
-        /// Whether data will follow the headers on the stream.
-        has_body: bool,
+        /// Whether more frames will follow the headers on the stream.
+        more_frames: bool,
     },
 
     /// Data was received.
@@ -1186,6 +1186,64 @@ impl Connection {
         Ok(())
     }
 
+    /// Sends additional HTTP/3 headers.
+    ///
+    /// After the initial request or response headers have been sent, send an
+    /// additional HEADERS frame. This can be used, for example, to send a
+    /// single instance of trailers after a request with a body, or to
+    /// issue another non-final 1xx after a preceding 1xx, or to issue a final
+    /// response after a preceding 1xx.
+    ///
+    /// Additional headers can only be sent during certain phases of an HTTP/3
+    /// message exchange, see [Section 4.1 of RFC 9114]. The [`FrameUnexpected`]
+    /// error is returned when this method is called during the wrong phase,
+    /// such as before initial headers have been sent, or if trailers have
+    /// already been sent.
+    ///
+    /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application should retry the operation once the stream is
+    /// reported as writable again.
+    ///
+    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
+    /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
+    /// [Section 4.1 of RFC 9114]:
+    ///     https://www.rfc-editor.org/rfc/rfc9114.html#section-4.1.
+    pub fn send_additional_headers<T: NameValue>(
+        &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
+        is_trailer_section: bool, fin: bool,
+    ) -> Result<()> {
+        // Clients can only send trailer headers.
+        if !self.is_server && !is_trailer_section {
+            return Err(Error::FrameUnexpected);
+        }
+
+        match self.streams.get(&stream_id) {
+            Some(s) => {
+                // Only one trailing HEADERS allowed.
+                if s.trailers_sent() {
+                    return Err(Error::FrameUnexpected);
+                }
+
+                s
+            },
+
+            None => return Err(Error::FrameUnexpected),
+        };
+
+        self.send_headers(conn, stream_id, headers, fin)?;
+
+        if is_trailer_section {
+            // send_headers() might have tidied the stream away, so we need to
+            // check again.
+            if let Some(s) = self.streams.get_mut(&stream_id) {
+                s.mark_trailers_sent();
+            }
+        }
+
+        Ok(())
+    }
+
     fn encode_header_block<T: NameValue>(
         &mut self, headers: &[T],
     ) -> Result<Vec<u8>> {
@@ -1312,11 +1370,16 @@ impl Connection {
             return Err(Error::FrameUnexpected);
         }
 
-        match self.streams.get(&stream_id) {
-            Some(s) =>
+        match self.streams.get_mut(&stream_id) {
+            Some(s) => {
                 if !s.local_initialized() {
                     return Err(Error::FrameUnexpected);
-                },
+                }
+
+                if s.trailers_sent() {
+                    return Err(Error::FrameUnexpected);
+                }
+            },
 
             None => {
                 return Err(Error::FrameUnexpected);
@@ -2568,6 +2631,20 @@ impl Connection {
                     return Err(Error::FrameUnexpected);
                 }
 
+                // Servers reject too many HEADERS frames.
+                if let Some(s) = self.streams.get_mut(&stream_id) {
+                    if self.is_server && s.headers_received_count() == 2 {
+                        conn.close(
+                            true,
+                            Error::FrameUnexpected.to_wire(),
+                            b"Too many HEADERS frames",
+                        )?;
+                        return Err(Error::FrameUnexpected);
+                    }
+
+                    s.increment_headers_received();
+                }
+
                 // Use "infinite" as default value for max_field_section_size if
                 // it is not configured by the application.
                 let max_size = self
@@ -2619,11 +2696,11 @@ impl Connection {
                     q.add_event_data_now(ev_data).ok();
                 });
 
-                let has_body = !conn.stream_finished(stream_id);
+                let more_frames = !conn.stream_finished(stream_id);
 
                 return Ok((stream_id, Event::Headers {
                     list: headers,
-                    has_body,
+                    more_frames,
                 }));
             },
 
@@ -3343,7 +3420,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -3353,7 +3430,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
@@ -3372,7 +3449,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -3387,7 +3464,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
@@ -3409,7 +3486,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -3429,7 +3506,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
@@ -3458,7 +3535,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -3472,7 +3549,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
@@ -3499,7 +3576,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -3516,7 +3593,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
@@ -3559,21 +3636,21 @@ mod tests {
         let (_, ev) = s.poll_server().unwrap();
         let ev_headers = Event::Headers {
             list: reqs[0].clone(),
-            has_body: true,
+            more_frames: true,
         };
         assert_eq!(ev, ev_headers);
 
         let (_, ev) = s.poll_server().unwrap();
         let ev_headers = Event::Headers {
             list: reqs[1].clone(),
-            has_body: true,
+            more_frames: true,
         };
         assert_eq!(ev, ev_headers);
 
         let (_, ev) = s.poll_server().unwrap();
         let ev_headers = Event::Headers {
             list: reqs[2].clone(),
-            has_body: true,
+            more_frames: true,
         };
         assert_eq!(ev, ev_headers);
 
@@ -3612,7 +3689,7 @@ mod tests {
             let (stream, ev) = s.poll_client().unwrap();
             let ev_headers = Event::Headers {
                 list: resps[(stream / 4) as usize].clone(),
-                has_body: false,
+                more_frames: false,
             };
             assert_eq!(ev, ev_headers);
             assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
@@ -3632,7 +3709,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -3646,7 +3723,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
@@ -3674,7 +3751,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -3682,12 +3759,9 @@ mod tests {
 
         let resp = s.send_response(stream, false).unwrap();
 
-        // Note that "has_body" is a misnomer, there will never be a body in
-        // this test. There's other work that will fix this, once it lands
-        // remove this comment.
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: true,
+            more_frames: true,
         };
 
         // Inject a GREASE frame
@@ -3720,7 +3794,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -3840,6 +3914,201 @@ mod tests {
     }
 
     #[test]
+    /// Client sends request with body and trailers.
+    fn trailers() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let body = s.send_body_client(stream, false).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+
+        let req_trailers = vec![Header::new(b"foo", b"bar")];
+
+        s.client
+            .send_additional_headers(
+                &mut s.pipe.client,
+                stream,
+                &req_trailers,
+                true,
+                true,
+            )
+            .unwrap();
+
+        s.advance().ok();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        let ev_trailers = Event::Headers {
+            list: req_trailers,
+            more_frames: false,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_trailers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+    }
+
+    #[test]
+    /// Server responds with a 103, then a 200 with no body.
+    fn informational_response() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(true).unwrap();
+
+        assert_eq!(stream, 0);
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: false,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        let info_resp = vec![
+            Header::new(b":status", b"103"),
+            Header::new(b"link", b"<https://example.com>; rel=\"preconnect\""),
+        ];
+
+        let resp = vec![
+            Header::new(b":status", b"200"),
+            Header::new(b"server", b"quiche-test"),
+        ];
+
+        s.server
+            .send_response(&mut s.pipe.server, stream, &info_resp, false)
+            .unwrap();
+
+        s.server
+            .send_additional_headers(
+                &mut s.pipe.server,
+                stream,
+                &resp,
+                false,
+                true,
+            )
+            .unwrap();
+
+        s.advance().ok();
+
+        let ev_info_headers = Event::Headers {
+            list: info_resp,
+            more_frames: true,
+        };
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            more_frames: false,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_info_headers)));
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Client sends multiple HEADERS before data.
+    fn additional_headers_before_data_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let req_trailer = vec![Header::new(b"goodbye", b"world")];
+
+        assert_eq!(
+            s.client.send_additional_headers(
+                &mut s.pipe.client,
+                stream,
+                &req_trailer,
+                true,
+                false
+            ),
+            Ok(())
+        );
+
+        s.advance().ok();
+
+        let ev_initial_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        let ev_trailing_headers = Event::Headers {
+            list: req_trailer,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_initial_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, ev_trailing_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Client sends multiple HEADERS before data.
+    fn data_after_trailers_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let body = s.send_body_client(stream, false).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+
+        let req_trailers = vec![Header::new(b"foo", b"bar")];
+
+        s.client
+            .send_additional_headers(
+                &mut s.pipe.client,
+                stream,
+                &req_trailers,
+                true,
+                false,
+            )
+            .unwrap();
+
+        s.advance().ok();
+
+        s.send_frame_client(
+            frame::Frame::Data {
+                payload: vec![1, 2, 3, 4],
+            },
+            stream,
+            true,
+        )
+        .unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        let ev_trailers = Event::Headers {
+            list: req_trailers,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((stream, ev_trailers)));
+        assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
+    }
+
+    #[test]
     /// Send a MAX_PUSH_ID frame from the client on a valid stream.
     fn max_push_id_from_client_good() {
         let mut s = Session::new().unwrap();
@@ -3872,7 +4141,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -3941,7 +4210,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -3981,7 +4250,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -4353,7 +4622,7 @@ mod tests {
         let (stream, req) = s.send_request(true).unwrap();
         let ev_headers = Event::Headers {
             list: req,
-            has_body: false,
+            more_frames: false,
         };
 
         // Priority event is generated before request headers.
@@ -4369,7 +4638,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
@@ -4407,7 +4676,7 @@ mod tests {
         let (stream, req) = s.send_request(false).unwrap();
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         // Priority event is generated before request headers.
@@ -4709,7 +4978,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.server.poll(&mut s.pipe.server), Ok((0, ev_headers)));
@@ -4784,7 +5053,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -5088,7 +5357,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -5222,7 +5491,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -5294,7 +5563,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -5363,7 +5632,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -5386,7 +5655,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
@@ -5845,7 +6114,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         s.send_dgram_client(0).unwrap();
@@ -5894,7 +6163,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         s.send_dgram_client(0).unwrap();
@@ -5921,7 +6190,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: true,
+            more_frames: true,
         };
 
         s.send_dgram_server(0).unwrap();
@@ -5980,7 +6249,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         s.send_dgram_client(0).unwrap();
@@ -6037,7 +6306,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: true,
+            more_frames: true,
         };
 
         s.send_dgram_server(0).unwrap();
@@ -6116,7 +6385,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
@@ -6137,13 +6406,13 @@ mod tests {
         let mut s = Session::new().unwrap();
         s.handshake().unwrap();
 
-        let (stream, req) = s.send_request(false).unwrap();
+        let (r1_id, r1_hdrs) = s.send_request(false).unwrap();
 
         let mut recv_buf = vec![0; bytes.len()];
 
-        let ev_headers = Event::Headers {
-            list: req,
-            has_body: true,
+        let r1_ev_headers = Event::Headers {
+            list: r1_hdrs,
+            more_frames: true,
         };
 
         // Manually send an incomplete DATA frame (i.e. the frame size is longer
@@ -6155,73 +6424,104 @@ mod tests {
             b.put_varint(frame::DATA_FRAME_TYPE_ID).unwrap();
             b.put_varint(bytes.len() as u64).unwrap();
             let off = b.off();
-            s.pipe.client.stream_send(stream, &d[..off], false).unwrap();
+            s.pipe.client.stream_send(r1_id, &d[..off], false).unwrap();
 
             assert_eq!(
-                s.pipe.client.stream_send(stream, &bytes[..5], false),
+                s.pipe.client.stream_send(r1_id, &bytes[..5], false),
                 Ok(5)
             );
 
             s.advance().ok();
         }
 
-        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
-        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((r1_id, r1_ev_headers)));
+        assert_eq!(s.poll_server(), Ok((r1_id, Event::Data)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
         // Read the available body data.
-        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(5));
+        assert_eq!(s.recv_body_server(r1_id, &mut recv_buf), Ok(5));
 
         // Send the remaining DATA payload.
-        assert_eq!(s.pipe.client.stream_send(stream, &bytes[5..], false), Ok(5));
+        assert_eq!(s.pipe.client.stream_send(r1_id, &bytes[5..], false), Ok(5));
         s.advance().ok();
 
-        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((r1_id, Event::Data)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
         // Read the rest of the body data.
-        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(5));
+        assert_eq!(s.recv_body_server(r1_id, &mut recv_buf), Ok(5));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
         // Send more data.
-        let body = s.send_body_client(stream, false).unwrap();
+        let r1_body = s.send_body_client(r1_id, false).unwrap();
 
-        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((r1_id, Event::Data)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
-        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.recv_body_server(r1_id, &mut recv_buf), Ok(r1_body.len()));
 
-        // Send more data, then HEADERS, then more data.
-        let body = s.send_body_client(stream, false).unwrap();
+        // Send a new request to ensure cross-stream events don't break rearming.
+        let (r2_id, r2_hdrs) = s.send_request(false).unwrap();
+        let r2_ev_headers = Event::Headers {
+            list: r2_hdrs,
+            more_frames: true,
+        };
+        let r2_body = s.send_body_client(r2_id, false).unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Ok((r2_id, r2_ev_headers)));
+        assert_eq!(s.poll_server(), Ok((r2_id, Event::Data)));
+        assert_eq!(s.recv_body_server(r2_id, &mut recv_buf), Ok(r2_body.len()));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // Send more data on request 1, then trailing HEADERS.
+        let r1_body = s.send_body_client(r1_id, false).unwrap();
 
         let trailers = vec![Header::new(b"hello", b"world")];
 
         s.client
-            .send_headers(&mut s.pipe.client, stream, &trailers, false)
+            .send_headers(&mut s.pipe.client, r1_id, &trailers, true)
             .unwrap();
 
-        let ev_trailers = Event::Headers {
-            list: trailers,
-            has_body: true,
+        let r1_ev_trailers = Event::Headers {
+            list: trailers.clone(),
+            more_frames: false,
         };
 
         s.advance().ok();
 
-        s.send_body_client(stream, false).unwrap();
+        assert_eq!(s.poll_server(), Ok((r1_id, Event::Data)));
+        assert_eq!(s.recv_body_server(r1_id, &mut recv_buf), Ok(r1_body.len()));
 
-        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
-        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((r1_id, r1_ev_trailers)));
+        assert_eq!(s.poll_server(), Ok((r1_id, Event::Finished)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
 
-        assert_eq!(s.poll_server(), Ok((stream, ev_trailers)));
+        // Send more data on request 2, then trailing HEADERS.
+        let r2_body = s.send_body_client(r2_id, false).unwrap();
 
-        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
-        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
+        s.client
+            .send_headers(&mut s.pipe.client, r2_id, &trailers, false)
+            .unwrap();
 
-        let (stream, req) = s.send_request(false).unwrap();
+        let r2_ev_trailers = Event::Headers {
+            list: trailers,
+            more_frames: true,
+        };
 
-        let ev_headers = Event::Headers {
-            list: req,
-            has_body: true,
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Ok((r2_id, Event::Data)));
+        assert_eq!(s.recv_body_server(r2_id, &mut recv_buf), Ok(r2_body.len()));
+        assert_eq!(s.poll_server(), Ok((r2_id, r2_ev_trailers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let (r3_id, r3_hdrs) = s.send_request(false).unwrap();
+
+        let r3_ev_headers = Event::Headers {
+            list: r3_hdrs,
+            more_frames: true,
         };
 
         // Manually send an incomplete DATA frame (i.e. only the header is sent).
@@ -6232,40 +6532,40 @@ mod tests {
             b.put_varint(frame::DATA_FRAME_TYPE_ID).unwrap();
             b.put_varint(bytes.len() as u64).unwrap();
             let off = b.off();
-            s.pipe.client.stream_send(stream, &d[..off], false).unwrap();
+            s.pipe.client.stream_send(r3_id, &d[..off], false).unwrap();
 
             s.advance().ok();
         }
 
-        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
-        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((r3_id, r3_ev_headers)));
+        assert_eq!(s.poll_server(), Ok((r3_id, Event::Data)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
-        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Err(Error::Done));
+        assert_eq!(s.recv_body_server(r3_id, &mut recv_buf), Err(Error::Done));
 
-        assert_eq!(s.pipe.client.stream_send(stream, &bytes[..5], false), Ok(5));
+        assert_eq!(s.pipe.client.stream_send(r3_id, &bytes[..5], false), Ok(5));
 
         s.advance().ok();
 
-        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((r3_id, Event::Data)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
-        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(5));
+        assert_eq!(s.recv_body_server(r3_id, &mut recv_buf), Ok(5));
 
-        assert_eq!(s.pipe.client.stream_send(stream, &bytes[5..], false), Ok(5));
+        assert_eq!(s.pipe.client.stream_send(r3_id, &bytes[5..], false), Ok(5));
         s.advance().ok();
 
-        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((r3_id, Event::Data)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
-        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(5));
+        assert_eq!(s.recv_body_server(r3_id, &mut recv_buf), Ok(5));
 
         // Buffer multiple data frames.
-        let body = s.send_body_client(stream, false).unwrap();
-        s.send_body_client(stream, false).unwrap();
-        s.send_body_client(stream, false).unwrap();
+        let body = s.send_body_client(r3_id, false).unwrap();
+        s.send_body_client(r3_id, false).unwrap();
+        s.send_body_client(r3_id, false).unwrap();
 
-        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_server(), Ok((r3_id, Event::Data)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
         {
@@ -6275,17 +6575,14 @@ mod tests {
             b.put_varint(frame::DATA_FRAME_TYPE_ID).unwrap();
             b.put_varint(0).unwrap();
             let off = b.off();
-            s.pipe.client.stream_send(stream, &d[..off], true).unwrap();
+            s.pipe.client.stream_send(r3_id, &d[..off], true).unwrap();
 
             s.advance().ok();
         }
 
         let mut recv_buf = vec![0; bytes.len() * 3];
 
-        assert_eq!(
-            s.recv_body_server(stream, &mut recv_buf),
-            Ok(body.len() * 3)
-        );
+        assert_eq!(s.recv_body_server(r3_id, &mut recv_buf), Ok(body.len() * 3));
     }
 
     #[test]
@@ -6327,7 +6624,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         s.send_dgram_client(0).unwrap();
@@ -6379,7 +6676,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         // Server sends response and closes stream.
@@ -6390,7 +6687,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: false,
+            more_frames: false,
         };
 
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
@@ -6454,7 +6751,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: false,
+            more_frames: false,
         };
 
         // Server receives headers and fin.
@@ -6477,7 +6774,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         // Server receives headers and data...
@@ -6511,7 +6808,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: true,
+            more_frames: true,
         };
 
         // Server receives headers.
@@ -6542,7 +6839,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: req,
-            has_body: false,
+            more_frames: false,
         };
 
         // Server receives headers and fin.
@@ -6572,7 +6869,7 @@ mod tests {
 
         let ev_headers = Event::Headers {
             list: resp,
-            has_body: false,
+            more_frames: false,
         };
 
         // Client receives headers and fin.

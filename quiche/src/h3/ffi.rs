@@ -188,9 +188,9 @@ pub extern fn quiche_h3_event_for_each_header(
 }
 
 #[no_mangle]
-pub extern fn quiche_h3_event_headers_has_body(ev: &h3::Event) -> bool {
+pub extern fn quiche_h3_event_headers_has_more_frames(ev: &h3::Event) -> bool {
     match ev {
-        h3::Event::Headers { has_body, .. } => *has_body,
+        h3::Event::Headers { more_frames, .. } => *more_frames,
 
         _ => unreachable!(),
     }
@@ -257,6 +257,27 @@ pub extern fn quiche_h3_send_response_with_priority(
         stream_id,
         &resp_headers,
         priority,
+        fin,
+    ) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern fn quiche_h3_send_additional_headers(
+    conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
+    headers: *const Header, headers_len: size_t, is_trailer_section: bool,
+    fin: bool,
+) -> c_int {
+    let headers = headers_from_ptr(headers, headers_len);
+
+    match conn.send_additional_headers(
+        quic_conn,
+        stream_id,
+        &headers,
+        is_trailer_section,
         fin,
     ) {
         Ok(_) => 0,
