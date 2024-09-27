@@ -2631,7 +2631,7 @@ impl Connection {
                     return Err(Error::FrameUnexpected);
                 }
 
-                // Servers reject too many HEADERS frames
+                // Servers reject too many HEADERS frames.
                 if let Some(s) = self.streams.get_mut(&stream_id) {
                     if self.is_server && s.headers_received_count() == 2 {
                         conn.close(
