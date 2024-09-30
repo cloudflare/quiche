@@ -27,7 +27,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::Bytes;
+use crate::Bytes;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]

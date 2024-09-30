@@ -27,18 +27,18 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::RawInfo;
+use crate::events::RawInfo;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum H3Owner {
+pub enum Owner {
     Local,
     Remote,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum H3StreamType {
+pub enum StreamType {
     Request,
     Control,
     Push,
@@ -50,14 +50,14 @@ pub enum H3StreamType {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum H3PushDecision {
+pub enum PushDecision {
     Claimed,
     Abandoned,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum H3PriorityTargetStreamType {
+pub enum PriorityTargetStreamType {
     Request,
     Push,
 }
@@ -162,7 +162,7 @@ pub enum Http3Frame {
     },
 
     PriorityUpdate {
-        target_stream_type: H3PriorityTargetStreamType,
+        target_stream_type: PriorityTargetStreamType,
         prioritized_element_id: u64,
         priority_field_value: String,
     },
@@ -179,8 +179,8 @@ pub enum Http3Frame {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct H3ParametersSet {
-    pub owner: Option<H3Owner>,
+pub struct ParametersSet {
+    pub owner: Option<Owner>,
 
     #[serde(alias = "max_header_list_size")]
     pub max_field_section_size: Option<u64>,
@@ -195,7 +195,7 @@ pub struct H3ParametersSet {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct H3ParametersRestored {
+pub struct ParametersRestored {
     #[serde(alias = "max_header_list_size")]
     pub max_field_section_size: Option<u64>,
     pub max_table_capacity: Option<u64>,
@@ -206,17 +206,17 @@ pub struct H3ParametersRestored {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct H3StreamTypeSet {
-    pub owner: Option<H3Owner>,
+pub struct StreamTypeSet {
+    pub owner: Option<Owner>,
     pub stream_id: u64,
-    pub stream_type: H3StreamType,
+    pub stream_type: StreamType,
     pub stream_type_value: Option<u64>,
     pub associated_push_id: Option<u64>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct H3FrameCreated {
+pub struct FrameCreated {
     pub stream_id: u64,
     pub length: Option<u64>,
     pub frame: Http3Frame,
@@ -226,7 +226,7 @@ pub struct H3FrameCreated {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct H3FrameParsed {
+pub struct FrameParsed {
     pub stream_id: u64,
     pub length: Option<u64>,
     pub frame: Http3Frame,
@@ -236,9 +236,9 @@ pub struct H3FrameParsed {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct H3PushResolved {
+pub struct PushResolved {
     push_id: Option<u64>,
     stream_id: Option<u64>,
 
-    decision: Option<H3PushDecision>,
+    decision: Option<PushDecision>,
 }

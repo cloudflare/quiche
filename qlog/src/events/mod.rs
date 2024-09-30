@@ -26,11 +26,14 @@
 
 use crate::Bytes;
 use crate::Token;
-use h3::*;
-use qpack::*;
-use quic::*;
-
-use connectivity::ConnectivityEventType;
+use http::h3;
+use http::h3::*;
+use quic::connectivity;
+use quic::connectivity::*;
+use quic::quic::*;
+use quic::recovery;
+use quic::recovery::*;
+use quic::security;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -39,12 +42,22 @@ use std::collections::BTreeMap;
 
 pub type ExData = BTreeMap<String, serde_json::Value>;
 
+pub const LOGLEVEL_URI: &str = "urn:ietf:params:qlog:events:gen#loglevel-09";
+
+pub const CONNECTIVITY_URI: &str =
+    "urn:ietf:params:qlog:events:quic#connectivity-08";
+pub const SECURITY_URI: &str = "urn:ietf:params:qlog:events:quic#security-08";
+pub const QUIC_URI: &str = "urn:ietf:params:qlog:events:quic#quic-08";
+pub const RECOVERY_URI: &str = "urn:ietf:params:qlog:events:quic#recovery-08";
+
+pub const H3_URI: &str = "urn:ietf:params:qlog:events:http#h3-08";
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(untagged)]
 pub enum EventType {
     ConnectivityEventType(ConnectivityEventType),
 
-    TransportEventType(TransportEventType),
+    QuicEventType(QuicEventType),
 
     SecurityEventType(SecurityEventType),
 
@@ -52,9 +65,7 @@ pub enum EventType {
 
     Http3EventType(Http3EventType),
 
-    QpackEventType(QpackEventType),
-
-    GenericEventType(GenericEventType),
+    LogLevelEventType(LogLevelEventType),
 
     #[default]
     None,
@@ -215,6 +226,9 @@ impl From<EventType> for EventImportance {
                 ConnectivityEventType::ConnectionStateUpdated,
             ) => EventImportance::Base,
             EventType::ConnectivityEventType(
+                ConnectivityEventType::PathAssigned,
+            ) => EventImportance::Extra,
+            EventType::ConnectivityEventType(
                 ConnectivityEventType::MtuUpdated,
             ) => EventImportance::Extra,
 
@@ -223,42 +237,39 @@ impl From<EventType> for EventImportance {
             EventType::SecurityEventType(SecurityEventType::KeyDiscarded) =>
                 EventImportance::Base,
 
-            EventType::TransportEventType(
-                TransportEventType::VersionInformation,
-            ) => EventImportance::Core,
-            EventType::TransportEventType(
-                TransportEventType::AlpnInformation,
-            ) => EventImportance::Core,
-            EventType::TransportEventType(TransportEventType::ParametersSet) =>
+            EventType::QuicEventType(QuicEventType::VersionInformation) =>
                 EventImportance::Core,
-            EventType::TransportEventType(
-                TransportEventType::ParametersRestored,
-            ) => EventImportance::Base,
-            EventType::TransportEventType(
-                TransportEventType::DatagramsReceived,
-            ) => EventImportance::Extra,
-            EventType::TransportEventType(TransportEventType::DatagramsSent) =>
-                EventImportance::Extra,
-            EventType::TransportEventType(
-                TransportEventType::DatagramDropped,
-            ) => EventImportance::Extra,
-            EventType::TransportEventType(TransportEventType::PacketReceived) =>
+            EventType::QuicEventType(QuicEventType::AlpnInformation) =>
                 EventImportance::Core,
-            EventType::TransportEventType(TransportEventType::PacketSent) =>
+            EventType::QuicEventType(QuicEventType::ParametersSet) =>
                 EventImportance::Core,
-            EventType::TransportEventType(TransportEventType::PacketDropped) =>
+            EventType::QuicEventType(QuicEventType::ParametersRestored) =>
                 EventImportance::Base,
-            EventType::TransportEventType(TransportEventType::PacketBuffered) =>
-                EventImportance::Base,
-            EventType::TransportEventType(TransportEventType::PacketsAcked) =>
+            EventType::QuicEventType(QuicEventType::UdpDatagramsReceived) =>
                 EventImportance::Extra,
-            EventType::TransportEventType(
-                TransportEventType::StreamStateUpdated,
-            ) => EventImportance::Base,
-            EventType::TransportEventType(
-                TransportEventType::FramesProcessed,
-            ) => EventImportance::Extra,
-            EventType::TransportEventType(TransportEventType::DataMoved) =>
+            EventType::QuicEventType(QuicEventType::UdpDatagramsSent) =>
+                EventImportance::Extra,
+            EventType::QuicEventType(QuicEventType::UdpDatagramDropped) =>
+                EventImportance::Extra,
+            EventType::QuicEventType(QuicEventType::PacketReceived) =>
+                EventImportance::Core,
+            EventType::QuicEventType(QuicEventType::PacketSent) =>
+                EventImportance::Core,
+            EventType::QuicEventType(QuicEventType::PacketDropped) =>
+                EventImportance::Base,
+            EventType::QuicEventType(QuicEventType::PacketBuffered) =>
+                EventImportance::Base,
+            EventType::QuicEventType(QuicEventType::PacketsAcked) =>
+                EventImportance::Extra,
+            EventType::QuicEventType(QuicEventType::StreamStateUpdated) =>
+                EventImportance::Base,
+            EventType::QuicEventType(QuicEventType::FramesProcessed) =>
+                EventImportance::Extra,
+            EventType::QuicEventType(QuicEventType::StreamDataMoved) =>
+                EventImportance::Base,
+            EventType::QuicEventType(QuicEventType::DatagramDataMoved) =>
+                EventImportance::Base,
+            EventType::QuicEventType(QuicEventType::MigrationStateUpdated) =>
                 EventImportance::Base,
 
             EventType::RecoveryEventType(RecoveryEventType::ParametersSet) =>
@@ -286,21 +297,6 @@ impl From<EventType> for EventImportance {
                 EventImportance::Core,
             EventType::Http3EventType(Http3EventType::PushResolved) =>
                 EventImportance::Extra,
-
-            EventType::QpackEventType(QpackEventType::StateUpdated) =>
-                EventImportance::Base,
-            EventType::QpackEventType(QpackEventType::StreamStateUpdated) =>
-                EventImportance::Base,
-            EventType::QpackEventType(QpackEventType::DynamicTableUpdated) =>
-                EventImportance::Extra,
-            EventType::QpackEventType(QpackEventType::HeadersEncoded) =>
-                EventImportance::Base,
-            EventType::QpackEventType(QpackEventType::HeadersDecoded) =>
-                EventImportance::Base,
-            EventType::QpackEventType(QpackEventType::InstructionCreated) =>
-                EventImportance::Base,
-            EventType::QpackEventType(QpackEventType::InstructionParsed) =>
-                EventImportance::Base,
 
             _ => unimplemented!(),
         }
@@ -357,10 +353,9 @@ impl From<EventType> for EventCategory {
         match ty {
             EventType::ConnectivityEventType(_) => EventCategory::Connectivity,
             EventType::SecurityEventType(_) => EventCategory::Security,
-            EventType::TransportEventType(_) => EventCategory::Transport,
+            EventType::QuicEventType(_) => EventCategory::Transport,
             EventType::RecoveryEventType(_) => EventCategory::Recovery,
             EventType::Http3EventType(_) => EventCategory::Http,
-            EventType::QpackEventType(_) => EventCategory::Qpack,
 
             _ => unimplemented!(),
         }
@@ -393,6 +388,9 @@ impl From<&EventData> for EventType {
                 EventType::ConnectivityEventType(
                     ConnectivityEventType::ConnectionStateUpdated,
                 ),
+            EventData::PathAssigned { .. } => EventType::ConnectivityEventType(
+                ConnectivityEventType::PathAssigned,
+            ),
             EventData::MtuUpdated { .. } => EventType::ConnectivityEventType(
                 ConnectivityEventType::MtuUpdated,
             ),
@@ -403,42 +401,39 @@ impl From<&EventData> for EventType {
                 EventType::SecurityEventType(SecurityEventType::KeyDiscarded),
 
             EventData::VersionInformation { .. } =>
-                EventType::TransportEventType(
-                    TransportEventType::VersionInformation,
-                ),
+                EventType::QuicEventType(QuicEventType::VersionInformation),
             EventData::AlpnInformation { .. } =>
-                EventType::TransportEventType(TransportEventType::AlpnInformation),
-            EventData::TransportParametersSet { .. } =>
-                EventType::TransportEventType(TransportEventType::ParametersSet),
-            EventData::TransportParametersRestored { .. } =>
-                EventType::TransportEventType(
-                    TransportEventType::ParametersRestored,
-                ),
-            EventData::DatagramsReceived { .. } => EventType::TransportEventType(
-                TransportEventType::DatagramsReceived,
-            ),
-            EventData::DatagramsSent { .. } =>
-                EventType::TransportEventType(TransportEventType::DatagramsSent),
-            EventData::DatagramDropped { .. } =>
-                EventType::TransportEventType(TransportEventType::DatagramDropped),
+                EventType::QuicEventType(QuicEventType::AlpnInformation),
+            EventData::ParametersSet { .. } =>
+                EventType::QuicEventType(QuicEventType::ParametersSet),
+            EventData::ParametersRestored { .. } =>
+                EventType::QuicEventType(QuicEventType::ParametersRestored),
+            EventData::UdpDatagramsReceived { .. } =>
+                EventType::QuicEventType(QuicEventType::UdpDatagramsReceived),
+            EventData::UdpDatagramsSent { .. } =>
+                EventType::QuicEventType(QuicEventType::UdpDatagramsSent),
+            EventData::UdpDatagramDropped { .. } =>
+                EventType::QuicEventType(QuicEventType::UdpDatagramDropped),
             EventData::PacketReceived { .. } =>
-                EventType::TransportEventType(TransportEventType::PacketReceived),
+                EventType::QuicEventType(QuicEventType::PacketReceived),
             EventData::PacketSent { .. } =>
-                EventType::TransportEventType(TransportEventType::PacketSent),
+                EventType::QuicEventType(QuicEventType::PacketSent),
             EventData::PacketDropped { .. } =>
-                EventType::TransportEventType(TransportEventType::PacketDropped),
+                EventType::QuicEventType(QuicEventType::PacketDropped),
             EventData::PacketBuffered { .. } =>
-                EventType::TransportEventType(TransportEventType::PacketBuffered),
+                EventType::QuicEventType(QuicEventType::PacketBuffered),
             EventData::PacketsAcked { .. } =>
-                EventType::TransportEventType(TransportEventType::PacketsAcked),
+                EventType::QuicEventType(QuicEventType::PacketsAcked),
             EventData::StreamStateUpdated { .. } =>
-                EventType::TransportEventType(
-                    TransportEventType::StreamStateUpdated,
-                ),
+                EventType::QuicEventType(QuicEventType::StreamStateUpdated),
             EventData::FramesProcessed { .. } =>
-                EventType::TransportEventType(TransportEventType::FramesProcessed),
-            EventData::DataMoved { .. } =>
-                EventType::TransportEventType(TransportEventType::DataMoved),
+                EventType::QuicEventType(QuicEventType::FramesProcessed),
+            EventData::StreamDataMoved { .. } =>
+                EventType::QuicEventType(QuicEventType::StreamDataMoved),
+            EventData::DatagramDataMoved { .. } =>
+                EventType::QuicEventType(QuicEventType::DatagramDataMoved),
+            EventData::MigrationStateUpdated { .. } =>
+                EventType::QuicEventType(QuicEventType::MigrationStateUpdated),
 
             EventData::RecoveryParametersSet { .. } =>
                 EventType::RecoveryEventType(RecoveryEventType::ParametersSet),
@@ -470,33 +465,16 @@ impl From<&EventData> for EventType {
             EventData::H3PushResolved { .. } =>
                 EventType::Http3EventType(Http3EventType::PushResolved),
 
-            EventData::QpackStateUpdated { .. } =>
-                EventType::QpackEventType(QpackEventType::StateUpdated),
-            EventData::QpackStreamStateUpdated { .. } =>
-                EventType::QpackEventType(QpackEventType::StreamStateUpdated),
-            EventData::QpackDynamicTableUpdated { .. } =>
-                EventType::QpackEventType(QpackEventType::DynamicTableUpdated),
-            EventData::QpackHeadersEncoded { .. } =>
-                EventType::QpackEventType(QpackEventType::HeadersEncoded),
-            EventData::QpackHeadersDecoded { .. } =>
-                EventType::QpackEventType(QpackEventType::HeadersDecoded),
-            EventData::QpackInstructionCreated { .. } =>
-                EventType::QpackEventType(QpackEventType::InstructionCreated),
-            EventData::QpackInstructionParsed { .. } =>
-                EventType::QpackEventType(QpackEventType::InstructionParsed),
-
-            EventData::ConnectionError { .. } =>
-                EventType::GenericEventType(GenericEventType::ConnectionError),
-            EventData::ApplicationError { .. } =>
-                EventType::GenericEventType(GenericEventType::ApplicationError),
-            EventData::InternalError { .. } =>
-                EventType::GenericEventType(GenericEventType::InternalError),
-            EventData::InternalWarning { .. } =>
-                EventType::GenericEventType(GenericEventType::InternalError),
-            EventData::Message { .. } =>
-                EventType::GenericEventType(GenericEventType::Message),
-            EventData::Marker { .. } =>
-                EventType::GenericEventType(GenericEventType::Marker),
+            EventData::LogLevelError { .. } =>
+                EventType::LogLevelEventType(LogLevelEventType::Error),
+            EventData::LogLevelWarning { .. } =>
+                EventType::LogLevelEventType(LogLevelEventType::Warning),
+            EventData::LogLevelInfo { .. } =>
+                EventType::LogLevelEventType(LogLevelEventType::Info),
+            EventData::LogLevelDebug { .. } =>
+                EventType::LogLevelEventType(LogLevelEventType::Debug),
+            EventData::LogLevelVerbose { .. } =>
+                EventType::LogLevelEventType(LogLevelEventType::Verbose),
         }
     }
 }
@@ -544,6 +522,9 @@ pub enum EventData {
     #[serde(rename = "connectivity:connection_state_updated")]
     ConnectionStateUpdated(connectivity::ConnectionStateUpdated),
 
+    #[serde(rename = "connectivity:path_assigned")]
+    PathAssigned(connectivity::PathAssigned),
+
     #[serde(rename = "connectivity:mtu_updated")]
     MtuUpdated(connectivity::MtuUpdated),
 
@@ -555,143 +536,124 @@ pub enum EventData {
     KeyDiscarded(security::KeyDiscarded),
 
     // Transport
-    #[serde(rename = "transport:version_information")]
-    VersionInformation(quic::VersionInformation),
+    #[serde(rename = "quic:version_information")]
+    VersionInformation(quic::quic::QuicVersionInformation),
 
-    #[serde(rename = "transport:alpn_information")]
-    AlpnInformation(quic::AlpnInformation),
+    #[serde(rename = "quic:alpn_information")]
+    AlpnInformation(quic::quic::AlpnInformation),
 
-    #[serde(rename = "transport:parameters_set")]
-    TransportParametersSet(quic::TransportParametersSet),
+    #[serde(rename = "quic:parameters_set")]
+    ParametersSet(quic::quic::ParametersSet),
 
-    #[serde(rename = "transport:parameters_restored")]
-    TransportParametersRestored(quic::TransportParametersRestored),
+    #[serde(rename = "quic:parameters_restored")]
+    ParametersRestored(quic::quic::ParametersRestored),
 
-    #[serde(rename = "transport:datagrams_received")]
-    DatagramsReceived(quic::DatagramsReceived),
+    #[serde(rename = "quic:datagrams_received")]
+    UdpDatagramsReceived(quic::quic::UdpDatagramsReceived),
 
-    #[serde(rename = "transport:datagrams_sent")]
-    DatagramsSent(quic::DatagramsSent),
+    #[serde(rename = "quic:datagrams_sent")]
+    UdpDatagramsSent(quic::quic::UdpDatagramsSent),
 
-    #[serde(rename = "transport:datagram_dropped")]
-    DatagramDropped(quic::DatagramDropped),
+    #[serde(rename = "quic:datagram_dropped")]
+    UdpDatagramDropped(quic::quic::UdpDatagramDropped),
 
-    #[serde(rename = "transport:packet_received")]
-    PacketReceived(quic::PacketReceived),
+    #[serde(rename = "quic:packet_received")]
+    PacketReceived(quic::quic::PacketReceived),
 
-    #[serde(rename = "transport:packet_sent")]
-    PacketSent(quic::PacketSent),
+    #[serde(rename = "quic:packet_sent")]
+    PacketSent(quic::quic::PacketSent),
 
-    #[serde(rename = "transport:packet_dropped")]
-    PacketDropped(quic::PacketDropped),
+    #[serde(rename = "quic:packet_dropped")]
+    PacketDropped(quic::quic::PacketDropped),
 
-    #[serde(rename = "transport:packet_buffered")]
-    PacketBuffered(quic::PacketBuffered),
+    #[serde(rename = "quic:packet_buffered")]
+    PacketBuffered(quic::quic::PacketBuffered),
 
-    #[serde(rename = "transport:packets_acked")]
-    PacketsAcked(quic::PacketsAcked),
+    #[serde(rename = "quic:packets_acked")]
+    PacketsAcked(quic::quic::PacketsAcked),
 
-    #[serde(rename = "transport:stream_state_updated")]
-    StreamStateUpdated(quic::StreamStateUpdated),
+    #[serde(rename = "quic:stream_state_updated")]
+    StreamStateUpdated(quic::quic::StreamStateUpdated),
 
-    #[serde(rename = "transport:frames_processed")]
-    FramesProcessed(quic::FramesProcessed),
+    #[serde(rename = "quic:frames_processed")]
+    FramesProcessed(quic::quic::FramesProcessed),
 
-    #[serde(rename = "transport:data_moved")]
-    DataMoved(quic::DataMoved),
+    #[serde(rename = "quic:stream_data_moved")]
+    StreamDataMoved(quic::quic::StreamDataMoved),
+
+    #[serde(rename = "quic:datagram_data_moved")]
+    DatagramDataMoved(quic::quic::DatagramDataMoved),
+
+    #[serde(rename = "quic:migration_state_updated")]
+    MigrationStateUpdated(quic::quic::MigrationStateUpdated),
 
     // Recovery
     #[serde(rename = "recovery:parameters_set")]
-    RecoveryParametersSet(quic::RecoveryParametersSet),
+    RecoveryParametersSet(recovery::ParametersSet),
 
     #[serde(rename = "recovery:metrics_updated")]
-    MetricsUpdated(quic::MetricsUpdated),
+    MetricsUpdated(recovery::MetricsUpdated),
 
     #[serde(rename = "recovery:congestion_state_updated")]
-    CongestionStateUpdated(quic::CongestionStateUpdated),
+    CongestionStateUpdated(recovery::CongestionStateUpdated),
 
     #[serde(rename = "recovery:loss_timer_updated")]
-    LossTimerUpdated(quic::LossTimerUpdated),
+    LossTimerUpdated(recovery::LossTimerUpdated),
 
     #[serde(rename = "recovery:packet_lost")]
-    PacketLost(quic::PacketLost),
+    PacketLost(recovery::PacketLost),
 
     #[serde(rename = "recovery:marked_for_retransmit")]
-    MarkedForRetransmit(quic::MarkedForRetransmit),
+    MarkedForRetransmit(recovery::MarkedForRetransmit),
 
     // HTTP/3
     #[serde(rename = "http:parameters_set")]
-    H3ParametersSet(h3::H3ParametersSet),
+    H3ParametersSet(h3::ParametersSet),
 
     #[serde(rename = "http:parameters_restored")]
-    H3ParametersRestored(h3::H3ParametersRestored),
+    H3ParametersRestored(h3::ParametersRestored),
 
     #[serde(rename = "http:stream_type_set")]
-    H3StreamTypeSet(h3::H3StreamTypeSet),
+    H3StreamTypeSet(h3::StreamTypeSet),
 
     #[serde(rename = "http:frame_created")]
-    H3FrameCreated(h3::H3FrameCreated),
+    H3FrameCreated(h3::FrameCreated),
 
     #[serde(rename = "http:frame_parsed")]
-    H3FrameParsed(h3::H3FrameParsed),
+    H3FrameParsed(h3::FrameParsed),
 
     #[serde(rename = "http:push_resolved")]
-    H3PushResolved(h3::H3PushResolved),
+    H3PushResolved(h3::PushResolved),
 
-    // QPACK
-    #[serde(rename = "qpack:state_updated")]
-    QpackStateUpdated(qpack::QpackStateUpdated),
-
-    #[serde(rename = "qpack:stream_state_updated")]
-    QpackStreamStateUpdated(qpack::QpackStreamStateUpdated),
-
-    #[serde(rename = "qpack:dynamic_table_updated")]
-    QpackDynamicTableUpdated(qpack::QpackDynamicTableUpdated),
-
-    #[serde(rename = "qpack:headers_encoded")]
-    QpackHeadersEncoded(qpack::QpackHeadersEncoded),
-
-    #[serde(rename = "qpack:headers_decoded")]
-    QpackHeadersDecoded(qpack::QpackHeadersDecoded),
-
-    #[serde(rename = "qpack:instruction_created")]
-    QpackInstructionCreated(qpack::QpackInstructionCreated),
-
-    #[serde(rename = "qpack:instruction_parsed")]
-    QpackInstructionParsed(qpack::QpackInstructionParsed),
-
-    // Generic
-    #[serde(rename = "generic:connection_error")]
-    ConnectionError {
-        code: Option<ConnectionErrorCode>,
-        description: Option<String>,
-    },
-
-    #[serde(rename = "generic:application_error")]
-    ApplicationError {
-        code: Option<ApplicationErrorCode>,
-        description: Option<String>,
-    },
-
-    #[serde(rename = "generic:internal_error")]
-    InternalError {
+    // LogLevel
+    #[serde(rename = "loglevel:error")]
+    LogLevelError {
         code: Option<u64>,
         description: Option<String>,
     },
 
-    #[serde(rename = "generic:internal_warning")]
-    InternalWarning {
+    #[serde(rename = "loglevel:warning")]
+    LogLevelWarning {
         code: Option<u64>,
         description: Option<String>,
     },
 
-    #[serde(rename = "generic:message")]
-    Message { message: String },
+    #[serde(rename = "loglevel:info")]
+    LogLevelInfo {
+        code: Option<u64>,
+        description: Option<String>,
+    },
 
-    #[serde(rename = "generic:marker")]
-    Marker {
-        marker_type: String,
-        message: Option<String>,
+    #[serde(rename = "loglevel:debug")]
+    LogLevelDebug {
+        code: Option<u64>,
+        description: Option<String>,
+    },
+
+    #[serde(rename = "loglevel:verbose")]
+    LogLevelVerbose {
+        code: Option<u64>,
+        description: Option<String>,
     },
 }
 
@@ -718,14 +680,12 @@ impl EventData {
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum GenericEventType {
-    ConnectionError,
-    ApplicationError,
-    InternalError,
-    InternalWarning,
-
-    Message,
-    Marker,
+pub enum LogLevelEventType {
+    Error,
+    Warning,
+    Info,
+    Debug,
+    Verbose,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -750,9 +710,16 @@ pub enum CryptoError {
     Prefix,
 }
 
-pub mod quic;
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PathEndpointInfo {
+    pub ip_v4: Option<String>,
+    pub ip_v6: Option<String>,
+    pub port_v4: Option<u16>,
+    pub port_v6: Option<u16>,
 
-pub mod connectivity;
-pub mod h3;
-pub mod qpack;
-pub mod security;
+    pub connection_ids: Vec<Bytes>,
+}
+
+pub mod http;
+pub mod quic;

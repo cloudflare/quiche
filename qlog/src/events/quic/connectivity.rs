@@ -27,9 +27,10 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::ApplicationErrorCode;
-use super::Bytes;
-use super::ConnectionErrorCode;
+use crate::events::ApplicationErrorCode;
+use crate::events::Bytes;
+use crate::events::ConnectionErrorCode;
+use crate::events::PathEndpointInfo;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -61,6 +62,7 @@ pub enum ConnectivityEventType {
     ConnectionIdUpdated,
     SpinBitUpdated,
     ConnectionStateUpdated,
+    PathAssigned,
     MtuUpdated,
 }
 
@@ -140,8 +142,16 @@ pub struct ConnectionStateUpdated {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PathAssigned {
+    pub path_id: String,
+    pub path_remote: Option<PathEndpointInfo>,
+    pub path_local: Option<PathEndpointInfo>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct MtuUpdated {
-    pub old: Option<u16>,
-    pub new: u16,
+    pub old: Option<u32>,
+    pub new: u32,
     pub done: Option<bool>,
 }
