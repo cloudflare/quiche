@@ -1147,9 +1147,28 @@ impl Connection {
 
     /// Sends an HTTP/3 response on the specified stream with default priority.
     ///
-    /// This method sends the provided `headers` without a body. To include a
-    /// body, set `fin` as `false` and subsequently call [`send_body()`] with
-    /// the same `conn` and `stream_id`.
+    /// This method sends the provided `headers` as a single initial response
+    /// without a body.
+    ///
+    /// To send a non-final 1xx, then a final 200+ without body:
+    ///   * send_response() with `fin` set to `false`.
+    ///   * [`send_additional_headers()`] with fin set to `true` using the same
+    ///     `stream_id` value.
+    ///
+    /// To send a non-final 1xx, then a final 200+ with body:
+    ///   * send_response() with `fin` set to `false`.
+    ///   * [`send_additional_headers()`] with fin set to `false` and same
+    ///     `stream_id` value.
+    ///   * [`send_body()`] with same `stream_id`.
+    ///
+    /// To send a final 200+ with body:
+    ///   * send_response() with `fin` set to `false`.
+    ///   * [`send_body()`] with same `stream_id`.
+    ///
+    /// Additional headers can only be sent during certain phases of an HTTP/3
+    /// message exchange, see [Section 4.1 of RFC 9114]. The [`FrameUnexpected`]
+    /// error is returned if this method, or [`send_response_with_priority()`],
+    /// are called multiple times with the same `stream_id` value.
     ///
     /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
     /// doesn't have enough capacity for the operation to complete. When this
@@ -1157,6 +1176,10 @@ impl Connection {
     /// reported as writable again.
     ///
     /// [`send_body()`]: struct.Connection.html#method.send_body
+    /// [`send_additional_headers()`]:
+    ///     struct.Connection.html#method.send_additional_headers
+    /// [`send_response_with_priority()`]:
+    ///     struct.Connection.html#method.send_response_with_priority
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_response<T: NameValue>(
         &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
@@ -1178,20 +1201,58 @@ impl Connection {
     /// parameters. If the urgency is outside the range 0-7, it will be clamped
     /// to 7.
     ///
+    /// This method sends the provided `headers` as a single initial response
+    /// without a body.
+    ///
+    /// To send a non-final 1xx, then a final 200+ without body:
+    ///   * send_response_with_priority() with `fin` set to `false`.
+    ///   * [`send_additional_headers()`] with fin set to `true` using the same
+    ///     `stream_id` value.
+    ///
+    /// To send a non-final 1xx, then a final 200+ with body:
+    ///   * send_response_with_priority() with `fin` set to `false`.
+    ///   * [`send_additional_headers()`] with fin set to `false` and same
+    ///     `stream_id` value.
+    ///   * [`send_body()`] with same `stream_id`.
+    ///
+    /// To send a final 200+ with body:
+    ///   * send_response_with_priority() with `fin` set to `false`.
+    ///   * [`send_body()`] with same `stream_id`.
+    ///
+    /// Additional headers can only be sent during certain phases of an HTTP/3
+    /// message exchange, see [Section 4.1 of RFC 9114]. The [`FrameUnexpected`]
+    /// error is returned if this method, or [`send_response()`],
+    /// are called multiple times with the same `stream_id` value.
+    ///
     /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
     /// doesn't have enough capacity for the operation to complete. When this
     /// happens the application should retry the operation once the stream is
     /// reported as writable again.
     ///
+    /// [`send_body()`]: struct.Connection.html#method.send_body
+    /// [`send_additional_headers()`]:
+    ///     struct.Connection.html#method.send_additional_headers
+    /// [`send_response()`]:
+    ///     struct.Connection.html#method.send_response
+    /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     pub fn send_response_with_priority<T: NameValue>(
         &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
         priority: &Priority, fin: bool,
     ) -> Result<()> {
-        if !self.streams.contains_key(&stream_id) {
-            return Err(Error::FrameUnexpected);
-        }
+        match self.streams.get(&stream_id) {
+            Some(s) => {
+                // Only one initial HEADERS allowed.
+                if s.local_initialized() {
+                    return Err(Error::FrameUnexpected);
+                }
+
+                s
+            },
+
+            None => return Err(Error::FrameUnexpected),
+        };
 
         self.send_headers(conn, stream_id, headers, fin)?;
 
@@ -1208,11 +1269,12 @@ impl Connection {
 
     /// Sends additional HTTP/3 headers.
     ///
-    /// After the initial request or response headers have been sent, send an
-    /// additional HEADERS frame. This can be used, for example, to send a
-    /// single instance of trailers after a request with a body, or to
-    /// issue another non-final 1xx after a preceding 1xx, or to issue a final
-    /// response after a preceding 1xx.
+    /// After the initial request or response headers have been sent, using
+    /// [`send_request()`] or [`send_response()`] respectively, this method can
+    /// be used send an additional HEADERS frame. For example, to send a single
+    /// instance of trailers after a request with a body, or to issue another
+    /// non-final 1xx after a preceding 1xx, or to issue a final response after
+    /// a preceding 1xx.
     ///
     /// Additional headers can only be sent during certain phases of an HTTP/3
     /// message exchange, see [Section 4.1 of RFC 9114]. The [`FrameUnexpected`]
@@ -1225,6 +1287,8 @@ impl Connection {
     /// happens the application should retry the operation once the stream is
     /// reported as writable again.
     ///
+    /// [`send_request()`]: struct.Connection.html#method.send_request
+    /// [`send_response()`]: struct.Connection.html#method.send_response
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
     /// [Section 4.1 of RFC 9114]:
@@ -4035,6 +4099,56 @@ mod tests {
         assert_eq!(s.poll_client(), Ok((stream, ev_info_headers)));
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Server responds with a 103, then attempts to send a 200 using
+    /// send_response again, which should fail.
+    fn no_multiple_response() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(true).unwrap();
+
+        assert_eq!(stream, 0);
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: false,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        let info_resp = vec![
+            Header::new(b":status", b"103"),
+            Header::new(b"link", b"<https://example.com>; rel=\"preconnect\""),
+        ];
+
+        let resp = vec![
+            Header::new(b":status", b"200"),
+            Header::new(b"server", b"quiche-test"),
+        ];
+
+        s.server
+            .send_response(&mut s.pipe.server, stream, &info_resp, false)
+            .unwrap();
+
+        assert_eq!(
+            Err(Error::FrameUnexpected),
+            s.server
+                .send_response(&mut s.pipe.server, stream, &resp, true)
+        );
+
+        s.advance().ok();
+
+        let ev_info_headers = Event::Headers {
+            list: info_resp,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_info_headers)));
         assert_eq!(s.poll_client(), Err(Error::Done));
     }
 
