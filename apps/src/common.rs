@@ -358,6 +358,12 @@ pub trait HttpConn {
     );
 }
 
+pub fn writable_response_streams(
+    conn: &quiche::Connection,
+) -> impl Iterator<Item = u64> {
+    conn.writable().filter(|id| id % 4 == 0)
+}
+
 /// Represents an HTTP/0.9 formatted request.
 pub struct Http09Request {
     url: url::Url,
@@ -675,7 +681,12 @@ impl HttpConn for Http09Conn {
         &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
-        trace!("{} stream {} is writable", conn.trace_id(), stream_id);
+        debug!(
+            "{} response stream {} is writable with capacity {:?}",
+            conn.trace_id(),
+            stream_id,
+            conn.stream_capacity(stream_id)
+        );
 
         if !partial_responses.contains_key(&stream_id) {
             return;
@@ -1393,6 +1404,9 @@ impl HttpConn for Http3Conn {
         index: &str, buf: &mut [u8],
     ) -> quiche::h3::Result<()> {
         // Process HTTP stream-related events.
+        //
+        // This loops over any and all received HTTP requests and sends just the
+        // HTTP response headers.
         loop {
             match self.h3_conn.poll(conn) {
                 Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
@@ -1547,6 +1561,11 @@ impl HttpConn for Http3Conn {
             }
         }
 
+        // Visit all writable response streams to send HTTP content.
+        for stream_id in writable_response_streams(conn) {
+            self.handle_writable(conn, partial_responses, stream_id);
+        }
+
         // Process datagram-related events.
         while let Ok(len) = conn.dgram_recv(buf) {
             let mut b = octets::Octets::with_slice(buf);
@@ -1587,7 +1606,12 @@ impl HttpConn for Http3Conn {
         &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
-        debug!("{} stream {} is writable", conn.trace_id(), stream_id);
+        debug!(
+            "{} response stream {} is writable with capacity {:?}",
+            conn.trace_id(),
+            stream_id,
+            conn.stream_capacity(stream_id)
+        );
 
         if !partial_responses.contains_key(&stream_id) {
             return;
