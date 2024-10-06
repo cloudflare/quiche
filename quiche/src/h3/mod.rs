@@ -1304,6 +1304,11 @@ impl Connection {
 
         match self.streams.get(&stream_id) {
             Some(s) => {
+                // Initial HEADERS must have been sent.
+                if !s.local_initialized() {
+                    return Err(Error::FrameUnexpected);
+                }
+
                 // Only one trailing HEADERS allowed.
                 if s.trailers_sent() {
                     return Err(Error::FrameUnexpected);
@@ -4149,6 +4154,45 @@ mod tests {
         };
 
         assert_eq!(s.poll_client(), Ok((stream, ev_info_headers)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Server attempts to use send_additional_headers before initial response.
+    fn no_send_additional_before_initial_response() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(true).unwrap();
+
+        assert_eq!(stream, 0);
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: false,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        let info_resp = vec![
+            Header::new(b":status", b"103"),
+            Header::new(b"link", b"<https://example.com>; rel=\"preconnect\""),
+        ];
+
+        assert_eq!(
+            Err(Error::FrameUnexpected),
+            s.server.send_additional_headers(
+                &mut s.pipe.server,
+                stream,
+                &info_resp,
+                false,
+                false
+            )
+        );
+
+        s.advance().ok();
+
         assert_eq!(s.poll_client(), Err(Error::Done));
     }
 
