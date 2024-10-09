@@ -6823,7 +6823,7 @@ impl Connection {
                 crypto::Level::OneRTT => packet::Epoch::Application,
             };
 
-            if !self.is_established() {
+            if !self.handshake_confirmed {
                 match epoch {
                     // Downgrade the epoch to Handshake as the handshake is not
                     // completed yet.
@@ -14918,6 +14918,48 @@ mod tests {
                 is_app: true,
                 error_code: 123,
                 reason: b"Invalid authentication".to_vec()
+            })
+        );
+    }
+
+    #[test]
+    fn transport_close_by_client_during_handshake_established() {
+        let mut pipe = testing::Pipe::new().unwrap();
+
+        // Client sends initial flight.
+        let flight = testing::emit_flight(&mut pipe.client).unwrap();
+        testing::process_flight(&mut pipe.server, flight).unwrap();
+
+        let flight = testing::emit_flight(&mut pipe.server).unwrap();
+
+        // Both connections are not established.
+        assert!(!pipe.client.is_established() && !pipe.server.is_established());
+
+        testing::process_flight(&mut pipe.client, flight).unwrap();
+
+        // Connection is established on the client.
+        assert!(pipe.client.is_established());
+
+        // Client sends after connection is established.
+        pipe.client.close(false, 123, b"connection close").unwrap();
+
+        let flight = testing::emit_flight(&mut pipe.client).unwrap();
+        testing::process_flight(&mut pipe.server, flight).unwrap();
+
+        assert_eq!(
+            pipe.server.peer_error(),
+            Some(&ConnectionError {
+                is_app: false,
+                error_code: 123,
+                reason: b"connection close".to_vec()
+            })
+        );
+        assert_eq!(
+            pipe.client.local_error(),
+            Some(&ConnectionError {
+                is_app: false,
+                error_code: 123,
+                reason: b"connection close".to_vec()
             })
         );
     }
