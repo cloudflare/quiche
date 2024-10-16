@@ -382,6 +382,7 @@
 #[macro_use]
 extern crate log;
 
+use octets::BufferTooShortError;
 #[cfg(feature = "qlog")]
 use qlog::events::connectivity::ConnectivityEventType;
 #[cfg(feature = "qlog")]
@@ -813,6 +814,8 @@ pub struct Config {
     max_amplification_factor: usize,
 
     disable_dcid_reuse: bool,
+
+    track_unknown_transport_params: Option<usize>,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -881,6 +884,8 @@ impl Config {
             max_amplification_factor: MAX_AMPLIFICATION_FACTOR,
 
             disable_dcid_reuse: false,
+
+            track_unknown_transport_params: None,
         })
     }
 
@@ -1350,6 +1355,18 @@ impl Config {
     pub fn set_disable_dcid_reuse(&mut self, v: bool) {
         self.disable_dcid_reuse = v;
     }
+
+    /// Enables tracking unknown transport parameters.
+    ///
+    /// Specify the maximum number of bytes used to track unknown transport
+    /// parameters. The size includes the identifier and its value. If storing a
+    /// transport parameter would cause the limit to be exceeded, it is quietly
+    /// dropped.
+    ///
+    /// The default is that the feature is disabled.
+    pub fn enable_track_unknown_transport_parameters(&mut self, size: usize) {
+        self.track_unknown_transport_params = Some(size);
+    }
 }
 
 /// A QUIC connection.
@@ -1368,6 +1385,10 @@ pub struct Connection {
 
     /// Peer's transport parameters.
     peer_transport_params: TransportParams,
+
+    /// If tracking unknown transport parameters from a peer, how much space to
+    /// use in bytes.
+    peer_transport_params_track_unknown: Option<usize>,
 
     /// Local transport parameters.
     local_transport_params: TransportParams,
@@ -1883,7 +1904,8 @@ impl Connection {
             ],
 
             peer_transport_params: TransportParams::default(),
-
+            peer_transport_params_track_unknown: config
+                .track_unknown_transport_params,
             local_transport_params: config.local_transport_params.clone(),
 
             handshake: tls,
@@ -2185,8 +2207,11 @@ impl Connection {
         let raw_params_len = b.get_u64()? as usize;
         let raw_params_bytes = b.get_bytes(raw_params_len)?;
 
-        let peer_params =
-            TransportParams::decode(raw_params_bytes.as_ref(), self.is_server)?;
+        let peer_params = TransportParams::decode(
+            raw_params_bytes.as_ref(),
+            self.is_server,
+            self.peer_transport_params_track_unknown,
+        )?;
 
         self.process_peer_transport_params(peer_params)?;
 
@@ -6755,8 +6780,11 @@ impl Connection {
                 let raw_params = self.handshake.quic_transport_params();
 
                 if !self.parsed_peer_transport_params && !raw_params.is_empty() {
-                    let peer_params =
-                        TransportParams::decode(raw_params, self.is_server)?;
+                    let peer_params = TransportParams::decode(
+                        raw_params,
+                        self.is_server,
+                        self.peer_transport_params_track_unknown,
+                    )?;
 
                     self.parse_peer_transport_params(peer_params)?;
                 }
@@ -6774,8 +6802,11 @@ impl Connection {
         let raw_params = self.handshake.quic_transport_params();
 
         if !self.parsed_peer_transport_params && !raw_params.is_empty() {
-            let peer_params =
-                TransportParams::decode(raw_params, self.is_server)?;
+            let peer_params = TransportParams::decode(
+                raw_params,
+                self.is_server,
+                self.peer_transport_params_track_unknown,
+            )?;
 
             self.parse_peer_transport_params(peer_params)?;
         }
@@ -7984,6 +8015,102 @@ impl std::fmt::Debug for Stats {
     }
 }
 
+/// QUIC Unknown Transport Parameter
+///
+/// A QUIC transport parameter that is not specifically recognized
+/// by this implementation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UnknownTransportParameter<T> {
+    /// ID of an unknown transport parameter
+    pub id: u64,
+    /// Original data representing the value of an unknown transport parameter
+    pub value: T,
+}
+
+#[cfg(feature = "qlog")]
+impl From<UnknownTransportParameter<Vec<u8>>>
+    for qlog::events::quic::UnknownTransportParameter
+{
+    fn from(value: UnknownTransportParameter<Vec<u8>>) -> Self {
+        Self {
+            id: value.id,
+            value: qlog::HexSlice::maybe_string(Some(value.value.as_slice()))
+                .unwrap_or_default(),
+        }
+    }
+}
+
+impl From<UnknownTransportParameter<&[u8]>>
+    for UnknownTransportParameter<Vec<u8>>
+{
+    // When an instance of an UnknownTransportParameter is actually
+    // stored in UnknownTransportParameters, then we make a copy
+    // of the bytes if the source is an instance of an UnknownTransportParameter
+    // whose value is not owned.
+    fn from(value: UnknownTransportParameter<&[u8]>) -> Self {
+        Self {
+            id: value.id,
+            value: value.value.to_vec(),
+        }
+    }
+}
+
+/// Track unknown transport parameters, up to a limit.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct UnknownTransportParameters {
+    // The maximum number of bytes available to store the values of unknown
+    // transport parameters.
+    /// The space remaining for storing unknown transport parameters.
+    pub capacity: usize,
+    /// The unknown transport parameters.
+    pub parameters: Vec<UnknownTransportParameter<Vec<u8>>>,
+}
+
+impl UnknownTransportParameters {
+    /// Push an unknown transport parameter into storage if there is space
+    /// remaining.
+    pub fn safe_push(
+        &mut self, new: UnknownTransportParameter<&[u8]>,
+    ) -> Result<()> {
+        let new_unknown_tp_size = new.value.len() + std::mem::size_of::<u64>();
+        if new_unknown_tp_size < self.capacity {
+            self.capacity -= new_unknown_tp_size;
+            self.parameters.push(new.into());
+            Ok(())
+        } else {
+            Err(BufferTooShortError.into())
+        }
+    }
+}
+
+/// An Iterator over unknown transport parameters.
+pub struct UnknownTransportParameterIterator<'a> {
+    index: usize,
+    parameters: &'a Vec<UnknownTransportParameter<Vec<u8>>>,
+}
+
+impl<'a> IntoIterator for &'a UnknownTransportParameters {
+    type IntoIter = UnknownTransportParameterIterator<'a>;
+    type Item = &'a UnknownTransportParameter<Vec<u8>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        UnknownTransportParameterIterator {
+            index: 0,
+            parameters: &self.parameters,
+        }
+    }
+}
+
+impl<'a> Iterator for UnknownTransportParameterIterator<'a> {
+    type Item = &'a UnknownTransportParameter<Vec<u8>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = self.parameters.get(self.index);
+        self.index += 1;
+        result
+    }
+}
+
 /// QUIC Transport Parameters
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransportParams {
@@ -8023,6 +8150,8 @@ pub struct TransportParams {
     pub retry_source_connection_id: Option<ConnectionId<'static>>,
     /// DATAGRAM frame extension parameter, if any.
     pub max_datagram_frame_size: Option<u64>,
+    /// Unknown peer transport parameters and values, if any.
+    pub unknown_params: UnknownTransportParameters,
     // pub preferred_address: ...,
 }
 
@@ -8046,16 +8175,30 @@ impl Default for TransportParams {
             initial_source_connection_id: None,
             retry_source_connection_id: None,
             max_datagram_frame_size: None,
+            unknown_params: Default::default(),
         }
     }
 }
 
 impl TransportParams {
-    fn decode(buf: &[u8], is_server: bool) -> Result<TransportParams> {
+    fn decode(
+        buf: &[u8], is_server: bool, unknown_size: Option<usize>,
+    ) -> Result<TransportParams> {
         let mut params = octets::Octets::with_slice(buf);
         let mut seen_params = HashSet::new();
 
         let mut tp = TransportParams::default();
+
+        let track_unknown_parameters =
+            if let Some(unknown_transport_param_tracking_size) = unknown_size {
+                tp.unknown_params = UnknownTransportParameters {
+                    capacity: unknown_transport_param_tracking_size,
+                    parameters: vec![],
+                };
+                true
+            } else {
+                false
+            };
 
         while params.cap() > 0 {
             let id = params.get_varint()?;
@@ -8196,8 +8339,18 @@ impl TransportParams {
                     tp.max_datagram_frame_size = Some(val.get_varint()?);
                 },
 
-                // Ignore unknown parameters.
-                _ => (),
+                // Track unknown transport parameters specially.
+                unknown_tp_id =>
+                    if track_unknown_parameters {
+                        // It is _not_ an error not to have space enough to track
+                        // an unknown parameter.
+                        let _track_unknown_parameter_result = tp
+                            .unknown_params
+                            .safe_push(UnknownTransportParameter {
+                                id: unknown_tp_id,
+                                value: val.buf(),
+                            });
+                    },
             }
         }
 
@@ -8410,6 +8563,12 @@ impl TransportParams {
                 initial_max_streams_uni: Some(self.initial_max_streams_uni),
 
                 preferred_address: None,
+
+                unknown_parameters: self.unknown_params
+                    .into_iter()
+                    .cloned()
+                    .map(Into::<qlog::events::quic::UnknownTransportParameter>::into)
+                    .collect(),
             },
         )
     }
@@ -8952,6 +9111,7 @@ mod tests {
             initial_source_connection_id: Some(b"woot woot".to_vec().into()),
             retry_source_connection_id: Some(b"retry".to_vec().into()),
             max_datagram_frame_size: Some(32),
+            unknown_params: Default::default(),
         };
 
         let mut raw_params = [42; 256];
@@ -8959,7 +9119,7 @@ mod tests {
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
         assert_eq!(raw_params.len(), 94);
 
-        let new_tp = TransportParams::decode(raw_params, false).unwrap();
+        let new_tp = TransportParams::decode(raw_params, false, None).unwrap();
 
         assert_eq!(new_tp, tp);
 
@@ -8982,6 +9142,7 @@ mod tests {
             initial_source_connection_id: Some(b"woot woot".to_vec().into()),
             retry_source_connection_id: None,
             max_datagram_frame_size: Some(32),
+            unknown_params: Default::default(),
         };
 
         let mut raw_params = [42; 256];
@@ -8989,7 +9150,7 @@ mod tests {
             TransportParams::encode(&tp, false, &mut raw_params).unwrap();
         assert_eq!(raw_params.len(), 69);
 
-        let new_tp = TransportParams::decode(raw_params, true).unwrap();
+        let new_tp = TransportParams::decode(raw_params, true, None).unwrap();
 
         assert_eq!(new_tp, tp);
     }
@@ -9009,6 +9170,7 @@ mod tests {
         let tp = TransportParams::decode(
             initial_source_connection_id_raw.as_slice(),
             true,
+            None,
         )
         .unwrap();
 
@@ -9024,8 +9186,80 @@ mod tests {
 
         // Decoding fails.
         assert_eq!(
-            TransportParams::decode(raw_params.as_slice(), true),
+            TransportParams::decode(raw_params.as_slice(), true, None),
             Err(Error::InvalidTransportParam)
+        );
+    }
+
+    #[test]
+    fn transport_params_unknown_zero_space() {
+        let mut unknown_params: UnknownTransportParameters =
+            UnknownTransportParameters {
+                capacity: 0,
+                parameters: vec![],
+            };
+        let massive_unknown_param = UnknownTransportParameter::<&[u8]> {
+            id: 5,
+            value: &[0xau8; 280],
+        };
+        assert!(unknown_params.safe_push(massive_unknown_param).is_err());
+        assert!(unknown_params.capacity == 0);
+        assert!(unknown_params.parameters.len() == 0);
+    }
+
+    #[test]
+    fn transport_params_unknown_max_space_respected() {
+        let mut unknown_params: UnknownTransportParameters =
+            UnknownTransportParameters {
+                capacity: 256,
+                parameters: vec![],
+            };
+
+        let massive_unknown_param = UnknownTransportParameter::<&[u8]> {
+            id: 5,
+            value: &[0xau8; 280],
+        };
+        let big_unknown_param = UnknownTransportParameter::<&[u8]> {
+            id: 5,
+            value: &[0xau8; 232],
+        };
+        let little_unknown_param = UnknownTransportParameter::<&[u8]> {
+            id: 6,
+            value: &[0xau8; 7],
+        };
+
+        assert!(unknown_params.safe_push(massive_unknown_param).is_err());
+        assert!(unknown_params.capacity == 256);
+        assert!(unknown_params.parameters.len() == 0);
+
+        unknown_params.safe_push(big_unknown_param).unwrap();
+        assert!(unknown_params.capacity == 16);
+        assert!(unknown_params.parameters.len() == 1);
+
+        unknown_params
+            .safe_push(little_unknown_param.clone())
+            .unwrap();
+        assert!(unknown_params.capacity == 1);
+        assert!(unknown_params.parameters.len() == 2);
+
+        assert!(unknown_params.safe_push(little_unknown_param).is_err());
+
+        let mut unknown_params_iter = unknown_params.into_iter();
+
+        let unknown_params_first = unknown_params_iter
+            .next()
+            .expect("Should have a 0th element.");
+        assert!(
+            unknown_params_first.id == 5 &&
+                unknown_params_first.value == vec![0xau8; 232]
+        );
+
+        let unknown_params_second = unknown_params_iter
+            .next()
+            .expect("Should have a 1th element.");
+        assert!(
+            unknown_params_second.id == 6 &&
+                unknown_params_second.value == vec![0xau8; 7]
         );
     }
 
