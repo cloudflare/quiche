@@ -40,14 +40,14 @@ pub enum Event {
 /// trait.
 ///
 /// [`BufRead`]: https://doc.rust-lang.org/std/io/trait.BufRead.html
-pub struct QlogSeqReader {
+pub struct QlogSeqReader<'a> {
     pub qlog: QlogSeq,
-    reader: Box<dyn std::io::BufRead + Send + Sync>,
+    reader: Box<dyn std::io::BufRead + Send + Sync + 'a>,
 }
 
-impl QlogSeqReader {
+impl<'a> QlogSeqReader<'a> {
     pub fn new(
-        mut reader: Box<dyn std::io::BufRead + Send + Sync>,
+        mut reader: Box<dyn std::io::BufRead + Send + Sync + 'a>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         // "null record" skip it
         Self::read_record(reader.as_mut());
@@ -83,7 +83,7 @@ impl QlogSeqReader {
     }
 }
 
-impl Iterator for QlogSeqReader {
+impl<'a> Iterator for QlogSeqReader<'a> {
     type Item = Event;
 
     #[inline]
