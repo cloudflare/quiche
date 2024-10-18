@@ -467,7 +467,7 @@ impl Http3Test {
 
             info!("sending HTTP request {:?}", req.hdrs);
 
-            let s =
+            let (s, _hdrs_fully_sent) =
                 match h3_conn.send_request(conn, &req.hdrs, req.body.is_none()) {
                     Ok(stream_id) => stream_id,
 
