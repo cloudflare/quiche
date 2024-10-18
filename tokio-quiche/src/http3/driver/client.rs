@@ -152,7 +152,8 @@ impl ClientHooks {
         let body_finished = request.body_writer.is_none();
 
         // TODO: retry the request if the error is not fatal
-        let stream_id = driver.conn_mut()?.send_request(
+        // TODO: take note and use _hdrs_fully_sent for retries
+        let (stream_id, _hdrs_fully_sent) = driver.conn_mut()?.send_request(
             qconn,
             &request.headers,
             body_finished,
