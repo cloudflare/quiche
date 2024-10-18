@@ -165,11 +165,25 @@ pub struct Stream {
     /// Whether a DATA frame has been received.
     data_received: bool,
 
+    /// Whether a trailing HEADER field is in flight.
+    trailers_in_flight: bool,
+
     /// Whether a trailing HEADER field has been sent.
     trailers_sent: bool,
 
     /// Whether a trailing HEADER field has been received.
     trailers_received: bool,
+
+    /// Tracking for outgoing frame header.
+    pub outgoing_frame_header: Vec<u8>,
+    pub outgoing_frame_header_off: usize,
+
+    /// Tracking for outgoing frame payload.
+    pub outgoing_frame_payload: Vec<u8>,
+    pub outgoing_frame_payload_off: usize,
+
+    /// Tracking for outgoing frame fin status.
+    pub fin_after_outgoing_frame: bool,
 }
 
 impl Stream {
@@ -215,10 +229,21 @@ impl Stream {
 
             data_received: false,
 
+            trailers_in_flight: false,
             trailers_sent: false,
             trailers_received: false,
+
+            outgoing_frame_header: vec![],
+            outgoing_frame_header_off: 0,
+
+            outgoing_frame_payload: vec![],
+            outgoing_frame_payload_off: 0,
+
+            fin_after_outgoing_frame: false,
         }
     }
+
+    // pub partial
 
     pub fn ty(&self) -> Option<Type> {
         self.ty
@@ -521,7 +546,16 @@ impl Stream {
         self.headers_received_count
     }
 
+    pub fn mark_trailers_in_flight(&mut self) {
+        self.trailers_in_flight = true;
+    }
+
+    pub fn trailers_trailers_in_flight(&self) -> bool {
+        self.trailers_in_flight
+    }
+
     pub fn mark_trailers_sent(&mut self) {
+        self.trailers_in_flight = true;
         self.trailers_sent = true;
     }
 
