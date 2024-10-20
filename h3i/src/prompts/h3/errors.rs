@@ -30,7 +30,7 @@ use inquire::validator::Validation;
 use inquire::CustomUserError;
 use inquire::Select;
 use inquire::Text;
-use qlog::events::quic::quic::ErrorSpace;
+use qlog::events::quic::ErrorSpace;
 
 use crate::prompts::h3;
 
