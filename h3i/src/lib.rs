@@ -44,9 +44,9 @@
 //! [RFC 9204]: https://www.rfc-editor.org/rfc/rfc9204.html
 
 use qlog::events::quic::PacketHeader;
-use qlog::events::quic::PacketSent;
+use qlog::events::quic::quic::PacketSent;
 use qlog::events::quic::PacketType;
-use qlog::events::quic::QuicFrame;
+use qlog::events::quic::quic::QuicFrame;
 use qlog::events::EventData;
 pub use quiche;
 use quiche::h3::NameValue;
@@ -128,14 +128,13 @@ fn fake_packet_header() -> PacketHeader {
 fn fake_packet_sent(frames: Option<SmallVec<[QuicFrame; 1]>>) -> EventData {
     EventData::PacketSent(PacketSent {
         header: fake_packet_header(),
-        is_coalesced: None,
-        retry_token: None,
         stateless_reset_token: None,
         supported_versions: None,
         raw: None,
         datagram_id: None,
         trigger: None,
         send_at_time: None,
+        is_mtu_probe_packet: None,
         frames,
     })
 }
