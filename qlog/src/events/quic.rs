@@ -29,14 +29,129 @@ use serde::Serialize;
 
 use smallvec::SmallVec;
 
-use super::connectivity::TransportOwner;
-use super::PacketHeader;
+use crate::HexSlice;
+
+use crate::events::ApplicationErrorCode;
+use crate::events::ConnectionErrorCode;
 use crate::events::DataRecipient;
 use crate::events::PathEndpointInfo;
 use crate::events::RawInfo;
 use crate::events::Token;
 use crate::Bytes;
 use crate::StatelessResetToken;
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum PacketType {
+    Initial,
+    Handshake,
+
+    #[serde(rename = "0RTT")]
+    ZeroRtt,
+
+    #[serde(rename = "1RTT")]
+    OneRtt,
+
+    Retry,
+    VersionNegotiation,
+    Unknown,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+pub struct PacketHeader {
+    pub packet_type: PacketType,
+    pub packet_number: Option<u64>,
+
+    pub flags: Option<u8>,
+    pub token: Option<Token>,
+
+    pub length: Option<u16>,
+
+    pub version: Option<Bytes>,
+
+    pub scil: Option<u8>,
+    pub dcil: Option<u8>,
+    pub scid: Option<Bytes>,
+    pub dcid: Option<Bytes>,
+}
+
+impl PacketHeader {
+    #[allow(clippy::too_many_arguments)]
+    /// Creates a new PacketHeader.
+    pub fn new(
+        packet_type: PacketType, packet_number: Option<u64>, flags: Option<u8>,
+        token: Option<Token>, length: Option<u16>, version: Option<u32>,
+        scid: Option<&[u8]>, dcid: Option<&[u8]>,
+    ) -> Self {
+        let (scil, scid) = match scid {
+            Some(cid) => (
+                Some(cid.len() as u8),
+                Some(format!("{}", HexSlice::new(&cid))),
+            ),
+
+            None => (None, None),
+        };
+
+        let (dcil, dcid) = match dcid {
+            Some(cid) => (
+                Some(cid.len() as u8),
+                Some(format!("{}", HexSlice::new(&cid))),
+            ),
+
+            None => (None, None),
+        };
+
+        let version = version.map(|v| format!("{v:x?}"));
+
+        PacketHeader {
+            packet_type,
+            packet_number,
+            flags,
+            token,
+            length,
+            version,
+            scil,
+            dcil,
+            scid,
+            dcid,
+        }
+    }
+
+    /// Creates a new PacketHeader.
+    ///
+    /// Once a QUIC connection has formed, version, dcid and scid are stable, so
+    /// there are space benefits to not logging them in every packet, especially
+    /// PacketType::OneRtt.
+    pub fn with_type(
+        ty: PacketType, packet_number: Option<u64>, version: Option<u32>,
+        scid: Option<&[u8]>, dcid: Option<&[u8]>,
+    ) -> Self {
+        match ty {
+            PacketType::OneRtt => PacketHeader::new(
+                ty,
+                packet_number,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+
+            _ => PacketHeader::new(
+                ty,
+                packet_number,
+                None,
+                None,
+                None,
+                version,
+                scid,
+                dcid,
+            ),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -114,29 +229,150 @@ pub enum TransportError {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum QuicEventType {
+    ServerListening,
+    ConnectionStarted,
+    ConnectionClosed,
+    ConnectionIdUpdated,
+    SpinBitUpdated,
+    ConnectionStateUpdated,
+    PathAssigned,
+    MtuUpdated,
+
     VersionInformation,
     AlpnInformation,
-
     ParametersSet,
     ParametersRestored,
-
     UdpDatagramsSent,
     UdpDatagramsReceived,
     UdpDatagramDropped,
-
     PacketSent,
     PacketReceived,
     PacketDropped,
     PacketBuffered,
     PacketsAcked,
-
     FramesProcessed,
-
     StreamStateUpdated,
-
     StreamDataMoved,
     DatagramDataMoved,
     MigrationStateUpdated,
+
+    RecoveryParametersSet,
+    RecoveryMetricsUpdated,
+    CongestionStateUpdated,
+    LossTimerUpdated,
+    PacketLost,
+    MarkedForRetransmit,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum TransportOwner {
+    Local,
+    Remote,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionState {
+    Attempted,
+    PeerValidated,
+    HandshakeStarted,
+    EarlyWrite,
+    HandshakeCompleted,
+    HandshakeConfirmed,
+    Closing,
+    Draining,
+    Closed,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionClosedTrigger {
+    Clean,
+    HandshakeTimeout,
+    IdleTimeout,
+    Error,
+    StatelessReset,
+    VersionMismatch,
+    Application,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct ServerListening {
+    pub ip_v4: Option<String>, // human-readable or bytes
+    pub ip_v6: Option<String>, // human-readable or bytes
+    pub port_v4: Option<u16>,
+    pub port_v6: Option<u16>,
+
+    retry_required: Option<bool>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct ConnectionStarted {
+    pub ip_version: Option<String>, // "v4" or "v6"
+    pub src_ip: String,             // human-readable or bytes
+    pub dst_ip: String,             // human-readable or bytes
+
+    pub protocol: Option<String>,
+    pub src_port: Option<u16>,
+    pub dst_port: Option<u16>,
+
+    pub src_cid: Option<Bytes>,
+    pub dst_cid: Option<Bytes>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct ConnectionClosed {
+    pub owner: Option<TransportOwner>,
+
+    pub connection_code: Option<ConnectionErrorCode>,
+    pub application_code: Option<ApplicationErrorCode>,
+    pub internal_code: Option<u32>,
+
+    pub reason: Option<String>,
+
+    pub trigger: Option<ConnectionClosedTrigger>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct ConnectionIdUpdated {
+    pub owner: Option<TransportOwner>,
+
+    pub old: Option<Bytes>,
+    pub new: Option<Bytes>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct SpinBitUpdated {
+    pub state: bool,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct ConnectionStateUpdated {
+    pub old: Option<ConnectionState>,
+    pub new: ConnectionState,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct PathAssigned {
+    pub path_id: String,
+    pub path_remote: Option<PathEndpointInfo>,
+    pub path_local: Option<PathEndpointInfo>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct MtuUpdated {
+    pub old: Option<u32>,
+    pub new: u32,
+    pub done: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -619,6 +855,159 @@ pub struct MigrationStateUpdated {
 
     pub path_remote: Option<PathEndpointInfo>,
     pub path_local: Option<PathEndpointInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum CongestionStateUpdatedTrigger {
+    PersistentCongestion,
+    Ecn,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum TimerType {
+    Ack,
+    Pto,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum PacketLostTrigger {
+    ReorderingThreshold,
+    TimeThreshold,
+    PtoExpired,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum LossTimerEventType {
+    Set,
+    Expired,
+    Cancelled,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct RecoveryParametersSet {
+    pub reordering_threshold: Option<u16>,
+    pub time_threshold: Option<f32>,
+    pub timer_granularity: Option<u16>,
+    pub initial_rtt: Option<f32>,
+
+    pub max_datagram_size: Option<u32>,
+    pub initial_congestion_window: Option<u64>,
+    pub minimum_congestion_window: Option<u32>,
+    pub loss_reduction_factor: Option<f32>,
+    pub persistent_congestion_threshold: Option<u16>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct RecoveryMetricsUpdated {
+    pub min_rtt: Option<f32>,
+    pub smoothed_rtt: Option<f32>,
+    pub latest_rtt: Option<f32>,
+    pub rtt_variance: Option<f32>,
+
+    pub pto_count: Option<u16>,
+
+    pub congestion_window: Option<u64>,
+    pub bytes_in_flight: Option<u64>,
+
+    pub ssthresh: Option<u64>,
+
+    // qlog defined
+    pub packets_in_flight: Option<u64>,
+
+    pub pacing_rate: Option<u64>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct CongestionStateUpdated {
+    pub old: Option<String>,
+    pub new: String,
+
+    pub trigger: Option<CongestionStateUpdatedTrigger>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct LossTimerUpdated {
+    pub timer_type: Option<TimerType>,
+    pub packet_number_space: Option<PacketNumberSpace>,
+
+    pub event_type: LossTimerEventType,
+
+    pub delta: Option<f32>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct PacketLost {
+    pub header: Option<PacketHeader>,
+
+    pub frames: Option<Vec<QuicFrame>>,
+
+    pub trigger: Option<PacketLostTrigger>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct MarkedForRetransmit {
+    pub frames: Vec<QuicFrame>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyType {
+    ServerInitialSecret,
+    ClientInitialSecret,
+
+    ServerHandshakeSecret,
+    ClientHandshakeSecret,
+
+    #[serde(rename = "server_0rtt_secret")]
+    Server0RttSecret,
+    #[serde(rename = "client_0rtt_secret")]
+    Client0RttSecret,
+    #[serde(rename = "server_1rtt_secret")]
+    Server1RttSecret,
+    #[serde(rename = "client_1rtt_secret")]
+    Client1RttSecret,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyUpdateOrRetiredTrigger {
+    Tls,
+    RemoteUpdate,
+    LocalUpdate,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct KeyUpdated {
+    pub key_type: KeyType,
+
+    pub old: Option<Bytes>,
+    pub new: Bytes,
+
+    pub generation: Option<u32>,
+
+    pub trigger: Option<KeyUpdateOrRetiredTrigger>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct KeyDiscarded {
+    pub key_type: KeyType,
+    pub key: Option<Bytes>,
+
+    pub generation: Option<u32>,
+
+    pub trigger: Option<KeyUpdateOrRetiredTrigger>,
 }
 
 #[cfg(test)]

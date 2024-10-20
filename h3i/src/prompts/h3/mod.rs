@@ -33,7 +33,7 @@ use inquire::validator::Validation;
 use inquire::InquireError;
 use inquire::Select;
 use inquire::Text;
-use qlog::events::quic::quic::ErrorSpace;
+use qlog::events::quic::ErrorSpace;
 use quiche::ConnectionError;
 
 use crate::actions::h3::Action;

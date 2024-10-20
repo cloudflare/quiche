@@ -44,9 +44,9 @@
 //! [RFC 9204]: https://www.rfc-editor.org/rfc/rfc9204.html
 
 use qlog::events::quic::PacketHeader;
-use qlog::events::quic::quic::PacketSent;
+use qlog::events::quic::PacketSent;
 use qlog::events::quic::PacketType;
-use qlog::events::quic::quic::QuicFrame;
+use qlog::events::quic::QuicFrame;
 use qlog::events::EventData;
 pub use quiche;
 use quiche::h3::NameValue;
