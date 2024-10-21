@@ -5034,7 +5034,7 @@ mod tests {
 
         s.pipe
             .client
-            .stream_send(s.client.control_stream_id.unwrap(), &vec![], true)
+            .stream_send(s.client.control_stream_id.unwrap(), &[], true)
             .unwrap();
 
         s.advance().ok();
@@ -5135,7 +5135,7 @@ mod tests {
             .client
             .stream_send(
                 s.client.local_qpack_streams.encoder_stream_id.unwrap(),
-                &vec![],
+                &[],
                 true,
             )
             .unwrap();

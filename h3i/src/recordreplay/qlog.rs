@@ -572,7 +572,7 @@ mod tests {
     use serde_json;
 
     const NOW: f32 = 123.0;
-    const H3I_WAIT: &'static str = "h3i:wait";
+    const H3I_WAIT: &str = "h3i:wait";
 
     #[test]
     fn ser_duration_wait() {
