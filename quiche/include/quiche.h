@@ -660,10 +660,10 @@ typedef struct {
     // The estimated round-trip time of the path (in nanoseconds).
     uint64_t rtt;
 
-    // The minimum round-trip time observed.
+    // The minimum round-trip time observed (in nanoseconds).
     uint64_t min_rtt;
 
-    // The estimated round-trip time variation.
+    // The estimated round-trip time variation (in nanoseconds).
     uint64_t rttvar;
 
     // The size of the path's congestion window in bytes.
