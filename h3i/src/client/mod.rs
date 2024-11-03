@@ -38,11 +38,13 @@ use qlog::events::h3::HttpHeader;
 use quiche::ConnectionError;
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::time::Instant;
 
 use crate::actions::h3::Action;
 use crate::actions::h3::StreamEvent;
 use crate::actions::h3::StreamEventType;
+use crate::config::Config;
 use crate::frame::H3iFrame;
 use crate::frame::ResetStream;
 use crate::frame_parser::FrameParseResult;
@@ -55,10 +57,92 @@ use qlog::events::h3::Http3Frame;
 use qlog::events::EventData;
 use qlog::streamer::QlogStreamer;
 
-use quiche;
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error;
 use quiche::h3::NameValue;
+use quiche::Connection;
+use quiche::Result;
+use quiche::{
+    self,
+};
+
+const MAX_DATAGRAM_SIZE: usize = 1350;
+const QUIC_VERSION: u32 = 1;
+
+pub fn build_quiche_connection(
+    args: Config, peer_addr: SocketAddr, local_addr: SocketAddr,
+) -> Result<Connection> {
+    // We'll only connect to one server.
+    let connect_url = if !args.omit_sni {
+        args.host_port.split(':').next()
+    } else {
+        None
+    };
+
+    // Create the configuration for the QUIC connection.
+    let mut config = quiche::Config::new(QUIC_VERSION).unwrap();
+
+    config.verify_peer(args.verify_peer);
+    config.set_application_protos(&[b"h3"]).unwrap();
+    config.set_max_idle_timeout(args.idle_timeout);
+    config.set_max_recv_udp_payload_size(MAX_DATAGRAM_SIZE);
+    config.set_max_send_udp_payload_size(MAX_DATAGRAM_SIZE);
+    config.set_initial_max_data(10_000_000);
+    config
+        .set_initial_max_stream_data_bidi_local(args.max_stream_data_bidi_local);
+    config.set_initial_max_stream_data_bidi_remote(
+        args.max_stream_data_bidi_remote,
+    );
+    config.set_initial_max_stream_data_uni(args.max_stream_data_uni);
+    config.set_initial_max_streams_bidi(args.max_streams_bidi);
+    config.set_initial_max_streams_uni(args.max_streams_uni);
+    config.set_disable_active_migration(true);
+    config.set_active_connection_id_limit(0);
+
+    config.set_max_connection_window(args.max_window);
+    config.set_max_stream_window(args.max_stream_window);
+
+    let mut keylog = None;
+
+    if let Some(keylog_path) = std::env::var_os("SSLKEYLOGFILE") {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(keylog_path)
+            .unwrap();
+
+        keylog = Some(file);
+
+        config.log_keys();
+    }
+
+    config.grease(false);
+
+    // Generate a random source connection ID for the connection.
+    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
+    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut scid);
+
+    let scid = quiche::ConnectionId::from_ref(&scid);
+
+    // Create a QUIC connection and initiate handshake.
+    let mut conn =
+        quiche::connect(connect_url, &scid, local_addr, peer_addr, &mut config)?;
+
+    if let Some(keylog) = &mut keylog {
+        if let Ok(keylog) = keylog.try_clone() {
+            conn.set_keylog(Box::new(keylog));
+        }
+    }
+
+    log::info!(
+        "connecting to {:} from {:} with scid {:?}",
+        peer_addr,
+        local_addr,
+        scid,
+    );
+
+    Ok(conn)
+}
 
 fn handle_qlog(
     qlog_streamer: Option<&mut QlogStreamer>, qlog_frame: Http3Frame,

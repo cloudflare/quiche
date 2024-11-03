@@ -37,18 +37,18 @@ use crate::actions::h3::Action;
 use crate::actions::h3::StreamEventType;
 use crate::actions::h3::WaitType;
 use crate::actions::h3::WaitingFor;
+use crate::client::build_quiche_connection;
 use crate::client::execute_action;
 use crate::client::parse_streams;
 use crate::client::ClientError;
 use crate::client::ClientVariant;
 use crate::client::ConnectionCloseDetails;
+use crate::client::MAX_DATAGRAM_SIZE;
 use crate::config::Config;
 
 use super::ConnectionSummary;
 use super::StreamMap;
 use super::StreamParserMap;
-
-const MAX_DATAGRAM_SIZE: usize = 1350;
 
 /// Connect to a server and execute provided actions.
 ///
@@ -57,7 +57,7 @@ const MAX_DATAGRAM_SIZE: usize = 1350;
 ///
 /// Returns a [ConnectionSummary] on success, [ClientError] on failure.
 pub fn connect(
-    args: &Config, actions: &[Action],
+    args: Config, actions: &[Action],
 ) -> std::result::Result<ConnectionSummary, ClientError> {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
@@ -65,13 +65,6 @@ pub fn connect(
     // Setup the event loop.
     let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
-
-    // We'll only connect to one server.
-    let connect_url = if !args.omit_sni {
-        args.host_port.split(':').next()
-    } else {
-        None
-    };
 
     // Resolve server address.
     let peer_addr = if let Some(addr) = &args.connect_to {
@@ -102,83 +95,14 @@ pub fn connect(
         .register(&mut socket, mio::Token(0), mio::Interest::READABLE)
         .unwrap();
 
-    // Create the configuration for the QUIC connection.
-    let mut config = quiche::Config::new(1).unwrap();
+    let Ok(local_addr) = socket.local_addr() else {
+        return Err(ClientError::Other("invalid socket".to_string()));
+    };
 
-    config.verify_peer(args.verify_peer);
-    config.set_application_protos(&[b"h3"]).unwrap();
-    config.set_max_idle_timeout(args.idle_timeout);
-    config.set_max_recv_udp_payload_size(MAX_DATAGRAM_SIZE);
-    config.set_max_send_udp_payload_size(MAX_DATAGRAM_SIZE);
-    config.set_initial_max_data(10_000_000);
-    config
-        .set_initial_max_stream_data_bidi_local(args.max_stream_data_bidi_local);
-    config.set_initial_max_stream_data_bidi_remote(
-        args.max_stream_data_bidi_remote,
-    );
-    config.set_initial_max_stream_data_uni(args.max_stream_data_uni);
-    config.set_initial_max_streams_bidi(args.max_streams_bidi);
-    config.set_initial_max_streams_uni(args.max_streams_uni);
-    config.set_disable_active_migration(true);
-    config.set_active_connection_id_limit(0);
-
-    config.set_max_connection_window(args.max_window);
-    config.set_max_stream_window(args.max_stream_window);
-
-    let mut keylog = None;
-
-    if let Some(keylog_path) = std::env::var_os("SSLKEYLOGFILE") {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(keylog_path)
-            .unwrap();
-
-        keylog = Some(file);
-
-        config.log_keys();
-    }
-
-    config.grease(false);
+    let mut conn = build_quiche_connection(args, peer_addr, local_addr)
+        .map_err(|_| ClientError::HandshakeFail)?;
 
     let mut app_proto_selected = false;
-
-    // Generate a random source connection ID for the connection.
-    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut scid);
-
-    let scid = quiche::ConnectionId::from_ref(&scid);
-
-    let local_addr = socket.local_addr().unwrap();
-
-    // Create a QUIC connection and initiate handshake.
-    let mut conn =
-        quiche::connect(connect_url, &scid, local_addr, peer_addr, &mut config)
-            .unwrap();
-
-    if let Some(keylog) = &mut keylog {
-        if let Ok(keylog) = keylog.try_clone() {
-            conn.set_keylog(Box::new(keylog));
-        }
-    }
-
-    if let Some(dir) = std::env::var_os("QLOGDIR") {
-        let id = format!("{scid:?}");
-        let writer = make_qlog_writer(&dir, "client", &id);
-
-        conn.set_qlog(
-            std::boxed::Box::new(writer),
-            "h3i-client qlog".to_string(),
-            format!("{} id={}", "quiche-client qlog", id),
-        );
-    }
-
-    log::info!(
-        "connecting to {:} from {:} with scid {:?}",
-        peer_addr,
-        socket.local_addr().unwrap(),
-        scid,
-    );
 
     let (write, send_info) = conn.send(&mut out).expect("initial send failed");
 
