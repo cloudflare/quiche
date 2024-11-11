@@ -26,13 +26,13 @@
 
 use std::collections::BTreeMap;
 
-use qlog::events::h3::H3FrameCreated;
-use qlog::events::h3::H3Owner;
-use qlog::events::h3::H3StreamTypeSet;
-use qlog::events::h3::Http3Frame;
-use qlog::events::quic::ErrorSpace;
-use qlog::events::quic::PacketSent;
-use qlog::events::quic::QuicFrame;
+use qlog::events::http::h3::FrameCreated;
+use qlog::events::http::h3::Owner;
+use qlog::events::http::h3::StreamTypeSet;
+use qlog::events::http::h3::Http3Frame;
+use qlog::events::quic::quic::ErrorSpace;
+use qlog::events::quic::quic::PacketSent;
+use qlog::events::quic::quic::QuicFrame;
 use qlog::events::Event;
 use qlog::events::EventData;
 use qlog::events::ExData;
@@ -73,7 +73,7 @@ pub struct H3Actions(pub Vec<Action>);
 
 /// A qlog [H3FrameCreated] event, with [ExData].
 pub struct H3FrameCreatedEx {
-    frame_created: H3FrameCreated,
+    frame_created: FrameCreated,
     ex_data: ExData,
 }
 
@@ -85,7 +85,7 @@ impl From<&Action> for QlogEvents {
                 fin_stream,
                 frame,
             } => {
-                let frame_ev = EventData::H3FrameCreated(H3FrameCreated {
+                let frame_ev = EventData::H3FrameCreated(FrameCreated {
                     stream_id: *stream_id,
                     length: None,
                     frame: frame.to_qlog(),
@@ -112,7 +112,7 @@ impl From<&Action> for QlogEvents {
             } => {
                 let qlog_headers = headers
                     .iter()
-                    .map(|h| qlog::events::h3::HttpHeader {
+                    .map(|h| qlog::events::http::h3::HttpHeader {
                         name: String::from_utf8_lossy(h.name()).into_owned(),
                         value: String::from_utf8_lossy(h.value()).into_owned(),
                     })
@@ -122,7 +122,7 @@ impl From<&Action> for QlogEvents {
                     headers: qlog_headers,
                 };
 
-                let frame_ev = EventData::H3FrameCreated(H3FrameCreated {
+                let frame_ev = EventData::H3FrameCreated(FrameCreated {
                     stream_id: *stream_id,
                     length: None,
                     frame,
@@ -148,25 +148,25 @@ impl From<&Action> for QlogEvents {
             } => {
                 let ty = match *stream_type {
                     HTTP3_CONTROL_STREAM_TYPE_ID =>
-                        qlog::events::h3::H3StreamType::Control,
+                        qlog::events::http::h3::StreamType::Control,
                     HTTP3_PUSH_STREAM_TYPE_ID =>
-                        qlog::events::h3::H3StreamType::Push,
+                        qlog::events::http::h3::StreamType::Push,
                     QPACK_ENCODER_STREAM_TYPE_ID =>
-                        qlog::events::h3::H3StreamType::QpackEncode,
+                        qlog::events::http::h3::StreamType::QpackEncode,
                     QPACK_DECODER_STREAM_TYPE_ID =>
-                        qlog::events::h3::H3StreamType::QpackDecode,
+                        qlog::events::http::h3::StreamType::QpackDecode,
 
-                    _ => qlog::events::h3::H3StreamType::Unknown,
+                    _ => qlog::events::http::h3::StreamType::Unknown,
                 };
                 let ty_val =
-                    if matches!(ty, qlog::events::h3::H3StreamType::Unknown) {
+                    if matches!(ty, qlog::events::http::h3::StreamType::Unknown) {
                         Some(*stream_type)
                     } else {
                         None
                     };
 
-                let stream_ev = EventData::H3StreamTypeSet(H3StreamTypeSet {
-                    owner: Some(H3Owner::Local),
+                let stream_ev = EventData::H3StreamTypeSet(StreamTypeSet {
+                    owner: Some(Owner::Local),
                     stream_id: *stream_id,
                     stream_type: ty,
                     stream_type_value: ty_val,
@@ -529,17 +529,17 @@ impl From<H3FrameCreatedEx> for H3Actions {
 }
 
 fn from_qlog_stream_type_set(
-    st: &H3StreamTypeSet, ex_data: &ExData,
+    st: &StreamTypeSet, ex_data: &ExData,
 ) -> Vec<Action> {
     let mut actions = vec![];
     let fin_stream = parse_ex_data(ex_data);
     let stream_type = match st.stream_type {
-        qlog::events::h3::H3StreamType::Control => Some(0x0),
-        qlog::events::h3::H3StreamType::Push => Some(0x1),
-        qlog::events::h3::H3StreamType::QpackEncode => Some(0x2),
-        qlog::events::h3::H3StreamType::QpackDecode => Some(0x3),
-        qlog::events::h3::H3StreamType::Reserved |
-        qlog::events::h3::H3StreamType::Unknown => st.stream_type_value,
+        qlog::events::http::h3::StreamType::Control => Some(0x0),
+        qlog::events::http::h3::StreamType::Push => Some(0x1),
+        qlog::events::http::h3::StreamType::QpackEncode => Some(0x2),
+        qlog::events::http::h3::StreamType::QpackDecode => Some(0x3),
+        qlog::events::http::h3::StreamType::Reserved |
+        qlog::events::http::h3::StreamType::Unknown => st.stream_type_value,
         _ => None,
     };
 
