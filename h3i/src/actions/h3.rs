@@ -49,7 +49,7 @@ use crate::encode_header_block;
 /// sequentially. Note that packets will be flushed when said iteration has
 /// completed, regardless of if an [`Action::FlushPackets`] was the terminal
 /// action.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     /// Send a [quiche::h3::frame::Frame] over a stream.
     SendFrame {
