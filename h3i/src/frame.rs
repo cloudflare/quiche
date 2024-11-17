@@ -237,6 +237,14 @@ impl From<Vec<Header>> for EnrichedHeaders {
     }
 }
 
+impl PartialEq<StatusCode> for EnrichedHeaders {
+    fn eq(&self, other: &StatusCode) -> bool {
+        self.status_code()
+            .map(|status| status.ok() == Some(*other))
+            .unwrap_or(false)
+    }
+}
+
 impl TryFrom<QFrame> for EnrichedHeaders {
     type Error = BoxError;
 
@@ -446,7 +454,21 @@ mod tests {
         let enriched = H3iFrame::Headers(header_frame.into())
             .to_enriched_headers()
             .unwrap();
-
         assert!(enriched.status_code().is_none());
+    }
+
+    #[test]
+    fn test_status_code_interaction() {
+        let header_frame =
+            EnrichedHeaders::from(vec![Header::new(b":status", b"200")]);
+        assert_eq!(header_frame, StatusCode::OK);
+
+        let header_frame =
+            EnrichedHeaders::from(vec![Header::new(b":status", b"404")]);
+        assert!(header_frame != StatusCode::OK);
+
+        let header_frame =
+            EnrichedHeaders::from(vec![Header::new(b"hello", b"world")]);
+        assert!(header_frame != StatusCode::OK);
     }
 }
