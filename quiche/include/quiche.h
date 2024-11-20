@@ -666,6 +666,9 @@ typedef struct {
     // The estimated round-trip time variation (in nanoseconds).
     uint64_t rttvar;
 
+    // The number of large jumps in round-trip time observed.
+    uint64_t rtt_jumps;
+
     // The size of the path's congestion window in bytes.
     size_t cwnd;
 

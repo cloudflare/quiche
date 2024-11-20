@@ -33,6 +33,8 @@ pub(crate) const INITIAL_RTT: Duration = Duration::from_millis(333);
 
 pub(crate) const RTT_WINDOW: Duration = Duration::from_secs(300);
 
+const JUMP_THRESHOLD: u32 = 3;
+
 pub struct RttStats {
     pub(super) latest_rtt: Duration,
 
@@ -45,6 +47,8 @@ pub struct RttStats {
     pub(super) max_ack_delay: Duration,
 
     pub(super) first_rtt_sample: Option<Instant>,
+
+    pub(super) rtt_jumps: u64,
 }
 
 impl std::fmt::Debug for RttStats {
@@ -54,6 +58,7 @@ impl std::fmt::Debug for RttStats {
             .field("srtt", &self.smoothed_rtt)
             .field("minrtt", &*self.min_rtt)
             .field("rttvar", &self.rttvar)
+            .field("rtt_jumps", &self.rtt_jumps)
             .finish()
     }
 }
@@ -67,6 +72,7 @@ impl RttStats {
             rttvar: INITIAL_RTT / 2,
             first_rtt_sample: None,
             max_ack_delay,
+            rtt_jumps: 0,
         }
     }
 
@@ -96,6 +102,10 @@ impl RttStats {
         let mut adjusted_rtt = latest_rtt;
         if latest_rtt >= *self.min_rtt + ack_delay {
             adjusted_rtt = latest_rtt - ack_delay;
+        }
+
+        if adjusted_rtt >= self.smoothed_rtt * JUMP_THRESHOLD {
+            self.rtt_jumps += 1;
         }
 
         self.rttvar = self.rttvar * 3 / 4 +

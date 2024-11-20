@@ -1303,6 +1303,7 @@ pub struct PathStats {
     rtt: u64,
     min_rtt: u64,
     rttvar: u64,
+    rtt_jumps: u64,
     cwnd: usize,
     sent_bytes: u64,
     recv_bytes: u64,
@@ -1332,6 +1333,7 @@ pub extern fn quiche_conn_path_stats(
     out.rtt = stats.rtt.as_nanos() as u64;
     out.min_rtt = stats.min_rtt.unwrap_or_default().as_nanos() as u64;
     out.rttvar = stats.rttvar.as_nanos() as u64;
+    out.rtt_jumps = stats.rtt_jumps;
     out.cwnd = stats.cwnd;
     out.sent_bytes = stats.sent_bytes;
     out.recv_bytes = stats.recv_bytes;
