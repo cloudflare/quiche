@@ -31,11 +31,7 @@ use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt::Debug;
 
-use http::status::InvalidStatusCode;
-use http::HeaderMap;
-use http::HeaderName;
-use http::StatusCode;
-
+use multimap::MultiMap;
 use quiche;
 
 use quiche::h3::frame::Frame as QFrame;
@@ -113,12 +109,15 @@ impl From<Vec<Header>> for H3iFrame {
     }
 }
 
+pub type HeaderMap = MultiMap<Vec<u8>, Vec<u8>>;
+
 /// An HTTP/3 HEADERS frame with decoded headers and a [HeaderMap].
 #[derive(Clone, PartialEq, Eq)]
 pub struct EnrichedHeaders {
     header_block: Vec<u8>,
     headers: Vec<Header>,
-    header_map: HeaderMap<Vec<u8>>,
+    /// A multi-map of raw header names to values, similar to http's HeaderMap.
+    header_map: HeaderMap,
 }
 
 /// A wrapper to help serialize an quiche HTTP header.
@@ -156,6 +155,44 @@ impl EnrichedHeaders {
         &self.headers
     }
 
+    /// Returns a multi-map of header keys to values.
+    ///
+    /// If a single key contains multiple values, the values in the entry will
+    /// be returned in the same order as they appear in the array of headers
+    /// which backs the [`EnrichedHeaders`].
+    ///
+    /// # Examples
+    /// ```
+    /// use h3i::frame::EnrichedHeaders;
+    /// use h3i::frame::H3iFrame;
+    /// use multimap::MultiMap;
+    /// use quiche::h3::Header;
+    /// use std::iter::FromIterator;
+    ///
+    /// let header_frame = vec![
+    ///     Header::new(b":status", b"200"),
+    ///     Header::new(b"hello", b"world"),
+    ///     Header::new(b"hello", b"super-earth"),
+    /// ];
+    ///
+    /// let enriched = H3iFrame::Headers(header_frame.into())
+    ///     .to_enriched_headers()
+    ///     .unwrap();
+    ///
+    /// let expected = MultiMap::from_iter([
+    ///     (b":status".to_vec(), vec![b"200".to_vec()]),
+    ///     (b"hello".to_vec(), vec![
+    ///         b"world".to_vec(),
+    ///         b"super-earth".to_vec(),
+    ///     ]),
+    /// ]);
+    ///
+    /// assert_eq!(*enriched.header_map(), expected);
+    /// ```
+    pub fn header_map(&self) -> &HeaderMap {
+        &self.header_map
+    }
+
     /// Fetches the value of the `:status` pseudo-header.
     ///
     /// # Examples
@@ -166,27 +203,11 @@ impl EnrichedHeaders {
     /// let headers = EnrichedHeaders::from(vec![Header::new(b"hello", b"world")]);
     /// assert!(headers.status_code().is_none());
     ///
-    /// let headers =
-    ///     EnrichedHeaders::from(vec![Header::new(b":status", b"hello_world")]);
-    /// assert!(headers.status_code().expect("code is Some").is_err());
-    ///
     /// let headers = EnrichedHeaders::from(vec![Header::new(b":status", b"200")]);
-    /// assert_eq!(
-    ///     headers
-    ///         .status_code()
-    ///         .expect("status code is Some")
-    ///         .expect("status code is Ok"),
-    ///     200
-    /// );
+    /// assert_eq!(headers.status_code().expect("status code is Some"), b"200");
     /// ```
-    pub fn status_code(&self) -> Option<Result<StatusCode, InvalidStatusCode>> {
-        // Unfortunately can't use header_map since pseudo-headers aren't stored
-        // in it
-        self.headers
-            .iter()
-            .filter(|h| h.name() == b":status")
-            .map(|header| StatusCode::from_bytes(header.value()))
-            .next()
+    pub fn status_code(&self) -> Option<&Vec<u8>> {
+        self.header_map.get(b":status".as_slice())
     }
 }
 
@@ -208,25 +229,9 @@ impl From<Vec<Header>> for EnrichedHeaders {
     fn from(headers: Vec<Header>) -> Self {
         let header_block = encode_header_block(&headers).unwrap();
 
-        let mut header_map = HeaderMap::with_capacity(headers.len());
+        let mut header_map: HeaderMap = MultiMap::with_capacity(headers.len());
         for header in headers.iter() {
-            let name = header.name();
-
-            if let Some(b':') = name.first() {
-                // Pseudo-headers can't be parsed into a `HeaderName` in the
-                // `http` crate.
-                //
-                // See https://docs.rs/http/latest/src/http/header/name.rs.html#1115 for more.
-                continue;
-            }
-
-            let header_name = if let Ok(s) = HeaderName::from_bytes(name) {
-                s
-            } else {
-                continue;
-            };
-
-            header_map.insert(header_name, header.value().to_vec());
+            header_map.insert(header.name().to_vec(), header.value().to_vec());
         }
 
         Self {
@@ -425,28 +430,5 @@ impl Serialize for SerializableQFrame<'_> {
                 state.end()
             },
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_status_code() {
-        let header_frame = vec![Header::new(b":status", b"200")];
-        let enriched = H3iFrame::Headers(header_frame.into())
-            .to_enriched_headers()
-            .unwrap();
-
-        let result = enriched.status_code().expect("no status code");
-        assert_eq!(result.ok(), Some(StatusCode::OK));
-
-        let header_frame = vec![Header::new(b"hello", b"super-earth")];
-        let enriched = H3iFrame::Headers(header_frame.into())
-            .to_enriched_headers()
-            .unwrap();
-
-        assert!(enriched.status_code().is_none());
     }
 }

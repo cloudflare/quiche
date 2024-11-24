@@ -14,10 +14,10 @@ rust-version = "1.67"
 [dependencies]
 clap = "3"
 env_logger = "0.6"
-http = "0.2"
 inquire = "0.6.2"
 log = { version = "0.4", features = ["std"] }
 mio = { version = "0.8", features = ["net", "os-poll"] }
+multimap = "0.10"
 octets = { version = "0.3", path = "../octets"}
 qlog = { version = "0.13.0", path = "../qlog" }
 quiche = { version = "0.22", path = "../quiche", features = ["internal", "qlog"] }
