@@ -571,6 +571,14 @@ pub struct TransportParametersSet {
     pub initial_max_streams_uni: Option<u64>,
 
     pub preferred_address: Option<PreferredAddress>,
+
+    pub unknown_parameters: Vec<UnknownTransportParameter>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct UnknownTransportParameter {
+    pub id: u64,
+    pub value: Bytes,
 }
 
 #[serde_with::skip_serializing_none]
