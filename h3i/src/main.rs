@@ -59,7 +59,7 @@ fn main() -> Result<(), ClientError> {
     };
 
     let actions = match &config.qlog_input {
-        Some(v) => read_qlog(v),
+        Some(v) => read_qlog(v, config.host_override.as_deref()),
         None => prompt_frames(&config),
     };
 
@@ -84,6 +84,7 @@ struct Config {
     library_config: h3i::config::Config,
     pub qlog_input: Option<String>,
     pub qlog_actions_output: bool,
+    pub host_override: Option<String>,
 }
 
 fn config_from_clap() -> std::result::Result<Config, String> {
@@ -188,6 +189,13 @@ fn config_from_clap() -> std::result::Result<Config, String> {
                 .takes_value(true)
                 .default_value("16777216"),
         )
+        .arg(
+            Arg::with_name("replay-host-override")
+                .long("replay-host-override")
+                .help("Override the host or authority field in any replayed request headers.")
+                .requires("qlog-input")
+                .takes_value(true),
+        )
         .get_matches();
 
     let host_port = matches.value_of("host:port").unwrap().to_string();
@@ -258,6 +266,10 @@ fn config_from_clap() -> std::result::Result<Config, String> {
             .map(|s| s.to_string())
     });
 
+    let host_override = matches
+        .value_of("replay-host-override")
+        .map(|s| s.to_string());
+
     let library_config = h3i::config::Config {
         host_port,
         omit_sni,
@@ -279,6 +291,7 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         qlog_input,
         qlog_actions_output,
         library_config,
+        host_override,
     })
 }
 
@@ -288,7 +301,7 @@ fn sync_client(
     h3i::client::sync_client::connect(&config.library_config, actions)
 }
 
-fn read_qlog(filename: &str) -> Vec<Action> {
+fn read_qlog(filename: &str, host_override: Option<&str>) -> Vec<Action> {
     let file = std::fs::File::open(filename).expect("failed to open file");
     let reader = BufReader::new(file);
 
@@ -298,7 +311,7 @@ fn read_qlog(filename: &str) -> Vec<Action> {
     for event in qlog_reader {
         match event {
             qlog::reader::Event::Qlog(ev) => {
-                let ac: H3Actions = (ev).into();
+                let ac: H3Actions = actions_from_qlog(ev, host_override);
                 actions.extend(ac.0);
             },
 

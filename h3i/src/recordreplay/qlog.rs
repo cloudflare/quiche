@@ -30,6 +30,7 @@ use qlog::events::h3::H3FrameCreated;
 use qlog::events::h3::H3Owner;
 use qlog::events::h3::H3StreamTypeSet;
 use qlog::events::h3::Http3Frame;
+use qlog::events::h3::HttpHeader;
 use qlog::events::quic::ErrorSpace;
 use qlog::events::quic::PacketSent;
 use qlog::events::quic::QuicFrame;
@@ -299,35 +300,40 @@ impl From<&Action> for QlogEvents {
     }
 }
 
-impl From<Event> for H3Actions {
-    fn from(event: Event) -> Self {
-        let mut actions = vec![];
-        match &event.data {
-            EventData::PacketSent(ps) => {
-                let packet_actions: H3Actions = ps.into();
-                actions.extend(packet_actions.0);
-            },
+pub fn actions_from_qlog(event: Event, host_override: Option<&str>) -> H3Actions {
+    let mut actions = vec![];
+    match &event.data {
+        EventData::PacketSent(ps) => {
+            let packet_actions: H3Actions = ps.into();
+            actions.extend(packet_actions.0);
+        },
 
-            EventData::H3FrameCreated(fc) => {
-                let frame_created = H3FrameCreatedEx {
-                    frame_created: fc.clone(),
-                    ex_data: event.ex_data.clone(),
-                };
-                let h3_actions: H3Actions = frame_created.into();
-                actions.extend(h3_actions.0);
-            },
+        EventData::H3FrameCreated(fc) => {
+            let mut frame_created = H3FrameCreatedEx {
+                frame_created: fc.clone(),
+                ex_data: event.ex_data.clone(),
+            };
 
-            EventData::H3StreamTypeSet(st) => {
-                let stream_actions =
-                    from_qlog_stream_type_set(st, &event.ex_data);
-                actions.extend(stream_actions);
-            },
+            // Insert custom data so that conversion of frames to Actions can
+            // use it.
+            if let Some(host) = host_override {
+                frame_created
+                    .ex_data
+                    .insert("host_override".into(), host.into());
+            }
 
-            _ => (),
-        }
+            actions.push(frame_created.into());
+        },
 
-        Self(actions)
+        EventData::H3StreamTypeSet(st) => {
+            let stream_actions = from_qlog_stream_type_set(st, &event.ex_data);
+            actions.extend(stream_actions);
+        },
+
+        _ => (),
     }
+
+    H3Actions(actions)
 }
 
 impl From<JsonEvent> for H3Actions {
@@ -424,9 +430,22 @@ impl From<&PacketSent> for H3Actions {
     }
 }
 
-impl From<H3FrameCreatedEx> for H3Actions {
+fn map_header(
+    hdr: &HttpHeader, host_override: Option<&str>,
+) -> quiche::h3::Header {
+    if hdr.name.to_ascii_lowercase() == ":authority" ||
+        hdr.name.to_ascii_lowercase() == "host"
+    {
+        if let Some(host) = host_override {
+            return quiche::h3::Header::new(hdr.name.as_bytes(), host.as_bytes());
+        }
+    }
+
+    quiche::h3::Header::new(hdr.name.as_bytes(), hdr.value.as_bytes())
+}
+
+impl From<H3FrameCreatedEx> for Action {
     fn from(value: H3FrameCreatedEx) -> Self {
-        let mut actions = vec![];
         let stream_id = value.frame_created.stream_id;
         let fin_stream = value
             .ex_data
@@ -434,8 +453,13 @@ impl From<H3FrameCreatedEx> for H3Actions {
             .unwrap_or(&serde_json::Value::Null)
             .as_bool()
             .unwrap_or_default();
+        let host_override = value
+            .ex_data
+            .get("host_override")
+            .unwrap_or(&serde_json::Value::Null)
+            .as_str();
 
-        match &value.frame_created.frame {
+        let ret = match &value.frame_created.frame {
             Http3Frame::Settings { settings } => {
                 let mut raw_settings = vec![];
                 let mut additional_settings = vec![];
@@ -460,7 +484,8 @@ impl From<H3FrameCreatedEx> for H3Actions {
                             },
                     }
                 }
-                actions.push(Action::SendFrame {
+
+                Action::SendFrame {
                     stream_id,
                     fin_stream,
                     frame: Frame::Settings {
@@ -473,26 +498,22 @@ impl From<H3FrameCreatedEx> for H3Actions {
                         raw: Some(raw_settings),
                         additional_settings: Some(additional_settings),
                     },
-                })
+                }
             },
 
             Http3Frame::Headers { headers } => {
                 let hdrs: Vec<quiche::h3::Header> = headers
                     .iter()
-                    .map(|h| {
-                        quiche::h3::Header::new(
-                            h.name.as_bytes(),
-                            h.value.as_bytes(),
-                        )
-                    })
+                    .map(|h| map_header(h, host_override))
                     .collect();
                 let header_block = encode_header_block(&hdrs).unwrap();
-                actions.push(Action::SendHeadersFrame {
+
+                Action::SendHeadersFrame {
                     stream_id,
                     fin_stream,
                     headers: hdrs,
                     frame: Frame::Headers { header_block },
-                });
+                }
             },
 
             Http3Frame::Data { raw } => {
@@ -506,25 +527,23 @@ impl From<H3FrameCreatedEx> for H3Actions {
                         .to_vec();
                 }
 
-                actions.push(Action::SendFrame {
+                Action::SendFrame {
                     stream_id,
                     fin_stream,
                     frame: Frame::Data { payload },
-                })
+                }
             },
 
-            Http3Frame::Goaway { id } => {
-                actions.push(Action::SendFrame {
-                    stream_id,
-                    fin_stream,
-                    frame: Frame::GoAway { id: *id },
-                });
+            Http3Frame::Goaway { id } => Action::SendFrame {
+                stream_id,
+                fin_stream,
+                frame: Frame::GoAway { id: *id },
             },
 
             _ => unimplemented!(),
-        }
+        };
 
-        H3Actions(actions)
+        ret
     }
 }
 
@@ -569,6 +588,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use quiche::h3::Header;
     use serde_json;
 
     const NOW: f32 = 123.0;
@@ -644,5 +664,55 @@ mod tests {
         let expected = r#"{"time":123.0,"name":"h3i:wait","data":{"stream_id":0,"type":"data"}}"#;
         let deser = serde_json::from_str::<JsonEvent>(expected).unwrap();
         assert_eq!(deser.data, ev.data);
+    }
+
+    #[test]
+    fn deser_http_headers_to_action() {
+        let serialized = r#"{"time":0.074725,"name":"http:frame_created","data":{"stream_id":0,"frame":{"frame_type":"headers","headers":[{"name":":method","value":"GET"},{"name":":authority","value":"example.net"},{"name":":path","value":"/"},{"name":":scheme","value":"https"}]}},"fin_stream":true}"#;
+        let deserialized = serde_json::from_str::<Event>(serialized).unwrap();
+        let actions = actions_from_qlog(deserialized, None);
+        assert!(actions.0.len() == 1);
+
+        let headers = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":authority", b"example.net"),
+            Header::new(b":path", b"/"),
+            Header::new(b":scheme", b"https"),
+        ];
+        let header_block = encode_header_block(&headers).unwrap();
+        let frame = Frame::Headers { header_block };
+        let expected = Action::SendHeadersFrame {
+            stream_id: 0,
+            fin_stream: true,
+            headers,
+            frame,
+        };
+
+        assert_eq!(actions.0[0], expected);
+    }
+
+    #[test]
+    fn deser_http_headers_host_overrid_to_action() {
+        let serialized = r#"{"time":0.074725,"name":"http:frame_created","data":{"stream_id":0,"frame":{"frame_type":"headers","headers":[{"name":":method","value":"GET"},{"name":":authority","value":"bla.com"},{"name":":path","value":"/"},{"name":":scheme","value":"https"}]}},"fin_stream":true}"#;
+        let deserialized = serde_json::from_str::<Event>(serialized).unwrap();
+        let actions = actions_from_qlog(deserialized, Some("example.org"));
+        assert!(actions.0.len() == 1);
+
+        let headers = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":authority", b"example.org"),
+            Header::new(b":path", b"/"),
+            Header::new(b":scheme", b"https"),
+        ];
+        let header_block = encode_header_block(&headers).unwrap();
+        let frame = Frame::Headers { header_block };
+        let expected = Action::SendHeadersFrame {
+            stream_id: 0,
+            fin_stream: true,
+            headers,
+            frame,
+        };
+
+        assert_eq!(actions.0[0], expected);
     }
 }
