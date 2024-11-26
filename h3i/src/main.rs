@@ -63,7 +63,7 @@ fn main() -> Result<(), ClientError> {
         None => prompt_frames(&config),
     };
 
-    match sync_client(&config, &actions) {
+    match sync_client(config, &actions) {
         Ok(summary) => {
             log::debug!(
                 "received connection_summary: {}",
@@ -296,9 +296,9 @@ fn config_from_clap() -> std::result::Result<Config, String> {
 }
 
 fn sync_client(
-    config: &Config, actions: &[Action],
+    config: Config, actions: &[Action],
 ) -> Result<ConnectionSummary, ClientError> {
-    h3i::client::sync_client::connect(&config.library_config, actions)
+    h3i::client::sync_client::connect(config.library_config, actions)
 }
 
 fn read_qlog(filename: &str, host_override: Option<&str>) -> Vec<Action> {
