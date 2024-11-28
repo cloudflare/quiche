@@ -652,7 +652,7 @@ impl<'a> HexSlice<'a> {
     }
 }
 
-impl<'a> std::fmt::Display for HexSlice<'a> {
+impl std::fmt::Display for HexSlice<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         for byte in self.0 {
             write!(f, "{byte:02x}")?;

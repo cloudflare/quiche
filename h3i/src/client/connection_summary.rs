@@ -338,7 +338,7 @@ pub enum ConnectionRecord {
 /// A wrapper to help serialize [quiche::PathStats]
 pub struct SerializablePathStats<'a>(&'a quiche::PathStats);
 
-impl<'a> Serialize for SerializablePathStats<'a> {
+impl Serialize for SerializablePathStats<'_> {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -374,7 +374,7 @@ impl<'a> Serialize for SerializablePathStats<'a> {
 /// A wrapper to help serialize [quiche::Stats]
 pub struct SerializableStats<'a>(&'a quiche::Stats);
 
-impl<'a> Serialize for SerializableStats<'a> {
+impl Serialize for SerializableStats<'_> {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -419,7 +419,7 @@ impl<'a> Serialize for SerializableStats<'a> {
 /// A wrapper to help serialize a [quiche::ConnectionError]
 pub struct SerializableConnectionError<'a>(&'a quiche::ConnectionError);
 
-impl<'a> Serialize for SerializableConnectionError<'a> {
+impl Serialize for SerializableConnectionError<'_> {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,

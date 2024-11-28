@@ -83,7 +83,7 @@ impl<'a> QlogSeqReader<'a> {
     }
 }
 
-impl<'a> Iterator for QlogSeqReader<'a> {
+impl Iterator for QlogSeqReader<'_> {
     type Item = Event;
 
     #[inline]

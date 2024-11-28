@@ -830,7 +830,7 @@ impl Ord for StreamPriorityKey {
 
 intrusive_adapter!(pub StreamWritablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { writable: RBTreeAtomicLink });
 
-impl<'a> KeyAdapter<'a> for StreamWritablePriorityAdapter {
+impl KeyAdapter<'_> for StreamWritablePriorityAdapter {
     type Key = StreamPriorityKey;
 
     fn get_key(&self, s: &StreamPriorityKey) -> Self::Key {
@@ -840,7 +840,7 @@ impl<'a> KeyAdapter<'a> for StreamWritablePriorityAdapter {
 
 intrusive_adapter!(pub StreamReadablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { readable: RBTreeAtomicLink });
 
-impl<'a> KeyAdapter<'a> for StreamReadablePriorityAdapter {
+impl KeyAdapter<'_> for StreamReadablePriorityAdapter {
     type Key = StreamPriorityKey;
 
     fn get_key(&self, s: &StreamPriorityKey) -> Self::Key {
@@ -850,7 +850,7 @@ impl<'a> KeyAdapter<'a> for StreamReadablePriorityAdapter {
 
 intrusive_adapter!(pub StreamFlushablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { flushable: RBTreeAtomicLink });
 
-impl<'a> KeyAdapter<'a> for StreamFlushablePriorityAdapter {
+impl KeyAdapter<'_> for StreamFlushablePriorityAdapter {
     type Key = StreamPriorityKey;
 
     fn get_key(&self, s: &StreamPriorityKey) -> Self::Key {
