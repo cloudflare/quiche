@@ -124,7 +124,7 @@ pub struct EnrichedHeaders {
 /// A wrapper to help serialize an quiche HTTP header.
 pub struct SerializableHeader<'a>(&'a Header);
 
-impl<'a> Serialize for SerializableHeader<'a> {
+impl Serialize for SerializableHeader<'_> {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -290,7 +290,7 @@ fn frame_name(frame: &QFrame) -> &'static str {
 /// A wrapper to help serialize a quiche HTTP/3 frame.
 pub struct SerializableQFrame<'a>(&'a QFrame);
 
-impl<'a> Serialize for SerializableQFrame<'a> {
+impl Serialize for SerializableQFrame<'_> {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,

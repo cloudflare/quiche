@@ -311,7 +311,7 @@ impl<'a> Octets<'a> {
     }
 }
 
-impl<'a> AsRef<[u8]> for Octets<'a> {
+impl AsRef<[u8]> for Octets<'_> {
     fn as_ref(&self) -> &[u8] {
         &self.buf[self.off..]
     }
@@ -652,13 +652,13 @@ impl<'a> OctetsMut<'a> {
     }
 }
 
-impl<'a> AsRef<[u8]> for OctetsMut<'a> {
+impl AsRef<[u8]> for OctetsMut<'_> {
     fn as_ref(&self) -> &[u8] {
         &self.buf[self.off..]
     }
 }
 
-impl<'a> AsMut<[u8]> for OctetsMut<'a> {
+impl AsMut<[u8]> for OctetsMut<'_> {
     fn as_mut(&mut self) -> &mut [u8] {
         &mut self.buf[self.off..]
     }

@@ -201,23 +201,23 @@ impl<'a> ConnectionId<'a> {
     }
 }
 
-impl<'a> Default for ConnectionId<'a> {
+impl Default for ConnectionId<'_> {
     #[inline]
     fn default() -> Self {
         Self::from_vec(Vec::new())
     }
 }
 
-impl<'a> From<Vec<u8>> for ConnectionId<'a> {
+impl From<Vec<u8>> for ConnectionId<'_> {
     #[inline]
     fn from(v: Vec<u8>) -> Self {
         Self::from_vec(v)
     }
 }
 
-impl<'a> From<ConnectionId<'a>> for Vec<u8> {
+impl From<ConnectionId<'_>> for Vec<u8> {
     #[inline]
-    fn from(id: ConnectionId<'a>) -> Self {
+    fn from(id: ConnectionId<'_>) -> Self {
         match id.0 {
             ConnectionIdInner::Vec(cid) => cid,
             ConnectionIdInner::Ref(cid) => cid.to_vec(),
@@ -225,16 +225,16 @@ impl<'a> From<ConnectionId<'a>> for Vec<u8> {
     }
 }
 
-impl<'a> PartialEq for ConnectionId<'a> {
+impl PartialEq for ConnectionId<'_> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.as_ref() == other.as_ref()
     }
 }
 
-impl<'a> Eq for ConnectionId<'a> {}
+impl Eq for ConnectionId<'_> {}
 
-impl<'a> AsRef<[u8]> for ConnectionId<'a> {
+impl AsRef<[u8]> for ConnectionId<'_> {
     #[inline]
     fn as_ref(&self) -> &[u8] {
         match &self.0 {
@@ -244,14 +244,14 @@ impl<'a> AsRef<[u8]> for ConnectionId<'a> {
     }
 }
 
-impl<'a> std::hash::Hash for ConnectionId<'a> {
+impl std::hash::Hash for ConnectionId<'_> {
     #[inline]
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.as_ref().hash(state);
     }
 }
 
-impl<'a> std::ops::Deref for ConnectionId<'a> {
+impl std::ops::Deref for ConnectionId<'_> {
     type Target = [u8];
 
     #[inline]
@@ -263,14 +263,14 @@ impl<'a> std::ops::Deref for ConnectionId<'a> {
     }
 }
 
-impl<'a> Clone for ConnectionId<'a> {
+impl Clone for ConnectionId<'_> {
     #[inline]
     fn clone(&self) -> Self {
         Self::from_vec(self.as_ref().to_vec())
     }
 }
 
-impl<'a> std::fmt::Debug for ConnectionId<'a> {
+impl std::fmt::Debug for ConnectionId<'_> {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         for c in self.as_ref() {
@@ -522,7 +522,7 @@ impl<'a> Header<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for Header<'a> {
+impl std::fmt::Debug for Header<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", self.ty)?;
 

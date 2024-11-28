@@ -739,7 +739,7 @@ impl<'a> HeaderRef<'a> {
     }
 }
 
-impl<'a> NameValue for HeaderRef<'a> {
+impl NameValue for HeaderRef<'_> {
     fn name(&self) -> &[u8] {
         self.0
     }

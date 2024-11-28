@@ -733,7 +733,7 @@ pub struct RecvInfo<'a> {
     to_len: socklen_t,
 }
 
-impl<'a> From<&RecvInfo<'a>> for crate::RecvInfo {
+impl From<&RecvInfo<'_>> for crate::RecvInfo {
     fn from(info: &RecvInfo) -> crate::RecvInfo {
         crate::RecvInfo {
             from: std_addr_from_c(info.from, info.from_len),
