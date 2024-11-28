@@ -30,6 +30,10 @@ jobs:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
           components: clippy
 
+      - name: Unused dependency check
+        if: ${{ matrix.tls-feature == '' }}
+        uses: bnjbvr/cargo-machete@main
+
       - name: Build OpenSSL
         if: ${{ matrix.tls-feature == 'openssl' }}
         run: |
