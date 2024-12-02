@@ -1840,7 +1840,7 @@ fn optional_std_addr_from_c(
 }
 
 fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
-    match addr.sa_family {
+    match addr.sa_family as _ {
         AF_INET => {
             assert!(addr_len as usize == std::mem::size_of::<sockaddr_in>());
 
@@ -2033,9 +2033,9 @@ mod tests {
             let dst = s.into_raw();
 
             inet_ntop(
-                AF_INET,
+                AF_INET as _,
                 &((*in_addr).sin_addr) as *const _ as *const c_void,
-                dst,
+                dst as _,
                 16,
             );
 
@@ -2077,9 +2077,9 @@ mod tests {
             let dst = s.into_raw();
 
             inet_ntop(
-                AF_INET6,
+                AF_INET6 as _,
                 &((*in6_addr).sin6_addr) as *const _ as *const c_void,
-                dst,
+                dst as _,
                 45,
             );
 
