@@ -27,7 +27,6 @@
 //! Configuration for the h3i client.
 use std::io;
 
-#[derive(Default)]
 /// Server details and QUIC connection properties.
 pub struct Config {
     /// A string representing the host and port to connect to using the format
@@ -167,5 +166,27 @@ impl Config {
             max_window: self.max_window,
             max_stream_window: self.max_stream_window,
         })
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        // Values mirror config_from_clap()
+        Self {
+            host_port: "".to_string(),
+            omit_sni: false,
+            connect_to: None,
+            source_port: 0,
+            verify_peer: true,
+            idle_timeout: 5000,
+            max_data: 10000000,
+            max_stream_data_bidi_local: 10000000,
+            max_stream_data_bidi_remote: 10000000,
+            max_stream_data_uni: 10000000,
+            max_streams_bidi: 100,
+            max_streams_uni: 100,
+            max_window: 25165824,
+            max_stream_window: 16777216,
+        }
     }
 }
