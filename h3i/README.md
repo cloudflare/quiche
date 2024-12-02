@@ -89,6 +89,19 @@ h3i is also provided as a library, which allows programmatic control over HTTP/3
 
 The key components of the library are actions, client runner, connection summary, and stream map.
 
+## Example
+h3i currently has one example, which can be run with:
+
+```shell
+cargo run --example content_length_mismatch
+```
+
+If you'd like to decrypt the example's output, you can do so by setting the `SSLKEYLOGFILE` environment variable:
+
+```shell
+SSLKEYLOGFILE="h3i-example" cargo run --example content_length_mismatch
+```
+
 ## Actions
 
 Actions are small operations such as sending HTTP/3 frames or managing QUIC streams. Each independent use case for h3i requires its own collection of Actions, that h3i iterates over in sequence and executes.
