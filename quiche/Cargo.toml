@@ -78,7 +78,7 @@ sfv = { version = "0.9", optional = true }
 smallvec = { version = "1.10", features = ["serde", "union"] }
 
 [target."cfg(windows)".dependencies]
-winapi = { version = "0.3", features = ["wincrypt", "ws2def", "ws2ipdef", "ws2tcpip"] }
+windows-sys = { version = "0.59", features = ["Win32_Networking_WinSock", "Win32_Security_Cryptography"] }
 
 [dev-dependencies]
 mio = { version = "0.8", features = ["net", "os-poll"] }
