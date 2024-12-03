@@ -89,6 +89,25 @@ h3i is also provided as a library, which allows programmatic control over HTTP/3
 
 The key components of the library are actions, client runner, connection summary, and stream map.
 
+## Example
+h3i currently has one example, which can be run with:
+
+```shell
+cargo run --example content_length_mismatch
+```
+
+It can be useful to observe the packets on the wire that are exchanged when h3i
+is run. Since QUIC is an encrypted transport protocol, tools such as Wireshark
+need access to the session keys in order to dissect the packets. A common
+approach is to log these keys in response to the `SSLKEYLOGFILE` environment
+variable and configure Wireshark to use them; [see
+more](https://wiki.wireshark.org/TLS#using-the-pre-master-secret). For example,
+to log to the file `h3i-example.keys`:
+
+```shell
+SSLKEYLOGFILE="h3i-example.keys" cargo run --example content_length_mismatch
+```
+
 ## Actions
 
 Actions are small operations such as sending HTTP/3 frames or managing QUIC streams. Each independent use case for h3i requires its own collection of Actions, that h3i iterates over in sequence and executes.
