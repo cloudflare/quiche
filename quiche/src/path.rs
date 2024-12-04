@@ -486,6 +486,7 @@ impl Path {
             rtt: self.recovery.rtt(),
             min_rtt: self.recovery.min_rtt(),
             rttvar: self.recovery.rttvar(),
+            rtt_jumps: self.recovery.rtt_jumps(),
             cwnd: self.recovery.cwnd(),
             sent_bytes: self.sent_bytes,
             recv_bytes: self.recv_bytes,
@@ -866,6 +867,9 @@ pub struct PathStats {
     /// variation.
     pub rttvar: time::Duration,
 
+    /// The number of large jumps in round-trip time observed.
+    pub rtt_jumps: u64,
+
     /// The size of the connection's congestion window in bytes.
     pub cwnd: usize,
 
@@ -910,8 +914,8 @@ impl std::fmt::Debug for PathStats {
         )?;
         write!(
             f,
-            "recv={} sent={} lost={} retrans={} rtt={:?} min_rtt={:?} rttvar={:?} cwnd={}",
-            self.recv, self.sent, self.lost, self.retrans, self.rtt, self.min_rtt, self.rttvar, self.cwnd,
+            "recv={} sent={} lost={} retrans={} rtt={:?} min_rtt={:?} rttvar={:?} rtt_jumps={} cwnd={}",
+            self.recv, self.sent, self.lost, self.retrans, self.rtt, self.min_rtt, self.rttvar, self.rtt_jumps, self.cwnd,
         )?;
 
         write!(
