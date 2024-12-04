@@ -1,4 +1,7 @@
 use h3i::actions::h3::Action;
+use h3i::actions::h3::StreamEvent;
+use h3i::actions::h3::StreamEventType;
+use h3i::actions::h3::WaitType;
 use h3i::client::sync_client;
 use h3i::config::Config;
 use quiche::h3::frame::Frame;
@@ -46,6 +49,19 @@ fn main() {
                 // 400 Bad Request response from an RFC-compliant
                 // server: https://datatracker.ietf.org/doc/html/rfc9114#section-4.1.2-3
                 payload: b"test".to_vec(),
+            },
+        },
+        Action::Wait {
+            wait_type: WaitType::StreamEvent(StreamEvent {
+                stream_id: STREAM_ID,
+                event_type: StreamEventType::Headers,
+            }),
+        },
+        Action::ConnectionClose {
+            error: quiche::ConnectionError {
+                is_app: true,
+                error_code: quiche::h3::WireErrorCode::NoError as u64,
+                reason: vec![],
             },
         },
     ];

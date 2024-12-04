@@ -41,17 +41,21 @@
 //! # Example
 //!
 //! The following example sends a request with its Content-Length header set to
-//! 5, but with its body only comprised of 4 bytes. This is classified as a
+//! 5, but with its body only consisting of 4 bytes. This is classified as a
 //! [malformed request], and the server should respond with a 400 Bad Request
-//! response.
+//! response. Once h3i receives the response, it will close the connection.
 //!
 //! ```no_run
 //! use h3i::actions::h3::Action;
+//! use h3i::actions::h3::StreamEvent;
+//! use h3i::actions::h3::StreamEventType;
+//! use h3i::actions::h3::WaitType;
 //! use h3i::client::sync_client;
 //! use h3i::config::Config;
 //! use quiche::h3::frame::Frame;
 //! use quiche::h3::Header;
 //! use quiche::h3::NameValue;
+//!
 //! fn main() {
 //!    /// The QUIC stream to send the frames on. See
 //!    /// https://datatracker.ietf.org/doc/html/rfc9000#name-streams and
@@ -90,6 +94,19 @@
 //!                // 400 Bad Request response from an RFC-compliant
 //!                // server: https://datatracker.ietf.org/doc/html/rfc9114#section-4.1.2-3
 //!                payload: b"test".to_vec(),
+//!            },
+//!        },
+//!        Action::Wait {
+//!            wait_type: WaitType::StreamEvent(StreamEvent {
+//!                stream_id: STREAM_ID,
+//!                event_type: StreamEventType::Headers,
+//!            }),
+//!        },
+//!        Action::ConnectionClose {
+//!            error: quiche::ConnectionError {
+//!                is_app: true,
+//!                error_code: quiche::h3::WireErrorCode::NoError as u64,
+//!                reason: vec![],
 //!            },
 //!        },
 //!    ];
