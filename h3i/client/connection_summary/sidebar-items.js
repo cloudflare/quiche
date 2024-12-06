@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_SERIALIZED_BUFFER_LEN"],"struct":["ConnectionCloseDetails","ConnectionSummary","SerializableConnectionError","SerializablePathStats","SerializableStats","StreamMap"]};
