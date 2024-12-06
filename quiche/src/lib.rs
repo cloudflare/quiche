@@ -6088,7 +6088,7 @@ impl Connection {
     /// returning an [`IdLimit`] in the case the caller wants to retire still
     /// unannounced Connection IDs.
     ///
-    /// The caller is responsible from ensuring that the provided `scid` is not
+    /// The caller is responsible for ensuring that the provided `scid` is not
     /// repeated several times over the connection. quiche ensures that as long
     /// as the provided Connection ID is still in use (i.e., not retired), it
     /// does not assign a different sequence number.
