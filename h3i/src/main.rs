@@ -334,12 +334,19 @@ fn prompt_frames(config: &Config) -> Vec<Action> {
         let mut streamer = make_streamer(std::boxed::Box::new(writer));
 
         for action in &actions {
+            let pretty = matches!(action, Action::SendHeadersFrame { .. });
+
             let events: QlogEvents = action.into();
             for event in events {
                 match event {
-                    QlogEvent::Event { data, ex_data } => {
-                        streamer.add_event_data_ex_now(*data, ex_data).ok();
-                    },
+                    QlogEvent::Event { data, ex_data } =>
+                        if pretty {
+                            streamer
+                                .add_event_data_ex_now_pretty(*data, ex_data)
+                                .ok();
+                        } else {
+                            streamer.add_event_data_ex_now(*data, ex_data).ok();
+                        },
 
                     QlogEvent::JsonEvent(mut ev) => {
                         // need to rewrite the event time
@@ -347,7 +354,12 @@ fn prompt_frames(config: &Config) -> Vec<Action> {
                             .duration_since(streamer.start_time())
                             .as_secs_f32() *
                             1000.0;
-                        streamer.add_event(ev).ok();
+
+                        if pretty {
+                            streamer.add_event_pretty(ev).ok();
+                        } else {
+                            streamer.add_event(ev).ok();
+                        }
                     },
                 }
             }
