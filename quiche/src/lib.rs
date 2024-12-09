@@ -8023,6 +8023,8 @@ pub struct TransportParams {
     pub retry_source_connection_id: Option<ConnectionId<'static>>,
     /// DATAGRAM frame extension parameter, if any.
     pub max_datagram_frame_size: Option<u64>,
+    /// Whether accurate ECN support is enabled.
+    pub accurate_ecn_enabled: bool,
     // pub preferred_address: ...,
 }
 
@@ -8046,6 +8048,7 @@ impl Default for TransportParams {
             initial_source_connection_id: None,
             retry_source_connection_id: None,
             max_datagram_frame_size: None,
+            accurate_ecn_enabled: false,
         }
     }
 }
@@ -8194,6 +8197,10 @@ impl TransportParams {
 
                 0x0020 => {
                     tp.max_datagram_frame_size = Some(val.get_varint()?);
+                },
+
+                0x2051a5fa8648af => {
+                    tp.accurate_ecn_enabled = true;
                 },
 
                 // Ignore unknown parameters.
@@ -8356,6 +8363,10 @@ impl TransportParams {
                 octets::varint_len(max_datagram_frame_size),
             )?;
             b.put_varint(max_datagram_frame_size)?;
+        }
+
+        if tp.accurate_ecn_enabled {
+            TransportParams::encode_param(&mut b, 0x2051a5fa8648af, 0)?;
         }
 
         let out_len = b.off();
@@ -8952,12 +8963,13 @@ mod tests {
             initial_source_connection_id: Some(b"woot woot".to_vec().into()),
             retry_source_connection_id: Some(b"retry".to_vec().into()),
             max_datagram_frame_size: Some(32),
+            accurate_ecn_enabled: true,
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 94);
+        assert_eq!(raw_params.len(), 103);
 
         let new_tp = TransportParams::decode(raw_params, false).unwrap();
 
@@ -8982,12 +8994,13 @@ mod tests {
             initial_source_connection_id: Some(b"woot woot".to_vec().into()),
             retry_source_connection_id: None,
             max_datagram_frame_size: Some(32),
+            accurate_ecn_enabled: true,
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, false, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 69);
+        assert_eq!(raw_params.len(), 78);
 
         let new_tp = TransportParams::decode(raw_params, true).unwrap();
 
