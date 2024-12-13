@@ -12676,6 +12676,26 @@ mod tests {
         }
     }
 
+    fn decrypt_initial_pkt(pkt: &[u8], dcid: &[u8], is_server: bool) -> Result<Vec<frame::Frame>> {
+        let mut pkt = pkt.to_vec();
+        let mut b = octets::OctetsMut::with_slice(&mut pkt);
+        let mut hdr = Header::from_bytes(&mut b, 0).unwrap();
+
+        let payload_len = b.get_varint().unwrap() as usize;
+        let (aead, _) = crypto::derive_initial_key_material(dcid, hdr.version, is_server).unwrap();
+
+        packet::decrypt_hdr(&mut b, &mut hdr, &aead).unwrap();
+
+        let pn = packet::decode_pkt_num(0, hdr.pkt_num, hdr.pkt_num_len);
+        let mut payload = packet::decrypt_pkt(&mut b, pn, hdr.pkt_num_len, payload_len, &aead)?;
+
+        let mut frames = Vec::new();
+        while payload.cap() > 0 {
+            frames.push(frame::Frame::from_bytes(&mut payload, hdr.ty)?);
+        }
+        Ok(frames)
+    }
+
     #[test]
     fn retry() {
         let mut buf = [0; 65535];
@@ -12696,10 +12716,25 @@ mod tests {
         // Client sends initial flight.
         let (mut len, _) = pipe.client.send(&mut buf).unwrap();
 
+        fn extract_crypto_data(fs: &Vec<frame::Frame>) -> Vec<u8> {
+            fs.iter().filter_map(|f| {
+                match f {
+                    frame::Frame::Crypto { data } => {
+                        Some(std::ops::Deref::deref(data))
+                    }
+                    _ => None
+                }
+            }).collect::<Vec<_>>().concat()
+        }
+
         // Server sends Retry packet.
         let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
 
         let odcid = hdr.dcid.clone();
+
+        // Remember the data sent in crypto frame(s)
+        let frames_before = decrypt_initial_pkt(&buf[..len], &hdr.dcid.clone(), true).unwrap();
+        let frames_before = extract_crypto_data(&frames_before);
 
         let mut scid = [0; MAX_CONN_ID_LEN];
         rand::rand_bytes(&mut scid[..]);
@@ -12724,6 +12759,11 @@ mod tests {
 
         let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
         assert_eq!(&hdr.token.unwrap(), token);
+
+        // Compare crypto data
+        let frames_after = decrypt_initial_pkt(&buf[..len], &hdr.dcid.clone(),true).unwrap();
+        let frames_after = extract_crypto_data(&frames_after);
+        assert_eq!(frames_before, frames_after);
 
         // Server accepts connection.
         let from = "127.0.0.1:1234".parse().unwrap();
