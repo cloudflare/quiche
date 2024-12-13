@@ -404,6 +404,7 @@ use qlog::events::EventType;
 use qlog::events::RawInfo;
 use stream::StreamPriorityKey;
 
+use std::borrow::BorrowMut;
 use std::cmp;
 use std::convert::TryInto;
 use std::time;
@@ -2544,15 +2545,26 @@ impl Connection {
                 self.is_server,
             )?;
 
-            // Reset connection state to force sending another Initial packet.
-            self.drop_epoch_state(packet::Epoch::Initial, now);
-            self.got_peer_conn_id = false;
-            self.handshake.clear()?;
+            // self.drop_epoch_state(packet::Epoch::Initial, now);
+            // self.got_peer_conn_id = false;
+            // self.handshake.clear()?;
+            let space = self.pkt_num_spaces[packet::Epoch::Initial].borrow_mut();
 
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_open =
-                Some(aead_open);
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_seal =
-                Some(aead_seal);
+            space.crypto_open = Some(aead_open);
+            space.crypto_seal = Some(aead_seal);
+
+            // Keep initial state and retransmit crypto data
+            let path = self.paths.get_active()?;
+            for s in path.recovery.get_sent_packets(packet::Epoch::Initial) {
+                for f in s.frames.iter() {
+                    match f {
+                        frame::Frame::CryptoHeader { offset, length} => {
+                            space.crypto_stream.send.retransmit(*offset, *length);
+                        }
+                        _ => ()
+                    }
+                }
+            }         
 
             return Err(Error::Done);
         }
