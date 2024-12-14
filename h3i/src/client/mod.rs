@@ -171,14 +171,13 @@ pub enum ClientError {
     Other(String),
 }
 
-// Placeholder so that we can reuse parse_streams between the sync/async clients
-pub(crate) enum ClientVariant {
-    Sync {
-        stream_map: StreamMap,
-        stream_parser_map: StreamParserMap,
-    },
-    #[allow(dead_code)]
-    Async,
+pub(crate) trait Client {
+    /// Gives mutable access to the stream parsers to update their state.
+    fn stream_parsers_mut(&mut self) -> &mut StreamParserMap;
+
+    /// Handles a response frame. This allows [`Client`]s to customize how they
+    /// construct a [`StreamMap`] from a list of frames.
+    fn handle_response_frame(&mut self, stream_id: u64, frame: H3iFrame);
 }
 
 pub(crate) type StreamParserMap = HashMap<u64, FrameParser>;
@@ -398,35 +397,11 @@ pub(crate) fn execute_action(
     }
 }
 
-pub(crate) fn parse_streams(
-    conn: &mut quiche::Connection, client_variant: &mut ClientVariant,
+pub(crate) fn parse_streams<C: Client>(
+    conn: &mut quiche::Connection, client: &mut C,
 ) -> Vec<StreamEvent> {
-    fn handle_fin(
-        responded_streams: &mut Vec<StreamEvent>, stream_id: u64,
-        stream_parsers: &mut StreamParserMap,
-    ) {
-        responded_streams.push(StreamEvent {
-            stream_id,
-            event_type: StreamEventType::Finished,
-        });
-
-        stream_parsers.remove(&stream_id);
-    }
-
     let mut responded_streams: Vec<StreamEvent> =
         Vec::with_capacity(conn.readable().len());
-
-    // Ugly, but we have to get the components out of the ClientVariant so that we
-    // avoid simultaneous mutable borrows. This will be better when the sync
-    // client gets deprecated
-    let (stream_parsers, mut stream_map_interaction) = match client_variant {
-        ClientVariant::Sync {
-            stream_parser_map,
-            stream_map,
-        } => (stream_parser_map, StreamMapInserter::Native(stream_map)),
-
-        ClientVariant::Async => unimplemented!("async client"),
-    };
 
     for stream in conn.readable() {
         // TODO: ignoring control streams
@@ -434,18 +409,21 @@ pub(crate) fn parse_streams(
             continue;
         }
 
-        let parser = stream_parsers
-            .get_mut(&stream)
-            .expect("stream readable with no parser");
         loop {
-            match parser.try_parse_frame(conn) {
+            let stream_parse_result = client
+                .stream_parsers_mut()
+                .get_mut(&stream)
+                .expect("stream readable with no parser")
+                .try_parse_frame(conn);
+
+            match stream_parse_result {
                 Ok(FrameParseResult::FrameParsed { h3i_frame, fin }) => {
                     if let H3iFrame::Headers(ref headers) = h3i_frame {
                         log::info!("hdrs={:?}", headers);
                     }
 
                     handle_response_frame(
-                        &mut stream_map_interaction,
+                        client,
                         conn.qlog_streamer(),
                         &mut responded_streams,
                         stream,
@@ -455,10 +433,9 @@ pub(crate) fn parse_streams(
                     if fin {
                         handle_fin(
                             &mut responded_streams,
+                            client.stream_parsers_mut(),
                             stream,
-                            stream_parsers,
                         );
-
                         break;
                     }
                 },
@@ -472,7 +449,7 @@ pub(crate) fn parse_streams(
 
                         log::info!("received reset stream: {:?}", frame);
                         handle_response_frame(
-                            &mut stream_map_interaction,
+                            client,
                             None,
                             &mut responded_streams,
                             stream,
@@ -480,8 +457,11 @@ pub(crate) fn parse_streams(
                         );
                     }
 
-                    handle_fin(&mut responded_streams, stream, stream_parsers);
-
+                    handle_fin(
+                        &mut responded_streams,
+                        client.stream_parsers_mut(),
+                        stream,
+                    );
                     break;
                 },
                 Err(e) => {
@@ -500,14 +480,14 @@ pub(crate) fn parse_streams(
                             log::info!("received reset stream: {:?}", frame);
 
                             handle_response_frame(
-                                &mut stream_map_interaction,
+                                client,
                                 None,
                                 &mut responded_streams,
                                 stream,
                                 frame,
                             );
 
-                            stream_parsers.remove(&stream);
+                            client.stream_parsers_mut().remove(&stream);
                         },
                         _ => {
                             log::warn!("stream read error: {e}");
@@ -523,24 +503,26 @@ pub(crate) fn parse_streams(
     responded_streams
 }
 
-/// An abstraction over a [`StreamMap`]. This is required because the async
-/// client doesn't construct the [`StreamMap`] directly - rather, it's
-/// constructed piecemeal as the receiver sees new frames.
-enum StreamMapInserter<'a> {
-    Native(&'a mut StreamMap),
+fn handle_fin(
+    responded_streams: &mut Vec<StreamEvent>,
+    stream_parsers: &mut StreamParserMap, stream_id: u64,
+) {
+    responded_streams.push(StreamEvent {
+        stream_id,
+        event_type: StreamEventType::Finished,
+    });
+
+    stream_parsers.remove(&stream_id);
 }
 
 /// Push any responses to the [StreamMap] as well as store them in the
 /// `responded` vector
-fn handle_response_frame(
-    stream_map_inserter: &mut StreamMapInserter,
-    qlog_streamer: Option<&mut QlogStreamer>,
+fn handle_response_frame<C: Client>(
+    client: &mut C, qlog_streamer: Option<&mut QlogStreamer>,
     responded_streams: &mut Vec<StreamEvent>, stream_id: u64, frame: H3iFrame,
 ) {
     let cloned = frame.clone();
-    match stream_map_inserter {
-        StreamMapInserter::Native(s) => s.insert(stream_id, cloned),
-    }
+    client.handle_response_frame(stream_id, cloned);
 
     let mut to_qlog: Option<Http3Frame> = None;
     let mut push_to_responses: Option<StreamEvent> = None;

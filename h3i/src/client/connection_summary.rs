@@ -77,8 +77,8 @@ impl Serialize for ConnectionSummary {
     }
 }
 
-/// An aggregation of frames received over a connection, mapped to the stream ID
-/// over which they were received.
+/// A read-only aggregation of frames received over a connection, mapped to the
+/// stream ID over which they were received.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct StreamMap(HashMap<u64, Vec<H3iFrame>>);
 
