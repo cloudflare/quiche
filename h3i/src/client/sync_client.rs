@@ -31,7 +31,8 @@ use std::slice::Iter;
 use std::time::Duration;
 use std::time::Instant;
 
-use quiche;
+use crate::frame::H3iFrame;
+use crate::quiche;
 
 use crate::actions::h3::Action;
 use crate::actions::h3::StreamEventType;
@@ -41,14 +42,30 @@ use crate::client::build_quiche_connection;
 use crate::client::execute_action;
 use crate::client::parse_streams;
 use crate::client::ClientError;
-use crate::client::ClientVariant;
 use crate::client::ConnectionCloseDetails;
 use crate::client::MAX_DATAGRAM_SIZE;
 use crate::config::Config;
 
+use super::Client;
 use super::ConnectionSummary;
 use super::StreamMap;
 use super::StreamParserMap;
+
+#[derive(Default)]
+struct SyncClient {
+    stream_map: StreamMap,
+    stream_parsers: StreamParserMap,
+}
+
+impl Client for SyncClient {
+    fn stream_parsers_mut(&mut self) -> &mut StreamParserMap {
+        &mut self.stream_parsers
+    }
+
+    fn handle_response_frame(&mut self, stream_id: u64, frame: H3iFrame) {
+        self.stream_map.insert(stream_id, frame);
+    }
+}
 
 /// Connect to a server and execute provided actions.
 ///
@@ -125,10 +142,7 @@ pub fn connect(
     let mut wait_duration = None;
     let mut wait_instant = None;
 
-    let mut client_variant = ClientVariant::Sync {
-        stream_map: StreamMap::default(),
-        stream_parser_map: StreamParserMap::default(),
-    };
+    let mut client = SyncClient::default();
 
     let mut waiting_for = WaitingFor::default();
 
@@ -241,26 +255,17 @@ pub fn connect(
         }
 
         if app_proto_selected {
-            #[allow(irrefutable_let_patterns)]
-            let ClientVariant::Sync {
-                ref mut stream_parser_map,
-                ..
-            } = client_variant
-            else {
-                panic!("async ClientVariant in sync code")
-            };
-
             check_duration_and_do_actions(
                 &mut wait_duration,
                 &mut wait_instant,
                 &mut action_iter,
                 &mut conn,
                 &mut waiting_for,
-                stream_parser_map,
+                client.stream_parsers_mut(),
             );
 
             let mut wait_cleared = false;
-            for response in parse_streams(&mut conn, &mut client_variant) {
+            for response in parse_streams(&mut conn, &mut client) {
                 let stream_id = response.stream_id;
 
                 if let StreamEventType::Finished = response.event_type {
@@ -273,22 +278,13 @@ pub fn connect(
             }
 
             if wait_cleared {
-                #[allow(irrefutable_let_patterns)]
-                let ClientVariant::Sync {
-                    ref mut stream_parser_map,
-                    ..
-                } = client_variant
-                else {
-                    unimplemented!("async ClientVariant in sync code")
-                };
-
                 check_duration_and_do_actions(
                     &mut wait_duration,
                     &mut wait_instant,
                     &mut action_iter,
                     &mut conn,
                     &mut waiting_for,
-                    stream_parser_map,
+                    client.stream_parsers_mut(),
                 );
             }
         }
@@ -374,14 +370,8 @@ pub fn connect(
         }
     }
 
-    #[allow(irrefutable_let_patterns)]
-    let ClientVariant::Sync { stream_map, .. } = client_variant
-    else {
-        unimplemented!("async client supplied to sync client code");
-    };
-
     Ok(ConnectionSummary {
-        stream_map,
+        stream_map: client.stream_map,
         stats: Some(conn.stats()),
         path_stats: conn.path_stats().collect(),
         conn_close_details: ConnectionCloseDetails::new(&conn),
