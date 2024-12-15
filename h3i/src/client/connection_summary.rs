@@ -36,6 +36,7 @@ use serde::ser::Serializer;
 use serde::Serialize;
 use std::cmp;
 use std::collections::HashMap;
+use std::iter::FromIterator;
 
 use crate::frame::EnrichedHeaders;
 use crate::frame::H3iFrame;
@@ -82,9 +83,13 @@ impl Serialize for ConnectionSummary {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct StreamMap(HashMap<u64, Vec<H3iFrame>>);
 
-impl From<HashMap<u64, Vec<H3iFrame>>> for StreamMap {
-    fn from(value: HashMap<u64, Vec<H3iFrame>>) -> Self {
-        Self(value)
+impl<T> From<T> for StreamMap
+where
+    T: IntoIterator<Item = (u64, Vec<H3iFrame>)>,
+{
+    fn from(value: T) -> Self {
+        let map = HashMap::from_iter(value);
+        Self(map)
     }
 }
 
@@ -99,13 +104,12 @@ impl StreamMap {
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
     /// use quiche::h3::Header;
-    ///
-    /// let mut stream_map = StreamMap::default();
+    /// use std::iter::FromIterator;
     ///
     /// let h = Header::new(b"hello", b"world");
     /// let headers = H3iFrame::Headers(EnrichedHeaders::from(vec![h]));
-    /// stream_map.insert(0, headers.clone());
     ///
+    /// let stream_map: StreamMap = [(0, vec![headers.clone()])].into();
     /// assert_eq!(stream_map.all_frames(), vec![headers]);
     /// ```
     pub fn all_frames(&self) -> Vec<H3iFrame> {
@@ -125,42 +129,18 @@ impl StreamMap {
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
     /// use quiche::h3::Header;
-    ///
-    /// let mut stream_map = StreamMap::default();
-    ///
-    /// let h = Header::new(b"hello", b"world");
-    /// let headers = H3iFrame::Headers(EnrichedHeaders::from(vec![h]));
-    /// stream_map.insert(0, headers.clone());
-    ///
-    /// assert_eq!(stream_map.stream(0), vec![headers]);
-    /// ```
-    pub fn stream(&self, stream_id: u64) -> Vec<H3iFrame> {
-        self.0.get(&stream_id).cloned().unwrap_or_default()
-    }
-
-    /// Insert a new [`H3iFrame`] into the stream map on a given stream.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use h3i::client::connection_summary::StreamMap;
-    /// use h3i::frame::EnrichedHeaders;
-    /// use h3i::frame::H3iFrame;
-    /// use quiche::h3::Header;
-    ///
-    /// use std::collections::HashMap;
     /// use std::iter::FromIterator;
     ///
     /// let mut stream_map = StreamMap::default();
     ///
     /// let h = Header::new(b"hello", b"world");
     /// let headers = H3iFrame::Headers(EnrichedHeaders::from(vec![h]));
-    /// stream_map.insert(0, headers.clone());
     ///
+    /// let stream_map: StreamMap = [(0, vec![headers.clone()])].into();
     /// assert_eq!(stream_map.stream(0), vec![headers]);
     /// ```
-    pub fn insert(&mut self, k: u64, v: H3iFrame) {
-        self.0.entry(k).or_default().push(v)
+    pub fn stream(&self, stream_id: u64) -> Vec<H3iFrame> {
+        self.0.get(&stream_id).cloned().unwrap_or_default()
     }
 
     /// Check if a provided [`H3iFrame`] was received, regardless of what stream
@@ -173,13 +153,14 @@ impl StreamMap {
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
     /// use quiche::h3::Header;
+    /// use std::iter::FromIterator;
     ///
     /// let mut stream_map = StreamMap::default();
     ///
     /// let h = Header::new(b"hello", b"world");
     /// let headers = H3iFrame::Headers(EnrichedHeaders::from(vec![h]));
-    /// stream_map.insert(0, headers.clone());
     ///
+    /// let stream_map: StreamMap = [(0, vec![headers.clone()])].into();
     /// assert!(stream_map.received_frame(&headers));
     /// ```
     pub fn received_frame(&self, frame: &H3iFrame) -> bool {
@@ -195,13 +176,14 @@ impl StreamMap {
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
     /// use quiche::h3::Header;
+    /// use std::iter::FromIterator;
     ///
     /// let mut stream_map = StreamMap::default();
     ///
     /// let h = Header::new(b"hello", b"world");
     /// let headers = H3iFrame::Headers(EnrichedHeaders::from(vec![h]));
-    /// stream_map.insert(0, headers.clone());
     ///
+    /// let stream_map: StreamMap = [(0, vec![headers.clone()])].into();
     /// assert!(stream_map.received_frame_on_stream(0, &headers));
     /// ```
     pub fn received_frame_on_stream(
@@ -219,14 +201,15 @@ impl StreamMap {
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
     /// use quiche::h3::Header;
+    /// use std::iter::FromIterator;
     ///
     /// let mut stream_map = StreamMap::default();
     /// assert!(stream_map.is_empty());
     ///
     /// let h = Header::new(b"hello", b"world");
     /// let headers = H3iFrame::Headers(EnrichedHeaders::from(vec![h]));
-    /// stream_map.insert(0, headers.clone());
     ///
+    /// let stream_map: StreamMap = [(0, vec![headers.clone()])].into();
     /// assert!(!stream_map.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
@@ -242,6 +225,7 @@ impl StreamMap {
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
     /// use quiche::h3::Header;
+    /// use std::iter::FromIterator;
     ///
     /// let mut stream_map = StreamMap::default();
     ///
@@ -251,9 +235,8 @@ impl StreamMap {
     /// let data = H3iFrame::QuicheH3(quiche::h3::frame::Frame::Data {
     ///     payload: b"hello world".to_vec(),
     /// });
-    /// stream_map.insert(0, headers.clone());
-    /// stream_map.insert(0, data);
     ///
+    /// let stream_map: StreamMap = [(0, vec![headers.clone(), data.clone()])].into();
     /// assert_eq!(stream_map.headers_on_stream(0), vec![enriched]);
     /// ```
     pub fn headers_on_stream(&self, stream_id: u64) -> Vec<EnrichedHeaders> {
@@ -261,6 +244,10 @@ impl StreamMap {
             .into_iter()
             .filter_map(|h3i_frame| h3i_frame.to_enriched_headers())
             .collect()
+    }
+
+    pub(crate) fn insert(&mut self, stream_id: u64, frame: H3iFrame) {
+        self.0.entry(stream_id).or_default().push(frame);
     }
 }
 
