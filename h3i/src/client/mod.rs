@@ -56,6 +56,7 @@ use qlog::events::h3::H3FrameParsed;
 use qlog::events::h3::Http3Frame;
 use qlog::events::EventData;
 use qlog::streamer::QlogStreamer;
+use serde::Serialize;
 
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error;
@@ -160,7 +161,7 @@ fn handle_qlog(
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 /// Represents different errors that can occur when [sync_client] runs.
 pub enum ClientError {
     /// An error during the QUIC handshake.

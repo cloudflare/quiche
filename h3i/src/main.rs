@@ -298,7 +298,8 @@ fn config_from_clap() -> std::result::Result<Config, String> {
 fn sync_client(
     config: Config, actions: &[Action],
 ) -> Result<ConnectionSummary, ClientError> {
-    h3i::client::sync_client::connect(config.library_config, actions)
+    // TODO: CLI/qlog don't support passing close trigger frames at the moment
+    h3i::client::sync_client::connect(config.library_config, actions, None)
 }
 
 fn read_qlog(filename: &str, host_override: Option<&str>) -> Vec<Action> {

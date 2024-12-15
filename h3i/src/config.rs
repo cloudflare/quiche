@@ -28,6 +28,7 @@
 use std::io;
 
 /// Server details and QUIC connection properties.
+#[derive(Clone)]
 pub struct Config {
     /// A string representing the host and port to connect to using the format
     /// `<host>:<port>`.
