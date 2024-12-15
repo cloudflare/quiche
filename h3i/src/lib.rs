@@ -111,8 +111,10 @@
 //!        },
 //!    ];
 //!
-//!    let summary =
-//!        sync_client::connect(config, &actions).expect("connection failed");
+//!    // This example doesn't use close trigger frames, since we manually close the connection upon
+//!    // receiving a HEADERS frame on stream 0.
+//!    let close_trigger_frames = None;
+//!    let summary = sync_client::connect(config, &actions, close_trigger_frames);
 //!
 //!    println!(
 //!        "=== received connection summary! ===\n\n{}",

@@ -47,6 +47,7 @@ use crate::client::MAX_DATAGRAM_SIZE;
 use crate::config::Config;
 
 use super::Client;
+use super::CloseTriggerFrames;
 use super::ConnectionSummary;
 use super::StreamMap;
 use super::StreamParserMap;
@@ -55,6 +56,15 @@ use super::StreamParserMap;
 struct SyncClient {
     streams: StreamMap,
     stream_parsers: StreamParserMap,
+}
+
+impl SyncClient {
+    fn new(close_trigger_frames: Option<CloseTriggerFrames>) -> Self {
+        Self {
+            streams: StreamMap::new(close_trigger_frames),
+            ..Default::default()
+        }
+    }
 }
 
 impl Client for SyncClient {
@@ -72,9 +82,14 @@ impl Client for SyncClient {
 /// Constructs a socket and [quiche::Connection] based on the provided `args`,
 /// then iterates over `actions`.
 ///
+/// If `close_trigger_frames` is specified, h3i will close the connection
+/// immediately upon receiving all of the supplied frames rather than waiting
+/// for the idle timeout. See [`CloseTriggerFrames`] for details.
+///
 /// Returns a [ConnectionSummary] on success, [ClientError] on failure.
 pub fn connect(
     args: Config, actions: &[Action],
+    close_trigger_frames: Option<CloseTriggerFrames>,
 ) -> std::result::Result<ConnectionSummary, ClientError> {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
@@ -142,8 +157,7 @@ pub fn connect(
     let mut wait_duration = None;
     let mut wait_instant = None;
 
-    let mut client = SyncClient::default();
-
+    let mut client = SyncClient::new(close_trigger_frames);
     let mut waiting_for = WaitingFor::default();
 
     loop {
@@ -275,6 +289,10 @@ pub fn connect(
                 }
 
                 wait_cleared = true;
+            }
+
+            if client.streams.all_close_trigger_frames_seen() {
+                client.streams.close_due_to_trigger_frames(&mut conn);
             }
 
             if wait_cleared {
