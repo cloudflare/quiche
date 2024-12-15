@@ -53,7 +53,7 @@ use super::StreamParserMap;
 
 #[derive(Default)]
 struct SyncClient {
-    stream_map: StreamMap,
+    streams: StreamMap,
     stream_parsers: StreamParserMap,
 }
 
@@ -63,7 +63,7 @@ impl Client for SyncClient {
     }
 
     fn handle_response_frame(&mut self, stream_id: u64, frame: H3iFrame) {
-        self.stream_map.insert(stream_id, frame);
+        self.streams.insert(stream_id, frame);
     }
 }
 
@@ -371,7 +371,7 @@ pub fn connect(
     }
 
     Ok(ConnectionSummary {
-        stream_map: client.stream_map,
+        stream_map: client.streams,
         stats: Some(conn.stats()),
         path_stats: conn.path_stats().collect(),
         conn_close_details: ConnectionCloseDetails::new(&conn),
