@@ -48,7 +48,7 @@ pub type BoxError = Box<dyn Error + Send + Sync + 'static>;
 
 /// An internal representation of a QUIC or HTTP/3 frame. This type exists so
 /// that we can extend types defined in Quiche.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum H3iFrame {
     /// A wrapper around a quiche HTTP/3 frame.
     QuicheH3(QFrame),
@@ -430,5 +430,75 @@ impl Serialize for SerializableQFrame<'_> {
                 state.end()
             },
         }
+    }
+}
+
+/// A combination of stream ID and [`H3iFrame`] which is used to instruct h3i to
+/// watch for specific frames. If h3i receives all the frames it expects, it
+/// will send an application CONNECTION_CLOSE frame with an error code of 0x100.
+/// This bypasses the idle timeout and vastly quickens test suites which depend
+/// heavily on h3i.
+#[derive(Debug, Eq, PartialEq, Serialize, Clone)]
+pub struct ExpectedFrame {
+    stream_id: u64,
+    frame: H3iFrame,
+}
+
+impl ExpectedFrame {
+    pub fn new(stream_id: u64, frame: H3iFrame) -> Self {
+        Self { stream_id, frame }
+    }
+
+    pub(crate) fn stream_id(&self) -> u64 {
+        self.stream_id
+    }
+
+    /// Check if this [`ExpectedFrame`] is equivalent to another [`H3iFrame`]. For
+    /// QuicheH3/ResetStream variants, equivalence is the same as equality.
+    /// For Headers variants, this [`ExpectedFrame`] is equivalent to another if
+    /// the other frame contains all [`Header`]s in _this_ frame.
+    pub(crate) fn is_equivalent(&self, other: &H3iFrame) -> bool {
+        match &self.frame {
+            H3iFrame::Headers(me) => {
+                let H3iFrame::Headers(other) = other else {
+                    return false;
+                };
+
+                // TODO(evanrittenhouse): we could theoretically hand-roll a MultiMap which uses a
+                // HashSet as the multi-value collection, but in practice we don't expect very many
+                // headers on an ExpectedFrame
+                //
+                // ref: https://docs.rs/multimap/latest/src/multimap/lib.rs.html#89
+                me.headers().iter().all(|m| other.headers().contains(m))
+            },
+            H3iFrame::QuicheH3(me) => match other {
+                H3iFrame::QuicheH3(other) => me == other,
+                _ => false,
+            },
+            H3iFrame::ResetStream(me) => match other {
+                H3iFrame::ResetStream(rs) => me == rs,
+                _ => false,
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_equivalence() {
+        let this =
+            ExpectedFrame::new(0, vec![Header::new(b"hello", b"world")].into());
+        let other = ExpectedFrame::new(
+            0,
+            vec![Header::new(b"hello", b"world"), Header::new(b"go", b"jets")]
+                .into(),
+        );
+
+        assert!(this.is_equivalent(&other.frame));
+        // `this` does not contain the `go: jets` header, so `other` is not equivalent to `this`.
+        assert!(!other.is_equivalent(&this.frame));
     }
 }

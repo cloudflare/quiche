@@ -31,6 +31,7 @@ use std::slice::Iter;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::frame::ExpectedFrame;
 use crate::frame::H3iFrame;
 use crate::quiche;
 
@@ -57,6 +58,15 @@ struct SyncClient {
     stream_parsers: StreamParserMap,
 }
 
+impl SyncClient {
+    fn new(expected_frames: Option<Vec<ExpectedFrame>>) -> Self {
+        Self {
+            streams: StreamMap::new(expected_frames),
+            ..Default::default()
+        }
+    }
+}
+
 impl Client for SyncClient {
     fn stream_parsers_mut(&mut self) -> &mut StreamParserMap {
         &mut self.stream_parsers
@@ -74,7 +84,7 @@ impl Client for SyncClient {
 ///
 /// Returns a [ConnectionSummary] on success, [ClientError] on failure.
 pub fn connect(
-    args: Config, actions: &[Action],
+    args: Config, actions: &[Action], expected_frames: Option<Vec<ExpectedFrame>>,
 ) -> std::result::Result<ConnectionSummary, ClientError> {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
@@ -142,8 +152,7 @@ pub fn connect(
     let mut wait_duration = None;
     let mut wait_instant = None;
 
-    let mut client = SyncClient::default();
-
+    let mut client = SyncClient::new(expected_frames);
     let mut waiting_for = WaitingFor::default();
 
     loop {
@@ -277,6 +286,14 @@ pub fn connect(
                 wait_cleared = true;
             }
 
+            if client.streams.saw_all_expected_frames() {
+                let _ = conn.close(
+                    true,
+                    quiche::h3::WireErrorCode::NoError as u64,
+                    b"saw all expected frames",
+                );
+            }
+
             if wait_cleared {
                 check_duration_and_do_actions(
                     &mut wait_duration,
@@ -370,11 +387,13 @@ pub fn connect(
         }
     }
 
+    let missing_frames = client.streams.missing_frames();
     Ok(ConnectionSummary {
         stream_map: client.streams,
         stats: Some(conn.stats()),
         path_stats: conn.path_stats().collect(),
         conn_close_details: ConnectionCloseDetails::new(&conn),
+        missing_frames,
     })
 }
 
