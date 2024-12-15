@@ -39,6 +39,7 @@ use std::collections::HashMap;
 use std::iter::FromIterator;
 
 use crate::frame::EnrichedHeaders;
+use crate::frame::ExpectedFrame;
 use crate::frame::H3iFrame;
 
 /// Maximum length of any serialized element's unstructured data such as reason
@@ -74,6 +75,10 @@ impl Serialize for ConnectionSummary {
             self.path_stats.iter().map(SerializablePathStats).collect();
         state.serialize_field("path_stats", &p)?;
         state.serialize_field("error", &self.conn_close_details)?;
+        state.serialize_field(
+            "missed_expected_frames",
+            &self.stream_map.missing_frames(),
+        )?;
         state.end()
     }
 }
@@ -81,7 +86,10 @@ impl Serialize for ConnectionSummary {
 /// A read-only aggregation of frames received over a connection, mapped to the
 /// stream ID over which they were received.
 #[derive(Clone, Debug, Default, Serialize)]
-pub struct StreamMap(HashMap<u64, Vec<H3iFrame>>);
+pub struct StreamMap {
+    map: HashMap<u64, Vec<H3iFrame>>,
+    expected_frames: Option<ExpectedFrames>,
+}
 
 impl<T> From<T> for StreamMap
 where
@@ -89,7 +97,10 @@ where
 {
     fn from(value: T) -> Self {
         let map = HashMap::from_iter(value);
-        Self(map)
+        Self {
+            map,
+            expected_frames: None,
+        }
     }
 }
 
@@ -113,7 +124,7 @@ impl StreamMap {
     /// assert_eq!(stream_map.all_frames(), vec![headers]);
     /// ```
     pub fn all_frames(&self) -> Vec<H3iFrame> {
-        self.0
+        self.map
             .values()
             .flatten()
             .map(Clone::clone)
@@ -140,7 +151,7 @@ impl StreamMap {
     /// assert_eq!(stream_map.stream(0), vec![headers]);
     /// ```
     pub fn stream(&self, stream_id: u64) -> Vec<H3iFrame> {
-        self.0.get(&stream_id).cloned().unwrap_or_default()
+        self.map.get(&stream_id).cloned().unwrap_or_default()
     }
 
     /// Check if a provided [`H3iFrame`] was received, regardless of what stream
@@ -189,7 +200,7 @@ impl StreamMap {
     pub fn received_frame_on_stream(
         &self, stream: u64, frame: &H3iFrame,
     ) -> bool {
-        self.0.get(&stream).map(|v| v.contains(frame)).is_some()
+        self.map.get(&stream).map(|v| v.contains(frame)).is_some()
     }
 
     /// Check if the stream map is empty, e.g., no frames were received.
@@ -213,7 +224,7 @@ impl StreamMap {
     /// assert!(!stream_map.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.map.is_empty()
     }
 
     /// See all HEADERS received on a given stream.
@@ -246,8 +257,107 @@ impl StreamMap {
             .collect()
     }
 
+    pub(crate) fn new(expected_frames: Option<ExpectedFrames>) -> Self {
+        Self {
+            expected_frames,
+            ..Default::default()
+        }
+    }
+
     pub(crate) fn insert(&mut self, stream_id: u64, frame: H3iFrame) {
-        self.0.entry(stream_id).or_default().push(frame);
+        if let Some(expected) = self.expected_frames.as_mut() {
+            expected.receive_frame(stream_id, &frame);
+        }
+
+        self.map.entry(stream_id).or_default().push(frame);
+    }
+
+    pub(crate) fn check_expected_frames(&self) -> bool {
+        if let Some(expected) = self.expected_frames.as_ref() {
+            expected.saw_all_frames()
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn missing_frames(&self) -> Option<Vec<ExpectedFrame>> {
+        self.expected_frames.as_ref().map(|e| e.missing_frames())
+    }
+
+    /// Close a [`quiche::Connection`] with the CONNECTION_CLOSE frame specified
+    /// by [`ExpectedFrames`]. If no [`ExpectedFrames`] exist, this is a
+    /// no-op.
+    pub(crate) fn close_due_to_expected_frames(
+        &self, qconn: &mut quiche::Connection,
+    ) {
+        let Some(ConnectionError {
+            is_app,
+            error_code,
+            reason,
+        }) = self.expected_frames.as_ref().map(|ef| &ef.close_with)
+        else {
+            return;
+        };
+
+        let _ = qconn.close(*is_app, *error_code, reason);
+    }
+}
+
+/// A container for frames that h3i expects to see over a given connection. If
+/// h3i receives all the frames it expects, it will send a CONNECTION_CLOSE
+/// frame to the server. This bypasses the idle timeout and vastly quickens test
+/// suites which depend heavily on h3i.
+///
+/// The specific CONNECTION_CLOSE frame can be customized by passing a
+/// [`ConnectionError`] to [`Self::new_with_close`]. h3i will send an
+/// application CONNECTION_CLOSE frame with error code 0x100 if this struct is
+/// constructed with the [`Self::new`] constructor.
+#[derive(Clone, Serialize, Debug)]
+pub struct ExpectedFrames {
+    missing: Vec<ExpectedFrame>,
+    #[serde(skip)]
+    close_with: ConnectionError,
+}
+
+impl ExpectedFrames {
+    pub fn new(frames: Vec<ExpectedFrame>) -> Self {
+        Self::new_with_close(frames, ConnectionError {
+            is_app: true,
+            error_code: quiche::h3::WireErrorCode::NoError as u64,
+            reason: b"saw all expected frames".to_vec(),
+        })
+    }
+
+    pub fn new_with_close(
+        frames: Vec<ExpectedFrame>, close_with: ConnectionError,
+    ) -> Self {
+        Self {
+            missing: frames,
+            close_with,
+        }
+    }
+
+    fn receive_frame(&mut self, stream_id: u64, frame: &H3iFrame) {
+        for (i, ef) in self.missing.iter_mut().enumerate() {
+            if ef.is_equivalent(frame) && ef.stream_id() == stream_id {
+                self.missing.remove(i);
+                break;
+            }
+        }
+    }
+
+    fn saw_all_frames(&self) -> bool {
+        self.missing.is_empty()
+    }
+
+    fn missing_frames(&self) -> Vec<ExpectedFrame> {
+        self.missing.clone()
+    }
+}
+
+impl From<Vec<ExpectedFrame>> for ExpectedFrames {
+    fn from(value: Vec<ExpectedFrame>) -> Self {
+        Self::new(value)
     }
 }
 
@@ -404,6 +514,7 @@ impl Serialize for SerializableStats<'_> {
 }
 
 /// A wrapper to help serialize a [quiche::ConnectionError]
+#[derive(Clone, Debug)]
 pub struct SerializableConnectionError<'a>(&'a quiche::ConnectionError);
 
 impl Serialize for SerializableConnectionError<'_> {
@@ -420,5 +531,79 @@ impl Serialize for SerializableConnectionError<'_> {
             &String::from_utf8_lossy(&self.0.reason[..max]),
         )?;
         state.end()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frame::EnrichedHeaders;
+    use quiche::h3::Header;
+
+    fn h3i_frame() -> H3iFrame {
+        vec![Header::new(b"hello", b"world")].into()
+    }
+
+    #[test]
+    fn expected_frame() {
+        let frame = h3i_frame();
+        let mut expected =
+            ExpectedFrames::new(vec![ExpectedFrame::new(0, frame.clone())]);
+
+        expected.receive_frame(0, &frame);
+
+        assert!(expected.saw_all_frames());
+    }
+
+    #[test]
+    fn expected_frame_missing() {
+        let frame = h3i_frame();
+        let expected_frames = vec![
+            ExpectedFrame::new(0, frame.clone()),
+            ExpectedFrame::new(4, frame.clone()),
+            ExpectedFrame::new(8, vec![Header::new(b"go", b"jets")].into()),
+        ];
+        let mut expected = ExpectedFrames::new(expected_frames.clone());
+
+        expected.receive_frame(0, &frame);
+
+        assert!(!expected.saw_all_frames());
+        assert_eq!(expected.missing_frames(), expected_frames[1..].to_vec());
+    }
+
+    fn stream_map_data() -> Vec<H3iFrame> {
+        let headers =
+            H3iFrame::Headers(EnrichedHeaders::from(vec![Header::new(
+                b"hello", b"world",
+            )]));
+        let data = H3iFrame::QuicheH3(quiche::h3::frame::Frame::Data {
+            payload: b"hello world".to_vec(),
+        });
+
+        vec![headers, data]
+    }
+
+    #[test]
+    fn test_stream_map_expected_frames_with_none() {
+        let stream_map: StreamMap = vec![(0, stream_map_data())].into();
+        assert!(!stream_map.check_expected_frames());
+    }
+
+    #[test]
+    fn test_stream_map_expected_frames() {
+        let data = stream_map_data();
+        let mut stream_map = StreamMap::new(Some(
+            vec![
+                ExpectedFrame::new(0, data[0].clone()),
+                ExpectedFrame::new(0, data[1].clone()),
+            ]
+            .into(),
+        ));
+
+        stream_map.insert(0, data[0].clone());
+        assert!(!stream_map.check_expected_frames());
+        assert_eq!(stream_map.missing_frames().unwrap(), vec![
+            ExpectedFrame::new(0, data[1].clone())
+        ]);
     }
 }

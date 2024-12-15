@@ -48,6 +48,7 @@ use crate::config::Config;
 
 use super::Client;
 use super::ConnectionSummary;
+use super::ExpectedFrames;
 use super::StreamMap;
 use super::StreamParserMap;
 
@@ -55,6 +56,15 @@ use super::StreamParserMap;
 struct SyncClient {
     streams: StreamMap,
     stream_parsers: StreamParserMap,
+}
+
+impl SyncClient {
+    fn new(expected_frames: Option<ExpectedFrames>) -> Self {
+        Self {
+            streams: StreamMap::new(expected_frames),
+            ..Default::default()
+        }
+    }
 }
 
 impl Client for SyncClient {
@@ -74,7 +84,7 @@ impl Client for SyncClient {
 ///
 /// Returns a [ConnectionSummary] on success, [ClientError] on failure.
 pub fn connect(
-    args: Config, actions: &[Action],
+    args: Config, actions: &[Action], expected_frames: Option<ExpectedFrames>,
 ) -> std::result::Result<ConnectionSummary, ClientError> {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
@@ -142,8 +152,7 @@ pub fn connect(
     let mut wait_duration = None;
     let mut wait_instant = None;
 
-    let mut client = SyncClient::default();
-
+    let mut client = SyncClient::new(expected_frames);
     let mut waiting_for = WaitingFor::default();
 
     loop {
@@ -275,6 +284,10 @@ pub fn connect(
                 }
 
                 wait_cleared = true;
+            }
+
+            if client.streams.check_expected_frames() {
+                client.streams.close_due_to_expected_frames(&mut conn);
             }
 
             if wait_cleared {
