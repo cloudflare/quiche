@@ -38,7 +38,6 @@ use std::cmp;
 use std::collections::HashMap;
 use std::iter::FromIterator;
 
-use crate::frame::EnrichedHeaders;
 use crate::frame::ExpectedFrame;
 use crate::frame::H3iFrame;
 
@@ -105,32 +104,6 @@ where
 }
 
 impl StreamMap {
-    /// Flatten all received frames into a single vector. The ordering is
-    /// non-deterministic.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use h3i::client::connection_summary::StreamMap;
-    /// use h3i::frame::EnrichedHeaders;
-    /// use h3i::frame::H3iFrame;
-    /// use quiche::h3::Header;
-    /// use std::iter::FromIterator;
-    ///
-    /// let h = Header::new(b"hello", b"world");
-    /// let headers = H3iFrame::Headers(EnrichedHeaders::from(vec![h]));
-    ///
-    /// let stream_map: StreamMap = [(0, vec![headers.clone()])].into();
-    /// assert_eq!(stream_map.all_frames(), vec![headers]);
-    /// ```
-    pub fn all_frames(&self) -> Vec<H3iFrame> {
-        self.map
-            .values()
-            .flatten()
-            .map(Clone::clone)
-            .collect::<Vec<H3iFrame>>()
-    }
-
     /// Get all frames on a given `stream_id`.
     ///
     /// # Example
@@ -152,6 +125,113 @@ impl StreamMap {
     /// ```
     pub fn stream(&self, stream_id: u64) -> Vec<H3iFrame> {
         self.map.get(&stream_id).cloned().unwrap_or_default()
+    }
+
+    /// Collect all frames that match the predicate on a given stream.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use h3i::client::connection_summary::StreamMap;
+    /// use h3i::frame::EnrichedHeaders;
+    /// use h3i::frame::H3iFrame;
+    /// use quiche::h3::frame::Frame;
+    /// use quiche::h3::Header;
+    /// use std::iter::FromIterator;
+    ///
+    /// let h = Header::new(b"hello", b"world");
+    /// let correct_headers = H3iFrame::Headers(EnrichedHeaders::from(vec![h]));
+    /// let data = H3iFrame::QuicheH3(Frame::Data {
+    ///     payload: b"nyj".to_vec(),
+    /// });
+    /// let stream_map: StreamMap = [
+    ///     (0, vec![correct_headers.clone(), data]),
+    ///     (4, vec![correct_headers.clone()]),
+    /// ]
+    /// .into();
+    ///
+    /// assert_eq!(
+    ///     stream_map.filter_stream(0, |frame| {
+    ///         match frame {
+    ///             H3iFrame::Headers(_) => true,
+    ///             _ => false,
+    ///         }
+    ///     }),
+    ///     vec![correct_headers]
+    /// );
+    /// ```
+    pub fn filter_stream<F>(&self, stream_id: u64, f: F) -> Vec<H3iFrame>
+    where
+        F: Fn(&H3iFrame) -> bool,
+    {
+        self.stream(stream_id)
+            .into_iter()
+            .filter(|frame| f(frame))
+            .collect()
+    }
+
+    /// Collect all frames that match the predicate. The ordering is
+    /// non-deterministic.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use h3i::client::connection_summary::StreamMap;
+    /// use h3i::frame::EnrichedHeaders;
+    /// use h3i::frame::H3iFrame;
+    /// use quiche::h3::frame::Frame;
+    /// use quiche::h3::Header;
+    /// use std::iter::FromIterator;
+    ///
+    /// let h = Header::new(b"hello", b"world");
+    /// let headers = H3iFrame::Headers(EnrichedHeaders::from(vec![h]));
+    /// let data = H3iFrame::QuicheH3(Frame::Data {
+    ///     payload: b"nyj".to_vec(),
+    /// });
+    /// let stream_map: StreamMap = [(0, vec![headers.clone(), data])].into();
+    ///
+    /// assert_eq!(
+    ///     stream_map.filter(|frame| {
+    ///         match frame {
+    ///             H3iFrame::Headers(_) => true,
+    ///             _ => false,
+    ///         }
+    ///     }),
+    ///     vec![headers]
+    /// );
+    /// ```
+    pub fn filter<F>(&self, f: F) -> Vec<H3iFrame>
+    where
+        F: Fn(&H3iFrame) -> bool,
+    {
+        self.map
+            .values()
+            .flatten()
+            .filter(|frame| f(frame))
+            .map(Clone::clone)
+            .collect()
+    }
+
+    /// Flatten all received frames into a single vector. The ordering is
+    /// non-deterministic.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use h3i::client::connection_summary::StreamMap;
+    /// use h3i::frame::EnrichedHeaders;
+    /// use h3i::frame::H3iFrame;
+    /// use quiche::h3::Header;
+    /// use std::iter::FromIterator;
+    ///
+    /// let h = Header::new(b"hello", b"world");
+    /// let headers = H3iFrame::Headers(EnrichedHeaders::from(vec![h]));
+    ///
+    /// let stream_map: StreamMap = [(0, vec![headers.clone()])].into();
+    /// assert_eq!(stream_map.all_frames(), vec![headers]);
+    /// ```
+    pub fn all_frames(&self) -> Vec<H3iFrame> {
+        self.filter(|_| true)
     }
 
     /// Check if a provided [`H3iFrame`] was received, regardless of what stream
@@ -225,36 +305,6 @@ impl StreamMap {
     /// ```
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
-    }
-
-    /// See all HEADERS received on a given stream.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use h3i::client::connection_summary::StreamMap;
-    /// use h3i::frame::EnrichedHeaders;
-    /// use h3i::frame::H3iFrame;
-    /// use quiche::h3::Header;
-    /// use std::iter::FromIterator;
-    ///
-    /// let mut stream_map = StreamMap::default();
-    ///
-    /// let h = Header::new(b"hello", b"world");
-    /// let enriched = EnrichedHeaders::from(vec![h]);
-    /// let headers = H3iFrame::Headers(enriched.clone());
-    /// let data = H3iFrame::QuicheH3(quiche::h3::frame::Frame::Data {
-    ///     payload: b"hello world".to_vec(),
-    /// });
-    ///
-    /// let stream_map: StreamMap = [(0, vec![headers.clone(), data.clone()])].into();
-    /// assert_eq!(stream_map.headers_on_stream(0), vec![enriched]);
-    /// ```
-    pub fn headers_on_stream(&self, stream_id: u64) -> Vec<EnrichedHeaders> {
-        self.stream(stream_id)
-            .into_iter()
-            .filter_map(|h3i_frame| h3i_frame.to_enriched_headers())
-            .collect()
     }
 
     pub(crate) fn new(expected_frames: Option<ExpectedFrames>) -> Self {
