@@ -67,7 +67,7 @@ fn main() {
     ];
 
     let summary =
-        sync_client::connect(config, &actions).expect("connection failed");
+        sync_client::connect(config, &actions, None).expect("connection failed");
 
     println!(
         "=== received connection summary! ===\n\n{}",
