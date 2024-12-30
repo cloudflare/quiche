@@ -17,7 +17,7 @@ mod linux {
 use linux::*;
 
 #[cfg(target_os = "linux")]
-fn raw_send_to(
+fn raw_send(
     fd: &impl AsFd, send_buf: &[u8], cmsgs: &[ControlMessage],
     msg_flags: MsgFlags, client_addr: Option<SockaddrStorage>,
 ) -> SyscallResult<usize> {
@@ -74,7 +74,7 @@ pub fn send_msg(
     }
 
     let client_addr = dst.map(SockaddrStorage::from);
-    raw_send_to(
+    raw_send(
         &fd.as_fd(),
         send_buf,
         &cmsgs,
