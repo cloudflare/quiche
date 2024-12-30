@@ -10,11 +10,30 @@ use std::net::SocketAddr;
 use std::time::Instant;
 use std::time::SystemTime;
 
-use libc::in6_pktinfo;
-use libc::in_pktinfo;
-use libc::sockaddr_in;
-use libc::sockaddr_in6;
-use nix::sys::socket::ControlMessageOwned;
+#[cfg(unix)]
+mod unix {
+    use libc::in6_pktinfo;
+    use libc::in_pktinfo;
+    use libc::sockaddr_in;
+    use libc::sockaddr_in6;
+    pub(super) use nix::sys::socket::ControlMessageOwned;
+
+    #[derive(Debug)]
+    pub enum IpOrigDstAddr {
+        V4(sockaddr_in),
+        V6(sockaddr_in6),
+    }
+
+    #[cfg(unix)]
+    #[derive(Copy, Clone, Debug)]
+    pub enum IpPktInfo {
+        V4(in_pktinfo),
+        V6(in6_pktinfo),
+    }
+}
+
+#[cfg(unix)]
+pub use unix::{IpOrigDstAddr, IpPktInfo};
 
 /// Settings for handling control messages when sending data.
 #[cfg(target_os = "linux")]
@@ -79,8 +98,10 @@ pub struct RecvData {
     ///
     /// This can be either an IPv4 or IPv6 address, depending on whether
     /// `IPV4_ORIGDSTADDR` or `IPV6_ORIGDSTADDR` was received.
+    #[cfg(unix)]
     pub original_addr: Option<IpOrigDstAddr>,
-    cmsgs: Vec<ControlMessageOwned>,
+    #[cfg(unix)]
+    cmsgs: Vec<unix::ControlMessageOwned>,
 }
 
 impl RecvData {
@@ -93,7 +114,9 @@ impl RecvData {
             metrics: None,
             gro: None,
             rx_time: None,
+            #[cfg(unix)]
             original_addr: None,
+            #[cfg(unix)]
             cmsgs: Vec::with_capacity(cmsg_space_len),
         }
     }
@@ -109,7 +132,8 @@ impl RecvData {
     /// Returns the list of cmsgs which were returned from calling `recvmsg`. If
     /// `recvmsg` was called with its [`RecvMsgCmsgSettings::store_cmsgs`]
     /// field set to to `false`, this will return an empty slice.
-    pub fn cmsgs(&self) -> &[ControlMessageOwned] {
+    #[cfg(unix)]
+    pub fn cmsgs(&self) -> &[unix::ControlMessageOwned] {
         &self.cmsgs
     }
 }
@@ -122,18 +146,6 @@ pub struct RecvMetrics {
     ///
     /// See SO_RXQOVFL for more.
     pub udp_packets_dropped: u64,
-}
-
-#[derive(Debug)]
-pub enum IpOrigDstAddr {
-    V4(sockaddr_in),
-    V6(sockaddr_in6),
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum IpPktInfo {
-    V4(in_pktinfo),
-    V6(in6_pktinfo),
 }
 
 #[cfg(target_os = "linux")]

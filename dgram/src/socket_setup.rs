@@ -1,8 +1,11 @@
-use std::io;
-use std::os::fd::AsFd;
-
 #[cfg(target_os = "linux")]
 use super::linux_imports::*;
+
+#[cfg(unix)]
+mod unix {
+    pub(super) use std::io;
+    pub(super) use std::os::fd::AsFd;
+}
 
 /// Indicators of settings applied to a socket. These settings aren't "applied"
 /// to a socket. Rather, the same (maximal) settings are always applied to a
@@ -31,7 +34,7 @@ impl SocketCapabilities {
     /// which settings were successfully applied.
     #[cfg(unix)]
     pub fn apply_all_and_get_compatibility(
-        socket: &impl AsFd, max_send_udp_payload_size: usize,
+        socket: &impl unix::AsFd, max_send_udp_payload_size: usize,
     ) -> Self {
         let fd = socket.as_fd();
 
@@ -52,8 +55,8 @@ pub fn set_gso_segment(sock: &impl AsFd, segment: usize) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
-pub fn set_gso_segment(_: &impl AsFd, _: usize) -> io::Result<()> {
+#[cfg(all(not(target_os = "linux"), unix))]
+pub fn set_gso_segment(_: &impl unix::AsFd, _: usize) -> unix::io::Result<()> {
     Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
 }
 
@@ -65,7 +68,8 @@ pub fn set_gro(sock: &impl AsFd) -> io::Result<()> {
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn set_gro(_: &impl AsFd) -> io::Result<()> {
+#[cfg(all(not(target_os = "linux"), unix))]
+pub fn set_gro(_: &impl unix::AsFd) -> unix::io::Result<()> {
     Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
 }
 
@@ -76,8 +80,8 @@ fn set_udp_rxq_ovfl(sock: &impl AsFd) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
-fn set_udp_rxq_ovfl(_: &impl AsFd) -> io::Result<()> {
+#[cfg(all(not(target_os = "linux"), unix))]
+fn set_udp_rxq_ovfl(_: &impl unix::AsFd) -> unix::io::Result<()> {
     Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
 }
 
@@ -93,8 +97,8 @@ pub fn set_tx_time(sock: &impl AsFd) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
-pub fn set_tx_time(_: &impl AsFd) -> io::Result<()> {
+#[cfg(all(not(target_os = "linux"), unix))]
+pub fn set_tx_time(_: &impl unix::AsFd) -> unix::io::Result<()> {
     Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
 }
 
@@ -105,7 +109,7 @@ pub fn set_rx_time(sock: &impl AsFd) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
-pub fn set_rx_time(_: &impl AsFd) -> io::Result<()> {
+#[cfg(all(not(target_os = "linux"), unix))]
+pub fn set_rx_time(_: &impl unix::AsFd) -> unix::io::Result<()> {
     Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
 }
