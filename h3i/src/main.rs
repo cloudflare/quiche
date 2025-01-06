@@ -36,7 +36,7 @@ use h3i::client::ClientError;
 use h3i::prompts::h3::Prompter;
 use h3i::recordreplay::qlog::QlogEvent;
 use h3i::recordreplay::qlog::*;
-use qlog::reader::QlogSeqReader;
+use quiche::qlog::reader::QlogSeqReader;
 
 use clap::App;
 use clap::Arg;
@@ -310,12 +310,12 @@ fn read_qlog(filename: &str, host_override: Option<&str>) -> Vec<Action> {
 
     for event in qlog_reader {
         match event {
-            qlog::reader::Event::Qlog(ev) => {
+            quiche::qlog::reader::Event::Qlog(ev) => {
                 let ac: H3Actions = actions_from_qlog(ev, host_override);
                 actions.extend(ac.0);
             },
 
-            qlog::reader::Event::Json(ev) => {
+            quiche::qlog::reader::Event::Json(ev) => {
                 let ac: H3Actions = (ev).into();
                 actions.extend(ac.0);
             },
@@ -381,32 +381,32 @@ pub fn make_qlog_writer() -> std::io::BufWriter<std::fs::File> {
 
 pub fn make_streamer(
     writer: Box<dyn std::io::Write + Send + Sync>,
-) -> qlog::streamer::QlogStreamer {
-    let vp = qlog::VantagePointType::Client;
+) -> quiche::qlog::streamer::QlogStreamer {
+    let vp = quiche::qlog::VantagePointType::Client;
 
-    let trace = qlog::TraceSeq::new(
-        qlog::VantagePoint {
+    let trace = quiche::qlog::TraceSeq::new(
+        quiche::qlog::VantagePoint {
             name: None,
             ty: vp,
             flow: None,
         },
         Some("h3i".into()),
         Some("h3i".into()),
-        Some(qlog::Configuration {
+        Some(quiche::qlog::Configuration {
             time_offset: Some(0.0),
             original_uris: None,
         }),
         None,
     );
 
-    let mut streamer = qlog::streamer::QlogStreamer::new(
-        qlog::QLOG_VERSION.to_string(),
+    let mut streamer = quiche::qlog::streamer::QlogStreamer::new(
+        quiche::qlog::QLOG_VERSION.to_string(),
         Some("h3i".into()),
         Some("h3i".into()),
         None,
         time::Instant::now(),
         trace,
-        qlog::events::EventImportance::Extra,
+        quiche::qlog::events::EventImportance::Extra,
         writer,
     );
 

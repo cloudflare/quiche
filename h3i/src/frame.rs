@@ -425,7 +425,7 @@ impl Serialize for SerializableQFrame<'_> {
 
                 state.serialize_field(
                     "payload",
-                    &qlog::HexSlice::maybe_string(Some(&payload[..max])),
+                    &quiche::qlog::HexSlice::maybe_string(Some(&payload[..max])),
                 )?;
                 state.end()
             },

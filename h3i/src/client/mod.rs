@@ -34,7 +34,7 @@ pub mod connection_summary;
 pub mod sync_client;
 
 use connection_summary::*;
-use qlog::events::h3::HttpHeader;
+use quiche::qlog::events::h3::HttpHeader;
 use quiche::ConnectionError;
 
 use std::collections::HashMap;
@@ -52,10 +52,10 @@ use crate::frame_parser::FrameParser;
 use crate::frame_parser::InterruptCause;
 use crate::recordreplay::qlog::QlogEvent;
 use crate::recordreplay::qlog::*;
-use qlog::events::h3::H3FrameParsed;
-use qlog::events::h3::Http3Frame;
-use qlog::events::EventData;
-use qlog::streamer::QlogStreamer;
+use quiche::qlog::events::h3::H3FrameParsed;
+use quiche::qlog::events::h3::Http3Frame;
+use quiche::qlog::events::EventData;
+use quiche::qlog::streamer::QlogStreamer;
 
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error;
@@ -537,7 +537,7 @@ fn handle_response_frame<C: Client>(
             let qlog_headers: Vec<HttpHeader> = enriched_headers
                 .headers()
                 .iter()
-                .map(|h| qlog::events::h3::HttpHeader {
+                .map(|h| quiche::qlog::events::h3::HttpHeader {
                     name: String::from_utf8_lossy(h.name()).into_owned(),
                     value: String::from_utf8_lossy(h.value()).into_owned(),
                 })

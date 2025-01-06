@@ -26,19 +26,19 @@
 
 use std::collections::BTreeMap;
 
-use qlog::events::h3::H3FrameCreated;
-use qlog::events::h3::H3Owner;
-use qlog::events::h3::H3StreamTypeSet;
-use qlog::events::h3::Http3Frame;
-use qlog::events::h3::HttpHeader;
-use qlog::events::quic::ErrorSpace;
-use qlog::events::quic::PacketSent;
-use qlog::events::quic::QuicFrame;
-use qlog::events::Event;
-use qlog::events::EventData;
-use qlog::events::ExData;
-use qlog::events::JsonEvent;
-use qlog::events::RawInfo;
+use quiche::qlog::events::h3::H3FrameCreated;
+use quiche::qlog::events::h3::H3Owner;
+use quiche::qlog::events::h3::H3StreamTypeSet;
+use quiche::qlog::events::h3::Http3Frame;
+use quiche::qlog::events::h3::HttpHeader;
+use quiche::qlog::events::quic::ErrorSpace;
+use quiche::qlog::events::quic::PacketSent;
+use quiche::qlog::events::quic::QuicFrame;
+use quiche::qlog::events::Event;
+use quiche::qlog::events::EventData;
+use quiche::qlog::events::ExData;
+use quiche::qlog::events::JsonEvent;
+use quiche::qlog::events::RawInfo;
 use quiche;
 use quiche::h3::frame::Frame;
 use quiche::h3::NameValue;
@@ -113,7 +113,7 @@ impl From<&Action> for QlogEvents {
             } => {
                 let qlog_headers = headers
                     .iter()
-                    .map(|h| qlog::events::h3::HttpHeader {
+                    .map(|h| quiche::qlog::events::h3::HttpHeader {
                         name: String::from_utf8_lossy(h.name()).into_owned(),
                         value: String::from_utf8_lossy(h.value()).into_owned(),
                     })
@@ -149,18 +149,18 @@ impl From<&Action> for QlogEvents {
             } => {
                 let ty = match *stream_type {
                     HTTP3_CONTROL_STREAM_TYPE_ID =>
-                        qlog::events::h3::H3StreamType::Control,
+                        quiche::qlog::events::h3::H3StreamType::Control,
                     HTTP3_PUSH_STREAM_TYPE_ID =>
-                        qlog::events::h3::H3StreamType::Push,
+                        quiche::qlog::events::h3::H3StreamType::Push,
                     QPACK_ENCODER_STREAM_TYPE_ID =>
-                        qlog::events::h3::H3StreamType::QpackEncode,
+                        quiche::qlog::events::h3::H3StreamType::QpackEncode,
                     QPACK_DECODER_STREAM_TYPE_ID =>
-                        qlog::events::h3::H3StreamType::QpackDecode,
+                        quiche::qlog::events::h3::H3StreamType::QpackDecode,
 
-                    _ => qlog::events::h3::H3StreamType::Unknown,
+                    _ => quiche::qlog::events::h3::H3StreamType::Unknown,
                 };
                 let ty_val =
-                    if matches!(ty, qlog::events::h3::H3StreamType::Unknown) {
+                    if matches!(ty, quiche::qlog::events::h3::H3StreamType::Unknown) {
                         Some(*stream_type)
                     } else {
                         None
@@ -255,9 +255,9 @@ impl From<&Action> for QlogEvents {
                         serde_json::to_value(event).unwrap(),
                 };
 
-                vec![QlogEvent::JsonEvent(qlog::events::JsonEvent {
+                vec![QlogEvent::JsonEvent(quiche::qlog::events::JsonEvent {
                     time: 0.0,
-                    importance: qlog::events::EventImportance::Core,
+                    importance: quiche::qlog::events::EventImportance::Core,
                     name,
                     data,
                 })]
@@ -553,12 +553,12 @@ fn from_qlog_stream_type_set(
     let mut actions = vec![];
     let fin_stream = parse_ex_data(ex_data);
     let stream_type = match st.stream_type {
-        qlog::events::h3::H3StreamType::Control => Some(0x0),
-        qlog::events::h3::H3StreamType::Push => Some(0x1),
-        qlog::events::h3::H3StreamType::QpackEncode => Some(0x2),
-        qlog::events::h3::H3StreamType::QpackDecode => Some(0x3),
-        qlog::events::h3::H3StreamType::Reserved |
-        qlog::events::h3::H3StreamType::Unknown => st.stream_type_value,
+        quiche::qlog::events::h3::H3StreamType::Control => Some(0x0),
+        quiche::qlog::events::h3::H3StreamType::Push => Some(0x1),
+        quiche::qlog::events::h3::H3StreamType::QpackEncode => Some(0x2),
+        quiche::qlog::events::h3::H3StreamType::QpackDecode => Some(0x3),
+        quiche::qlog::events::h3::H3StreamType::Reserved |
+        quiche::qlog::events::h3::H3StreamType::Unknown => st.stream_type_value,
         _ => None,
     };
 
@@ -598,7 +598,7 @@ mod tests {
     fn ser_duration_wait() {
         let ev = JsonEvent {
             time: NOW,
-            importance: qlog::events::EventImportance::Core,
+            importance: quiche::qlog::events::EventImportance::Core,
             name: H3I_WAIT.to_string(),
             data: serde_json::to_value(WaitType::WaitDuration(
                 Duration::from_millis(0),
@@ -616,7 +616,7 @@ mod tests {
     fn deser_duration_wait() {
         let ev = JsonEvent {
             time: NOW,
-            importance: qlog::events::EventImportance::Core,
+            importance: quiche::qlog::events::EventImportance::Core,
             name: H3I_WAIT.to_string(),
             data: serde_json::to_value(WaitType::WaitDuration(
                 Duration::from_millis(0),
@@ -635,7 +635,7 @@ mod tests {
         let expected = r#"{"time":123.0,"name":"h3i:wait","data":{"stream_id":0,"type":"data"}}"#;
         let ev = JsonEvent {
             time: NOW,
-            importance: qlog::events::EventImportance::Core,
+            importance: quiche::qlog::events::EventImportance::Core,
             name: H3I_WAIT.to_string(),
             data: serde_json::to_value(StreamEvent {
                 stream_id: 0,
@@ -652,7 +652,7 @@ mod tests {
     fn deser_stream_wait() {
         let ev = JsonEvent {
             time: NOW,
-            importance: qlog::events::EventImportance::Core,
+            importance: quiche::qlog::events::EventImportance::Core,
             name: H3I_WAIT.to_string(),
             data: serde_json::to_value(StreamEvent {
                 stream_id: 0,

@@ -149,11 +149,11 @@
 //! [RFC 9204]: https://www.rfc-editor.org/rfc/rfc9204.html
 //! [malformed request]: https://datatracker.ietf.org/doc/html/rfc9114#section-4.1.2-3
 
-use qlog::events::quic::PacketHeader;
-use qlog::events::quic::PacketSent;
-use qlog::events::quic::PacketType;
-use qlog::events::quic::QuicFrame;
-use qlog::events::EventData;
+use quiche::qlog::events::quic::PacketHeader;
+use quiche::qlog::events::quic::PacketSent;
+use quiche::qlog::events::quic::PacketType;
+use quiche::qlog::events::quic::QuicFrame;
+use quiche::qlog::events::EventData;
 pub use quiche;
 use quiche::h3::NameValue;
 

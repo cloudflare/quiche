@@ -383,6 +383,12 @@
 extern crate log;
 
 #[cfg(feature = "qlog")]
+#[doc(hidden)]
+// Re-export qlog here to avoid having to publish both qlog and quiche to bump
+// qlog version in h3i.
+pub use qlog;
+
+#[cfg(feature = "qlog")]
 use qlog::events::connectivity::ConnectivityEventType;
 #[cfg(feature = "qlog")]
 use qlog::events::connectivity::TransportOwner;
