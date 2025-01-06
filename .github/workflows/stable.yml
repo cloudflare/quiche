@@ -49,8 +49,12 @@ jobs:
       - name: Run cargo doc test
         run: cargo test --verbose --doc --features=ffi,qlog,${{ matrix.tls-feature }}
 
-      - name: Run cargo package
-        run: cargo package --verbose --workspace --exclude=quiche_apps --allow-dirty
+      # NOTE: this is disabled as it fails when building changes that bump
+      # version of local crates (e.g. when doing a `qlog` release) that have not
+      # been published yet, and we couldn't find a workaround.
+      #
+      # - name: Run cargo package
+      #   run: cargo package --verbose --workspace --exclude=quiche_apps --allow-dirty
 
       - name: Run cargo clippy
         run: cargo clippy --features=ffi,qlog,${{ matrix.tls-feature }} -- -D warnings
