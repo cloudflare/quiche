@@ -34,11 +34,6 @@ Android's DNS resolver uses quiche to [implement DNS over HTTP/3][android-http3]
 
 quiche can be [integrated into curl][curl-http3] to provide support for HTTP/3.
 
-### NGINX (unofficial)
-
-quiche can be [integrated into NGINX](nginx/) using an unofficial patch to
-provide support for HTTP/3.
-
 [cloudflare-http3]: https://blog.cloudflare.com/http3-the-past-present-and-future/
 [android-http3]: https://security.googleblog.com/2022/07/dns-over-http3-in-android.html
 [curl-http3]: https://github.com/curl/curl/blob/master/docs/HTTP3.md#quiche-version
