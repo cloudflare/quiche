@@ -64,6 +64,7 @@ impl Open {
         if rc != 1 {
             return Err(Error::CryptoFail);
         }
+
         Ok(out_len)
     }
 }
@@ -116,6 +117,7 @@ impl Seal {
                 ad.len(),                   // ad_len
             )
         };
+
         if rc != 1 {
             return Err(Error::CryptoFail);
         }
@@ -164,20 +166,64 @@ impl PacketKey {
         })
     }
 
-    pub fn from_secret_prk(
-        aead: Algorithm, secret_prk: &hkdf::Prk, enc: u32,
-    ) -> Result<Self> {
+    pub fn from_secret(aead: Algorithm, secret: &[u8], enc: u32) -> Result<Self> {
         let key_len = aead.key_len();
         let nonce_len = aead.nonce_len();
 
         let mut key = vec![0; key_len];
         let mut iv = vec![0; nonce_len];
 
-        derive_pkt_key(aead, secret_prk, &mut key)?;
-        derive_pkt_iv(aead, secret_prk, &mut iv)?;
+        derive_pkt_key(aead, secret, &mut key)?;
+        derive_pkt_iv(aead, secret, &mut iv)?;
 
         Self::new(aead, key, iv, enc)
     }
+}
+
+pub(crate) fn hkdf_extract(
+    alg: Algorithm, out: &mut [u8], secret: &[u8], salt: &[u8],
+) -> Result<()> {
+    let mut out_len = out.len();
+
+    let rc = unsafe {
+        HKDF_extract(
+            out.as_mut_ptr(),
+            &mut out_len,
+            alg.get_evp_digest(),
+            secret.as_ptr(),
+            secret.len(),
+            salt.as_ptr(),
+            salt.len(),
+        )
+    };
+
+    if rc != 1 {
+        return Err(Error::CryptoFail);
+    }
+
+    Ok(())
+}
+
+pub(crate) fn hkdf_expand(
+    alg: Algorithm, out: &mut [u8], secret: &[u8], info: &[u8],
+) -> Result<()> {
+    let rc = unsafe {
+        HKDF_expand(
+            out.as_mut_ptr(),
+            out.len(),
+            alg.get_evp_digest(),
+            secret.as_ptr(),
+            secret.len(),
+            info.as_ptr(),
+            info.len(),
+        )
+    };
+
+    if rc != 1 {
+        return Err(Error::CryptoFail);
+    }
+
+    Ok(())
 }
 
 extern {
@@ -186,6 +232,17 @@ extern {
     fn EVP_aead_aes_256_gcm() -> *const EVP_AEAD;
 
     fn EVP_aead_chacha20_poly1305() -> *const EVP_AEAD;
+
+    // HKDF
+    fn HKDF_extract(
+        out_key: *mut u8, out_len: *mut usize, digest: *const EVP_MD,
+        secret: *const u8, secret_len: usize, salt: *const u8, salt_len: usize,
+    ) -> c_int;
+
+    fn HKDF_expand(
+        out_key: *mut u8, out_len: usize, digest: *const EVP_MD, prk: *const u8,
+        prk_len: usize, info: *const u8, info_len: usize,
+    ) -> c_int;
 
     // EVP_AEAD_CTX
     fn EVP_AEAD_CTX_init(
