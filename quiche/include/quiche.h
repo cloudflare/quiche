@@ -489,6 +489,9 @@ void quiche_conn_peer_cert(const quiche_conn *conn, const uint8_t **out, size_t 
 // Returns the serialized cryptographic session for the connection.
 void quiche_conn_session(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
+// Returns the server name requested by the client.
+void quiche_conn_server_name(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
+
 // Returns true if the connection handshake is complete.
 bool quiche_conn_is_established(const quiche_conn *conn);
 
