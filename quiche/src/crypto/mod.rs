@@ -25,7 +25,6 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use ring::aead;
-use ring::hkdf;
 
 use libc::c_void;
 
@@ -78,11 +77,11 @@ impl Algorithm {
         }
     }
 
-    fn get_ring_digest(self) -> hkdf::Algorithm {
+    fn get_evp_digest(self) -> *const EVP_MD {
         match self {
-            Algorithm::AES128_GCM => hkdf::HKDF_SHA256,
-            Algorithm::AES256_GCM => hkdf::HKDF_SHA384,
-            Algorithm::ChaCha20_Poly1305 => hkdf::HKDF_SHA256,
+            Algorithm::AES128_GCM => unsafe { EVP_sha256() },
+            Algorithm::AES256_GCM => unsafe { EVP_sha384() },
+            Algorithm::ChaCha20_Poly1305 => unsafe { EVP_sha256() },
         }
     }
 
@@ -121,10 +120,16 @@ pub struct EVP_AEAD {
     _unused: c_void,
 }
 
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
+struct EVP_MD {
+    _unused: c_void,
+}
+
 pub struct Open {
     alg: Algorithm,
 
-    secret_prk: hkdf::Prk,
+    secret: Vec<u8>,
 
     header: HeaderProtectionKey,
 
@@ -138,36 +143,28 @@ impl Open {
 
     pub fn new(
         alg: Algorithm, key: Vec<u8>, iv: Vec<u8>, hp_key: Vec<u8>,
-        secret_prk: hkdf::Prk,
+        secret: Vec<u8>,
     ) -> Result<Open> {
         Ok(Open {
             alg,
 
+            secret,
+
             header: HeaderProtectionKey::new(alg, hp_key)?,
 
             packet: PacketKey::new(alg, key, iv, Self::DECRYPT)?,
-
-            secret_prk,
         })
     }
 
     pub fn from_secret(aead: Algorithm, secret: &[u8]) -> Result<Open> {
-        let secret_prk = hkdf::Prk::new_less_safe(aead.get_ring_digest(), secret);
-
-        Self::from_secret_prk(aead, secret_prk)
-    }
-
-    pub fn from_secret_prk(
-        aead: Algorithm, secret_prk: hkdf::Prk,
-    ) -> Result<Open> {
         Ok(Open {
             alg: aead,
 
-            header: HeaderProtectionKey::from_secret(aead, &secret_prk)?,
+            secret: secret.to_vec(),
 
-            packet: PacketKey::from_secret_prk(aead, &secret_prk, Self::DECRYPT)?,
+            header: HeaderProtectionKey::from_secret(aead, secret)?,
 
-            secret_prk,
+            packet: PacketKey::from_secret(aead, secret, Self::DECRYPT)?,
         })
     }
 
@@ -190,18 +187,15 @@ impl Open {
     }
 
     pub fn derive_next_packet_key(&self) -> Result<Open> {
-        let next_secret_prk = derive_next_secret(self.alg, &self.secret_prk)?;
+        let next_secret = derive_next_secret(self.alg, &self.secret)?;
 
-        let next_packet_key = PacketKey::from_secret_prk(
-            self.alg,
-            &next_secret_prk,
-            Self::DECRYPT,
-        )?;
+        let next_packet_key =
+            PacketKey::from_secret(self.alg, &next_secret, Self::DECRYPT)?;
 
         Ok(Open {
             alg: self.alg,
 
-            secret_prk: next_secret_prk,
+            secret: next_secret,
 
             header: HeaderProtectionKey::new(
                 self.alg,
@@ -216,7 +210,7 @@ impl Open {
 pub struct Seal {
     alg: Algorithm,
 
-    secret_prk: hkdf::Prk,
+    secret: Vec<u8>,
 
     header: HeaderProtectionKey,
 
@@ -230,36 +224,28 @@ impl Seal {
 
     pub fn new(
         alg: Algorithm, key: Vec<u8>, iv: Vec<u8>, hp_key: Vec<u8>,
-        secret_prk: hkdf::Prk,
+        secret: Vec<u8>,
     ) -> Result<Seal> {
         Ok(Seal {
             alg,
 
+            secret,
+
             header: HeaderProtectionKey::new(alg, hp_key)?,
 
             packet: PacketKey::new(alg, key, iv, Self::ENCRYPT)?,
-
-            secret_prk,
         })
     }
 
     pub fn from_secret(aead: Algorithm, secret: &[u8]) -> Result<Seal> {
-        let secret_prk = hkdf::Prk::new_less_safe(aead.get_ring_digest(), secret);
-
-        Self::from_secret_prk(aead, secret_prk)
-    }
-
-    pub fn from_secret_prk(
-        aead: Algorithm, secret_prk: hkdf::Prk,
-    ) -> Result<Seal> {
         Ok(Seal {
             alg: aead,
 
-            header: HeaderProtectionKey::from_secret(aead, &secret_prk)?,
+            secret: secret.to_vec(),
 
-            packet: PacketKey::from_secret_prk(aead, &secret_prk, Self::ENCRYPT)?,
+            header: HeaderProtectionKey::from_secret(aead, secret)?,
 
-            secret_prk,
+            packet: PacketKey::from_secret(aead, secret, Self::ENCRYPT)?,
         })
     }
 
@@ -282,18 +268,15 @@ impl Seal {
     }
 
     pub fn derive_next_packet_key(&self) -> Result<Seal> {
-        let next_secret_prk = derive_next_secret(self.alg, &self.secret_prk)?;
+        let next_secret = derive_next_secret(self.alg, &self.secret)?;
 
-        let next_packet_key = PacketKey::from_secret_prk(
-            self.alg,
-            &next_secret_prk,
-            Self::ENCRYPT,
-        )?;
+        let next_packet_key =
+            PacketKey::from_secret(self.alg, &next_secret, Self::ENCRYPT)?;
 
         Ok(Seal {
             alg: self.alg,
 
-            secret_prk: next_secret_prk,
+            secret: next_secret,
 
             header: HeaderProtectionKey::new(
                 self.alg,
@@ -318,7 +301,7 @@ impl HeaderProtectionKey {
             .map_err(|_| Error::CryptoFail)
     }
 
-    pub fn from_secret(aead: Algorithm, secret: &hkdf::Prk) -> Result<Self> {
+    pub fn from_secret(aead: Algorithm, secret: &[u8]) -> Result<Self> {
         let key_len = aead.key_len();
 
         let mut hp_key = vec![0; key_len];
@@ -332,84 +315,57 @@ impl HeaderProtectionKey {
 pub fn derive_initial_key_material(
     cid: &[u8], version: u32, is_server: bool,
 ) -> Result<(Open, Seal)> {
-    let mut client_secret = [0; 32];
-    let mut server_secret = [0; 32];
+    let mut initial_secret = [0; 32];
+    let mut client_secret = vec![0; 32];
+    let mut server_secret = vec![0; 32];
 
     let aead = Algorithm::AES128_GCM;
 
     let key_len = aead.key_len();
     let nonce_len = aead.nonce_len();
 
-    let initial_secret = derive_initial_secret(cid, version);
+    derive_initial_secret(cid, version, &mut initial_secret)?;
 
     // Client.
     let mut client_key = vec![0; key_len];
     let mut client_iv = vec![0; nonce_len];
     let mut client_hp_key = vec![0; key_len];
 
-    derive_client_initial_secret(&initial_secret, &mut client_secret)?;
+    derive_client_initial_secret(aead, &initial_secret, &mut client_secret)?;
 
-    let client_secret_prk =
-        hkdf::Prk::new_less_safe(aead.get_ring_digest(), &client_secret);
-
-    derive_pkt_key(aead, &client_secret_prk, &mut client_key)?;
-    derive_pkt_iv(aead, &client_secret_prk, &mut client_iv)?;
-    derive_hdr_key(aead, &client_secret_prk, &mut client_hp_key)?;
+    derive_pkt_key(aead, &client_secret, &mut client_key)?;
+    derive_pkt_iv(aead, &client_secret, &mut client_iv)?;
+    derive_hdr_key(aead, &client_secret, &mut client_hp_key)?;
 
     // Server.
     let mut server_key = vec![0; key_len];
     let mut server_iv = vec![0; nonce_len];
     let mut server_hp_key = vec![0; key_len];
 
-    derive_server_initial_secret(&initial_secret, &mut server_secret)?;
+    derive_server_initial_secret(aead, &initial_secret, &mut server_secret)?;
 
-    let server_secret_prk =
-        hkdf::Prk::new_less_safe(aead.get_ring_digest(), &server_secret);
-
-    derive_pkt_key(aead, &server_secret_prk, &mut server_key)?;
-    derive_pkt_iv(aead, &server_secret_prk, &mut server_iv)?;
-    derive_hdr_key(aead, &server_secret_prk, &mut server_hp_key)?;
+    derive_pkt_key(aead, &server_secret, &mut server_key)?;
+    derive_pkt_iv(aead, &server_secret, &mut server_iv)?;
+    derive_hdr_key(aead, &server_secret, &mut server_hp_key)?;
 
     let (open, seal) = if is_server {
         (
-            Open::new(
-                aead,
-                client_key,
-                client_iv,
-                client_hp_key,
-                client_secret_prk,
-            )?,
-            Seal::new(
-                aead,
-                server_key,
-                server_iv,
-                server_hp_key,
-                server_secret_prk,
-            )?,
+            Open::new(aead, client_key, client_iv, client_hp_key, client_secret)?,
+            Seal::new(aead, server_key, server_iv, server_hp_key, server_secret)?,
         )
     } else {
         (
-            Open::new(
-                aead,
-                server_key,
-                server_iv,
-                server_hp_key,
-                server_secret_prk,
-            )?,
-            Seal::new(
-                aead,
-                client_key,
-                client_iv,
-                client_hp_key,
-                client_secret_prk,
-            )?,
+            Open::new(aead, server_key, server_iv, server_hp_key, server_secret)?,
+            Seal::new(aead, client_key, client_iv, client_hp_key, client_secret)?,
         )
     };
 
     Ok((open, seal))
 }
 
-fn derive_initial_secret(secret: &[u8], version: u32) -> hkdf::Prk {
+fn derive_initial_secret(
+    secret: &[u8], version: u32, out_prk: &mut [u8],
+) -> Result<()> {
     const INITIAL_SALT_V1: [u8; 20] = [
         0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17, 0x9a, 0xe6,
         0xa4, 0xc8, 0x0c, 0xad, 0xcc, 0xbb, 0x7f, 0x0a,
@@ -421,35 +377,35 @@ fn derive_initial_secret(secret: &[u8], version: u32) -> hkdf::Prk {
         _ => &INITIAL_SALT_V1,
     };
 
-    let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, salt);
-    salt.extract(secret)
+    hkdf_extract(Algorithm::AES128_GCM, out_prk, secret, salt)
 }
 
-fn derive_client_initial_secret(prk: &hkdf::Prk, out: &mut [u8]) -> Result<()> {
+fn derive_client_initial_secret(
+    aead: Algorithm, prk: &[u8], out: &mut [u8],
+) -> Result<()> {
     const LABEL: &[u8] = b"client in";
-    hkdf_expand_label(prk, LABEL, out)
+    hkdf_expand_label(aead, prk, LABEL, out)
 }
 
-fn derive_server_initial_secret(prk: &hkdf::Prk, out: &mut [u8]) -> Result<()> {
+fn derive_server_initial_secret(
+    aead: Algorithm, prk: &[u8], out: &mut [u8],
+) -> Result<()> {
     const LABEL: &[u8] = b"server in";
-    hkdf_expand_label(prk, LABEL, out)
+    hkdf_expand_label(aead, prk, LABEL, out)
 }
 
-fn derive_next_secret(aead: Algorithm, secret: &hkdf::Prk) -> Result<hkdf::Prk> {
+fn derive_next_secret(aead: Algorithm, secret: &[u8]) -> Result<Vec<u8>> {
     const LABEL: &[u8] = b"quic ku";
 
-    let mut next_secret = [0u8; 32];
+    let mut next_secret = vec![0u8; 32];
 
-    hkdf_expand_label(secret, LABEL, &mut next_secret)?;
+    hkdf_expand_label(aead, secret, LABEL, &mut next_secret)?;
 
-    let next_secret_prk =
-        hkdf::Prk::new_less_safe(aead.get_ring_digest(), &next_secret);
-
-    Ok(next_secret_prk)
+    Ok(next_secret)
 }
 
 pub fn derive_hdr_key(
-    aead: Algorithm, secret: &hkdf::Prk, out: &mut [u8],
+    aead: Algorithm, secret: &[u8], out: &mut [u8],
 ) -> Result<()> {
     const LABEL: &[u8] = b"quic hp";
 
@@ -459,12 +415,10 @@ pub fn derive_hdr_key(
         return Err(Error::CryptoFail);
     }
 
-    hkdf_expand_label(secret, LABEL, &mut out[..key_len])
+    hkdf_expand_label(aead, secret, LABEL, &mut out[..key_len])
 }
 
-pub fn derive_pkt_key(
-    aead: Algorithm, secret: &hkdf::Prk, out: &mut [u8],
-) -> Result<()> {
+pub fn derive_pkt_key(aead: Algorithm, prk: &[u8], out: &mut [u8]) -> Result<()> {
     const LABEL: &[u8] = b"quic key";
 
     let key_len: usize = aead.key_len();
@@ -473,12 +427,10 @@ pub fn derive_pkt_key(
         return Err(Error::CryptoFail);
     }
 
-    hkdf_expand_label(secret, LABEL, &mut out[..key_len])
+    hkdf_expand_label(aead, prk, LABEL, &mut out[..key_len])
 }
 
-pub fn derive_pkt_iv(
-    aead: Algorithm, secret: &hkdf::Prk, out: &mut [u8],
-) -> Result<()> {
+pub fn derive_pkt_iv(aead: Algorithm, prk: &[u8], out: &mut [u8]) -> Result<()> {
     const LABEL: &[u8] = b"quic iv";
 
     let nonce_len = aead.nonce_len();
@@ -487,11 +439,11 @@ pub fn derive_pkt_iv(
         return Err(Error::CryptoFail);
     }
 
-    hkdf_expand_label(secret, LABEL, &mut out[..nonce_len])
+    hkdf_expand_label(aead, prk, LABEL, &mut out[..nonce_len])
 }
 
 fn hkdf_expand_label(
-    prk: &hkdf::Prk, label: &[u8], out: &mut [u8],
+    alg: Algorithm, prk: &[u8], label: &[u8], out: &mut [u8],
 ) -> Result<()> {
     const LABEL_PREFIX: &[u8] = b"tls13 ";
 
@@ -499,11 +451,9 @@ fn hkdf_expand_label(
     let label_len = (LABEL_PREFIX.len() + label.len()) as u8;
 
     let info = [&out_len, &[label_len][..], LABEL_PREFIX, label, &[0][..]];
+    let info = info.concat();
 
-    prk.expand(&info, ArbitraryOutputLen(out.len()))
-        .map_err(|_| Error::CryptoFail)?
-        .fill(out)
-        .map_err(|_| Error::CryptoFail)?;
+    hkdf_expand(alg, out, prk, &info)?;
 
     Ok(())
 }
@@ -521,15 +471,10 @@ fn make_nonce(iv: &[u8], counter: u64) -> [u8; aead::NONCE_LEN] {
     nonce
 }
 
-// The ring HKDF expand() API does not accept an arbitrary output length, so we
-// need to hide the `usize` length as part of a type that implements the trait
-// `ring::hkdf::KeyType` in order to trick ring into accepting it.
-struct ArbitraryOutputLen(usize);
+extern {
+    fn EVP_sha256() -> *const EVP_MD;
 
-impl hkdf::KeyType for ArbitraryOutputLen {
-    fn len(&self) -> usize {
-        self.0
-    }
+    fn EVP_sha384() -> *const EVP_MD;
 }
 
 #[cfg(test)]
@@ -540,6 +485,8 @@ mod tests {
     fn derive_initial_secrets_v1() {
         let dcid = [0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
 
+        let mut initial_secret = [0; 32];
+
         let mut secret = [0; 32];
         let mut pkt_key = [0; 16];
         let mut pkt_iv = [0; 12];
@@ -547,12 +494,17 @@ mod tests {
 
         let aead = Algorithm::AES128_GCM;
 
-        let initial_secret =
-            derive_initial_secret(&dcid, crate::PROTOCOL_VERSION_V1);
+        assert!(derive_initial_secret(
+            &dcid,
+            crate::PROTOCOL_VERSION_V1,
+            &mut initial_secret,
+        )
+        .is_ok());
 
         // Client.
         assert!(
-            derive_client_initial_secret(&initial_secret, &mut secret).is_ok()
+            derive_client_initial_secret(aead, &initial_secret, &mut secret)
+                .is_ok()
         );
         let expected_client_initial_secret = [
             0xc0, 0x0c, 0xf1, 0x51, 0xca, 0x5b, 0xe0, 0x75, 0xed, 0x0e, 0xbf,
@@ -561,24 +513,21 @@ mod tests {
         ];
         assert_eq!(&secret, &expected_client_initial_secret);
 
-        let secret_prk =
-            hkdf::Prk::new_less_safe(aead.get_ring_digest(), &secret);
-
-        assert!(derive_pkt_key(aead, &secret_prk, &mut pkt_key).is_ok());
+        assert!(derive_pkt_key(aead, &secret, &mut pkt_key).is_ok());
         let expected_client_pkt_key = [
             0x1f, 0x36, 0x96, 0x13, 0xdd, 0x76, 0xd5, 0x46, 0x77, 0x30, 0xef,
             0xcb, 0xe3, 0xb1, 0xa2, 0x2d,
         ];
         assert_eq!(&pkt_key, &expected_client_pkt_key);
 
-        assert!(derive_pkt_iv(aead, &secret_prk, &mut pkt_iv).is_ok());
+        assert!(derive_pkt_iv(aead, &secret, &mut pkt_iv).is_ok());
         let expected_client_pkt_iv = [
             0xfa, 0x04, 0x4b, 0x2f, 0x42, 0xa3, 0xfd, 0x3b, 0x46, 0xfb, 0x25,
             0x5c,
         ];
         assert_eq!(&pkt_iv, &expected_client_pkt_iv);
 
-        assert!(derive_hdr_key(aead, &secret_prk, &mut hdr_key).is_ok());
+        assert!(derive_hdr_key(aead, &secret, &mut hdr_key).is_ok());
         let expected_client_hdr_key = [
             0x9f, 0x50, 0x44, 0x9e, 0x04, 0xa0, 0xe8, 0x10, 0x28, 0x3a, 0x1e,
             0x99, 0x33, 0xad, 0xed, 0xd2,
@@ -587,11 +536,9 @@ mod tests {
 
         // Server.
         assert!(
-            derive_server_initial_secret(&initial_secret, &mut secret).is_ok()
+            derive_server_initial_secret(aead, &initial_secret, &mut secret)
+                .is_ok()
         );
-
-        let secret_prk =
-            hkdf::Prk::new_less_safe(aead.get_ring_digest(), &secret);
 
         let expected_server_initial_secret = [
             0x3c, 0x19, 0x98, 0x28, 0xfd, 0x13, 0x9e, 0xfd, 0x21, 0x6c, 0x15,
@@ -600,21 +547,21 @@ mod tests {
         ];
         assert_eq!(&secret, &expected_server_initial_secret);
 
-        assert!(derive_pkt_key(aead, &secret_prk, &mut pkt_key).is_ok());
+        assert!(derive_pkt_key(aead, &secret, &mut pkt_key).is_ok());
         let expected_server_pkt_key = [
             0xcf, 0x3a, 0x53, 0x31, 0x65, 0x3c, 0x36, 0x4c, 0x88, 0xf0, 0xf3,
             0x79, 0xb6, 0x06, 0x7e, 0x37,
         ];
         assert_eq!(&pkt_key, &expected_server_pkt_key);
 
-        assert!(derive_pkt_iv(aead, &secret_prk, &mut pkt_iv).is_ok());
+        assert!(derive_pkt_iv(aead, &secret, &mut pkt_iv).is_ok());
         let expected_server_pkt_iv = [
             0x0a, 0xc1, 0x49, 0x3c, 0xa1, 0x90, 0x58, 0x53, 0xb0, 0xbb, 0xa0,
             0x3e,
         ];
         assert_eq!(&pkt_iv, &expected_server_pkt_iv);
 
-        assert!(derive_hdr_key(aead, &secret_prk, &mut hdr_key).is_ok());
+        assert!(derive_hdr_key(aead, &secret, &mut hdr_key).is_ok());
         let expected_server_hdr_key = [
             0xc2, 0x06, 0xb8, 0xd9, 0xb9, 0xf0, 0xf3, 0x76, 0x44, 0x43, 0x0b,
             0x49, 0x0e, 0xea, 0xa3, 0x14,
@@ -636,10 +583,7 @@ mod tests {
         let mut pkt_iv = [0; 12];
         let mut hdr_key = [0; 32];
 
-        let secret_prk =
-            hkdf::Prk::new_less_safe(aead.get_ring_digest(), &secret);
-
-        assert!(derive_pkt_key(aead, &secret_prk, &mut pkt_key).is_ok());
+        assert!(derive_pkt_key(aead, &secret, &mut pkt_key).is_ok());
         let expected_pkt_key = [
             0xc6, 0xd9, 0x8f, 0xf3, 0x44, 0x1c, 0x3f, 0xe1, 0xb2, 0x18, 0x20,
             0x94, 0xf6, 0x9c, 0xaa, 0x2e, 0xd4, 0xb7, 0x16, 0xb6, 0x54, 0x88,
@@ -647,14 +591,14 @@ mod tests {
         ];
         assert_eq!(&pkt_key, &expected_pkt_key);
 
-        assert!(derive_pkt_iv(aead, &secret_prk, &mut pkt_iv).is_ok());
+        assert!(derive_pkt_iv(aead, &secret, &mut pkt_iv).is_ok());
         let expected_pkt_iv = [
             0xe0, 0x45, 0x9b, 0x34, 0x74, 0xbd, 0xd0, 0xe4, 0x4a, 0x41, 0xc1,
             0x44,
         ];
         assert_eq!(&pkt_iv, &expected_pkt_iv);
 
-        assert!(derive_hdr_key(aead, &secret_prk, &mut hdr_key).is_ok());
+        assert!(derive_hdr_key(aead, &secret, &mut hdr_key).is_ok());
         let expected_hdr_key = [
             0x25, 0xa2, 0x82, 0xb9, 0xe8, 0x2f, 0x06, 0xf2, 0x1f, 0x48, 0x89,
             0x17, 0xa4, 0xfc, 0x8f, 0x1b, 0x73, 0x57, 0x36, 0x85, 0x60, 0x85,

@@ -8,6 +8,13 @@ use libc::c_uchar;
 struct EVP_CIPHER_CTX {
     _unused: *mut EVP_CIPHER_CTX,
 }
+
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
+struct EVP_PKEY_CTX {
+    _unused: c_void,
+}
+
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 struct OSSL_PARAM {
@@ -312,17 +319,15 @@ impl PacketKey {
         })
     }
 
-    pub fn from_secret_prk(
-        aead: Algorithm, secret_prk: &hkdf::Prk, enc: u32,
-    ) -> Result<Self> {
+    pub fn from_secret(aead: Algorithm, secret: &[u8], enc: u32) -> Result<Self> {
         let key_len = aead.key_len();
         let nonce_len = aead.nonce_len();
 
         let mut key = vec![0; key_len];
         let mut iv = vec![0; nonce_len];
 
-        derive_pkt_key(aead, secret_prk, &mut key)?;
-        derive_pkt_iv(aead, secret_prk, &mut iv)?;
+        derive_pkt_key(aead, secret, &mut key)?;
+        derive_pkt_iv(aead, secret, &mut iv)?;
 
         Self::new(aead, key, iv, enc)
     }
@@ -330,6 +335,70 @@ impl PacketKey {
 
 unsafe impl std::marker::Send for PacketKey {}
 unsafe impl std::marker::Sync for PacketKey {}
+
+pub(crate) fn hkdf_extract(
+    alg: Algorithm, out: &mut [u8], secret: &[u8], salt: &[u8],
+) -> Result<()> {
+    let mut out_len = out.len();
+
+    unsafe {
+        let prf = alg.get_evp_digest();
+
+        let ctx = EVP_PKEY_CTX_new_id(
+            1036, // EVP_PKEY_HKDF
+            std::ptr::null_mut(),
+        );
+
+        if EVP_PKEY_derive_init(ctx) != 1 ||
+            EVP_PKEY_CTX_set_hkdf_mode(
+                ctx, 1, // EVP_PKEY_HKDF_MODE_EXTRACT_ONLY
+            ) != 1 ||
+            EVP_PKEY_CTX_set_hkdf_md(ctx, prf) != 1 ||
+            EVP_PKEY_CTX_set1_hkdf_salt(ctx, salt.as_ptr(), salt.len()) != 1 ||
+            EVP_PKEY_CTX_set1_hkdf_key(ctx, secret.as_ptr(), secret.len()) != 1 ||
+            EVP_PKEY_derive(ctx, out.as_mut_ptr(), &mut out_len) != 1
+        {
+            EVP_PKEY_CTX_free(ctx);
+            return Err(Error::CryptoFail);
+        }
+
+        EVP_PKEY_CTX_free(ctx);
+    }
+
+    Ok(())
+}
+
+pub(crate) fn hkdf_expand(
+    alg: Algorithm, out: &mut [u8], secret: &[u8], info: &[u8],
+) -> Result<()> {
+    let mut out_len = out.len();
+
+    unsafe {
+        let prf = alg.get_evp_digest();
+
+        let ctx = EVP_PKEY_CTX_new_id(
+            1036, // EVP_PKEY_HKDF
+            std::ptr::null_mut(),
+        );
+
+        if EVP_PKEY_derive_init(ctx) != 1 ||
+            EVP_PKEY_CTX_set_hkdf_mode(
+                ctx, 2, // EVP_PKEY_HKDF_MODE_EXPAND_ONLY
+            ) != 1 ||
+            EVP_PKEY_CTX_set_hkdf_md(ctx, prf) != 1 ||
+            EVP_PKEY_CTX_set1_hkdf_key(ctx, secret.as_ptr(), secret.len()) != 1 ||
+            EVP_PKEY_CTX_add1_hkdf_info(ctx, info.as_ptr(), info.len()) != 1 ||
+            EVP_PKEY_derive(ctx, out.as_mut_ptr(), &mut out_len) != 1
+        {
+            EVP_PKEY_CTX_free(ctx);
+            return Err(Error::CryptoFail);
+        }
+
+        EVP_PKEY_CTX_free(ctx);
+    }
+
+    Ok(())
+}
 
 extern {
     // EVP
@@ -361,4 +430,29 @@ extern {
     fn EVP_CipherFinal_ex(
         ctx: *mut EVP_CIPHER_CTX, out: *mut c_uchar, outl: *mut c_int,
     ) -> c_int;
+
+    // EVP_PKEY
+    fn EVP_PKEY_CTX_new_id(id: c_int, e: *mut c_void) -> *mut EVP_PKEY_CTX;
+
+    fn EVP_PKEY_CTX_set_hkdf_mode(ctx: *mut EVP_PKEY_CTX, mode: c_int) -> c_int;
+    fn EVP_PKEY_CTX_set_hkdf_md(
+        ctx: *mut EVP_PKEY_CTX, md: *const EVP_MD,
+    ) -> c_int;
+    fn EVP_PKEY_CTX_set1_hkdf_salt(
+        ctx: *mut EVP_PKEY_CTX, salt: *const u8, salt_len: usize,
+    ) -> c_int;
+    fn EVP_PKEY_CTX_set1_hkdf_key(
+        ctx: *mut EVP_PKEY_CTX, key: *const u8, key_len: usize,
+    ) -> c_int;
+    fn EVP_PKEY_CTX_add1_hkdf_info(
+        ctx: *mut EVP_PKEY_CTX, info: *const u8, info_len: usize,
+    ) -> c_int;
+
+    fn EVP_PKEY_derive_init(ctx: *mut EVP_PKEY_CTX) -> c_int;
+
+    fn EVP_PKEY_derive(
+        ctx: *mut EVP_PKEY_CTX, key: *mut u8, key_len: *mut usize,
+    ) -> c_int;
+
+    fn EVP_PKEY_CTX_free(ctx: *mut EVP_PKEY_CTX);
 }
