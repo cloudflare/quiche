@@ -1,5 +1,5 @@
 // (num-bits, bits)
-pub const ENCODE_TABLE: [(usize, u64); 257] = [
+pub static ENCODE_TABLE: [(usize, u64); 257] = [
     (13, 0x1ff8),
     (23, 0x7fffd8),
     (28, 0xfffffe2),
@@ -260,7 +260,7 @@ pub const ENCODE_TABLE: [(usize, u64); 257] = [
 ];
 
 // (next-state, byte, flags)
-pub const DECODE_TABLE: [[(usize, u8, u8); 16]; 256] = [
+pub static DECODE_TABLE: [[(usize, u8, u8); 16]; 256] = [
     // 0
     [
         (4, 0, 0x00),

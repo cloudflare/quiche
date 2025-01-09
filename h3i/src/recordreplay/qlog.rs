@@ -433,8 +433,8 @@ impl From<&PacketSent> for H3Actions {
 fn map_header(
     hdr: &HttpHeader, host_override: Option<&str>,
 ) -> quiche::h3::Header {
-    if hdr.name.to_ascii_lowercase() == ":authority" ||
-        hdr.name.to_ascii_lowercase() == "host"
+    if hdr.name.eq_ignore_ascii_case(":authority") ||
+        hdr.name.eq_ignore_ascii_case("host")
     {
         if let Some(host) = host_override {
             return quiche::h3::Header::new(hdr.name.as_bytes(), host.as_bytes());
