@@ -238,7 +238,7 @@ impl Seal {
     }
 
     pub fn from_secret(aead: Algorithm, secret: &[u8]) -> Result<Seal> {
-        Ok(Seal {
+        let seal = Seal {
             alg: aead,
 
             secret: secret.to_vec(),
@@ -246,7 +246,17 @@ impl Seal {
             header: HeaderProtectionKey::from_secret(aead, secret)?,
 
             packet: PacketKey::from_secret(aead, secret, Self::ENCRYPT)?,
-        })
+        };
+
+        // Dummy seal operation to prime the AEAD context with the nonce mask.
+        //
+        // This is needed because BoringCrypto requires the first counter (i.e.
+        // packet number) to be zero, which would not be the case for packet
+        // number spaces after Initial as the same packet number sequence is
+        // shared.
+        let _ = seal.seal_with_u64_counter(0, b"", &mut [0_u8; 16], 0, None);
+
+        Ok(seal)
     }
 
     pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
