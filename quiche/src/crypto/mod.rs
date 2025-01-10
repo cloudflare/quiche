@@ -24,8 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use ring::aead;
-
 use libc::c_int;
 use libc::c_void;
 
@@ -70,17 +68,9 @@ pub enum Algorithm {
     ChaCha20_Poly1305,
 }
 
+// Note: some vendor-specific methods are implemented by each vendor's submodule
+// (openssl-quictls / boringssl).
 impl Algorithm {
-    // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
-    fn get_ring_hp(self) -> &'static aead::quic::Algorithm {
-        match self {
-            Algorithm::AES128_GCM => &aead::quic::AES_128,
-            Algorithm::AES256_GCM => &aead::quic::AES_256,
-            Algorithm::ChaCha20_Poly1305 => &aead::quic::CHACHA20,
-        }
-    }
-
     fn get_evp_digest(self) -> *const EVP_MD {
         match self {
             Algorithm::AES128_GCM => unsafe { EVP_sha256() },
@@ -178,13 +168,7 @@ impl Open {
             return Ok(<[u8; 5]>::default());
         }
 
-        let mask = self
-            .header
-            .hpk
-            .new_mask(sample)
-            .map_err(|_| Error::CryptoFail)?;
-
-        Ok(mask)
+        self.header.new_mask(sample)
     }
 
     pub fn alg(&self) -> Algorithm {
@@ -202,10 +186,7 @@ impl Open {
 
             secret: next_secret,
 
-            header: HeaderProtectionKey::new(
-                self.alg,
-                self.header.hp_key.clone(),
-            )?,
+            header: self.header.clone(),
 
             packet: next_packet_key,
         })
@@ -280,13 +261,7 @@ impl Seal {
             return Ok(<[u8; 5]>::default());
         }
 
-        let mask = self
-            .header
-            .hpk
-            .new_mask(sample)
-            .map_err(|_| Error::CryptoFail)?;
-
-        Ok(mask)
+        self.header.new_mask(sample)
     }
 
     pub fn alg(&self) -> Algorithm {
@@ -304,10 +279,7 @@ impl Seal {
 
             secret: next_secret,
 
-            header: HeaderProtectionKey::new(
-                self.alg,
-                self.header.hp_key.clone(),
-            )?,
+            header: self.header.clone(),
 
             packet: next_packet_key,
         })
@@ -331,19 +303,7 @@ impl Seal {
     }
 }
 
-pub struct HeaderProtectionKey {
-    hpk: aead::quic::HeaderProtectionKey,
-
-    hp_key: Vec<u8>,
-}
-
 impl HeaderProtectionKey {
-    pub fn new(alg: Algorithm, hp_key: Vec<u8>) -> Result<Self> {
-        aead::quic::HeaderProtectionKey::new(alg.get_ring_hp(), &hp_key)
-            .map(|hpk| Self { hpk, hp_key })
-            .map_err(|_| Error::CryptoFail)
-    }
-
     pub fn from_secret(aead: Algorithm, secret: &[u8]) -> Result<Self> {
         let key_len = aead.key_len();
 

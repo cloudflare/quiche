@@ -21,13 +21,15 @@ struct OSSL_PARAM {
     _unused: c_void,
 }
 
-impl Drop for EVP_CIPHER_CTX {
-    fn drop(&mut self) {
-        unsafe { EVP_CIPHER_CTX_free(self) }
-    }
-}
-
 impl Algorithm {
+    pub fn get_evp(self) -> *const EVP_AEAD {
+        match self {
+            Algorithm::AES128_GCM => unsafe { EVP_aes_128_ctr() },
+            Algorithm::AES256_GCM => unsafe { EVP_aes_256_ctr() },
+            Algorithm::ChaCha20_Poly1305 => unsafe { EVP_chacha20() },
+        }
+    }
+
     pub fn get_evp_aead(self) -> *const EVP_AEAD {
         match self {
             Algorithm::AES128_GCM => unsafe { EVP_aes_128_gcm() },
@@ -56,7 +58,7 @@ impl PacketKey {
     ) -> Result<Self> {
         Ok(Self {
             alg,
-            ctx: make_evp_cipher_ctx_basic(alg, enc)?,
+            ctx: make_evp_cipher_ctx_basic(alg, true, enc)?,
             nonce: iv,
             key,
         })
@@ -291,16 +293,114 @@ impl PacketKey {
     }
 }
 
+impl Drop for PacketKey {
+    fn drop(&mut self) {
+        unsafe { EVP_CIPHER_CTX_free(self.ctx) }
+    }
+}
+
 unsafe impl std::marker::Send for PacketKey {}
 unsafe impl std::marker::Sync for PacketKey {}
 
+pub(crate) struct HeaderProtectionKey {
+    ctx: *mut EVP_CIPHER_CTX,
+
+    key: Vec<u8>,
+}
+
+impl HeaderProtectionKey {
+    pub fn new(alg: Algorithm, hp_key: Vec<u8>) -> Result<Self> {
+        Ok(Self {
+            ctx: make_evp_cipher_ctx_basic(alg, false, 1)?,
+            key: hp_key,
+        })
+    }
+
+    pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
+        const PLAINTEXT: &[u8; 5] = &[0_u8; 5];
+
+        let mut new_mask = [0_u8; 5];
+
+        // Set IV (i.e. the sample).
+        let rc = unsafe {
+            EVP_CipherInit_ex2(
+                self.ctx,
+                std::ptr::null_mut(), // already set
+                self.key.as_ptr(),
+                sample.as_ptr(),
+                -1,
+                std::ptr::null(),
+            )
+        };
+
+        if rc != 1 {
+            return Err(Error::CryptoFail);
+        }
+
+        let mut out_len: i32 = 0;
+
+        let rc = unsafe {
+            EVP_CipherUpdate(
+                self.ctx,
+                new_mask.as_mut_ptr(),
+                &mut out_len,
+                PLAINTEXT.as_ptr(),
+                PLAINTEXT.len() as i32,
+            )
+        };
+
+        if rc != 1 {
+            return Err(Error::CryptoFail);
+        };
+
+        let rc = unsafe {
+            EVP_CipherFinal_ex(
+                self.ctx,
+                new_mask[out_len as usize..].as_mut_ptr(),
+                &mut out_len,
+            )
+        };
+
+        if rc != 1 {
+            return Err(Error::CryptoFail);
+        }
+
+        Ok(new_mask)
+    }
+}
+
+impl Clone for HeaderProtectionKey {
+    fn clone(&self) -> Self {
+        let ctx = unsafe { EVP_CIPHER_CTX_dup(self.ctx) };
+
+        Self {
+            ctx,
+            key: self.key.clone(),
+        }
+    }
+}
+
+impl Drop for HeaderProtectionKey {
+    fn drop(&mut self) {
+        unsafe { EVP_CIPHER_CTX_free(self.ctx) }
+    }
+}
+
+unsafe impl std::marker::Send for HeaderProtectionKey {}
+unsafe impl std::marker::Sync for HeaderProtectionKey {}
+
 fn make_evp_cipher_ctx_basic(
-    alg: Algorithm, enc: u32,
+    alg: Algorithm, aead: bool, enc: u32,
 ) -> Result<*mut EVP_CIPHER_CTX> {
     let ctx: *mut EVP_CIPHER_CTX = unsafe {
-        let cipher: *const EVP_AEAD = alg.get_evp_aead();
+        let cipher: *const EVP_AEAD = if aead {
+            alg.get_evp_aead()
+        } else {
+            alg.get_evp()
+        };
 
         let ctx = EVP_CIPHER_CTX_new();
+
         if ctx.is_null() {
             return Err(Error::CryptoFail);
         }
@@ -390,14 +490,19 @@ pub(crate) fn hkdf_expand(
 
 extern "C" {
     // EVP
+    fn EVP_aes_128_ctr() -> *const EVP_AEAD;
     fn EVP_aes_128_gcm() -> *const EVP_AEAD;
 
+    fn EVP_aes_256_ctr() -> *const EVP_AEAD;
     fn EVP_aes_256_gcm() -> *const EVP_AEAD;
 
+    fn EVP_chacha20() -> *const EVP_AEAD;
     fn EVP_chacha20_poly1305() -> *const EVP_AEAD;
 
     // EVP_CIPHER_CTX
     fn EVP_CIPHER_CTX_new() -> *mut EVP_CIPHER_CTX;
+
+    fn EVP_CIPHER_CTX_dup(ctx: *const EVP_CIPHER_CTX) -> *mut EVP_CIPHER_CTX;
 
     fn EVP_CIPHER_CTX_free(ctx: *mut EVP_CIPHER_CTX);
 
