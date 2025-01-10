@@ -228,48 +228,6 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy --manifest-path=tools/http3_test/Cargo.toml -- -D warnings
 
-  nginx:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        version: ["1.16.1"]
-    # Only run on "pull_request" event for external PRs. This is to avoid
-    # duplicate builds for PRs created from internal branches.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUSTTOOLCHAIN }}
-
-      - name: Install dependencies
-        run: sudo apt-get install libpcre3-dev zlib1g-dev
-
-      - name: Download NGINX sources
-        run: curl -O https://nginx.org/download/nginx-${{ matrix.version }}.tar.gz
-
-      - name: Extract NGINX sources
-        run: tar xzf nginx-${{ matrix.version }}.tar.gz
-
-      - name: Build NGINX
-        run: |
-          cd nginx-${{ matrix.version }} &&
-          patch -p01 < ../nginx/nginx-1.16.patch &&
-          ./configure \
-              --with-http_ssl_module \
-              --with-http_v2_module \
-              --with-http_v3_module \
-              --with-openssl="${{ github.workspace }}/quiche/deps/boringssl" \
-              --with-quiche="${{ github.workspace }}" \
-              --with-debug &&
-          make -j`nproc` &&
-          objs/nginx -V
-
   docker:
     runs-on: ubuntu-latest
     # Only run on "pull_request" event for external PRs. This is to avoid
