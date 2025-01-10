@@ -3753,7 +3753,7 @@ impl Connection {
                 (pkt_type == Type::Handshake &&
                     self.local_error
                         .as_ref()
-                        .map_or(false, |le| le.is_app))) &&
+                        .is_some_and(|le| le.is_app))) &&
             path.active()
         {
             let ack_delay = pkt_space.largest_rx_pkt_time.elapsed();
@@ -6814,7 +6814,7 @@ impl Connection {
         if self
             .local_error
             .as_ref()
-            .map_or(false, |conn_err| !conn_err.is_app)
+            .is_some_and(|conn_err| !conn_err.is_app)
         {
             let epoch = match self.handshake.write_level() {
                 crypto::Level::Initial => packet::Epoch::Initial,
@@ -6880,7 +6880,7 @@ impl Connection {
                 self.dgram_send_queue.has_pending() ||
                 self.local_error
                     .as_ref()
-                    .map_or(false, |conn_err| conn_err.is_app) ||
+                    .is_some_and(|conn_err| conn_err.is_app) ||
                 self.streams.should_update_max_streams_bidi() ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
