@@ -3,6 +3,8 @@ use super::*;
 use std::mem::MaybeUninit;
 
 use libc::c_int;
+use libc::c_uint;
+use libc::c_void;
 
 // NOTE: This structure is copied from <openssl/aead.h> in order to be able to
 // statically allocate it. While it is not often modified upstream, it needs to
@@ -13,6 +15,13 @@ struct EVP_AEAD_CTX {
     opaque: [u8; 580],
     alignment: u64,
     tag_len: u8,
+}
+
+#[derive(Clone)]
+#[repr(C)]
+pub(crate) struct AES_KEY {
+    rd_key: [u32; 4 * (14 + 1)],
+    rounds: c_int,
 }
 
 impl Algorithm {
@@ -142,6 +151,75 @@ impl PacketKey {
     }
 }
 
+#[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum HeaderProtectionKey {
+    Aes(AES_KEY),
+
+    ChaCha(Vec<u8>),
+}
+
+impl HeaderProtectionKey {
+    pub fn new(alg: Algorithm, hp_key: Vec<u8>) -> Result<Self> {
+        match alg {
+            Algorithm::AES128_GCM | Algorithm::AES256_GCM => unsafe {
+                let key_len_bits = alg.key_len() as u32 * 8;
+
+                let mut aes_key = MaybeUninit::<AES_KEY>::uninit();
+
+                let rc = AES_set_encrypt_key(
+                    hp_key.as_ptr(),
+                    key_len_bits,
+                    aes_key.as_mut_ptr(),
+                );
+
+                if rc != 0 {
+                    return Err(Error::CryptoFail);
+                }
+
+                let aes_key = aes_key.assume_init();
+                Ok(Self::Aes(aes_key))
+            },
+
+            Algorithm::ChaCha20_Poly1305 => Ok(Self::ChaCha(hp_key)),
+        }
+    }
+
+    pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
+        let mut new_mask = [0_u8; 5];
+
+        match self {
+            Self::Aes(aes_key) => unsafe {
+                AES_ecb_encrypt(
+                    sample.as_ptr(),
+                    new_mask.as_mut_ptr(),
+                    aes_key as _,
+                    1,
+                );
+            },
+
+            Self::ChaCha(key) => unsafe {
+                const PLAINTEXT: &[u8; 5] = &[0_u8; 5];
+
+                let counter = u32::from_le_bytes([
+                    sample[0], sample[1], sample[2], sample[3],
+                ]);
+
+                CRYPTO_chacha_20(
+                    new_mask.as_mut_ptr(),
+                    PLAINTEXT.as_ptr(),
+                    PLAINTEXT.len(),
+                    key.as_ptr(),
+                    sample[std::mem::size_of::<u32>()..].as_ptr(),
+                    counter,
+                );
+            },
+        }
+
+        Ok(new_mask)
+    }
+}
+
 fn make_aead_ctx(alg: Algorithm, key: &[u8]) -> Result<EVP_AEAD_CTX> {
     let mut ctx = MaybeUninit::uninit();
 
@@ -249,4 +327,19 @@ extern "C" {
         nonce_len: usize, inp: *const u8, in_len: usize, extra_in: *const u8,
         extra_in_len: usize, ad: *const u8, ad_len: usize,
     ) -> c_int;
+
+    // AES
+    fn AES_set_encrypt_key(
+        key: *const u8, bits: c_uint, aeskey: *mut AES_KEY,
+    ) -> c_int;
+
+    fn AES_ecb_encrypt(
+        inp: *const u8, out: *mut u8, key: *const AES_KEY, enc: c_int,
+    ) -> c_void;
+
+    // ChaCha20
+    fn CRYPTO_chacha_20(
+        out: *mut u8, inp: *const u8, in_len: usize, key: *const u8,
+        nonce: *const u8, counter: u32,
+    ) -> c_void;
 }
