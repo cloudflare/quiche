@@ -214,10 +214,11 @@ impl Context {
     fn load_ca_certs(&mut self) -> Result<()> {
         unsafe {
             let cstr = ffi::CString::new("Root").map_err(|_| Error::TlsFail)?;
-            let sys_store = windows_sys::Win32::Security::Cryptography::CertOpenSystemStoreA(
-                0,
-                cstr.as_ptr() as windows_sys::core::PCSTR,
-            );
+            let sys_store =
+                windows_sys::Win32::Security::Cryptography::CertOpenSystemStoreA(
+                    0,
+                    cstr.as_ptr() as windows_sys::core::PCSTR,
+                );
             if sys_store.is_null() {
                 return Err(Error::TlsFail);
             }
@@ -253,7 +254,9 @@ impl Context {
 
             // tidy up
             windows_sys::Win32::Security::Cryptography::CertFreeCertificateContext(ctx_p);
-            windows_sys::Win32::Security::Cryptography::CertCloseStore(sys_store, 0);
+            windows_sys::Win32::Security::Cryptography::CertCloseStore(
+                sys_store, 0,
+            );
         }
 
         Ok(())

@@ -1876,7 +1876,9 @@ fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
                 #[cfg(not(windows))]
                 in6.sin6_addr.s6_addr,
                 #[cfg(windows)]
-                unsafe { in6.sin6_addr.u.Byte },
+                unsafe {
+                    in6.sin6_addr.u.Byte
+                },
             );
 
             let port = u16::from_be(in6.sin6_port);
@@ -1910,9 +1912,7 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
             let sin_addr = in_addr { s_addr };
             #[cfg(windows)]
             let sin_addr = in_addr {
-                S_un: IN_ADDR_0 {
-                    S_addr: s_addr,
-                }
+                S_un: IN_ADDR_0 { S_addr: s_addr },
             };
 
             *out_in = sockaddr_in {
@@ -1950,7 +1950,7 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
             #[cfg(windows)]
             let sin6_addr = in6_addr {
                 u: IN6_ADDR_0 {
-                    Byte: addr.ip().octets()
+                    Byte: addr.ip().octets(),
                 },
             };
 
