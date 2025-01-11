@@ -2198,6 +2198,19 @@ impl Connection {
         Ok(())
     }
 
+    /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
+    ///
+    /// This must only be called immediately after creating a connection, that
+    /// is, before any packet is sent or received.
+    ///
+    /// The default value is infinite, that is, no timeout is used unless
+    /// already configured when creating the connection.
+    pub fn set_max_idle_timeout(&mut self, v: u64) -> Result<()> {
+        self.local_transport_params.max_idle_timeout = v;
+
+        self.encode_transport_params()
+    }
+
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
@@ -9225,6 +9238,40 @@ mod tests {
         assert_eq!(
             pipe.server_recv(&mut buf[..len]),
             Err(Error::InvalidTransportParam)
+        );
+    }
+
+    #[test]
+    fn change_idle_timeout() {
+        let mut config = Config::new(0x1).unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_max_idle_timeout(999999);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
+        assert_eq!(pipe.client.local_transport_params.max_idle_timeout, 999999);
+        assert_eq!(pipe.client.peer_transport_params.max_idle_timeout, 0);
+        assert_eq!(pipe.server.local_transport_params.max_idle_timeout, 0);
+        assert_eq!(pipe.server.peer_transport_params.max_idle_timeout, 0);
+
+        pipe.client.set_max_idle_timeout(456000).unwrap();
+        pipe.server.set_max_idle_timeout(234000).unwrap();
+        assert_eq!(pipe.client.local_transport_params.max_idle_timeout, 456000);
+        assert_eq!(pipe.client.peer_transport_params.max_idle_timeout, 0);
+        assert_eq!(pipe.server.local_transport_params.max_idle_timeout, 234000);
+        assert_eq!(pipe.server.peer_transport_params.max_idle_timeout, 0);
+
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(
+            pipe.client.idle_timeout(),
+            Some(time::Duration::from_millis(234000))
+        );
+        assert_eq!(
+            pipe.server.idle_timeout(),
+            Some(time::Duration::from_millis(234000))
         );
     }
 

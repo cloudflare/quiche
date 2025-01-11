@@ -725,6 +725,17 @@ pub extern fn quiche_conn_set_session(
     }
 }
 
+#[no_mangle]
+pub extern fn quiche_conn_set_max_idle_timeout(
+    conn: &mut Connection, v: u64,
+) -> c_int {
+    match conn.set_max_idle_timeout(v) {
+        Ok(()) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
 #[repr(C)]
 pub struct RecvInfo<'a> {
     from: &'a sockaddr,
