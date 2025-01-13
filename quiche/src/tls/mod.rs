@@ -214,10 +214,11 @@ impl Context {
     fn load_ca_certs(&mut self) -> Result<()> {
         unsafe {
             let cstr = ffi::CString::new("Root").map_err(|_| Error::TlsFail)?;
-            let sys_store = winapi::um::wincrypt::CertOpenSystemStoreA(
-                0,
-                cstr.as_ptr() as winapi::um::winnt::LPCSTR,
-            );
+            let sys_store =
+                windows_sys::Win32::Security::Cryptography::CertOpenSystemStoreA(
+                    0,
+                    cstr.as_ptr() as windows_sys::core::PCSTR,
+                );
             if sys_store.is_null() {
                 return Err(Error::TlsFail);
             }
@@ -227,7 +228,7 @@ impl Context {
                 return Err(Error::TlsFail);
             }
 
-            let mut ctx_p = winapi::um::wincrypt::CertEnumCertificatesInStore(
+            let mut ctx_p = windows_sys::Win32::Security::Cryptography::CertEnumCertificatesInStore(
                 sys_store,
                 ptr::null(),
             );
@@ -246,14 +247,16 @@ impl Context {
 
                 X509_free(cert);
 
-                ctx_p = winapi::um::wincrypt::CertEnumCertificatesInStore(
+                ctx_p = windows_sys::Win32::Security::Cryptography::CertEnumCertificatesInStore(
                     sys_store, ctx_p,
                 );
             }
 
             // tidy up
-            winapi::um::wincrypt::CertFreeCertificateContext(ctx_p);
-            winapi::um::wincrypt::CertCloseStore(sys_store, 0);
+            windows_sys::Win32::Security::Cryptography::CertFreeCertificateContext(ctx_p);
+            windows_sys::Win32::Security::Cryptography::CertCloseStore(
+                sys_store, 0,
+            );
         }
 
         Ok(())

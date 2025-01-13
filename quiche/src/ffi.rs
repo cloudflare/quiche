@@ -48,42 +48,42 @@ use libc::timespec;
 #[cfg(not(windows))]
 use libc::AF_INET;
 #[cfg(windows)]
-use winapi::shared::ws2def::AF_INET;
+use windows_sys::Win32::Networking::WinSock::AF_INET;
 
 #[cfg(not(windows))]
 use libc::AF_INET6;
 #[cfg(windows)]
-use winapi::shared::ws2def::AF_INET6;
+use windows_sys::Win32::Networking::WinSock::AF_INET6;
 
 #[cfg(not(windows))]
 use libc::in_addr;
 #[cfg(windows)]
-use winapi::shared::inaddr::IN_ADDR as in_addr;
+use windows_sys::Win32::Networking::WinSock::IN_ADDR as in_addr;
 
 #[cfg(not(windows))]
 use libc::in6_addr;
 #[cfg(windows)]
-use winapi::shared::in6addr::IN6_ADDR as in6_addr;
+use windows_sys::Win32::Networking::WinSock::IN6_ADDR as in6_addr;
 
 #[cfg(not(windows))]
 use libc::sa_family_t;
 #[cfg(windows)]
-use winapi::shared::ws2def::ADDRESS_FAMILY as sa_family_t;
+use windows_sys::Win32::Networking::WinSock::ADDRESS_FAMILY as sa_family_t;
 
 #[cfg(not(windows))]
 use libc::sockaddr_in;
 #[cfg(windows)]
-use winapi::shared::ws2def::SOCKADDR_IN as sockaddr_in;
+use windows_sys::Win32::Networking::WinSock::SOCKADDR_IN as sockaddr_in;
 
 #[cfg(not(windows))]
 use libc::sockaddr_in6;
 #[cfg(windows)]
-use winapi::shared::ws2ipdef::SOCKADDR_IN6_LH as sockaddr_in6;
+use windows_sys::Win32::Networking::WinSock::SOCKADDR_IN6 as sockaddr_in6;
 
 #[cfg(not(windows))]
 use libc::sockaddr_storage;
 #[cfg(windows)]
-use winapi::shared::ws2def::SOCKADDR_STORAGE_LH as sockaddr_storage;
+use windows_sys::Win32::Networking::WinSock::SOCKADDR_STORAGE as sockaddr_storage;
 
 #[cfg(windows)]
 use libc::c_int as socklen_t;
@@ -91,11 +91,11 @@ use libc::c_int as socklen_t;
 use libc::socklen_t;
 
 #[cfg(windows)]
-use winapi::shared::in6addr::in6_addr_u;
+use windows_sys::Win32::Networking::WinSock::IN6_ADDR_0;
 #[cfg(windows)]
-use winapi::shared::inaddr::in_addr_S_un;
+use windows_sys::Win32::Networking::WinSock::IN_ADDR_0;
 #[cfg(windows)]
-use winapi::shared::ws2ipdef::SOCKADDR_IN6_LH_u;
+use windows_sys::Win32::Networking::WinSock::SOCKADDR_IN6_0;
 
 use crate::*;
 
@@ -1851,7 +1851,7 @@ fn optional_std_addr_from_c(
 }
 
 fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
-    match addr.sa_family as i32 {
+    match addr.sa_family as _ {
         AF_INET => {
             assert!(addr_len as usize == std::mem::size_of::<sockaddr_in>());
 
@@ -1861,7 +1861,7 @@ fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
             let ip_addr = Ipv4Addr::from(u32::from_be(in4.sin_addr.s_addr));
             #[cfg(windows)]
             let ip_addr = {
-                let ip_bytes = unsafe { in4.sin_addr.S_un.S_un_b() };
+                let ip_bytes = unsafe { in4.sin_addr.S_un.S_un_b };
 
                 Ipv4Addr::from([
                     ip_bytes.s_b1,
@@ -1887,7 +1887,9 @@ fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
                 #[cfg(not(windows))]
                 in6.sin6_addr.s6_addr,
                 #[cfg(windows)]
-                *unsafe { in6.sin6_addr.u.Byte() },
+                unsafe {
+                    in6.sin6_addr.u.Byte
+                },
             );
 
             let port = u16::from_be(in6.sin6_port);
@@ -1895,7 +1897,7 @@ fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
             #[cfg(not(windows))]
             let scope_id = in6.sin6_scope_id;
             #[cfg(windows)]
-            let scope_id = unsafe { *in6.u.sin6_scope_id() };
+            let scope_id = unsafe { in6.Anonymous.sin6_scope_id };
 
             let out =
                 SocketAddrV6::new(ip_addr, port, in6.sin6_flowinfo, scope_id);
@@ -1920,10 +1922,8 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
             #[cfg(not(windows))]
             let sin_addr = in_addr { s_addr };
             #[cfg(windows)]
-            let sin_addr = {
-                let mut s_un = std::mem::zeroed::<in_addr_S_un>();
-                *s_un.S_addr_mut() = s_addr;
-                in_addr { S_un: s_un }
+            let sin_addr = in_addr {
+                S_un: IN_ADDR_0 { S_addr: s_addr },
             };
 
             *out_in = sockaddr_in {
@@ -1959,17 +1959,10 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
                 s6_addr: addr.ip().octets(),
             };
             #[cfg(windows)]
-            let sin6_addr = {
-                let mut u = std::mem::zeroed::<in6_addr_u>();
-                *u.Byte_mut() = addr.ip().octets();
-                in6_addr { u }
-            };
-
-            #[cfg(windows)]
-            let u = {
-                let mut u = std::mem::zeroed::<SOCKADDR_IN6_LH_u>();
-                *u.sin6_scope_id_mut() = addr.scope_id();
-                u
+            let sin6_addr = in6_addr {
+                u: IN6_ADDR_0 {
+                    Byte: addr.ip().octets(),
+                },
             };
 
             *out_in6 = sockaddr_in6 {
@@ -1995,7 +1988,9 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
                 #[cfg(not(windows))]
                 sin6_scope_id: addr.scope_id(),
                 #[cfg(windows)]
-                u,
+                Anonymous: SOCKADDR_IN6_0 {
+                    sin6_scope_id: addr.scope_id(),
+                },
             };
 
             sa_len as socklen_t
@@ -2025,12 +2020,9 @@ fn std_time_to_c(_time: &std::time::Instant, out: &mut timespec) {
 mod tests {
     use super::*;
 
-    #[cfg(not(windows))]
     use libc::c_void;
     #[cfg(windows)]
-    use winapi::ctypes::c_void;
-    #[cfg(windows)]
-    use winapi::um::ws2tcpip::inet_ntop;
+    use windows_sys::Win32::Networking::WinSock::inet_ntop;
 
     #[test]
     fn addr_v4() {
@@ -2052,9 +2044,9 @@ mod tests {
             let dst = s.into_raw();
 
             inet_ntop(
-                AF_INET,
+                AF_INET as _,
                 &((*in_addr).sin_addr) as *const _ as *const c_void,
-                dst,
+                dst as _,
                 16,
             );
 
@@ -2096,9 +2088,9 @@ mod tests {
             let dst = s.into_raw();
 
             inet_ntop(
-                AF_INET6,
+                AF_INET6 as _,
                 &((*in6_addr).sin6_addr) as *const _ as *const c_void,
-                dst,
+                dst as _,
                 45,
             );
 
