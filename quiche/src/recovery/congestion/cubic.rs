@@ -228,7 +228,7 @@ fn on_packet_acked(
     }
 
     if r.congestion_window < r.ssthresh {
-        // In Slow slart, bytes_acked_sl is used for counting
+        // In Slow start, bytes_acked_sl is used for counting
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
 
