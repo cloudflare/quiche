@@ -90,6 +90,8 @@ fn get_tiny_rand() -> u8 {
         RNG = Some(ring::rand::SystemRandom::new());
     });
     unsafe {
+        // Only mutable access is synchronized above
+        #[allow(static_mut_refs)]
         RNG.as_ref()
             .unwrap()
             .fill(std::slice::from_mut(&mut r))
