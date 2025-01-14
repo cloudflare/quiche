@@ -671,9 +671,9 @@ mod tests {
 #[cfg(not(feature = "openssl"))]
 mod boringssl;
 #[cfg(not(feature = "openssl"))]
-use boringssl::*;
+pub(crate) use boringssl::*;
 
 #[cfg(feature = "openssl")]
 mod openssl_quictls;
 #[cfg(feature = "openssl")]
-use openssl_quictls::*;
+pub(crate) use openssl_quictls::*;
