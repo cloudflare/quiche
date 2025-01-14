@@ -34,6 +34,9 @@ use crate::Result;
 
 use crate::packet;
 
+// All the AEAD algorithms we support use 96-bit nonces.
+pub const MAX_NONCE_LEN: usize = 12;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
@@ -86,7 +89,7 @@ impl Algorithm {
         }
     }
 
-    pub fn key_len(self) -> usize {
+    pub const fn key_len(self) -> usize {
         match self {
             Algorithm::AES128_GCM => 16,
             Algorithm::AES256_GCM => 32,
@@ -94,7 +97,7 @@ impl Algorithm {
         }
     }
 
-    pub fn tag_len(self) -> usize {
+    pub const fn tag_len(self) -> usize {
         if cfg!(feature = "fuzzing") {
             return 0;
         }
@@ -106,7 +109,7 @@ impl Algorithm {
         }
     }
 
-    pub fn nonce_len(self) -> usize {
+    pub const fn nonce_len(self) -> usize {
         match self {
             Algorithm::AES128_GCM => 12,
             Algorithm::AES256_GCM => 12,
@@ -140,6 +143,7 @@ pub struct Open {
 impl Open {
     // Note: some vendor-specific methods are implemented by each vendor's
     // submodule (openssl-quictls / boringssl).
+
     pub const DECRYPT: u32 = 0;
 
     pub fn new(
@@ -221,6 +225,7 @@ pub struct Seal {
 impl Seal {
     // Note: some vendor-specific methods are implemented by each vendor's
     // submodule (openssl-quictls / boringssl).
+
     const ENCRYPT: u32 = 1;
 
     pub fn new(
@@ -469,8 +474,8 @@ fn hkdf_expand_label(
     Ok(())
 }
 
-fn make_nonce(iv: &[u8], counter: u64) -> [u8; aead::NONCE_LEN] {
-    let mut nonce = [0; aead::NONCE_LEN];
+fn make_nonce(iv: &[u8], counter: u64) -> [u8; MAX_NONCE_LEN] {
+    let mut nonce = [0; MAX_NONCE_LEN];
     nonce.copy_from_slice(iv);
 
     // XOR the last bytes of the IV with the counter. This is equivalent to
