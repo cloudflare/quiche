@@ -27,15 +27,42 @@ impl Algorithm {
     }
 }
 
-impl Open {
+pub(crate) struct PacketKey {
+    alg: Algorithm,
+
+    ctx: EVP_AEAD_CTX,
+
+    nonce: Vec<u8>,
+}
+
+impl PacketKey {
+    pub fn new(
+        alg: Algorithm, key: Vec<u8>, iv: Vec<u8>, _enc: u32,
+    ) -> Result<Self> {
+        Ok(Self {
+            alg,
+            ctx: make_aead_ctx(alg, &key)?,
+            nonce: iv,
+        })
+    }
+
+    pub fn from_secret(aead: Algorithm, secret: &[u8], enc: u32) -> Result<Self> {
+        let key_len = aead.key_len();
+        let nonce_len = aead.nonce_len();
+
+        let mut key = vec![0; key_len];
+        let mut iv = vec![0; nonce_len];
+
+        derive_pkt_key(aead, secret, &mut key)?;
+        derive_pkt_iv(aead, secret, &mut iv)?;
+
+        Self::new(aead, key, iv, enc)
+    }
+
     pub fn open_with_u64_counter(
         &self, counter: u64, ad: &[u8], buf: &mut [u8],
     ) -> Result<usize> {
-        if cfg!(feature = "fuzzing") {
-            return Ok(buf.len());
-        }
-
-        let tag_len = self.alg().tag_len();
+        let tag_len = self.alg.tag_len();
 
         let mut out_len = match buf.len().checked_sub(tag_len) {
             Some(n) => n,
@@ -44,11 +71,11 @@ impl Open {
 
         let max_out_len = out_len;
 
-        let nonce = make_nonce(&self.packet.nonce, counter);
+        let nonce = make_nonce(&self.nonce, counter);
 
         let rc = unsafe {
             EVP_AEAD_CTX_open(
-                &self.packet.ctx,   // ctx
+                &self.ctx,          // ctx
                 buf.as_mut_ptr(),   // out
                 &mut out_len,       // out_len
                 max_out_len,        // max_out_len
@@ -67,23 +94,12 @@ impl Open {
 
         Ok(out_len)
     }
-}
 
-impl Seal {
     pub fn seal_with_u64_counter(
         &self, counter: u64, ad: &[u8], buf: &mut [u8], in_len: usize,
         extra_in: Option<&[u8]>,
     ) -> Result<usize> {
-        if cfg!(feature = "fuzzing") {
-            if let Some(extra) = extra_in {
-                buf[in_len..in_len + extra.len()].copy_from_slice(extra);
-                return Ok(in_len + extra.len());
-            }
-
-            return Ok(in_len);
-        }
-
-        let tag_len = self.alg().tag_len();
+        let tag_len = self.alg.tag_len();
 
         let mut out_tag_len = tag_len;
 
@@ -98,11 +114,11 @@ impl Seal {
             return Err(Error::CryptoFail);
         }
 
-        let nonce = make_nonce(&self.packet.nonce, counter);
+        let nonce = make_nonce(&self.nonce, counter);
 
         let rc = unsafe {
             EVP_AEAD_CTX_seal_scatter(
-                &self.packet.ctx,           // ctx
+                &self.ctx,                  // ctx
                 buf.as_mut_ptr(),           // out
                 buf[in_len..].as_mut_ptr(), // out_tag
                 &mut out_tag_len,           // out_tag_len
@@ -149,35 +165,6 @@ fn make_aead_ctx(alg: Algorithm, key: &[u8]) -> Result<EVP_AEAD_CTX> {
     };
 
     Ok(ctx)
-}
-
-pub(crate) struct PacketKey {
-    ctx: EVP_AEAD_CTX,
-    nonce: Vec<u8>,
-}
-
-impl PacketKey {
-    pub fn new(
-        alg: Algorithm, key: Vec<u8>, iv: Vec<u8>, _enc: u32,
-    ) -> Result<Self> {
-        Ok(Self {
-            ctx: make_aead_ctx(alg, &key)?,
-            nonce: iv,
-        })
-    }
-
-    pub fn from_secret(aead: Algorithm, secret: &[u8], enc: u32) -> Result<Self> {
-        let key_len = aead.key_len();
-        let nonce_len = aead.nonce_len();
-
-        let mut key = vec![0; key_len];
-        let mut iv = vec![0; nonce_len];
-
-        derive_pkt_key(aead, secret, &mut key)?;
-        derive_pkt_iv(aead, secret, &mut iv)?;
-
-        Self::new(aead, key, iv, enc)
-    }
 }
 
 pub(crate) fn hkdf_extract(

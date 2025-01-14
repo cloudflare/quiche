@@ -210,6 +210,16 @@ impl Open {
             packet: next_packet_key,
         })
     }
+
+    pub fn open_with_u64_counter(
+        &self, counter: u64, ad: &[u8], buf: &mut [u8],
+    ) -> Result<usize> {
+        if cfg!(feature = "fuzzing") {
+            return Ok(buf.len());
+        }
+
+        self.packet.open_with_u64_counter(counter, ad, buf)
+    }
 }
 
 pub struct Seal {
@@ -226,7 +236,7 @@ impl Seal {
     // Note: some vendor-specific methods are implemented by each vendor's
     // submodule (openssl-quictls / boringssl).
 
-    const ENCRYPT: u32 = 1;
+    pub const ENCRYPT: u32 = 1;
 
     pub fn new(
         alg: Algorithm, key: Vec<u8>, iv: Vec<u8>, hp_key: Vec<u8>,
@@ -301,6 +311,23 @@ impl Seal {
 
             packet: next_packet_key,
         })
+    }
+
+    pub fn seal_with_u64_counter(
+        &self, counter: u64, ad: &[u8], buf: &mut [u8], in_len: usize,
+        extra_in: Option<&[u8]>,
+    ) -> Result<usize> {
+        if cfg!(feature = "fuzzing") {
+            if let Some(extra) = extra_in {
+                buf[in_len..in_len + extra.len()].copy_from_slice(extra);
+                return Ok(in_len + extra.len());
+            }
+
+            return Ok(in_len);
+        }
+
+        self.packet
+            .seal_with_u64_counter(counter, ad, buf, in_len, extra_in)
     }
 }
 
