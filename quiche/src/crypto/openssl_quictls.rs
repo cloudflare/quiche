@@ -37,26 +37,60 @@ impl Algorithm {
     }
 }
 
-impl Open {
+pub(crate) struct PacketKey {
+    alg: Algorithm,
+
+    ctx: *mut EVP_CIPHER_CTX,
+
+    nonce: Vec<u8>,
+
+    // Note: We'd need the key for later use as it is needed by the openssl API.
+    // TODO: check if we can avoid this and get the key when needed and not
+    // have it stored here.
+    key: Vec<u8>,
+}
+
+impl PacketKey {
+    pub fn new(
+        alg: Algorithm, key: Vec<u8>, iv: Vec<u8>, enc: u32,
+    ) -> Result<Self> {
+        Ok(Self {
+            alg,
+            ctx: make_evp_cipher_ctx_basic(alg, enc)?,
+            nonce: iv,
+            key,
+        })
+    }
+
+    pub fn from_secret(aead: Algorithm, secret: &[u8], enc: u32) -> Result<Self> {
+        let key_len = aead.key_len();
+        let nonce_len = aead.nonce_len();
+
+        let mut key = vec![0; key_len];
+        let mut iv = vec![0; nonce_len];
+
+        derive_pkt_key(aead, secret, &mut key)?;
+        derive_pkt_iv(aead, secret, &mut iv)?;
+
+        Self::new(aead, key, iv, enc)
+    }
+
     pub fn open_with_u64_counter(
         &self, counter: u64, ad: &[u8], buf: &mut [u8],
     ) -> Result<usize> {
-        if cfg!(feature = "fuzzing") {
-            return Ok(buf.len());
-        }
+        let tag_len = self.alg.tag_len();
 
         let in_buf = buf.to_owned(); // very inefficient
-        let tag_len = self.alg().tag_len();
 
         let mut cipher_len = buf.len();
 
-        let nonce = make_nonce(&self.packet.nonce, counter);
+        let nonce = make_nonce(&self.nonce, counter);
 
         // Set the IV len.
         const EVP_CTRL_AEAD_SET_IVLEN: i32 = 0x9;
         let mut rc = unsafe {
             EVP_CIPHER_CTX_ctrl(
-                self.packet.ctx,
+                self.ctx,
                 EVP_CTRL_AEAD_SET_IVLEN,
                 nonce.len() as i32,
                 std::ptr::null_mut(),
@@ -68,11 +102,11 @@ impl Open {
 
         rc = unsafe {
             EVP_CipherInit_ex2(
-                self.packet.ctx,
+                self.ctx,
                 std::ptr::null_mut(), // already set
-                self.packet.key.as_ptr(),
+                self.key.as_ptr(),
                 nonce[..].as_ptr(),
-                Self::DECRYPT as i32,
+                Open::DECRYPT as i32,
                 std::ptr::null(),
             )
         };
@@ -86,7 +120,7 @@ impl Open {
         if !ad.is_empty() {
             rc = unsafe {
                 EVP_CipherUpdate(
-                    self.packet.ctx,
+                    self.ctx,
                     std::ptr::null_mut(),
                     &mut olen,
                     ad.as_ptr(),
@@ -107,7 +141,7 @@ impl Open {
 
         rc = unsafe {
             EVP_CipherUpdate(
-                self.packet.ctx,
+                self.ctx,
                 buf.as_mut_ptr(),
                 &mut olen,
                 in_buf.as_ptr(),
@@ -124,7 +158,7 @@ impl Open {
         const EVP_CTRL_AEAD_SET_TAG: i32 = 0x11;
         rc = unsafe {
             EVP_CIPHER_CTX_ctrl(
-                self.packet.ctx,
+                self.ctx,
                 EVP_CTRL_AEAD_SET_TAG,
                 tag_len as i32,
                 buf[cipher_len..].as_mut_ptr() as *mut c_void,
@@ -137,7 +171,7 @@ impl Open {
 
         rc = unsafe {
             EVP_CipherFinal_ex(
-                self.packet.ctx,
+                self.ctx,
                 buf[plaintext_len..].as_mut_ptr(),
                 &mut olen,
             )
@@ -149,31 +183,23 @@ impl Open {
 
         Ok(plaintext_len + olen as usize)
     }
-}
 
-impl Seal {
     pub fn seal_with_u64_counter(
         &self, counter: u64, ad: &[u8], buf: &mut [u8], in_len: usize,
-        extra_in: Option<&[u8]>,
+        _extra_in: Option<&[u8]>,
     ) -> Result<usize> {
-        if cfg!(feature = "fuzzing") {
-            if let Some(extra) = extra_in {
-                buf[in_len..in_len + extra.len()].copy_from_slice(extra);
-                return Ok(in_len + extra.len());
-            }
+        let tag_len = self.alg.tag_len();
 
-            return Ok(in_len);
-        }
-        // very inefficient
+        // TODO: replace this with something more efficient.
         let in_buf = buf.to_owned();
 
-        let nonce = make_nonce(&self.packet.nonce, counter);
+        let nonce = make_nonce(&self.nonce, counter);
 
         // Set the IV len.
         const EVP_CTRL_AEAD_SET_IVLEN: i32 = 0x9;
         let mut rc = unsafe {
             EVP_CIPHER_CTX_ctrl(
-                self.packet.ctx,
+                self.ctx,
                 EVP_CTRL_AEAD_SET_IVLEN,
                 nonce.len() as i32,
                 std::ptr::null_mut(),
@@ -186,11 +212,11 @@ impl Seal {
 
         rc = unsafe {
             EVP_CipherInit_ex2(
-                self.packet.ctx,
+                self.ctx,
                 std::ptr::null_mut(), // already set
-                self.packet.key.as_ptr(),
+                self.key.as_ptr(),
                 nonce[..].as_ptr(),
-                Self::ENCRYPT as i32,
+                Seal::ENCRYPT as i32,
                 std::ptr::null(),
             )
         };
@@ -198,15 +224,13 @@ impl Seal {
             return Err(Error::CryptoFail);
         }
 
-        let tag_len = self.alg().tag_len();
-
         let mut olen: i32 = 0;
         let mut rc;
 
         if !ad.is_empty() {
             rc = unsafe {
                 EVP_CipherUpdate(
-                    self.packet.ctx,
+                    self.ctx,
                     std::ptr::null_mut(),
                     &mut olen,
                     ad.as_ptr(),
@@ -224,7 +248,7 @@ impl Seal {
 
         rc = unsafe {
             EVP_CipherUpdate(
-                self.packet.ctx,
+                self.ctx,
                 buf.as_mut_ptr(),
                 &mut olen,
                 in_buf.as_ptr(),
@@ -240,11 +264,7 @@ impl Seal {
 
         let len = olen as usize;
         rc = unsafe {
-            EVP_CipherFinal_ex(
-                self.packet.ctx,
-                buf[len..].as_mut_ptr(),
-                &mut olen,
-            )
+            EVP_CipherFinal_ex(self.ctx, buf[len..].as_mut_ptr(), &mut olen)
         };
 
         if rc != 1 {
@@ -256,7 +276,7 @@ impl Seal {
         const EVP_CTRL_AEAD_GET_TAG: i32 = 0x10;
         rc = unsafe {
             EVP_CIPHER_CTX_ctrl(
-                self.packet.ctx,
+                self.ctx,
                 EVP_CTRL_AEAD_GET_TAG,
                 tag_len as i32,
                 buf[ciphertext_len..].as_mut_ptr() as *mut c_void,
@@ -270,6 +290,9 @@ impl Seal {
         Ok(in_len + tag_len)
     }
 }
+
+unsafe impl std::marker::Send for PacketKey {}
+unsafe impl std::marker::Sync for PacketKey {}
 
 fn make_evp_cipher_ctx_basic(
     alg: Algorithm, enc: u32,
@@ -294,47 +317,12 @@ fn make_evp_cipher_ctx_basic(
         if rc != 1 {
             return Err(Error::CryptoFail);
         }
+
         ctx
     };
+
     Ok(ctx)
 }
-
-pub(crate) struct PacketKey {
-    ctx: *mut EVP_CIPHER_CTX,
-    nonce: Vec<u8>,
-    // Note: We'd need the key for later use as it is needed by the openssl API.
-    // TODO: check if we can avoid this and get the key when needed and not
-    // have it stored here.
-    key: Vec<u8>,
-}
-
-impl PacketKey {
-    pub fn new(
-        algo: Algorithm, key: Vec<u8>, iv: Vec<u8>, enc: u32,
-    ) -> Result<Self> {
-        Ok(Self {
-            ctx: make_evp_cipher_ctx_basic(algo, enc)?,
-            nonce: iv,
-            key,
-        })
-    }
-
-    pub fn from_secret(aead: Algorithm, secret: &[u8], enc: u32) -> Result<Self> {
-        let key_len = aead.key_len();
-        let nonce_len = aead.nonce_len();
-
-        let mut key = vec![0; key_len];
-        let mut iv = vec![0; nonce_len];
-
-        derive_pkt_key(aead, secret, &mut key)?;
-        derive_pkt_iv(aead, secret, &mut iv)?;
-
-        Self::new(aead, key, iv, enc)
-    }
-}
-
-unsafe impl std::marker::Send for PacketKey {}
-unsafe impl std::marker::Sync for PacketKey {}
 
 pub(crate) fn hkdf_extract(
     alg: Algorithm, out: &mut [u8], secret: &[u8], salt: &[u8],
