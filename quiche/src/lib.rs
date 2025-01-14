@@ -2367,7 +2367,8 @@ impl Connection {
         match self.peer_transport_params.stateless_reset_token {
             Some(token) => {
                 let token_len = 16;
-                ring::constant_time::verify_slices_are_equal(
+
+                crypto::verify_slices_are_equal(
                     &token.to_be_bytes(),
                     &buf[buf_len - token_len..buf_len],
                 )

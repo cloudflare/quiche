@@ -26,6 +26,7 @@
 
 use ring::aead;
 
+use libc::c_int;
 use libc::c_void;
 
 use crate::Error;
@@ -481,10 +482,27 @@ fn make_nonce(iv: &[u8], counter: u64) -> [u8; aead::NONCE_LEN] {
     nonce
 }
 
+pub fn verify_slices_are_equal(a: &[u8], b: &[u8]) -> Result<()> {
+    if a.len() != b.len() {
+        return Err(Error::CryptoFail);
+    }
+
+    let rc = unsafe { CRYPTO_memcmp(a.as_ptr(), b.as_ptr(), a.len()) };
+
+    if rc == 0 {
+        return Ok(());
+    }
+
+    Err(Error::CryptoFail)
+}
+
 extern {
     fn EVP_sha256() -> *const EVP_MD;
 
     fn EVP_sha384() -> *const EVP_MD;
+
+    // CRYPTO
+    fn CRYPTO_memcmp(a: *const u8, b: *const u8, len: usize) -> c_int;
 }
 
 #[cfg(test)]

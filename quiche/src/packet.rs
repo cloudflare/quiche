@@ -778,13 +778,10 @@ pub fn verify_retry_integrity(
 ) -> Result<()> {
     let tag = compute_retry_integrity_tag(b, odcid, version)?;
 
-    ring::constant_time::verify_slices_are_equal(
+    crypto::verify_slices_are_equal(
         &b.as_ref()[..aead::AES_128_GCM.tag_len()],
         tag.as_ref(),
     )
-    .map_err(|_| Error::CryptoFail)?;
-
-    Ok(())
 }
 
 fn compute_retry_integrity_tag(
