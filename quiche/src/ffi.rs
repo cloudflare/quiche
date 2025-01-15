@@ -1670,10 +1670,10 @@ pub extern fn quiche_conn_migrate(
 #[no_mangle]
 pub extern fn quiche_conn_path_event_next(
     conn: &mut Connection,
-) -> *const PathEvent {
+) -> *mut PathEvent {
     match conn.path_event_next() {
         Some(v) => Box::into_raw(Box::new(v)),
-        None => ptr::null(),
+        None => ptr::null_mut(),
     }
 }
 
