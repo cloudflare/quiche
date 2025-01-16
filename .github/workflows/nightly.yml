@@ -7,6 +7,10 @@ env:
   RUSTDOCFLAGS: "--cfg docsrs"
   RUSTTOOLCHAIN: "nightly"
 
+concurrency:
+  group: ${{ github.ref }}-nightly
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
   quiche:
     runs-on: ubuntu-latest
