@@ -226,7 +226,7 @@ pub(crate) fn hkdf_expand(
     Ok(())
 }
 
-extern {
+extern "C" {
     fn EVP_aead_aes_128_gcm_tls13() -> *const EVP_AEAD;
 
     fn EVP_aead_aes_256_gcm_tls13() -> *const EVP_AEAD;

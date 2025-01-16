@@ -12,7 +12,7 @@ struct CRYPTO_BUFFER {
 #[allow(non_camel_case_types)]
 pub(super) struct SSL_QUIC_METHOD {
     set_read_secret: Option<
-        unsafe extern fn(
+        unsafe extern "C" fn(
             ssl: *mut SSL,
             level: crypto::Level,
             cipher: *const SSL_CIPHER,
@@ -22,7 +22,7 @@ pub(super) struct SSL_QUIC_METHOD {
     >,
 
     set_write_secret: Option<
-        unsafe extern fn(
+        unsafe extern "C" fn(
             ssl: *mut SSL,
             level: crypto::Level,
             cipher: *const SSL_CIPHER,
@@ -32,7 +32,7 @@ pub(super) struct SSL_QUIC_METHOD {
     >,
 
     add_handshake_data: Option<
-        unsafe extern fn(
+        unsafe extern "C" fn(
             ssl: *mut SSL,
             level: crypto::Level,
             data: *const u8,
@@ -40,10 +40,10 @@ pub(super) struct SSL_QUIC_METHOD {
         ) -> c_int,
     >,
 
-    flush_flight: Option<extern fn(ssl: *mut SSL) -> c_int>,
+    flush_flight: Option<extern "C" fn(ssl: *mut SSL) -> c_int>,
 
     send_alert: Option<
-        extern fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int,
+        extern "C" fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int,
     >,
 }
 
@@ -52,7 +52,7 @@ pub(super) struct SSL_QUIC_METHOD {
 #[allow(non_camel_case_types)]
 struct SSL_PRIVATE_KEY_METHOD {
     sign: Option<
-        unsafe extern fn(
+        unsafe extern "C" fn(
             ssl: *mut SSL,
             out: *mut u8,
             out_len: *mut usize,
@@ -64,7 +64,7 @@ struct SSL_PRIVATE_KEY_METHOD {
     >,
 
     decrypt: Option<
-        unsafe extern fn(
+        unsafe extern "C" fn(
             ssl: *mut SSL,
             out: *mut u8,
             out_len: *mut usize,
@@ -75,7 +75,7 @@ struct SSL_PRIVATE_KEY_METHOD {
     >,
 
     complete: Option<
-        unsafe extern fn(
+        unsafe extern "C" fn(
             ssl: *mut SSL,
             out: *mut u8,
             out_len: *mut usize,
@@ -236,21 +236,21 @@ impl Handshake {
     // Only used for testing handling of failure during key signing.
     #[cfg(test)]
     pub fn set_failing_private_key_method(&mut self) {
-        extern fn failing_sign(
+        extern "C" fn failing_sign(
             _ssl: *mut SSL, _out: *mut u8, _out_len: *mut usize, _max_out: usize,
             _signature_algorithm: u16, _in: *const u8, _in_len: usize,
         ) -> ssl_private_key_result_t {
             ssl_private_key_result_t::ssl_private_key_failure
         }
 
-        extern fn failing_decrypt(
+        extern "C" fn failing_decrypt(
             _ssl: *mut SSL, _out: *mut u8, _out_len: *mut usize, _max_out: usize,
             _in: *const u8, _in_len: usize,
         ) -> ssl_private_key_result_t {
             ssl_private_key_result_t::ssl_private_key_failure
         }
 
-        extern fn failing_complete(
+        extern "C" fn failing_complete(
             _ssl: *mut SSL, _out: *mut u8, _out_len: *mut usize, _max_out: usize,
         ) -> ssl_private_key_result_t {
             ssl_private_key_result_t::ssl_private_key_failure
@@ -293,7 +293,7 @@ pub(super) fn get_session_bytes(session: *mut SSL_SESSION) -> Result<Vec<u8>> {
 }
 pub(super) const TLS_ERROR: c_int = 3;
 
-extern {
+extern "C" {
     // SSL_METHOD specific for boringssl.
     pub(super) fn SSL_CTX_set_tlsext_ticket_keys(
         ctx: *mut SSL_CTX, key: *const u8, key_len: usize,
