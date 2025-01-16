@@ -6,6 +6,10 @@ env:
   RUSTFLAGS: "-D warnings"
   RUSTTOOLCHAIN: "stable"
 
+concurrency:
+  group: ${{ github.ref }}-stable
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
   quiche:
     runs-on: ubuntu-latest
