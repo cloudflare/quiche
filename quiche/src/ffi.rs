@@ -100,13 +100,13 @@ use windows_sys::Win32::Networking::WinSock::SOCKADDR_IN6_0;
 use crate::*;
 
 #[no_mangle]
-pub extern fn quiche_version() -> *const u8 {
+pub extern "C" fn quiche_version() -> *const u8 {
     static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
     VERSION.as_ptr()
 }
 
 struct Logger {
-    cb: extern fn(line: *const u8, argp: *mut c_void),
+    cb: extern "C" fn(line: *const u8, argp: *mut c_void),
     argp: std::sync::atomic::AtomicPtr<c_void>,
 }
 
@@ -124,8 +124,8 @@ impl log::Log for Logger {
 }
 
 #[no_mangle]
-pub extern fn quiche_enable_debug_logging(
-    cb: extern fn(line: *const u8, argp: *mut c_void), argp: *mut c_void,
+pub extern "C" fn quiche_enable_debug_logging(
+    cb: extern "C" fn(line: *const u8, argp: *mut c_void), argp: *mut c_void,
 ) -> c_int {
     let argp = atomic::AtomicPtr::new(argp);
     let logger = Box::new(Logger { cb, argp });
@@ -140,7 +140,7 @@ pub extern fn quiche_enable_debug_logging(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_new(version: u32) -> *mut Config {
+pub extern "C" fn quiche_config_new(version: u32) -> *mut Config {
     match Config::new(version) {
         Ok(c) => Box::into_raw(Box::new(c)),
 
@@ -149,7 +149,7 @@ pub extern fn quiche_config_new(version: u32) -> *mut Config {
 }
 
 #[no_mangle]
-pub extern fn quiche_config_load_cert_chain_from_pem_file(
+pub extern "C" fn quiche_config_load_cert_chain_from_pem_file(
     config: &mut Config, path: *const c_char,
 ) -> c_int {
     let path = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
@@ -162,7 +162,7 @@ pub extern fn quiche_config_load_cert_chain_from_pem_file(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_load_priv_key_from_pem_file(
+pub extern "C" fn quiche_config_load_priv_key_from_pem_file(
     config: &mut Config, path: *const c_char,
 ) -> c_int {
     let path = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
@@ -175,7 +175,7 @@ pub extern fn quiche_config_load_priv_key_from_pem_file(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_load_verify_locations_from_file(
+pub extern "C" fn quiche_config_load_verify_locations_from_file(
     config: &mut Config, path: *const c_char,
 ) -> c_int {
     let path = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
@@ -188,7 +188,7 @@ pub extern fn quiche_config_load_verify_locations_from_file(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_load_verify_locations_from_directory(
+pub extern "C" fn quiche_config_load_verify_locations_from_directory(
     config: &mut Config, path: *const c_char,
 ) -> c_int {
     let path = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
@@ -201,34 +201,34 @@ pub extern fn quiche_config_load_verify_locations_from_directory(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_verify_peer(config: &mut Config, v: bool) {
+pub extern "C" fn quiche_config_verify_peer(config: &mut Config, v: bool) {
     config.verify_peer(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_grease(config: &mut Config, v: bool) {
+pub extern "C" fn quiche_config_grease(config: &mut Config, v: bool) {
     config.grease(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_discover_pmtu(config: &mut Config, v: bool) {
+pub extern "C" fn quiche_config_discover_pmtu(config: &mut Config, v: bool) {
     config.discover_pmtu(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_log_keys(config: &mut Config) {
+pub extern "C" fn quiche_config_log_keys(config: &mut Config) {
     config.log_keys();
 }
 
 #[no_mangle]
-pub extern fn quiche_config_enable_early_data(config: &mut Config) {
+pub extern "C" fn quiche_config_enable_early_data(config: &mut Config) {
     config.enable_early_data();
 }
 
 #[no_mangle]
 /// Corresponds to the `Config::set_application_protos_wire_format` Rust
 /// function.
-pub extern fn quiche_config_set_application_protos(
+pub extern "C" fn quiche_config_set_application_protos(
     config: &mut Config, protos: *const u8, protos_len: size_t,
 ) -> c_int {
     let protos = unsafe { slice::from_raw_parts(protos, protos_len) };
@@ -241,83 +241,89 @@ pub extern fn quiche_config_set_application_protos(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_max_amplification_factor(
+pub extern "C" fn quiche_config_set_max_amplification_factor(
     config: &mut Config, v: usize,
 ) {
     config.set_max_amplification_factor(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_max_idle_timeout(config: &mut Config, v: u64) {
+pub extern "C" fn quiche_config_set_max_idle_timeout(
+    config: &mut Config, v: u64,
+) {
     config.set_max_idle_timeout(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_max_recv_udp_payload_size(
+pub extern "C" fn quiche_config_set_max_recv_udp_payload_size(
     config: &mut Config, v: size_t,
 ) {
     config.set_max_recv_udp_payload_size(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_data(config: &mut Config, v: u64) {
+pub extern "C" fn quiche_config_set_initial_max_data(
+    config: &mut Config, v: u64,
+) {
     config.set_initial_max_data(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_stream_data_bidi_local(
+pub extern "C" fn quiche_config_set_initial_max_stream_data_bidi_local(
     config: &mut Config, v: u64,
 ) {
     config.set_initial_max_stream_data_bidi_local(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_stream_data_bidi_remote(
+pub extern "C" fn quiche_config_set_initial_max_stream_data_bidi_remote(
     config: &mut Config, v: u64,
 ) {
     config.set_initial_max_stream_data_bidi_remote(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_stream_data_uni(
+pub extern "C" fn quiche_config_set_initial_max_stream_data_uni(
     config: &mut Config, v: u64,
 ) {
     config.set_initial_max_stream_data_uni(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_streams_bidi(
+pub extern "C" fn quiche_config_set_initial_max_streams_bidi(
     config: &mut Config, v: u64,
 ) {
     config.set_initial_max_streams_bidi(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_max_streams_uni(
+pub extern "C" fn quiche_config_set_initial_max_streams_uni(
     config: &mut Config, v: u64,
 ) {
     config.set_initial_max_streams_uni(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_ack_delay_exponent(config: &mut Config, v: u64) {
+pub extern "C" fn quiche_config_set_ack_delay_exponent(
+    config: &mut Config, v: u64,
+) {
     config.set_ack_delay_exponent(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_max_ack_delay(config: &mut Config, v: u64) {
+pub extern "C" fn quiche_config_set_max_ack_delay(config: &mut Config, v: u64) {
     config.set_max_ack_delay(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_disable_active_migration(
+pub extern "C" fn quiche_config_set_disable_active_migration(
     config: &mut Config, v: bool,
 ) {
     config.set_disable_active_migration(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_cc_algorithm_name(
+pub extern "C" fn quiche_config_set_cc_algorithm_name(
     config: &mut Config, name: *const c_char,
 ) -> c_int {
     let name = unsafe { ffi::CStr::from_ptr(name).to_str().unwrap() };
@@ -329,36 +335,36 @@ pub extern fn quiche_config_set_cc_algorithm_name(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_cc_algorithm(
+pub extern "C" fn quiche_config_set_cc_algorithm(
     config: &mut Config, algo: CongestionControlAlgorithm,
 ) {
     config.set_cc_algorithm(algo);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_initial_congestion_window_packets(
+pub extern "C" fn quiche_config_set_initial_congestion_window_packets(
     config: &mut Config, packets: size_t,
 ) {
     config.set_initial_congestion_window_packets(packets);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
+pub extern "C" fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
     config.enable_hystart(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_enable_pacing(config: &mut Config, v: bool) {
+pub extern "C" fn quiche_config_enable_pacing(config: &mut Config, v: bool) {
     config.enable_pacing(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_max_pacing_rate(config: &mut Config, v: u64) {
+pub extern "C" fn quiche_config_set_max_pacing_rate(config: &mut Config, v: u64) {
     config.set_max_pacing_rate(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_enable_dgram(
+pub extern "C" fn quiche_config_enable_dgram(
     config: &mut Config, enabled: bool, recv_queue_len: size_t,
     send_queue_len: size_t,
 ) {
@@ -366,33 +372,35 @@ pub extern fn quiche_config_enable_dgram(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_max_send_udp_payload_size(
+pub extern "C" fn quiche_config_set_max_send_udp_payload_size(
     config: &mut Config, v: size_t,
 ) {
     config.set_max_send_udp_payload_size(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_max_connection_window(
+pub extern "C" fn quiche_config_set_max_connection_window(
     config: &mut Config, v: u64,
 ) {
     config.set_max_connection_window(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_max_stream_window(config: &mut Config, v: u64) {
+pub extern "C" fn quiche_config_set_max_stream_window(
+    config: &mut Config, v: u64,
+) {
     config.set_max_stream_window(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_active_connection_id_limit(
+pub extern "C" fn quiche_config_set_active_connection_id_limit(
     config: &mut Config, v: u64,
 ) {
     config.set_active_connection_id_limit(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_stateless_reset_token(
+pub extern "C" fn quiche_config_set_stateless_reset_token(
     config: &mut Config, v: *const u8,
 ) {
     let reset_token = unsafe { slice::from_raw_parts(v, 16) };
@@ -405,12 +413,14 @@ pub extern fn quiche_config_set_stateless_reset_token(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_disable_dcid_reuse(config: &mut Config, v: bool) {
+pub extern "C" fn quiche_config_set_disable_dcid_reuse(
+    config: &mut Config, v: bool,
+) {
     config.set_disable_dcid_reuse(v);
 }
 
 #[no_mangle]
-pub extern fn quiche_config_set_ticket_key(
+pub extern "C" fn quiche_config_set_ticket_key(
     config: &mut Config, key: *const u8, key_len: size_t,
 ) -> c_int {
     let key = unsafe { slice::from_raw_parts(key, key_len) };
@@ -423,12 +433,12 @@ pub extern fn quiche_config_set_ticket_key(
 }
 
 #[no_mangle]
-pub extern fn quiche_config_free(config: *mut Config) {
+pub extern "C" fn quiche_config_free(config: *mut Config) {
     drop(unsafe { Box::from_raw(config) });
 }
 
 #[no_mangle]
-pub extern fn quiche_header_info(
+pub extern "C" fn quiche_header_info(
     buf: *mut u8, buf_len: size_t, dcil: size_t, version: *mut u32, ty: *mut u8,
     scid: *mut u8, scid_len: *mut size_t, dcid: *mut u8, dcid_len: *mut size_t,
     token: *mut u8, token_len: *mut size_t,
@@ -493,7 +503,7 @@ pub extern fn quiche_header_info(
 }
 
 #[no_mangle]
-pub extern fn quiche_accept(
+pub extern "C" fn quiche_accept(
     scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
     local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
     config: &mut Config,
@@ -520,7 +530,7 @@ pub extern fn quiche_accept(
 }
 
 #[no_mangle]
-pub extern fn quiche_connect(
+pub extern "C" fn quiche_connect(
     server_name: *const c_char, scid: *const u8, scid_len: size_t,
     local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
     config: &mut Config,
@@ -545,7 +555,7 @@ pub extern fn quiche_connect(
 }
 
 #[no_mangle]
-pub extern fn quiche_negotiate_version(
+pub extern "C" fn quiche_negotiate_version(
     scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
     out: *mut u8, out_len: size_t,
 ) -> ssize_t {
@@ -565,12 +575,12 @@ pub extern fn quiche_negotiate_version(
 }
 
 #[no_mangle]
-pub extern fn quiche_version_is_supported(version: u32) -> bool {
+pub extern "C" fn quiche_version_is_supported(version: u32) -> bool {
     version_is_supported(version)
 }
 
 #[no_mangle]
-pub extern fn quiche_retry(
+pub extern "C" fn quiche_retry(
     scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
     new_scid: *const u8, new_scid_len: size_t, token: *const u8,
     token_len: size_t, version: u32, out: *mut u8, out_len: size_t,
@@ -595,7 +605,7 @@ pub extern fn quiche_retry(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_new_with_tls(
+pub extern "C" fn quiche_conn_new_with_tls(
     scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
     local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
     config: &Config, ssl: *mut c_void, is_server: bool,
@@ -632,7 +642,7 @@ pub extern fn quiche_conn_new_with_tls(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_set_keylog_path(
+pub extern "C" fn quiche_conn_set_keylog_path(
     conn: &mut Connection, path: *const c_char,
 ) -> bool {
     let filename = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
@@ -655,7 +665,7 @@ pub extern fn quiche_conn_set_keylog_path(
 
 #[no_mangle]
 #[cfg(unix)]
-pub extern fn quiche_conn_set_keylog_fd(conn: &mut Connection, fd: c_int) {
+pub extern "C" fn quiche_conn_set_keylog_fd(conn: &mut Connection, fd: c_int) {
     let f = unsafe { std::fs::File::from_raw_fd(fd) };
     let writer = std::io::BufWriter::new(f);
 
@@ -664,7 +674,7 @@ pub extern fn quiche_conn_set_keylog_fd(conn: &mut Connection, fd: c_int) {
 
 #[no_mangle]
 #[cfg(feature = "qlog")]
-pub extern fn quiche_conn_set_qlog_path(
+pub extern "C" fn quiche_conn_set_qlog_path(
     conn: &mut Connection, path: *const c_char, log_title: *const c_char,
     log_desc: *const c_char,
 ) -> bool {
@@ -695,7 +705,7 @@ pub extern fn quiche_conn_set_qlog_path(
 
 #[no_mangle]
 #[cfg(all(unix, feature = "qlog"))]
-pub extern fn quiche_conn_set_qlog_fd(
+pub extern "C" fn quiche_conn_set_qlog_fd(
     conn: &mut Connection, fd: c_int, log_title: *const c_char,
     log_desc: *const c_char,
 ) {
@@ -713,7 +723,7 @@ pub extern fn quiche_conn_set_qlog_fd(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_set_session(
+pub extern "C" fn quiche_conn_set_session(
     conn: &mut Connection, buf: *const u8, buf_len: size_t,
 ) -> c_int {
     let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
@@ -726,7 +736,7 @@ pub extern fn quiche_conn_set_session(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_set_max_idle_timeout(
+pub extern "C" fn quiche_conn_set_max_idle_timeout(
     conn: &mut Connection, v: u64,
 ) -> c_int {
     match conn.set_max_idle_timeout(v) {
@@ -754,7 +764,7 @@ impl From<&RecvInfo<'_>> for crate::RecvInfo {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_recv(
+pub extern "C" fn quiche_conn_recv(
     conn: &mut Connection, buf: *mut u8, buf_len: size_t, info: &RecvInfo,
 ) -> ssize_t {
     if buf_len > <ssize_t>::MAX as usize {
@@ -781,7 +791,7 @@ pub struct SendInfo {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_send(
+pub extern "C" fn quiche_conn_send(
     conn: &mut Connection, out: *mut u8, out_len: size_t, out_info: &mut SendInfo,
 ) -> ssize_t {
     if out_len > <ssize_t>::MAX as usize {
@@ -805,7 +815,7 @@ pub extern fn quiche_conn_send(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_send_on_path(
+pub extern "C" fn quiche_conn_send_on_path(
     conn: &mut Connection, out: *mut u8, out_len: size_t, from: *const sockaddr,
     from_len: socklen_t, to: *const sockaddr, to_len: socklen_t,
     out_info: &mut SendInfo,
@@ -833,7 +843,7 @@ pub extern fn quiche_conn_send_on_path(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_recv(
+pub extern "C" fn quiche_conn_stream_recv(
     conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: size_t,
     fin: &mut bool, out_error_code: &mut u64,
 ) -> ssize_t {
@@ -862,7 +872,7 @@ pub extern fn quiche_conn_stream_recv(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_send(
+pub extern "C" fn quiche_conn_stream_send(
     conn: &mut Connection, stream_id: u64, buf: *const u8, buf_len: size_t,
     fin: bool, out_error_code: &mut u64,
 ) -> ssize_t {
@@ -887,7 +897,7 @@ pub extern fn quiche_conn_stream_send(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_priority(
+pub extern "C" fn quiche_conn_stream_priority(
     conn: &mut Connection, stream_id: u64, urgency: u8, incremental: bool,
 ) -> c_int {
     match conn.stream_priority(stream_id, urgency, incremental) {
@@ -898,7 +908,7 @@ pub extern fn quiche_conn_stream_priority(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_shutdown(
+pub extern "C" fn quiche_conn_stream_shutdown(
     conn: &mut Connection, stream_id: u64, direction: Shutdown, err: u64,
 ) -> c_int {
     match conn.stream_shutdown(stream_id, direction, err) {
@@ -909,7 +919,7 @@ pub extern fn quiche_conn_stream_shutdown(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_capacity(
+pub extern "C" fn quiche_conn_stream_capacity(
     conn: &Connection, stream_id: u64,
 ) -> ssize_t {
     match conn.stream_capacity(stream_id) {
@@ -920,19 +930,19 @@ pub extern fn quiche_conn_stream_capacity(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_readable(
+pub extern "C" fn quiche_conn_stream_readable(
     conn: &Connection, stream_id: u64,
 ) -> bool {
     conn.stream_readable(stream_id)
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_readable_next(conn: &mut Connection) -> i64 {
+pub extern "C" fn quiche_conn_stream_readable_next(conn: &mut Connection) -> i64 {
     conn.stream_readable_next().map(|v| v as i64).unwrap_or(-1)
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_writable(
+pub extern "C" fn quiche_conn_stream_writable(
     conn: &mut Connection, stream_id: u64, len: usize,
 ) -> c_int {
     match conn.stream_writable(stream_id, len) {
@@ -945,39 +955,41 @@ pub extern fn quiche_conn_stream_writable(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_writable_next(conn: &mut Connection) -> i64 {
+pub extern "C" fn quiche_conn_stream_writable_next(conn: &mut Connection) -> i64 {
     conn.stream_writable_next().map(|v| v as i64).unwrap_or(-1)
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stream_finished(
+pub extern "C" fn quiche_conn_stream_finished(
     conn: &Connection, stream_id: u64,
 ) -> bool {
     conn.stream_finished(stream_id)
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_readable(conn: &Connection) -> *mut StreamIter {
+pub extern "C" fn quiche_conn_readable(conn: &Connection) -> *mut StreamIter {
     Box::into_raw(Box::new(conn.readable()))
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_writable(conn: &Connection) -> *mut StreamIter {
+pub extern "C" fn quiche_conn_writable(conn: &Connection) -> *mut StreamIter {
     Box::into_raw(Box::new(conn.writable()))
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_max_send_udp_payload_size(conn: &Connection) -> usize {
+pub extern "C" fn quiche_conn_max_send_udp_payload_size(
+    conn: &Connection,
+) -> usize {
     conn.max_send_udp_payload_size()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_readable(conn: &Connection) -> bool {
+pub extern "C" fn quiche_conn_is_readable(conn: &Connection) -> bool {
     conn.is_readable()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_close(
+pub extern "C" fn quiche_conn_close(
     conn: &mut Connection, app: bool, err: u64, reason: *const u8,
     reason_len: size_t,
 ) -> c_int {
@@ -991,7 +1003,7 @@ pub extern fn quiche_conn_close(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_timeout_as_nanos(conn: &Connection) -> u64 {
+pub extern "C" fn quiche_conn_timeout_as_nanos(conn: &Connection) -> u64 {
     match conn.timeout() {
         Some(timeout) => timeout.as_nanos() as u64,
 
@@ -1000,7 +1012,7 @@ pub extern fn quiche_conn_timeout_as_nanos(conn: &Connection) -> u64 {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_timeout_as_millis(conn: &Connection) -> u64 {
+pub extern "C" fn quiche_conn_timeout_as_millis(conn: &Connection) -> u64 {
     match conn.timeout() {
         Some(timeout) => timeout.as_millis() as u64,
 
@@ -1009,12 +1021,12 @@ pub extern fn quiche_conn_timeout_as_millis(conn: &Connection) -> u64 {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_on_timeout(conn: &mut Connection) {
+pub extern "C" fn quiche_conn_on_timeout(conn: &mut Connection) {
     conn.on_timeout()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_trace_id(
+pub extern "C" fn quiche_conn_trace_id(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let trace_id = conn.trace_id();
@@ -1042,7 +1054,9 @@ impl<'a> Iterator for ConnectionIdIter<'a> {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_source_ids(conn: &Connection) -> *mut ConnectionIdIter {
+pub extern "C" fn quiche_conn_source_ids(
+    conn: &Connection,
+) -> *mut ConnectionIdIter {
     let vec = conn.source_ids().cloned().collect();
     Box::into_raw(Box::new(ConnectionIdIter {
         cids: vec,
@@ -1051,7 +1065,7 @@ pub extern fn quiche_conn_source_ids(conn: &Connection) -> *mut ConnectionIdIter
 }
 
 #[no_mangle]
-pub extern fn quiche_connection_id_iter_next(
+pub extern "C" fn quiche_connection_id_iter_next(
     iter: &mut ConnectionIdIter, out: &mut *const u8, out_len: &mut size_t,
 ) -> bool {
     if let Some(conn_id) = iter.next() {
@@ -1065,12 +1079,12 @@ pub extern fn quiche_connection_id_iter_next(
 }
 
 #[no_mangle]
-pub extern fn quiche_connection_id_iter_free(iter: *mut ConnectionIdIter) {
+pub extern "C" fn quiche_connection_id_iter_free(iter: *mut ConnectionIdIter) {
     drop(unsafe { Box::from_raw(iter) });
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_source_id(
+pub extern "C" fn quiche_conn_source_id(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let conn_id = conn.source_id();
@@ -1080,7 +1094,7 @@ pub extern fn quiche_conn_source_id(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_destination_id(
+pub extern "C" fn quiche_conn_destination_id(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let conn_id = conn.destination_id();
@@ -1091,7 +1105,7 @@ pub extern fn quiche_conn_destination_id(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_application_proto(
+pub extern "C" fn quiche_conn_application_proto(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     let proto = conn.application_proto();
@@ -1101,7 +1115,7 @@ pub extern fn quiche_conn_application_proto(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_peer_cert(
+pub extern "C" fn quiche_conn_peer_cert(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     match conn.peer_cert() {
@@ -1115,7 +1129,7 @@ pub extern fn quiche_conn_peer_cert(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_session(
+pub extern "C" fn quiche_conn_session(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
     match conn.session() {
@@ -1129,37 +1143,37 @@ pub extern fn quiche_conn_session(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_established(conn: &Connection) -> bool {
+pub extern "C" fn quiche_conn_is_established(conn: &Connection) -> bool {
     conn.is_established()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_resumed(conn: &Connection) -> bool {
+pub extern "C" fn quiche_conn_is_resumed(conn: &Connection) -> bool {
     conn.is_resumed()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_in_early_data(conn: &Connection) -> bool {
+pub extern "C" fn quiche_conn_is_in_early_data(conn: &Connection) -> bool {
     conn.is_in_early_data()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_draining(conn: &Connection) -> bool {
+pub extern "C" fn quiche_conn_is_draining(conn: &Connection) -> bool {
     conn.is_draining()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_closed(conn: &Connection) -> bool {
+pub extern "C" fn quiche_conn_is_closed(conn: &Connection) -> bool {
     conn.is_closed()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_timed_out(conn: &Connection) -> bool {
+pub extern "C" fn quiche_conn_is_timed_out(conn: &Connection) -> bool {
     conn.is_timed_out()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_peer_error(
+pub extern "C" fn quiche_conn_peer_error(
     conn: &Connection, is_app: *mut bool, error_code: *mut u64,
     reason: &mut *const u8, reason_len: &mut size_t,
 ) -> bool {
@@ -1178,7 +1192,7 @@ pub extern fn quiche_conn_peer_error(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_local_error(
+pub extern "C" fn quiche_conn_local_error(
     conn: &Connection, is_app: *mut bool, error_code: *mut u64,
     reason: &mut *const u8, reason_len: &mut size_t,
 ) -> bool {
@@ -1197,7 +1211,7 @@ pub extern fn quiche_conn_local_error(
 }
 
 #[no_mangle]
-pub extern fn quiche_stream_iter_next(
+pub extern "C" fn quiche_stream_iter_next(
     iter: &mut StreamIter, stream_id: *mut u64,
 ) -> bool {
     if let Some(v) = iter.next() {
@@ -1209,7 +1223,7 @@ pub extern fn quiche_stream_iter_next(
 }
 
 #[no_mangle]
-pub extern fn quiche_stream_iter_free(iter: *mut StreamIter) {
+pub extern "C" fn quiche_stream_iter_free(iter: *mut StreamIter) {
     drop(unsafe { Box::from_raw(iter) });
 }
 
@@ -1248,7 +1262,7 @@ pub struct TransportParams {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
+pub extern "C" fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     let stats = conn.stats();
 
     out.recv = stats.recv;
@@ -1268,7 +1282,7 @@ pub extern fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_peer_transport_params(
+pub extern "C" fn quiche_conn_peer_transport_params(
     conn: &Connection, out: &mut TransportParams,
 ) -> bool {
     let tps = match conn.peer_transport_params() {
@@ -1324,7 +1338,7 @@ pub struct PathStats {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_path_stats(
+pub extern "C" fn quiche_conn_path_stats(
     conn: &Connection, idx: usize, out: &mut PathStats,
 ) -> c_int {
     let stats = match conn.path_stats().nth(idx) {
@@ -1355,12 +1369,14 @@ pub extern fn quiche_conn_path_stats(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_server(conn: &Connection) -> bool {
+pub extern "C" fn quiche_conn_is_server(conn: &Connection) -> bool {
     conn.is_server()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_dgram_max_writable_len(conn: &Connection) -> ssize_t {
+pub extern "C" fn quiche_conn_dgram_max_writable_len(
+    conn: &Connection,
+) -> ssize_t {
     match conn.dgram_max_writable_len() {
         None => Error::Done.to_c(),
 
@@ -1369,7 +1385,7 @@ pub extern fn quiche_conn_dgram_max_writable_len(conn: &Connection) -> ssize_t {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_dgram_recv_front_len(conn: &Connection) -> ssize_t {
+pub extern "C" fn quiche_conn_dgram_recv_front_len(conn: &Connection) -> ssize_t {
     match conn.dgram_recv_front_len() {
         None => Error::Done.to_c(),
 
@@ -1378,31 +1394,31 @@ pub extern fn quiche_conn_dgram_recv_front_len(conn: &Connection) -> ssize_t {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_dgram_recv_queue_len(conn: &Connection) -> ssize_t {
+pub extern "C" fn quiche_conn_dgram_recv_queue_len(conn: &Connection) -> ssize_t {
     conn.dgram_recv_queue_len() as ssize_t
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_dgram_recv_queue_byte_size(
+pub extern "C" fn quiche_conn_dgram_recv_queue_byte_size(
     conn: &Connection,
 ) -> ssize_t {
     conn.dgram_recv_queue_byte_size() as ssize_t
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_dgram_send_queue_len(conn: &Connection) -> ssize_t {
+pub extern "C" fn quiche_conn_dgram_send_queue_len(conn: &Connection) -> ssize_t {
     conn.dgram_send_queue_len() as ssize_t
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_dgram_send_queue_byte_size(
+pub extern "C" fn quiche_conn_dgram_send_queue_byte_size(
     conn: &Connection,
 ) -> ssize_t {
     conn.dgram_send_queue_byte_size() as ssize_t
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_dgram_send(
+pub extern "C" fn quiche_conn_dgram_send(
     conn: &mut Connection, buf: *const u8, buf_len: size_t,
 ) -> ssize_t {
     if buf_len > <ssize_t>::MAX as usize {
@@ -1419,7 +1435,7 @@ pub extern fn quiche_conn_dgram_send(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_dgram_recv(
+pub extern "C" fn quiche_conn_dgram_recv(
     conn: &mut Connection, out: *mut u8, out_len: size_t,
 ) -> ssize_t {
     if out_len > <ssize_t>::MAX as usize {
@@ -1438,8 +1454,8 @@ pub extern fn quiche_conn_dgram_recv(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_dgram_purge_outgoing(
-    conn: &mut Connection, f: extern fn(*const u8, size_t) -> bool,
+pub extern "C" fn quiche_conn_dgram_purge_outgoing(
+    conn: &mut Connection, f: extern "C" fn(*const u8, size_t) -> bool,
 ) {
     conn.dgram_purge_outgoing(|d: &[u8]| -> bool {
         let ptr: *const u8 = d.as_ptr();
@@ -1450,17 +1466,23 @@ pub extern fn quiche_conn_dgram_purge_outgoing(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_dgram_send_queue_full(conn: &Connection) -> bool {
+pub extern "C" fn quiche_conn_is_dgram_send_queue_full(
+    conn: &Connection,
+) -> bool {
     conn.is_dgram_send_queue_full()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_dgram_recv_queue_full(conn: &Connection) -> bool {
+pub extern "C" fn quiche_conn_is_dgram_recv_queue_full(
+    conn: &Connection,
+) -> bool {
     conn.is_dgram_recv_queue_full()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_send_ack_eliciting(conn: &mut Connection) -> ssize_t {
+pub extern "C" fn quiche_conn_send_ack_eliciting(
+    conn: &mut Connection,
+) -> ssize_t {
     match conn.send_ack_eliciting() {
         Ok(()) => 0,
         Err(e) => e.to_c(),
@@ -1468,7 +1490,7 @@ pub extern fn quiche_conn_send_ack_eliciting(conn: &mut Connection) -> ssize_t {
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_send_ack_eliciting_on_path(
+pub extern "C" fn quiche_conn_send_ack_eliciting_on_path(
     conn: &mut Connection, local: &sockaddr, local_len: socklen_t,
     peer: &sockaddr, peer_len: socklen_t,
 ) -> ssize_t {
@@ -1481,37 +1503,37 @@ pub extern fn quiche_conn_send_ack_eliciting_on_path(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_free(conn: *mut Connection) {
+pub extern "C" fn quiche_conn_free(conn: *mut Connection) {
     drop(unsafe { Box::from_raw(conn) });
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_peer_streams_left_bidi(conn: &Connection) -> u64 {
+pub extern "C" fn quiche_conn_peer_streams_left_bidi(conn: &Connection) -> u64 {
     conn.peer_streams_left_bidi()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_peer_streams_left_uni(conn: &Connection) -> u64 {
+pub extern "C" fn quiche_conn_peer_streams_left_uni(conn: &Connection) -> u64 {
     conn.peer_streams_left_uni()
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_send_quantum(conn: &Connection) -> size_t {
+pub extern "C" fn quiche_conn_send_quantum(conn: &Connection) -> size_t {
     conn.send_quantum() as size_t
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_active_scids(conn: &Connection) -> size_t {
+pub extern "C" fn quiche_conn_active_scids(conn: &Connection) -> size_t {
     conn.active_scids() as size_t
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_scids_left(conn: &Connection) -> size_t {
+pub extern "C" fn quiche_conn_scids_left(conn: &Connection) -> size_t {
     conn.scids_left() as size_t
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_new_scid(
+pub extern "C" fn quiche_conn_new_scid(
     conn: &mut Connection, scid: *const u8, scid_len: size_t,
     reset_token: *const u8, retire_if_needed: bool, scid_seq: *mut u64,
 ) -> c_int {
@@ -1535,7 +1557,7 @@ pub extern fn quiche_conn_new_scid(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_retire_dcid(
+pub extern "C" fn quiche_conn_retire_dcid(
     conn: &mut Connection, dcid_seq: u64,
 ) -> c_int {
     match conn.retire_dcid(dcid_seq) {
@@ -1545,17 +1567,17 @@ pub extern fn quiche_conn_retire_dcid(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_available_dcids(conn: &Connection) -> size_t {
+pub extern "C" fn quiche_conn_available_dcids(conn: &Connection) -> size_t {
     conn.available_dcids() as size_t
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_retired_scids(conn: &Connection) -> size_t {
+pub extern "C" fn quiche_conn_retired_scids(conn: &Connection) -> size_t {
     conn.retired_scids() as size_t
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_retired_scid_next(
+pub extern "C" fn quiche_conn_retired_scid_next(
     conn: &mut Connection, out: &mut *const u8, out_len: &mut size_t,
 ) -> bool {
     match conn.retired_scid_next() {
@@ -1571,7 +1593,7 @@ pub extern fn quiche_conn_retired_scid_next(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_send_quantum_on_path(
+pub extern "C" fn quiche_conn_send_quantum_on_path(
     conn: &Connection, local: &sockaddr, local_len: socklen_t, peer: &sockaddr,
     peer_len: socklen_t,
 ) -> size_t {
@@ -1582,7 +1604,7 @@ pub extern fn quiche_conn_send_quantum_on_path(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_paths_iter(
+pub extern "C" fn quiche_conn_paths_iter(
     conn: &Connection, from: &sockaddr, from_len: socklen_t,
 ) -> *mut SocketAddrIter {
     let addr = std_addr_from_c(from, from_len);
@@ -1591,7 +1613,7 @@ pub extern fn quiche_conn_paths_iter(
 }
 
 #[no_mangle]
-pub extern fn quiche_socket_addr_iter_next(
+pub extern "C" fn quiche_socket_addr_iter_next(
     iter: &mut SocketAddrIter, peer: &mut sockaddr_storage,
     peer_len: *mut socklen_t,
 ) -> bool {
@@ -1604,12 +1626,12 @@ pub extern fn quiche_socket_addr_iter_next(
 }
 
 #[no_mangle]
-pub extern fn quiche_socket_addr_iter_free(iter: *mut SocketAddrIter) {
+pub extern "C" fn quiche_socket_addr_iter_free(iter: *mut SocketAddrIter) {
     drop(unsafe { Box::from_raw(iter) });
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_is_path_validated(
+pub extern "C" fn quiche_conn_is_path_validated(
     conn: &Connection, from: &sockaddr, from_len: socklen_t, to: &sockaddr,
     to_len: socklen_t,
 ) -> c_int {
@@ -1622,7 +1644,7 @@ pub extern fn quiche_conn_is_path_validated(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_probe_path(
+pub extern "C" fn quiche_conn_probe_path(
     conn: &mut Connection, local: &sockaddr, local_len: socklen_t,
     peer: &sockaddr, peer_len: socklen_t, seq: *mut u64,
 ) -> c_int {
@@ -1638,7 +1660,7 @@ pub extern fn quiche_conn_probe_path(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_migrate_source(
+pub extern "C" fn quiche_conn_migrate_source(
     conn: &mut Connection, local: &sockaddr, local_len: socklen_t, seq: *mut u64,
 ) -> c_int {
     let local = std_addr_from_c(local, local_len);
@@ -1652,7 +1674,7 @@ pub extern fn quiche_conn_migrate_source(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_migrate(
+pub extern "C" fn quiche_conn_migrate(
     conn: &mut Connection, local: &sockaddr, local_len: socklen_t,
     peer: &sockaddr, peer_len: socklen_t, seq: *mut u64,
 ) -> c_int {
@@ -1668,7 +1690,7 @@ pub extern fn quiche_conn_migrate(
 }
 
 #[no_mangle]
-pub extern fn quiche_conn_path_event_next(
+pub extern "C" fn quiche_conn_path_event_next(
     conn: &mut Connection,
 ) -> *mut PathEvent {
     match conn.path_event_next() {
@@ -1678,7 +1700,7 @@ pub extern fn quiche_conn_path_event_next(
 }
 
 #[no_mangle]
-pub extern fn quiche_path_event_type(ev: &PathEvent) -> u32 {
+pub extern "C" fn quiche_path_event_type(ev: &PathEvent) -> u32 {
     match ev {
         PathEvent::New { .. } => 0,
 
@@ -1695,7 +1717,7 @@ pub extern fn quiche_path_event_type(ev: &PathEvent) -> u32 {
 }
 
 #[no_mangle]
-pub extern fn quiche_path_event_new(
+pub extern "C" fn quiche_path_event_new(
     ev: &PathEvent, local_addr: &mut sockaddr_storage,
     local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
     peer_addr_len: &mut socklen_t,
@@ -1711,7 +1733,7 @@ pub extern fn quiche_path_event_new(
 }
 
 #[no_mangle]
-pub extern fn quiche_path_event_validated(
+pub extern "C" fn quiche_path_event_validated(
     ev: &PathEvent, local_addr: &mut sockaddr_storage,
     local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
     peer_addr_len: &mut socklen_t,
@@ -1727,7 +1749,7 @@ pub extern fn quiche_path_event_validated(
 }
 
 #[no_mangle]
-pub extern fn quiche_path_event_failed_validation(
+pub extern "C" fn quiche_path_event_failed_validation(
     ev: &PathEvent, local_addr: &mut sockaddr_storage,
     local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
     peer_addr_len: &mut socklen_t,
@@ -1743,7 +1765,7 @@ pub extern fn quiche_path_event_failed_validation(
 }
 
 #[no_mangle]
-pub extern fn quiche_path_event_closed(
+pub extern "C" fn quiche_path_event_closed(
     ev: &PathEvent, local_addr: &mut sockaddr_storage,
     local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
     peer_addr_len: &mut socklen_t,
@@ -1759,7 +1781,7 @@ pub extern fn quiche_path_event_closed(
 }
 
 #[no_mangle]
-pub extern fn quiche_path_event_reused_source_connection_id(
+pub extern "C" fn quiche_path_event_reused_source_connection_id(
     ev: &PathEvent, cid_sequence_number: &mut u64,
     old_local_addr: &mut sockaddr_storage, old_local_addr_len: &mut socklen_t,
     old_peer_addr: &mut sockaddr_storage, old_peer_addr_len: &mut socklen_t,
@@ -1781,7 +1803,7 @@ pub extern fn quiche_path_event_reused_source_connection_id(
 }
 
 #[no_mangle]
-pub extern fn quiche_path_event_peer_migrated(
+pub extern "C" fn quiche_path_event_peer_migrated(
     ev: &PathEvent, local_addr: &mut sockaddr_storage,
     local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
     peer_addr_len: &mut socklen_t,
@@ -1797,12 +1819,12 @@ pub extern fn quiche_path_event_peer_migrated(
 }
 
 #[no_mangle]
-pub extern fn quiche_path_event_free(ev: *mut PathEvent) {
+pub extern "C" fn quiche_path_event_free(ev: *mut PathEvent) {
     drop(unsafe { Box::from_raw(ev) });
 }
 
 #[no_mangle]
-pub extern fn quiche_put_varint(
+pub extern "C" fn quiche_put_varint(
     buf: *mut u8, buf_len: size_t, val: u64,
 ) -> c_int {
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
@@ -1819,7 +1841,7 @@ pub extern fn quiche_put_varint(
 }
 
 #[no_mangle]
-pub extern fn quiche_get_varint(
+pub extern "C" fn quiche_get_varint(
     buf: *const u8, buf_len: size_t, val: *mut u64,
 ) -> ssize_t {
     let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
@@ -2115,7 +2137,7 @@ mod tests {
     }
 
     #[cfg(not(windows))]
-    extern {
+    extern "C" {
         fn inet_ntop(
             af: c_int, src: *const c_void, dst: *mut c_char, size: socklen_t,
         ) -> *mut c_char;

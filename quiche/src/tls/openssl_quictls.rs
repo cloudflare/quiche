@@ -19,7 +19,7 @@ struct X509 {
 #[allow(non_camel_case_types)]
 pub(super) struct SSL_QUIC_METHOD {
     set_encryption_secrets: Option<
-        extern fn(
+        extern "C" fn(
             ssl: *mut SSL,
             level: crypto::Level,
             read_secret: *const u8,
@@ -29,7 +29,7 @@ pub(super) struct SSL_QUIC_METHOD {
     >,
 
     add_handshake_data: Option<
-        unsafe extern fn(
+        unsafe extern "C" fn(
             ssl: *mut SSL,
             level: crypto::Level,
             data: *const u8,
@@ -37,10 +37,10 @@ pub(super) struct SSL_QUIC_METHOD {
         ) -> c_int,
     >,
 
-    flush_flight: Option<extern fn(ssl: *mut SSL) -> c_int>,
+    flush_flight: Option<extern "C" fn(ssl: *mut SSL) -> c_int>,
 
     send_alert: Option<
-        extern fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int,
+        extern "C" fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int,
     >,
 }
 
@@ -177,7 +177,7 @@ impl Handshake {
     }
 }
 
-extern fn set_encryption_secrets(
+extern "C" fn set_encryption_secrets(
     ssl: *mut SSL, level: crypto::Level, read_secret: *const u8,
     write_secret: *const u8, secret_len: usize,
 ) -> c_int {
@@ -319,7 +319,7 @@ pub(super) fn get_session_bytes(session: *mut SSL_SESSION) -> Result<Vec<u8>> {
 }
 pub(super) const TLS_ERROR: c_int = 2;
 
-extern {
+extern "C" {
 
     fn SSL_CTX_ctrl(
         ctx: *mut SSL_CTX, cmd: c_int, larg: c_long, parg: *mut c_void,
