@@ -1180,6 +1180,7 @@ impl Connection {
     ///     struct.Connection.html#method.send_additional_headers
     /// [`send_response_with_priority()`]:
     ///     struct.Connection.html#method.send_response_with_priority
+    /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_response<T: NameValue>(
         &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],

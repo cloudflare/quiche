@@ -321,7 +321,7 @@ impl StreamMap {
 /// suites which depend heavily on h3i.
 ///
 /// The specific CONNECTION_CLOSE frame can be customized by passing a
-/// [`ConnectionError`] to [`Self::new_with_close`]. h3i will send an
+/// [`ConnectionError`] to [`Self::new_with_connection_close`]. h3i will send an
 /// application CONNECTION_CLOSE frame with error code 0x100 if this struct is
 /// constructed with the [`Self::new`] constructor.
 #[derive(Clone, Serialize, Debug)]
