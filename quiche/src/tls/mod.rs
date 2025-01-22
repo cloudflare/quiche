@@ -30,7 +30,7 @@ use std::slice;
 
 use std::io::Write;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use libc::c_char;
 use libc::c_int;
@@ -123,9 +123,7 @@ enum ssl_private_key_result_t {
 }
 
 /// BoringSSL ex_data index for quiche connections.
-///
-/// TODO: replace with `std::sync::LazyLock` when stable.
-pub static QUICHE_EX_DATA_INDEX: Lazy<c_int> = Lazy::new(|| unsafe {
+pub static QUICHE_EX_DATA_INDEX: LazyLock<c_int> = LazyLock::new(|| unsafe {
     SSL_get_ex_new_index(0, ptr::null(), ptr::null(), ptr::null(), ptr::null())
 });
 
