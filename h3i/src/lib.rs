@@ -163,22 +163,22 @@ use smallvec::SmallVec;
 
 /// The ID for an HTTP/3 control stream type.
 ///
-/// See https://datatracker.ietf.org/doc/html/rfc9114#name-control-streams.
+/// See <https://datatracker.ietf.org/doc/html/rfc9114#name-control-streams>.
 pub const HTTP3_CONTROL_STREAM_TYPE_ID: u64 = 0x0;
 
 /// The ID for an HTTP/3 push stream type.
 ///
-/// See https://datatracker.ietf.org/doc/html/rfc9114#name-push-streams.
+/// See <https://datatracker.ietf.org/doc/html/rfc9114#name-push-streams>.
 pub const HTTP3_PUSH_STREAM_TYPE_ID: u64 = 0x1;
 
 /// The ID for a QPACK encoder stream type.
 ///
-/// See https://datatracker.ietf.org/doc/html/rfc9204#section-4.2-2.1.
+/// See <https://datatracker.ietf.org/doc/html/rfc9204#section-4.2-2.1>.
 pub const QPACK_ENCODER_STREAM_TYPE_ID: u64 = 0x2;
 
 /// The ID for a QPACK decoder stream type.
 ///
-/// See https://datatracker.ietf.org/doc/html/rfc9204#section-4.2-2.2.
+/// See <https://datatracker.ietf.org/doc/html/rfc9204#section-4.2-2.2>.
 pub const QPACK_DECODER_STREAM_TYPE_ID: u64 = 0x3;
 
 #[derive(Default)]

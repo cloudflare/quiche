@@ -490,7 +490,7 @@ impl CloseTriggerFrame {
     /// For Headers variants, this [`CloseTriggerFrame`] is equivalent to the
     /// incoming [`H3iFrame`] if the [`H3iFrame`] contains all [`Header`]s
     /// in _this_ frame. In other words, `this` can be considered equivalent
-    /// to `other` if `other` contains a superset of `this`'s [`Headers`].
+    /// to `other` if `other` contains a superset of `this`'s [`Header`]s.
     ///
     /// This allows users for fuzzy-matching on header frames without needing to
     /// supply every individual header on the frame.
