@@ -10246,15 +10246,27 @@ mod tests {
         );
 
         // Server sends message with the new key.
-        assert_eq!(pipe.server.stream_send(4, b"world", true), Ok(5));
+        assert_eq!(pipe.server.stream_send(4, b"world", false), Ok(5));
         assert_eq!(pipe.advance(), Ok(()));
 
         // Ensure update key is completed and client can decrypt packet.
         let mut r = pipe.client.readable();
         assert_eq!(r.next(), Some(4));
         assert_eq!(r.next(), None);
-        assert_eq!(pipe.client.stream_recv(4, &mut b), Ok((5, true)));
+        assert_eq!(pipe.client.stream_recv(4, &mut b), Ok((5, false)));
         assert_eq!(&b[..5], b"world");
+
+        // Server keeps sending packets to ensure encryption still works.
+        for _ in 0..10 {
+            assert_eq!(pipe.server.stream_send(4, b"world", false), Ok(5));
+            assert_eq!(pipe.advance(), Ok(()));
+
+            let mut r = pipe.client.readable();
+            assert_eq!(r.next(), Some(4));
+            assert_eq!(r.next(), None);
+            assert_eq!(pipe.client.stream_recv(4, &mut b), Ok((5, false)));
+            assert_eq!(&b[..5], b"world");
+        }
     }
 
     #[test]
