@@ -65,7 +65,17 @@ impl PacketKey {
         derive_pkt_key(aead, secret, &mut key)?;
         derive_pkt_iv(aead, secret, &mut iv)?;
 
-        Self::new(aead, key, iv, enc)
+        let pkt_key = Self::new(aead, key, iv, enc)?;
+
+        // Dummy seal operation to prime the AEAD context with the nonce mask.
+        //
+        // This is needed because BoringCrypto requires the first counter (i.e.
+        // packet number) to be zero, which would not be the case for packet
+        // number spaces after Initial as the same packet number sequence is
+        // shared.
+        let _ = pkt_key.seal_with_u64_counter(0, b"", &mut [0_u8; 16], 0, None);
+
+        Ok(pkt_key)
     }
 
     pub fn open_with_u64_counter(
