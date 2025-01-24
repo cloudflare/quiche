@@ -19,7 +19,7 @@ log = { version = "0.4", features = ["std"] }
 mio = { version = "0.8", features = ["net", "os-poll"] }
 multimap = "0.10"
 octets = { version = "0.3", path = "../octets"}
-qlog = { version = "0.14", path = "../qlog" }
+qlog = { version = "0.15", path = "../qlog" }
 quiche = { version = "0.23", path = "../quiche", features = ["internal", "qlog"] }
 rand = "0.8.5"
 smallvec = "1.11.2"
