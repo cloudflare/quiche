@@ -316,10 +316,10 @@ impl HeaderProtectionKey {
         })
     }
 
-    pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
+    pub fn new_mask(&self, sample: &[u8]) -> Result<HeaderProtectionMask> {
         const PLAINTEXT: &[u8; 5] = &[0_u8; 5];
 
-        let mut new_mask = [0_u8; 5];
+        let mut new_mask = HeaderProtectionMask::default();
 
         // Set IV (i.e. the sample).
         let rc = unsafe {
