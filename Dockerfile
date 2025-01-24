@@ -9,7 +9,7 @@ COPY quiche/ ./quiche/
 
 RUN apt-get update && apt-get install -y cmake && rm -rf /var/lib/apt/lists/*
 
-RUN cargo build --manifest-path apps/Cargo.toml
+RUN cargo build --release --manifest-path apps/Cargo.toml
 
 ##
 ## quiche-base: quiche image for apps
@@ -20,8 +20,8 @@ RUN apt-get update && apt-get install -y ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=build \
-     /build/apps/target/debug/quiche-client \
-     /build/apps/target/debug/quiche-server \
+     /build/apps/target/release/quiche-client \
+     /build/apps/target/release/quiche-server \
      /usr/local/bin/
 
 ENV PATH="/usr/local/bin/:${PATH}"
@@ -39,8 +39,8 @@ WORKDIR /quiche
 RUN apt-get update && apt-get install -y wait-for-it && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build \
-     /build/apps/target/debug/quiche-client \
-     /build/apps/target/debug/quiche-server \
+     /build/apps/target/release/quiche-client \
+     /build/apps/target/release/quiche-server \
      /build/apps/run_endpoint.sh \
      ./
 
