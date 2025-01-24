@@ -2,6 +2,13 @@
 members = [ "apps", "h3i", "octets", "qlog", "quiche" ]
 exclude = [ "fuzz", "tools/http3_test" ]
 
+[workspace.metadata.release]
+pre-release-commit-message = "{{crate_name}}: release {{version}}"
+consolidate-commits = false
+tag-name = "{{version}}"
+tag-message = "{{crate_name}} {{version}}"
+publish = false
+
 [profile.bench]
 debug = true
 
