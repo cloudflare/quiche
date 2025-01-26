@@ -304,8 +304,13 @@ impl Serialize for SerializableQFrame<'_> {
         let name = frame_name(self.0);
         match self.0 {
             QFrame::Data { payload } => {
-                let mut state = s.serialize_struct(name, 1)?;
+                let mut state = s.serialize_struct(name, 2)?;
+                let max = cmp::min(payload.len(), MAX_SERIALIZED_BUFFER_LEN);
                 state.serialize_field("payload_len", &payload.len())?;
+                state.serialize_field(
+                    "payload",
+                    &qlog::HexSlice::maybe_string(Some(&payload[..max])),
+                )?;
                 state.end()
             },
 
@@ -382,7 +387,7 @@ impl Serialize for SerializableQFrame<'_> {
                 prioritized_element_id,
                 priority_field_value,
             } => {
-                let mut state = s.serialize_struct(name, 2)?;
+                let mut state = s.serialize_struct(name, 3)?;
                 state.serialize_field(
                     "prioritized_element_id",
                     &prioritized_element_id,
@@ -392,6 +397,10 @@ impl Serialize for SerializableQFrame<'_> {
                     priority_field_value.len(),
                     MAX_SERIALIZED_BUFFER_LEN,
                 );
+                state.serialize_field(
+                    "priority_field_value_len",
+                    &priority_field_value.len(),
+                )?;
                 state.serialize_field(
                     "priority_field_value",
                     &String::from_utf8_lossy(&priority_field_value[..max]),
@@ -403,7 +412,7 @@ impl Serialize for SerializableQFrame<'_> {
                 prioritized_element_id,
                 priority_field_value,
             } => {
-                let mut state = s.serialize_struct(name, 1)?;
+                let mut state = s.serialize_struct(name, 3)?;
                 state.serialize_field(
                     "prioritized_element_id",
                     &prioritized_element_id,
@@ -413,6 +422,10 @@ impl Serialize for SerializableQFrame<'_> {
                     MAX_SERIALIZED_BUFFER_LEN,
                 );
                 state.serialize_field(
+                    "priority_field_value_len",
+                    &priority_field_value.len(),
+                )?;
+                state.serialize_field(
                     "priority_field_value",
                     &String::from_utf8_lossy(&priority_field_value[..max]),
                 )?;
@@ -420,10 +433,10 @@ impl Serialize for SerializableQFrame<'_> {
             },
 
             QFrame::Unknown { raw_type, payload } => {
-                let mut state = s.serialize_struct(name, 1)?;
+                let mut state = s.serialize_struct(name, 3)?;
                 state.serialize_field("raw_type", &raw_type)?;
                 let max = cmp::min(payload.len(), MAX_SERIALIZED_BUFFER_LEN);
-
+                state.serialize_field("payload_len", &payload.len())?;
                 state.serialize_field(
                     "payload",
                     &qlog::HexSlice::maybe_string(Some(&payload[..max])),
