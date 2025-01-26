@@ -49,6 +49,12 @@ pub const MAX_SERIALIZED_BUFFER_LEN: usize = 16384;
 /// A summary of all frames received on a connection. There are some extra
 /// fields included to provide additional context into the connection's
 /// behavior.
+///
+/// ConnectionSummary implements [Serialize]. HTTP/3 frames that contain binary
+/// payload are serialized using the qlog
+/// [hexstring](https://www.ietf.org/archive/id/draft-ietf-quic-qlog-main-schema-10.html#section-1.2)
+/// format - "an even-length lowercase string of hexadecimally encoded bytes
+/// examples: 82dc, 027339, 4cdbfd9bf0"
 #[derive(Default, Debug)]
 pub struct ConnectionSummary {
     pub stream_map: StreamMap,
