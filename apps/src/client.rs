@@ -299,7 +299,7 @@ pub fn connect(
                     },
                 };
 
-                trace!("{}: got {} bytes", local_addr, len);
+                trace!("got {len} bytes from {from} to {local_addr}");
 
                 if let Some(target_path) = conn_args.dump_packet_path.as_ref() {
                     let path = format!("{target_path}/{pkt_count}.pkt");
@@ -553,10 +553,8 @@ pub fn connect(
                     }
 
                     trace!(
-                        "{} -> {}: written {}",
-                        local_addr,
-                        send_info.to,
-                        write
+                        "written {write} bytes from {local_addr} to {}",
+                        send_info.to
                     );
                 }
             }
