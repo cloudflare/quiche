@@ -226,7 +226,7 @@ fn main() {
                 },
             };
 
-            trace!("got {} bytes", len);
+            trace!("got {len} bytes from {from} to {local_addr}");
 
             let pkt_buf = &mut buf[..len];
 
@@ -609,7 +609,10 @@ fn main() {
                 panic!("send_to() failed: {:?}", e);
             }
 
-            trace!("{} written {} bytes", client.conn.trace_id(), total_write);
+            trace!(
+                "{} written {total_write} bytes with {dst_info:?}",
+                client.conn.trace_id()
+            );
 
             if total_write >= max_send_burst {
                 trace!("{} pause writing", client.conn.trace_id(),);
