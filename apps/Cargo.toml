@@ -21,6 +21,7 @@ sfv = ["quiche/sfv"]
 default = ["qlog", "sfv"]
 
 [dependencies]
+dgram = { path = "../dgram" }
 docopt = "1"
 env_logger = "0.10"
 mio = { version = "0.8", features = ["net", "os-poll"] }

@@ -116,7 +116,7 @@ jobs:
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     env:
-      IPHONEOS_DEPLOYMENT_TARGET: "10.0"
+      IPHONEOS_DEPLOYMENT_TARGET: "17.5"
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
