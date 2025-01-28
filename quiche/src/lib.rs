@@ -495,6 +495,9 @@ const DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 10;
 // The maximum data offset that can be stored in a crypto stream.
 const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
 
+// The send capacity factor.
+const TX_CAP_FACTOR: usize = 1;
+
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -801,6 +804,8 @@ pub struct Config {
     pacing: bool,
     max_pacing_rate: Option<u64>,
 
+    tx_cap_factor: usize,
+
     dgram_recv_max_queue_len: usize,
     dgram_send_max_queue_len: usize,
 
@@ -869,6 +874,8 @@ impl Config {
             hystart: true,
             pacing: true,
             max_pacing_rate: None,
+
+            tx_cap_factor: TX_CAP_FACTOR,
 
             dgram_recv_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
             dgram_send_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
@@ -1076,6 +1083,13 @@ impl Config {
     /// The default value is `3`.
     pub fn set_max_amplification_factor(&mut self, v: usize) {
         self.max_amplification_factor = v;
+    }
+
+    /// Sets the send capacity factor.
+    ///
+    /// The default value is `1`.
+    pub fn set_send_capacity_factor(&mut self, v: usize) {
+        self.tx_cap_factor = v;
     }
 
     /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
@@ -1450,7 +1464,10 @@ pub struct Connection {
     /// Number of stream data bytes that can be buffered.
     tx_cap: usize,
 
-    // Number of bytes buffered in the send buffer.
+    /// The send capacity factor.
+    tx_cap_factor: usize,
+
+    /// Number of bytes buffered in the send buffer.
     tx_buffered: usize,
 
     /// Total number of bytes sent to the peer.
@@ -1954,6 +1971,7 @@ impl Connection {
             almost_full: false,
 
             tx_cap: 0,
+            tx_cap_factor: config.tx_cap_factor,
 
             tx_buffered: 0,
 
@@ -7573,8 +7591,9 @@ impl Connection {
             Err(_) => 0,
         };
 
-        self.tx_cap =
+        let cap =
             cmp::min(cwin_available, self.max_tx_data - self.tx_data) as usize;
+        self.tx_cap = cap * self.tx_cap_factor;
     }
 
     fn delivery_rate_check_if_app_limited(&self) -> bool {
@@ -13556,6 +13575,58 @@ mod tests {
             .expect("no active")
             .recovery
             .app_limited());
+    }
+
+    #[test]
+    fn tx_cap_factor() {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_initial_max_data(50000);
+        config.set_initial_max_stream_data_bidi_local(12000);
+        config.set_initial_max_stream_data_bidi_remote(12000);
+        config.set_initial_max_streams_bidi(3);
+        config.set_initial_max_streams_uni(3);
+        config.set_max_recv_udp_payload_size(1200);
+        config.verify_peer(false);
+
+        config.set_send_capacity_factor(2);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Client sends stream data.
+        assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
+        assert_eq!(pipe.client.stream_send(4, b"a", true), Ok(1));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let mut b = [0; 50000];
+
+        // Server reads stream data.
+        pipe.server.stream_recv(0, &mut b).unwrap();
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server sends stream data bigger than cwnd.
+        let send_buf = [0; 50000];
+        assert_eq!(pipe.server.stream_send(0, &send_buf, false), Ok(12000));
+        assert_eq!(pipe.server.stream_send(4, &send_buf, false), Ok(12000));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let mut r = pipe.client.readable();
+        assert_eq!(r.next(), Some(0));
+        assert_eq!(pipe.client.stream_recv(0, &mut b), Ok((12000, false)));
+
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(pipe.client.stream_recv(4, &mut b), Ok((12000, false)));
+
+        assert_eq!(r.next(), None);
     }
 
     #[test]
