@@ -1,4 +1,4 @@
-FROM rust:1.80 as build
+FROM rust:1.80 AS build
 
 WORKDIR /build
 
@@ -14,7 +14,7 @@ RUN cargo build --release --manifest-path apps/Cargo.toml
 ##
 ## quiche-base: quiche image for apps
 ##
-FROM debian:latest as quiche-base
+FROM debian:latest AS quiche-base
 
 RUN apt-get update && apt-get install -y ca-certificates && \
     rm -rf /var/lib/apt/lists/*
@@ -32,7 +32,7 @@ ENV RUST_LOG=info
 ## https://github.com/marten-seemann/quic-network-simulator
 ## https://github.com/marten-seemann/quic-interop-runner
 ##
-FROM martenseemann/quic-network-simulator-endpoint:latest as quiche-qns
+FROM martenseemann/quic-network-simulator-endpoint:latest AS quiche-qns
 
 WORKDIR /quiche
 
