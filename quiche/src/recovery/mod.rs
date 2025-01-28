@@ -936,6 +936,10 @@ impl Recovery {
     pub fn lost_count(&self) -> usize {
         self.congestion.lost_count
     }
+
+    pub fn get_sent_packets(&self, epoch: packet::Epoch) -> impl Iterator<Item = &Sent> {
+      self.epochs[epoch].sent_packets.iter()
+    }
 }
 
 impl std::fmt::Debug for Recovery {
