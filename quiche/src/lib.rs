@@ -405,6 +405,7 @@ use qlog::events::EventType;
 use qlog::events::RawInfo;
 use stream::StreamPriorityKey;
 
+use std::borrow::BorrowMut;
 use std::cmp;
 use std::convert::TryInto;
 use std::time;
@@ -2598,15 +2599,26 @@ impl Connection {
                 self.is_server,
             )?;
 
-            // Reset connection state to force sending another Initial packet.
-            self.drop_epoch_state(packet::Epoch::Initial, now);
-            self.got_peer_conn_id = false;
-            self.handshake.clear()?;
+            // self.drop_epoch_state(packet::Epoch::Initial, now);
+            // self.got_peer_conn_id = false;
+            // self.handshake.clear()?;
+            let space = self.pkt_num_spaces[packet::Epoch::Initial].borrow_mut();
 
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_open =
-                Some(aead_open);
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_seal =
-                Some(aead_seal);
+            space.crypto_open = Some(aead_open);
+            space.crypto_seal = Some(aead_seal);
+
+            // Keep initial state and retransmit crypto data
+            let path = self.paths.get_active()?;
+            for s in path.recovery.get_sent_packets(packet::Epoch::Initial) {
+                for f in s.frames.iter() {
+                    match f {
+                        frame::Frame::CryptoHeader { offset, length} => {
+                            space.crypto_stream.send.retransmit(*offset, *length);
+                        }
+                        _ => ()
+                    }
+                }
+            }         
 
             return Err(Error::Done);
         }
@@ -13029,6 +13041,26 @@ mod tests {
         }
     }
 
+    fn decrypt_initial_pkt(pkt: &[u8], dcid: &[u8], is_server: bool) -> Result<Vec<frame::Frame>> {
+        let mut pkt = pkt.to_vec();
+        let mut b = octets::OctetsMut::with_slice(&mut pkt);
+        let mut hdr = Header::from_bytes(&mut b, 0).unwrap();
+
+        let payload_len = b.get_varint().unwrap() as usize;
+        let (aead, _) = crypto::derive_initial_key_material(dcid, hdr.version, is_server).unwrap();
+
+        packet::decrypt_hdr(&mut b, &mut hdr, &aead).unwrap();
+
+        let pn = packet::decode_pkt_num(0, hdr.pkt_num, hdr.pkt_num_len);
+        let mut payload = packet::decrypt_pkt(&mut b, pn, hdr.pkt_num_len, payload_len, &aead)?;
+
+        let mut frames = Vec::new();
+        while payload.cap() > 0 {
+            frames.push(frame::Frame::from_bytes(&mut payload, hdr.ty)?);
+        }
+        Ok(frames)
+    }
+
     #[test]
     fn retry() {
         let mut buf = [0; 65535];
@@ -13049,10 +13081,25 @@ mod tests {
         // Client sends initial flight.
         let (mut len, _) = pipe.client.send(&mut buf).unwrap();
 
+        fn extract_crypto_data(fs: &Vec<frame::Frame>) -> Vec<u8> {
+            fs.iter().filter_map(|f| {
+                match f {
+                    frame::Frame::Crypto { data } => {
+                        Some(std::ops::Deref::deref(data))
+                    }
+                    _ => None
+                }
+            }).collect::<Vec<_>>().concat()
+        }
+
         // Server sends Retry packet.
         let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
 
         let odcid = hdr.dcid.clone();
+
+        // Remember the data sent in crypto frame(s)
+        let frames_before = decrypt_initial_pkt(&buf[..len], &hdr.dcid.clone(), true).unwrap();
+        let frames_before = extract_crypto_data(&frames_before);
 
         let mut scid = [0; MAX_CONN_ID_LEN];
         rand::rand_bytes(&mut scid[..]);
@@ -13077,6 +13124,11 @@ mod tests {
 
         let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
         assert_eq!(&hdr.token.unwrap(), token);
+
+        // Compare crypto data
+        let frames_after = decrypt_initial_pkt(&buf[..len], &hdr.dcid.clone(),true).unwrap();
+        let frames_after = extract_crypto_data(&frames_after);
+        assert_eq!(frames_before, frames_after);
 
         // Server accepts connection.
         let from = "127.0.0.1:1234".parse().unwrap();
