@@ -667,9 +667,16 @@ pub struct PacketSent {
 
     pub trigger: Option<PacketSentTrigger>,
 
-    pub send_at_time: Option<f32>,
+    #[serde(flatten)]
+    pub extension: PacketSentExtension,
 
     pub frames: Option<SmallVec<[QuicFrame; 1]>>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct PacketSentExtension {
+    pub send_at_time: Option<f32>,
 }
 
 #[serde_with::skip_serializing_none]

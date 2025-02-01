@@ -141,7 +141,9 @@
 //!         supported_versions: None,
 //!         raw: Some(raw),
 //!         datagram_id: None,
-//!         send_at_time: None,
+//!         extension: qlog::events::quic::PacketSentExtension {
+//!             send_at_time: None,
+//!         },
 //!         trigger: None,
 //!     });
 //!
@@ -351,7 +353,9 @@
 //!         supported_versions: None,
 //!         raw: None,
 //!         datagram_id: None,
-//!         send_at_time: None,
+//!         extension: qlog::events::quic::PacketSentExtension {
+//!             send_at_time: None,
+//!         },
 //!         trigger: None,
 //!     });
 //!
@@ -724,6 +728,7 @@ pub mod testing {
 mod tests {
     use super::*;
     use crate::events::quic::PacketSent;
+    use crate::events::quic::PacketSentExtension;
     use crate::events::quic::PacketType;
     use crate::events::quic::QuicFrame;
     use crate::events::EventData;
@@ -766,7 +771,7 @@ mod tests {
                 data: None,
             }),
             datagram_id: None,
-            send_at_time: None,
+            extension: PacketSentExtension { send_at_time: None },
             trigger: None,
         });
 
@@ -846,7 +851,7 @@ mod tests {
                 data: None,
             }),
             datagram_id: None,
-            send_at_time: None,
+            extension: PacketSentExtension { send_at_time: None },
             trigger: None,
         });
 
@@ -966,7 +971,7 @@ mod tests {
                 data: None,
             }),
             datagram_id: None,
-            send_at_time: None,
+            extension: PacketSentExtension { send_at_time: None },
             trigger: None,
         });
 
