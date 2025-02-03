@@ -236,15 +236,8 @@ fn fake_packet_header() -> PacketHeader {
 fn fake_packet_sent(frames: Option<SmallVec<[QuicFrame; 1]>>) -> EventData {
     EventData::PacketSent(PacketSent {
         header: fake_packet_header(),
-        is_coalesced: None,
-        retry_token: None,
-        stateless_reset_token: None,
-        supported_versions: None,
-        raw: None,
-        datagram_id: None,
-        trigger: None,
-        send_at_time: None,
         frames,
+        ..Default::default()
     })
 }
 

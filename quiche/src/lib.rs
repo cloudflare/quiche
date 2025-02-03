@@ -4610,14 +4610,9 @@ impl Connection {
                     EventData::PacketSent(qlog::events::quic::PacketSent {
                         header,
                         frames: Some(qlog_frames),
-                        is_coalesced: None,
-                        retry_token: None,
-                        stateless_reset_token: None,
-                        supported_versions: None,
                         raw: Some(qlog_raw_info),
-                        datagram_id: None,
                         send_at_time: Some(send_at_time),
-                        trigger: None,
+                        ..Default::default()
                     });
 
                 q.add_event_data_with_instant(ev_data, now).ok();
