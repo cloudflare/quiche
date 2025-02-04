@@ -8569,13 +8569,8 @@ impl TransportParams {
         EventData::TransportParametersSet(
             qlog::events::quic::TransportParametersSet {
                 owner: Some(owner),
-                resumption_allowed: None,
-                early_data_enabled: None,
                 tls_cipher: Some(format!("{cipher:?}")),
-                aead_tag_length: None,
                 original_destination_connection_id,
-                initial_source_connection_id: None,
-                retry_source_connection_id: None,
                 stateless_reset_token,
                 disable_active_migration: Some(self.disable_active_migration),
                 max_idle_timeout: Some(self.max_idle_timeout),
@@ -8598,9 +8593,7 @@ impl TransportParams {
                 ),
                 initial_max_streams_bidi: Some(self.initial_max_streams_bidi),
                 initial_max_streams_uni: Some(self.initial_max_streams_uni),
-
-                preferred_address: None,
-
+                
                 unknown_parameters: self
                     .unknown_params
                     .as_ref()
@@ -8616,6 +8609,8 @@ impl TransportParams {
                             .collect()
                     })
                     .unwrap_or_default(),
+
+                ..Default::default()
             },
         )
     }
