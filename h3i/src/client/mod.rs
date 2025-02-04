@@ -152,9 +152,8 @@ fn handle_qlog(
     if let Some(s) = qlog_streamer {
         let ev_data = EventData::H3FrameParsed(H3FrameParsed {
             stream_id,
-            length: None,
             frame: qlog_frame,
-            raw: None,
+            ..Default::default()
         });
 
         s.add_event_data_now(ev_data).ok();
