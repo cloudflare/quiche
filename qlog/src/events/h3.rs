@@ -232,7 +232,7 @@ pub struct H3FrameCreated {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct H3FrameParsed {
     pub stream_id: u64,
     pub length: Option<u64>,
