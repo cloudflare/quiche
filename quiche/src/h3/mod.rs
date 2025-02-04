@@ -1417,7 +1417,7 @@ impl Connection {
                 stream_id,
                 length: Some(header_block.len() as u64),
                 frame,
-                raw: None,
+                ..Default::default()
             });
 
             q.add_event_data_now(ev_data).ok();
@@ -1538,7 +1538,7 @@ impl Connection {
                 stream_id,
                 length: Some(written as u64),
                 frame,
-                raw: None,
+                ..Default::default()
             });
 
             q.add_event_data_now(ev_data).ok();
@@ -1748,7 +1748,7 @@ impl Connection {
                 stream_id,
                 length: Some(priority_field_value.len() as u64),
                 frame,
-                raw: None,
+                ..Default::default()
             });
 
             q.add_event_data_now(ev_data).ok();
@@ -1961,7 +1961,7 @@ impl Connection {
                     stream_id,
                     length: Some(octets::varint_len(id) as u64),
                     frame: frame.to_qlog(),
-                    raw: None,
+                    ..Default::default()
                 });
 
                 q.add_event_data_now(ev_data).ok();
@@ -2117,7 +2117,7 @@ impl Connection {
                 stream_id,
                 length: Some(0),
                 frame,
-                raw: None,
+                ..Default::default()
             });
 
             q.add_event_data_now(ev_data).ok();
@@ -2147,7 +2147,7 @@ impl Connection {
                 stream_id,
                 length: Some(grease_payload.len() as u64),
                 frame,
-                raw: None,
+                ..Default::default()
             });
 
             q.add_event_data_now(ev_data).ok();
@@ -2266,7 +2266,7 @@ impl Connection {
                     stream_id: id,
                     length: Some(off as u64),
                     frame,
-                    raw: None,
+                    ..Default::default()
                 });
 
                 q.add_event_data_now(ev_data).ok();
