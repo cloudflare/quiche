@@ -8593,7 +8593,7 @@ impl TransportParams {
                 ),
                 initial_max_streams_bidi: Some(self.initial_max_streams_bidi),
                 initial_max_streams_uni: Some(self.initial_max_streams_uni),
-                
+
                 unknown_parameters: self
                     .unknown_params
                     .as_ref()

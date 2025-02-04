@@ -180,7 +180,10 @@ pub enum Http3Frame {
 
 impl Default for Http3Frame {
     fn default() -> Self {
-        Self::Unknown { frame_type_value: 0, raw: None }
+        Self::Unknown {
+            frame_type_value: 0,
+            raw: None,
+        }
     }
 }
 
