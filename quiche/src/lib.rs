@@ -2960,13 +2960,8 @@ impl Connection {
                 EventData::PacketReceived(qlog::events::quic::PacketReceived {
                     header: qlog_pkt_hdr,
                     frames: Some(qlog_frames),
-                    is_coalesced: None,
-                    retry_token: None,
-                    stateless_reset_token: None,
-                    supported_versions: None,
                     raw: Some(qlog_raw_info),
-                    datagram_id: None,
-                    trigger: None,
+                    ..Default::default()
                 });
 
             q.add_event_data_with_instant(ev_data, now).ok();
