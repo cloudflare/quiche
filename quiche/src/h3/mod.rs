@@ -2033,8 +2033,7 @@ impl Connection {
                 stream_id,
                 owner: Some(H3Owner::Local),
                 stream_type: H3StreamType::QpackEncode,
-                stream_type_value: None,
-                associated_push_id: None,
+                ..Default::default()
             });
 
             q.add_event_data_now(ev_data).ok();
@@ -2056,8 +2055,7 @@ impl Connection {
                 stream_id,
                 owner: Some(H3Owner::Local),
                 stream_type: H3StreamType::QpackDecode,
-                stream_type_value: None,
-                associated_push_id: None,
+                ..Default::default()
             });
 
             q.add_event_data_now(ev_data).ok();
@@ -2174,7 +2172,7 @@ impl Connection {
                         owner: Some(H3Owner::Local),
                         stream_type: H3StreamType::Unknown,
                         stream_type_value: Some(ty),
-                        associated_push_id: None,
+                        ..Default::default()
                     });
 
                     q.add_event_data_now(ev_data).ok();
@@ -2218,8 +2216,7 @@ impl Connection {
                 stream_id,
                 owner: Some(H3Owner::Local),
                 stream_type: H3StreamType::Control,
-                stream_type_value: None,
-                associated_push_id: None,
+                ..Default::default()
             });
 
             q.add_event_data_now(ev_data).ok();
@@ -2343,7 +2340,7 @@ impl Connection {
                                 owner: Some(H3Owner::Remote),
                                 stream_type: ty.to_qlog(),
                                 stream_type_value: ty_val,
-                                associated_push_id: None,
+                                ..Default::default()
                             });
 
                         q.add_event_data_now(ev_data).ok();
