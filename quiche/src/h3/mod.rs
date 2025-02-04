@@ -2514,7 +2514,7 @@ impl Connection {
                                     stream_id,
                                     length: Some(payload_len),
                                     frame,
-                                    raw: None,
+                                    ..Default::default()
                                 });
 
                             q.add_event_data_now(ev_data).ok();
@@ -2665,7 +2665,7 @@ impl Connection {
                     stream_id,
                     length: Some(payload_len),
                     frame,
-                    raw: None,
+                    ..Default::default()
                 });
 
                 q.add_event_data_now(ev_data).ok();
@@ -2777,7 +2777,7 @@ impl Connection {
                         stream_id,
                         length: Some(payload_len),
                         frame,
-                        raw: None,
+                        ..Default::default()
                     });
 
                     q.add_event_data_now(ev_data).ok();
