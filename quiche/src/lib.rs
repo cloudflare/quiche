@@ -2855,10 +2855,8 @@ impl Connection {
                     EventData::KeyUpdated(qlog::events::security::KeyUpdated {
                         key_type:
                             qlog::events::security::KeyType::Client1RttSecret,
-                        old: None,
-                        new: String::new(),
-                        generation: None,
                         trigger: trigger.clone(),
+                        ..Default::default()
                     });
 
                 q.add_event_data_with_instant(ev_data_client, now).ok();
@@ -2867,10 +2865,8 @@ impl Connection {
                     EventData::KeyUpdated(qlog::events::security::KeyUpdated {
                         key_type:
                             qlog::events::security::KeyType::Server1RttSecret,
-                        old: None,
-                        new: String::new(),
-                        generation: None,
                         trigger,
+                        ..Default::default()
                     });
 
                 q.add_event_data_with_instant(ev_data_server, now).ok();
