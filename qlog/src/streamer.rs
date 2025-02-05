@@ -395,14 +395,8 @@ mod tests {
         let event_data1 = EventData::PacketSent(quic::PacketSent {
             header: pkt_hdr.clone(),
             frames: Some(smallvec![frame1]),
-            is_coalesced: None,
-            retry_token: None,
-            stateless_reset_token: None,
-            supported_versions: None,
             raw: raw.clone(),
-            datagram_id: None,
-            send_at_time: None,
-            trigger: None,
+            ..Default::default()
         });
 
         let ev1 = Event::with_time(0.0, event_data1);
@@ -426,14 +420,8 @@ mod tests {
         let event_data2 = EventData::PacketSent(quic::PacketSent {
             header: pkt_hdr.clone(),
             frames: Some(smallvec![frame2]),
-            is_coalesced: None,
-            retry_token: None,
-            stateless_reset_token: None,
-            supported_versions: None,
             raw: raw.clone(),
-            datagram_id: None,
-            send_at_time: None,
-            trigger: None,
+            ..Default::default()
         });
 
         let ev2 = Event::with_time(0.0, event_data2);
@@ -441,14 +429,9 @@ mod tests {
         let event_data3 = EventData::PacketSent(quic::PacketSent {
             header: pkt_hdr,
             frames: Some(smallvec![frame3]),
-            is_coalesced: None,
-            retry_token: None,
             stateless_reset_token: Some("reset_token".to_string()),
-            supported_versions: None,
             raw,
-            datagram_id: None,
-            send_at_time: None,
-            trigger: None,
+            ..Default::default()
         });
 
         let ev3 = Event::with_time(0.0, event_data3);
@@ -570,14 +553,8 @@ mod tests {
         let event_data1 = EventData::PacketSent(quic::PacketSent {
             header: pkt_hdr.clone(),
             frames: Some(smallvec![frame1]),
-            is_coalesced: None,
-            retry_token: None,
-            stateless_reset_token: None,
-            supported_versions: None,
             raw: raw.clone(),
-            datagram_id: None,
-            send_at_time: None,
-            trigger: None,
+            ..Default::default()
         });
         let j1 = json!({"foo": "Bar", "hello": 123});
         let j2 = json!({"baz": [1,2,3,4]});
@@ -598,14 +575,8 @@ mod tests {
         let event_data2 = EventData::PacketSent(quic::PacketSent {
             header: pkt_hdr.clone(),
             frames: Some(smallvec![frame2]),
-            is_coalesced: None,
-            retry_token: None,
-            stateless_reset_token: None,
-            supported_versions: None,
             raw: raw.clone(),
-            datagram_id: None,
-            send_at_time: None,
-            trigger: None,
+            ..Default::default()
         });
 
         let ev2 = Event::with_time(0.0, event_data2);

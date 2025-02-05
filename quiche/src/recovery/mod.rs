@@ -1178,12 +1178,11 @@ impl QlogMetrics {
                     smoothed_rtt: new_smoothed_rtt,
                     latest_rtt: new_latest_rtt,
                     rtt_variance: new_rttvar,
-                    pto_count: None,
                     congestion_window: new_cwnd,
                     bytes_in_flight: new_bytes_in_flight,
                     ssthresh: new_ssthresh,
-                    packets_in_flight: None,
                     pacing_rate: new_pacing_rate,
+                    ..Default::default()
                 },
             ));
         }
