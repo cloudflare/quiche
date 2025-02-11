@@ -2,15 +2,15 @@
 name = "quiche"
 version = "0.23.2"
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
-edition = "2018"
-build = "src/build.rs"
 description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
-repository = "https://github.com/cloudflare/quiche"
-readme = "README.md"
-keywords = ["quic", "http3"]
-categories = ["network-programming"]
-license = "BSD-2-Clause"
+build = "src/build.rs"
 rust-version = "1.80"
+edition = { workspace = true }
+repository = { workspace = true }
+license = { workspace = true }
+readme = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
 include = [
     "/*.md",
     "/*.toml",

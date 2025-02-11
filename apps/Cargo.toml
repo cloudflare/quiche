@@ -2,7 +2,11 @@
 name = "quiche_apps"
 version = "0.1.0"
 authors = ["Lucas Pardue <lucaspardue.24.7@gmail.com>"]
-edition = "2018"
+edition = { workspace = true }
+repository = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
 publish = false
 
 [features]
