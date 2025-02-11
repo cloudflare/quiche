@@ -25,16 +25,14 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use once_cell::sync::Lazy;
-use tokio::{
-    sync::{mpsc, watch},
-    task::JoinHandle,
-};
+use tokio::sync::mpsc;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
-use std::{
-    collections::HashMap,
-    future::Future,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::collections::HashMap;
+use std::future::Future;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 enum ActiveTaskOp {
     Add { id: u64, handle: JoinHandle<()> },
@@ -55,12 +53,13 @@ impl Drop for RemoveOnDrop {
     }
 }
 
-/// A task killswitch that allows aborting all the tasks spawned with it at once.
-/// The implementation strives to not introduce any in-band locking, so spawning the future
-/// doesn't require acquiring a global lock, keeping the regular pace of operation.
+/// A task killswitch that allows aborting all the tasks spawned with it at
+/// once. The implementation strives to not introduce any in-band locking, so
+/// spawning the future doesn't require acquiring a global lock, keeping the
+/// regular pace of operation.
 struct TaskKillswitch {
-    // NOTE: use a lock without poisoning here to not panic all the threads if one of the
-    // worker threads panic.
+    // NOTE: use a lock without poisoning here to not panic all the threads if
+    // one of the worker threads panic.
     task_tx: parking_lot::RwLock<Option<mpsc::UnboundedSender<ActiveTaskOp>>>,
     task_counter: AtomicU64,
     all_killed: watch::Receiver<()>,
@@ -86,8 +85,9 @@ impl TaskKillswitch {
     }
 
     fn spawn_task(&self, fut: impl Future<Output = ()> + Send + 'static) {
-        // NOTE: acquiring the lock here is very cheap, as unless the killswitch is activated,
-        // this one is always unlocked and this is just a few atomic operations.
+        // NOTE: acquiring the lock here is very cheap, as unless the killswitch
+        // is activated, this one is always unlocked and this is just a
+        // few atomic operations.
         let Some(task_tx) = self.task_tx.read().as_ref().cloned() else {
             return;
         };
@@ -108,8 +108,9 @@ impl TaskKillswitch {
 
     fn activate(&self) {
         // take()ing the sender here drops it and thereby triggers the killswitch.
-        // Concurrent spawn_task calls may still hold strong senders, which ensures
-        // those tasks are added to ActiveTasks before the killing starts.
+        // Concurrent spawn_task calls may still hold strong senders, which
+        // ensures those tasks are added to ActiveTasks before the killing
+        // starts.
         assert!(
             self.task_tx.write().take().is_some(),
             "killswitch can't be used twice"
@@ -146,10 +147,10 @@ impl ActiveTasks {
         match op {
             ActiveTaskOp::Add { id, handle } => {
                 self.tasks.insert(id, handle);
-            }
+            },
             ActiveTaskOp::Remove { id } => {
                 self.tasks.remove(&id);
-            }
+            },
         }
     }
 }
@@ -157,7 +158,8 @@ impl ActiveTasks {
 /// The global [`TaskKillswitch`] exposed publicly from the crate.
 static TASK_KILLSWITCH: Lazy<TaskKillswitch> = Lazy::new(TaskKillswitch::new);
 
-/// Spawns a new asynchronous task and registers it in the crate's global killswitch.
+/// Spawns a new asynchronous task and registers it in the crate's global
+/// killswitch.
 ///
 /// Under the hood, [`tokio::spawn`] schedules the actual execution.
 #[inline]
@@ -170,7 +172,8 @@ pub async fn activate() {
     TASK_KILLSWITCH.activate()
 }
 
-/// Triggers the killswitch, thereby scheduling all registered tasks to be killed.
+/// Triggers the killswitch, thereby scheduling all registered tasks to be
+/// killed.
 ///
 /// Note: tasks are not killed synchronously in this function. This means
 /// `activate_now()` will return before all tasks have been stopped.
@@ -182,9 +185,9 @@ pub fn activate_now() {
 /// Returns a future that resolves when all registered tasks have been killed,
 /// after [`activate_now`] has been called.
 ///
-/// Note: tokio does not kill a task until the next time it yields to the runtime.
-/// This means some killed tasks may still be running by the time this Future
-/// resolves.
+/// Note: tokio does not kill a task until the next time it yields to the
+/// runtime. This means some killed tasks may still be running by the time this
+/// Future resolves.
 #[inline]
 pub fn killed_signal() -> impl Future<Output = ()> + Send + 'static {
     TASK_KILLSWITCH.killed()
@@ -213,13 +216,16 @@ mod tests {
         }
     }
 
-    fn start_test_tasks(killswitch: &TaskKillswitch) -> Vec<oneshot::Receiver<()>> {
+    fn start_test_tasks(
+        killswitch: &TaskKillswitch,
+    ) -> Vec<oneshot::Receiver<()>> {
         (0..1000)
             .map(|_| {
                 let (tx, rx) = TaskAbortSignal::new();
 
                 killswitch.spawn_task(async move {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(3600))
+                        .await;
                     drop(tx);
                 });
 
@@ -235,9 +241,12 @@ mod tests {
 
         killswitch.activate();
 
-        tokio::time::timeout(Duration::from_secs(1), future::join_all(abort_signals))
-            .await
-            .expect("tasks should be killed within given timeframe");
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            future::join_all(abort_signals),
+        )
+        .await
+        .expect("tasks should be killed within given timeframe");
     }
 
     #[tokio::test]
@@ -252,9 +261,12 @@ mod tests {
         assert!(!signal_handle.is_finished());
         killswitch.activate();
 
-        tokio::time::timeout(Duration::from_secs(1), future::join_all(abort_signals))
-            .await
-            .expect("tasks should be killed within given timeframe");
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            future::join_all(abort_signals),
+        )
+        .await
+        .expect("tasks should be killed within given timeframe");
 
         tokio::time::timeout(Duration::from_secs(1), signal_handle)
             .await

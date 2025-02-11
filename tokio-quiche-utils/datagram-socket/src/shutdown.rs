@@ -24,10 +24,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::future::{poll_fn, Future};
+use std::future::poll_fn;
+use std::future::Future;
 use std::io;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
 
 use tokio::net::UdpSocket;
 
@@ -42,21 +44,22 @@ pub trait ShutdownConnection {
     ///
     /// This function returns a `Poll<io::Result<()>>` classified as such:
     ///
-    /// * `Poll::Ready(Ok(()))` - indicates that the connection was
-    ///   successfully shut down and is now safe to deallocate/drop/close
-    ///   resources associated with it. This method means that the current task
-    ///   will no longer receive any notifications due to this method and the
-    ///   I/O object itself is likely no longer usable.
+    /// * `Poll::Ready(Ok(()))` - indicates that the connection was successfully
+    ///   shut down and is now safe to deallocate/drop/close resources
+    ///   associated with it. This method means that the current task will no
+    ///   longer receive any notifications due to this method and the I/O object
+    ///   itself is likely no longer usable.
     ///
-    /// * `Poll::Pending` - indicates that shutdown is initiated but could
-    ///   not complete just yet. This may mean that more I/O needs to happen to
+    /// * `Poll::Pending` - indicates that shutdown is initiated but could not
+    ///   complete just yet. This may mean that more I/O needs to happen to
     ///   continue this shutdown operation. The current task is scheduled to
     ///   receive a notification when it's otherwise ready to continue the
     ///   shutdown operation. When woken up this method should be called again.
     ///
-    /// * `Poll::Ready(Err(e))` - indicates a fatal error has happened with shutdown,
-    ///   indicating that the shutdown operation did not complete successfully.
-    ///   This typically means that the I/O object is no longer usable.
+    /// * `Poll::Ready(Err(e))` - indicates a fatal error has happened with
+    ///   shutdown, indicating that the shutdown operation did not complete
+    ///   successfully. This typically means that the I/O object is no longer
+    ///   usable.
     ///
     /// # Errors
     ///
@@ -92,8 +95,9 @@ impl<T: ShutdownConnection + Send + Sync> ShutdownConnection for Arc<T> {
 
 /// Shuts down a datagram oriented connection.
 ///
-/// Implemented as an extension trait, adding utility methods to all [`ShutdownConnection`]
-/// types. Callers will tend to import this trait instead of [`ShutdownConnection`].
+/// Implemented as an extension trait, adding utility methods to all
+/// [`ShutdownConnection`] types. Callers will tend to import this trait instead
+/// of [`ShutdownConnection`].
 ///
 /// [`ShutdownConnection`]: ShutdownConnection
 pub trait ShutdownConnectionExt: ShutdownConnection {

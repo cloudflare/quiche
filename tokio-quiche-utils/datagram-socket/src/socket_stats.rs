@@ -25,9 +25,12 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::ops::Deref;
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime};
+use std::sync::atomic::AtomicI64;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::RwLock;
+use std::time::Duration;
+use std::time::SystemTime;
 
 pub trait AsSocketStats {
     fn as_socket_stats(&self) -> SocketStats;
@@ -116,8 +119,7 @@ impl QuicAuditStats {
 
     #[inline]
     pub fn set_recvd_conn_close_transport_error_code(
-        &self,
-        recvd_conn_close_transport_error_code: i64,
+        &self, recvd_conn_close_transport_error_code: i64,
     ) {
         self.recvd_conn_close_transport_error_code
             .store(recvd_conn_close_transport_error_code, Ordering::SeqCst)
@@ -125,8 +127,7 @@ impl QuicAuditStats {
 
     #[inline]
     pub fn set_sent_conn_close_transport_error_code(
-        &self,
-        sent_conn_close_transport_error_code: i64,
+        &self, sent_conn_close_transport_error_code: i64,
     ) {
         self.sent_conn_close_transport_error_code
             .store(sent_conn_close_transport_error_code, Ordering::SeqCst)
@@ -134,8 +135,7 @@ impl QuicAuditStats {
 
     #[inline]
     pub fn set_recvd_conn_close_application_error_code(
-        &self,
-        recvd_conn_close_application_error_code: i64,
+        &self, recvd_conn_close_application_error_code: i64,
     ) {
         self.recvd_conn_close_application_error_code
             .store(recvd_conn_close_application_error_code, Ordering::SeqCst)
@@ -143,8 +143,7 @@ impl QuicAuditStats {
 
     #[inline]
     pub fn set_sent_conn_close_application_error_code(
-        &self,
-        sent_conn_close_application_error_code: i64,
+        &self, sent_conn_close_application_error_code: i64,
     ) {
         self.sent_conn_close_application_error_code
             .store(sent_conn_close_application_error_code, Ordering::SeqCst)
@@ -173,7 +172,9 @@ impl QuicAuditStats {
     }
 
     #[inline]
-    pub fn connection_close_reason(&self) -> impl Deref<Target = Option<BoxError>> + '_ {
+    pub fn connection_close_reason(
+        &self,
+    ) -> impl Deref<Target = Option<BoxError>> + '_ {
         self.connection_close_reason.read().unwrap()
     }
 

@@ -25,9 +25,11 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::io;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
 
-use crate::{ConsumeBuffer, Pooled};
+use crate::ConsumeBuffer;
+use crate::Pooled;
 
 pub type PooledBuf = Pooled<ConsumeBuffer>;
 
@@ -42,36 +44,31 @@ pub trait RawPoolBufIo: Send {
 
 pub trait RawPoolBufDatagramIo: Send {
     fn poll_send_datagrams(
-        &mut self,
-        cx: &mut Context,
-        datagrams: &mut [PooledBuf],
+        &mut self, cx: &mut Context, datagrams: &mut [PooledBuf],
     ) -> Poll<io::Result<usize>>;
 
-    fn poll_recv_dgram(&mut self, cx: &mut Context) -> Poll<io::Result<PooledBuf>>;
+    fn poll_recv_dgram(
+        &mut self, cx: &mut Context,
+    ) -> Poll<io::Result<PooledBuf>>;
 
     fn poll_recv_datagrams(
-        &mut self,
-        cx: &mut Context,
-        buffer: &mut Vec<PooledBuf>,
-        limit: usize,
+        &mut self, cx: &mut Context, buffer: &mut Vec<PooledBuf>, limit: usize,
     ) -> Poll<io::Result<usize>> {
         for i in 0..limit {
             match self.poll_recv_dgram(cx) {
                 Poll::Ready(Ok(buf)) => buffer.push(buf),
-                Poll::Ready(Err(err)) => {
+                Poll::Ready(Err(err)) =>
                     if i > 0 {
                         return Poll::Ready(Ok(i));
                     } else {
                         return Poll::Ready(Err(err));
-                    }
-                }
-                Poll::Pending => {
+                    },
+                Poll::Pending =>
                     if i > 0 {
                         return Poll::Ready(Ok(i));
                     } else {
                         return Poll::Pending;
-                    }
-                }
+                    },
             }
         }
 

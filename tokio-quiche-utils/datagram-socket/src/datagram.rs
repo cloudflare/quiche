@@ -26,17 +26,29 @@
 
 use buffer_pool::RawPoolBufDatagramIo;
 use futures_util::future::poll_fn;
-use futures_util::{ready, FutureExt};
+use futures_util::ready;
+use futures_util::FutureExt;
 use std::future::Future;
 use std::io;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::Ipv4Addr;
+use std::net::SocketAddr;
+use std::net::SocketAddrV4;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
 use tokio::io::ReadBuf;
 use tokio::net::UdpSocket;
 
 #[cfg(unix)]
-use std::os::fd::{AsFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
+use std::os::fd::AsFd;
+#[cfg(unix)]
+use std::os::fd::BorrowedFd;
+#[cfg(unix)]
+use std::os::fd::FromRawFd;
+#[cfg(unix)]
+use std::os::fd::IntoRawFd;
+#[cfg(unix)]
+use std::os::fd::OwnedFd;
 #[cfg(unix)]
 use tokio::net::UnixDatagram;
 
@@ -58,9 +70,12 @@ impl<T> DatagramSocketWithStats for T where T: DatagramSocket + AsSocketStats {}
 /// with stream semantics. For example, the `AsyncReadExt::read_exact` method
 /// which issues as many reads as possible to fill the buffer provided.
 ///
-/// For a similar reason, [`std::net::UdpSocket`] does not implement [`io::Read`]
-/// nor does [`tokio::net::UdpSocket`] implement [`tokio::io::AsyncRead`].
-pub trait DatagramSocket: DatagramSocketSend + DatagramSocketRecv + 'static {
+/// For a similar reason, [`std::net::UdpSocket`] does not implement
+/// [`io::Read`] nor does [`tokio::net::UdpSocket`] implement
+/// [`tokio::io::AsyncRead`].
+pub trait DatagramSocket:
+    DatagramSocketSend + DatagramSocketRecv + 'static
+{
     #[cfg(unix)]
     fn as_raw_io(&self) -> Option<BorrowedFd<'_>>;
 
@@ -96,14 +111,14 @@ pub trait DatagramSocketSend: Sync {
 
     /// Attempts to send data on the socket to a given address.
     ///
-    /// If this socket only supports a single address, it should forward to `send`.
-    /// It should *not* panic or discard the data.
-    /// It's recommended that this return an error if `addr` doesn't match the only
-    /// supported address.
+    /// If this socket only supports a single address, it should forward to
+    /// `send`. It should *not* panic or discard the data.
+    /// It's recommended that this return an error if `addr` doesn't match the
+    /// only supported address.
     ///
-    /// Note that on multiple calls to a `poll_*` method in the send direction, only the
-    /// `Waker` from the `Context` passed to the most recent call will be scheduled to
-    /// receive a wakeup.
+    /// Note that on multiple calls to a `poll_*` method in the send direction,
+    /// only the `Waker` from the `Context` passed to the most recent call
+    /// will be scheduled to receive a wakeup.
     ///
     /// # Return value
     ///
@@ -117,32 +132,31 @@ pub trait DatagramSocketSend: Sync {
     ///
     /// This function may encounter any standard I/O error except `WouldBlock`.
     fn poll_send_to(
-        &self,
-        cx: &mut Context,
-        buf: &[u8],
-        addr: SocketAddr,
+        &self, cx: &mut Context, buf: &[u8], addr: SocketAddr,
     ) -> Poll<io::Result<usize>>;
 
     /// Attempts to send multiple packets of data on the socket to the remote
     /// address to which it was previously connected.
     ///
-    /// Note that on multiple calls to a `poll_*` method in the send direction, only the
-    /// `Waker` from the `Context` passed to the most recent call will be scheduled to
-    /// receive a wakeup.
+    /// Note that on multiple calls to a `poll_*` method in the send direction,
+    /// only the `Waker` from the `Context` passed to the most recent call
+    /// will be scheduled to receive a wakeup.
     ///
     /// # Return value
     ///
     /// The function returns:
     ///
     /// * `Poll::Pending` if the socket is not ready to write
-    /// * `Poll::Ready(Ok(n))` `n` is the number of packets sent.
-    ///    If any packet was sent only partially, that information is lost.
+    /// * `Poll::Ready(Ok(n))` `n` is the number of packets sent. If any packet
+    ///   was sent only partially, that information is lost.
     /// * `Poll::Ready(Err(e))` if an error is encountered.
     ///
     /// # Errors
     ///
     /// This function may encounter any standard I/O error except `WouldBlock`.
-    fn poll_send_many(&self, cx: &mut Context, bufs: &[ReadBuf<'_>]) -> Poll<io::Result<usize>> {
+    fn poll_send_many(
+        &self, cx: &mut Context, bufs: &[ReadBuf<'_>],
+    ) -> Poll<io::Result<usize>> {
         let mut sent = 0;
 
         for buf in bufs {
@@ -153,13 +167,13 @@ pub trait DatagramSocketSend: Sync {
                         return Poll::Ready(err);
                     }
                     break;
-                }
+                },
                 Poll::Pending => {
                     if sent == 0 {
                         return Poll::Pending;
                     }
                     break;
-                }
+                },
             }
         }
 
@@ -171,7 +185,8 @@ pub trait DatagramSocketSend: Sync {
         None
     }
 
-    /// Returns the socket address of the remote peer this socket was connected to.
+    /// Returns the socket address of the remote peer this socket was connected
+    /// to.
     fn peer_addr(&self) -> Option<SocketAddr> {
         None
     }
@@ -179,24 +194,32 @@ pub trait DatagramSocketSend: Sync {
 
 /// Writes datagrams to a socket.
 ///
-/// Implemented as an extension trait, adding utility methods to all [`DatagramSocketSend`]
-/// types. Callers will tend to import this trait instead of [`DatagramSocketSend`].
+/// Implemented as an extension trait, adding utility methods to all
+/// [`DatagramSocketSend`] types. Callers will tend to import this trait instead
+/// of [`DatagramSocketSend`].
 ///
 /// [`DatagramSocketSend`]: DatagramSocketSend
 pub trait DatagramSocketSendExt: DatagramSocketSend {
-    /// Sends data on the socket to the remote address that the socket is connected to.
+    /// Sends data on the socket to the remote address that the socket is
+    /// connected to.
     fn send(&self, buf: &[u8]) -> impl Future<Output = io::Result<usize>> {
         poll_fn(move |cx| self.poll_send(cx, buf))
     }
 
-    /// Sends data on the socket to the given address. On success, returns the number of bytes written.
-    fn send_to(&self, buf: &[u8], addr: SocketAddr) -> impl Future<Output = io::Result<usize>> {
+    /// Sends data on the socket to the given address. On success, returns the
+    /// number of bytes written.
+    fn send_to(
+        &self, buf: &[u8], addr: SocketAddr,
+    ) -> impl Future<Output = io::Result<usize>> {
         poll_fn(move |cx| self.poll_send_to(cx, buf, addr))
     }
 
-    /// Sends multiple data packets on the socket to the to the remote address that the socket is connected to.
-    /// On success, returns the number of packets sent.
-    fn send_many(&self, bufs: &[ReadBuf<'_>]) -> impl Future<Output = io::Result<usize>> {
+    /// Sends multiple data packets on the socket to the to the remote address
+    /// that the socket is connected to. On success, returns the number of
+    /// packets sent.
+    fn send_many(
+        &self, bufs: &[ReadBuf<'_>],
+    ) -> impl Future<Output = io::Result<usize>> {
         poll_fn(move |cx| self.poll_send_many(cx, bufs))
     }
 
@@ -217,12 +240,12 @@ pub trait DatagramSocketSendExt: DatagramSocketSend {
 
 /// Describes the receive half of a connected datagram socket.
 pub trait DatagramSocketRecv: Send {
-    /// Attempts to receive a single datagram message on the socket from the remote
-    /// address to which it is `connect`ed.
+    /// Attempts to receive a single datagram message on the socket from the
+    /// remote address to which it is `connect`ed.
     ///
-    /// Note that on multiple calls to a `poll_*` method in the `recv` direction, only the
-    /// `Waker` from the `Context` passed to the most recent call will be scheduled to
-    /// receive a wakeup.
+    /// Note that on multiple calls to a `poll_*` method in the `recv`
+    /// direction, only the `Waker` from the `Context` passed to the most
+    /// recent call will be scheduled to receive a wakeup.
     ///
     /// # Return value
     ///
@@ -235,57 +258,57 @@ pub trait DatagramSocketRecv: Send {
     /// # Errors
     ///
     /// This function may encounter any standard I/O error except `WouldBlock`.
-    fn poll_recv(&mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>>;
+    fn poll_recv(
+        &mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>>;
 
     /// Attempts to receive a single datagram on the socket.
     ///
-    /// Note that on multiple calls to a `poll_*` method in the `recv` direction, only the
-    /// `Waker` from the `Context` passed to the most recent call will be scheduled to
-    /// receive a wakeup.
+    /// Note that on multiple calls to a `poll_*` method in the `recv`
+    /// direction, only the `Waker` from the `Context` passed to the most
+    /// recent call will be scheduled to receive a wakeup.
     ///
     /// # Return value
     ///
     /// The function returns:
     ///
     /// * `Poll::Pending` if the socket is not ready to read
-    /// * `Poll::Ready(Ok(addr))` reads data from `addr` into `ReadBuf` if the socket is ready
+    /// * `Poll::Ready(Ok(addr))` reads data from `addr` into `ReadBuf` if the
+    ///   socket is ready
     /// * `Poll::Ready(Err(e))` if an error is encountered.
     ///
     /// # Errors
     ///
     /// This function may encounter any standard I/O error except `WouldBlock`.
     fn poll_recv_from(
-        &mut self,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
+        &mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<SocketAddr>> {
-        self.poll_recv(cx, buf)
-            .map_ok(|_| SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
+        self.poll_recv(cx, buf).map_ok(|_| {
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
+        })
     }
 
     /// Attempts to receive multiple datagrams on the socket from the remote
     /// address to which it is `connect`ed.
     ///
-    /// Note that on multiple calls to a `poll_*` method in the `recv` direction, only the
-    /// `Waker` from the `Context` passed to the most recent call will be scheduled to
-    /// receive a wakeup.
+    /// Note that on multiple calls to a `poll_*` method in the `recv`
+    /// direction, only the `Waker` from the `Context` passed to the most
+    /// recent call will be scheduled to receive a wakeup.
     ///
     /// # Return value
     ///
     /// The function returns:
     ///
     /// * `Poll::Pending` if the socket is not ready to read
-    /// * `Poll::Ready(Ok(n))` reads data `ReadBuf` if the socket is ready
-    ///    `n` is the number of datagrams read.
+    /// * `Poll::Ready(Ok(n))` reads data `ReadBuf` if the socket is ready `n`
+    ///   is the number of datagrams read.
     /// * `Poll::Ready(Err(e))` if an error is encountered.
     ///
     /// # Errors
     ///
     /// This function may encounter any standard I/O error except `WouldBlock`.
     fn poll_recv_many(
-        &mut self,
-        cx: &mut Context<'_>,
-        bufs: &mut [ReadBuf<'_>],
+        &mut self, cx: &mut Context<'_>, bufs: &mut [ReadBuf<'_>],
     ) -> Poll<io::Result<usize>> {
         let mut read = 0;
 
@@ -313,14 +336,17 @@ pub trait DatagramSocketRecv: Send {
 
 /// Reads datagrams from a socket.
 ///
-/// Implemented as an extension trait, adding utility methods to all [`DatagramSocketRecv`]
-/// types. Callers will tend to import this trait instead of [`DatagramSocketRecv`].
+/// Implemented as an extension trait, adding utility methods to all
+/// [`DatagramSocketRecv`] types. Callers will tend to import this trait instead
+/// of [`DatagramSocketRecv`].
 ///
 /// [`DatagramSocketRecv`]: DatagramSocketRecv
 pub trait DatagramSocketRecvExt: DatagramSocketRecv {
     /// Receives a single datagram message on the socket from the remote address
     /// to which it is connected. On success, returns the number of bytes read.
-    fn recv(&mut self, buf: &mut [u8]) -> impl Future<Output = io::Result<usize>> + Send {
+    fn recv(
+        &mut self, buf: &mut [u8],
+    ) -> impl Future<Output = io::Result<usize>> + Send {
         poll_fn(|cx| {
             let mut buf = ReadBuf::new(buf);
 
@@ -333,8 +359,7 @@ pub trait DatagramSocketRecvExt: DatagramSocketRecv {
     /// Receives a single datagram message on the socket. On success, returns
     /// the number of bytes read and the origin.
     fn recv_from(
-        &mut self,
-        buf: &mut [u8],
+        &mut self, buf: &mut [u8],
     ) -> impl Future<Output = io::Result<(usize, SocketAddr)>> + Send {
         poll_fn(|cx| {
             let mut buf = ReadBuf::new(buf);
@@ -350,8 +375,7 @@ pub trait DatagramSocketRecvExt: DatagramSocketRecv {
     /// number of datagrams read). Each used buffer can be read up to its
     /// `filled().len()`.
     fn recv_many(
-        &mut self,
-        bufs: &mut [ReadBuf<'_>],
+        &mut self, bufs: &mut [ReadBuf<'_>],
     ) -> impl Future<Output = io::Result<usize>> + Send {
         poll_fn(|cx| self.poll_recv_many(cx, bufs))
     }
@@ -388,16 +412,15 @@ impl<T: AsDatagramSocketSend + Sync> DatagramSocketSend for T {
 
     #[inline]
     fn poll_send_to(
-        &self,
-        cx: &mut Context,
-        buf: &[u8],
-        addr: SocketAddr,
+        &self, cx: &mut Context, buf: &[u8], addr: SocketAddr,
     ) -> Poll<io::Result<usize>> {
         self.as_datagram_socket_send().poll_send_to(cx, buf, addr)
     }
 
     #[inline]
-    fn poll_send_many(&self, cx: &mut Context, bufs: &[ReadBuf<'_>]) -> Poll<io::Result<usize>> {
+    fn poll_send_many(
+        &self, cx: &mut Context, bufs: &[ReadBuf<'_>],
+    ) -> Poll<io::Result<usize>> {
         self.as_datagram_socket_send().poll_send_many(cx, bufs)
     }
 
@@ -414,24 +437,22 @@ impl<T: AsDatagramSocketSend + Sync> DatagramSocketSend for T {
 
 impl<T: AsDatagramSocketRecv + Send> DatagramSocketRecv for T {
     #[inline]
-    fn poll_recv(&mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+    fn poll_recv(
+        &mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         self.as_datagram_socket_recv().poll_recv(cx, buf)
     }
 
     #[inline]
     fn poll_recv_from(
-        &mut self,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
+        &mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<SocketAddr>> {
         self.as_datagram_socket_recv().poll_recv_from(cx, buf)
     }
 
     #[inline]
     fn poll_recv_many(
-        &mut self,
-        cx: &mut Context<'_>,
-        bufs: &mut [ReadBuf<'_>],
+        &mut self, cx: &mut Context<'_>, bufs: &mut [ReadBuf<'_>],
     ) -> Poll<io::Result<usize>> {
         self.as_datagram_socket_recv().poll_recv_many(cx, bufs)
     }
@@ -525,17 +546,16 @@ impl DatagramSocketSend for UdpSocket {
 
     #[inline]
     fn poll_send_to(
-        &self,
-        cx: &mut Context,
-        buf: &[u8],
-        addr: SocketAddr,
+        &self, cx: &mut Context, buf: &[u8], addr: SocketAddr,
     ) -> Poll<io::Result<usize>> {
         UdpSocket::poll_send_to(self, cx, buf, addr)
     }
 
     #[cfg(target_os = "linux")]
     #[inline]
-    fn poll_send_many(&self, cx: &mut Context, bufs: &[ReadBuf<'_>]) -> Poll<io::Result<usize>> {
+    fn poll_send_many(
+        &self, cx: &mut Context, bufs: &[ReadBuf<'_>],
+    ) -> Poll<io::Result<usize>> {
         crate::poll_sendmmsg!(self, cx, bufs)
     }
 
@@ -550,16 +570,16 @@ impl DatagramSocketSend for UdpSocket {
 
 impl DatagramSocketRecv for UdpSocket {
     #[inline]
-    fn poll_recv(&mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+    fn poll_recv(
+        &mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         UdpSocket::poll_recv(self, cx, buf)
     }
 
     #[cfg(target_os = "linux")]
     #[inline]
     fn poll_recv_many(
-        &mut self,
-        cx: &mut Context<'_>,
-        bufs: &mut [ReadBuf<'_>],
+        &mut self, cx: &mut Context<'_>, bufs: &mut [ReadBuf<'_>],
     ) -> Poll<io::Result<usize>> {
         crate::poll_recvmmsg!(self, cx, bufs)
     }
@@ -583,15 +603,15 @@ impl DatagramSocket for Arc<UdpSocket> {
 
 impl DatagramSocketRecv for Arc<UdpSocket> {
     #[inline]
-    fn poll_recv(&mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+    fn poll_recv(
+        &mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         UdpSocket::poll_recv(self, cx, buf)
     }
 
     #[inline]
     fn poll_recv_from(
-        &mut self,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
+        &mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<SocketAddr>> {
         UdpSocket::poll_recv_from(self, cx, buf)
     }
@@ -599,9 +619,7 @@ impl DatagramSocketRecv for Arc<UdpSocket> {
     #[cfg(target_os = "linux")]
     #[inline]
     fn poll_recv_many(
-        &mut self,
-        cx: &mut Context<'_>,
-        bufs: &mut [ReadBuf<'_>],
+        &mut self, cx: &mut Context<'_>, bufs: &mut [ReadBuf<'_>],
     ) -> Poll<io::Result<usize>> {
         crate::poll_recvmmsg!(self, cx, bufs)
     }
@@ -630,7 +648,9 @@ impl DatagramSocketSend for UnixDatagram {
     }
 
     #[inline]
-    fn poll_send_to(&self, _: &mut Context, _: &[u8], _: SocketAddr) -> Poll<io::Result<usize>> {
+    fn poll_send_to(
+        &self, _: &mut Context, _: &[u8], _: SocketAddr,
+    ) -> Poll<io::Result<usize>> {
         Poll::Ready(Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "invalid address family",
@@ -639,7 +659,9 @@ impl DatagramSocketSend for UnixDatagram {
 
     #[cfg(target_os = "linux")]
     #[inline]
-    fn poll_send_many(&self, cx: &mut Context, bufs: &[ReadBuf<'_>]) -> Poll<io::Result<usize>> {
+    fn poll_send_many(
+        &self, cx: &mut Context, bufs: &[ReadBuf<'_>],
+    ) -> Poll<io::Result<usize>> {
         crate::poll_sendmmsg!(self, cx, bufs)
     }
 }
@@ -647,16 +669,16 @@ impl DatagramSocketSend for UnixDatagram {
 #[cfg(unix)]
 impl DatagramSocketRecv for UnixDatagram {
     #[inline]
-    fn poll_recv(&mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+    fn poll_recv(
+        &mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         UnixDatagram::poll_recv(self, cx, buf)
     }
 
     #[cfg(target_os = "linux")]
     #[inline]
     fn poll_recv_many(
-        &mut self,
-        cx: &mut Context<'_>,
-        bufs: &mut [ReadBuf<'_>],
+        &mut self, cx: &mut Context<'_>, bufs: &mut [ReadBuf<'_>],
     ) -> Poll<io::Result<usize>> {
         crate::poll_recvmmsg!(self, cx, bufs)
     }
@@ -665,41 +687,46 @@ impl DatagramSocketRecv for UnixDatagram {
 #[cfg(unix)]
 impl DatagramSocketRecv for Arc<UnixDatagram> {
     #[inline]
-    fn poll_recv(&mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+    fn poll_recv(
+        &mut self, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         UnixDatagram::poll_recv(self, cx, buf)
     }
 
     #[cfg(target_os = "linux")]
     #[inline]
     fn poll_recv_many(
-        &mut self,
-        cx: &mut Context<'_>,
-        bufs: &mut [ReadBuf<'_>],
+        &mut self, cx: &mut Context<'_>, bufs: &mut [ReadBuf<'_>],
     ) -> Poll<io::Result<usize>> {
         crate::poll_recvmmsg!(self, cx, bufs)
     }
 }
 
-/// `Into<OwnedFd>::into` for types (tokio sockets etc) that don't implement `From<OwnedFd>`.
+/// `Into<OwnedFd>::into` for types (tokio sockets etc) that don't implement
+/// `From<OwnedFd>`.
 #[cfg(unix)]
 fn into_owned_fd<F: IntoRawFd>(into_fd: F) -> OwnedFd {
     unsafe { OwnedFd::from_raw_fd(into_fd.into_raw_fd()) }
 }
 
-/// A cheap wrapper around a datagram socket which describes if it is connected to an explicit peer.
+/// A cheap wrapper around a datagram socket which describes if it is connected
+/// to an explicit peer.
 ///
-/// This struct essentially forwards its underlying socket's `send_to()` method to `send()` if the socket is
-/// explicitly connected to a peer. This is helpful for preventing issues on platforms that do not
-/// support `send_to` on already-connected sockets.
+/// This struct essentially forwards its underlying socket's `send_to()` method
+/// to `send()` if the socket is explicitly connected to a peer. This is helpful
+/// for preventing issues on platforms that do not support `send_to` on
+/// already-connected sockets.
 ///
 /// # Warning
-/// A socket's "connectedness" is determined once, when it is created. If the socket is created as
-/// connected, then later disconnected from its peer, its `send_to()` call will fail.
+/// A socket's "connectedness" is determined once, when it is created. If the
+/// socket is created as connected, then later disconnected from its peer, its
+/// `send_to()` call will fail.
 ///
-/// For example, MacOS errors if `send_to` is used on a socket that's already connected. Only
-/// `send` can be used. By using `MaybeConnectedSocket`, you can use the same `send` and `send_to`
-/// APIs in both client- and server-side code. Clients, usually with connected sockets, will then
-/// forward `send_to` to `send`, whereas servers, usually with unconnected sockets, will use
+/// For example, MacOS errors if `send_to` is used on a socket that's already
+/// connected. Only `send` can be used. By using `MaybeConnectedSocket`, you can
+/// use the same `send` and `send_to` APIs in both client- and server-side code.
+/// Clients, usually with connected sockets, will then forward `send_to` to
+/// `send`, whereas servers, usually with unconnected sockets, will use
 /// `send_to`.
 #[derive(Clone)]
 pub struct MaybeConnectedSocket<T> {
@@ -735,10 +762,7 @@ impl<T: DatagramSocketSend> DatagramSocketSend for MaybeConnectedSocket<T> {
 
     #[inline]
     fn poll_send_to(
-        &self,
-        cx: &mut Context,
-        buf: &[u8],
-        addr: SocketAddr,
+        &self, cx: &mut Context, buf: &[u8], addr: SocketAddr,
     ) -> Poll<io::Result<usize>> {
         if let Some(peer) = self.peer {
             debug_assert_eq!(peer, addr);
@@ -749,7 +773,9 @@ impl<T: DatagramSocketSend> DatagramSocketSend for MaybeConnectedSocket<T> {
     }
 
     #[inline]
-    fn poll_send_many(&self, cx: &mut Context, bufs: &[ReadBuf<'_>]) -> Poll<io::Result<usize>> {
+    fn poll_send_many(
+        &self, cx: &mut Context, bufs: &[ReadBuf<'_>],
+    ) -> Poll<io::Result<usize>> {
         self.inner.poll_send_many(cx, bufs)
     }
 

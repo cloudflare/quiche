@@ -24,8 +24,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::io::{self, IoSlice};
-use std::os::fd::{AsRawFd, BorrowedFd};
+use std::io::IoSlice;
+use std::io::{
+    self,
+};
+use std::os::fd::AsRawFd;
+use std::os::fd::BorrowedFd;
 
 use smallvec::SmallVec;
 use tokio::io::ReadBuf;
@@ -45,7 +49,8 @@ pub fn recvmmsg(fd: BorrowedFd, bufs: &mut [ReadBuf<'_>]) -> io::Result<usize> {
         for buf in bufs.iter_mut() {
             // Safety: will not read the maybe uninitialized bytes.
             let b = unsafe {
-                &mut *(buf.unfilled_mut() as *mut [std::mem::MaybeUninit<u8>] as *mut [u8])
+                &mut *(buf.unfilled_mut() as *mut [std::mem::MaybeUninit<u8>]
+                    as *mut [u8])
             };
 
             slices.push(IoSlice::new(b));
@@ -124,8 +129,14 @@ pub fn sendmmsg(fd: BorrowedFd, bufs: &[ReadBuf<'_>]) -> io::Result<usize> {
             });
         }
 
-        let result =
-            unsafe { libc::sendmmsg(fd.as_raw_fd(), msgvec.as_mut_ptr(), msgvec.len() as _, 0) };
+        let result = unsafe {
+            libc::sendmmsg(
+                fd.as_raw_fd(),
+                msgvec.as_mut_ptr(),
+                msgvec.len() as _,
+                0,
+            )
+        };
 
         if result == -1 {
             break;
@@ -187,9 +198,11 @@ macro_rules! poll_sendmmsg {
 mod tests {
     use std::io;
 
-    use tokio::{io::ReadBuf, net::UnixDatagram};
+    use tokio::io::ReadBuf;
+    use tokio::net::UnixDatagram;
 
-    use crate::{DatagramSocketRecvExt, DatagramSocketSendExt};
+    use crate::DatagramSocketRecvExt;
+    use crate::DatagramSocketSendExt;
 
     #[tokio::test]
     async fn recvmmsg() -> io::Result<()> {
@@ -200,7 +213,8 @@ mod tests {
             s.send(&[i; 128]).await?;
         }
 
-        let mut rbufs: Vec<_> = bufs.iter_mut().map(|s| ReadBuf::new(&mut s[..])).collect();
+        let mut rbufs: Vec<_> =
+            bufs.iter_mut().map(|s| ReadBuf::new(&mut s[..])).collect();
         assert_eq!(r.recv_many(&mut rbufs).await?, 5);
 
         for (i, buf) in rbufs[0..5].iter().enumerate() {
@@ -211,7 +225,8 @@ mod tests {
             s.send(&[i; 128]).await?;
         }
 
-        let mut rbufs: Vec<_> = bufs.iter_mut().map(|s| ReadBuf::new(&mut s[..])).collect();
+        let mut rbufs: Vec<_> =
+            bufs.iter_mut().map(|s| ReadBuf::new(&mut s[..])).collect();
         assert_eq!(r.recv_many(&mut rbufs).await?, 92);
 
         for (i, buf) in rbufs[0..92].iter().enumerate() {

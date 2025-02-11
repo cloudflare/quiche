@@ -28,8 +28,10 @@ mod buffer;
 mod raw_pool_buf_io;
 
 use std::collections::VecDeque;
-use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::ops::Deref;
+use std::ops::DerefMut;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 use crossbeam::queue::SegQueue;
 
@@ -51,7 +53,8 @@ struct QueueShard<T> {
     queue: SegQueue<T>,
     /// The number of elements currently stored in this shard.
     elem_cnt: AtomicUsize,
-    /// The value to use when calling [`Reuse::reuse`]. Typically the capacity to keep in a reused buffer.
+    /// The value to use when calling [`Reuse::reuse`]. Typically the capacity
+    /// to keep in a reused buffer.
     trim: usize,
     /// The max number of values to keep in the shard.
     max: usize,
@@ -91,11 +94,13 @@ impl<T: Default + Reuse> Drop for Pooled<T> {
         } = self.pool;
         if self.inner.reuse(*trim) {
             if elem_cnt.fetch_add(1, Ordering::Acquire) < *max {
-                // If returning the element to the queue would not exceed max number of elements, return it
+                // If returning the element to the queue would not exceed max
+                // number of elements, return it
                 queue.push(std::mem::take(&mut self.inner));
                 return;
             }
-            // There was no room for the buffer, return count to previous value and drop
+            // There was no room for the buffer, return count to previous value
+            // and drop
             elem_cnt.fetch_sub(1, Ordering::Release);
         }
         // If item did not qualify for return, drop it
@@ -135,7 +140,7 @@ impl<const S: usize, T: Default + Reuse> Pool<S, T> {
             Some(el) => {
                 shard.elem_cnt.fetch_sub(1, Ordering::Relaxed);
                 el
-            }
+            },
             None => Default::default(),
         };
 
@@ -193,9 +198,9 @@ impl<T: Default + Reuse> DerefMut for Pooled<T> {
     }
 }
 
-/// A trait that prepares an item to be returned to the pool. For example clearing it.
-/// `true` is returned if the item should be returned to the pool, `false` if it should
-/// be dropped.
+/// A trait that prepares an item to be returned to the pool. For example
+/// clearing it. `true` is returned if the item should be returned to the pool,
+/// `false` if it should be dropped.
 pub trait Reuse {
     fn reuse(&mut self, trim: usize) -> bool;
 }
@@ -239,7 +244,10 @@ mod tests {
         for (i, buf) in bufs.iter().enumerate() {
             assert!(buf.is_empty());
             // Check the buffer is sharded properly.
-            assert_eq!(buf.pool as *const _, &pool.queues[i % SHARDS] as *const _);
+            assert_eq!(
+                buf.pool as *const _,
+                &pool.queues[i % SHARDS] as *const _
+            );
         }
 
         // Shards are still empty.
@@ -247,8 +255,9 @@ mod tests {
             assert_eq!(shard.elem_cnt.load(Ordering::Relaxed), 0);
         }
 
-        // Now drop the buffers, they will not go into the pool because they have no capacity,
-        // so reuse returns false. What is the point in pooling empty buffers?
+        // Now drop the buffers, they will not go into the pool because they have
+        // no capacity, so reuse returns false. What is the point in
+        // pooling empty buffers?
         drop(bufs);
 
         // Get buffers with capacity next.
@@ -258,7 +267,10 @@ mod tests {
 
         for (i, buf) in bufs.iter().enumerate() {
             // Check the buffer is sharded properly.
-            assert_eq!(buf.pool as *const _, &pool.queues[i % SHARDS] as *const _);
+            assert_eq!(
+                buf.pool as *const _,
+                &pool.queues[i % SHARDS] as *const _
+            );
             // Check that the buffer was properly extended
             assert_eq!(&buf[..], &[0, 1]);
         }
@@ -276,7 +288,10 @@ mod tests {
             // Check that the buffer was properly cleared.
             assert!(buf.is_empty());
             // Check the buffer is sharded properly.
-            assert_eq!(buf.pool as *const _, &pool.queues[i % SHARDS] as *const _);
+            assert_eq!(
+                buf.pool as *const _,
+                &pool.queues[i % SHARDS] as *const _
+            );
         }
 
         for shard in pool.queues.iter() {
