@@ -2,6 +2,14 @@
 members = [ "apps", "h3i", "octets", "qlog", "quiche" ]
 exclude = [ "fuzz", "tools/http3_test" ]
 
+[workspace.package]
+edition = "2018"
+repository = "https://github.com/cloudflare/quiche"
+license = "BSD-2-Clause"
+readme = "README.md"
+keywords = ["quic", "http3"]
+categories = ["network-programming"]
+
 [workspace.metadata.release]
 pre-release-commit-message = "{{crate_name}}: release {{version}}"
 consolidate-commits = false

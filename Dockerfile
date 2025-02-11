@@ -2,7 +2,9 @@ FROM rust:1.80 AS build
 
 WORKDIR /build
 
+COPY Cargo.toml ./
 COPY apps/ ./apps/
+COPY h3i/ ./h3i/
 COPY octets/ ./octets/
 COPY qlog/ ./qlog/
 COPY quiche/ ./quiche/
@@ -20,8 +22,8 @@ RUN apt-get update && apt-get install -y ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=build \
-     /build/apps/target/release/quiche-client \
-     /build/apps/target/release/quiche-server \
+     /build/target/release/quiche-client \
+     /build/target/release/quiche-server \
      /usr/local/bin/
 
 ENV PATH="/usr/local/bin/:${PATH}"
@@ -39,8 +41,8 @@ WORKDIR /quiche
 RUN apt-get update && apt-get install -y wait-for-it && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build \
-     /build/apps/target/release/quiche-client \
-     /build/apps/target/release/quiche-server \
+     /build/target/release/quiche-client \
+     /build/target/release/quiche-server \
      /build/apps/run_endpoint.sh \
      ./
 
