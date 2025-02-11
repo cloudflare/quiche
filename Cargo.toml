@@ -1,5 +1,14 @@
 [workspace]
-members = [ "apps", "h3i", "octets", "qlog", "quiche", "./tokio-quiche-utils/buffer-pool", "./tokio-quiche-utils/datagram-socket", "./tokio-quiche-utils/task-killswitch" ]
+members = [
+    "apps",
+    "h3i",
+    "octets",
+    "qlog",
+    "quiche",
+    "buffer-pool",
+    "datagram-socket",
+    "task-killswitch",
+]
 exclude = [ "fuzz", "tools/http3_test" ]
 resolver = "2"
 
