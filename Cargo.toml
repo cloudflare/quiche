@@ -1,9 +1,10 @@
 [workspace]
 members = [ "apps", "h3i", "octets", "qlog", "quiche" ]
 exclude = [ "fuzz", "tools/http3_test" ]
+resolver = "2"
 
 [workspace.package]
-edition = "2018"
+edition = "2021"
 repository = "https://github.com/cloudflare/quiche"
 license = "BSD-2-Clause"
 readme = "README.md"
