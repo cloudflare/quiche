@@ -71,6 +71,9 @@ mod result;
 pub mod settings;
 pub mod socket;
 
+pub use buffer_pool;
+pub use datagram_socket;
+
 use foundations::telemetry::settings::LogVerbosity;
 use std::io;
 use std::sync::{Arc, Once};
@@ -85,7 +88,8 @@ pub use crate::http3::driver::{
 };
 pub use crate::http3::{ClientH3Connection, ServerH3Connection};
 pub use crate::quic::connection::{
-    ApplicationOverQuic, ConnectionIdGenerator, InitialQuicConnection, QuicConnection,
+    ApplicationOverQuic, ConnectionIdGenerator, InitialQuicConnection,
+    QuicConnection,
 };
 pub use crate::result::{BoxError, QuicResult};
 pub use crate::settings::ConnectionParams;
@@ -97,7 +101,8 @@ pub use crate::result::QuicResultExt;
 ///
 /// Errors from processing the client's QUIC initials can also be emitted on
 /// this stream. These do not indicate that the listener itself has failed.
-pub type QuicConnectionStream<M> = ReceiverStream<io::Result<InitialQuicConnection<UdpSocket, M>>>;
+pub type QuicConnectionStream<M> =
+    ReceiverStream<io::Result<InitialQuicConnection<UdpSocket, M>>>;
 
 /// Starts listening for inbound QUIC connections on the given [`QuicListener`]s.
 ///
@@ -108,10 +113,8 @@ pub type QuicConnectionStream<M> = ReceiverStream<io::Result<InitialQuicConnecti
 /// The task shuts down when the returned stream is closed (or dropped) and all
 /// previously-yielded connections are closed.
 pub fn listen_with_capabilities<M>(
-    sockets: impl IntoIterator<Item = QuicListener>,
-    params: ConnectionParams,
-    cid_generator: impl ConnectionIdGenerator<'static> + Clone,
-    metrics: M,
+    sockets: impl IntoIterator<Item = QuicListener>, params: ConnectionParams,
+    cid_generator: impl ConnectionIdGenerator<'static> + Clone, metrics: M,
 ) -> io::Result<Vec<QuicConnectionStream<M>>>
 where
     M: Metrics,
@@ -122,7 +125,14 @@ where
 
     sockets
         .into_iter()
-        .map(|s| crate::quic::start_listener(s, &params, cid_generator.clone(), metrics.clone()))
+        .map(|s| {
+            crate::quic::start_listener(
+                s,
+                &params,
+                cid_generator.clone(),
+                metrics.clone(),
+            )
+        })
         .collect()
 }
 
@@ -131,10 +141,8 @@ where
 /// Each socket is converted into a [`QuicListener`] with defaulted socket
 /// parameters. The listeners are then passed to [`listen_with_capabilities`].
 pub fn listen<S, M>(
-    sockets: impl IntoIterator<Item = S>,
-    params: ConnectionParams,
-    cid_generator: impl ConnectionIdGenerator<'static> + Clone,
-    metrics: M,
+    sockets: impl IntoIterator<Item = S>, params: ConnectionParams,
+    cid_generator: impl ConnectionIdGenerator<'static> + Clone, metrics: M,
 ) -> io::Result<Vec<QuicConnectionStream<M>>>
 where
     S: TryInto<QuicListener, Error = io::Error>,
@@ -146,7 +154,9 @@ where
             #[cfg_attr(not(target_os = "linux"), expect(unused_mut))]
             let mut socket = s.try_into()?;
             #[cfg(target_os = "linux")]
-            socket.apply_max_capabilities(params.settings.max_send_udp_payload_size);
+            socket.apply_max_capabilities(
+                params.settings.max_send_udp_payload_size,
+            );
             Ok(socket)
         })
         .collect::<io::Result<_>>()?;
@@ -175,7 +185,8 @@ pub(crate) fn capture_quiche_logs() {
         use foundations::telemetry::log as foundations_log;
         use log::Level as std_level;
 
-        let curr_logger = Arc::clone(&foundations_log::slog_logger()).read().clone();
+        let curr_logger =
+            Arc::clone(&foundations_log::slog_logger()).read().clone();
         let scope_guard = slog_scope::set_global_logger(curr_logger);
 
         // Convert slog::Level from Foundations settings to log::Level
