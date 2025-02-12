@@ -1,15 +1,15 @@
 [workspace]
 members = [
-    "apps",
-    "h3i",
-    "octets",
-    "qlog",
-    "quiche",
-    "buffer-pool",
-    "datagram-socket",
-    "task-killswitch",
+  "apps",
+  "buffer-pool",
+  "datagram-socket",
+  "h3i",
+  "octets",
+  "qlog",
+  "quiche",
+  "task-killswitch",
 ]
-exclude = [ "fuzz", "tools/http3_test" ]
+exclude = ["fuzz", "tools/http3_test"]
 resolver = "2"
 
 [workspace.package]
@@ -29,10 +29,14 @@ publish = false
 
 [workspace.dependencies]
 crossbeam = { version = "0.8.1", default-features = false }
+env_logger = "0.10"
 futures-util = { version = "0.3", default-features = false }
 libc = { version = "0.2.76", default-features = false }
+log = "0.4"
+octets = { version = "0.3", path = "./octets" }
 once_cell = { version = "1.5.2", default-features = false }
 parking_lot = { version = "0.12.1", default-features = false }
+qlog = { version = "0.15", path = "./qlog" }
 smallvec = { version = "1.10", default-features = false }
 tokio = { version = "1.29", default-features = false }
 

@@ -12,19 +12,19 @@ readme = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
 include = [
-    "/*.md",
-    "/*.toml",
-    "/COPYING",
-    "/deps/boringssl/**/*.[chS]",
-    "/deps/boringssl/**/*.asm",
-    "/deps/boringssl/src/**/*.cc",
-    "/deps/boringssl/**/CMakeLists.txt",
-    "/deps/boringssl/**/sources.cmake",
-    "/deps/boringssl/LICENSE",
-    "/examples",
-    "/include",
-    "/quiche.svg",
-    "/src",
+  "/*.md",
+  "/*.toml",
+  "/COPYING",
+  "/deps/boringssl/**/*.[chS]",
+  "/deps/boringssl/**/*.asm",
+  "/deps/boringssl/src/**/*.cc",
+  "/deps/boringssl/**/CMakeLists.txt",
+  "/deps/boringssl/**/sources.cmake",
+  "/deps/boringssl/LICENSE",
+  "/examples",
+  "/include",
+  "/quiche.svg",
+  "/src",
 ]
 
 [features]
@@ -62,21 +62,24 @@ pkg-config = { version = "0.3", optional = true }
 cdylib-link-lines = { version = "0.1", optional = true }
 
 [dependencies]
-either = { version = "1.8", default-features = false }
-log = { version = "0.4", features = ["std"] }
-libc = "0.2"
-libm = "0.2"
-slab = "0.4"
-octets = { version = "0.3", path = "../octets" }
 boring = { version = "4", optional = true }
+either = { version = "1.8", default-features = false }
 foreign-types-shared = { version = "0.3.0", optional = true }
 intrusive-collections = "0.9.5"
-qlog = { version = "0.15", path = "../qlog", optional = true }
+libc = { workspace = true }
+libm = "0.2"
+log = { workspace = true, features = ["std"] }
+octets = { workspace = true }
+qlog = { workspace = true, optional = true }
 sfv = { version = "0.9", optional = true }
-smallvec = { version = "1.10", features = ["union"] }
+slab = "0.4"
+smallvec = { workspace = true, features = ["union"] }
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Networking_WinSock", "Win32_Security_Cryptography"] }
+windows-sys = { version = "0.59", features = [
+  "Win32_Networking_WinSock",
+  "Win32_Security_Cryptography",
+] }
 
 [dev-dependencies]
 mio = { version = "0.8", features = ["net", "os-poll"] }

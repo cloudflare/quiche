@@ -47,7 +47,7 @@ fn main() -> Result<(), ClientError> {
         log_builder.filter_level(log::LevelFilter::Info);
     }
 
-    log_builder.default_format_timestamp_nanos(true).init();
+    log_builder.format_timestamp_nanos().init();
 
     let config = match config_from_clap() {
         Ok(v) => v,
