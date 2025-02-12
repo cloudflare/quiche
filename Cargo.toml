@@ -1,5 +1,14 @@
 [workspace]
-members = [ "apps", "h3i", "octets", "qlog", "quiche" ]
+members = [
+    "apps",
+    "h3i",
+    "octets",
+    "qlog",
+    "quiche",
+    "buffer-pool",
+    "datagram-socket",
+    "task-killswitch",
+]
 exclude = [ "fuzz", "tools/http3_test" ]
 resolver = "2"
 
@@ -17,6 +26,15 @@ consolidate-commits = false
 tag-name = "{{version}}"
 tag-message = "{{crate_name}} {{version}}"
 publish = false
+
+[workspace.dependencies]
+crossbeam = { version = "0.8.1", default-features = false }
+futures-util = { version = "0.3", default-features = false }
+libc = { version = "0.2.76", default-features = false }
+once_cell = { version = "1.5.2", default-features = false }
+parking_lot = { version = "0.12.1", default-features = false }
+smallvec = { version = "1.10", default-features = false }
+tokio = { version = "1.29", default-features = false }
 
 [profile.bench]
 debug = true

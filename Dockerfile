@@ -8,6 +8,9 @@ COPY h3i/ ./h3i/
 COPY octets/ ./octets/
 COPY qlog/ ./qlog/
 COPY quiche/ ./quiche/
+COPY datagram-socket/ ./datagram-socket/
+COPY buffer-pool ./buffer-pool/
+COPY task-killswitch ./task-killswitch/
 
 RUN apt-get update && apt-get install -y cmake && rm -rf /var/lib/apt/lists/*
 
