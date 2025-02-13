@@ -545,7 +545,7 @@ fn main() {
                 client.conn.stats().lost as f64 / client.conn.stats().sent as f64;
             if loss_rate > client.loss_rate + 0.001 {
                 client.max_send_burst = client.max_send_burst / 4 * 3;
-                // Minimun bound of 10xMSS.
+                // Minimum bound of 10xMSS.
                 client.max_send_burst =
                     client.max_send_burst.max(client.max_datagram_size * 10);
                 client.loss_rate = loss_rate;

@@ -115,7 +115,7 @@ pub enum WaitType {
     WaitDuration(Duration),
     /// Wait for some form of a response before firing the next action. This can
     /// be superseded in several cases:
-    /// 1. The peer resets the spcified stream.
+    /// 1. The peer resets the specified stream.
     /// 2. The peer sends a `fin` over the specified stream
     StreamEvent(StreamEvent),
 }
