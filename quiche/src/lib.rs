@@ -5137,7 +5137,7 @@ impl Connection {
             return Err(Error::InvalidStreamState(stream_id));
         }
 
-        // Dont' try to reset a remote unidirectional stream.
+        // Don't try to reset a remote unidirectional stream.
         if direction == Shutdown::Write &&
             !stream::is_local(stream_id, self.is_server) &&
             !stream::is_bidi(stream_id)

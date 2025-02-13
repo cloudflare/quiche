@@ -65,7 +65,7 @@ of QUIC and HTTP/3 will be written.
 
 In some cases, it can be useful to ignore server name resolution and connect to
 a server at a specific IP address, using the indicated SNI. The `--connect-to`
-option can be used to specificy the desired IP and port.
+option can be used to specify the desired IP and port.
 
 ## Record and Replay
 
