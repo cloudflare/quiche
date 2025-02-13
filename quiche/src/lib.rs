@@ -8068,8 +8068,12 @@ impl<T> UnknownTransportParameter<T> {
     ///
     /// See Section 18.1 in [RFC9000](https://datatracker.ietf.org/doc/html/rfc9000#name-reserved-transport-paramete).
     pub fn is_reserved(&self) -> bool {
-        let n = (self.id - 27) / 31;
-        self.id == 31 * n + 27
+        if self.id < 27 {
+            false
+        } else {
+            let n = (self.id - 27) / 31;
+            self.id == 31 * n + 27
+        }
     }
 }
 
@@ -9317,6 +9321,17 @@ mod tests {
         assert!(reserved_unknown_param.is_reserved());
         assert!(!not_reserved_unknown_param.is_reserved());
     }
+
+    #[test]
+    fn transport_params_unknown_small_id_is_not_reserved() {
+        let param_with_small_id_not_reserved = UnknownTransportParameter::<&[u8]> {
+            id: 21,
+            value: &[0xau8; 280],
+        };
+
+        assert!(!param_with_small_id_not_reserved.is_reserved());
+    }
+
     #[test]
     fn unknown_version() {
         let mut config = Config::new(0xbabababa).unwrap();
