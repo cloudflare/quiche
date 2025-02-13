@@ -41,7 +41,7 @@ pub(crate) fn extract_flow_id(stream_id: u64, headers: &[h3::Header]) -> Option<
     }
 }
 
-/// Sends an h3 datagram over the QUIC connection with the given `flow_id`.
+/// Sends an HTTP/3 datagram over the QUIC connection with the given `flow_id`.
 pub(crate) fn send_h3_dgram(
     conn: &mut QuicheConnection,
     flow_id: u64,
@@ -60,7 +60,7 @@ pub(crate) fn send_h3_dgram(
     }
 }
 
-/// Reads the next h3 datagram from the QUIC connection.
+/// Reads the next HTTP/3 datagram from the QUIC connection.
 ///
 /// [`quiche::Error::Done`] is returned if there is no datagram to read.
 pub(crate) fn receive_h3_dgram(conn: &mut QuicheConnection) -> quiche::Result<(u64, InboundFrame)> {

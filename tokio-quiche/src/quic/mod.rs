@@ -99,7 +99,7 @@ fn make_qlog_writer(dir: &str, id: &str) -> std::io::Result<std::io::BufWriter<s
     Ok(std::io::BufWriter::new(f))
 }
 
-/// Connects to an h3 server using `socket` and the default client configuration.
+/// Connects to an HTTP/3 server using `socket` and the default client configuration.
 ///
 /// This function always uses the [`ApplicationOverQuic`] provided in
 /// [`http3::driver`](crate::http3::driver) and returns a corresponding [ClientH3Controller].

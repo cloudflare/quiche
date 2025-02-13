@@ -70,7 +70,7 @@ impl From<&BoxError> for HandshakeError {
     }
 }
 
-/// Reason why a QUIC initial was discarded by the packet router.
+/// Reason why a QUIC Initial was discarded by the packet router.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum QuicInvalidInitialPacketError {
     TokenValidationFail,

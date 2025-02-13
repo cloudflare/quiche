@@ -44,7 +44,7 @@ pub use self::server::{
     ServerEventStream, ServerH3Command, ServerH3Controller, ServerH3Driver, ServerH3Event,
 };
 
-// The priority of all h3 responses is currently fixed at this value.
+// The priority of all HTTP/3 responses is currently fixed at this value.
 // TODO: make this configurable as part of `OutboundFrame::Headers`
 const DEFAULT_PRIO: h3::Priority = h3::Priority::new(3, true);
 
@@ -438,7 +438,7 @@ impl<H: DriverHooks> H3Driver<H> {
                     return self.finish_stream(qconn, stream_id, None, None);
                 }
 
-                // The quic stream is finished, manually invoke `process_h3_fin` in case
+                // The QUIC stream is finished, manually invoke `process_h3_fin` in case
                 // `h3::poll()` is never called again.
                 //
                 // Note that this case will not conflict with StreamStatus::Done being
@@ -885,9 +885,9 @@ impl<H: DriverHooks> H3Driver<H> {
     }
 
     /// Tests `qconn` for either a local or peer error and increments
-    /// the associated h3 or quic error counter.
+    /// the associated HTTP/3 or QUIC error counter.
     fn record_quiche_error(qconn: &mut QuicheConnection, metrics: &impl Metrics) {
-        // split metrics between local/peer and quic/h3 level errors
+        // split metrics between local/peer and QUIC/HTTP/3 level errors
         if let Some(err) = qconn.local_error() {
             if err.is_app {
                 metrics.local_h3_conn_close_error_count(err.error_code.into())

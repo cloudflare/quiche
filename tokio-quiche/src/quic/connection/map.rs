@@ -65,7 +65,7 @@ impl From<&ConnectionId<'_>> for CidOwned {
     }
 }
 
-/// A unique idetifier quiche assigns to a connection.
+/// A unique identifier quiche assigns to a connection.
 type QuicheId = u64;
 
 /// A map for QUIC connections.
