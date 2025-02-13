@@ -13,12 +13,20 @@ pub struct H3AuditStats {
     /// The number of bytes received over the stream.
     downstream_bytes_recvd: AtomicU64,
     /// A STOP_SENDING error code received from the peer.
+    ///
+    /// -1 indicates that this error code was not received yet.
     recvd_stop_sending_error_code: AtomicI64,
     /// A RESET_STREAM error code received from the peer.
+    ///
+    /// -1 indicates that this error code was not received yet.
     recvd_reset_stream_error_code: AtomicI64,
     /// A STOP_SENDING error code sent to the peer.
+    ///
+    /// -1 indicates that this error code was not received yet.
     sent_stop_sending_error_code: AtomicI64,
     /// A RESET_STREAM error code sent to the peer.
+    ///
+    /// -1 indicates that this error code was not received yet.
     sent_reset_stream_error_code: AtomicI64,
     /// Stream FIN received from the peer.
     recvd_stream_fin: AtomicCell<StreamClosureKind>,
@@ -41,46 +49,63 @@ impl H3AuditStats {
         }
     }
 
+    /// The stream ID of this session.
     #[inline]
     pub fn stream_id(&self) -> u64 {
         self.stream_id
     }
 
+    /// The number of bytes sent over the stream.
     #[inline]
     pub fn downstream_bytes_sent(&self) -> u64 {
         self.downstream_bytes_sent.load(Ordering::SeqCst)
     }
 
+    /// The number of bytes received over the stream.
     #[inline]
     pub fn downstream_bytes_recvd(&self) -> u64 {
         self.downstream_bytes_recvd.load(Ordering::SeqCst)
     }
 
+    /// A STOP_SENDING error code received from the peer.
+    ///
+    /// -1 indicates that this error code was not received yet.
     #[inline]
     pub fn recvd_stop_sending_error_code(&self) -> i64 {
         self.recvd_stop_sending_error_code.load(Ordering::SeqCst)
     }
 
+    /// A RESET_STREAM error code received from the peer.
+    ///
+    /// -1 indicates that this error code was not received yet.
     #[inline]
     pub fn recvd_reset_stream_error_code(&self) -> i64 {
         self.recvd_reset_stream_error_code.load(Ordering::SeqCst)
     }
 
+    /// A STOP_SENDING error code sent to the peer.
+    ///
+    /// -1 indicates that this error code was not received yet.
     #[inline]
     pub fn sent_stop_sending_error_code(&self) -> i64 {
         self.sent_stop_sending_error_code.load(Ordering::SeqCst)
     }
 
+    /// A RESET_STREAM error code sent to the peer.
+    ///
+    /// -1 indicates that this error code was not received yet.
     #[inline]
     pub fn sent_reset_stream_error_code(&self) -> i64 {
         self.sent_reset_stream_error_code.load(Ordering::SeqCst)
     }
 
+    /// Stream FIN received from the peer.
     #[inline]
     pub fn recvd_stream_fin(&self) -> StreamClosureKind {
         self.recvd_stream_fin.load()
     }
 
+    /// Stream FIN sent to the peer.
     #[inline]
     pub fn sent_stream_fin(&self) -> StreamClosureKind {
         self.sent_stream_fin.load()
