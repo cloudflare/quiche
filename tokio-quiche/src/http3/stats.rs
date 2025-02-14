@@ -1,10 +1,10 @@
-use std::fmt;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 use crossbeam::atomic::AtomicCell;
 use datagram_socket::StreamClosureKind;
 
 /// Stream-level HTTP/3 audit statistics recorded by [H3Driver](crate::http3::driver::H3Driver).
+#[derive(Debug)]
 pub struct H3AuditStats {
     /// The stream ID of this session.
     stream_id: u64,
@@ -155,31 +155,5 @@ impl H3AuditStats {
     #[inline]
     pub fn set_sent_stream_fin(&self, sent_stream_fin: StreamClosureKind) {
         self.sent_stream_fin.store(sent_stream_fin);
-    }
-}
-
-impl fmt::Debug for H3AuditStats {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("H3AuditStats")
-            .field("stream_id", &self.stream_id)
-            .field("downstream_bytes_sent", &self.downstream_bytes_sent)
-            .field("downstream_bytes_recvd", &self.downstream_bytes_recvd)
-            .field(
-                "recvd_stop_sending_error_code",
-                &self.recvd_stop_sending_error_code,
-            )
-            .field(
-                "recvd_reset_stream_error_code",
-                &self.recvd_reset_stream_error_code,
-            )
-            .field(
-                "sent_stop_sending_error_code",
-                &self.sent_stop_sending_error_code,
-            )
-            .field(
-                "sent_reset_stream_error_code",
-                &self.sent_reset_stream_error_code,
-            )
-            .finish()
     }
 }
