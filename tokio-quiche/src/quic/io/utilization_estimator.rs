@@ -1,14 +1,17 @@
 use foundations::telemetry::metrics::Gauge;
 
 use std::collections::VecDeque;
-use std::ops::{Div, Sub};
-use std::time::{Duration, Instant};
+use std::ops::Div;
+use std::ops::Sub;
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::quic::QuicheConnection;
 
 const EST_WIN: usize = 10;
 
-/// [`BandwidthReporter`] is responsible to track the bandwidth estimate for the connection
+/// [`BandwidthReporter`] is responsible to track the bandwidth estimate for the
+/// connection
 pub(super) struct BandwidthReporter {
     /// Time of last update
     last_update: Instant,
@@ -65,8 +68,12 @@ impl BandwidthReporter {
         let bytes_lost = stats.lost_bytes - self.last_lost;
         let bytes_acked = stats.acked_bytes - self.last_acked;
 
-        self.estimator
-            .new_round(self.last_update, bytes_sent, bytes_lost, bytes_acked);
+        self.estimator.new_round(
+            self.last_update,
+            bytes_sent,
+            bytes_lost,
+            bytes_acked,
+        );
 
         self.last_sent = stats.sent_bytes;
         self.last_lost = stats.lost_bytes;
@@ -150,7 +157,10 @@ impl MaxUtilizedBandwidthEstimator {
         }
     }
 
-    fn new_round(&mut self, time: Instant, bytes_sent: u64, bytes_lost: u64, bytes_acked: u64) {
+    fn new_round(
+        &mut self, time: Instant, bytes_sent: u64, bytes_lost: u64,
+        bytes_acked: u64,
+    ) {
         if self.rounds.len() == EST_WIN {
             let _ = self.rounds.pop_front();
         }
@@ -179,8 +189,10 @@ impl MaxUtilizedBandwidthEstimator {
         let time_delta = time.duration_since(self.rounds.front().unwrap().start);
 
         if bytes_acked > 0 {
-            let ack_rate = bandwidth_from_bytes_and_time_delta(bytes_acked, time_delta);
-            let send_rate = bandwidth_from_bytes_and_time_delta(bytes_sent, time_delta);
+            let ack_rate =
+                bandwidth_from_bytes_and_time_delta(bytes_acked, time_delta);
+            let send_rate =
+                bandwidth_from_bytes_and_time_delta(bytes_sent, time_delta);
             let estimate = Estimate {
                 bandwidth: ack_rate.min(send_rate),
                 loss,
@@ -268,7 +280,9 @@ where
         if match &self.estimates[0] {
             None => true,
             Some(best) if new_sample > best.sample => true,
-            _ => new_time - self.estimates[2].as_ref().unwrap().time > self.window_length,
+            _ =>
+                new_time - self.estimates[2].as_ref().unwrap().time >
+                    self.window_length,
         } {
             return self.reset(new_sample, new_time);
         }
@@ -307,8 +321,8 @@ where
             return;
         }
 
-        if self.estimates[1].unwrap().sample == self.estimates[0].unwrap().sample
-            && new_time - self.estimates[1].unwrap().time > self.window_length / 4
+        if self.estimates[1].unwrap().sample == self.estimates[0].unwrap().sample &&
+            new_time - self.estimates[1].unwrap().time > self.window_length / 4
         {
             // A quarter of the window has passed without a better sample, so the
             // second-best estimate is taken from the second quarter of the
@@ -321,8 +335,8 @@ where
             return;
         }
 
-        if self.estimates[2].unwrap().sample == self.estimates[1].unwrap().sample
-            && new_time - self.estimates[2].unwrap().time > self.window_length / 2
+        if self.estimates[2].unwrap().sample == self.estimates[1].unwrap().sample &&
+            new_time - self.estimates[2].unwrap().time > self.window_length / 2
         {
             // We've passed a half of the window without a better estimate, so
             // take a third-best estimate from the second half of the
@@ -385,11 +399,13 @@ mod tests {
             now += Duration::from_secs(30);
             // Send another 10M, previous 10M gets acked
             estimator.new_round(now, 30_000_000, 0, 30_000_000);
-            // The bandwidth is lower but it doesn't matter, we record highest bandwidth, so it remains as before for two minutes
+            // The bandwidth is lower but it doesn't matter, we record highest
+            // bandwidth, so it remains as before for two minutes
             assert_eq!(estimator.get().bandwidth, 16_000_000);
         }
 
-        // After two minutes the filter is updated, and the max bandwidth is reduced
+        // After two minutes the filter is updated, and the max bandwidth is
+        // reduced
         now += Duration::from_secs(30);
         // Send another 10M, previous 10M gets acked
         estimator.new_round(now, 30_000_000, 0, 30_000_000);

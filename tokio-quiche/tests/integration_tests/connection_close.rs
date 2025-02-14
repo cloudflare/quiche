@@ -1,12 +1,16 @@
 use std::time::Duration;
 
 use crate::fixtures::*;
-use h3i_fixtures::{
-    default_headers, h3i_config, received_status_code_on_stream, summarize_connection,
-};
+use h3i_fixtures::default_headers;
+use h3i_fixtures::h3i_config;
+use h3i_fixtures::received_status_code_on_stream;
+use h3i_fixtures::summarize_connection;
 
 use h3i::actions::h3::send_headers_frame;
-use h3i::actions::h3::{Action, StreamEvent, StreamEventType, WaitType};
+use h3i::actions::h3::Action;
+use h3i::actions::h3::StreamEvent;
+use h3i::actions::h3::StreamEventType;
+use h3i::actions::h3::WaitType;
 use h3i::quiche;
 use h3i::quiche::h3::Header;
 
@@ -42,7 +46,8 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
         actions.push(Action::FlushPackets);
     }
 
-    // This last action should fail due to request limits on the connection being breached
+    // This last action should fail due to request limits on the connection being
+    // breached
     actions.push(send_headers_frame(
         (MAX_REQS + 1) * 4,
         true,

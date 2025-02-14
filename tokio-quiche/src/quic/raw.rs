@@ -5,23 +5,30 @@
 //! [`settings`](crate::settings), or need more control over how to pass data
 //! into the connection.
 //!
-//! Most use cases are much better served by our [`connect`](crate::quic::connect)
-//! (for clients) or [`listen`](crate::listen) (for servers) API.
+//! Most use cases are much better served by our
+//! [`connect`](crate::quic::connect) (for clients) or [`listen`](crate::listen)
+//! (for servers) API.
 
 use datagram_socket::DatagramSocketSend;
 use std::sync::Arc;
-use std::task::{ready, Context, Poll};
+use std::task::ready;
+use std::task::Context;
+use std::task::Poll;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
-use super::connection::{InitialQuicConnection, QuicConnectionParams};
+use super::connection::InitialQuicConnection;
+use super::connection::QuicConnectionParams;
 use super::io::worker::WriterConfig;
 use super::router::ConnectionMapCommand;
 use crate::metrics::Metrics;
-use crate::quic::{HandshakeInfo, Incoming, QuicheConnection};
+use crate::quic::HandshakeInfo;
+use crate::quic::Incoming;
+use crate::quic::QuicheConnection;
 use crate::socket::Socket;
 
-/// Result of manually wrapping a [`quiche::Connection`] in an [`InitialQuicConnection`].
+/// Result of manually wrapping a [`quiche::Connection`] in an
+/// [`InitialQuicConnection`].
 ///
 /// This struct bundles the interfaces which interact with the connection.
 pub struct ConnWrapperResult<Tx, M>
@@ -51,13 +58,11 @@ where
 /// endpoint's addresses.
 ///
 /// # Note
-/// This function does not attempt any I/O when wrapping the [`quiche::Connection`].
-/// To start handshaking and consuming packets from the returned channel, use the
-/// methods on [`InitialQuicConnection`].
+/// This function does not attempt any I/O when wrapping the
+/// [`quiche::Connection`]. To start handshaking and consuming packets from the
+/// returned channel, use the methods on [`InitialQuicConnection`].
 pub fn wrap_quiche_conn<Tx, R, M>(
-    quiche_conn: QuicheConnection,
-    tx_socket: Socket<Arc<Tx>, R>,
-    metrics: M,
+    quiche_conn: QuicheConnection, tx_socket: Socket<Arc<Tx>, R>, metrics: M,
 ) -> ConnWrapperResult<Tx, M>
 where
     Tx: DatagramSocketSend + Send + 'static + ?Sized,
@@ -110,7 +115,8 @@ where
     }
 }
 
-/// Pollable receiver for `connection closed` notifications from a QUIC connection.
+/// Pollable receiver for `connection closed` notifications from a QUIC
+/// connection.
 ///
 /// This receiver also fires if the corresponding sender has been dropped
 /// without a `CONNECTION_CLOSE` frame on the connection.

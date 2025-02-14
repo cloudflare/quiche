@@ -7,24 +7,33 @@ use std::time::Instant;
 #[cfg(feature = "perf-quic-listener-metrics")]
 use std::time::SystemTime;
 
-use super::connection_stage::{
-    Close, ConnectionStage, ConnectionStageContext, Handshake, RunningApplication,
-};
+use super::connection_stage::Close;
+use super::connection_stage::ConnectionStage;
+use super::connection_stage::ConnectionStageContext;
+use super::connection_stage::Handshake;
+use super::connection_stage::RunningApplication;
 use super::gso::*;
 use super::utilization_estimator::BandwidthReporter;
 
-use crate::metrics::{labels, Metrics};
-use crate::quic::connection::{ApplicationOverQuic, HandshakeError, Incoming, QuicConnectionStats};
+use crate::metrics::labels;
+use crate::metrics::Metrics;
+use crate::quic::connection::ApplicationOverQuic;
+use crate::quic::connection::HandshakeError;
+use crate::quic::connection::Incoming;
+use crate::quic::connection::QuicConnectionStats;
 use crate::quic::router::ConnectionMapCommand;
 use crate::quic::QuicheConnection;
 use crate::QuicResult;
 
 use boring::ssl::SslRef;
-use datagram_socket::{
-    DatagramSocketSend, DatagramSocketSendExt, MaybeConnectedSocket, QuicAuditStats,
-};
+use datagram_socket::DatagramSocketSend;
+use datagram_socket::DatagramSocketSendExt;
+use datagram_socket::MaybeConnectedSocket;
+use datagram_socket::QuicAuditStats;
 use foundations::telemetry::log;
-use quiche::{ConnectionId, Error as QuicheError, SendInfo};
+use quiche::ConnectionId;
+use quiche::Error as QuicheError;
+use quiche::SendInfo;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::time;
@@ -32,7 +41,8 @@ use tokio::time;
 // Number of incoming packets to be buffered in the incoming channel.
 pub(crate) const INCOMING_QUEUE_SIZE: usize = 2048;
 
-// Check if there are any incoming packets while sending data every this number of sent packets
+// Check if there are any incoming packets while sending data every this number
+// of sent packets
 pub(crate) const CHECK_INCOMING_QUEUE_RATIO: usize = INCOMING_QUEUE_SIZE / 16;
 
 const RELEASE_TIMER_THRESHOLD: Duration = Duration::from_micros(250);
@@ -56,10 +66,11 @@ pub(crate) struct WriteState {
     num_pkts: usize,
     tx_time: Option<Instant>,
     has_pending_data: bool,
-    // If pacer schedules packets too far into the future, we want to pause sending, until the future arrives
+    // If pacer schedules packets too far into the future, we want to pause
+    // sending, until the future arrives
     next_release_time: Option<Instant>,
-    // If set, outgoing packets will be sent to the peer from the `send_from` address rather than
-    // the listening socket.
+    // If set, outgoing packets will be sent to the peer from the `send_from`
+    // address rather than the listening socket.
     send_from: Option<SocketAddr>,
 }
 
@@ -77,8 +88,9 @@ pub(crate) struct IoWorkerParams<Tx, M> {
 
 pub(crate) struct IoWorker<Tx, M, S> {
     socket: MaybeConnectedSocket<Tx>,
-    /// A field that signals to the listener task that the connection has gone away
-    /// (nothing is sent here, listener task just detects the sender has dropped)
+    /// A field that signals to the listener task that the connection has gone
+    /// away (nothing is sent here, listener task just detects the sender
+    /// has dropped)
     shutdown_tx: mpsc::Sender<()>,
     cfg: WriterConfig,
     audit_log_stats: Arc<QuicAuditStats>,
@@ -98,7 +110,8 @@ where
     S: ConnectionStage,
 {
     pub(crate) fn new(params: IoWorkerParams<Tx, M>, conn_stage: S) -> Self {
-        let bw_estimator = BandwidthReporter::new(params.metrics.utilized_bandwidth());
+        let bw_estimator =
+            BandwidthReporter::new(params.metrics.utilized_bandwidth());
 
         log::trace!("Creating IoWorker with stage: {conn_stage:?}");
 
@@ -118,8 +131,7 @@ where
     }
 
     async fn work_loop<A: ApplicationOverQuic>(
-        &mut self,
-        qconn: &mut QuicheConnection,
+        &mut self, qconn: &mut QuicheConnection,
         ctx: &mut ConnectionStageContext<A>,
     ) -> QuicResult<()> {
         const DEFAULT_SLEEP: Duration = Duration::from_secs(60);
@@ -135,9 +147,10 @@ where
             while self.write_state.has_pending_data {
                 let mut packets_sent = 0;
 
-                // Try to clear all received packets every so often, because incoming packets contain acks,
-                // and because the recieve queue has a very limited size, once it is full incoming packets
-                // get stalled indefinitely
+                // Try to clear all received packets every so often, because
+                // incoming packets contain acks, and because the
+                // recieve queue has a very limited size, once it is full incoming
+                // packets get stalled indefinitely
                 let mut did_recv = false;
                 while let Some(pkt) = ctx
                     .in_pkt
@@ -152,15 +165,17 @@ where
 
                 let can_release = match self.write_state.next_release_time {
                     None => true,
-                    Some(next_release) => {
-                        next_release.checked_duration_since(now).unwrap_or_default()
-                            < RELEASE_TIMER_THRESHOLD
-                    }
+                    Some(next_release) =>
+                        next_release
+                            .checked_duration_since(now)
+                            .unwrap_or_default() <
+                            RELEASE_TIMER_THRESHOLD,
                 };
 
                 self.write_state.has_pending_data &= can_release;
 
-                while self.write_state.has_pending_data && packets_sent < CHECK_INCOMING_QUEUE_RATIO
+                while self.write_state.has_pending_data &&
+                    packets_sent < CHECK_INCOMING_QUEUE_RATIO
                 {
                     self.gather_data_from_quiche_conn(qconn, ctx.buffer())?;
 
@@ -172,7 +187,9 @@ where
                     self.flush_buffer_to_socket(ctx.buffer()).await;
                     packets_sent += self.write_state.num_pkts;
 
-                    if let ControlFlow::Break(reason) = self.conn_stage.on_flush(qconn, ctx) {
+                    if let ControlFlow::Break(reason) =
+                        self.conn_stage.on_flush(qconn, ctx)
+                    {
                         return reason;
                     }
                 }
@@ -180,9 +197,12 @@ where
 
             self.bw_estimator.update(qconn, now);
 
+            let new_deadline = min_of_some(
+                qconn.timeout_instant(),
+                self.write_state.next_release_time,
+            );
             let new_deadline =
-                min_of_some(qconn.timeout_instant(), self.write_state.next_release_time);
-            let new_deadline = min_of_some(new_deadline, self.conn_stage.wait_deadline());
+                min_of_some(new_deadline, self.conn_stage.wait_deadline());
 
             if new_deadline != current_deadline {
                 current_deadline = new_deadline;
@@ -224,9 +244,7 @@ where
 
     #[inline]
     fn gather_data_from_quiche_conn(
-        &mut self,
-        qconn: &mut QuicheConnection,
-        send_buf: &mut [u8],
+        &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
     ) -> QuicResult<usize> {
         self.fill_send_buffer(qconn, send_buf)
     }
@@ -236,16 +254,16 @@ where
         if let Some(init_rx_time) = self.init_rx_time.take() {
             if let Ok(delta) = init_rx_time.elapsed() {
                 self.metrics
-                    .handshake_time_seconds(labels::QuicHandshakeStage::HandshakeResponse)
+                    .handshake_time_seconds(
+                        labels::QuicHandshakeStage::HandshakeResponse,
+                    )
                     .observe(delta.as_nanos() as u64);
             }
         }
     }
 
     fn fill_send_buffer(
-        &mut self,
-        qconn: &mut QuicheConnection,
-        send_buf: &mut [u8],
+        &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
     ) -> QuicResult<usize> {
         let mut segment_size = None;
         let mut send_info = None;
@@ -266,11 +284,14 @@ where
                 .get_next_release_time()
                 .filter(|_| self.cfg.pacing_offload);
 
-            if let Some(next_release) = next_release.as_ref().and_then(|v| v.time(now)) {
+            if let Some(next_release) =
+                next_release.as_ref().and_then(|v| v.time(now))
+            {
                 let max_into_fut = qconn.max_release_into_future();
 
                 if next_release.duration_since(now) >= max_into_fut {
-                    self.write_state.next_release_time = Some(now + max_into_fut.mul_f32(0.8));
+                    self.write_state.next_release_time =
+                        Some(now + max_into_fut.mul_f32(0.8));
                     self.write_state.has_pending_data = false;
                     return Ok(0);
                 }
@@ -280,20 +301,24 @@ where
         };
 
         let buffer_write_outcome = loop {
-            let outcome =
-                self.write_packet_to_buffer(qconn, send_buf, &mut send_info, segment_size);
+            let outcome = self.write_packet_to_buffer(
+                qconn,
+                send_buf,
+                &mut send_info,
+                segment_size,
+            );
 
             let packet_size = match outcome {
                 Ok(0) => {
                     self.write_state.has_pending_data = false;
 
                     break Ok(0);
-                }
+                },
                 Ok(bytes_written) => {
                     self.write_state.has_pending_data = true;
 
                     bytes_written
-                }
+                },
                 Err(e) => break Err(e),
             };
 
@@ -304,8 +329,11 @@ where
             }
 
             #[cfg(not(feature = "gcongestion"))]
-            let max_send_size =
-                tune_max_send_size(segment_size, qconn.send_quantum(), send_buf.len());
+            let max_send_size = tune_max_send_size(
+                segment_size,
+                qconn.send_quantum(),
+                send_buf.len(),
+            );
 
             #[cfg(feature = "gcongestion")]
             let max_send_size = usize::MAX;
@@ -313,8 +341,9 @@ where
             // If segment_size is known, update the maximum of
             // GSO sender buffer size to the multiple of
             // segment_size.
-            let buffer_is_full = self.write_state.num_pkts == UDP_MAX_SEGMENT_COUNT
-                || self.write_state.bytes_written >= max_send_size;
+            let buffer_is_full = self.write_state.num_pkts ==
+                UDP_MAX_SEGMENT_COUNT ||
+                self.write_state.bytes_written >= max_send_size;
 
             if buffer_is_full {
                 break outcome;
@@ -325,17 +354,21 @@ where
             // to have the same size, except for the last one in the buffer.
             // The last packet may be smaller than the previous size.
             match segment_size {
-                Some(size) if packet_size != size || packet_size < GSO_THRESHOLD => break outcome,
+                Some(size)
+                    if packet_size != size || packet_size < GSO_THRESHOLD =>
+                    break outcome,
                 None => segment_size = Some(packet_size),
                 _ => (),
             }
 
             #[cfg(feature = "gcongestion")]
-            // If the release time of next packet is different, or it can't be part of a burst, start the next batch
+            // If the release time of next packet is different, or it can't be
+            // part of a burst, start the next batch
             if let Some(next_release) = next_release {
                 match qconn.get_next_release_time() {
-                    Some(release) if release.can_burst() || release.time_eq(&next_release, now) => {
-                    }
+                    Some(release)
+                        if release.can_burst() ||
+                            release.time_eq(&next_release, now) => {},
                     _ => break outcome,
                 }
             }
@@ -351,7 +384,8 @@ where
 
         self.write_state.conn_established = qconn.is_established();
         self.write_state.tx_time = tx_time;
-        self.write_state.segment_size = segment_size.unwrap_or(self.write_state.bytes_written);
+        self.write_state.segment_size =
+            segment_size.unwrap_or(self.write_state.bytes_written);
 
         #[cfg(not(feature = "gcongestion"))]
         if let Some(time) = tx_time {
@@ -372,15 +406,13 @@ where
     }
 
     fn write_packet_to_buffer(
-        &mut self,
-        qconn: &mut QuicheConnection,
-        send_buf: &mut [u8],
-        send_info: &mut Option<SendInfo>,
-        segment_size: Option<usize>,
+        &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
+        send_info: &mut Option<SendInfo>, segment_size: Option<usize>,
     ) -> QuicResult<usize> {
         let mut send_buf = &mut send_buf[self.write_state.bytes_written..];
         if send_buf.len() > segment_size.unwrap_or(usize::MAX) {
-            // Never let the buffer be longer than segment size, for GSO to function properly
+            // Never let the buffer be longer than segment size, for GSO to
+            // function properly
             send_buf = &mut send_buf[..segment_size.unwrap_or(usize::MAX)];
         }
 
@@ -390,28 +422,34 @@ where
 
                 self.write_state.bytes_written += packet_size;
                 self.write_state.num_pkts += 1;
-                self.write_state.send_from = send_info.as_ref().map(|info| info.from);
+                self.write_state.send_from =
+                    send_info.as_ref().map(|info| info.from);
 
                 Ok(packet_size)
-            }
+            },
             Err(QuicheError::Done) => {
                 // Flush to network and yield when there are no
                 // more packets to write.
                 Ok(0)
-            }
+            },
             Err(e) => {
                 if let Some(local_error) = qconn.local_error() {
                     self.audit_log_stats
-                        .set_sent_conn_close_transport_error_code(local_error.error_code as i64);
+                        .set_sent_conn_close_transport_error_code(
+                            local_error.error_code as i64,
+                        );
                     log::error!(
                         "quiche::send failed and connection closed with error_code: {}",
                         local_error.error_code
                     );
                 } else {
-                    let internal_error_code = quiche::WireErrorCode::InternalError as u64;
+                    let internal_error_code =
+                        quiche::WireErrorCode::InternalError as u64;
 
                     self.audit_log_stats
-                        .set_sent_conn_close_transport_error_code(internal_error_code as i64);
+                        .set_sent_conn_close_transport_error_code(
+                            internal_error_code as i64,
+                        );
 
                     let _ = qconn.close(false, internal_error_code, &[]);
                     log::error!(
@@ -421,7 +459,7 @@ where
                 }
 
                 Err(Box::new(e))
-            }
+            },
         }
     }
 
@@ -452,25 +490,22 @@ where
             self.measure_complete_handshake_time();
 
             match send_res {
-                Ok(n) => {
+                Ok(n) =>
                     if n < self.write_state.bytes_written {
                         self.metrics
                             .write_errors(labels::QuicWriteError::Partial)
                             .inc();
-                    }
-                }
+                    },
                 Err(_) => {
                     self.metrics.write_errors(labels::QuicWriteError::Err).inc();
-                }
+                },
             }
         }
     }
 
     /// Process the incoming packet
     fn process_incoming(
-        &mut self,
-        qconn: &mut QuicheConnection,
-        mut pkt: Incoming,
+        &mut self, qconn: &mut QuicheConnection, mut pkt: Incoming,
     ) -> QuicResult<()> {
         let recv_info = quiche::RecvInfo {
             from: pkt.peer_addr,
@@ -488,13 +523,11 @@ where
         Ok(())
     }
 
-    /// When a connection is established, process application data, if not the task
-    /// is probably polled following a wakeup from boring, so we check if quiche has
-    /// any handshake packets to send.
+    /// When a connection is established, process application data, if not the
+    /// task is probably polled following a wakeup from boring, so we check
+    /// if quiche has any handshake packets to send.
     async fn wait_for_data_or_handshake<A: ApplicationOverQuic>(
-        &mut self,
-        qconn: &mut QuicheConnection,
-        quic_application: &mut A,
+        &mut self, qconn: &mut QuicheConnection, quic_application: &mut A,
     ) -> QuicResult<()> {
         if quic_application.should_act() {
             quic_application.wait_for_data(qconn).await
@@ -507,28 +540,29 @@ where
     ///
     /// # Example
     ///
-    /// This function can be used, for example, to drive an asynchronous TLS handshake. Each call
-    /// to `gather_data_from_quiche_conn` attempts to progress the handshake via a call to
-    /// `quiche::Connection.send()` - once one of the `gather_data_from_quiche_conn()` calls writes
-    /// to the send buffer, we flush it to the network socket.
+    /// This function can be used, for example, to drive an asynchronous TLS
+    /// handshake. Each call to `gather_data_from_quiche_conn` attempts to
+    /// progress the handshake via a call to `quiche::Connection.send()` -
+    /// once one of the `gather_data_from_quiche_conn()` calls writes to the
+    /// send buffer, we flush it to the network socket.
     async fn wait_for_quiche<App: ApplicationOverQuic>(
-        &mut self,
-        qconn: &mut QuicheConnection,
-        app: &mut App,
+        &mut self, qconn: &mut QuicheConnection, app: &mut App,
     ) -> QuicResult<()> {
         let populate_send_buf = std::future::poll_fn(|_| {
             match self.gather_data_from_quiche_conn(qconn, app.buffer()) {
                 Ok(bytes_written) => {
-                    // We need to avoid consecutive calls to gather(), which write data to the
-                    // buffer, without a flush(). If we don't avoid those consecutive calls, we end
-                    // up overwriting data in the buffer or unnecessarily waiting for more calls to
-                    // drive_handshake() before calling the handshake complete.
+                    // We need to avoid consecutive calls to gather(), which write
+                    // data to the buffer, without a flush().
+                    // If we don't avoid those consecutive calls, we end
+                    // up overwriting data in the buffer or unnecessarily waiting
+                    // for more calls to drive_handshake()
+                    // before calling the handshake complete.
                     if bytes_written == 0 && self.write_state.bytes_written == 0 {
                         Poll::Pending
                     } else {
                         Poll::Ready(Ok(()))
                     }
-                }
+                },
                 _ => Poll::Ready(Err(quiche::Error::TlsFail)),
             }
         })
@@ -574,17 +608,16 @@ where
     M: Metrics,
 {
     pub(crate) async fn run<A>(
-        mut self,
-        mut qconn: QuicheConnection,
-        mut ctx: ConnectionStageContext<A>,
+        mut self, mut qconn: QuicheConnection, mut ctx: ConnectionStageContext<A>,
     ) -> RunningOrClosing<Tx, M, A>
     where
         A: ApplicationOverQuic,
     {
         // This makes an assumption that the waker being set in ex_data is stable
         // accross the active task's lifetime. Moving a future that encompasses an
-        // async callback from this task accross a channel, for example, will cause
-        // issues as this waker will then be stale and attempt to wake the wrong task.
+        // async callback from this task accross a channel, for example, will
+        // cause issues as this waker will then be stale and attempt to
+        // wake the wrong task.
         std::future::poll_fn(|cx| {
             let ssl = qconn.as_mut();
             ssl.set_task_waker(Some(cx.waker().clone()));
@@ -626,17 +659,16 @@ where
                     work_loop_result,
                     qconn,
                 })
-            }
+            },
         }
     }
 
     fn on_conn_established<App: ApplicationOverQuic>(
-        &mut self,
-        qconn: &mut QuicheConnection,
-        driver: &mut App,
+        &mut self, qconn: &mut QuicheConnection, driver: &mut App,
     ) -> QuicResult<()> {
-        // Only calculate the QUIC handshake duration and call the driver's on_conn_established
-        // hook if this is the first time is_established == true.
+        // Only calculate the QUIC handshake duration and call the driver's
+        // on_conn_established hook if this is the first time
+        // is_established == true.
         if self.audit_log_stats.transport_handshake_duration_us() == -1 {
             self.conn_stage.handshake_info.set_elapsed();
             let handshake_info = &self.conn_stage.handshake_info;
@@ -679,9 +711,7 @@ where
     M: Metrics,
 {
     pub(crate) async fn run<A: ApplicationOverQuic>(
-        mut self,
-        mut qconn: QuicheConnection,
-        mut ctx: ConnectionStageContext<A>,
+        mut self, mut qconn: QuicheConnection, mut ctx: ConnectionStageContext<A>,
     ) -> Closing<Tx, M, A> {
         let work_loop_result = self.work_loop(&mut qconn, &mut ctx).await;
 
@@ -700,11 +730,12 @@ where
     M: Metrics,
 {
     pub(crate) async fn close<A: ApplicationOverQuic>(
-        mut self,
-        qconn: &mut QuicheConnection,
+        mut self, qconn: &mut QuicheConnection,
         ctx: &mut ConnectionStageContext<A>,
     ) {
-        if self.conn_stage.work_loop_result.is_ok() && self.bw_estimator.max_bandwidth > 0 {
+        if self.conn_stage.work_loop_result.is_ok() &&
+            self.bw_estimator.max_bandwidth > 0
+        {
             let metrics = &self.metrics;
 
             metrics
@@ -717,14 +748,17 @@ where
         }
 
         if ctx.application.should_act() {
-            ctx.application
-                .on_conn_close(qconn, &self.metrics, &self.conn_stage.work_loop_result);
+            ctx.application.on_conn_close(
+                qconn,
+                &self.metrics,
+                &self.conn_stage.work_loop_result,
+            );
         }
 
-        // TODO: this assumes that the tidy_up operation can be completed in one send
-        // (ignoring flow/congestion control constraints). We should guarantee that it gets
-        // sent by doublechecking the gathered/flushed byte totals and retry if they don't
-        // match.
+        // TODO: this assumes that the tidy_up operation can be completed in one
+        // send (ignoring flow/congestion control constraints). We should
+        // guarantee that it gets sent by doublechecking the
+        // gathered/flushed byte totals and retry if they don't match.
         let _ = self.gather_data_from_quiche_conn(qconn, ctx.buffer());
         self.flush_buffer_to_socket(ctx.buffer()).await;
 
@@ -733,10 +767,14 @@ where
         if let Some(err) = qconn.peer_error() {
             if err.is_app {
                 self.audit_log_stats
-                    .set_recvd_conn_close_application_error_code(err.error_code as _);
+                    .set_recvd_conn_close_application_error_code(
+                        err.error_code as _,
+                    );
             } else {
                 self.audit_log_stats
-                    .set_recvd_conn_close_transport_error_code(err.error_code as _);
+                    .set_recvd_conn_close_transport_error_code(
+                        err.error_code as _,
+                    );
             }
         }
 

@@ -1,12 +1,14 @@
 use foundations::settings::settings;
-use serde_with::{serde_as, DurationMilliSeconds};
+use serde_with::serde_as;
+use serde_with::DurationMilliSeconds;
 use std::time::Duration;
 
 /// QUIC configuration parameters.
 #[serde_as]
 #[settings]
 pub struct QuicSettings {
-    /// Configures the list of supported application protocols. Defaults to `[b"h3"]`.
+    /// Configures the list of supported application protocols. Defaults to
+    /// `[b"h3"]`.
     #[serde(skip, default = "QuicSettings::default_alpn")]
     pub alpn: Vec<Vec<u8>>,
 
@@ -54,8 +56,9 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_initial_max_streams")]
     pub initial_max_streams_uni: u64,
 
-    /// Configures the max idle timeout of the connection in milliseconds. The real
-    /// idle timeout is the minimum of this and the peer's `max_idle_timeout`.
+    /// Configures the max idle timeout of the connection in milliseconds. The
+    /// real idle timeout is the minimum of this and the peer's
+    /// `max_idle_timeout`.
     ///
     /// Defaults to 56 seconds.
     #[serde(
@@ -65,8 +68,8 @@ pub struct QuicSettings {
     #[serde_as(as = "Option<DurationMilliSeconds>")]
     pub max_idle_timeout: Option<Duration>,
 
-    /// Configures whether the local endpoint supports active connection migration.
-    /// Defaults to `true` (meaning disabled).
+    /// Configures whether the local endpoint supports active connection
+    /// migration. Defaults to `true` (meaning disabled).
     #[serde(default = "QuicSettings::default_disable_active_migration")]
     pub disable_active_migration: bool,
 
@@ -94,12 +97,14 @@ pub struct QuicSettings {
 
     /// Congestion control algorithm to use.
     ///
-    /// For available values, see [`CongestionControlAlgorithm`](quiche::CongestionControlAlgorithm).
+    /// For available values, see
+    /// [`CongestionControlAlgorithm`](quiche::CongestionControlAlgorithm).
     /// Defaults to `cubic`.
     #[serde(default = "QuicSettings::default_cc_algorithm")]
     pub cc_algorithm: String,
 
-    /// Whether to use HyStart++ (only with `cubic` and `reno` CC). Defaults to `true`.
+    /// Whether to use HyStart++ (only with `cubic` and `reno` CC). Defaults to
+    /// `true`.
     #[serde(default = "QuicSettings::default_enable_hystart")]
     pub enable_hystart: bool,
 
@@ -109,21 +114,23 @@ pub struct QuicSettings {
     /// [`SocketCapabilities`](crate::socket::SocketCapabilities).
     pub enable_pacing: bool,
 
-    /// Optionally enables expensive versions of the `accepted_initial_quic_packet_count`
+    /// Optionally enables expensive versions of the
+    /// `accepted_initial_quic_packet_count`
     /// and `rejected_initial_quic_packet_count` metrics.
     ///
-    /// The expensive versions add a label for the peer IP subnet (`/24` for IPv4,
-    /// `/32` for IPv6). They thus generate many more time series if peers are arbitrary
-    /// eyeballs from the global Internet.
+    /// The expensive versions add a label for the peer IP subnet (`/24` for
+    /// IPv4, `/32` for IPv6). They thus generate many more time series if
+    /// peers are arbitrary eyeballs from the global Internet.
     pub enable_expensive_packet_count_metrics: bool,
 
-    /// Forwards [`quiche`] logs into the logging system currently used by [`foundations`].
-    /// Defaults to `false`.
+    /// Forwards [`quiche`] logs into the logging system currently used by
+    /// [`foundations`]. Defaults to `false`.
     ///
     /// # Warning
-    /// This should **only be used for local debugging**. `quiche` can emit lots (and lots,
-    /// and lots) of logs (the TRACE level emits a log record for every packet and frame) and
-    /// you can very easily overwhelm your logging pipeline.
+    /// This should **only be used for local debugging**. `quiche` can emit lots
+    /// (and lots, and lots) of logs (the TRACE level emits a log record for
+    /// every packet and frame) and you can very easily overwhelm your
+    /// logging pipeline.
     pub capture_quiche_logs: bool,
 
     /// A timeout for the QUIC handshake, in milliseconds. Disabled by default.
@@ -131,8 +138,8 @@ pub struct QuicSettings {
     #[serde_as(as = "Option<DurationMilliSeconds>")]
     pub handshake_timeout: Option<Duration>,
 
-    /// The maximum number of newly-created connections that will be queued for the
-    /// application to receive. Not applicable to client-side usage.
+    /// The maximum number of newly-created connections that will be queued for
+    /// the application to receive. Not applicable to client-side usage.
     ///
     /// Defaults to 1024 connections.
     #[serde(default = "QuicSettings::default_listen_backlog")]
@@ -205,9 +212,10 @@ impl QuicSettings {
 
     #[inline]
     fn default_listen_backlog() -> usize {
-        // Given a worst-case 1 minute handshake timeout and up to 4096 concurrent handshakes,
-        // we will dequeue at least 70 connections per second. This means this backlog size
-        // limits the queueing latency to ~15s.
+        // Given a worst-case 1 minute handshake timeout and up to 4096 concurrent
+        // handshakes, we will dequeue at least 70 connections per second.
+        // This means this backlog size limits the queueing latency to
+        // ~15s.
         1024
     }
 }

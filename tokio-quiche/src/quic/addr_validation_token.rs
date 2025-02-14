@@ -1,10 +1,12 @@
 use quiche::ConnectionId;
-use ring::{hmac, rand};
-use std::net::SocketAddr;
-use std::{
-    io::{self, Write},
-    net::IpAddr,
+use ring::hmac;
+use ring::rand;
+use std::io::Write;
+use std::io::{
+    self,
 };
+use std::net::IpAddr;
+use std::net::SocketAddr;
 
 use crate::QuicResultExt;
 
@@ -25,7 +27,9 @@ impl Default for AddrValidationTokenManager {
 }
 
 impl AddrValidationTokenManager {
-    pub(super) fn gen(&self, original_dcid: &[u8], client_addr: SocketAddr) -> Vec<u8> {
+    pub(super) fn gen(
+        &self, original_dcid: &[u8], client_addr: SocketAddr,
+    ) -> Vec<u8> {
         let ip_bytes = match client_addr.ip() {
             IpAddr::V4(addr) => addr.octets().to_vec(),
             IpAddr::V6(addr) => addr.octets().to_vec(),
@@ -47,9 +51,7 @@ impl AddrValidationTokenManager {
     }
 
     pub(super) fn validate_and_extract_original_dcid<'t>(
-        &self,
-        token: &'t [u8],
-        client_addr: SocketAddr,
+        &self, token: &'t [u8], client_addr: SocketAddr,
     ) -> io::Result<ConnectionId<'t>> {
         let ip_bytes = match client_addr.ip() {
             IpAddr::V4(addr) => addr.octets().to_vec(),
@@ -101,10 +103,9 @@ mod tests {
 
         assert_tag_generated(&token);
 
-        assert_eq!(
-            token[HMAC_TAG_LEN..HMAC_TAG_LEN + 16],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
-        );
+        assert_eq!(token[HMAC_TAG_LEN..HMAC_TAG_LEN + 16], [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+        ]);
 
         assert_eq!(&token[HMAC_TAG_LEN + 16..], b"bar");
     }
@@ -150,7 +151,10 @@ mod tests {
                 .is_err());
 
             assert!(manager
-                .validate_and_extract_original_dcid(&[1u8; HMAC_TAG_LEN + 1], *addr)
+                .validate_and_extract_original_dcid(
+                    &[1u8; HMAC_TAG_LEN + 1],
+                    *addr
+                )
                 .is_err());
         }
     }
@@ -162,13 +166,19 @@ mod tests {
         let token = manager.gen(b"foo", "127.0.0.1:1337".parse().unwrap());
 
         assert!(manager
-            .validate_and_extract_original_dcid(&token, "127.0.0.2:1337".parse().unwrap())
+            .validate_and_extract_original_dcid(
+                &token,
+                "127.0.0.2:1337".parse().unwrap()
+            )
             .is_err());
 
         let token = manager.gen(b"barbaz", "[::1]:1338".parse().unwrap());
 
         assert!(manager
-            .validate_and_extract_original_dcid(&token, "[::2]:1338".parse().unwrap())
+            .validate_and_extract_original_dcid(
+                &token,
+                "[::2]:1338".parse().unwrap()
+            )
             .is_err());
     }
 

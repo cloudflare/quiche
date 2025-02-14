@@ -4,9 +4,13 @@ use std::time::Instant;
 
 #[cfg(target_os = "linux")]
 mod linux_imports {
-    pub(super) use nix::sys::socket::{sendmsg, ControlMessage, MsgFlags, SockaddrStorage};
+    pub(super) use nix::sys::socket::sendmsg;
+    pub(super) use nix::sys::socket::ControlMessage;
+    pub(super) use nix::sys::socket::MsgFlags;
+    pub(super) use nix::sys::socket::SockaddrStorage;
     pub(super) use smallvec::SmallVec;
-    pub(super) use std::{io::ErrorKind, os::fd::AsRawFd};
+    pub(super) use std::io::ErrorKind;
+    pub(super) use std::os::fd::AsRawFd;
     pub(super) use tokio::io::Interest;
 }
 
@@ -27,9 +31,7 @@ pub(crate) const UDP_MAX_SEGMENT_COUNT: usize = 64;
 ///
 /// not to have last 10 bytes packet.
 pub(crate) fn tune_max_send_size(
-    segment_size: Option<usize>,
-    send_quantum: usize,
-    max_capacity: usize,
+    segment_size: Option<usize>, send_quantum: usize, max_capacity: usize,
 ) -> usize {
     let max_send_buf_size = send_quantum.min(max_capacity);
 
@@ -62,8 +64,9 @@ impl PktInfo {
     fn from_socket_addr(addr: SocketAddr) -> Self {
         match addr {
             SocketAddr::V4(ipv4) => {
-                // This is basically a safe wrapper around `mem::transmute()`. Calling this on the
-                // raw octets will ensure they become a native-endian, kernel-readable u32
+                // This is basically a safe wrapper around `mem::transmute()`.
+                // Calling this on the raw octets will ensure they
+                // become a native-endian, kernel-readable u32
                 let s_addr = u32::from_ne_bytes(ipv4.ip().octets());
 
                 Self::V4(libc::in_pktinfo {
@@ -71,7 +74,7 @@ impl PktInfo {
                     ipi_spec_dst: libc::in_addr { s_addr },
                     ipi_addr: libc::in_addr { s_addr: 0 },
                 })
-            }
+            },
             SocketAddr::V6(ipv6) => Self::V6(libc::in6_pktinfo {
                 ipi6_ifindex: 0,
                 ipi6_addr: libc::in6_addr {
@@ -84,16 +87,12 @@ impl PktInfo {
 
 #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
 pub async fn send_to(
-    socket: &tokio::net::UdpSocket,
-    to: SocketAddr,
-    from: Option<SocketAddr>,
-    send_buf: &[u8],
-    segment_size: usize,
-    num_pkts: usize,
+    socket: &tokio::net::UdpSocket, to: SocketAddr, from: Option<SocketAddr>,
+    send_buf: &[u8], segment_size: usize, num_pkts: usize,
     tx_time: Option<Instant>,
 ) -> io::Result<usize> {
-    // An instant with the value of zero, since [`Instant`] is backed by a version of timespec
-    // this allows to extract raw values from an [`Instant`]
+    // An instant with the value of zero, since [`Instant`] is backed by a version
+    // of timespec this allows to extract raw values from an [`Instant`]
     const INSTANT_ZERO: Instant = unsafe { std::mem::transmute(0u128) };
 
     loop {
@@ -128,12 +127,14 @@ pub async fn send_to(
         // Must use [`try_io`] so tokio can properly clear its readyness flag
         let res = socket.try_io(Interest::WRITABLE, || {
             let fd = socket.as_raw_fd();
-            sendmsg(fd, &iov, &cmsgs, MsgFlags::empty(), Some(&addr)).map_err(Into::into)
+            sendmsg(fd, &iov, &cmsgs, MsgFlags::empty(), Some(&addr))
+                .map_err(Into::into)
         });
 
         match res {
             // Wait for the socket to become writable and try again
-            Err(e) if e.kind() == ErrorKind::WouldBlock => socket.writable().await?,
+            Err(e) if e.kind() == ErrorKind::WouldBlock =>
+                socket.writable().await?,
             res => return res,
         }
     }
@@ -141,12 +142,8 @@ pub async fn send_to(
 
 #[cfg(any(not(target_os = "linux"), feature = "fuzzing"))]
 pub(crate) async fn send_to(
-    socket: &tokio::net::UdpSocket,
-    to: SocketAddr,
-    _from: Option<SocketAddr>,
-    send_buf: &[u8],
-    _segment_size: usize,
-    _num_pkts: usize,
+    socket: &tokio::net::UdpSocket, to: SocketAddr, _from: Option<SocketAddr>,
+    send_buf: &[u8], _segment_size: usize, _num_pkts: usize,
     _tx_time: Option<Instant>,
 ) -> io::Result<usize> {
     socket.send_to(send_buf, to).await
@@ -155,7 +152,8 @@ pub(crate) async fn send_to(
 #[cfg(all(target_os = "linux", test))]
 mod test {
     #[test]
-    /// If this test begins to fail, it means the implementation of [`Instant`] has changed in the std library.
+    /// If this test begins to fail, it means the implementation of [`Instant`]
+    /// has changed in the std library.
     fn instant_zero() {
         use std::time::Instant;
 
@@ -173,8 +171,8 @@ mod test {
         let now_timespec: Timespec = unsafe { std::mem::transmute(now) };
 
         let ref_elapsed = now.duration_since(INSTANT_ZERO).as_nanos();
-        let raw_elapsed =
-            now_timespec.tv_sec as u128 * NANOS_PER_SEC + now_timespec.tv_nsec as u128;
+        let raw_elapsed = now_timespec.tv_sec as u128 * NANOS_PER_SEC +
+            now_timespec.tv_nsec as u128;
 
         assert_eq!(ref_elapsed, raw_elapsed);
     }

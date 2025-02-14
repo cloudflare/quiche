@@ -1,18 +1,30 @@
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 
-use boring::ssl::{BoxSelectCertFinish, ClientHello, SslContextBuilder, SslFiletype, SslMethod};
-use h3i::actions::h3::{send_headers_frame, Action, WaitType};
-use h3i::quiche::{self, ConnectionError};
-use tokio::{net::UdpSocket, time::timeout};
+use boring::ssl::BoxSelectCertFinish;
+use boring::ssl::ClientHello;
+use boring::ssl::SslContextBuilder;
+use boring::ssl::SslFiletype;
+use boring::ssl::SslMethod;
+use h3i::actions::h3::send_headers_frame;
+use h3i::actions::h3::Action;
+use h3i::actions::h3::WaitType;
+use h3i::quiche::ConnectionError;
+use h3i::quiche::{
+    self,
+};
+use tokio::net::UdpSocket;
+use tokio::time::timeout;
 use tokio_quiche::http3::driver::H3ConnectionError;
-use tokio_quiche::{quic::ConnectionHook, settings::TlsCertificatePaths};
+use tokio_quiche::quic::ConnectionHook;
+use tokio_quiche::settings::TlsCertificatePaths;
 use url::Url;
 
-use crate::fixtures::{h3i_fixtures::*, *};
+use crate::fixtures::h3i_fixtures::*;
+use crate::fixtures::*;
 
 // TODO(erittenhouse): figure out a way to avoid all of this duplication
 #[tokio::test]
@@ -26,19 +38,21 @@ async fn test_handshake_duration_ioworker() {
 
     impl ConnectionHook for TestAsyncCallbackConnectionHook {
         fn create_custom_ssl_context_builder(
-            &self,
-            _settings: TlsCertificatePaths<'_>,
+            &self, _settings: TlsCertificatePaths<'_>,
         ) -> Option<SslContextBuilder> {
-            let mut ssl_ctx_builder = SslContextBuilder::new(SslMethod::tls()).ok()?;
+            let mut ssl_ctx_builder =
+                SslContextBuilder::new(SslMethod::tls()).ok()?;
             let cloned_bool = Arc::clone(&self.was_called);
 
             ssl_ctx_builder.set_async_select_certificate_callback(move |_| {
                 cloned_bool.store(true, Ordering::SeqCst);
 
                 Ok(Box::pin(async {
-                    // Pause during the handshake. Give some extra time to (hopefully) avoid flakiness.
+                    // Pause during the handshake. Give some extra time to
+                    // (hopefully) avoid flakiness.
                     tokio::time::sleep(HANDSHAKE_TIMEOUT.mul_f32(1.5)).await;
-                    Ok(Box::new(|_: ClientHello<'_>| Ok(())) as BoxSelectCertFinish)
+                    Ok(Box::new(|_: ClientHello<'_>| Ok(()))
+                        as BoxSelectCertFinish)
                 }))
             });
 
@@ -60,8 +74,9 @@ async fn test_handshake_duration_ioworker() {
 
     let url = start_server_with_settings(
         QuicSettings {
-            // Since this is longer than the handshake timeout, if the connection fails we
-            // know that it's from the handshake timing out rather than Quiche's idle timeout.
+            // Since this is longer than the handshake timeout, if the connection
+            // fails we know that it's from the handshake timing out
+            // rather than Quiche's idle timeout.
             max_idle_timeout: Some(Duration::from_secs(5)),
             handshake_timeout: Some(HANDSHAKE_TIMEOUT),
             ..Default::default()
@@ -74,14 +89,16 @@ async fn test_handshake_duration_ioworker() {
         handle_connection,
     );
 
-    // TODO: migrate to h3i client to assert a CONNECTION_CLOSE was received. This will have to
-    // be the sync version so as to isolate the tokio-quiche IO loop.
+    // TODO: migrate to h3i client to assert a CONNECTION_CLOSE was received. This
+    // will have to be the sync version so as to isolate the tokio-quiche IO
+    // loop.
     //
-    // Unfortunately we can't PCAP this test since encryption keys don't seem to get dumped.
+    // Unfortunately we can't PCAP this test since encryption keys don't seem to
+    // get dumped.
     //
-    // build() spawns the InboundPacketRouter and sends the Initial, which will kick the
-    // handshake off on the server-side. If all goes well, the server will close the connection
-    // and the router will time the connection out.
+    // build() spawns the InboundPacketRouter and sends the Initial, which will
+    // kick the handshake off on the server-side. If all goes well, the server
+    // will close the connection and the router will time the connection out.
     let url = format!("{url}/1");
     let client_res = h3i_fixtures::request(&url, 1).await;
 
@@ -169,22 +186,20 @@ async fn test_handshake_timeout_with_one_client_flight() {
     )
     .await;
 
-    assert_eq!(
-        err.unwrap(),
-        ConnectionError {
-            is_app: false,
-            error_code: quiche::WireErrorCode::ApplicationError as u64,
-            reason: vec![]
-        }
-    );
+    assert_eq!(err.unwrap(), ConnectionError {
+        is_app: false,
+        error_code: quiche::WireErrorCode::ApplicationError as u64,
+        reason: vec![]
+    });
 }
 
 #[tokio::test]
 async fn test_post_accept_timeout() {
     const POST_ACCEPT_TIMEOUT: Duration = Duration::from_secs(1);
 
-    // Absence of async callbacks should render the handshake portion of the post-accept
-    // timeout (see test_handshake_duration_ioworker) calculation negligble.
+    // Absence of async callbacks should render the handshake portion of the
+    // post-accept timeout (see test_handshake_duration_ioworker) calculation
+    // negligble.
     let hook = TestConnectionHook::new();
 
     // Track if we've seen any requests over this connection.
@@ -193,8 +208,9 @@ async fn test_post_accept_timeout() {
 
     let url = start_server_with_settings(
         QuicSettings {
-            // Since this is longer than the H3Driver's post-accept timeout, if the connection fails we
-            // know that it's from the post-accept timeout rather than Quiche's idle timeout.
+            // Since this is longer than the H3Driver's post-accept timeout, if
+            // the connection fails we know that it's from the
+            // post-accept timeout rather than Quiche's idle timeout.
             max_idle_timeout: Some(Duration::from_secs(5)),
             ..Default::default()
         },
@@ -206,9 +222,10 @@ async fn test_post_accept_timeout() {
         move |mut h3_conn| {
             let counter = Arc::clone(&clone);
             async move {
-                let err = serve_connection_details(&mut h3_conn.h3_controller, counter)
-                    .await
-                    .expect_err("serve_connection didn't return an error");
+                let err =
+                    serve_connection_details(&mut h3_conn.h3_controller, counter)
+                        .await
+                        .expect_err("serve_connection didn't return an error");
                 let h3_err: &H3ConnectionError = err
                     .downcast_ref()
                     .expect("Didn't receive an H3ConnectionError error");
@@ -224,8 +241,9 @@ async fn test_post_accept_timeout() {
 
     let summary = summarize_connection(h3i_config, actions).await;
 
-    // Since the server's idle timeout is longer than the H3Driver's post-accept timeout,
-    // the connection should have closed without any requests being received.
+    // Since the server's idle timeout is longer than the H3Driver's post-accept
+    // timeout, the connection should have closed without any requests being
+    // received.
     assert_eq!(request_counter.load(Ordering::SeqCst), 0);
 
     let err = summary
@@ -240,8 +258,9 @@ async fn test_post_accept_timeout() {
 async fn test_post_accept_timeout_is_reset() {
     const POST_ACCEPT_TIMEOUT: Duration = Duration::from_secs(1);
 
-    // Absence of async callbacks should render the handshake portion of the post-accept
-    // timeout (see test_handshake_duration_ioworker) calculation negligble.
+    // Absence of async callbacks should render the handshake portion of the
+    // post-accept timeout (see test_handshake_duration_ioworker) calculation
+    // negligble.
     let hook = TestConnectionHook::new();
 
     let request_counter = Arc::new(AtomicUsize::new(0));
@@ -249,8 +268,9 @@ async fn test_post_accept_timeout_is_reset() {
 
     let url = start_server_with_settings(
         QuicSettings {
-            // Since this is longer than the H3Driver's post-accept timeout, if the connection fails we
-            // know that it's from the post-accept timeout rather than Quiche's idle timeout.
+            // Since this is longer than the H3Driver's post-accept timeout, if
+            // the connection fails we know that it's from the
+            // post-accept timeout rather than Quiche's idle timeout.
             max_idle_timeout: Some(Duration::from_secs(5)),
             ..Default::default()
         },
@@ -271,14 +291,16 @@ async fn test_post_accept_timeout_is_reset() {
 
     let h3i_config = h3i_config(&url);
     let actions = vec![
-        // Just to ensure that normal waits don't accidentally trigger the post-accept timeout
+        // Just to ensure that normal waits don't accidentally trigger the
+        // post-accept timeout
         Action::Wait {
             wait_type: WaitType::WaitDuration(POST_ACCEPT_TIMEOUT.mul_f32(0.50)),
         },
         send_headers_frame(0, true, default_headers()),
         Action::FlushPackets,
-        // Post-accept timeout should be cancelled, so we can wait an arbitrary period (less than the
-        // idle timeout of course) and the post-accept timeout shouldn't fire
+        // Post-accept timeout should be cancelled, so we can wait an arbitrary
+        // period (less than the idle timeout of course) and the
+        // post-accept timeout shouldn't fire
         Action::Wait {
             wait_type: WaitType::WaitDuration(POST_ACCEPT_TIMEOUT.mul_f32(1.5)),
         },

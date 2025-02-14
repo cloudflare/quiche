@@ -4,7 +4,9 @@ use std::fs::File;
 use std::time::Duration;
 
 use crate::result::QuicResult;
-use crate::settings::{CertificateKind, ConnectionParams, TlsCertificatePaths};
+use crate::settings::CertificateKind;
+use crate::settings::ConnectionParams;
+use crate::settings::TlsCertificatePaths;
 use crate::socket::SocketCapabilities;
 
 /// Internal representation of the combined configuration for a QUIC connection.
@@ -30,8 +32,7 @@ impl AsMut<quiche::Config> for Config {
 
 impl Config {
     pub(crate) fn new(
-        params: &ConnectionParams,
-        socket_capabilities: SocketCapabilities,
+        params: &ConnectionParams, socket_capabilities: SocketCapabilities,
     ) -> QuicResult<Self> {
         let quic_settings = &params.settings;
         let keylog_path = match &quic_settings.keylog_file {
@@ -57,7 +58,8 @@ impl Config {
 
         Ok(Config {
             quiche_config: make_quiche_config(params, keylog_file.is_some())?,
-            disable_client_ip_validation: quic_settings.disable_client_ip_validation,
+            disable_client_ip_validation: quic_settings
+                .disable_client_ip_validation,
             qlog_dir: quic_settings.qlog_dir.clone(),
             has_gso,
             // Only enable pacing if it is explicitly enabled in the configuration
@@ -75,8 +77,7 @@ impl Config {
 }
 
 fn make_quiche_config(
-    params: &ConnectionParams,
-    should_log_keys: bool,
+    params: &ConnectionParams, should_log_keys: bool,
 ) -> QuicResult<quiche::Config> {
     let ssl_ctx_builder = params
         .hooks
@@ -86,13 +87,17 @@ fn make_quiche_config(
         .and_then(|(hook, tls)| hook.create_custom_ssl_context_builder(tls));
 
     let mut config = if let Some(builder) = ssl_ctx_builder {
-        quiche::Config::with_boring_ssl_ctx_builder(quiche::PROTOCOL_VERSION, builder)?
+        quiche::Config::with_boring_ssl_ctx_builder(
+            quiche::PROTOCOL_VERSION,
+            builder,
+        )?
     } else {
         quiche_config_with_tls(params.tls_cert)?
     };
 
     let quic_settings = &params.settings;
-    let alpns: Vec<&[u8]> = quic_settings.alpn.iter().map(Vec::as_slice).collect();
+    let alpns: Vec<&[u8]> =
+        quic_settings.alpn.iter().map(Vec::as_slice).collect();
     config.set_application_protos(&alpns).unwrap();
 
     if let Some(timeout) = quic_settings.max_idle_timeout {
@@ -112,10 +117,15 @@ fn make_quiche_config(
     config.set_max_recv_udp_payload_size(quic_settings.max_recv_udp_payload_size);
     config.set_max_send_udp_payload_size(quic_settings.max_send_udp_payload_size);
     config.set_initial_max_data(quic_settings.initial_max_data);
-    config.set_initial_max_stream_data_bidi_local(quic_settings.initial_max_stream_data_bidi_local);
-    config
-        .set_initial_max_stream_data_bidi_remote(quic_settings.initial_max_stream_data_bidi_remote);
-    config.set_initial_max_stream_data_uni(quic_settings.initial_max_stream_data_uni);
+    config.set_initial_max_stream_data_bidi_local(
+        quic_settings.initial_max_stream_data_bidi_local,
+    );
+    config.set_initial_max_stream_data_bidi_remote(
+        quic_settings.initial_max_stream_data_bidi_remote,
+    );
+    config.set_initial_max_stream_data_uni(
+        quic_settings.initial_max_stream_data_uni,
+    );
     config.set_initial_max_streams_bidi(quic_settings.initial_max_streams_bidi);
     config.set_initial_max_streams_uni(quic_settings.initial_max_streams_uni);
     config.set_disable_active_migration(quic_settings.disable_active_migration);
@@ -130,7 +140,9 @@ fn make_quiche_config(
     Ok(config)
 }
 
-fn quiche_config_with_tls(tls_cert: Option<TlsCertificatePaths>) -> QuicResult<quiche::Config> {
+fn quiche_config_with_tls(
+    tls_cert: Option<TlsCertificatePaths>,
+) -> QuicResult<quiche::Config> {
     let Some(tls) = tls_cert else {
         return Ok(quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap());
     };
@@ -140,7 +152,7 @@ fn quiche_config_with_tls(tls_cert: Option<TlsCertificatePaths>) -> QuicResult<q
         CertificateKind::RawPublicKey => {
             // TODO: don't compile this enum variant unless rpk feature is enabled
             panic!("Can't use RPK when compiled without rpk feature");
-        }
+        },
         #[cfg(feature = "rpk")]
         CertificateKind::RawPublicKey => {
             let mut ssl_ctx_builder = boring::ssl::SslContextBuilder::new_rpk()?;
@@ -148,19 +160,21 @@ fn quiche_config_with_tls(tls_cert: Option<TlsCertificatePaths>) -> QuicResult<q
             ssl_ctx_builder.set_rpk_certificate(&raw_public_key)?;
 
             let raw_private_key = std::fs::read(tls.private_key)?;
-            let pkey = boring::pkey::PKey::private_key_from_pem(&raw_private_key)?;
+            let pkey =
+                boring::pkey::PKey::private_key_from_pem(&raw_private_key)?;
             ssl_ctx_builder.set_null_chain_private_key(&pkey)?;
 
             Ok(quiche::Config::with_boring_ssl_ctx_builder(
                 quiche::PROTOCOL_VERSION,
                 ssl_ctx_builder,
             )?)
-        }
+        },
         CertificateKind::X509 => {
-            let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+            let mut config =
+                quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
             config.load_cert_chain_from_pem_file(tls.cert)?;
             config.load_priv_key_from_pem_file(tls.private_key)?;
             Ok(config)
-        }
+        },
     }
 }

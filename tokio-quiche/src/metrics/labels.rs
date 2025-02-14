@@ -1,8 +1,10 @@
 //! Labels for crate metrics.
 
-use serde::{Serialize, Serializer};
+use serde::Serialize;
+use serde::Serializer;
 
-use crate::{quic, BoxError};
+use crate::quic;
+use crate::BoxError;
 
 /// Type of handshake latency that was measured by a metric.
 #[derive(Clone, Eq, Hash, PartialEq, Serialize)]
@@ -11,12 +13,14 @@ pub enum QuicHandshakeStage {
     // The time spent in kernel processing a packet plus the time waiting
     // for the QUIC handler to be polled by tokio worker.
     QueueWaiting,
-    // Time spent on protocol processing of a single handshake packet (not including
-    // queue waiting and scheduling delay of I/O worker to write data out)
+    // Time spent on protocol processing of a single handshake packet (not
+    // including queue waiting and scheduling delay of I/O worker to write
+    // data out)
     HandshakeProtocol,
-    // Time between receiving a handshake in the kernel and flushing its response to
-    // the socket. Ideally we can ask kernel to report TX stamp, but right now tx
-    // latency is not a major source of problem, so we omit that.
+    // Time between receiving a handshake in the kernel and flushing its
+    // response to the socket. Ideally we can ask kernel to report TX stamp,
+    // but right now tx latency is not a major source of problem, so we omit
+    // that.
     HandshakeResponse,
 }
 

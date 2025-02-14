@@ -1,30 +1,46 @@
 pub(crate) mod acceptor;
 pub(crate) mod connector;
 
-use super::connection::{
-    ConnectionMap, HandshakeInfo, Incoming, InitialQuicConnection, QuicConnectionParams,
-};
+use super::connection::ConnectionMap;
+use super::connection::HandshakeInfo;
+use super::connection::Incoming;
+use super::connection::InitialQuicConnection;
+use super::connection::QuicConnectionParams;
 use super::io::worker::WriterConfig;
 use super::QuicheConnection;
-use crate::buf_factory::{BufFactory, PooledBuf};
-use crate::metrics::{labels, quic_expensive_metrics_ip_reduce, Metrics};
+use crate::buf_factory::BufFactory;
+use crate::buf_factory::PooledBuf;
+use crate::metrics::labels;
+use crate::metrics::quic_expensive_metrics_ip_reduce;
+use crate::metrics::Metrics;
 use crate::settings::Config;
 
-use datagram_socket::{DatagramSocketRecv, DatagramSocketSend};
+use datagram_socket::DatagramSocketRecv;
+use datagram_socket::DatagramSocketSend;
 use foundations::telemetry::log;
 #[cfg(target_os = "linux")]
-use foundations::telemetry::metrics::{Counter, TimeHistogram};
+use foundations::telemetry::metrics::Counter;
 #[cfg(target_os = "linux")]
-use libc::{sockaddr_in, sockaddr_in6};
-use quiche::{ConnectionId, Header, MAX_CONN_ID_LEN};
+use foundations::telemetry::metrics::TimeHistogram;
+#[cfg(target_os = "linux")]
+use libc::sockaddr_in;
+#[cfg(target_os = "linux")]
+use libc::sockaddr_in6;
+use quiche::ConnectionId;
+use quiche::Header;
+use quiche::MAX_CONN_ID_LEN;
 use std::default::Default;
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{ready, Context, Poll};
-use std::time::{Duration, Instant, SystemTime};
+use std::task::ready;
+use std::task::Context;
+use std::task::Poll;
+use std::time::Duration;
+use std::time::Instant;
+use std::time::SystemTime;
 use task_killswitch::spawn_with_killswitch;
 use tokio::sync::mpsc;
 
@@ -41,7 +57,9 @@ mod listener_stage_timer {
     }
 
     impl ListenerStageTimer {
-        pub(super) fn new(start: Instant, time_hist: TimeHistogram) -> ListenerStageTimer {
+        pub(super) fn new(
+            start: Instant, time_hist: TimeHistogram,
+        ) -> ListenerStageTimer {
             ListenerStageTimer { start, time_hist }
         }
     }
@@ -59,14 +77,15 @@ struct PollRecvData {
     bytes: usize,
     // The packet's source, e.g., the peer's address
     src_addr: SocketAddr,
-    // The packet's original destination. If the original destination is different from the local
-    // listening address, this will be `None`.
+    // The packet's original destination. If the original destination is
+    // different from the local listening address, this will be `None`.
     dst_addr_override: Option<SocketAddr>,
     rx_time: Option<SystemTime>,
     gro: Option<u16>,
 }
 
-/// A message to the listener notifiying a mapping for a connection should be removed.
+/// A message to the listener notifiying a mapping for a connection should be
+/// removed.
 pub enum ConnectionMapCommand {
     UnmapCid(ConnectionId<'static>),
     RemoveScid(ConnectionId<'static>),
@@ -125,12 +144,8 @@ where
     I: InitialPacketHandler,
 {
     pub(crate) fn new(
-        config: Config,
-        socket_tx: Arc<Tx>,
-        socket_rx: Rx,
-        local_addr: SocketAddr,
-        incoming_packet_handler: I,
-        metrics: M,
+        config: Config, socket_tx: Arc<Tx>, socket_rx: Rx,
+        local_addr: SocketAddr, incoming_packet_handler: I, metrics: M,
     ) -> (Self, ConnStream<Tx, M>) {
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         let (accept_sink, accept_stream) = mpsc::channel(config.listen_backlog);
@@ -184,12 +199,12 @@ where
             }
         }
 
-        let hdr = Header::from_slice(&mut incoming.buf, MAX_CONN_ID_LEN).map_err(|e| match e {
-            quiche::Error::BufferTooShort => {
-                labels::QuicInvalidInitialPacketError::SmallPacket.into()
-            }
-            e => io::Error::other(e),
-        })?;
+        let hdr = Header::from_slice(&mut incoming.buf, MAX_CONN_ID_LEN)
+            .map_err(|e| match e {
+                quiche::Error::BufferTooShort =>
+                    labels::QuicInvalidInitialPacketError::SmallPacket.into(),
+                e => io::Error::other(e),
+            })?;
 
         if let Some(ev_sender) = self.conns.get(&hdr.dcid) {
             let _ = ev_sender.try_send(incoming);
@@ -199,8 +214,9 @@ where
         #[cfg(feature = "perf-quic-listener-metrics")]
         let _timer = listener_stage_timer::ListenerStageTimer::new(
             start,
-            self.metrics
-                .handshake_time_seconds(labels::QuicHandshakeStage::HandshakeProtocol),
+            self.metrics.handshake_time_seconds(
+                labels::QuicHandshakeStage::HandshakeProtocol,
+            ),
         );
 
         if self.shutdown_tx.is_none() {
@@ -213,9 +229,11 @@ where
         #[cfg(feature = "perf-quic-listener-metrics")]
         let init_rx_time = incoming.rx_time;
 
-        let new_connection =
-            self.incoming_packet_handler
-                .handle_initials(incoming, hdr, self.config.as_mut())?;
+        let new_connection = self.incoming_packet_handler.handle_initials(
+            incoming,
+            hdr,
+            self.config.as_mut(),
+        )?;
 
         match new_connection {
             Some(new_connection) => self.spawn_new_connection(
@@ -231,11 +249,11 @@ where
 
     /// Creates a new [`QuicConnection`] and spawns an associated io worker.
     fn spawn_new_connection(
-        &mut self,
-        new_connection: NewConnection,
-        local_addr: SocketAddr,
+        &mut self, new_connection: NewConnection, local_addr: SocketAddr,
         peer_addr: SocketAddr,
-        #[cfg(feature = "perf-quic-listener-metrics")] init_rx_time: Option<SystemTime>,
+        #[cfg(feature = "perf-quic-listener-metrics")] init_rx_time: Option<
+            SystemTime,
+        >,
     ) -> io::Result<()> {
         let NewConnection {
             conn,
@@ -250,7 +268,9 @@ where
         };
         let Ok(send_permit) = self.accept_sink.try_reserve() else {
             // drop the connection if the backlog is full. the client will retry.
-            return Err(labels::QuicInvalidInitialPacketError::AcceptQueueOverflow.into());
+            return Err(
+                labels::QuicInvalidInitialPacketError::AcceptQueueOverflow.into(),
+            );
         };
 
         let scid = conn.source_id().into_owned();
@@ -266,8 +286,10 @@ where
             },
         };
 
-        let handshake_info =
-            HandshakeInfo::new(handshake_start_time, self.config.handshake_timeout);
+        let handshake_info = HandshakeInfo::new(
+            handshake_start_time,
+            self.config.handshake_timeout,
+        );
 
         let conn = InitialQuicConnection::new(QuicConnectionParams {
             writer_cfg,
@@ -286,7 +308,9 @@ where
         });
 
         conn.audit_log_stats
-            .set_transport_handshake_start(instant_to_system(handshake_start_time));
+            .set_transport_handshake_start(instant_to_system(
+                handshake_start_time,
+            ));
 
         self.conns.insert(scid, &conn);
 
@@ -301,7 +325,9 @@ where
 
         self.metrics.accepted_initial_packet_count().inc();
         if self.config.enable_expensive_packet_count_metrics {
-            if let Some(peer_ip) = quic_expensive_metrics_ip_reduce(conn.peer_addr().ip()) {
+            if let Some(peer_ip) =
+                quic_expensive_metrics_ip_reduce(conn.peer_addr().ip())
+            {
                 self.metrics
                     .expensive_accepted_initial_packet_count(peer_ip)
                     .inc();
@@ -322,7 +348,9 @@ where
 {
     /// [`poll_recv_from`] should be used if the underlying system or socket
     /// does not support rx_time nor GRO.
-    fn poll_recv_from(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<PollRecvData>> {
+    fn poll_recv_from(
+        &mut self, cx: &mut Context<'_>,
+    ) -> Poll<io::Result<PollRecvData>> {
         let mut buf = tokio::io::ReadBuf::new(&mut self.current_buf);
         let addr = ready!(self.socket_rx.poll_recv_from(cx, &mut buf))?;
         Poll::Ready(Ok(PollRecvData {
@@ -334,7 +362,9 @@ where
         }))
     }
 
-    fn poll_recv_and_rx_time(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<PollRecvData>> {
+    fn poll_recv_and_rx_time(
+        &mut self, cx: &mut Context<'_>,
+    ) -> Poll<io::Result<PollRecvData>> {
         #[cfg(not(target_os = "linux"))]
         {
             self.poll_recv_from(cx)
@@ -344,7 +374,8 @@ where
         {
             use nix::errno::Errno;
             use nix::sys::socket::*;
-            use std::net::{SocketAddrV4, SocketAddrV6};
+            use std::net::SocketAddrV4;
+            use std::net::SocketAddrV6;
             use std::os::fd::AsRawFd;
             use tokio::io::Interest;
 
@@ -376,15 +407,17 @@ where
                         };
 
                         let peer_addr = match address.family() {
-                            Some(AddressFamily::Inet) => {
-                                SocketAddrV4::from(*address.as_sockaddr_in().unwrap()).into()
-                            }
-                            Some(AddressFamily::Inet6) => {
-                                SocketAddrV6::from(*address.as_sockaddr_in6().unwrap()).into()
-                            }
+                            Some(AddressFamily::Inet) => SocketAddrV4::from(
+                                *address.as_sockaddr_in().unwrap(),
+                            )
+                            .into(),
+                            Some(AddressFamily::Inet6) => SocketAddrV6::from(
+                                *address.as_sockaddr_in6().unwrap(),
+                            )
+                            .into(),
                             _ => {
                                 return Poll::Ready(Err(Errno::EINVAL.into()));
-                            }
+                            },
                         };
 
                         let mut rx_time = None;
@@ -395,60 +428,82 @@ where
                             match cmsg {
                                 ControlMessageOwned::RxqOvfl(c) => {
                                     if c != self.udp_drop_count {
-                                        self.metrics_udp_drop_count
-                                            .inc_by((c - self.udp_drop_count) as u64);
+                                        self.metrics_udp_drop_count.inc_by(
+                                            (c - self.udp_drop_count) as u64,
+                                        );
                                         self.udp_drop_count = c;
                                     }
-                                }
+                                },
                                 ControlMessageOwned::ScmTimestampns(val) => {
-                                    rx_time = SystemTime::UNIX_EPOCH.checked_add(val.into());
+                                    rx_time = SystemTime::UNIX_EPOCH
+                                        .checked_add(val.into());
                                     if let Some(delta) =
-                                        rx_time.and_then(|rx_time| rx_time.elapsed().ok())
+                                        rx_time.and_then(|rx_time| {
+                                            rx_time.elapsed().ok()
+                                        })
                                     {
                                         self.metrics_handshake_time_seconds
                                             .observe(delta.as_nanos() as u64);
                                     }
-                                }
-                                ControlMessageOwned::UdpGroSegments(val) => gro = Some(val),
+                                },
+                                ControlMessageOwned::UdpGroSegments(val) =>
+                                    gro = Some(val),
                                 ControlMessageOwned::Ipv4OrigDstAddr(val) => {
-                                    let source_addr =
-                                        std::net::Ipv4Addr::from(u32::to_be(val.sin_addr.s_addr));
+                                    let source_addr = std::net::Ipv4Addr::from(
+                                        u32::to_be(val.sin_addr.s_addr),
+                                    );
                                     let source_port = u16::to_be(val.sin_port);
 
                                     let parsed_addr =
-                                        SocketAddr::V4(SocketAddrV4::new(source_addr, source_port));
+                                        SocketAddr::V4(SocketAddrV4::new(
+                                            source_addr,
+                                            source_port,
+                                        ));
 
-                                    dst_addr_override =
-                                        resolve_dst_addr(&self.local_addr, &parsed_addr);
-                                }
+                                    dst_addr_override = resolve_dst_addr(
+                                        &self.local_addr,
+                                        &parsed_addr,
+                                    );
+                                },
                                 ControlMessageOwned::Ipv6OrigDstAddr(val) => {
-                                    // Don't have to flip IPv6 bytes since it's a byte array, not a
-                                    // series of bytes parsed as a u32 as in the IPv4 case
-                                    let source_addr =
-                                        std::net::Ipv6Addr::from(val.sin6_addr.s6_addr);
+                                    // Don't have to flip IPv6 bytes since it's a
+                                    // byte array, not a
+                                    // series of bytes parsed as a u32 as in the
+                                    // IPv4 case
+                                    let source_addr = std::net::Ipv6Addr::from(
+                                        val.sin6_addr.s6_addr,
+                                    );
                                     let source_port = u16::to_be(val.sin6_port);
-                                    let source_flowinfo = u32::to_be(val.sin6_flowinfo);
-                                    let source_scope = u32::to_be(val.sin6_scope_id);
+                                    let source_flowinfo =
+                                        u32::to_be(val.sin6_flowinfo);
+                                    let source_scope =
+                                        u32::to_be(val.sin6_scope_id);
 
-                                    let parsed_addr = SocketAddr::V6(SocketAddrV6::new(
-                                        source_addr,
-                                        source_port,
-                                        source_flowinfo,
-                                        source_scope,
-                                    ));
+                                    let parsed_addr =
+                                        SocketAddr::V6(SocketAddrV6::new(
+                                            source_addr,
+                                            source_port,
+                                            source_flowinfo,
+                                            source_scope,
+                                        ));
 
-                                    dst_addr_override =
-                                        resolve_dst_addr(&self.local_addr, &parsed_addr);
-                                }
-                                ControlMessageOwned::Ipv4PacketInfo(_)
-                                | ControlMessageOwned::Ipv6PacketInfo(_) => {
+                                    dst_addr_override = resolve_dst_addr(
+                                        &self.local_addr,
+                                        &parsed_addr,
+                                    );
+                                },
+                                ControlMessageOwned::Ipv4PacketInfo(_) |
+                                ControlMessageOwned::Ipv6PacketInfo(_) => {
                                     // We only want the destination address from
-                                    // IP_RECVORIGDSTADDR, but we'll get these messages because
+                                    // IP_RECVORIGDSTADDR, but we'll get these
+                                    // messages because
                                     // we set IP_PKTINFO on the socket.
-                                }
+                                },
                                 _ => {
-                                    return Poll::Ready(Err(Errno::EINVAL.into()));
-                                }
+                                    return Poll::Ready(
+                                        Err(Errno::EINVAL.into()),
+                                    );
+                                },
                             };
                         }
 
@@ -459,14 +514,17 @@ where
                             rx_time,
                             gro,
                         }));
-                    }
+                    },
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        // NOTE: we manually poll the socket here to register interest in the socket to become
-                        // writable for the given `cx`. Under the hood, tokio's implementation just checks for
-                        // EWOULDBLOCK and if socket is busy registers provided waker to be invoked when the
+                        // NOTE: we manually poll the socket here to register
+                        // interest in the socket to become
+                        // writable for the given `cx`. Under the hood, tokio's
+                        // implementation just checks for
+                        // EWOULDBLOCK and if socket is busy registers provided
+                        // waker to be invoked when the
                         // socket is free and consequently drive the event loop.
                         ready!(udp_socket.poll_recv_ready(cx))?
-                    }
+                    },
                     Err(e) => return Poll::Ready(Err(e)),
                 }
             }
@@ -477,7 +535,8 @@ where
         while let Ok(req) = self.conn_map_cmd_rx.try_recv() {
             match req {
                 ConnectionMapCommand::UnmapCid(cid) => self.conns.unmap_cid(&cid),
-                ConnectionMapCommand::RemoveScid(scid) => self.conns.remove(&scid),
+                ConnectionMapCommand::RemoveScid(scid) =>
+                    self.conns.remove(&scid),
             }
         }
     }
@@ -507,15 +566,18 @@ fn instant_to_system(ts: Instant) -> SystemTime {
     system_now + delta
 }
 
-/// Determine if we should store the destination address for a packet, based on an address parsed
-/// from a [`ControlMessageOwned`].
+/// Determine if we should store the destination address for a packet, based on
+/// an address parsed from a [`ControlMessageOwned`].
 ///
-/// This is to prevent overriding the destination address if the packet was originally addressed to
-/// `local`, as that would cause us to incorrectly address packets when sending.
+/// This is to prevent overriding the destination address if the packet was
+/// originally addressed to `local`, as that would cause us to incorrectly
+/// address packets when sending.
 ///
 /// Returns the parsed address if it should be stored.
 #[cfg(target_os = "linux")]
-fn resolve_dst_addr(local: &SocketAddr, parsed: &SocketAddr) -> Option<SocketAddr> {
+fn resolve_dst_addr(
+    local: &SocketAddr, parsed: &SocketAddr,
+) -> Option<SocketAddr> {
     if local != parsed {
         return Some(*parsed);
     }
@@ -552,8 +614,10 @@ where
                     rx_time,
                     gro,
                 })) => {
-                    let mut buf =
-                        std::mem::replace(&mut self.current_buf, BufFactory::get_max_buf());
+                    let mut buf = std::mem::replace(
+                        &mut self.current_buf,
+                        BufFactory::get_max_buf(),
+                    );
                     buf.truncate(bytes);
 
                     let send_from = if let Some(dst_addr) = dst_addr_override {
@@ -578,7 +642,8 @@ where
                             .inc();
 
                         if self.config.enable_expensive_packet_count_metrics {
-                            if let Some(peer_ip) = quic_expensive_metrics_ip_reduce(peer_addr.ip())
+                            if let Some(peer_ip) =
+                                quic_expensive_metrics_ip_reduce(peer_addr.ip())
                             {
                                 self.metrics
                                     .expensive_rejected_initial_packet_count(
@@ -589,19 +654,24 @@ where
                             }
                         }
 
-                        // TODO(lblocher): remove logging and pass error to self.accept_sink
-                        // after trial phase to determine verbosity.
-                        if matches!(err_type, labels::QuicInvalidInitialPacketError::Unexpected) {
+                        // TODO(lblocher): remove logging and pass error to
+                        // self.accept_sink after trial
+                        // phase to determine verbosity.
+                        if matches!(
+                            err_type,
+                            labels::QuicInvalidInitialPacketError::Unexpected
+                        ) {
                             log_unexpected_initial_error(&e);
                         }
                     }
-                }
+                },
 
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
 
                 Poll::Pending => {
                     // Check whether any connections are still active
-                    if self.shutdown_tx.is_some() && self.accept_sink.is_closed() {
+                    if self.shutdown_tx.is_some() && self.accept_sink.is_closed()
+                    {
                         self.shutdown_tx = None;
                     }
 
@@ -613,16 +683,19 @@ where
                     self.handle_conn_map_commands();
 
                     return Poll::Pending;
-                }
+                },
             }
         }
     }
 }
 
 /// Categorizes errors that are returned when handling packets which are not
-/// associated with an established connection. The purpose is to suppress logging
-/// of 'expected' errors (e.g. junk data sent to the UDP socket) to prevent DoS.
-fn initial_packet_error_type(e: &io::Error) -> labels::QuicInvalidInitialPacketError {
+/// associated with an established connection. The purpose is to suppress
+/// logging of 'expected' errors (e.g. junk data sent to the UDP socket) to
+/// prevent DoS.
+fn initial_packet_error_type(
+    e: &io::Error,
+) -> labels::QuicInvalidInitialPacketError {
     Some(e)
         .filter(|e| e.kind() == io::ErrorKind::Other)
         .and_then(io::Error::get_ref)
@@ -634,24 +707,28 @@ fn initial_packet_error_type(e: &io::Error) -> labels::QuicInvalidInitialPacketE
 }
 
 // TODO(lblocher): remove after trial phase
-/// Use a token bucket to log QUIC initials `Unexpected` errors, but not too quic(k)ly, so that we
-/// can get an idea of the verbosity and types of errors we see.
+/// Use a token bucket to log QUIC initials `Unexpected` errors, but not too
+/// quic(k)ly, so that we can get an idea of the verbosity and types of errors
+/// we see.
 ///
-/// This token bucket gets additional tokens once per minute, and is allowed to have up to 20
-/// tokens in reserve to burst above its normal rate limits if logging is slower than the maximum
-/// normal rate.
+/// This token bucket gets additional tokens once per minute, and is allowed to
+/// have up to 20 tokens in reserve to burst above its normal rate limits if
+/// logging is slower than the maximum normal rate.
 ///
-/// Some cp4 Kibana investigation shows log rates between 200 lines per minute down to just
-/// 1 line in 24h. Hence, we choose a conservative rate of up to 3 lines per minute to strike
-/// a balance between added log load and useful results. Based on existing metrics, we expect
-/// these types of errors to be very rare.
+/// Some cp4 Kibana investigation shows log rates between 200 lines per minute
+/// down to just 1 line in 24h. Hence, we choose a conservative rate of up to 3
+/// lines per minute to strike a balance between added log load and useful
+/// results. Based on existing metrics, we expect these types of errors to be
+/// very rare.
 ///
-/// The max burst threshold will allow us to potentially burst a bit above if we get a sudden spike
-/// of these logs, but not for too long, and only if we already aren't logging too much.
+/// The max burst threshold will allow us to potentially burst a bit above if we
+/// get a sudden spike of these logs, but not for too long, and only if we
+/// already aren't logging too much.
 fn log_unexpected_initial_error(e: &io::Error) {
     use foundations::telemetry::log;
     use std::cmp::min;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::Ordering;
     use std::sync::Once;
 
     const TOKEN_BUCKET_MAX_BURST: u64 = 20;
@@ -669,10 +746,16 @@ fn log_unexpected_initial_error(e: &io::Error) {
             interval.tick().await;
 
             // Skip update if v == TOKEN_BUCKET_MAX_BURST by returning None
-            let _ = LOG_COUNT.fetch_update(Ordering::AcqRel, Ordering::Relaxed, |v| {
-                (v < TOKEN_BUCKET_MAX_BURST)
-                    .then_some(min(v + TOKENS_PER_PERIOD, TOKEN_BUCKET_MAX_BURST))
-            });
+            let _ = LOG_COUNT.fetch_update(
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+                |v| {
+                    (v < TOKEN_BUCKET_MAX_BURST).then_some(min(
+                        v + TOKENS_PER_PERIOD,
+                        TOKEN_BUCKET_MAX_BURST,
+                    ))
+                },
+            );
         }
     }
     FILLER_INIT.call_once(|| _ = tokio::spawn(bucket_filler()));
@@ -687,11 +770,11 @@ fn log_unexpected_initial_error(e: &io::Error) {
     }
 }
 
-/// An [`InitialPacketHandler`] handles unknown quic initials and processes them;
-/// generally accepting new connections (acting as a server), or establishing a
-/// connection to a server (acting as a client). A [`QuicRouter`] holds an
-/// instance of this trait and routes [`Incoming`] packets to it when it
-/// receives initials.
+/// An [`InitialPacketHandler`] handles unknown quic initials and processes
+/// them; generally accepting new connections (acting as a server), or
+/// establishing a connection to a server (acting as a client). A [`QuicRouter`]
+/// holds an instance of this trait and routes [`Incoming`] packets to it when
+/// it receives initials.
 ///
 /// The handler produces [`quiche::Connection`]s which are then turned into
 /// [`QuicConnection`], IoWorker pair.
@@ -701,9 +784,7 @@ pub trait InitialPacketHandler {
     }
 
     fn handle_initials(
-        &mut self,
-        incoming: Incoming,
-        hdr: Header<'static>,
+        &mut self, incoming: Incoming, hdr: Header<'static>,
         quiche_config: &mut quiche::Config,
     ) -> io::Result<Option<NewConnection>>;
 }
@@ -723,15 +804,20 @@ pub struct NewConnection {
 // TODO: Rewrite tests to be Windows compatible
 #[cfg(all(test, unix))]
 mod tests {
-    use super::acceptor::{ConnectionAcceptor, ConnectionAcceptorConfig};
+    use super::acceptor::ConnectionAcceptor;
+    use super::acceptor::ConnectionAcceptorConfig;
     use super::*;
 
     use crate::http3::settings::Http3Settings;
     use crate::metrics::DefaultMetrics;
     use crate::quic::connection::SimpleConnectionIdGenerator;
-    use crate::settings::{Config, Hooks, QuicSettings, TlsCertificatePaths};
+    use crate::settings::Config;
+    use crate::settings::Hooks;
+    use crate::settings::QuicSettings;
+    use crate::settings::TlsCertificatePaths;
     use crate::socket::SocketCapabilities;
-    use crate::{ConnectionParams, ServerH3Driver};
+    use crate::ConnectionParams;
+    use crate::ServerH3Driver;
 
     use datagram_socket::MAX_DATAGRAM_SIZE;
     use h3i::actions::h3::Action;
@@ -767,7 +853,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_timeout() {
-        // Configure a short idle timeout to speed up connection reclamation as quiche doesn't support time mocking
+        // Configure a short idle timeout to speed up connection reclamation as
+        // quiche doesn't support time mocking
         let quic_settings = QuicSettings {
             max_idle_timeout: Some(Duration::from_millis(1)),
             max_recv_udp_payload_size: MAX_DATAGRAM_SIZE,
@@ -781,8 +868,11 @@ mod tests {
             kind: crate::settings::CertificateKind::X509,
         };
 
-        let params =
-            ConnectionParams::new_server(quic_settings, tls_cert_settings, Hooks::default());
+        let params = ConnectionParams::new_server(
+            quic_settings,
+            tls_cert_settings,
+            Hooks::default(),
+        );
         let config = Config::new(&params, SocketCapabilities::default()).unwrap();
 
         let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -795,7 +885,10 @@ mod tests {
             ConnectionAcceptorConfig {
                 disable_client_ip_validation: config.disable_client_ip_validation,
                 qlog_dir: config.qlog_dir.clone(),
-                keylog_file: config.keylog_file.as_ref().and_then(|f| f.try_clone().ok()),
+                keylog_file: config
+                    .keylog_file
+                    .as_ref()
+                    .and_then(|f| f.try_clone().ok()),
                 #[cfg(target_os = "linux")]
                 with_pktinfo: false,
             },
@@ -831,8 +924,8 @@ mod tests {
         time::advance(Duration::new(30, 0)).await;
         time::resume();
 
-        // NOTE: this is a smoke test - in case of issues `notified()` future will never
-        // resolve hanging the test.
+        // NOTE: this is a smoke test - in case of issues `notified()` future will
+        // never resolve hanging the test.
         drop_check.closed().await;
     }
 }

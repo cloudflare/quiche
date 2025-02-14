@@ -1,9 +1,13 @@
 use quiche::h3;
 use std::future::Future;
 
-use super::{H3Command, H3ConnectionResult, H3Driver, H3Event};
+use super::H3Command;
+use super::H3ConnectionResult;
+use super::H3Driver;
+use super::H3Event;
 use crate::http3::settings::Http3Settings;
-use crate::quic::{HandshakeInfo, QuicheConnection};
+use crate::quic::HandshakeInfo;
+use crate::quic::QuicheConnection;
 
 /// A HEADERS frame received from the [`h3::Connection`], to be processed by
 /// the [DriverHooks].
@@ -34,24 +38,21 @@ pub trait DriverHooks: Sized + Send + 'static {
     /// has been initialized. Used to verify connection settings and set up
     /// post-accept state like timeouts.
     fn conn_established(
-        driver: &mut H3Driver<Self>,
-        qconn: &mut QuicheConnection,
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         handshake_info: &HandshakeInfo,
     ) -> H3ConnectionResult<()>;
 
     /// Processes any received [`h3::Event::Headers`]. There is no default
     /// processing of HEADERS frames in [H3Driver].
     fn headers_received(
-        driver: &mut H3Driver<Self>,
-        qconn: &mut QuicheConnection,
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         headers: InboundHeaders,
     ) -> H3ConnectionResult<()>;
 
     /// Processes any command received from the [H3Controller]. May use
     /// `H3Driver::handle_core_command` to handle regular [`H3Command`]s.
     fn conn_command(
-        driver: &mut H3Driver<Self>,
-        qconn: &mut QuicheConnection,
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         cmd: Self::Command,
     ) -> H3ConnectionResult<()>;
 
@@ -62,12 +63,12 @@ pub trait DriverHooks: Sized + Send + 'static {
         false
     }
 
-    /// Returns a future that will be polled in `ApplicationOverQuic::wait_for_data`,
-    /// along with the other input sources for the [H3Driver]. Note that the future
-    /// will be dropped before it resolves if another input is available first.
+    /// Returns a future that will be polled in
+    /// `ApplicationOverQuic::wait_for_data`, along with the other input
+    /// sources for the [H3Driver]. Note that the future will be dropped
+    /// before it resolves if another input is available first.
     fn wait_for_action(
-        &mut self,
-        qconn: &mut QuicheConnection,
+        &mut self, qconn: &mut QuicheConnection,
     ) -> impl Future<Output = H3ConnectionResult<()>> + Send {
         std::future::pending()
     }

@@ -1,15 +1,19 @@
 use crate::fixtures::*;
 use h3i_fixtures::received_status_code_on_stream;
 
-use foundations::telemetry::{with_test_telemetry, TestTelemetryContext};
+use foundations::telemetry::with_test_telemetry;
+use foundations::telemetry::TestTelemetryContext;
 use futures::StreamExt;
 use futures_util::future::try_join_all;
 use std::time::Duration;
 use tokio::time::timeout;
+use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
 use tokio_quiche::quic::SimpleConnectionIdGenerator;
-use tokio_quiche::settings::{Hooks, TlsCertificatePaths};
-use tokio_quiche::{listen, ConnectionParams, InitialQuicConnection};
+use tokio_quiche::settings::Hooks;
+use tokio_quiche::settings::TlsCertificatePaths;
+use tokio_quiche::ConnectionParams;
+use tokio_quiche::InitialQuicConnection;
 
 pub mod async_callbacks;
 pub mod connection_close;
@@ -110,15 +114,14 @@ async fn quiche_logs_forwarded_server_side(cx: TestTelemetryContext) {
 
     assert_eq!(res_map.len(), 1);
 
-    // Unfortunately, the Foundations `fields` struct is empty for some reason. This is a bit of
-    // a hacky test, but it checks for a string that should come from Quiche's Trace logs
-    assert!(cx
-        .log_records()
-        .iter()
-        .any(
-            |record| (record.message.contains("rx pkt") || record.message.contains("tx pkt"))
-                && record.level.as_str() == "TRACE"
-        ));
+    // Unfortunately, the Foundations `fields` struct is empty for some reason.
+    // This is a bit of a hacky test, but it checks for a string that should
+    // come from Quiche's Trace logs
+    assert!(cx.log_records().iter().any(|record| (record
+        .message
+        .contains("rx pkt") ||
+        record.message.contains("tx pkt")) &&
+        record.level.as_str() == "TRACE"));
 }
 
 #[tokio::test]
@@ -136,7 +139,11 @@ async fn test_ioworker_state_machine_pause() {
         connection_hook: Some(TestConnectionHook::new()),
     };
 
-    let params = ConnectionParams::new_server(QuicSettings::default(), tls_cert_settings, hooks);
+    let params = ConnectionParams::new_server(
+        QuicSettings::default(),
+        tls_cert_settings,
+        hooks,
+    );
     let mut stream = listen(
         vec![socket],
         params,
@@ -148,7 +155,8 @@ async fn test_ioworker_state_machine_pause() {
 
     tokio::spawn(async move {
         loop {
-            let (h3_driver, h3_controller) = ServerH3Driver::new(Http3Settings::default());
+            let (h3_driver, h3_controller) =
+                ServerH3Driver::new(Http3Settings::default());
             let conn = stream.next().await.unwrap().unwrap();
 
             let (quic_connection, worker) =
@@ -156,7 +164,8 @@ async fn test_ioworker_state_machine_pause() {
 
             InitialQuicConnection::resume(worker);
 
-            let h3_over_quic = ServerH3Connection::new(quic_connection, h3_controller);
+            let h3_over_quic =
+                ServerH3Connection::new(quic_connection, h3_controller);
             tokio::spawn(async move {
                 handle_connection(h3_over_quic).await;
             });

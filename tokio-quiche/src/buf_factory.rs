@@ -1,18 +1,21 @@
 //! Pooled buffers for zero-copy packet handling.
 //!
-//! tokio-quiche maintains multiple [`buffer_pool::Pool`] instances for the lifetime of
-//! the program. Buffers from those pools are used for received network packets and HTTP/3
-//! data, which is passed directly to users of the crate. Outbound HTTP/3 data
-//! (like a message body or a datagram) is provided by users in the same format.
+//! tokio-quiche maintains multiple [`buffer_pool::Pool`] instances for the
+//! lifetime of the program. Buffers from those pools are used for received
+//! network packets and HTTP/3 data, which is passed directly to users of the
+//! crate. Outbound HTTP/3 data (like a message body or a datagram) is provided
+//! by users in the same format.
 //!
-//! [`BufFactory`] provides access to the crate's pools to create outbound buffers, but
-//! users can also use their own custom [`buffer_pool::Pool`]s. There are two types of
-//! built-in pools:
-//! - The generic buffer pool with very large buffers, which is used for stream data
-//!   such as HTTP bodies.
+//! [`BufFactory`] provides access to the crate's pools to create outbound
+//! buffers, but users can also use their own custom [`buffer_pool::Pool`]s.
+//! There are two types of built-in pools:
+//! - The generic buffer pool with very large buffers, which is used for stream
+//!   data such as HTTP bodies.
 //! - The datagram pool, which retains buffers the size of a single UDP packet.
 
-use buffer_pool::{ConsumeBuffer, Pool, Pooled};
+use buffer_pool::ConsumeBuffer;
+use buffer_pool::Pool;
+use buffer_pool::Pooled;
 use datagram_socket::MAX_DATAGRAM_SIZE;
 
 const POOL_SHARDS: usize = 8;
@@ -34,7 +37,8 @@ static MEDIUM_POOL: BufPool = BufPool::new(MEDIUM_BUF_SIZE, MEDIUM_BUF_SIZE);
 static BUF_POOL: BufPool = BufPool::new(POOL_SIZE, MAX_POOL_BUF_SIZE);
 
 /// A datagram pool shared for both UDP streams, and incoming QUIC packets.
-static DATAGRAM_POOL: BufPool = BufPool::new(DATAGRAM_POOL_SIZE, MAX_DATAGRAM_SIZE);
+static DATAGRAM_POOL: BufPool =
+    BufPool::new(DATAGRAM_POOL_SIZE, MAX_DATAGRAM_SIZE);
 
 /// A pooled byte buffer to pass stream data around without copying.
 pub type PooledBuf = Pooled<ConsumeBuffer>;
@@ -62,14 +66,14 @@ impl BufFactory {
     /// The maximum size of the buffers in the datagram pool.
     pub const MAX_DGRAM_SIZE: usize = MAX_DATAGRAM_SIZE;
 
-    /// Creates an empty [`PooledBuf`] which is not taken from the pool. When dropped,
-    /// it may be assigned to the generic pool if no longer empty.
+    /// Creates an empty [`PooledBuf`] which is not taken from the pool. When
+    /// dropped, it may be assigned to the generic pool if no longer empty.
     pub fn get_empty_buf() -> PooledBuf {
         BUF_POOL.get_empty()
     }
 
-    /// Creates an empty [`PooledDgram`] which is not taken from the pool. When dropped,
-    /// it may be assigned to the datagram pool if no longer empty.
+    /// Creates an empty [`PooledDgram`] which is not taken from the pool. When
+    /// dropped, it may be assigned to the datagram pool if no longer empty.
     pub fn get_empty_datagram() -> PooledDgram {
         DATAGRAM_POOL.get_empty()
     }
@@ -79,7 +83,8 @@ impl BufFactory {
         BUF_POOL.get_with(|d| d.expand(MAX_POOL_BUF_SIZE))
     }
 
-    /// Fetches a `MAX_DATAGRAM_SIZE` sized [`PooledDgram`] from the datagram pool.
+    /// Fetches a `MAX_DATAGRAM_SIZE` sized [`PooledDgram`] from the datagram
+    /// pool.
     pub fn get_max_datagram() -> PooledDgram {
         DATAGRAM_POOL.get_with(|d| {
             d.expand(MAX_DATAGRAM_SIZE);

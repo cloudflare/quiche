@@ -3,36 +3,53 @@ mod id;
 mod map;
 
 pub use self::error::HandshakeError;
-pub use self::id::{ConnectionIdGenerator, SimpleConnectionIdGenerator};
+pub use self::id::ConnectionIdGenerator;
+pub use self::id::SimpleConnectionIdGenerator;
 pub(crate) use self::map::ConnectionMap;
 
 use boring::ssl::SslRef;
-use datagram_socket::{
-    AsSocketStats, DatagramSocketSend, MaybeConnectedSocket, QuicAuditStats, ShutdownConnection,
-    SocketStats,
-};
+use datagram_socket::AsSocketStats;
+use datagram_socket::DatagramSocketSend;
+use datagram_socket::MaybeConnectedSocket;
+use datagram_socket::QuicAuditStats;
+use datagram_socket::ShutdownConnection;
+use datagram_socket::SocketStats;
 use foundations::telemetry::log;
 use futures::future::BoxFuture;
 use futures::Future;
 use quiche::ConnectionId;
-use ring::rand::{self, SecureRandom};
+use ring::rand::SecureRandom;
+use ring::rand::{
+    self,
+};
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::Poll;
+use std::time::Duration;
+use std::time::Instant;
 use std::time::SystemTime;
-use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio_util::task::AbortOnDropHandle;
 
 use self::error::make_handshake_result;
-use super::io::connection_stage::{Close, ConnectionStageContext, Handshake, RunningApplication};
-use super::io::worker::{Closing, IoWorkerParams, Running, RunningOrClosing, WriteState};
+use super::io::connection_stage::Close;
+use super::io::connection_stage::ConnectionStageContext;
+use super::io::connection_stage::Handshake;
+use super::io::connection_stage::RunningApplication;
+use super::io::worker::Closing;
+use super::io::worker::IoWorkerParams;
+use super::io::worker::Running;
+use super::io::worker::RunningOrClosing;
+use super::io::worker::WriteState;
 use super::QuicheConnection;
 use crate::buf_factory::PooledBuf;
 use crate::metrics::Metrics;
-use crate::quic::io::worker::{IoWorker, WriterConfig, INCOMING_QUEUE_SIZE};
+use crate::quic::io::worker::IoWorker;
+use crate::quic::io::worker::WriterConfig;
+use crate::quic::io::worker::INCOMING_QUEUE_SIZE;
 use crate::quic::router::ConnectionMapCommand;
 use crate::QuicResult;
 
@@ -110,16 +127,17 @@ pub struct Incoming {
 /// a client has been received and (optionally) the client's IP address has been
 /// validated.
 ///
-/// To turn the initial connection into a fully established one, a QUIC handshake
-/// must be performed. Users have multiple options to facilitate this:
-/// - `start` is a simple entrypoint which spawns a task to handle the entire lifetime
-///   of the QUIC connection. The caller can then only communicate with the connection
-///   via their [`ApplicationOverQuic`].
-/// - `handshake` spawns a task for the handshake and awaits its completion. Afterwards,
-///   it pauses the connection and allows the caller to resume it later via an opaque
-///   struct. We spawn a separate task to allow the tokio scheduler free choice in where
-///   to run the handshake.
-/// - `handshake_fut` returns a future to drive the handshake for maximum flexibility.
+/// To turn the initial connection into a fully established one, a QUIC
+/// handshake must be performed. Users have multiple options to facilitate this:
+/// - `start` is a simple entrypoint which spawns a task to handle the entire
+///   lifetime of the QUIC connection. The caller can then only communicate with
+///   the connection via their [`ApplicationOverQuic`].
+/// - `handshake` spawns a task for the handshake and awaits its completion.
+///   Afterwards, it pauses the connection and allows the caller to resume it
+///   later via an opaque struct. We spawn a separate task to allow the tokio
+///   scheduler free choice in where to run the handshake.
+/// - `handshake_fut` returns a future to drive the handshake for maximum
+///   flexibility.
 #[must_use = "call InitialQuicConnection::start to establish the connection"]
 pub struct InitialQuicConnection<Tx, M>
 where
@@ -143,7 +161,8 @@ where
 {
     #[inline]
     pub(crate) fn new(params: QuicConnectionParams<Tx, M>) -> Self {
-        let (incoming_ev_sender, incoming_ev_receiver) = mpsc::channel(INCOMING_QUEUE_SIZE);
+        let (incoming_ev_sender, incoming_ev_receiver) =
+            mpsc::channel(INCOMING_QUEUE_SIZE);
         let audit_log_stats = Arc::new(QuicAuditStats::new(params.scid.to_vec()));
 
         let stats = Arc::new(Mutex::new(QuicConnectionStats::from_conn(
@@ -191,8 +210,8 @@ where
     ///
     /// # Note
     /// Initially, these stats represent the state when the [quiche::Connection]
-    /// was created. They are updated when the connection is closed, so this getter
-    /// exists primarily to grab a handle early on.
+    /// was created. They are updated when the connection is closed, so this
+    /// getter exists primarily to grab a handle early on.
     #[inline]
     pub fn stats(&self) -> &QuicConnectionStatsShared {
         &self.stats
@@ -200,13 +219,12 @@ where
 
     /// Creates a future to drive the connection's handshake.
     ///
-    /// This is a lower-level alternative to the `handshake` function which gives the
-    /// caller more control over execution of the future. See `handshake` for details on
-    /// the return values.
+    /// This is a lower-level alternative to the `handshake` function which
+    /// gives the caller more control over execution of the future. See
+    /// `handshake` for details on the return values.
     #[allow(clippy::type_complexity)]
     pub fn handshake_fut<A: ApplicationOverQuic>(
-        self,
-        app: A,
+        self, app: A,
     ) -> (
         QuicConnection,
         BoxFuture<'static, io::Result<Running<Arc<Tx>, M, A>>>,
@@ -243,7 +261,8 @@ where
 
         let handshake_fut = async move {
             let qconn = self.params.quiche_conn;
-            let handshake_done = IoWorker::new(params, conn_stage).run(qconn, context).await;
+            let handshake_done =
+                IoWorker::new(params, conn_stage).run(qconn, context).await;
 
             match handshake_done {
                 RunningOrClosing::Running(r) => Ok(r),
@@ -258,32 +277,36 @@ where
                         .close(&mut qconn, &mut context)
                         .await;
                     hs_result
-                }
+                },
             }
         };
 
         (conn, Box::pin(handshake_fut))
     }
 
-    /// Performs the QUIC handshake in a separate tokio task and awaits its completion.
+    /// Performs the QUIC handshake in a separate tokio task and awaits its
+    /// completion.
     ///
-    /// The returned [`QuicConnection`] holds metadata about the established connection. The
-    /// connection itself is paused after `handshake` returns and must be resumed by passing
-    /// the opaque `Running` value to [`InitialQuicConnection::resume`]. This two-step process
+    /// The returned [`QuicConnection`] holds metadata about the established
+    /// connection. The connection itself is paused after `handshake`
+    /// returns and must be resumed by passing the opaque `Running` value to
+    /// [`InitialQuicConnection::resume`]. This two-step process
     /// allows callers to collect telemetry and run code before serving their
     /// [`ApplicationOverQuic`].
     pub async fn handshake<A: ApplicationOverQuic>(
-        self,
-        app: A,
+        self, app: A,
     ) -> io::Result<(QuicConnection, Running<Arc<Tx>, M, A>)> {
         let task_metrics = self.params.metrics.clone();
         let (conn, handshake_fut) = Self::handshake_fut(self, app);
 
-        let handshake_handle =
-            crate::metrics::tokio_task::spawn("quic_handshake_worker", task_metrics, handshake_fut);
+        let handshake_handle = crate::metrics::tokio_task::spawn(
+            "quic_handshake_worker",
+            task_metrics,
+            handshake_fut,
+        );
 
-        // `AbortOnDropHandle` simulates task-killswitch behavior without needing to give up
-        // ownership of the `JoinHandle`.
+        // `AbortOnDropHandle` simulates task-killswitch behavior without needing
+        // to give up ownership of the `JoinHandle`.
         let handshake_abort_handle = AbortOnDropHandle::new(handshake_handle);
 
         let worker = handshake_abort_handle.await??;
@@ -314,10 +337,15 @@ where
                 .await;
         };
 
-        crate::metrics::tokio_task::spawn_with_killswitch("quic_io_worker", task_metrics, fut);
+        crate::metrics::tokio_task::spawn_with_killswitch(
+            "quic_io_worker",
+            task_metrics,
+            fut,
+        );
     }
 
-    /// Drives a QUIC connection from handshake to close in separate tokio tasks.
+    /// Drives a QUIC connection from handshake to close in separate tokio
+    /// tasks.
     ///
     /// It combines [`InitialQuicConnection::handshake`] and
     /// [`InitialQuicConnection::resume`] into a single call.
@@ -328,7 +356,8 @@ where
         let fut = async move {
             match handshake_fut.await {
                 Ok(running) => Self::resume(running),
-                Err(e) => log::error!("QUIC handshake failed in IQC::start"; "error" => e),
+                Err(e) =>
+                    log::error!("QUIC handshake failed in IQC::start"; "error" => e),
             }
         };
 
@@ -359,7 +388,7 @@ where
     pub writer_cfg: WriterConfig,
     pub initial_pkt: Option<Incoming>,
     pub shutdown_tx: mpsc::Sender<()>,
-    pub conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>, // channel that signals connection map changes
+    pub conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>, /* channel that signals connection map changes */
     pub scid: ConnectionId<'static>,
     pub metrics: M,
     #[cfg(feature = "perf-quic-listener-metrics")]
@@ -373,13 +402,14 @@ where
 
 /// Metadata about an established QUIC connection.
 ///
-/// While this struct allows access to some facets of a QUIC connection, it notably
-/// does not represent the [quiche::Connection] itself. The crate handles most interactions
-/// with [quiche] internally in a worker task. Users can only access the connection directly
-/// via their [`ApplicationOverQuic`] implementation.
+/// While this struct allows access to some facets of a QUIC connection, it
+/// notably does not represent the [quiche::Connection] itself. The crate
+/// handles most interactions with [quiche] internally in a worker task. Users
+/// can only access the connection directly via their [`ApplicationOverQuic`]
+/// implementation.
 ///
-/// See the [module-level docs](crate::quic) for an overview of how a QUIC connection is
-/// handled internally.
+/// See the [module-level docs](crate::quic) for an overview of how a QUIC
+/// connection is handled internally.
 pub struct QuicConnection {
     local_addr: SocketAddr,
     peer_addr: SocketAddr,
@@ -416,8 +446,8 @@ impl QuicConnection {
     ///
     /// # Note
     /// Initially, these stats represent the state when the [quiche::Connection]
-    /// was created. They are updated when the connection is closed, so this getter
-    /// exists primarily to grab a handle early on.
+    /// was created. They are updated when the connection is closed, so this
+    /// getter exists primarily to grab a handle early on.
     #[inline]
     pub fn stats(&self) -> &QuicConnectionStatsShared {
         &self.stats
@@ -470,7 +500,9 @@ where
     M: Metrics,
 {
     #[inline]
-    fn poll_shutdown(&mut self, _cx: &mut std::task::Context) -> std::task::Poll<io::Result<()>> {
+    fn poll_shutdown(
+        &mut self, _cx: &mut std::task::Context,
+    ) -> std::task::Poll<io::Result<()>> {
         // TODO: Does nothing at the moment. We always call Self::start
         // anyway so it's not really important at this moment.
         Poll::Ready(Ok(()))
@@ -479,7 +511,9 @@ where
 
 impl ShutdownConnection for QuicConnection {
     #[inline]
-    fn poll_shutdown(&mut self, _cx: &mut std::task::Context) -> std::task::Poll<io::Result<()>> {
+    fn poll_shutdown(
+        &mut self, _cx: &mut std::task::Context,
+    ) -> std::task::Poll<io::Result<()>> {
         // TODO: does nothing at the moment
         Poll::Ready(Ok(()))
     }
@@ -534,30 +568,31 @@ impl HandshakeInfo {
 
 /// A trait to implement an application served over QUIC.
 ///
-/// The application is driven by an internal worker task, which also handles I/O for the
-/// connection. The worker feeds inbound packets into the [quiche::Connection], calls
-/// [`ApplicationOverQuic::process_reads`] followed by [`ApplicationOverQuic::process_writes`],
-/// and then flushes any pending outbound packets to the network. This repeats in a loop until
-/// either the connection is closed or the [`ApplicationOverQuic`] returns an error.
+/// The application is driven by an internal worker task, which also handles I/O
+/// for the connection. The worker feeds inbound packets into the
+/// [quiche::Connection], calls [`ApplicationOverQuic::process_reads`] followed
+/// by [`ApplicationOverQuic::process_writes`], and then flushes any pending
+/// outbound packets to the network. This repeats in a loop until either the
+/// connection is closed or the [`ApplicationOverQuic`] returns an error.
 ///
-/// In between loop iterations, the worker yields until a new packet arrives, a timer expires,
-/// or [`ApplicationOverQuic::wait_for_data`] resolves. Implementors can interact with the
-/// underlying connection via the mutable reference passed to trait methods.
+/// In between loop iterations, the worker yields until a new packet arrives, a
+/// timer expires, or [`ApplicationOverQuic::wait_for_data`] resolves.
+/// Implementors can interact with the underlying connection via the mutable
+/// reference passed to trait methods.
 #[allow(unused_variables)] // for default functions
 pub trait ApplicationOverQuic: Send + 'static {
-    /// Callback to customize the [`ApplicationOverQuic`] after the QUIC handshake
-    /// completed successfully.
+    /// Callback to customize the [`ApplicationOverQuic`] after the QUIC
+    /// handshake completed successfully.
     ///
     /// # Errors
-    /// Returning an error from this method immediately stops the worker loop and
-    /// transitions to the connection closing stage.
+    /// Returning an error from this method immediately stops the worker loop
+    /// and transitions to the connection closing stage.
     fn on_conn_established(
-        &mut self,
-        qconn: &mut QuicheConnection,
-        handshake_info: &HandshakeInfo,
+        &mut self, qconn: &mut QuicheConnection, handshake_info: &HandshakeInfo,
     ) -> QuicResult<()>;
 
-    /// Determines whether the application's methods will be called by the worker.
+    /// Determines whether the application's methods will be called by the
+    /// worker.
     ///
     /// The function is checked in each iteration of the worker loop. Only
     /// `on_conn_established()` and `buffer()` bypass this check.
@@ -565,98 +600,101 @@ pub trait ApplicationOverQuic: Send + 'static {
 
     /// A borrowed buffer for the worker to write outbound packets into.
     ///
-    /// This method allows sharing a buffer between the worker and the application,
-    /// efficiently using the allocated memory while the application is inactive. It can
-    /// also be used to artificially restrict the size of outbound network packets.
+    /// This method allows sharing a buffer between the worker and the
+    /// application, efficiently using the allocated memory while the
+    /// application is inactive. It can also be used to artificially
+    /// restrict the size of outbound network packets.
     ///
-    /// Any data in the buffer may be overwritten by the worker. If necessary, the
-    /// application should save the contents when this method is called.
+    /// Any data in the buffer may be overwritten by the worker. If necessary,
+    /// the application should save the contents when this method is called.
     fn buffer(&mut self) -> &mut [u8];
 
     /// Waits for an event to trigger the next iteration of the worker loop.
     ///
-    /// The returned future is awaited in parallel to inbound packets and the connection's
-    /// timers. Any one of those futures resolving triggers the next loop iteration, so
-    /// implementations should not rely on `wait_for_data` for the bulk of their processing.
-    /// Instead, after `wait_for_data` resolves, `process_writes` should be used to pull all
+    /// The returned future is awaited in parallel to inbound packets and the
+    /// connection's timers. Any one of those futures resolving triggers the
+    /// next loop iteration, so implementations should not rely on
+    /// `wait_for_data` for the bulk of their processing. Instead, after
+    /// `wait_for_data` resolves, `process_writes` should be used to pull all
     /// available data out of the event source (for example, a channel).
     ///
-    /// As for any future, it is **very important** that this method does not block the
-    /// runtime. If it does, the other concurrent futures will be starved.
+    /// As for any future, it is **very important** that this method does not
+    /// block the runtime. If it does, the other concurrent futures will be
+    /// starved.
     ///
     /// # Errors
-    /// Returning an error from this method immediately stops the worker loop and
-    /// transitions to the connection closing stage.
+    /// Returning an error from this method immediately stops the worker loop
+    /// and transitions to the connection closing stage.
     fn wait_for_data(
-        &mut self,
-        qconn: &mut QuicheConnection,
+        &mut self, qconn: &mut QuicheConnection,
     ) -> impl Future<Output = QuicResult<()>> + Send;
 
     /// Processes data received on the connection.
     ///
-    /// This method is only called if `should_act()` returns `true` and any packets
-    /// were received since the last worker loop iteration. It should be used to
-    /// read from the connection's open streams.
+    /// This method is only called if `should_act()` returns `true` and any
+    /// packets were received since the last worker loop iteration. It
+    /// should be used to read from the connection's open streams.
     ///
     /// # Errors
-    /// Returning an error from this method immediately stops the worker loop and
-    /// transitions to the connection closing stage.
+    /// Returning an error from this method immediately stops the worker loop
+    /// and transitions to the connection closing stage.
     fn process_reads(&mut self, qconn: &mut QuicheConnection) -> QuicResult<()>;
 
     /// Adds data to be sent on the connection.
     ///
-    /// Unlike `process_reads`, this method is called on every iteration of the worker
-    /// loop (provided `should_act()` returns true). It is called after `process_reads`
-    /// and immediately before packets are pushed to the socket. The main use case is
-    /// providing already-buffered data to the [quiche::Connection].
+    /// Unlike `process_reads`, this method is called on every iteration of the
+    /// worker loop (provided `should_act()` returns true). It is called
+    /// after `process_reads` and immediately before packets are pushed to
+    /// the socket. The main use case is providing already-buffered data to
+    /// the [quiche::Connection].
     ///
     /// # Errors
-    /// Returning an error from this method immediately stops the worker loop and
-    /// transitions to the connection closing stage.
+    /// Returning an error from this method immediately stops the worker loop
+    /// and transitions to the connection closing stage.
     fn process_writes(&mut self, qconn: &mut QuicheConnection) -> QuicResult<()>;
 
-    /// Callback to inspect the result of the worker task, before a final packet with a
-    /// `CONNECTION_CLOSE` frame is flushed to the network.
+    /// Callback to inspect the result of the worker task, before a final packet
+    /// with a `CONNECTION_CLOSE` frame is flushed to the network.
     ///
-    /// `connection_result` is [`Ok`] only if the connection was closed without any local
-    /// error. Otherwise, the state of `qconn` depends on the error type and application
-    /// behavior.
+    /// `connection_result` is [`Ok`] only if the connection was closed without
+    /// any local error. Otherwise, the state of `qconn` depends on the
+    /// error type and application behavior.
     fn on_conn_close<M: Metrics>(
-        &mut self,
-        qconn: &mut QuicheConnection,
-        metrics: &M,
+        &mut self, qconn: &mut QuicheConnection, metrics: &M,
         connection_result: &QuicResult<()>,
     ) {
     }
 }
 
-/// A command to execute on a [quiche::Connection] in the context of an [`ApplicationOverQuic`].
+/// A command to execute on a [quiche::Connection] in the context of an
+/// [`ApplicationOverQuic`].
 ///
 /// We expect most [`ApplicationOverQuic`] implementations (such as
-/// [H3Driver](crate::http3::driver::H3Driver)) will provide some way to submit actions for them
-/// to take, for example via a channel. This enum may be accepted as part of those actions to
-/// inspect or alter the state of the underlying connection.
+/// [H3Driver](crate::http3::driver::H3Driver)) will provide some way to submit
+/// actions for them to take, for example via a channel. This enum may be
+/// accepted as part of those actions to inspect or alter the state of the
+/// underlying connection.
 pub enum QuicCommand {
     /// Close the connection with the given parameters.
     ///
     /// Some packets may still be sent after this command has been executed, so
-    /// the worker task may continue running for a bit. See [`quiche::Connection::close`]
-    /// for details.
+    /// the worker task may continue running for a bit. See
+    /// [`quiche::Connection::close`] for details.
     ConnectionClose(ConnectionShutdownBehaviour),
     /// Execute a custom callback on the connection.
     Custom(Box<dyn FnOnce(&mut QuicheConnection) + Send + 'static>),
     /// Collect the current [`SocketStats`] from the connection.
     ///
-    /// Unlike [`QuicConnection::stats()`], these statistics are not cached and instead
-    /// are retrieved right before the command is executed.
+    /// Unlike [`QuicConnection::stats()`], these statistics are not cached and
+    /// instead are retrieved right before the command is executed.
     Stats(Box<dyn FnOnce(datagram_socket::SocketStats) + Send + 'static>),
 }
 
 impl QuicCommand {
     /// Consume the command and perform its operation on `qconn`.
     ///
-    /// This method should be called by [`ApplicationOverQuic`] implementations when
-    /// they receive a [`QuicCommand`] to execute.
+    /// This method should be called by [`ApplicationOverQuic`] implementations
+    /// when they receive a [`QuicCommand`] to execute.
     pub fn execute(self, qconn: &mut QuicheConnection) {
         match self {
             Self::ConnectionClose(behavior) => {
@@ -667,14 +705,14 @@ impl QuicCommand {
                 } = behavior;
 
                 let _ = qconn.close(send_application_close, error_code, &reason);
-            }
+            },
             Self::Custom(f) => {
                 (f)(qconn);
-            }
+            },
             Self::Stats(callback) => {
                 let stats_pair = QuicConnectionStats::from_conn(qconn);
                 (callback)(stats_pair.as_socket_stats());
-            }
+            },
         }
     }
 }
@@ -682,7 +720,8 @@ impl QuicCommand {
 impl fmt::Debug for QuicCommand {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::ConnectionClose(b) => f.debug_tuple("ConnectionClose").field(b).finish(),
+            Self::ConnectionClose(b) =>
+                f.debug_tuple("ConnectionClose").field(b).finish(),
             Self::Custom(_) => f.debug_tuple("Custom").finish_non_exhaustive(),
             Self::Stats(_) => f.debug_tuple("Stats").finish_non_exhaustive(),
         }
@@ -697,12 +736,14 @@ impl fmt::Debug for QuicCommand {
 pub struct ConnectionShutdownBehaviour {
     /// Whether to send an application close or a regular close to the peer.
     ///
-    /// If this is true but the connection is not in a state where it is safe to send an
-    /// application error (not established nor in early data), in accordance with
-    /// [RFC 9000](https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.3-3), the
-    /// error code is changed to `APPLICATION_ERROR` and the reason phrase is cleared.
+    /// If this is true but the connection is not in a state where it is safe to
+    /// send an application error (not established nor in early data), in
+    /// accordance with [RFC 9000](https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.3-3), the
+    /// error code is changed to `APPLICATION_ERROR` and the reason phrase is
+    /// cleared.
     pub send_application_close: bool,
-    /// The [QUIC][proto-err] or [application-level][app-err] error code to send to the peer.
+    /// The [QUIC][proto-err] or [application-level][app-err] error code to send
+    /// to the peer.
     ///
     /// [proto-err]: https://www.rfc-editor.org/rfc/rfc9000.html#section-20.1
     /// [app-err]: https://www.rfc-editor.org/rfc/rfc9000.html#section-20.2

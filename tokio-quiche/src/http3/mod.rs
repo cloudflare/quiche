@@ -7,5 +7,6 @@ pub mod driver;
 pub mod settings;
 mod stats;
 
-pub use self::driver::connection::{ClientH3Connection, ServerH3Connection};
+pub use self::driver::connection::ClientH3Connection;
+pub use self::driver::connection::ServerH3Connection;
 pub use self::stats::H3AuditStats;

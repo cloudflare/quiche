@@ -3,25 +3,42 @@ use std::sync::Arc;
 
 use foundations::telemetry::log;
 use quiche::h3;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
-use super::{
-    datagram, DriverHooks, H3Command, H3ConnectionError, H3ConnectionResult, H3Controller,
-    H3Driver, H3Event, InboundFrameStream, InboundHeaders, IncomingH3Headers, OutboundFrameSender,
-    RequestSender, StreamCtx, STREAM_CAPACITY,
-};
+use super::datagram;
+use super::DriverHooks;
+use super::H3Command;
+use super::H3ConnectionError;
+use super::H3ConnectionResult;
+use super::H3Controller;
+use super::H3Driver;
+use super::H3Event;
+use super::InboundFrameStream;
+use super::InboundHeaders;
+use super::IncomingH3Headers;
+use super::OutboundFrameSender;
+use super::RequestSender;
+use super::StreamCtx;
+use super::STREAM_CAPACITY;
 use crate::http3::settings::Http3Settings;
-use crate::quic::{HandshakeInfo, QuicCommand, QuicheConnection};
+use crate::quic::HandshakeInfo;
+use crate::quic::QuicCommand;
+use crate::quic::QuicheConnection;
 
-/// An [H3Driver] for a client-side HTTP/3 connection. See [H3Driver] for details.
-/// Emits [`ClientH3Event`]s and expects [`ClientH3Command`]s for control.
+/// An [H3Driver] for a client-side HTTP/3 connection. See [H3Driver] for
+/// details. Emits [`ClientH3Event`]s and expects [`ClientH3Command`]s for
+/// control.
 pub type ClientH3Driver = H3Driver<ClientHooks>;
-/// The [H3Controller] type paired with [ClientH3Driver]. See [H3Controller] for details.
+/// The [H3Controller] type paired with [ClientH3Driver]. See [H3Controller] for
+/// details.
 pub type ClientH3Controller = H3Controller<ClientHooks>;
-/// Receives [`ClientH3Event`]s from a [ClientH3Driver]. This is the control stream
-/// which describes what is happening on the connection, but does not transfer data.
+/// Receives [`ClientH3Event`]s from a [ClientH3Driver]. This is the control
+/// stream which describes what is happening on the connection, but does not
+/// transfer data.
 pub type ClientEventStream = mpsc::UnboundedReceiver<ClientH3Event>;
-/// A [RequestSender] to send HTTP requests over a [ClientH3Driver]'s connection.
+/// A [RequestSender] to send HTTP requests over a [ClientH3Driver]'s
+/// connection.
 pub type ClientRequestSender = RequestSender<ClientH3Command, NewClientRequest>;
 
 /// An HTTP request sent using a [ClientRequestSender] to the [ClientH3Driver].
@@ -32,7 +49,8 @@ pub struct NewClientRequest {
     pub request_id: u64,
     /// The [`h3::Header`]s that make up this request.
     pub headers: Vec<h3::Header>,
-    /// A sender to pass the request's [`OutboundFrameSender`] to the request body.
+    /// A sender to pass the request's [`OutboundFrameSender`] to the request
+    /// body.
     pub body_writer: Option<oneshot::Sender<OutboundFrameSender>>,
 }
 
@@ -40,8 +58,8 @@ pub struct NewClientRequest {
 #[derive(Debug)]
 pub enum ClientH3Event {
     Core(H3Event),
-    /// Headers for the request with the given `request_id` were sent on `stream_id`.
-    /// The body, if there is one, could still be sending.
+    /// Headers for the request with the given `request_id` were sent on
+    /// `stream_id`. The body, if there is one, could still be sending.
     NewOutboundRequest {
         stream_id: u64,
         request_id: u64,
@@ -58,8 +76,8 @@ impl From<H3Event> for ClientH3Event {
 #[derive(Debug)]
 pub enum ClientH3Command {
     Core(H3Command),
-    /// Send a new HTTP request over the [`quiche::h3::Connection`]. The driver will
-    /// allocate a stream ID and report it back to the controller via
+    /// Send a new HTTP request over the [`quiche::h3::Connection`]. The driver
+    /// will allocate a stream ID and report it back to the controller via
     /// [`ClientH3Event::NewOutboundRequest`].
     ClientRequest(NewClientRequest),
 }
@@ -82,7 +100,8 @@ impl From<NewClientRequest> for ClientH3Command {
     }
 }
 
-/// A [`PendingClientRequest`] is a request which has not yet received a response.
+/// A [`PendingClientRequest`] is a request which has not yet received a
+/// response.
 ///
 /// The `send` and `recv` halves are passed to the [ClientH3Controller] in an
 /// [`H3Event::IncomingHeaders`] once the server's response has been received.
@@ -98,24 +117,28 @@ pub struct ClientHooks {
 
 impl ClientHooks {
     /// Initiates a client-side request. This sends the request, stores the
-    /// [`PendingClientRequest`] and allocates a new stream plus potential DATAGRAM
-    /// flow (CONNECT-{UDP,IP}).
+    /// [`PendingClientRequest`] and allocates a new stream plus potential
+    /// DATAGRAM flow (CONNECT-{UDP,IP}).
     fn initiate_request(
-        driver: &mut H3Driver<Self>,
-        qconn: &mut QuicheConnection,
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         request: NewClientRequest,
     ) -> H3ConnectionResult<()> {
         let body_finished = request.body_writer.is_none();
 
         // TODO: retry the request if the error is not fatal
-        let stream_id = driver
-            .conn_mut()?
-            .send_request(qconn, &request.headers, body_finished)?;
+        let stream_id = driver.conn_mut()?.send_request(
+            qconn,
+            &request.headers,
+            body_finished,
+        )?;
 
         // log::info!("sent h3 request"; "stream_id" => stream_id);
-        let (mut stream_ctx, send, recv) = StreamCtx::new(stream_id, STREAM_CAPACITY);
+        let (mut stream_ctx, send, recv) =
+            StreamCtx::new(stream_id, STREAM_CAPACITY);
 
-        if let Some(flow_id) = datagram::extract_flow_id(stream_id, &request.headers) {
+        if let Some(flow_id) =
+            datagram::extract_flow_id(stream_id, &request.headers)
+        {
             log::info!(
                 "creating new flow for MASQUE request";
                 "stream_id" => stream_id,
@@ -150,11 +173,10 @@ impl ClientHooks {
         Ok(())
     }
 
-    /// Handles a response from the peer by sending a relevant [`H3Event`] to the
-    /// [ClientH3Controller] for application-level processing.
+    /// Handles a response from the peer by sending a relevant [`H3Event`] to
+    /// the [ClientH3Controller] for application-level processing.
     fn handle_response(
-        driver: &mut H3Driver<Self>,
-        headers: InboundHeaders,
+        driver: &mut H3Driver<Self>, headers: InboundHeaders,
         pending_request: PendingClientRequest,
     ) -> H3ConnectionResult<()> {
         let InboundHeaders {
@@ -186,8 +208,8 @@ impl ClientHooks {
 
 #[allow(private_interfaces)]
 impl DriverHooks for ClientHooks {
-    type Event = ClientH3Event;
     type Command = ClientH3Command;
+    type Event = ClientH3Event;
 
     fn new(_settings: &Http3Settings) -> Self {
         Self {
@@ -196,8 +218,7 @@ impl DriverHooks for ClientHooks {
     }
 
     fn conn_established(
-        _driver: &mut H3Driver<Self>,
-        qconn: &mut QuicheConnection,
+        _driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         _handshake_info: &HandshakeInfo,
     ) -> H3ConnectionResult<()> {
         assert!(
@@ -208,25 +229,27 @@ impl DriverHooks for ClientHooks {
     }
 
     fn headers_received(
-        driver: &mut H3Driver<Self>,
-        _qconn: &mut QuicheConnection,
+        driver: &mut H3Driver<Self>, _qconn: &mut QuicheConnection,
         headers: InboundHeaders,
     ) -> H3ConnectionResult<()> {
-        let Some(pending_request) = driver.hooks.pending_requests.remove(&headers.stream_id) else {
-            // todo(fisher): better handling when an unknown stream_id is encountered.
+        let Some(pending_request) =
+            driver.hooks.pending_requests.remove(&headers.stream_id)
+        else {
+            // todo(fisher): better handling when an unknown stream_id is
+            // encountered.
             return Ok(());
         };
         Self::handle_response(driver, headers, pending_request)
     }
 
     fn conn_command(
-        driver: &mut H3Driver<Self>,
-        qconn: &mut QuicheConnection,
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         cmd: Self::Command,
     ) -> H3ConnectionResult<()> {
         match cmd {
             ClientH3Command::Core(c) => driver.handle_core_command(qconn, c),
-            ClientH3Command::ClientRequest(req) => Self::initiate_request(driver, qconn, req),
+            ClientH3Command::ClientRequest(req) =>
+                Self::initiate_request(driver, qconn, req),
         }
     }
 }

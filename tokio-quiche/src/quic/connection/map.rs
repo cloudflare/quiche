@@ -1,9 +1,12 @@
-use super::{Incoming, InitialQuicConnection};
+use super::Incoming;
+use super::InitialQuicConnection;
 use crate::metrics::Metrics;
 
 use datagram_socket::DatagramSocketSend;
-use quiche::{ConnectionId, MAX_CONN_ID_LEN};
-use std::collections::{BTreeMap, HashMap};
+use quiche::ConnectionId;
+use quiche::MAX_CONN_ID_LEN;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 const U64_SZ: usize = std::mem::size_of::<u64>();
@@ -23,15 +26,17 @@ const fn min_usize(v1: usize, v2: usize) -> usize {
     }
 }
 
-/// A non unique connection identifier, multiple Cids can map to the same conenction.
+/// A non unique connection identifier, multiple Cids can map to the same
+/// conenction.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum CidOwned {
-    /// The QUIC connections IDs theoretically have unbounded length, so for the generic case
-    /// a boxed slice is used to store the ID.
+    /// The QUIC connections IDs theoretically have unbounded length, so for the
+    /// generic case a boxed slice is used to store the ID.
     Generic(Box<[u8]>),
-    /// For QUIC version 1 (the one that actually exists) the maximal ID size is `20`, which
-    /// should correspond to the `MAX_CONN_ID_LEN` value. For this common case, we store the
-    /// ID in a u64 array for faster comparison (and therefore BTreeMap lookups).
+    /// For QUIC version 1 (the one that actually exists) the maximal ID size is
+    /// `20`, which should correspond to the `MAX_CONN_ID_LEN` value. For
+    /// this common case, we store the ID in a u64 array for faster
+    /// comparison (and therefore BTreeMap lookups).
     Optimized([u64; MAX_CONN_ID_QUADS]),
 }
 
@@ -52,7 +57,7 @@ impl From<&ConnectionId<'_>> for CidOwned {
                     let mut remainder = [0u8; U64_SZ];
                     remainder[..c.len()].copy_from_slice(c);
                     u64::from_le_bytes(remainder)
-                }
+                },
             })
             .enumerate()
             .for_each(|(i, v)| cid[i] = v);
@@ -71,8 +76,8 @@ type QuicheId = u64;
 /// A map for QUIC connections.
 ///
 /// Due to the fact that QUIC connections can be identified by multiple QUIC
-/// connection IDs, we have to be able to map multiple IDs to the same connection.
-///
+/// connection IDs, we have to be able to map multiple IDs to the same
+/// connection.
 #[derive(Default)]
 pub(crate) struct ConnectionMap {
     quic_id_map: BTreeMap<CidOwned, (QuicheId, mpsc::Sender<Incoming>)>,
@@ -81,9 +86,7 @@ pub(crate) struct ConnectionMap {
 
 impl ConnectionMap {
     pub(crate) fn insert<Tx, M>(
-        &mut self,
-        cid: ConnectionId<'_>,
-        conn: &InitialQuicConnection<Tx, M>,
+        &mut self, cid: ConnectionId<'_>, conn: &InitialQuicConnection<Tx, M>,
     ) where
         Tx: DatagramSocketSend + Send + 'static,
         M: Metrics,
@@ -102,9 +105,7 @@ impl ConnectionMap {
     }
 
     pub(crate) fn map_cid<Tx, M>(
-        &mut self,
-        cid: ConnectionId<'_>,
-        conn: &InitialQuicConnection<Tx, M>,
+        &mut self, cid: ConnectionId<'_>, conn: &InitialQuicConnection<Tx, M>,
     ) where
         Tx: DatagramSocketSend + Send + 'static,
         M: Metrics,
@@ -121,10 +122,13 @@ impl ConnectionMap {
         self.quic_id_map.remove(&cid.into());
     }
 
-    pub(crate) fn get(&self, id: &ConnectionId) -> Option<&mpsc::Sender<Incoming>> {
+    pub(crate) fn get(
+        &self, id: &ConnectionId,
+    ) -> Option<&mpsc::Sender<Incoming>> {
         if id.len() == MAX_CONN_ID_LEN {
-            // Although both branches run the same code, the one here will generate an optimized version
-            // for the length we are using, as opposed to temporary cids sent by clients.
+            // Although both branches run the same code, the one here will
+            // generate an optimized version for the length we are
+            // using, as opposed to temporary cids sent by clients.
             self.quic_id_map.get(&id.into()).map(|(_id, sender)| sender)
         } else {
             self.quic_id_map.get(&id.into()).map(|(_id, sender)| sender)

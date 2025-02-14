@@ -15,20 +15,21 @@ pub enum HandshakeError {
     ConnectionClosed,
 }
 
-// We use io::Result for `IQC::handshake` to provide a uniform interface with handshakes
-// of other connection types, for example TLS. This is a best-effort mapping to match the
-// existing io::ErrorKind values.
+// We use io::Result for `IQC::handshake` to provide a uniform interface with
+// handshakes of other connection types, for example TLS. This is a best-effort
+// mapping to match the existing io::ErrorKind values.
 impl From<HandshakeError> for io::Error {
     fn from(err: HandshakeError) -> Self {
         match err {
             HandshakeError::Timeout => Self::new(io::ErrorKind::TimedOut, err),
-            HandshakeError::ConnectionClosed => Self::new(io::ErrorKind::NotConnected, err),
+            HandshakeError::ConnectionClosed =>
+                Self::new(io::ErrorKind::NotConnected, err),
         }
     }
 }
 
-/// Derives a [`std::io::Result`] from `IoWorker::handshake`'s result without taking
-/// ownership of the original [`Result`].
+/// Derives a [`std::io::Result`] from `IoWorker::handshake`'s result without
+/// taking ownership of the original [`Result`].
 pub(crate) fn make_handshake_result<T>(res: &QuicResult<()>) -> io::Result<T> {
     let Err(err) = res else {
         return Err(io::Error::other(

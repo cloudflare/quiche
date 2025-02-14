@@ -3,20 +3,27 @@ use std::io;
 use std::sync::Arc;
 use std::time::Instant;
 
-use datagram_socket::{DatagramSocketSend, DatagramSocketSendExt, MAX_DATAGRAM_SIZE};
-use quiche::{ConnectionId, Header, Type as PacketType};
+use datagram_socket::DatagramSocketSend;
+use datagram_socket::DatagramSocketSendExt;
+use datagram_socket::MAX_DATAGRAM_SIZE;
+use quiche::ConnectionId;
+use quiche::Header;
+use quiche::Type as PacketType;
 use task_killswitch::spawn_with_killswitch;
 
-use crate::metrics::{labels, Metrics};
+use crate::metrics::labels;
+use crate::metrics::Metrics;
 use crate::quic::addr_validation_token::AddrValidationTokenManager;
+use crate::quic::make_qlog_writer;
 use crate::quic::router::NewConnection;
-use crate::quic::{make_qlog_writer, Incoming};
-use crate::{ConnectionIdGenerator, QuicResultExt};
+use crate::quic::Incoming;
+use crate::ConnectionIdGenerator;
+use crate::QuicResultExt;
 
 use super::InitialPacketHandler;
 
-/// A [`ConnectionAcceptor`] is an [`InitialPacketHandler`] that acts as a server and
-/// accepts quic connections.
+/// A [`ConnectionAcceptor`] is an [`InitialPacketHandler`] that acts as a
+/// server and accepts quic connections.
 pub(crate) struct ConnectionAcceptor<S, M> {
     config: ConnectionAcceptorConfig,
     socket: Arc<S>,
@@ -40,12 +47,9 @@ where
     M: Metrics,
 {
     pub(crate) fn new(
-        config: ConnectionAcceptorConfig,
-        socket: Arc<S>,
-        socket_cookie: u64,
+        config: ConnectionAcceptorConfig, socket: Arc<S>, socket_cookie: u64,
         token_manager: AddrValidationTokenManager,
-        cid_generator: Box<dyn ConnectionIdGenerator<'static>>,
-        metrics: M,
+        cid_generator: Box<dyn ConnectionIdGenerator<'static>>, metrics: M,
     ) -> Self {
         Self {
             config,
@@ -58,9 +62,7 @@ where
     }
 
     fn accept_conn(
-        &mut self,
-        incoming: Incoming,
-        scid: ConnectionId<'static>,
+        &mut self, incoming: Incoming, scid: ConnectionId<'static>,
         original_dcid: Option<&ConnectionId>,
         pending_cid: Option<ConnectionId<'static>>,
         quiche_config: &mut quiche::Config,
@@ -113,8 +115,7 @@ where
     }
 
     fn handshake_reply(
-        &self,
-        incoming: Incoming,
+        &self, incoming: Incoming,
         writer: impl FnOnce(&mut [u8]) -> io::Result<usize>,
     ) -> io::Result<Option<NewConnection>> {
         let mut send_buf = [0u8; MAX_DATAGRAM_SIZE];
@@ -136,7 +137,10 @@ where
             #[cfg(target_os = "linux")]
             {
                 let from = Some(incoming.local_addr).filter(|_| with_pktinfo);
-                let _ = crate::quic::io::gso::send_to(udp, to, from, send_buf, 1, 1, None).await;
+                let _ = crate::quic::io::gso::send_to(
+                    udp, to, from, send_buf, 1, 1, None,
+                )
+                .await;
             }
 
             #[cfg(not(target_os = "linux"))]
@@ -147,16 +151,15 @@ where
     }
 
     fn stateless_retry(
-        &mut self,
-        incoming: Incoming,
-        hdr: Header,
+        &mut self, incoming: Incoming, hdr: Header,
     ) -> io::Result<Option<NewConnection>> {
         let scid = self.new_connection_id();
 
         let token = self.token_manager.gen(&hdr.dcid, incoming.peer_addr);
 
         self.handshake_reply(incoming, move |buf| {
-            quiche::retry(&hdr.scid, &hdr.dcid, &scid, &token, hdr.version, buf).into_io()
+            quiche::retry(&hdr.scid, &hdr.dcid, &scid, &token, hdr.version, buf)
+                .into_io()
         })
     }
 
@@ -171,14 +174,12 @@ where
     M: Metrics,
 {
     fn handle_initials(
-        &mut self,
-        incoming: Incoming,
-        hdr: quiche::Header<'static>,
+        &mut self, incoming: Incoming, hdr: quiche::Header<'static>,
         quiche_config: &mut quiche::Config,
     ) -> io::Result<Option<NewConnection>> {
         if hdr.ty != PacketType::Initial {
-            // Non-initial packets should have a valid CID, but we want to have some
-            // telemetry if this isn't the case.
+            // Non-initial packets should have a valid CID, but we want to have
+            // some telemetry if this isn't the case.
             if let Err(e) = self
                 .cid_generator
                 .verify_connection_id(self.socket_cookie, &hdr.dcid)
@@ -195,7 +196,10 @@ where
             });
         }
 
-        let (scid, original_dcid, pending_cid) = if self.config.disable_client_ip_validation {
+        let (scid, original_dcid, pending_cid) = if self
+            .config
+            .disable_client_ip_validation
+        {
             (self.new_connection_id(), None, Some(hdr.dcid))
         } else {
             // NOTE: token is always present in Initial packets

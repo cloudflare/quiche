@@ -1,9 +1,12 @@
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::AtomicI64;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use crossbeam::atomic::AtomicCell;
 use datagram_socket::StreamClosureKind;
 
-/// Stream-level HTTP/3 audit statistics recorded by [H3Driver](crate::http3::driver::H3Driver).
+/// Stream-level HTTP/3 audit statistics recorded by
+/// [H3Driver](crate::http3::driver::H3Driver).
 #[derive(Debug)]
 pub struct H3AuditStats {
     /// The stream ID of this session.
@@ -124,25 +127,33 @@ impl H3AuditStats {
     }
 
     #[inline]
-    pub fn set_recvd_stop_sending_error_code(&self, recvd_stop_sending_error_code: i64) {
+    pub fn set_recvd_stop_sending_error_code(
+        &self, recvd_stop_sending_error_code: i64,
+    ) {
         self.recvd_stop_sending_error_code
             .store(recvd_stop_sending_error_code, Ordering::SeqCst);
     }
 
     #[inline]
-    pub fn set_recvd_reset_stream_error_code(&self, recvd_reset_stream_error_code: i64) {
+    pub fn set_recvd_reset_stream_error_code(
+        &self, recvd_reset_stream_error_code: i64,
+    ) {
         self.recvd_reset_stream_error_code
             .store(recvd_reset_stream_error_code, Ordering::SeqCst);
     }
 
     #[inline]
-    pub fn set_sent_stop_sending_error_code(&self, sent_stop_sending_error_code: i64) {
+    pub fn set_sent_stop_sending_error_code(
+        &self, sent_stop_sending_error_code: i64,
+    ) {
         self.sent_stop_sending_error_code
             .store(sent_stop_sending_error_code, Ordering::SeqCst);
     }
 
     #[inline]
-    pub fn set_sent_reset_stream_error_code(&self, sent_reset_stream_error_code: i64) {
+    pub fn set_sent_reset_stream_error_code(
+        &self, sent_reset_stream_error_code: i64,
+    ) {
         self.sent_reset_stream_error_code
             .store(sent_reset_stream_error_code, Ordering::SeqCst);
     }

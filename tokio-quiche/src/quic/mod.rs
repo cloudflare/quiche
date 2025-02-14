@@ -1,15 +1,16 @@
 //! `async`-ified QUIC connections powered by [quiche].
 //!
-//! Hooking up a [quiche::Connection] to [tokio]'s executor and IO primitives requires
-//! an [`ApplicationOverQuic`] to control the connection. The application exposes
-//! a small number of callbacks which are executed whenever there is work to do
-//! with the connection.
+//! Hooking up a [quiche::Connection] to [tokio]'s executor and IO primitives
+//! requires an [`ApplicationOverQuic`] to control the connection. The
+//! application exposes a small number of callbacks which are executed whenever
+//! there is work to do with the connection.
 //!
-//! The primary entrypoints to set up a connection are [`listen`][listen] for servers and
-//! [`connect`] for clients. [`listen_with_capabilities`](crate::listen_with_capabilities)
-//! and [`connect_with_config`] exist for scenarios that require more in-depth configuration.
-//! Lastly, the [`raw`] submodule allows users to take full control over connection creation
-//! and its ingress path.
+//! The primary entrypoints to set up a connection are [`listen`][listen] for
+//! servers and [`connect`] for clients.
+//! [`listen_with_capabilities`](crate::listen_with_capabilities)
+//! and [`connect_with_config`] exist for scenarios that require more in-depth
+//! configuration. Lastly, the [`raw`] submodule allows users to take full
+//! control over connection creation and its ingress path.
 //!
 //! # QUIC Connection Internals
 //!
@@ -17,34 +18,38 @@
 //!
 //! *Note: Internal details are subject to change between minor versions.*
 //!
-//! tokio-quiche conceptually separates a network socket into a `recv` half and a `send`
-//! half. The `recv` half can only sensibly be used by one async task at a time, while many
-//! tasks can `send` packets on the socket concurrently. Thus, we spawn a dedicated
-//! `InboundPacketRouter` task for each socket which becomes the sole owner of the socket's
-//! `recv` half. It decodes the QUIC header in each packet, looks up the destination connection
-//! ID (DCID), and forwards the packet to the connection's `IoWorker` task.
+//! tokio-quiche conceptually separates a network socket into a `recv` half and
+//! a `send` half. The `recv` half can only sensibly be used by one async task
+//! at a time, while many tasks can `send` packets on the socket concurrently.
+//! Thus, we spawn a dedicated `InboundPacketRouter` task for each socket which
+//! becomes the sole owner of the socket's `recv` half. It decodes the QUIC
+//! header in each packet, looks up the destination connection ID (DCID), and
+//! forwards the packet to the connection's `IoWorker` task.
 //!
-//! If the packet initiates a new connection, it is passed to an `InitialPacketHandler` with
-//! logic for either the client- or server-side connection setup. The purple `ConnectionAcceptor`
-//! depicted above is the server-side implementation. It optionally validates the client's IP
-//! address with a `RETRY` packet before packaging the nascent connection into an
-//! [`InitialQuicConnection`][iqc] and sending it to the [`QuicConnectionStream`] returned by
-//! [`listen`][listen].
+//! If the packet initiates a new connection, it is passed to an
+//! `InitialPacketHandler` with logic for either the client- or server-side
+//! connection setup. The purple `ConnectionAcceptor` depicted above is the
+//! server-side implementation. It optionally validates the client's IP
+//! address with a `RETRY` packet before packaging the nascent connection into
+//! an [`InitialQuicConnection`][iqc] and sending it to the
+//! [`QuicConnectionStream`] returned by [`listen`][listen].
 //!
 //! At this point the caller of [`listen`][listen] has control of the
-//! [`InitialQuicConnection`][iqc] (`IQC`). Now an `IoWorker` task needs to be spawned to
-//! continue driving the connection. This is possible with `IQC::handshake` or `IQC::start`
-//! (see the [`InitialQuicConnection`][iqc] docs). Client-side connections use the same
-//! infrastructure (except for the `InitialPacketHandler`), but [`connect`] immediately
-//! consumes the [`QuicConnectionStream`] and calls `IQC::start`.
+//! [`InitialQuicConnection`][iqc] (`IQC`). Now an `IoWorker` task needs to be
+//! spawned to continue driving the connection. This is possible with
+//! `IQC::handshake` or `IQC::start` (see the [`InitialQuicConnection`][iqc]
+//! docs). Client-side connections use the same infrastructure (except for the
+//! `InitialPacketHandler`), but [`connect`] immediately consumes the
+//! [`QuicConnectionStream`] and calls `IQC::start`.
 //!
 //! `IoWorker` is responsible for feeding inbound packets into the underlying
-//! [`quiche::Connection`], executing the [`ApplicationOverQuic`] callbacks, and flushing
-//! outbound packets to the network via the socket's shared `send` half. It loops through these
-//! operations in the order shown above, yielding only when sending packets and on
-//! `wait_for_data` calls. New inbound packets or a timeout can also restart the loop while
-//! `wait_for_data` is pending. This continues until the connection is closed or the
-//! [`ApplicationOverQuic`] returns an error.
+//! [`quiche::Connection`], executing the [`ApplicationOverQuic`] callbacks, and
+//! flushing outbound packets to the network via the socket's shared `send`
+//! half. It loops through these operations in the order shown above, yielding
+//! only when sending packets and on `wait_for_data` calls. New inbound packets
+//! or a timeout can also restart the loop while `wait_for_data` is pending.
+//! This continues until the connection is closed or the [`ApplicationOverQuic`]
+//! returns an error.
 //!
 //! [listen]: crate::listen
 //! [iqc]: crate::InitialQuicConnection
@@ -52,17 +57,23 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use datagram_socket::{DatagramSocketRecv, DatagramSocketSend};
+use datagram_socket::DatagramSocketRecv;
+use datagram_socket::DatagramSocketSend;
 use foundations::telemetry::log;
 
 use crate::http3::settings::Http3Settings;
-use crate::metrics::{DefaultMetrics, Metrics};
+use crate::metrics::DefaultMetrics;
+use crate::metrics::Metrics;
 use crate::settings::Config;
-use crate::socket::{QuicListener, Socket, SocketCapabilities};
-use crate::{
-    ClientH3Controller, ClientH3Driver, ConnectionParams, QuicConnectionStream, QuicResult,
-    QuicResultExt,
-};
+use crate::socket::QuicListener;
+use crate::socket::Socket;
+use crate::socket::SocketCapabilities;
+use crate::ClientH3Controller;
+use crate::ClientH3Driver;
+use crate::ConnectionParams;
+use crate::QuicConnectionStream;
+use crate::QuicResult;
+use crate::QuicResultExt;
 
 mod addr_validation_token;
 pub(crate) mod connection;
@@ -71,15 +82,21 @@ mod io;
 pub mod raw;
 mod router;
 
-use self::connection::{ApplicationOverQuic, ConnectionIdGenerator, QuicConnection};
-use self::router::acceptor::{ConnectionAcceptor, ConnectionAcceptorConfig};
+use self::connection::ApplicationOverQuic;
+use self::connection::ConnectionIdGenerator;
+use self::connection::QuicConnection;
+use self::router::acceptor::ConnectionAcceptor;
+use self::router::acceptor::ConnectionAcceptorConfig;
 use self::router::connector::ClientConnector;
 use self::router::InboundPacketRouter;
 
-pub use self::connection::{
-    ConnectionShutdownBehaviour, HandshakeError, HandshakeInfo, Incoming, QuicCommand,
-    QuicConnectionStats, SimpleConnectionIdGenerator,
-};
+pub use self::connection::ConnectionShutdownBehaviour;
+pub use self::connection::HandshakeError;
+pub use self::connection::HandshakeInfo;
+pub use self::connection::Incoming;
+pub use self::connection::QuicCommand;
+pub use self::connection::QuicConnectionStats;
+pub use self::connection::SimpleConnectionIdGenerator;
 pub use self::hooks::ConnectionHook;
 
 /// Alias of [quiche::Connection] used internally by the crate.
@@ -89,7 +106,9 @@ pub type QuicheConnection = quiche::Connection<crate::buf_factory::BufFactory>;
 #[cfg(not(feature = "zero-copy"))]
 pub type QuicheConnection = quiche::Connection;
 
-fn make_qlog_writer(dir: &str, id: &str) -> std::io::Result<std::io::BufWriter<std::fs::File>> {
+fn make_qlog_writer(
+    dir: &str, id: &str,
+) -> std::io::Result<std::io::BufWriter<std::fs::File>> {
     let mut path = std::path::PathBuf::from(dir);
     let filename = format!("{id}.sqlog");
     path.push(filename);
@@ -98,20 +117,20 @@ fn make_qlog_writer(dir: &str, id: &str) -> std::io::Result<std::io::BufWriter<s
     Ok(std::io::BufWriter::new(f))
 }
 
-/// Connects to an HTTP/3 server using `socket` and the default client configuration.
+/// Connects to an HTTP/3 server using `socket` and the default client
+/// configuration.
 ///
 /// This function always uses the [`ApplicationOverQuic`] provided in
-/// [`http3::driver`](crate::http3::driver) and returns a corresponding [ClientH3Controller].
-/// To specify a different implementation or customize the configuration, use
-/// [`connect_with_config`].
+/// [`http3::driver`](crate::http3::driver) and returns a corresponding
+/// [ClientH3Controller]. To specify a different implementation or customize the
+/// configuration, use [`connect_with_config`].
 ///
 /// # Note
-/// tokio-quiche currently only supports one client connection per socket. Sharing a socket
-/// among multiple connections will lead to lost packets as both connections try to read from
-/// the shared socket.
+/// tokio-quiche currently only supports one client connection per socket.
+/// Sharing a socket among multiple connections will lead to lost packets as
+/// both connections try to read from the shared socket.
 pub async fn connect<Tx, Rx, S>(
-    socket: S,
-    host: Option<&str>,
+    socket: S, host: Option<&str>,
 ) -> QuicResult<(QuicConnection, ClientH3Controller)>
 where
     Tx: DatagramSocketSend + Send + 'static,
@@ -119,7 +138,8 @@ where
     S: TryInto<Socket<Tx, Rx>>,
     S::Error: std::error::Error + Send + Sync + 'static,
 {
-    let (h3_driver, h3_controller) = ClientH3Driver::new(Http3Settings::default());
+    let (h3_driver, h3_controller) =
+        ClientH3Driver::new(Http3Settings::default());
     let mut params = ConnectionParams::default();
     params.settings.max_idle_timeout = Some(Duration::from_secs(30));
 
@@ -129,21 +149,19 @@ where
     ))
 }
 
-/// Connects to a QUIC server using `socket` and the provided [`ApplicationOverQuic`].
+/// Connects to a QUIC server using `socket` and the provided
+/// [`ApplicationOverQuic`].
 ///
-/// When the future resolves, the connection has completed its handshake and `app` is
-/// running in the worker task. In case the handshake failed, we close the connection
-/// automatically and the future will resolve with an error.
+/// When the future resolves, the connection has completed its handshake and
+/// `app` is running in the worker task. In case the handshake failed, we close
+/// the connection automatically and the future will resolve with an error.
 ///
 /// # Note
-/// tokio-quiche currently only supports one client connection per socket. Sharing a socket
-/// among multiple connections will lead to lost packets as both connections try to read from
-/// the shared socket.
+/// tokio-quiche currently only supports one client connection per socket.
+/// Sharing a socket among multiple connections will lead to lost packets as
+/// both connections try to read from the shared socket.
 pub async fn connect_with_config<Tx, Rx, S, App>(
-    socket: S,
-    host: Option<&str>,
-    params: &ConnectionParams<'_>,
-    app: App,
+    socket: S, host: Option<&str>, params: &ConnectionParams<'_>, app: App,
 ) -> QuicResult<QuicConnection>
 where
     Tx: DatagramSocketSend + Send + 'static,
@@ -187,8 +205,8 @@ where
 
     log::info!("created unestablished quiche::Connection"; "scid" => ?scid);
 
-    // Set the qlog writer here instead of in the `ClientConnector` to avoid missing
-    // logs from early in the connection
+    // Set the qlog writer here instead of in the `ClientConnector` to avoid
+    // missing logs from early in the connection
     if let Some(qlog_dir) = &client_config.qlog_dir {
         log::info!("setting up qlogs"; "qlog_dir"=>qlog_dir);
         let id = format!("{:?}", &scid);
@@ -227,7 +245,7 @@ where
             Ok(()) => log::debug!("incoming packet router finished"),
             Err(error) => {
                 log::error!("incoming packet router failed"; "error"=>error)
-            }
+            },
         }
     });
 
@@ -239,10 +257,8 @@ where
 }
 
 pub(crate) fn start_listener<M>(
-    socket: QuicListener,
-    params: &ConnectionParams,
-    cid_generator: impl ConnectionIdGenerator<'static>,
-    metrics: M,
+    socket: QuicListener, params: &ConnectionParams,
+    cid_generator: impl ConnectionIdGenerator<'static>, metrics: M,
 ) -> std::io::Result<QuicConnectionStream<M>>
 where
     M: Metrics,
@@ -263,7 +279,10 @@ where
         ConnectionAcceptorConfig {
             disable_client_ip_validation: config.disable_client_ip_validation,
             qlog_dir: config.qlog_dir.clone(),
-            keylog_file: config.keylog_file.as_ref().and_then(|f| f.try_clone().ok()),
+            keylog_file: config
+                .keylog_file
+                .as_ref()
+                .and_then(|f| f.try_clone().ok()),
             #[cfg(target_os = "linux")]
             with_pktinfo: if local_addr.is_ipv4() {
                 config.has_ippktinfo
@@ -287,6 +306,10 @@ where
         metrics.clone(),
     );
 
-    crate::metrics::tokio_task::spawn("quic_udp_listener", metrics, socket_driver);
+    crate::metrics::tokio_task::spawn(
+        "quic_udp_listener",
+        metrics,
+        socket_driver,
+    );
     Ok(QuicConnectionStream::new(accept_stream))
 }

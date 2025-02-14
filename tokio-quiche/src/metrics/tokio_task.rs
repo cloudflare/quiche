@@ -1,10 +1,12 @@
 //! Instrumentation and metrics for spawned tokio tasks.
 //!
-//! Currently, this is implemented by creating wrapper futures and wakers for the future inside of
-//! a spawned task. Ideally we would be able to move at least some of this work into tokio proper
-//! at some point, but this should be sufficient for now.
+//! Currently, this is implemented by creating wrapper futures and wakers for
+//! the future inside of a spawned task. Ideally we would be able to move at
+//! least some of this work into tokio proper at some point, but this should be
+//! sufficient for now.
 //!
-//! This does *not* rely on the tokio-metrics crate, as that has more overhead than we would like.
+//! This does *not* rely on the tokio-metrics crate, as that has more overhead
+//! than we would like.
 
 use crate::metrics::Metrics;
 use foundations::telemetry::TelemetryContext;
@@ -12,15 +14,20 @@ use pin_project::pin_project;
 use std::future::Future;
 use std::pin::pin;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Wake, Waker};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::task::Context;
+use std::task::Poll;
+use std::task::Wake;
+use std::task::Waker;
 use std::time::Instant;
 use task_killswitch::spawn_with_killswitch as killswitch_spawn;
 use tokio::task::JoinHandle;
 
 /// An instrumented future.
 ///
-/// It's important to keep overhead low here, especially where contention is concerned.
+/// It's important to keep overhead low here, especially where contention is
+/// concerned.
 #[pin_project]
 struct Instrumented<F, M> {
     #[pin]
@@ -32,7 +39,8 @@ struct Instrumented<F, M> {
 
 /// An instrumented waker for our instrumented future.
 ///
-/// It's very important to keep overhead low here, especially where contention is concerned.
+/// It's very important to keep overhead low here, especially where contention
+/// is concerned.
 struct InstrumentedWaker {
     timer: Arc<Mutex<Option<Instant>>>,
     waker: Waker,
@@ -80,14 +88,14 @@ impl<F: Future, M: Metrics> Future for Instrumented<F, M> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let total_timer = Instant::now();
 
-        // if we were to hold the lock over the poll boundary, self-wakes would deadlock us, so we
-        // won't do that.
+        // if we were to hold the lock over the poll boundary, self-wakes would
+        // deadlock us, so we won't do that.
         //
         // this is unlikely to be contended much otherwise.
         let maybe_schedule_timer = self.timer.lock().unwrap().take();
 
-        // for various reasons related to how rust does lifetime things, we will not acquire the
-        // lock in the if statement
+        // for various reasons related to how rust does lifetime things, we will
+        // not acquire the lock in the if statement
         if let Some(schedule_timer) = maybe_schedule_timer {
             let elapsed = schedule_timer.elapsed();
 
@@ -129,8 +137,8 @@ impl<F: Future, M: Metrics> Future for Instrumented<F, M> {
 
 /// Spawn a potentially instrumented task.
 ///
-/// Depending on whether the `tokio-task-metrics` feature is enabled, this may instrument
-/// the task and collect metrics for it.
+/// Depending on whether the `tokio-task-metrics` feature is enabled, this may
+/// instrument the task and collect metrics for it.
 pub fn spawn<M, T>(name: &str, metrics: M, future: T) -> JoinHandle<T::Output>
 where
     T: Future + Send + 'static,
@@ -149,8 +157,8 @@ where
 /// Spawn a potentially instrumented, long-lived task. Integrates with
 /// [task-killswitch](task_killswitch).
 ///
-/// Depending on whether the `tokio-task-metrics` feature is enabled, this may instrument
-/// the task and collect metrics for it.
+/// Depending on whether the `tokio-task-metrics` feature is enabled, this may
+/// instrument the task and collect metrics for it.
 pub fn spawn_with_killswitch<M, T>(name: &str, metrics: M, future: T)
 where
     T: Future<Output = ()> + Send + 'static,

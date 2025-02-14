@@ -1,4 +1,5 @@
-use datagram_socket::{DatagramSocketRecv, DatagramSocketSend};
+use datagram_socket::DatagramSocketRecv;
+use datagram_socket::DatagramSocketSend;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -7,13 +8,15 @@ use tokio::net::UdpSocket;
 /// A connected datagram socket with separate `send` and `recv` halves.
 ///
 /// [`Socket`] abstracts over both real UDP-based connections and in-process
-/// tunneled flows like (multi-hop) MASQUE flows. It uses the [`datagram_socket`]
-/// traits for this purpose.
+/// tunneled flows like (multi-hop) MASQUE flows. It uses the
+/// [`datagram_socket`] traits for this purpose.
 #[derive(Debug)]
 pub struct Socket<Tx, Rx> {
-    /// The sending half of the connection. This generally supports concurrent senders.
+    /// The sending half of the connection. This generally supports concurrent
+    /// senders.
     pub send: Tx,
-    /// The receiving half of the connection. This is generally owned by a single caller.
+    /// The receiving half of the connection. This is generally owned by a
+    /// single caller.
     pub recv: Rx,
     /// The address of the local endpoint.
     pub local_addr: SocketAddr,
@@ -28,9 +31,11 @@ pub type BoxedSocket = Socket<
 >;
 
 impl<Tx, Rx> Socket<Tx, Rx> {
-    /// Creates a [`Socket`] from a [`UdpSocket`] by wrapping the file descriptor
-    /// in an [`Arc`].
-    pub fn from_udp(socket: UdpSocket) -> io::Result<Socket<Arc<UdpSocket>, Arc<UdpSocket>>> {
+    /// Creates a [`Socket`] from a [`UdpSocket`] by wrapping the file
+    /// descriptor in an [`Arc`].
+    pub fn from_udp(
+        socket: UdpSocket,
+    ) -> io::Result<Socket<Arc<UdpSocket>, Arc<UdpSocket>>> {
         let local_addr = socket.local_addr()?;
         let peer_addr = socket.peer_addr()?;
 
@@ -55,8 +60,8 @@ where
     /// UDP socket FD and returns a reference to that socket.
     ///
     /// # Note
-    /// The file descriptor _numbers_ have to be identical. A pair of FDs created
-    /// by [`dup(2)`](https://man7.org/linux/man-pages/man2/dup.2.html) will
+    /// The file descriptor _numbers_ have to be identical. A pair of FDs
+    /// created by [`dup(2)`](https://man7.org/linux/man-pages/man2/dup.2.html) will
     /// return `None`.
     #[cfg(unix)]
     pub fn as_udp_socket(&self) -> Option<&UdpSocket> {

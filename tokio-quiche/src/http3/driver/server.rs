@@ -2,20 +2,36 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use super::{
-    datagram, DriverHooks, H3Command, H3ConnectionError, H3ConnectionResult, H3Controller,
-    H3Driver, H3Event, InboundHeaders, IncomingH3Headers, StreamCtx, STREAM_CAPACITY,
-};
-use crate::http3::settings::{Http3Settings, Http3SettingsEnforcer, Http3TimeoutType, TimeoutKey};
-use crate::quic::{HandshakeInfo, QuicCommand, QuicheConnection};
+use super::datagram;
+use super::DriverHooks;
+use super::H3Command;
+use super::H3ConnectionError;
+use super::H3ConnectionResult;
+use super::H3Controller;
+use super::H3Driver;
+use super::H3Event;
+use super::InboundHeaders;
+use super::IncomingH3Headers;
+use super::StreamCtx;
+use super::STREAM_CAPACITY;
+use crate::http3::settings::Http3Settings;
+use crate::http3::settings::Http3SettingsEnforcer;
+use crate::http3::settings::Http3TimeoutType;
+use crate::http3::settings::TimeoutKey;
+use crate::quic::HandshakeInfo;
+use crate::quic::QuicCommand;
+use crate::quic::QuicheConnection;
 
-/// An [H3Driver] for a server-side HTTP/3 connection. See [H3Driver] for details.
-/// Emits [`ServerH3Event`]s and expects [`ServerH3Command`]s for control.
+/// An [H3Driver] for a server-side HTTP/3 connection. See [H3Driver] for
+/// details. Emits [`ServerH3Event`]s and expects [`ServerH3Command`]s for
+/// control.
 pub type ServerH3Driver = H3Driver<ServerHooks>;
-/// The [H3Controller] type paired with [ServerH3Driver]. See [H3Controller] for details.
+/// The [H3Controller] type paired with [ServerH3Driver]. See [H3Controller] for
+/// details.
 pub type ServerH3Controller = H3Controller<ServerHooks>;
-/// Receives [`ServerH3Event`]s from a [ServerH3Driver]. This is the control stream
-/// which describes what is happening on the connection, but does not transfer data.
+/// Receives [`ServerH3Event`]s from a [ServerH3Driver]. This is the control
+/// stream which describes what is happening on the connection, but does not
+/// transfer data.
 pub type ServerEventStream = mpsc::UnboundedReceiver<ServerH3Event>;
 
 /// Events produced by [ServerH3Driver].
@@ -60,12 +76,12 @@ pub struct ServerHooks {
 }
 
 impl ServerHooks {
-    /// Handles a new request, creating a stream context, checking for a potential
-    /// DATAGRAM flow (CONNECT-{UDP,IP}) and sending a relevant [`H3Event`] to the
-    /// [ServerH3Controller] for application-level processing.
+    /// Handles a new request, creating a stream context, checking for a
+    /// potential DATAGRAM flow (CONNECT-{UDP,IP}) and sending a relevant
+    /// [`H3Event`] to the [ServerH3Controller] for application-level
+    /// processing.
     fn handle_request(
-        driver: &mut H3Driver<Self>,
-        headers: InboundHeaders,
+        driver: &mut H3Driver<Self>, headers: InboundHeaders,
     ) -> H3ConnectionResult<()> {
         let InboundHeaders {
             stream_id,
@@ -80,7 +96,8 @@ impl ServerHooks {
             return Ok(());
         }
 
-        let (mut stream_ctx, send, recv) = StreamCtx::new(stream_id, STREAM_CAPACITY);
+        let (mut stream_ctx, send, recv) =
+            StreamCtx::new(stream_id, STREAM_CAPACITY);
 
         if let Some(flow_id) = datagram::extract_flow_id(stream_id, &headers) {
             let _ = driver.get_or_insert_flow(flow_id)?;
@@ -113,8 +130,8 @@ impl ServerHooks {
 
 #[allow(private_interfaces)]
 impl DriverHooks for ServerHooks {
-    type Event = ServerH3Event;
     type Command = ServerH3Command;
+    type Event = ServerH3Event;
 
     fn new(settings: &Http3Settings) -> Self {
         Self {
@@ -125,8 +142,7 @@ impl DriverHooks for ServerHooks {
     }
 
     fn conn_established(
-        driver: &mut H3Driver<Self>,
-        qconn: &mut QuicheConnection,
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         handshake_info: &HandshakeInfo,
     ) -> H3ConnectionResult<()> {
         assert!(
@@ -134,7 +150,9 @@ impl DriverHooks for ServerHooks {
             "ServerH3Driver requires a server-side QUIC connection"
         );
 
-        if let Some(post_accept_timeout) = driver.hooks.settings_enforcer.post_accept_timeout() {
+        if let Some(post_accept_timeout) =
+            driver.hooks.settings_enforcer.post_accept_timeout()
+        {
             let remaining = post_accept_timeout
                 .checked_sub(handshake_info.elapsed())
                 .ok_or(H3ConnectionError::PostAcceptTimeout)?;
@@ -150,8 +168,7 @@ impl DriverHooks for ServerHooks {
     }
 
     fn headers_received(
-        driver: &mut H3Driver<Self>,
-        qconn: &mut QuicheConnection,
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         headers: InboundHeaders,
     ) -> H3ConnectionResult<()> {
         if driver
@@ -159,7 +176,8 @@ impl DriverHooks for ServerHooks {
             .settings_enforcer
             .enforce_requests_limit(driver.hooks.requests)
         {
-            let _ = qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[]);
+            let _ =
+                qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[]);
             return Ok(());
         }
 
@@ -173,8 +191,7 @@ impl DriverHooks for ServerHooks {
     }
 
     fn conn_command(
-        driver: &mut H3Driver<Self>,
-        qconn: &mut QuicheConnection,
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         cmd: Self::Command,
     ) -> H3ConnectionResult<()> {
         let ServerH3Command::Core(cmd) = cmd;
@@ -185,7 +202,9 @@ impl DriverHooks for ServerHooks {
         driver.hooks.settings_enforcer.has_pending_timeouts()
     }
 
-    async fn wait_for_action(&mut self, qconn: &mut QuicheConnection) -> H3ConnectionResult<()> {
+    async fn wait_for_action(
+        &mut self, qconn: &mut QuicheConnection,
+    ) -> H3ConnectionResult<()> {
         self.settings_enforcer.enforce_timeouts(qconn).await?;
         Err(H3ConnectionError::PostAcceptTimeout)
     }

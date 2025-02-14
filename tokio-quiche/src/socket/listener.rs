@@ -1,6 +1,12 @@
 use std::io;
 #[cfg(unix)]
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
+use std::os::fd::AsFd;
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::fd::BorrowedFd;
+#[cfg(unix)]
+use std::os::fd::RawFd;
 use tokio::net::UdpSocket;
 
 use super::SocketCapabilities;
@@ -22,9 +28,9 @@ pub struct QuicListener {
     pub socket_cookie: u64,
     /// The [`SocketCapabilities`] to use for this socket.
     ///
-    /// By default, [`QuicListener`]s are constructed with all capabilities disabled.
-    /// On Linux, you can use `apply_max_capabilities()` to (try to) enable all
-    /// supported capabilities.
+    /// By default, [`QuicListener`]s are constructed with all capabilities
+    /// disabled. On Linux, you can use `apply_max_capabilities()` to (try
+    /// to) enable all supported capabilities.
     pub capabilities: SocketCapabilities,
 }
 

@@ -1,22 +1,28 @@
+use std::io;
+use std::mem;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
 use std::time::Instant;
-use std::{io, mem};
 
-use datagram_socket::{
-    DatagramSocketSend, DatagramSocketSendExt, MaybeConnectedSocket, MAX_DATAGRAM_SIZE,
-};
+use datagram_socket::DatagramSocketSend;
+use datagram_socket::DatagramSocketSendExt;
+use datagram_socket::MaybeConnectedSocket;
+use datagram_socket::MAX_DATAGRAM_SIZE;
 use foundations::telemetry::log;
-use quiche::{ConnectionId, Header};
+use quiche::ConnectionId;
+use quiche::Header;
 use tokio_util::time::delay_queue::Key;
 use tokio_util::time::DelayQueue;
 
-use crate::quic::router::{InitialPacketHandler, NewConnection};
-use crate::quic::{Incoming, QuicheConnection};
+use crate::quic::router::InitialPacketHandler;
+use crate::quic::router::NewConnection;
+use crate::quic::Incoming;
+use crate::quic::QuicheConnection;
 
-/// A [`ClientConnector`] manages client-initiated [`quiche::Connection`]s. When a connection is
-/// established, this struct returns the connection to the [`super::QuicRouter`] for futher
-/// processing.
+/// A [`ClientConnector`] manages client-initiated [`quiche::Connection`]s. When
+/// a connection is established, this struct returns the connection to the
+/// [`super::QuicRouter`] for futher processing.
 pub(crate) struct ClientConnector<Tx> {
     socket_tx: MaybeConnectedSocket<Arc<Tx>>,
     connection: ConnectionState,
@@ -40,20 +46,20 @@ impl ConnectionState {
             state => {
                 *self = state;
                 None
-            }
+            },
         }
     }
 
     fn take_if_pending_and_id_matches(
-        &mut self,
-        scid: &ConnectionId<'static>,
+        &mut self, scid: &ConnectionId<'static>,
     ) -> Option<PendingConnection> {
         match mem::replace(self, Self::Returned) {
-            Self::Pending(pending) if *scid == pending.conn.source_id() => Some(pending),
+            Self::Pending(pending) if *scid == pending.conn.source_id() =>
+                Some(pending),
             state => {
                 *self = state;
                 None
-            }
+            },
         }
     }
 }
@@ -81,7 +87,9 @@ where
     /// Sets the connection to it's pending state. Await [`Incoming`] packets.
     ///
     /// This sends any pending packets and arms the connection's timeout timer.
-    fn set_connection_to_pending(&mut self, mut conn: QuicheConnection) -> io::Result<()> {
+    fn set_connection_to_pending(
+        &mut self, mut conn: QuicheConnection,
+    ) -> io::Result<()> {
         simple_conn_send(&self.socket_tx, &mut conn)?;
 
         let timeout_key = conn.timeout_instant().map(|instant| {
@@ -103,9 +111,7 @@ where
     ///
     /// If the connection is pending, we return it
     fn on_incoming(
-        &mut self,
-        mut incoming: Incoming,
-        hdr: Header<'static>,
+        &mut self, mut incoming: Incoming, hdr: Header<'static>,
     ) -> io::Result<Option<NewConnection>> {
         let Some(PendingConnection {
             mut conn,
@@ -167,7 +173,9 @@ where
     fn on_timeout(&mut self, scid: ConnectionId<'static>) -> io::Result<()> {
         log::debug!("connection timedout"; "scid" => ?scid);
 
-        let Some(mut pending) = self.connection.take_if_pending_and_id_matches(&scid) else {
+        let Some(mut pending) =
+            self.connection.take_if_pending_and_id_matches(&scid)
+        else {
             log::debug!("timedout connection missing from pending map"; "scid" => ?scid);
             return Ok(());
         };
@@ -186,10 +194,11 @@ where
         self.set_connection_to_pending(pending.conn)
     }
 
-    /// [`update`] handles expired pending connections and checks starts the inner connection if
-    /// not started yet.
+    /// [`update`] handles expired pending connections and checks starts the
+    /// inner connection if not started yet.
     fn update(&mut self, cx: &mut Context) -> io::Result<()> {
-        while let Poll::Ready(Some(expired)) = self.timeout_queue.poll_expired(cx) {
+        while let Poll::Ready(Some(expired)) = self.timeout_queue.poll_expired(cx)
+        {
             let scid = expired.into_inner();
             self.on_timeout(scid)?;
         }
@@ -211,9 +220,7 @@ where
     }
 
     fn handle_initials(
-        &mut self,
-        incoming: Incoming,
-        hdr: Header<'static>,
+        &mut self, incoming: Incoming, hdr: Header<'static>,
         _: &mut quiche::Config,
     ) -> io::Result<Option<NewConnection>> {
         self.on_incoming(incoming, hdr)
@@ -225,8 +232,7 @@ where
 /// This does not have to be efficent, since once a connection is established
 /// the [`crate::io_worker::IoWorker`] will take over sending and receiving.
 fn simple_conn_send<Tx: DatagramSocketSend + Send + Sync + 'static>(
-    socket_tx: &MaybeConnectedSocket<Arc<Tx>>,
-    conn: &mut QuicheConnection,
+    socket_tx: &MaybeConnectedSocket<Arc<Tx>>, conn: &mut QuicheConnection,
 ) -> io::Result<()> {
     let scid = conn.source_id().into_owned();
     log::debug!("sending client Initials to peer"; "scid" => ?scid);
@@ -247,12 +253,12 @@ fn simple_conn_send<Tx: DatagramSocketSend + Send + Sync + 'static>(
                     })
                     }
                 });
-            }
+            },
             Err(quiche::Error::Done) => break Ok(()),
             Err(error) => {
                 log::error!("error writing packets to quiche's internal buffer"; "scid" => ?scid, "error" => error.to_string());
                 break Err(std::io::Error::new(std::io::ErrorKind::Other, error));
-            }
+            },
         }
     }
 }

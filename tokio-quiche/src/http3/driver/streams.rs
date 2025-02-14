@@ -1,15 +1,18 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
 
 use tokio::sync::mpsc;
 use tokio_util::sync::PollSender;
 
-use super::{
-    InboundFrame, InboundFrameSender, InboundFrameStream, OutboundFrame, OutboundFrameSender,
-    OutboundFrameStream,
-};
+use super::InboundFrame;
+use super::InboundFrameSender;
+use super::InboundFrameStream;
+use super::OutboundFrame;
+use super::OutboundFrameSender;
+use super::OutboundFrameStream;
 use crate::http3::H3AuditStats;
 
 pub(crate) struct StreamCtx {
@@ -34,8 +37,7 @@ impl StreamCtx {
     /// Creates a new [StreamCtx]. This method returns the [StreamCtx] itself
     /// as well as the sender/receiver that it communicates with.
     pub(crate) fn new(
-        stream_id: u64,
-        capacity: usize,
+        stream_id: u64, capacity: usize,
     ) -> (Self, OutboundFrameSender, InboundFrameStream) {
         let (forward_sender, forward_receiver) = mpsc::channel(capacity);
         let (backward_sender, backward_receiver) = mpsc::channel(capacity);
@@ -89,7 +91,8 @@ impl FlowCtx {
         (ctx, forward_receiver)
     }
 
-    /// Tries to send a datagram to the flow receiver, but drops it if the channel is full.
+    /// Tries to send a datagram to the flow receiver, but drops it if the
+    /// channel is full.
     pub(crate) fn send_best_effort(&self, datagram: InboundFrame) {
         let _ = self.send.try_send(datagram);
     }
@@ -110,8 +113,10 @@ impl Future for WaitForStream {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.get_mut() {
-            WaitForStream::Downstream(d) => Pin::new(d).poll(cx).map(StreamReady::Downstream),
-            WaitForStream::Upstream(u) => Pin::new(u).poll(cx).map(StreamReady::Upstream),
+            WaitForStream::Downstream(d) =>
+                Pin::new(d).poll(cx).map(StreamReady::Downstream),
+            WaitForStream::Upstream(u) =>
+                Pin::new(u).poll(cx).map(StreamReady::Upstream),
         }
     }
 }
@@ -130,18 +135,18 @@ pub(crate) struct ReceivedDownstreamData {
 impl Future for WaitForDownstreamData {
     type Output = ReceivedDownstreamData;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Unwraps below are Ok because chan will only be None after first Poll::Ready, which
-        // is fine to panic for non fused future.
-        self.chan
-            .as_mut()
-            .unwrap()
-            .poll_recv(cx)
-            .map(|data| ReceivedDownstreamData {
+    fn poll(
+        mut self: Pin<&mut Self>, cx: &mut Context<'_>,
+    ) -> Poll<Self::Output> {
+        // Unwraps below are Ok because chan will only be None after first
+        // Poll::Ready, which is fine to panic for non fused future.
+        self.chan.as_mut().unwrap().poll_recv(cx).map(|data| {
+            ReceivedDownstreamData {
                 stream_id: self.stream_id,
                 chan: self.chan.take().unwrap(),
                 data,
-            })
+            }
+        })
     }
 }
 
@@ -158,9 +163,11 @@ pub(crate) struct HaveUpstreamCapacity {
 impl Future for WaitForUpstreamCapacity {
     type Output = HaveUpstreamCapacity;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Unwraps below are Ok because chan will only be None after first Poll::Ready, which
-        // is fine to panic for non fused future.
+    fn poll(
+        mut self: Pin<&mut Self>, cx: &mut Context<'_>,
+    ) -> Poll<Self::Output> {
+        // Unwraps below are Ok because chan will only be None after first
+        // Poll::Ready, which is fine to panic for non fused future.
         match self.chan.as_mut().unwrap().poll_reserve(cx) {
             Poll::Ready(_) => Poll::Ready(HaveUpstreamCapacity {
                 stream_id: self.stream_id,

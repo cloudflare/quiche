@@ -1,20 +1,36 @@
 #[cfg(target_os = "linux")]
 mod linux_imports {
-    pub use libc::{
-        c_int, c_void, sock_txtime, socklen_t, IPPROTO_IP, IPPROTO_IPV6, IPV6_MTU_DISCOVER,
-        IPV6_PMTUDISC_PROBE, IP_MTU_DISCOVER, IP_PMTUDISC_PROBE,
-    };
+    pub use libc::c_int;
+    pub use libc::c_void;
+    pub use libc::sock_txtime;
+    pub use libc::socklen_t;
+    pub use libc::IPPROTO_IP;
+    pub use libc::IPPROTO_IPV6;
+    pub use libc::IPV6_MTU_DISCOVER;
+    pub use libc::IPV6_PMTUDISC_PROBE;
+    pub use libc::IP_MTU_DISCOVER;
+    pub use libc::IP_PMTUDISC_PROBE;
     pub use nix::errno::Errno;
+    pub use nix::sys::socket::getsockopt;
+    pub use nix::sys::socket::setsockopt;
+    pub use nix::sys::socket::sockopt::IpFreebind;
+    pub use nix::sys::socket::sockopt::IpTransparent;
+    pub use nix::sys::socket::sockopt::Ipv4OrigDstAddr;
+    pub use nix::sys::socket::sockopt::Ipv4PacketInfo;
+    pub use nix::sys::socket::sockopt::Ipv6OrigDstAddr;
+    pub use nix::sys::socket::sockopt::Ipv6RecvPacketInfo;
     #[cfg(feature = "perf-quic-listener-metrics")]
     pub use nix::sys::socket::sockopt::ReceiveTimestampns;
-    pub use nix::sys::socket::sockopt::{
-        IpFreebind, IpTransparent, Ipv4OrigDstAddr, Ipv4PacketInfo, Ipv6OrigDstAddr,
-        Ipv6RecvPacketInfo, RxqOvfl, TxTime, UdpGroSegment, UdpGsoSegment,
-    };
+    pub use nix::sys::socket::sockopt::RxqOvfl;
+    pub use nix::sys::socket::sockopt::TxTime;
+    pub use nix::sys::socket::sockopt::UdpGroSegment;
+    pub use nix::sys::socket::sockopt::UdpGsoSegment;
     pub use nix::sys::socket::SetSockOpt;
-    pub use nix::sys::socket::{getsockopt, setsockopt};
     pub use std::io;
-    pub use std::os::fd::{AsFd, AsRawFd as _, BorrowedFd, RawFd};
+    pub use std::os::fd::AsFd;
+    pub use std::os::fd::AsRawFd as _;
+    pub use std::os::fd::BorrowedFd;
+    pub use std::os::fd::RawFd;
 }
 
 #[cfg(target_os = "linux")]
@@ -94,9 +110,10 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// Enables [`UDP_SEGMENT`](https://man7.org/linux/man-pages/man7/udp.7.html),
     /// a generic segmentation offload (GSO).
     ///
-    /// GSO improves transmit performance by treating multiple sequential UDP packets
-    /// as a single entity in the kernel. Segmentation into individual packets happens
-    /// in the NIC, if it supports GSO. The parameter specifies the packet size.
+    /// GSO improves transmit performance by treating multiple sequential UDP
+    /// packets as a single entity in the kernel. Segmentation into
+    /// individual packets happens in the NIC, if it supports GSO. The
+    /// parameter specifies the packet size.
     pub fn gso(&mut self, max_send_udp_payload_size: usize) -> io::Result<()> {
         setsockopt(
             self.socket.as_raw_fd(),
@@ -142,8 +159,8 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// Enables [`UDP_GRO`](https://man7.org/linux/man-pages/man7/udp.7.html),
     /// a generic receive offload (GRO).
     ///
-    /// GRO improves receive performance by allowing the kernel to yield multiple
-    /// UDP packets in one [`recvmsg(2)`](https://man7.org/linux/man-pages/man2/recv.2.html)
+    /// GRO improves receive performance by allowing the kernel to yield
+    /// multiple UDP packets in one [`recvmsg(2)`](https://man7.org/linux/man-pages/man2/recv.2.html)
     /// call. It is the equivalent of GSO for the receive path.
     pub fn gro(&mut self) -> io::Result<()> {
         UdpGroSegment.set(self.socket.as_raw_fd(), &true)?;
@@ -164,8 +181,8 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// Enables [`IP_RECVORIGDSTADDR`](https://man7.org/linux/man-pages/man7/ip.7.html),
     /// which reports each packet's real IPv4 destination address.
     ///
-    /// This can be different from the socket's local address due to netfilter TPROXY
-    /// rules or eBPF redirects.
+    /// This can be different from the socket's local address due to netfilter
+    /// TPROXY rules or eBPF redirects.
     pub fn ipv4_recvorigdstaddr(&mut self) -> io::Result<()> {
         setsockopt(self.socket.as_raw_fd(), Ipv4OrigDstAddr, &true)?;
 
@@ -185,8 +202,8 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// Enables [`IPV6_RECVORIGDSTADDR`](https://elixir.bootlin.com/linux/v6.12/source/net/ipv6/datagram.c#L722-L743),
     /// which reports each packet's real IPv6 destination address.
     ///
-    /// This can be different from the socket's local address due to netfilter TPROXY
-    /// rules or eBPF redirects.
+    /// This can be different from the socket's local address due to netfilter
+    /// TPROXY rules or eBPF redirects.
     pub fn ipv6_recvorigdstaddr(&mut self) -> io::Result<()> {
         setsockopt(self.socket.as_raw_fd(), Ipv6OrigDstAddr, &true)?;
 
@@ -195,7 +212,8 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     }
 
     /// Sets [`IP_MTU_DISCOVER`](https://man7.org/linux/man-pages/man7/ip.7.html), to
-    /// `IP_PMTUDISC_PROBE`, which disables kernel PMTUD and sets the `DF` (Don't Fragment) flag.
+    /// `IP_PMTUDISC_PROBE`, which disables kernel PMTUD and sets the `DF`
+    /// (Don't Fragment) flag.
     pub fn ip_mtu_discover_probe(&mut self) -> io::Result<()> {
         setsockopt(self.socket.as_raw_fd(), IpMtuDiscoverProbe, &())?;
 
@@ -204,7 +222,8 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     }
 
     /// Sets [`IPV6_MTU_DISCOVER`](https://man7.org/linux/man-pages/man7/ipv6.7.html), to
-    /// `IPV6_PMTUDISC_PROBE`, which disables kernel PMTUD and sets the `DF` (Don't Fragment) flag.
+    /// `IPV6_PMTUDISC_PROBE`, which disables kernel PMTUD and sets the `DF`
+    /// (Don't Fragment) flag.
     pub fn ipv6_mtu_discover_probe(&mut self) -> io::Result<()> {
         setsockopt(self.socket.as_raw_fd(), Ipv6MtuDiscoverProbe, &())?;
 
@@ -217,12 +236,12 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// enabled for this socket.
     ///
     /// # Warning
-    /// These sockopts require elevated permissions to enable, so the builder will only
-    /// check their status. **If neither of them is enabled, the `PKTINFO` sockopts will
-    /// cause errors when sending packets.**
+    /// These sockopts require elevated permissions to enable, so the builder
+    /// will only check their status. **If neither of them is enabled, the
+    /// `PKTINFO` sockopts will cause errors when sending packets.**
     pub fn allows_nonlocal_source(&self) -> io::Result<bool> {
-        Ok(getsockopt(self.socket.as_raw_fd(), IpFreebind)?
-            || getsockopt(self.socket.as_raw_fd(), IpTransparent)?)
+        Ok(getsockopt(self.socket.as_raw_fd(), IpFreebind)? ||
+            getsockopt(self.socket.as_raw_fd(), IpTransparent)?)
     }
 
     /// Consumes the builder and returns the configured [`SocketCapabilities`].
@@ -235,20 +254,21 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
 #[cfg_attr(not(target_os = "linux"), expect(rustdoc::broken_intra_doc_links))]
 /// Indicators of sockopts configured for a socket.
 ///
-/// On Linux, a socket can be configured using a [`SocketCapabilitiesBuilder`], which
-/// returns the sockopts that were applied successfully. By default, all options are
-/// assumed to be disabled (including on OSes besides Linux).
+/// On Linux, a socket can be configured using a [`SocketCapabilitiesBuilder`],
+/// which returns the sockopts that were applied successfully. By default, all
+/// options are assumed to be disabled (including on OSes besides Linux).
 ///
-/// As a shortcut, you may call `apply_all_and_get_compatibility` to apply the maxmimum
-/// set of capabilities supported by this crate. The result will indicate which options
-/// were actually enabled.
+/// As a shortcut, you may call `apply_all_and_get_compatibility` to apply the
+/// maxmimum set of capabilities supported by this crate. The result will
+/// indicate which options were actually enabled.
 #[derive(Debug, Default)]
 pub struct SocketCapabilities {
     /// Indicates if the socket has `UDP_SEGMENT` enabled.
     pub(crate) has_gso: bool,
 
     /// Indicates if the socket has `SO_RXQ_OVFL` set.
-    // NOTE: RX-side sockopts are `expect(dead_code)` because we check for received cmsgs directly
+    // NOTE: RX-side sockopts are `expect(dead_code)` because we check for
+    // received cmsgs directly
     #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
     pub(crate) check_udp_drop: bool,
 
@@ -281,7 +301,8 @@ pub struct SocketCapabilities {
     #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
     pub(crate) has_ip_mtu_discover_probe: bool,
 
-    // Indicates if the socket has `IPV6_MTU_DISCOVER` set to `IPV6_PMTUDISC_PROBE`.
+    // Indicates if the socket has `IPV6_MTU_DISCOVER` set to
+    // `IPV6_PMTUDISC_PROBE`.
     #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
     pub(crate) has_ipv6_mtu_discover_probe: bool,
 }
@@ -290,7 +311,9 @@ impl SocketCapabilities {
     /// Tries to enable all supported sockopts and returns indicators
     /// of which settings were successfully applied.
     #[cfg(target_os = "linux")]
-    pub fn apply_all_and_get_compatibility<S>(socket: &S, max_send_udp_payload_size: usize) -> Self
+    pub fn apply_all_and_get_compatibility<S>(
+        socket: &S, max_send_udp_payload_size: usize,
+    ) -> Self
     where
         S: AsFd,
     {
@@ -302,8 +325,8 @@ impl SocketCapabilities {
         let _ = b.rxtime();
         let _ = b.gro();
 
-        // We can't determine if this is an IPv4 or IPv6 socket, so try setting the relevant
-        // options for both
+        // We can't determine if this is an IPv4 or IPv6 socket, so try setting
+        // the relevant options for both
         let _ = b.ip_mtu_discover_probe();
         let _ = b.ipv6_mtu_discover_probe();
         if let Ok(true) = b.allows_nonlocal_source() {

@@ -1,21 +1,23 @@
 //! Bridging the gap between [quiche] and [tokio].
 //!
 //! tokio-quiche connects [quiche::Connection]s and [quiche::h3::Connection]s to
-//! tokio's event loop. Users have the choice between implementing their own, custom
-//! [`ApplicationOverQuic`] or using the ready-made [H3Driver](crate::http3::driver::H3Driver)
-//! for HTTP/3 clients and servers.
+//! tokio's event loop. Users have the choice between implementing their own,
+//! custom [`ApplicationOverQuic`] or using the ready-made
+//! [H3Driver](crate::http3::driver::H3Driver) for HTTP/3 clients and servers.
 //!
 //! # Starting an HTTP/3 Server
 //!
-//! A server [`listen`]s on a UDP socket for QUIC connections and spawns a new tokio
-//! task to handle each individual connection.
+//! A server [`listen`]s on a UDP socket for QUIC connections and spawns a new
+//! tokio task to handle each individual connection.
 //!
 //! ```
 //! use futures::stream::StreamExt;
 //! use tokio_quiche::http3::settings::Http3Settings;
+//! use tokio_quiche::listen;
 //! use tokio_quiche::metrics::DefaultMetrics;
 //! use tokio_quiche::quic::SimpleConnectionIdGenerator;
-//! use tokio_quiche::{ConnectionParams, listen, ServerH3Driver};
+//! use tokio_quiche::ConnectionParams;
+//! use tokio_quiche::ServerH3Driver;
 //!
 //! # async fn example() -> tokio_quiche::QuicResult<()> {
 //! let socket = tokio::net::UdpSocket::bind("0.0.0.0:443").await?;
@@ -28,7 +30,8 @@
 //! let mut accept_stream = &mut listeners[0];
 //!
 //! while let Some(conn) = accept_stream.next().await {
-//!     let (driver, mut controller) = ServerH3Driver::new(Http3Settings::default());
+//!     let (driver, mut controller) =
+//!         ServerH3Driver::new(Http3Settings::default());
 //!     conn?.start(driver);
 //!
 //!     tokio::spawn(async move {
@@ -41,22 +44,27 @@
 //! # }
 //! ```
 //!
-//! For client-side use cases, check out our [`connect`](crate::quic::connect) API.
+//! For client-side use cases, check out our [`connect`](crate::quic::connect)
+//! API.
 //!
 //! # Feature Flags
 //!
-//! tokio-quiche supports a number of feature flags to enable experimental features,
-//! performance enhancements, and additional telemetry. By default, no feature flags are
-//! enabled.
+//! tokio-quiche supports a number of feature flags to enable experimental
+//! features, performance enhancements, and additional telemetry. By default, no
+//! feature flags are enabled.
 //!
-//! - `rpk`: Support for raw public keys (RPK) in QUIC handshakes (via [boring]).
-//! - `capture_keylogs`: Optional `SSLKEYLOGFILE` capturing for QUIC connections.
-//! - `gcongestion`: Replace quiche's original congestion control implementation with one
-//!    adapted from google/quiche (via quiche-mallard).
-//! - `zero-copy`: Use zero-copy sends with quiche-mallard (implies `gcongestion`).
-//! - `perf-quic-listener-metrics`: Extra telemetry for QUIC handshake durations,
-//!   including protocol overhead and network delays.
-//! - `tokio-task-metrics`: Scheduling & poll duration histograms for tokio tasks.
+//! - `rpk`: Support for raw public keys (RPK) in QUIC handshakes (via
+//!   [boring]).
+//! - `capture_keylogs`: Optional `SSLKEYLOGFILE` capturing for QUIC
+//!   connections.
+//! - `gcongestion`: Replace quiche's original congestion control implementation
+//!   with one adapted from google/quiche (via quiche-mallard).
+//! - `zero-copy`: Use zero-copy sends with quiche-mallard (implies
+//!   `gcongestion`).
+//! - `perf-quic-listener-metrics`: Extra telemetry for QUIC handshake
+//!   durations, including protocol overhead and network delays.
+//! - `tokio-task-metrics`: Scheduling & poll duration histograms for tokio
+//!   tasks.
 
 #[cfg(not(feature = "gcongestion"))]
 pub extern crate quiche_cf as quiche;
@@ -76,22 +84,26 @@ pub use datagram_socket;
 
 use foundations::telemetry::settings::LogVerbosity;
 use std::io;
-use std::sync::{Arc, Once};
+use std::sync::Arc;
+use std::sync::Once;
 use tokio::net::UdpSocket;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::metrics::Metrics;
 use crate::socket::QuicListener;
 
-pub use crate::http3::driver::{
-    ClientH3Controller, ClientH3Driver, ServerH3Controller, ServerH3Driver,
-};
-pub use crate::http3::{ClientH3Connection, ServerH3Connection};
-pub use crate::quic::connection::{
-    ApplicationOverQuic, ConnectionIdGenerator, InitialQuicConnection,
-    QuicConnection,
-};
-pub use crate::result::{BoxError, QuicResult};
+pub use crate::http3::driver::ClientH3Controller;
+pub use crate::http3::driver::ClientH3Driver;
+pub use crate::http3::driver::ServerH3Controller;
+pub use crate::http3::driver::ServerH3Driver;
+pub use crate::http3::ClientH3Connection;
+pub use crate::http3::ServerH3Connection;
+pub use crate::quic::connection::ApplicationOverQuic;
+pub use crate::quic::connection::ConnectionIdGenerator;
+pub use crate::quic::connection::InitialQuicConnection;
+pub use crate::quic::connection::QuicConnection;
+pub use crate::result::BoxError;
+pub use crate::result::QuicResult;
 pub use crate::settings::ConnectionParams;
 
 #[doc(hidden)]
@@ -104,11 +116,13 @@ pub use crate::result::QuicResultExt;
 pub type QuicConnectionStream<M> =
     ReceiverStream<io::Result<InitialQuicConnection<UdpSocket, M>>>;
 
-/// Starts listening for inbound QUIC connections on the given [`QuicListener`]s.
+/// Starts listening for inbound QUIC connections on the given
+/// [`QuicListener`]s.
 ///
-/// Each socket starts a separate tokio task to process and route inbound packets.
-/// This task emits connections on the respective [`QuicConnectionStream`] after
-/// receiving the client's QUIC initial and (optionally) validating its IP address.
+/// Each socket starts a separate tokio task to process and route inbound
+/// packets. This task emits connections on the respective
+/// [`QuicConnectionStream`] after receiving the client's QUIC initial and
+/// (optionally) validating its IP address.
 ///
 /// The task shuts down when the returned stream is closed (or dropped) and all
 /// previously-yielded connections are closed.
@@ -170,16 +184,17 @@ static GLOBAL_LOGGER_ONCE: Once = Once::new();
 ///
 /// # Warning
 ///
-/// This should **only be used for local debugging**. Quiche can potentially emit lots (and lots,
-/// and lots) of logs (the TRACE level emits a log record on every packet and frame) and you can
-/// very easily overwhelm your logging pipeline.
+/// This should **only be used for local debugging**. Quiche can potentially
+/// emit lots (and lots, and lots) of logs (the TRACE level emits a log record
+/// on every packet and frame) and you can very easily overwhelm your logging
+/// pipeline.
 ///
 /// # Note
 ///
-/// Quiche uses the `env_logger` crate, which uses `log` under the hood. `log` requires that you
-/// only set the global logger once. That means that we have to register the logger at `listen()`
-/// time for servers - for clients, we should register loggers when the `quiche::Connection` is
-/// established.
+/// Quiche uses the `env_logger` crate, which uses `log` under the hood. `log`
+/// requires that you only set the global logger once. That means that we have
+/// to register the logger at `listen()` time for servers - for clients, we
+/// should register loggers when the `quiche::Connection` is established.
 pub(crate) fn capture_quiche_logs() {
     GLOBAL_LOGGER_ONCE.call_once(|| {
         use foundations::telemetry::log as foundations_log;
@@ -200,9 +215,10 @@ pub(crate) fn capture_quiche_logs() {
 
         slog_stdlog::init_with_level(normalized_level).unwrap();
 
-        // The slog Drain becomes `slog::Discard` when the scope_guard is dropped, and you can't set
-        // the global logger again because of a mandate in the `log` crate. We have to manually
-        // `forget` the scope guard so that the logger remains registered for the duration of the
+        // The slog Drain becomes `slog::Discard` when the scope_guard is dropped,
+        // and you can't set the global logger again because of a mandate
+        // in the `log` crate. We have to manually `forget` the scope
+        // guard so that the logger remains registered for the duration of the
         // process.
         std::mem::forget(scope_guard)
     });

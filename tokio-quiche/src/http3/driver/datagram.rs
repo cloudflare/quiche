@@ -1,11 +1,17 @@
 use super::InboundFrame;
-use crate::buf_factory::{BufFactory, PooledDgram};
+use crate::buf_factory::BufFactory;
+use crate::buf_factory::PooledDgram;
 use crate::quic::QuicheConnection;
-use quiche::h3::{self, NameValue};
+use quiche::h3::NameValue;
+use quiche::h3::{
+    self,
+};
 
 /// Extracts the DATAGRAM flow ID proxied over the given `stream_id`,
 /// or `None` if this is not a proxy request.
-pub(crate) fn extract_flow_id(stream_id: u64, headers: &[h3::Header]) -> Option<u64> {
+pub(crate) fn extract_flow_id(
+    stream_id: u64, headers: &[h3::Header],
+) -> Option<u64> {
     let mut method = None;
     let mut datagram_flow_id: Option<u64> = None;
     let mut protocol = None;
@@ -14,16 +20,17 @@ pub(crate) fn extract_flow_id(stream_id: u64, headers: &[h3::Header]) -> Option<
         match header.name() {
             b":method" => method = Some(header.value()),
             b":protocol" => protocol = Some(header.value()),
-            b"datagram-flow-id" => {
+            b"datagram-flow-id" =>
                 datagram_flow_id = std::str::from_utf8(header.value())
                     .ok()
-                    .and_then(|v| v.parse().ok())
-            }
-            _ => {}
+                    .and_then(|v| v.parse().ok()),
+            _ => {},
         };
 
-        // We have all of the information needed to get a flow_id or quarter_stream_id
-        if method.is_some() && (datagram_flow_id.is_some() || protocol.is_some()) {
+        // We have all of the information needed to get a flow_id or
+        // quarter_stream_id
+        if method.is_some() && (datagram_flow_id.is_some() || protocol.is_some())
+        {
             break;
         }
     }
@@ -43,9 +50,7 @@ pub(crate) fn extract_flow_id(stream_id: u64, headers: &[h3::Header]) -> Option<
 
 /// Sends an HTTP/3 datagram over the QUIC connection with the given `flow_id`.
 pub(crate) fn send_h3_dgram(
-    conn: &mut QuicheConnection,
-    flow_id: u64,
-    mut dgram: PooledDgram,
+    conn: &mut QuicheConnection, flow_id: u64, mut dgram: PooledDgram,
 ) -> quiche::Result<()> {
     let mut prefix = [0u8; 8];
     let mut buf = octets::OctetsMut::with_slice(&mut prefix);
@@ -63,12 +68,15 @@ pub(crate) fn send_h3_dgram(
 /// Reads the next HTTP/3 datagram from the QUIC connection.
 ///
 /// [`quiche::Error::Done`] is returned if there is no datagram to read.
-pub(crate) fn receive_h3_dgram(conn: &mut QuicheConnection) -> quiche::Result<(u64, InboundFrame)> {
+pub(crate) fn receive_h3_dgram(
+    conn: &mut QuicheConnection,
+) -> quiche::Result<(u64, InboundFrame)> {
     let dgram = conn.dgram_recv_vec()?;
     let mut buf = octets::Octets::with_slice(&dgram);
     let flow_id = buf.get_varint()?;
     let advance = buf.off();
-    let datagram = InboundFrame::Datagram(BufFactory::dgram_from_slice(&dgram[advance..]));
+    let datagram =
+        InboundFrame::Datagram(BufFactory::dgram_from_slice(&dgram[advance..]));
 
     Ok((flow_id, datagram))
 }

@@ -13,10 +13,11 @@ pub use self::tls::*;
 
 /// Combined configuration parameters required to establish a QUIC connection.
 ///
-/// [`ConnectionParams`] aggregates the parameters required for all QUIC connections,
-/// regardless of whether it's a client- or server-side connection. To construct them,
-/// either `ConnectionParams::new_server` or `ConnectionParams::new_client` must be
-/// used. The parameters can be modified freely after construction.
+/// [`ConnectionParams`] aggregates the parameters required for all QUIC
+/// connections, regardless of whether it's a client- or server-side connection.
+/// To construct them, either `ConnectionParams::new_server` or
+/// `ConnectionParams::new_client` must be used. The parameters can be modified
+/// freely after construction.
 #[derive(Debug, Default)]
 #[non_exhaustive] // force use of constructor functions
 pub struct ConnectionParams<'a> {
@@ -33,9 +34,7 @@ impl<'a> ConnectionParams<'a> {
     /// Servers should always specify TLS credentials.
     #[inline]
     pub fn new_server(
-        settings: QuicSettings,
-        tls_cert: TlsCertificatePaths<'a>,
-        hooks: Hooks,
+        settings: QuicSettings, tls_cert: TlsCertificatePaths<'a>, hooks: Hooks,
     ) -> Self {
         Self {
             settings,
@@ -48,8 +47,7 @@ impl<'a> ConnectionParams<'a> {
     /// Clients may enable mTLS by specifying TLS credentials.
     #[inline]
     pub fn new_client(
-        settings: QuicSettings,
-        tls_cert: Option<TlsCertificatePaths<'a>>,
+        settings: QuicSettings, tls_cert: Option<TlsCertificatePaths<'a>>,
         hooks: Hooks,
     ) -> Self {
         Self {
