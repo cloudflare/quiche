@@ -1052,7 +1052,7 @@ pub enum H3Command {
 pub struct RequestSender<C, T> {
     sender: UnboundedSender<C>,
     // Required to work around dangling type parameter
-    _r: PhantomData<T>,
+    _r: PhantomData<fn() -> T>,
 }
 
 impl<C, T: Into<C>> RequestSender<C, T> {
