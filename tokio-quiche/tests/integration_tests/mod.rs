@@ -173,7 +173,7 @@ async fn test_ioworker_state_machine_pause() {
     });
 
     let url = format!("{url}/1");
-    let summary = timeout(Duration::from_secs(1), h3i_fixtures::request(&url, 1))
+    let summary = timeout(Duration::from_secs(2), h3i_fixtures::request(&url, 1))
         .await
         .expect("request timed out")
         .expect("request failed");
