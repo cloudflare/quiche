@@ -13,8 +13,7 @@
 //!
 //! # QUIC Connection Internals
 //!
-//! <!-- TODO: switch to github link before merging into quiche -->
-//! ![QUIC Worker Setup](https://gitlab.cfdata.org/cloudflare/oxy/httx/-/raw/master/tokio-quiche/docs/worker.png)
+//! ![QUIC Worker Setup](https://github.com/cloudflare/quiche/blob/master/tokio-quiche/docs/worker.png?raw=true)
 //!
 //! *Note: Internal details are subject to change between minor versions.*
 //!
