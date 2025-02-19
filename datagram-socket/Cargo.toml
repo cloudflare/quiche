@@ -6,9 +6,10 @@ edition = { workspace = true }
 license = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
+description = "Utilities for working with datagram sockets"
 
 [dependencies]
-buffer-pool = { path = "../buffer-pool" }
+buffer-pool = { workspace = true }
 futures-util = { workspace = true }
 libc = { workspace = true }
 smallvec = { workspace = true }

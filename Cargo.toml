@@ -28,6 +28,7 @@ tag-message = "{{crate_name}} {{version}}"
 publish = false
 
 [workspace.dependencies]
+buffer-pool = { version = "0.1.0", path = "./buffer-pool" }
 crossbeam = { version = "0.8.1", default-features = false }
 env_logger = "0.10"
 futures-util = { version = "0.3", default-features = false }
