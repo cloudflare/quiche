@@ -1,0 +1,74 @@
+[package]
+name = "tokio-quiche"
+version = "0.1.0"
+repository = { workspace = true }
+description = "Asynchronous wrapper around quiche"
+keywords = ["quic", "http3", "tokio"]
+categories = { workspace = true }
+rust-version = "1.83"
+edition = { workspace = true }
+readme = "README.md"
+
+[features]
+# Forwarded quiche features for re-exports
+fuzzing = ["quiche-cf/fuzzing", "quiche-mallard?/fuzzing"]
+quiche_internal = ["quiche-cf/internal", "quiche-mallard?/internal"]
+
+# Enable extra timing instrumentation for QUIC handshakes, including protocol
+# overhead and network delays.
+perf-quic-listener-metrics = []
+
+# Enable raw public key (RPK) support for QUIC handshakes.
+rpk = ["boring/rpk"]
+
+# Use the quiche-mallard fork in place of upstream quiche.
+# quiche-mallard replaces quiche's original congestion control
+# implementation with one adapted from google/quiche.
+gcongestion = ["dep:quiche-mallard"]
+# Use quiche-mallard with zero-copy send calls.
+zero-copy = ["gcongestion"]
+
+# Enable SSLKEYLOGFILE capturing for QUIC connections.
+capture_keylogs = []
+
+# Enable scheduling & poll duration histograms for tokio tasks.
+tokio-task-metrics = []
+
+[dependencies]
+boring = { workspace = true }
+buffer-pool = { workspace = true }
+crossbeam = { workspace = true, default-features = false }
+datagram-socket = { workspace = true }
+foundations = { workspace = true, default-features = false, features = ["server-client-common-default"] }
+futures = { workspace = true }
+futures-util = { workspace = true }
+ipnetwork = { workspace = true }
+log = { workspace = true }
+octets = { version = "0.3.0" }
+pin-project = { workspace = true }
+quiche-cf = { workspace = true, features = ["boringssl-boring-crate", "qlog"] }
+quiche-mallard = { workspace = true, features = ["boringssl-boring-crate", "qlog"], optional = true }
+ring = { workspace = true }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_with = { workspace = true }
+slog-scope = { workspace = true }
+slog-stdlog = { workspace = true }
+smallvec = { workspace = true }
+task-killswitch = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros"] }
+tokio-stream = { workspace = true, features = ["net", "io-util"] }
+tokio-util = { workspace = true, features = ["compat", "time", "codec", "io", "rt"] }
+triomphe = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+h3i = { workspace = true }
+rand = { workspace = true, features = ["small_rng"] }
+regex = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["time", "test-util"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
+nix = { workspace = true, features = ["signal"] }

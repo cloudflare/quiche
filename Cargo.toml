@@ -8,6 +8,7 @@ members = [
   "qlog",
   "quiche",
   "task-killswitch",
+  "tokio-quiche",
 ]
 exclude = ["fuzz", "tools/http3_test"]
 resolver = "2"
@@ -28,18 +29,43 @@ tag-message = "{{crate_name}} {{version}}"
 publish = false
 
 [workspace.dependencies]
+boring = { version = "4.3" }
 buffer-pool = { version = "0.1.0", path = "./buffer-pool" }
 crossbeam = { version = "0.8.1", default-features = false }
+datagram-socket = { version = "0.1.0", path = "datagram-socket" }
 env_logger = "0.10"
+foundations = { version = "4", default-features = false }
+futures = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false }
+h3i = { version = "0.2" }
+ipnetwork = { version = "0.20" }
 libc = { version = "0.2.76", default-features = false }
-log = "0.4"
-octets = { version = "0.3", path = "./octets" }
+log = { version = "0.4.20" }
+nix = { version = "0.26.2" }
+octets = { version = "0.3.0", path = "octets" }
 once_cell = { version = "1.5.2", default-features = false }
 parking_lot = { version = "0.12.1", default-features = false }
+pin-project = { version = "1.0.12" }
 qlog = { version = "0.15", path = "./qlog" }
+quiche = { version = "0.23.2", path = "quiche" }
+quiche-cf = { version = "0.22", package = "quiche" }
+quiche-mallard = { version = "0.21.0" }
+rand = { version = "0.8" }
+regex = { version = "1.4.2" }
+ring = { version = "0.17.8" }
+serde = { version = "1" }
+serde_json = { version = "1" }
+serde_with = { version = "3.3" }
+slog-scope = { version = "4.0" }
+slog-stdlog = { version = "4.1.1" }
 smallvec = { version = "1.10", default-features = false }
+task-killswitch = { version = "0.1.0", path = "task-killswitch" }
+thiserror = { version = "1" }
 tokio = { version = "1.29", default-features = false }
+tokio-stream = { version = "0.1" }
+tokio-util = { version = "0.7.13" }
+triomphe = { version = "0.1" }
+url = { version = "2" }
 
 [profile.bench]
 debug = true

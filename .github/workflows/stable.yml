@@ -137,7 +137,7 @@ jobs:
         run: cargo build --target=${{ matrix.target }} --verbose
 
   quiche_windows:
-    runs-on: windows-2019
+    runs-on: windows-2022
     strategy:
       matrix:
         target: ["x86_64-pc-windows-msvc", "i686-pc-windows-msvc", "x86_64-pc-windows-gnu", "i686-pc-windows-gnu"]
@@ -155,9 +155,6 @@ jobs:
         with:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
           targets: ${{ matrix.target }}
-
-      - name: Set default toolchain
-        run: rustup default ${{ env.RUSTTOOLCHAIN }}-${{ matrix.target }}
 
       - name: Set up MinGW for 64 bit
         if: matrix.target == 'x86_64-pc-windows-gnu'
@@ -179,11 +176,11 @@ jobs:
 
       - name: Run cargo build
         if: endsWith(matrix.target, '-gnu')
-        run: cargo build --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
+        run: cargo build --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog,boringssl-boring-crate
 
       - name: Run cargo test
         if: endsWith(matrix.target, '-msvc')
-        run: cargo test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
+        run: cargo test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog,boringssl-boring-crate
 
   quiche_multiarch:
     runs-on: ubuntu-latest
@@ -211,7 +208,7 @@ jobs:
         run: cargo-binstall -y cross
 
       - name: Run cargo test using cross
-        run: cross test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
+        run: cross test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog --workspace --exclude tokio-quiche
 
   http3_test:
     runs-on: ubuntu-latest

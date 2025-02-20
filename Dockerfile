@@ -11,6 +11,7 @@ COPY octets/ ./octets/
 COPY qlog/ ./qlog/
 COPY quiche/ ./quiche/
 COPY task-killswitch ./task-killswitch/
+COPY tokio-quiche ./tokio-quiche/
 
 RUN apt-get update && apt-get install -y cmake && rm -rf /var/lib/apt/lists/*
 
