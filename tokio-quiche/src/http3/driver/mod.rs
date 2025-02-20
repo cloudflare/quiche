@@ -555,7 +555,16 @@ impl<H: DriverHooks> H3Driver<H> {
         self.forward_settings()?;
 
         match event {
-            // Requests/responses are exclusively handled by hooks
+            // Requests/responses are exclusively handled by hooks.
+            #[cfg(not(feature = "gcongestion"))]
+            h3::Event::Headers { list, more_frames } =>
+                H::headers_received(self, qconn, InboundHeaders {
+                    stream_id,
+                    headers: list,
+                    has_body: more_frames,
+                }),
+
+            #[cfg(feature = "gcongestion")]
             h3::Event::Headers { list, has_body } =>
                 H::headers_received(self, qconn, InboundHeaders {
                     stream_id,
