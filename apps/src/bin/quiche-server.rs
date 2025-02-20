@@ -784,10 +784,7 @@ fn set_txtime_sockopt(sock: &mio::net::UdpSocket) -> io::Result<()> {
         flags: 0,
     };
 
-    // mio::net::UdpSocket doesn't implement AsFd (yet?).
-    let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(sock.as_raw_fd()) };
-
-    setsockopt(&fd, TxTime, &config)?;
+    setsockopt(sock.as_raw_fd(), TxTime, &config)?;
 
     Ok(())
 }
