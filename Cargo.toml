@@ -43,7 +43,6 @@ libc = { version = "0.2.76", default-features = false }
 log = { version = "0.4.20" }
 nix = { version = "0.26.2" }
 octets = { version = "0.3.0", path = "octets" }
-once_cell = { version = "1.5.2", default-features = false }
 parking_lot = { version = "0.12.1", default-features = false }
 pin-project = { version = "1.0.12" }
 qlog = { version = "0.15", path = "./qlog" }

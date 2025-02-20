@@ -9,7 +9,6 @@ categories = { workspace = true }
 description = "Abort all tokio tasks at once"
 
 [dependencies]
-once_cell = { workspace = true, features = ["critical-section"] }
 parking_lot = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync"] }
 
