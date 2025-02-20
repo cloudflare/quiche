@@ -154,7 +154,7 @@ fn encode_str<const LOWER_CASE: bool>(
     // those just encode the literal string.
     match super::huffman::encode_output_length::<LOWER_CASE>(v) {
         Ok(len) => {
-            encode_int(len as u64, first | 1 << prefix, prefix, b)?;
+            encode_int(len as u64, first | (1 << prefix), prefix, b)?;
             super::huffman::encode::<LOWER_CASE>(v, b)?;
         },
 
