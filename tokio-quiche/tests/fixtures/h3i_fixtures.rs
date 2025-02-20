@@ -88,7 +88,7 @@ pub async fn summarize_connection(
     h3i: h3i::config::Config, actions: Vec<Action>,
 ) -> ConnectionSummary {
     tokio::task::spawn_blocking(move || {
-        h3i::client::sync_client::connect(&h3i, &actions).unwrap()
+        h3i::client::sync_client::connect(h3i, &actions, None).unwrap()
     })
     .await
     .unwrap()
@@ -123,7 +123,7 @@ pub async fn request(
     });
 
     tokio::task::spawn_blocking(move || {
-        h3i::client::sync_client::connect(&h3i, &actions)
+        h3i::client::sync_client::connect(h3i, &actions, None)
     })
     .await
     .unwrap()
@@ -137,10 +137,13 @@ pub fn received_status_code_on_stream(
         .headers_on_stream(stream)
         .iter()
         .any(|e| {
-            e.status_code()
-                .expect("no status code")
-                .expect("unparsable status code") ==
-                code
+            let u16 =
+                std::str::from_utf8(e.status_code().expect("no status code"))
+                    .expect("invalid utf8 in status code")
+                    .parse::<u16>()
+                    .expect("unparseable status code");
+
+            u16 == code
         })
 }
 

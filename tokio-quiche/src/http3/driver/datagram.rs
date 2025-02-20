@@ -24,6 +24,9 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#[cfg(feature = "gcongestion")]
+extern crate octets_mallard as octets;
+
 use super::InboundFrame;
 use crate::buf_factory::BufFactory;
 use crate::buf_factory::PooledDgram;

@@ -23,11 +23,8 @@ mio = { version = "0.8", features = ["net", "os-poll"] }
 multimap = "0.10"
 octets = { workspace = true }
 qlog = { workspace = true }
-quiche = { version = "0.23", path = "../quiche", features = [
-  "internal",
-  "qlog",
-] }
-rand = "0.8.5"
+quiche = { workspace = true, features = ["internal", "qlog"] }
+rand = { workspace = true }
 smallvec = { workspace = true }
 serde_with = "1"
 serde_json = "1"

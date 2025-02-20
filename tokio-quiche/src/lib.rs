@@ -93,7 +93,7 @@
 //!   tasks.
 
 #[cfg(not(feature = "gcongestion"))]
-pub extern crate quiche_cf as quiche;
+pub extern crate quiche;
 #[cfg(feature = "gcongestion")]
 pub extern crate quiche_mallard as quiche;
 
