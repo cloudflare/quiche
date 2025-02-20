@@ -27,8 +27,6 @@
 use crate::args::*;
 use crate::common::*;
 
-use std::net::ToSocketAddrs;
-
 use std::io::prelude::*;
 
 use std::rc::Rc;
@@ -67,7 +65,7 @@ pub fn connect(
     let peer_addr = if let Some(addr) = &args.connect_to {
         addr.parse().expect("--connect-to is expected to be a string containing an IPv4 or IPv6 address with a port. E.g. 192.0.2.0:443")
     } else {
-        connect_url.to_socket_addrs().unwrap().next().unwrap()
+        *connect_url.socket_addrs(|| None).unwrap().first().unwrap()
     };
 
     // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the

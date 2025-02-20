@@ -29,12 +29,12 @@ docopt = "1"
 env_logger = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
-mio = { version = "0.8", features = ["net", "os-poll"] }
-nix = { version = "0.27", features = ["net", "socket", "uio"] }
+mio = { workspace = true, features = ["net", "os-poll"] }
+nix = { workspace = true, features = ["net", "socket", "uio"] }
 octets = { workspace = true }
-quiche = { path = "../quiche" }
-ring = "0.17"
-url = "1"
+quiche = { workspace = true }
+ring = { workspace = true }
+url = { workspace = true }
 
 [lib]
 crate-type = ["lib"]
