@@ -9246,7 +9246,7 @@ mod tests {
         };
         assert!(unknown_params.push(massive_unknown_param).is_err());
         assert!(unknown_params.capacity == 0);
-        assert!(unknown_params.parameters.len() == 0);
+        assert!(unknown_params.parameters.is_empty());
     }
 
     #[test]
@@ -9272,7 +9272,7 @@ mod tests {
 
         assert!(unknown_params.push(massive_unknown_param).is_err());
         assert!(unknown_params.capacity == 256);
-        assert!(unknown_params.parameters.len() == 0);
+        assert!(unknown_params.parameters.is_empty());
 
         unknown_params.push(big_unknown_param).unwrap();
         assert!(unknown_params.capacity == 16);
