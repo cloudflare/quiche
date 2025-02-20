@@ -50,12 +50,29 @@ jobs:
           echo "LD_LIBRARY_PATH=$PWD" >> "$GITHUB_ENV"
 
       - name: Run cargo test
+        if: ${{ matrix.tls-feature != 'openssl' }}
         run: cargo test --verbose --all-targets --features=ffi,qlog,${{ matrix.tls-feature }}
+
+      # Don't run tokio-quiche tests when building with OpenSSL as they require
+      # BoringSSL.
+      - name: Run cargo test
+        if: ${{ matrix.tls-feature == 'openssl' }}
+        run: cargo test --verbose --all-targets --features=ffi,qlog,${{ matrix.tls-feature }} --workspace --exclude tokio-quiche
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
       - name: Run cargo doc test
+        if: ${{ matrix.tls-feature != 'openssl' }}
         run: cargo test --verbose --doc --features=ffi,qlog,${{ matrix.tls-feature }}
+
+      # Need to run doc tests separately.
+      # (https://github.com/rust-lang/cargo/issues/6669)
+      #
+      # Don't run tokio-quiche tests when building with OpenSSL as they require
+      # BoringSSL.
+      - name: Run cargo doc test
+        if: ${{ matrix.tls-feature == 'openssl' }}
+        run: cargo test --verbose --doc --features=ffi,qlog,${{ matrix.tls-feature }} --workspace --exclude tokio-quiche
 
       # NOTE: this is disabled as it fails when building changes that bump
       # version of local crates (e.g. when doing a `qlog` release) that have not
