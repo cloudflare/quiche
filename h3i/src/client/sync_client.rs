@@ -26,7 +26,6 @@
 
 //! Responsible for creating a [quiche::Connection] and managing I/O.
 
-use std::net::ToSocketAddrs;
 use std::slice::Iter;
 use std::time::Duration;
 use std::time::Instant;
@@ -103,11 +102,11 @@ pub fn connect(
         addr.parse().expect("--connect-to is expected to be a string containing an IPv4 or IPv6 address with a port. E.g. 192.0.2.0:443")
     } else {
         let x = format!("https://{}", args.host_port);
-        url::Url::parse(&x)
+        *url::Url::parse(&x)
             .unwrap()
-            .to_socket_addrs()
+            .socket_addrs(|| None)
             .unwrap()
-            .next()
+            .first()
             .unwrap()
     };
 

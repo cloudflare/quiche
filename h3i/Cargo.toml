@@ -25,8 +25,7 @@ octets = { workspace = true }
 qlog = { workspace = true }
 quiche = { workspace = true, features = ["internal", "qlog"] }
 rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 smallvec = { workspace = true }
-serde_with = "1"
-serde_json = "1"
-serde = "1"
-url = "1"
+url = { workspace = true }
