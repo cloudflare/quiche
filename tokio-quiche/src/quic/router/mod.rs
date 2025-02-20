@@ -874,7 +874,7 @@ mod tests {
         };
         let actions = [Action::ConnectionClose { error: conn_close }];
 
-        let _ = h3i::client::sync_client::connect(&h3i_config, &actions);
+        let _ = h3i::client::sync_client::connect(h3i_config, &actions, None);
     }
 
     #[tokio::test]
