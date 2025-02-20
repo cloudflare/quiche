@@ -24,15 +24,16 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use once_cell::sync::Lazy;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use std::collections::HashMap;
+
 use std::future::Future;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::sync::LazyLock;
 
 enum ActiveTaskOp {
     Add { id: u64, handle: JoinHandle<()> },
@@ -156,7 +157,8 @@ impl ActiveTasks {
 }
 
 /// The global [`TaskKillswitch`] exposed publicly from the crate.
-static TASK_KILLSWITCH: Lazy<TaskKillswitch> = Lazy::new(TaskKillswitch::new);
+static TASK_KILLSWITCH: LazyLock<TaskKillswitch> =
+    LazyLock::new(TaskKillswitch::new);
 
 /// Spawns a new asynchronous task and registers it in the crate's global
 /// killswitch.
