@@ -41,6 +41,7 @@ h3i = { version = "0.3", path = "./h3i" }
 ipnetwork = { version = "0.20" }
 libc = { version = "0.2.76", default-features = false }
 log = { version = "0.4.20" }
+mio = { version = "0.8" }
 nix = { version = "0.26.2" }
 octets = { version = "0.3.0", path = "./octets" }
 parking_lot = { version = "0.12.1", default-features = false }

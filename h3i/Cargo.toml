@@ -19,7 +19,7 @@ clap = "3"
 env_logger = { workspace = true }
 inquire = "0.6.2"
 log = { workspace = true, features = ["std"] }
-mio = { version = "0.8", features = ["net", "os-poll"] }
+mio = { workspace = true, features = ["net", "os-poll"] }
 multimap = "0.10"
 octets = { workspace = true }
 qlog = { workspace = true }
