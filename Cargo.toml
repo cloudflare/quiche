@@ -24,7 +24,8 @@ categories = ["network-programming"]
 [workspace.metadata.release]
 pre-release-commit-message = "{{crate_name}}: release {{version}}"
 consolidate-commits = false
-tag-name = "{{version}}"
+tag-prefix = "{{crate_name}}-"
+tag-name = "{{prefix}}{{version}}"
 tag-message = "{{crate_name}} {{version}}"
 publish = false
 
