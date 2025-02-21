@@ -852,11 +852,16 @@ mod tests {
     use tokio::net::UdpSocket;
     use tokio::time;
 
-    fn path_relative_to_manifest_dir(path: &str) -> String {
-        let mut res = std::fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
-        res.push(path);
-        res.to_string_lossy().into_owned()
-    }
+    const TEST_CERT_FILE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/",
+        "../quiche/examples/cert.crt"
+    );
+    const TEST_KEY_FILE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/",
+        "../quiche/examples/cert.key"
+    );
 
     fn test_connect(host_port: String) {
         let h3i_config = h3i::config::Config::new()
@@ -889,8 +894,8 @@ mod tests {
         };
 
         let tls_cert_settings = TlsCertificatePaths {
-            cert: &path_relative_to_manifest_dir("./certs/proxy-cert.pem"),
-            private_key: &path_relative_to_manifest_dir("./certs/proxy-key.pem"),
+            cert: &TEST_CERT_FILE,
+            private_key: &TEST_KEY_FILE,
             kind: crate::settings::CertificateKind::X509,
         };
 

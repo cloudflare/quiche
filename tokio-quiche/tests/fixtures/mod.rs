@@ -69,7 +69,19 @@ pub use tokio_quiche::ServerH3Connection;
 pub use tokio_quiche::ServerH3Driver;
 
 pub mod h3i_fixtures;
+
 use h3i_fixtures::stream_body;
+
+pub const TEST_CERT_FILE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/",
+    "../quiche/examples/cert.crt"
+);
+pub const TEST_KEY_FILE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/",
+    "../quiche/examples/cert.key"
+);
 
 pub struct TestConnectionHook {
     was_called: Arc<AtomicBool>,
@@ -220,8 +232,8 @@ where
     let url = format!("http://127.0.0.1:{}", socket.local_addr().unwrap().port());
 
     let tls_cert_settings = TlsCertificatePaths {
-        cert: &path_relative_to_manifest_dir("./certs/proxy-cert.pem"),
-        private_key: &path_relative_to_manifest_dir("./certs/proxy-key.pem"),
+        cert: &TEST_CERT_FILE,
+        private_key: &TEST_KEY_FILE,
         kind: tokio_quiche::settings::CertificateKind::X509,
     };
 
@@ -283,12 +295,4 @@ pub fn map_responses(
     }
 
     map
-}
-
-pub fn path_relative_to_manifest_dir(
-    path: impl AsRef<std::path::Path>,
-) -> String {
-    let mut res = std::fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
-    res.push(path);
-    res.to_string_lossy().into_owned()
 }

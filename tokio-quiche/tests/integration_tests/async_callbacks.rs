@@ -63,11 +63,11 @@ async fn test_hello_world_async_callbacks() {
             });
 
             ssl_ctx_builder
-                .set_private_key_file("./certs/proxy-key.pem", SslFiletype::PEM)
+                .set_private_key_file(&TEST_KEY_FILE, SslFiletype::PEM)
                 .unwrap();
 
             ssl_ctx_builder
-                .set_certificate_chain_file("./certs/proxy-cert.pem")
+                .set_certificate_chain_file(&TEST_CERT_FILE)
                 .unwrap();
 
             self.was_called.store(true, Ordering::SeqCst);
@@ -127,11 +127,11 @@ async fn test_async_callbacks_fail_after_initial_send() {
             });
 
             ssl_ctx_builder
-                .set_private_key_file("./certs/proxy-key.pem", SslFiletype::PEM)
+                .set_private_key_file(&TEST_KEY_FILE, SslFiletype::PEM)
                 .unwrap();
 
             ssl_ctx_builder
-                .set_certificate_chain_file("./certs/proxy-cert.pem")
+                .set_certificate_chain_file(&TEST_CERT_FILE)
                 .unwrap();
 
             Some(ssl_ctx_builder)
