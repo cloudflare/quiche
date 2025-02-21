@@ -2,6 +2,7 @@
 name = "tokio-quiche"
 version = "0.1.0"
 repository = { workspace = true }
+license = { workspace = true }
 description = "Asynchronous wrapper around quiche"
 keywords = ["quic", "http3", "tokio"]
 categories = { workspace = true }
