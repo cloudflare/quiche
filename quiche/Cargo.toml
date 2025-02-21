@@ -51,6 +51,9 @@ ffi = ["dep:cdylib-link-lines"]
 # Exposes internal APIs that have no stability guarantees across versions.
 internal = []
 
+[package.metadata.release]
+tag-prefix = ""
+
 [package.metadata.docs.rs]
 no-default-features = true
 features = ["boringssl-boring-crate", "qlog"]
