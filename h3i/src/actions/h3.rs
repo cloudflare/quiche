@@ -39,6 +39,7 @@ use quiche::h3::Header;
 use quiche::ConnectionError;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_with::serde_as;
 
 use crate::encode_header_block;
 
@@ -105,11 +106,15 @@ pub enum Action {
 }
 
 /// Configure the wait behavior for a connection.
+#[serde_as]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(untagged)]
 pub enum WaitType {
     /// Wait for a time before firing the next action
-    WaitDuration(Duration),
+    #[serde(rename = "duration")]
+    WaitDuration(
+        #[serde_as(as = "serde_with::DurationMilliSecondsWithFrac<f64>")]
+        Duration,
+    ),
     /// Wait for some form of a response before firing the next action. This can
     /// be superseded in several cases:
     /// 1. The peer resets the specified stream.
