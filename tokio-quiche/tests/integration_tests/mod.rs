@@ -156,8 +156,8 @@ async fn test_ioworker_state_machine_pause() {
     let url = format!("http://127.0.0.1:{}", socket.local_addr().unwrap().port());
 
     let tls_cert_settings = TlsCertificatePaths {
-        cert: &path_relative_to_manifest_dir("./certs/proxy-cert.pem"),
-        private_key: &path_relative_to_manifest_dir("./certs/proxy-key.pem"),
+        cert: &TEST_CERT_FILE,
+        private_key: &TEST_KEY_FILE,
         kind: tokio_quiche::settings::CertificateKind::X509,
     };
 
