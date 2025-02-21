@@ -599,14 +599,14 @@ mod tests {
             importance: qlog::events::EventImportance::Core,
             name: H3I_WAIT.to_string(),
             data: serde_json::to_value(WaitType::WaitDuration(
-                Duration::from_millis(0),
+                Duration::from_millis(12345),
             ))
             .unwrap(),
         };
         let serialized = serde_json::to_string(&ev);
 
         let expected =
-            r#"{"time":123.0,"name":"h3i:wait","data":{"secs":0,"nanos":0}}"#;
+            r#"{"time":123.0,"name":"h3i:wait","data":{"duration":12345.0}}"#;
         assert_eq!(&serialized.unwrap(), expected);
     }
 
@@ -617,13 +617,13 @@ mod tests {
             importance: qlog::events::EventImportance::Core,
             name: H3I_WAIT.to_string(),
             data: serde_json::to_value(WaitType::WaitDuration(
-                Duration::from_millis(0),
+                Duration::from_millis(12345),
             ))
             .unwrap(),
         };
 
         let expected =
-            r#"{"time":123.0,"name":"h3i:wait","data":{"secs":0,"nanos":0}}"#;
+            r#"{"time":123.0,"name":"h3i:wait","data":{"duration":12345.0}}"#;
         let deser = serde_json::from_str::<JsonEvent>(expected).unwrap();
         assert_eq!(deser.data, ev.data);
     }
