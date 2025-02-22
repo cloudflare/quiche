@@ -58,27 +58,20 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
     let h3i = h3i_config(&url);
     let mut actions = vec![];
 
-    actions.push(send_headers_frame(0, true, default_headers()));
-    actions.push(Action::FlushPackets);
-
-    for i in 1..MAX_REQS {
+    for i in 0..MAX_REQS {
+        actions.push(send_headers_frame(i * 4, true, default_headers()));
+        actions.push(Action::FlushPackets);
         actions.push(Action::Wait {
             wait_type: WaitType::StreamEvent(StreamEvent {
-                stream_id: (i - 1) * 4,
+                stream_id: i * 4,
                 event_type: StreamEventType::Headers,
             }),
         });
-        actions.push(send_headers_frame(i * 4, true, default_headers()));
-        actions.push(Action::FlushPackets);
     }
 
     // This last action should fail due to request limits on the connection being
     // breached
-    actions.push(send_headers_frame(
-        (MAX_REQS + 1) * 4,
-        true,
-        default_headers(),
-    ));
+    actions.push(send_headers_frame(MAX_REQS * 4, true, default_headers()));
     actions.push(Action::FlushPackets);
 
     let summary = summarize_connection(h3i, actions).await;
@@ -89,7 +82,7 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
             "request {i} didn't have a status code OK",
         );
     }
-    assert!(summary.stream_map.stream((MAX_REQS + 1) * 4).is_empty());
+    assert!(summary.stream_map.stream(MAX_REQS * 4).is_empty());
 
     let error = summary
         .conn_close_details
