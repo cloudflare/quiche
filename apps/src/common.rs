@@ -42,6 +42,8 @@ use std::rc::Rc;
 
 use std::cell::RefCell;
 
+use std::cmp::min;
+
 use std::path;
 
 use ring::rand::SecureRandom;
@@ -336,6 +338,7 @@ fn send_h3_dgram(
 pub trait HttpConn {
     fn send_requests(
         &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
+        max_reqs_concurrent: &u64,
     );
 
     fn handle_responses(
@@ -445,6 +448,7 @@ impl Http09Conn {
 impl HttpConn for Http09Conn {
     fn send_requests(
         &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
+        _: &u64,
     ) {
         let mut reqs_done = 0;
 
@@ -768,6 +772,7 @@ pub struct Http3Conn {
     dump_json: bool,
     dgram_sender: Option<Http3DgramSender>,
     output_sink: Rc<RefCell<dyn FnMut(String)>>,
+    reqs_in_flight: u64,
 }
 
 impl Http3Conn {
@@ -861,6 +866,7 @@ impl Http3Conn {
             dump_json: dump_json.is_some(),
             dgram_sender,
             output_sink,
+            reqs_in_flight: 0
         };
 
         Box::new(h_conn)
@@ -893,6 +899,7 @@ impl Http3Conn {
             dump_json: false,
             dgram_sender,
             output_sink,
+            reqs_in_flight: 0,
         };
 
         Ok(Box::new(h_conn))
@@ -1126,17 +1133,37 @@ impl Http3Conn {
 impl HttpConn for Http3Conn {
     fn send_requests(
         &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
+        max_reqs_concurrent: &u64,
     ) {
+        debug!("EVAN sending requests");
         let mut reqs_done = 0;
+
+        let max_reqs_concurrent =
+            min(*max_reqs_concurrent, conn.peer_streams_left_bidi());
 
         // First send headers.
         for req in self.reqs.iter_mut().skip(self.reqs_hdrs_sent) {
+            if self.reqs_in_flight >= max_reqs_concurrent {
+                debug!(
+                    "too many reqs in flight, retry later... [{}]",
+                    self.reqs_in_flight
+                );
+                break;
+            }
+
             let s = match self.h3_conn.send_request(
                 conn,
                 &req.hdrs,
                 self.body.is_none(),
             ) {
-                Ok(v) => v,
+                Ok(v) => {
+                    self.reqs_in_flight += 1;
+                    debug!(
+                        "EVAN incremented reqs_in_flight: [{}]",
+                        self.reqs_in_flight
+                    );
+                    v
+                },
 
                 Err(quiche::h3::Error::TransportError(
                     quiche::Error::StreamLimit,
@@ -1229,6 +1256,7 @@ impl HttpConn for Http3Conn {
         &mut self, conn: &mut quiche::Connection, buf: &mut [u8],
         req_start: &std::time::Instant,
     ) {
+        debug!("EVAN entered handle_responses");
         loop {
             match self.h3_conn.poll(conn) {
                 Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
@@ -1287,10 +1315,16 @@ impl HttpConn for Http3Conn {
 
                 Ok((_stream_id, quiche::h3::Event::Finished)) => {
                     self.reqs_complete += 1;
+                    debug!(
+                        "(2) EVAN received finished on {} // reqs_in_flight pre-decrement [{}]\n",
+                        _stream_id, self.reqs_in_flight
+                    );
+                    self.reqs_in_flight = self.reqs_in_flight.saturating_sub(1);
+
                     let reqs_count = self.reqs.len();
 
                     debug!(
-                        "{}/{} responses received",
+                        "EVAN {}/{} responses received",
                         self.reqs_complete, reqs_count
                     );
 
@@ -1321,7 +1355,9 @@ impl HttpConn for Http3Conn {
                 },
 
                 Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
+                    debug!("(2) EVAN found reset on {}", _stream_id);
                     error!("request was reset by peer with {}, closing...", e);
+                    self.reqs_in_flight = self.reqs_in_flight.saturating_sub(1);
 
                     match conn.close(true, 0x100, b"kthxbye") {
                         // Already closed.
@@ -1353,6 +1389,18 @@ impl HttpConn for Http3Conn {
                 },
 
                 Err(quiche::h3::Error::Done) => {
+                    // EVAN: testing with one concurrent req causes a timeout
+                    // after 2 requests if we don't decrement
+                    // here, but this has to be removed since
+                    // it's when the event loop has run out of
+                    // data, not when the request has.
+                    //
+                    // There's a race condition somewhere which triggers when a
+                    // stream finishes
+                    debug!(
+                        "(3) EVAN received done // reqs_in_flight pre-decrement [{}]",
+                        self.reqs_in_flight
+                    );
                     break;
                 },
 
@@ -1363,6 +1411,11 @@ impl HttpConn for Http3Conn {
                 },
             }
         }
+
+        debug!(
+            "EVAN finished handle_responses loop // reqs_in_flight [{}]",
+            self.reqs_in_flight
+        );
 
         // Process datagram-related events.
         while let Ok(len) = conn.dgram_recv(buf) {
