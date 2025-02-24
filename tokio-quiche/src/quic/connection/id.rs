@@ -64,12 +64,8 @@ pub struct SimpleConnectionIdGenerator;
 
 impl ConnectionIdGenerator<'static> for SimpleConnectionIdGenerator {
     fn new_connection_id(&self, _socket_cookie: u64) -> ConnectionId<'static> {
-        use ring::rand::SecureRandom;
-
         let mut buf = vec![0; 20];
-        let rng = ring::rand::SystemRandom::new();
-
-        rng.fill(&mut buf).unwrap();
+        boring::rand::rand_bytes(&mut buf).unwrap();
 
         ConnectionId::from_vec(buf)
     }
