@@ -634,13 +634,21 @@ impl<H: DriverHooks> H3Driver<H> {
         let stream_id = audit_stats.stream_id();
 
         match frame {
-            OutboundFrame::Headers(headers) => conn.send_response_with_priority(
-                qconn,
-                stream_id,
-                headers,
-                &DEFAULT_PRIO,
-                false,
-            ),
+            // Initial headers were already sent, send additional headers now.
+            #[cfg(not(feature = "gcongestion"))]
+            OutboundFrame::Headers(headers) if ctx.initial_headers_sent => conn
+                .send_additional_headers(qconn, stream_id, headers, false, false),
+
+            // Send initial headers.
+            OutboundFrame::Headers(headers) => conn
+                .send_response_with_priority(
+                    qconn,
+                    stream_id,
+                    headers,
+                    &DEFAULT_PRIO,
+                    false,
+                )
+                .inspect(|_| ctx.initial_headers_sent = true),
 
             OutboundFrame::Body(body, fin) => {
                 let len = body.as_ref().len();
