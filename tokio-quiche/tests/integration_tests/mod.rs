@@ -43,6 +43,7 @@ use tokio_quiche::InitialQuicConnection;
 
 pub mod async_callbacks;
 pub mod connection_close;
+pub mod headers;
 pub mod timeouts;
 
 #[tokio::test]

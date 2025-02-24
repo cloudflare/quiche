@@ -50,6 +50,8 @@ pub(crate) struct StreamCtx {
     /// This is used as temporary storage when waiting for `recv`.
     pub(crate) queued_frame: Option<OutboundFrame>,
     pub(crate) audit_stats: Arc<H3AuditStats>,
+    /// Indicates the stream sent initial headers.
+    pub(crate) initial_headers_sent: bool,
     /// Indicates the stream received fin. No more data will be received.
     pub(crate) fin_recv: bool,
     /// Indicates the stream sent fin. No more data will be sent.
@@ -73,6 +75,8 @@ impl StreamCtx {
             recv: Some(backward_receiver),
             queued_frame: None,
             audit_stats: Arc::new(H3AuditStats::new(stream_id)),
+
+            initial_headers_sent: false,
 
             fin_recv: false,
             fin_sent: false,
