@@ -323,40 +323,8 @@ mod tests {
     use quiche::h3::frame::Frame;
     use quiche::h3::testing::*;
 
-    pub fn path_relative_to_manifest_dir(
-        path: impl AsRef<std::path::Path>,
-    ) -> String {
-        std::fs::canonicalize(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path),
-        )
-        .unwrap()
-        .to_string_lossy()
-        .into_owned()
-    }
-
-    // TODO: remove this and use Session::new() when https://github.com/cloudflare/quiche/pull/1805
-    // lands
     fn session() -> Result<Session> {
-        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-        config.load_cert_chain_from_pem_file(&path_relative_to_manifest_dir(
-            "../quiche/examples/cert.crt",
-        ))?;
-        config.load_priv_key_from_pem_file(&path_relative_to_manifest_dir(
-            "../quiche/examples/cert.key",
-        ))?;
-        config.set_application_protos(&[b"h3"])?;
-        config.set_initial_max_data(1500);
-        config.set_initial_max_stream_data_bidi_local(150);
-        config.set_initial_max_stream_data_bidi_remote(150);
-        config.set_initial_max_stream_data_uni(150);
-        config.set_initial_max_streams_bidi(5);
-        config.set_initial_max_streams_uni(5);
-        config.verify_peer(false);
-        config.enable_dgram(true, 3, 3);
-        config.set_ack_delay_exponent(8);
-
-        let h3_config = quiche::h3::Config::new()?;
-        Session::with_configs(&mut config, &h3_config)
+        Session::new()
     }
 
     // See https://datatracker.ietf.org/doc/html/rfc9000#name-variable-length-integer-enc for
