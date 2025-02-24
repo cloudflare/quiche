@@ -55,7 +55,6 @@ quiche-mallard = { version = "0.21", features = [
   "boringssl-boring-crate",
   "qlog",
 ], optional = true }
-ring = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_with = { workspace = true }
 slog-scope = { workspace = true }
@@ -77,7 +76,6 @@ url = { workspace = true }
 
 [dev-dependencies]
 h3i = { workspace = true }
-rand = { workspace = true, features = ["small_rng"] }
 regex = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["time", "test-util"] }

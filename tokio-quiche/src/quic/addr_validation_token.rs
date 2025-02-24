@@ -25,8 +25,6 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use quiche::ConnectionId;
-use ring::hmac;
-use ring::rand;
 use std::io::Write;
 use std::io::{
     self,
@@ -36,18 +34,20 @@ use std::net::SocketAddr;
 
 use crate::QuicResultExt;
 
+const HMAC_KEY_LEN: usize = 32;
 const HMAC_TAG_LEN: usize = 32;
 
 pub(crate) struct AddrValidationTokenManager {
-    sign_key: hmac::Key,
+    sign_key: [u8; HMAC_KEY_LEN],
 }
 
 impl Default for AddrValidationTokenManager {
     fn default() -> Self {
-        let rng = rand::SystemRandom::new();
+        let mut key_bytes = [0; HMAC_KEY_LEN];
+        boring::rand::rand_bytes(&mut key_bytes).unwrap();
 
         AddrValidationTokenManager {
-            sign_key: hmac::Key::generate(hmac::HMAC_SHA256, &rng).unwrap(),
+            sign_key: key_bytes,
         }
     }
 }
@@ -68,7 +68,11 @@ impl AddrValidationTokenManager {
         token.write_all(&ip_bytes).unwrap();
         token.write_all(original_dcid).unwrap();
 
-        let tag = hmac::sign(&self.sign_key, &token.get_ref()[HMAC_TAG_LEN..]);
+        let tag = boring::hash::hmac_sha256(
+            &self.sign_key,
+            &token.get_ref()[HMAC_TAG_LEN..],
+        )
+        .unwrap();
 
         token.set_position(0);
         token.write_all(tag.as_ref()).unwrap();
@@ -92,9 +96,12 @@ impl AddrValidationTokenManager {
 
         let (tag, payload) = token.split_at(HMAC_TAG_LEN);
 
-        hmac::verify(&self.sign_key, payload, tag)
-            .map_err(|_| "signature verification failed")
-            .into_io()?;
+        let expected_tag =
+            boring::hash::hmac_sha256(&self.sign_key, payload).unwrap();
+
+        if !boring::memcmp::eq(&expected_tag, tag) {
+            return Err("signature verification failed").into_io();
+        }
 
         if payload[..ip_bytes.len()] != *ip_bytes {
             return Err("IPs don't match").into_io();

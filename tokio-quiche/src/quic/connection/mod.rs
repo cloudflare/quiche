@@ -44,10 +44,6 @@ use foundations::telemetry::log;
 use futures::future::BoxFuture;
 use futures::Future;
 use quiche::ConnectionId;
-use ring::rand::SecureRandom;
-use ring::rand::{
-    self,
-};
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
@@ -398,9 +394,8 @@ where
 
     fn generate_id() -> u64 {
         let mut buf = [0; 8];
-        let rng = rand::SystemRandom::new();
 
-        rng.fill(&mut buf).unwrap();
+        boring::rand::rand_bytes(&mut buf).unwrap();
 
         u64::from_ne_bytes(buf)
     }

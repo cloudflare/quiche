@@ -162,7 +162,7 @@ async fn test_handshake_timeout_with_one_client_flight() {
     socket.connect(peer_addr).await.unwrap();
 
     let mut scid = [0; quiche::MAX_CONN_ID_LEN];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut scid);
+    boring::rand::rand_bytes(&mut scid).unwrap();
     let scid = quiche::ConnectionId::from_ref(&scid);
 
     let local_addr = socket.local_addr().unwrap();
