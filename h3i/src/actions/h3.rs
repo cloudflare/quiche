@@ -122,6 +122,12 @@ pub enum WaitType {
     StreamEvent(StreamEvent),
 }
 
+impl From<WaitType> for Action {
+    fn from(value: WaitType) -> Self {
+        Self::Wait { wait_type: value }
+    }
+}
+
 /// A response event, received over a stream, which will terminate the wait
 /// period.
 ///
