@@ -723,6 +723,10 @@ impl Recovery {
         self.rtt_stats.rttvar
     }
 
+    pub fn rtt_jumps(&self) -> u64 {
+        self.rtt_stats.rtt_jumps
+    }
+
     pub fn pto(&self) -> Duration {
         self.rtt() + cmp::max(self.rtt_stats.rttvar * 4, GRANULARITY)
     }
@@ -961,6 +965,7 @@ impl std::fmt::Debug for Recovery {
         write!(f, "srtt={:?} ", self.rtt_stats.smoothed_rtt)?;
         write!(f, "min_rtt={:?} ", *self.rtt_stats.min_rtt)?;
         write!(f, "rttvar={:?} ", self.rtt_stats.rttvar)?;
+        write!(f, "rtt_jumps={:?} ", self.rtt_stats.rtt_jumps)?;
         write!(f, "cwnd={} ", self.cwnd())?;
         write!(f, "ssthresh={} ", self.congestion.ssthresh)?;
         write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
