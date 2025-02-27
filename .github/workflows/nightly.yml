@@ -33,12 +33,12 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Run cargo test
-        run: cargo test --verbose --all-targets --features=ffi,qlog
+        run: cargo test --verbose --all-targets --features=boringssl-boring-crate,ffi,qlog
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
       - name: Run cargo doc test
-        run: cargo test --verbose --doc --features=ffi,qlog
+        run: cargo test --verbose --doc --features=boringssl-boring-crate,ffi,qlog
 
       # NOTE: this is disabled as it fails when building changes that bump
       # version of local crates (e.g. when doing a `qlog` release) that have not
