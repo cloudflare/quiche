@@ -25,7 +25,7 @@ rpk = ["boring/rpk"]
 # Use the quiche-mallard fork in place of upstream quiche.
 # quiche-mallard replaces quiche's original congestion control
 # implementation with one adapted from google/quiche.
-gcongestion = ["dep:quiche-mallard", "dep:octets-mallard"]
+gcongestion = ["dep:quiche-mallard"]
 # Use quiche-mallard with zero-copy send calls.
 zero-copy = ["gcongestion"]
 
@@ -47,10 +47,9 @@ futures = { workspace = true }
 futures-util = { workspace = true }
 ipnetwork = { workspace = true }
 log = { workspace = true }
-octets = { workspace = true }
-octets-mallard = { package = "octets", version = "0.3.0", optional = true }
+octets = { version = "0.3.0" }
 pin-project = { workspace = true }
-quiche = { workspace = true, features = ["boringssl-boring-crate", "qlog"] }
+quiche = { version = "0.23", features = ["boringssl-boring-crate", "qlog"] }
 quiche-mallard = { version = "0.21", features = [
   "boringssl-boring-crate",
   "qlog",
