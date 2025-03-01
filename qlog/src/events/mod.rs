@@ -27,6 +27,7 @@
 use crate::Bytes;
 use crate::Token;
 use http3::*;
+use moqt::MOQTEventType;
 use quic::*;
 
 use serde::Deserialize;
@@ -49,6 +50,8 @@ pub enum EventType {
     Http3EventType(Http3EventType),
 
     LogLevelEventType(LogLevelEventType),
+
+    MOQTEventType(MOQTEventType),
 
     #[default]
     None,
@@ -288,6 +291,8 @@ impl From<EventType> for EventImportance {
             EventType::Http3EventType(Http3EventType::PushResolved) =>
                 EventImportance::Extra,
 
+            EventType::MOQTEventType(_) => EventImportance::Core,
+
             _ => unimplemented!(),
         }
     }
@@ -413,7 +418,33 @@ impl From<&EventData> for EventType {
                 EventType::LogLevelEventType(LogLevelEventType::Debug),
             EventData::LogLevelVerbose { .. } =>
                 EventType::LogLevelEventType(LogLevelEventType::Verbose),
-            //_ => EventType::None,
+
+            EventData::MOQTControlMessageCreated { .. } =>
+                EventType::MOQTEventType(MOQTEventType::ControlMessageCreated),
+            EventData::MOQTControlMessageParsed { .. } =>
+                EventType::MOQTEventType(MOQTEventType::ControlMessageParsed),
+            EventData::MOQTStreamTypeSet { .. } =>
+                EventType::MOQTEventType(MOQTEventType::StreamTypeSet),
+            EventData::MOQTObjectDatagramCreated { .. } =>
+                EventType::MOQTEventType(MOQTEventType::ObjectDatagramCreated),
+            EventData::MOQTObjectDatagramParsed { .. } =>
+                EventType::MOQTEventType(MOQTEventType::ObjectDatagramParsed),
+            EventData::MOQTSubgroupHeaderCreated { .. } =>
+                EventType::MOQTEventType(MOQTEventType::SubgroupHeaderCreated),
+            EventData::MOQTSubgroupHeaderParsed { .. } =>
+                EventType::MOQTEventType(MOQTEventType::SubgroupHeaderParsed),
+            EventData::MOQTSubgroupObjectCreated { .. } =>
+                EventType::MOQTEventType(MOQTEventType::SubgroupObjectCreated),
+            EventData::MOQTSubgroupObjectParsed { .. } =>
+                EventType::MOQTEventType(MOQTEventType::SubgroupObjectParsed),
+            EventData::MOQTFetchHeaderCreated { .. } =>
+                EventType::MOQTEventType(MOQTEventType::FetchHeaderCreated),
+            EventData::MOQTFetchHeaderParsed { .. } =>
+                EventType::MOQTEventType(MOQTEventType::FetchHeaderParsed),
+            EventData::MOQTFetchObjectCreated { .. } =>
+                EventType::MOQTEventType(MOQTEventType::FetchObjectCreated),
+            EventData::MOQTFetchObjectParsed { .. } =>
+                EventType::MOQTEventType(MOQTEventType::FetchObjectParsed),
         }
     }
 }
@@ -612,6 +643,46 @@ pub enum EventData {
         code: Option<u64>,
         message: Option<String>,
     },
+
+    // MOQT
+    #[serde(rename = "moqt:control_message_created")]
+    MOQTControlMessageCreated(moqt::MOQTControlMessageCreated),
+
+    #[serde(rename = "moqt:control_message_parsed")]
+    MOQTControlMessageParsed(moqt::MOQTControlMessageParsed),
+
+    #[serde(rename = "moqt:stream_type_set")]
+    MOQTStreamTypeSet(moqt::MOQTStreamTypeSet),
+
+    #[serde(rename = "moqt:object_datagram_created")]
+    MOQTObjectDatagramCreated(moqt::MOQTObjectDatagramCreated),
+
+    #[serde(rename = "moqt:object_datagram_parsed")]
+    MOQTObjectDatagramParsed(moqt::MOQTObjectDatagramParsed),
+
+    #[serde(rename = "moqt:subgroup_header_created")]
+    MOQTSubgroupHeaderCreated(moqt::MOQTSubgroupHeaderCreated),
+
+    #[serde(rename = "moqt:subgroup_header_parsed")]
+    MOQTSubgroupHeaderParsed(moqt::MOQTSubgroupHeaderParsed),
+
+    #[serde(rename = "moqt:subgroup_object_created")]
+    MOQTSubgroupObjectCreated(moqt::MOQTSubgroupObjectCreated),
+
+    #[serde(rename = "moqt:subgroup_object_parsed")]
+    MOQTSubgroupObjectParsed(moqt::MOQTSubgroupObjectParsed),
+
+    #[serde(rename = "moqt:fetch_header_created")]
+    MOQTFetchHeaderCreated(moqt::MOQTFetchHeaderCreated),
+
+    #[serde(rename = "moqt:fetch_header_parsed")]
+    MOQTFetchHeaderParsed(moqt::MOQTFetchHeaderParsed),
+
+    #[serde(rename = "moqt:fetch_object_created")]
+    MOQTFetchObjectCreated(moqt::MOQTFetchObjectCreated),
+
+    #[serde(rename = "moqt:fetch_object_parsed")]
+    MOQTFetchObjectParsed(moqt::MOQTFetchObjectParsed),
 }
 
 impl EventData {
@@ -704,4 +775,5 @@ pub struct TupleEndpointInfo {
 }
 
 pub mod http3;
+pub mod moqt;
 pub mod quic;
