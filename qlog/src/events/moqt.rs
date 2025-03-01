@@ -1,0 +1,442 @@
+// Copyright (C) 2025, Cloudflare, Inc.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//     * Redistributions of source code must retain the above copyright notice,
+//       this list of conditions and the following disclaimer.
+//
+//     * Redistributions in binary form must reproduce the above copyright
+//       notice, this list of conditions and the following disclaimer in the
+//       documentation and/or other materials provided with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+// IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+use serde::Deserialize;
+use serde::Serialize;
+
+use super::RawInfo;
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum MOQTOwner {
+    Local,
+    Remote,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MOQTStreamType {
+    SubgroupHeader,
+    FetchHeader,
+    #[default]
+    Unknown,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum MOQTEventType {
+    StreamTypeSet,
+    ControlMessageCreated,
+    ControlMessageParsed,
+    ObjectDatagramCreated,
+    ObjectDatagramParsed,
+    ObjectDatagramStatusCreated,
+    ObjectDatagramStatusParsed,
+    SubgroupHeaderCreated,
+    SubgroupHeaderParsed,
+    SubgroupObjectCreated,
+    SubgroupObjectParsed,
+    FetchHeaderCreated,
+    FetchHeaderParsed,
+    FetchObjectCreated,
+    FetchObjectParsed,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct MOQTParameter {
+    pub name: String,
+    pub length: u64,
+    pub value: Option<RawInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct MOQTExtensionHeader {
+    header_type: u64,
+    header_value: Option<u64>,
+    header_length: Option<u64>,
+    payload: Option<RawInfo>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(tag = "frame_type")]
+#[serde(rename_all = "snake_case")]
+// Strictly, the qlog spec says that all these control messages have a type
+// field. But instead of making that a rust object property, just use serde to
+// ensure it goes out on the wire. This means that deserialization of control
+// messages also works automatically.
+pub enum MOQTControlMessage {
+    ClientSetup {
+        number_of_supported_versions: u64,
+        supported_versions: Vec<u64>,
+        number_of_parameters: u64,
+        setup_parameters: Vec<MOQTParameter>,
+    },
+
+    SeverSetup {
+        selected_version: u64,
+        number_of_parameters: u64,
+        setup_parameters: Vec<MOQTParameter>,
+    },
+
+    Goaway {
+        new_session_uri: RawInfo,
+    },
+
+    Subscribe {
+        subscribe_id: u64,
+        track_alias: u64,
+        // track_namespace: TODO pending tuple decision
+        track_name: RawInfo,
+        subscriber_priority: u8,
+        group_order: u8,
+        filter_type: u64,
+        start_group: Option<u64>,
+        start_object: Option<u64>,
+        end_group: Option<u64>,
+        number_of_parameters: u64,
+        subscribe_parameters: Vec<MOQTParameter>,
+    },
+
+    SubscribeUpdate {
+        subscribe_id: u64,
+        start_group: u64,
+        start_object: u64,
+        end_group: u64,
+        subscriber_priority: u8,
+        number_of_parameters: u64,
+        subscribe_parameters: Vec<MOQTParameter>,
+    },
+
+    Unsubscribe {
+        subscribe_id: u64,
+    },
+
+    Fetch {
+        subscribe_id: u64,
+        subscriber_priority: u8,
+        group_order: u8,
+        fetch_type: u64,
+        // track_namespace: TODO pending tuple decision
+        track_name: Option<RawInfo>,
+        start_group: Option<u64>,
+        start_object: Option<u64>,
+        end_group: Option<u64>,
+        end_object: Option<u64>,
+        joining_subscribe_id: Option<u64>,
+        preceding_group_offset: Option<u64>,
+        number_of_parameters: u64,
+        parameters: Vec<MOQTParameter>,
+    },
+
+    FetchCancel {
+        subscribe_id: u64,
+    },
+
+    AnnounceOk {
+        // track_namespace: TODO pending tuple decision
+    },
+
+    AnnounceError {
+        // track_namespace: TODO pending tuple decision
+        error_code: u64,
+        reason_phrase: RawInfo,
+    },
+
+    AnnounceCancel {
+        // track_namespace: TODO pending tuple decision
+        error_code: u64,
+        reason_phrase: RawInfo,
+    },
+
+    TrackStatusRequest {
+        // track_namespace: TODO pending tuple decision
+        track_name: RawInfo,
+    },
+
+    SubscribeAnnounces {
+        // track_namespace: TODO pending tuple decision
+        number_of_parameters: u64,
+        parameters: Vec<MOQTParameter>,
+    },
+
+    UnsubscribeAnnounces {
+        // track_namespace: TODO pending tuple decision
+    },
+
+    SubscribeOk {
+        subscribe_id: u64,
+        expires: u8,
+        group_order: u8,
+        content_exists: u8,
+        largest_group_id: Option<u64>,
+        largest_object_id: Option<u64>,
+        number_of_parameters: u64,
+        parameters: Vec<MOQTParameter>,
+    },
+
+    SubscribeError {
+        subscribe_id: u64,
+        error_code: u64,
+        reason_phrase: RawInfo,
+        track_alias: u64,
+    },
+
+    FetchOk {
+        subscribe_id: u64,
+        group_order: u8,
+        end_of_track: u8,
+        largest_group_id: Option<u64>,
+        largest_object_id: Option<u64>,
+        number_of_parameters: u64,
+        parameters: Vec<MOQTParameter>,
+    },
+
+    FetchError {
+        subscribe_id: u64,
+        error_code: u64,
+        reason_phrase: RawInfo,
+    },
+
+    SubscribeDone {
+        subscribe_id: u64,
+        status_code: u64,
+        stream_count: u64,
+        reason_phrase: RawInfo,
+    },
+
+    MaxSubscribeId {
+        subscribe_id: u64,
+    },
+
+    SubscribedBlocked {
+        maximum_subscribe_id: u64,
+    },
+
+    Announce {
+        // track_namespace: TODO pending tuple decision
+        number_of_parameters: u64,
+        parameters: Vec<MOQTParameter>,
+    },
+
+    Unannounce {
+        // track_namespace: TODO pending tuple decision
+    },
+
+    TrackStatus {
+        // track_namespace: TODO pending tuple decision
+        track_name: RawInfo,
+        status_code: u64,
+        last_group_id: Option<u64>,
+        last_object_id: Option<u64>,
+    },
+
+    SubscribeAnnouncesOk {
+        // track_namespace: TODO pending tuple decision
+    },
+
+    SubscribeAnnouncesError {
+        // track_namespace: TODO pending tuple decision
+        error_code: u64,
+        reason_phrase: RawInfo,
+    },
+
+    Unknown,
+}
+
+impl Default for MOQTControlMessage {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTControlMessageCreated {
+    pub stream_id: u64,
+    pub length: Option<u64>,
+    pub message: MOQTControlMessage,
+
+    pub raw: Option<RawInfo>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTControlMessageParsed {
+    pub stream_id: u64,
+    pub length: Option<u64>,
+    pub message: MOQTControlMessage,
+
+    pub raw: Option<RawInfo>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTStreamTypeSet {
+    pub owner: Option<MOQTOwner>,
+    pub stream_id: u64,
+    pub stream_type: MOQTStreamType,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTObjectDatagramCreated {
+    pub track_alias: u64,
+    pub group_id: u64,
+    pub object_id: u64,
+    pub publisher_priority: u8,
+    pub extension_headers_length: u64,
+    pub extension_headers: Option<Vec<MOQTExtensionHeader>>,
+    pub object_payload: RawInfo,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTObjectDatagramParsed {
+    pub track_alias: u64,
+    pub group_id: u64,
+    pub object_id: u64,
+    pub publisher_priority: u8,
+    pub extension_headers_length: u64,
+    pub extension_headers: Option<Vec<MOQTExtensionHeader>>,
+    pub object_payload: RawInfo,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTObjectDatagramStatusCreated {
+    pub track_alias: u64,
+    pub group_id: u64,
+    pub object_id: u64,
+    pub publisher_priority: u8,
+    pub extension_headers_length: u64,
+    pub extension_headers: Option<Vec<MOQTExtensionHeader>>,
+    pub object_status: u64,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTObjectDatagramStatusParsed {
+    pub track_alias: u64,
+    pub group_id: u64,
+    pub object_id: u64,
+    pub publisher_priority: u8,
+    pub extension_headers_length: u64,
+    pub extension_headers: Option<Vec<MOQTExtensionHeader>>,
+    pub object_status: u64,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTSubgroupHeaderCreated {
+    pub stream_id: u64,
+    pub track_alias: u64,
+    pub group_id: u64,
+    pub object_id: u64,
+    pub publisher_priority: u8,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTSubgroupHeaderParsed {
+    pub stream_id: u64,
+    pub track_alias: u64,
+    pub group_id: u64,
+    pub object_id: u64,
+    pub publisher_priority: u8,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTSubgroupObjectCreated {
+    pub stream_id: u64,
+    pub group_id: Option<u64>,
+    pub subgroup_id: Option<u64>,
+    pub object_id: u64,
+    pub extension_headers_length: u64,
+    pub extension_headers: Option<Vec<MOQTExtensionHeader>>,
+    pub object_payload_length: u64,
+    pub object_status: Option<u64>,
+    pub object_payload: Option<RawInfo>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTSubgroupObjectParsed {
+    pub stream_id: u64,
+    pub group_id: Option<u64>,
+    pub subgroup_id: Option<u64>,
+    pub object_id: u64,
+    pub extension_headers_length: u64,
+    pub extension_headers: Option<Vec<MOQTExtensionHeader>>,
+    pub object_payload_length: u64,
+    pub object_status: Option<u64>,
+    pub object_payload: Option<RawInfo>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTFetchHeaderCreated {
+    pub stream_id: u64,
+    pub subscribe_id: u64,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTFetchHeaderParsed {
+    pub stream_id: u64,
+    pub subscribe_id: u64,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTFetchObjectCreated {
+    pub stream_id: u64,
+    pub group_id: Option<u64>,
+    pub subgroup_id: Option<u64>,
+    pub object_id: u64,
+    pub publisher_priority: u8,
+    pub extension_headers_length: u64,
+    pub extension_headers: Option<Vec<MOQTExtensionHeader>>,
+    pub object_payload_length: u64,
+    pub object_status: Option<u64>,
+    pub object_payload: Option<RawInfo>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct MOQTFetchObjectParsed {
+    pub stream_id: u64,
+    pub group_id: Option<u64>,
+    pub subgroup_id: Option<u64>,
+    pub object_id: u64,
+    pub publisher_priority: u8,
+    pub extension_headers_length: u64,
+    pub extension_headers: Option<Vec<MOQTExtensionHeader>>,
+    pub object_payload_length: u64,
+    pub object_status: Option<u64>,
+    pub object_payload: Option<RawInfo>,
+}
