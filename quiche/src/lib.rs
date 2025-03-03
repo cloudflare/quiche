@@ -8566,10 +8566,12 @@ impl TransportParams {
             self.stateless_reset_token.map(|s| s.to_be_bytes()).as_ref(),
         );
 
+        let tls_cipher: Option<String> = cipher.map(|f| format!("{f:?}"));
+
         EventData::TransportParametersSet(
             qlog::events::quic::TransportParametersSet {
                 owner: Some(owner),
-                tls_cipher: Some(format!("{cipher:?}")),
+                tls_cipher,
                 original_destination_connection_id,
                 stateless_reset_token,
                 disable_active_migration: Some(self.disable_active_migration),
