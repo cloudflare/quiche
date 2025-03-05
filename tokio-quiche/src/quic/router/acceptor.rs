@@ -120,8 +120,8 @@ where
             if let Ok(writer) = make_qlog_writer(qlog_dir, &id) {
                 conn.set_qlog(
                     std::boxed::Box::new(writer),
-                    "oxy qlog".to_string(),
-                    format!("oxy qlog id={id}"),
+                    "tokio-quiche qlog".to_string(),
+                    format!("tokio-quiche qlog id={id}"),
                 );
             }
         }
