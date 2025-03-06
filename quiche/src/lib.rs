@@ -7861,10 +7861,16 @@ impl Connection {
                 },
 
                 (true, false, Some(peer_error), None) => {
-                    let (connection_code, application_code) = if peer_error.is_app {
-                        (None, Some(qlog::events::ApplicationErrorCode::Value(peer_error.error_code)))
+                    let (connection_code, application_code, trigger) = if peer_error.is_app {
+                        (None, Some(qlog::events::ApplicationErrorCode::Value(peer_error.error_code)), None)
                     } else {
-                        (Some(qlog::events::ConnectionErrorCode::Value(peer_error.error_code)), None)
+                        let trigger = if peer_error.error_code == WireErrorCode::NoError as u64 {
+                            Some(qlog::events::connectivity::ConnectionClosedTrigger::Clean)
+                        } else {
+                            Some(qlog::events::connectivity::ConnectionClosedTrigger::Error)
+                        };
+
+                        (Some(qlog::events::ConnectionErrorCode::Value(peer_error.error_code)), None, trigger)
                     };
 
                     qlog::events::connectivity::ConnectionClosed {
@@ -7873,15 +7879,21 @@ impl Connection {
                         application_code,
                         internal_code: None,
                         reason: Some(String::from_utf8_lossy(&peer_error.reason).to_string()),
-                        trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::Error),
+                        trigger,
                     }
                 },
 
                 (true, false, None, Some(local_error)) => {
-                    let (connection_code, application_code) = if local_error.is_app {
-                        (None, Some(qlog::events::ApplicationErrorCode::Value(local_error.error_code)))
+                    let (connection_code, application_code, trigger) = if local_error.is_app {
+                        (None, Some(qlog::events::ApplicationErrorCode::Value(local_error.error_code)), None)
                     } else {
-                        (Some(qlog::events::ConnectionErrorCode::Value(local_error.error_code)), None)
+                        let trigger = if local_error.error_code == WireErrorCode::NoError as u64 {
+                            Some(qlog::events::connectivity::ConnectionClosedTrigger::Clean)
+                        } else {
+                            Some(qlog::events::connectivity::ConnectionClosedTrigger::Error)
+                        };
+
+                        (Some(qlog::events::ConnectionErrorCode::Value(local_error.error_code)), None, trigger)
                     };
 
                     qlog::events::connectivity::ConnectionClosed {
@@ -7890,7 +7902,7 @@ impl Connection {
                         application_code,
                         internal_code: None,
                         reason: Some(String::from_utf8_lossy(&local_error.reason).to_string()),
-                        trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::Error),
+                        trigger,
                     }
                 },
 
