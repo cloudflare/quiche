@@ -28,6 +28,7 @@ use crate::QlogSeq;
 
 /// Represents the format of the read event.
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone, Debug)]
 pub enum Event {
     /// A native qlog event type.
     Qlog(crate::events::Event),
