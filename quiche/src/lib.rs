@@ -2076,6 +2076,7 @@ impl Connection {
                 &dcid,
                 conn.version,
                 conn.is_server,
+                false,
             )?;
 
             let reset_token = conn.peer_transport_params.stateless_reset_token;
@@ -2531,6 +2532,7 @@ impl Connection {
                 &self.destination_id(),
                 self.version,
                 self.is_server,
+                true,
             )?;
 
             // Reset connection state to force sending another Initial packet.
@@ -2596,6 +2598,7 @@ impl Connection {
                 &hdr.scid,
                 self.version,
                 self.is_server,
+                true,
             )?;
 
             // Reset connection state to force sending another Initial packet.
@@ -2665,6 +2668,7 @@ impl Connection {
                 &hdr.dcid,
                 self.version,
                 self.is_server,
+                false,
             )?;
 
             self.pkt_num_spaces[packet::Epoch::Initial].crypto_open =
@@ -13068,22 +13072,92 @@ mod tests {
         // Client receives Retry and sends new Initial.
         assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
+        let (len, send_info) = pipe.client.send(&mut buf).unwrap();
 
         let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
         assert_eq!(&hdr.token.unwrap(), token);
 
         // Server accepts connection.
-        let from = "127.0.0.1:1234".parse().unwrap();
         pipe.server = accept(
             &scid,
             Some(&odcid),
             testing::Pipe::server_addr(),
-            from,
+            send_info.from,
             &mut config,
         )
         .unwrap();
         assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+
+        assert_eq!(pipe.advance(), Ok(()));
+
+        assert!(pipe.client.is_established());
+        assert!(pipe.server.is_established());
+    }
+
+    #[test]
+    fn retry_with_pto() {
+        let mut buf = [0; 65535];
+
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+
+        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
+
+        // Client sends initial flight.
+        let (mut len, _) = pipe.client.send(&mut buf).unwrap();
+
+        // Server sends Retry packet.
+        let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
+
+        let odcid = hdr.dcid.clone();
+
+        let mut scid = [0; MAX_CONN_ID_LEN];
+        rand::rand_bytes(&mut scid[..]);
+        let scid = ConnectionId::from_ref(&scid);
+
+        let token = b"quiche test retry token";
+
+        len = packet::retry(
+            &hdr.scid,
+            &hdr.dcid,
+            &scid,
+            token,
+            hdr.version,
+            &mut buf,
+        )
+        .unwrap();
+
+        // Client receives Retry and sends new Initial.
+        assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
+
+        let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+
+        let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
+        assert_eq!(&hdr.token.unwrap(), token);
+
+        // Server accepts connection.
+        pipe.server = accept(
+            &scid,
+            Some(&odcid),
+            testing::Pipe::server_addr(),
+            send_info.from,
+            &mut config,
+        )
+        .unwrap();
+        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+
+        // Wait for the client's PTO so it will try to send an Initial again.
+        let timer = pipe.client.timeout().unwrap();
+        std::thread::sleep(timer + time::Duration::from_millis(1));
+        pipe.client.on_timeout();
 
         assert_eq!(pipe.advance(), Ok(()));
 
