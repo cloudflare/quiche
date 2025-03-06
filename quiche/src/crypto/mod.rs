@@ -311,7 +311,7 @@ impl HeaderProtectionKey {
 }
 
 pub fn derive_initial_key_material(
-    cid: &[u8], version: u32, is_server: bool,
+    cid: &[u8], version: u32, is_server: bool, did_reset: bool,
 ) -> Result<(Open, Seal)> {
     let mut initial_secret = [0; 32];
     let mut client_secret = vec![0; 32];
@@ -324,12 +324,34 @@ pub fn derive_initial_key_material(
 
     derive_initial_secret(cid, version, &mut initial_secret)?;
 
+    derive_client_initial_secret(aead, &initial_secret, &mut client_secret)?;
+
+    derive_server_initial_secret(aead, &initial_secret, &mut server_secret)?;
+
+    // When the initial key material has been reset (e.g. due to retry or
+    // version negotiation), we need to prime the AEAD context as well, as the
+    // following packet will not start from 0 again. This is done through the
+    // `Open/Seal::from_secret()` path, rather than `Open/Seal::new()`.
+    if did_reset {
+        let (open, seal) = if is_server {
+            (
+                Open::from_secret(aead, &client_secret)?,
+                Seal::from_secret(aead, &server_secret)?,
+            )
+        } else {
+            (
+                Open::from_secret(aead, &server_secret)?,
+                Seal::from_secret(aead, &client_secret)?,
+            )
+        };
+
+        return Ok((open, seal));
+    }
+
     // Client.
     let mut client_key = vec![0; key_len];
     let mut client_iv = vec![0; nonce_len];
     let mut client_hp_key = vec![0; key_len];
-
-    derive_client_initial_secret(aead, &initial_secret, &mut client_secret)?;
 
     derive_pkt_key(aead, &client_secret, &mut client_key)?;
     derive_pkt_iv(aead, &client_secret, &mut client_iv)?;
@@ -339,8 +361,6 @@ pub fn derive_initial_key_material(
     let mut server_key = vec![0; key_len];
     let mut server_iv = vec![0; nonce_len];
     let mut server_hp_key = vec![0; key_len];
-
-    derive_server_initial_secret(aead, &initial_secret, &mut server_secret)?;
 
     derive_pkt_key(aead, &server_secret, &mut server_key)?;
     derive_pkt_iv(aead, &server_secret, &mut server_iv)?;

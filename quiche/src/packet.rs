@@ -1312,9 +1312,13 @@ mod tests {
 
         let payload_len = b.get_varint().unwrap() as usize;
 
-        let (aead, _) =
-            crypto::derive_initial_key_material(dcid, hdr.version, is_server)
-                .unwrap();
+        let (aead, _) = crypto::derive_initial_key_material(
+            dcid,
+            hdr.version,
+            is_server,
+            false,
+        )
+        .unwrap();
 
         decrypt_hdr(&mut b, &mut hdr, &aead).unwrap();
         assert_eq!(hdr.pkt_num_len, expected_pn_len);
@@ -1561,9 +1565,13 @@ mod tests {
 
         b.put_bytes(header).unwrap();
 
-        let (_, aead) =
-            crypto::derive_initial_key_material(dcid, hdr.version, is_server)
-                .unwrap();
+        let (_, aead) = crypto::derive_initial_key_material(
+            dcid,
+            hdr.version,
+            is_server,
+            false,
+        )
+        .unwrap();
 
         let payload_len = frames.len();
 
@@ -1947,7 +1955,8 @@ mod tests {
         let payload_len = b.get_varint().unwrap() as usize;
 
         let (aead, _) =
-            crypto::derive_initial_key_material(b"", hdr.version, true).unwrap();
+            crypto::derive_initial_key_material(b"", hdr.version, true, false)
+                .unwrap();
 
         assert_eq!(
             decrypt_pkt(&mut b, 0, 1, payload_len, &aead),
@@ -1980,7 +1989,8 @@ mod tests {
         let payload_len = 1;
 
         let (aead, _) =
-            crypto::derive_initial_key_material(b"", hdr.version, true).unwrap();
+            crypto::derive_initial_key_material(b"", hdr.version, true, false)
+                .unwrap();
 
         assert_eq!(
             decrypt_pkt(&mut b, 0, 1, payload_len, &aead),
