@@ -65,11 +65,80 @@ pub enum MOQTEventType {
     FetchObjectParsed,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct MOQTParameter {
-    pub name: String,
-    pub length: u64,
-    pub value: Option<RawInfo>,
+#[serde(tag = "name")]
+#[serde(rename_all = "snake_case")]
+// Strictly, the qlog spec says that all these parameters have a name field. But
+// instead of making that a rust object property, just use serde to ensure it
+// goes out on the wire. This means that deserialization of frames also works
+// automatically.
+pub enum MOQTSetupParameter {
+    Path {
+        value: String,
+    },
+
+    MaxSubscribeId {
+        value: u64,
+    },
+
+    Unknown {
+        name_bytes: u64,
+        length: Option<u64>,
+        value: Option<u64>,
+        value_bytes: Option<RawInfo>,
+    },
+}
+
+impl Default for MOQTSetupParameter {
+    fn default() -> Self {
+        Self::Unknown {
+            name_bytes: 0,
+            length: None,
+            value: None,
+            value_bytes: None,
+        }
+    }
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(tag = "name")]
+#[serde(rename_all = "snake_case")]
+// Strictly, the qlog spec says that all these parameters have a name field. But
+// instead of making that a rust object property, just use serde to ensure it
+// goes out on the wire. This means that deserialization of frames also works
+// automatically.
+pub enum MOQTParameter {
+    AuthorizationInfo {
+        value: String,
+    },
+
+    DeliveryTimeout {
+        value: u64,
+    },
+
+    MaxCacheDuration {
+        value: u64,
+    },
+
+    Unknown {
+        name_bytes: u64,
+        length: Option<u64>,
+        value: Option<u64>,
+        value_bytes: Option<RawInfo>,
+    },
+}
+
+impl Default for MOQTParameter {
+    fn default() -> Self {
+        Self::Unknown {
+            name_bytes: 0,
+            length: None,
+            value: None,
+            value_bytes: None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -93,13 +162,13 @@ pub enum MOQTControlMessage {
         number_of_supported_versions: u64,
         supported_versions: Vec<u64>,
         number_of_parameters: u64,
-        setup_parameters: Vec<MOQTParameter>,
+        setup_parameters: Vec<MOQTSetupParameter>,
     },
 
     SeverSetup {
         selected_version: u64,
         number_of_parameters: u64,
-        setup_parameters: Vec<MOQTParameter>,
+        setup_parameters: Vec<MOQTSetupParameter>,
     },
 
     Goaway {
