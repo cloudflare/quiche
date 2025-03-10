@@ -144,16 +144,16 @@ impl Default for MOQTParameter {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct MOQTStringOrBytes {
-    value: Option<String>,
-    value_bytes: Option<String>,
+    pub value: Option<String>,
+    pub value_bytes: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct MOQTExtensionHeader {
-    header_type: u64,
-    header_value: Option<u64>,
-    header_length: Option<u64>,
-    payload: Option<RawInfo>,
+    pub header_type: u64,
+    pub header_value: Option<u64>,
+    pub header_length: Option<u64>,
+    pub payload: Option<RawInfo>,
 }
 
 #[serde_with::skip_serializing_none]
