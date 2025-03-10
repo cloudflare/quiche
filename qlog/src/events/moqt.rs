@@ -151,7 +151,7 @@ pub struct MOQTExtensionHeader {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-#[serde(tag = "name")]
+#[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 // Strictly, the qlog spec says that all these control messages have a type
 // field. But instead of making that a rust object property, just use serde to
