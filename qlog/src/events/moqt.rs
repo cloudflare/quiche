@@ -141,6 +141,13 @@ impl Default for MOQTParameter {
     }
 }
 
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct MOQTStringOrBytes {
+    value: Option<String>,
+    value_bytes: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct MOQTExtensionHeader {
     header_type: u64,
@@ -178,8 +185,8 @@ pub enum MOQTControlMessage {
     Subscribe {
         subscribe_id: u64,
         track_alias: u64,
-        // track_namespace: TODO pending tuple decision
-        track_name: RawInfo,
+        track_namespace: Vec<MOQTStringOrBytes>,
+        track_name: MOQTStringOrBytes,
         subscriber_priority: u8,
         group_order: u8,
         filter_type: u64,
@@ -209,8 +216,8 @@ pub enum MOQTControlMessage {
         subscriber_priority: u8,
         group_order: u8,
         fetch_type: u64,
-        // track_namespace: TODO pending tuple decision
-        track_name: Option<RawInfo>,
+        track_namespace: Vec<MOQTStringOrBytes>,
+        track_name: Option<MOQTStringOrBytes>,
         start_group: Option<u64>,
         start_object: Option<u64>,
         end_group: Option<u64>,
@@ -226,36 +233,36 @@ pub enum MOQTControlMessage {
     },
 
     AnnounceOk {
-        // track_namespace: TODO pending tuple decision
+        track_namespace: Vec<MOQTStringOrBytes>,
     },
 
     AnnounceError {
-        // track_namespace: TODO pending tuple decision
+        track_namespace: Vec<MOQTStringOrBytes>,
         error_code: u64,
         reason: Option<String>,
         reason_bytes: Option<String>,
     },
 
     AnnounceCancel {
-        // track_namespace: TODO pending tuple decision
+        track_namespace: Vec<MOQTStringOrBytes>,
         error_code: u64,
         reason: Option<String>,
         reason_bytes: Option<String>,
     },
 
     TrackStatusRequest {
-        // track_namespace: TODO pending tuple decision
-        track_name: RawInfo,
+        track_namespace: Vec<MOQTStringOrBytes>,
+        track_name: MOQTStringOrBytes,
     },
 
     SubscribeAnnounces {
-        // track_namespace: TODO pending tuple decision
+        track_namespace: Vec<MOQTStringOrBytes>,
         number_of_parameters: u64,
         parameters: Vec<MOQTParameter>,
     },
 
     UnsubscribeAnnounces {
-        // track_namespace: TODO pending tuple decision
+        track_namespace: Vec<MOQTStringOrBytes>,
     },
 
     SubscribeOk {
@@ -311,29 +318,29 @@ pub enum MOQTControlMessage {
     },
 
     Announce {
-        // track_namespace: TODO pending tuple decision
+        track_namespace: Vec<MOQTStringOrBytes>,
         number_of_parameters: u64,
         parameters: Vec<MOQTParameter>,
     },
 
     Unannounce {
-        // track_namespace: TODO pending tuple decision
+        track_namespace: Vec<MOQTStringOrBytes>,
     },
 
     TrackStatus {
-        // track_namespace: TODO pending tuple decision
-        track_name: RawInfo,
+        track_namespace: Vec<MOQTStringOrBytes>,
+        track_name: MOQTStringOrBytes,
         status_code: u64,
         last_group_id: Option<u64>,
         last_object_id: Option<u64>,
     },
 
     SubscribeAnnouncesOk {
-        // track_namespace: TODO pending tuple decision
+        track_namespace: Vec<MOQTStringOrBytes>,
     },
 
     SubscribeAnnouncesError {
-        // track_namespace: TODO pending tuple decision
+        track_namespace: Vec<MOQTStringOrBytes>,
         error_code: u64,
         reason: Option<String>,
         reason_bytes: Option<String>,
@@ -514,4 +521,80 @@ pub struct MOQTFetchObjectParsed {
     pub object_payload_length: u64,
     pub object_status: Option<u64>,
     pub object_payload: Option<RawInfo>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subsribe() {
+        let sub = MOQTControlMessage::Subscribe {
+            subscribe_id: 123,
+            track_alias: 456,
+            track_namespace: vec![
+                MOQTStringOrBytes {
+                    value: Some("hello".to_string()),
+                    value_bytes: None,
+                },
+                MOQTStringOrBytes {
+                    value: None,
+                    value_bytes: Some("world".to_string()),
+                },
+            ],
+            track_name: MOQTStringOrBytes {
+                value: Some("byeeee".to_string()),
+                value_bytes: None,
+            },
+            subscriber_priority: 99,
+            group_order: 55,
+            filter_type: 1,
+            start_group: Some(2),
+            start_object: Some(0),
+            end_group: Some(3),
+            number_of_parameters: 2,
+            subscribe_parameters: vec![
+                MOQTParameter::AuthorizationInfo {
+                    value: "letmein".to_string(),
+                },
+                MOQTParameter::DeliveryTimeout { value: 1000 },
+            ],
+        };
+
+        let log_string = r#"{
+  "type": "subscribe",
+  "subscribe_id": 123,
+  "track_alias": 456,
+  "track_namespace": [
+    {
+      "value": "hello"
+    },
+    {
+      "value_bytes": "world"
+    }
+  ],
+  "track_name": {
+    "value": "byeeee"
+  },
+  "subscriber_priority": 99,
+  "group_order": 55,
+  "filter_type": 1,
+  "start_group": 2,
+  "start_object": 0,
+  "end_group": 3,
+  "number_of_parameters": 2,
+  "subscribe_parameters": [
+    {
+      "name": "authorization_info",
+      "value": "letmein"
+    },
+    {
+      "name": "delivery_timeout",
+      "value": 1000
+    }
+  ]
+}"#;
+
+        assert_eq!(serde_json::to_string_pretty(&sub).unwrap(), log_string );
+    }
 }
