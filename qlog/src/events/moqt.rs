@@ -232,13 +232,15 @@ pub enum MOQTControlMessage {
     AnnounceError {
         // track_namespace: TODO pending tuple decision
         error_code: u64,
-        reason_phrase: RawInfo,
+        reason: Option<String>,
+        reason_bytes: Option<String>,
     },
 
     AnnounceCancel {
         // track_namespace: TODO pending tuple decision
         error_code: u64,
-        reason_phrase: RawInfo,
+        reason: Option<String>,
+        reason_bytes: Option<String>,
     },
 
     TrackStatusRequest {
@@ -270,7 +272,8 @@ pub enum MOQTControlMessage {
     SubscribeError {
         subscribe_id: u64,
         error_code: u64,
-        reason_phrase: RawInfo,
+        reason: Option<String>,
+        reason_bytes: Option<String>,
         track_alias: u64,
     },
 
@@ -287,14 +290,16 @@ pub enum MOQTControlMessage {
     FetchError {
         subscribe_id: u64,
         error_code: u64,
-        reason_phrase: RawInfo,
+        reason: Option<String>,
+        reason_bytes: Option<String>,
     },
 
     SubscribeDone {
         subscribe_id: u64,
         status_code: u64,
         stream_count: u64,
-        reason_phrase: RawInfo,
+        reason: Option<String>,
+        reason_bytes: Option<String>,
     },
 
     MaxSubscribeId {
@@ -330,7 +335,8 @@ pub enum MOQTControlMessage {
     SubscribeAnnouncesError {
         // track_namespace: TODO pending tuple decision
         error_code: u64,
-        reason_phrase: RawInfo,
+        reason: Option<String>,
+        reason_bytes: Option<String>,
     },
 
     Unknown,
