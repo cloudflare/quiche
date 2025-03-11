@@ -497,8 +497,8 @@ pub struct MOQTFetchHeaderParsed {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct MOQTFetchObjectCreated {
     pub stream_id: u64,
-    pub group_id: Option<u64>,
-    pub subgroup_id: Option<u64>,
+    pub group_id: u64,
+    pub subgroup_id: u64,
     pub object_id: u64,
     pub publisher_priority: u8,
     pub extension_headers_length: u64,
@@ -512,8 +512,8 @@ pub struct MOQTFetchObjectCreated {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct MOQTFetchObjectParsed {
     pub stream_id: u64,
-    pub group_id: Option<u64>,
-    pub subgroup_id: Option<u64>,
+    pub group_id: u64,
+    pub subgroup_id: u64,
     pub object_id: u64,
     pub publisher_priority: u8,
     pub extension_headers_length: u64,
