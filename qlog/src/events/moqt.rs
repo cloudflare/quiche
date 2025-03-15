@@ -32,7 +32,6 @@ use super::RawInfo;
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum MOQTOwner {
-    Control,
     Local,
     Remote,
 }
@@ -42,6 +41,7 @@ pub enum MOQTOwner {
 pub enum MOQTStreamType {
     SubgroupHeader,
     FetchHeader,
+    Control,
     #[default]
     Unknown,
 }
@@ -596,6 +596,6 @@ mod tests {
   ]
 }"#;
 
-        assert_eq!(serde_json::to_string_pretty(&sub).unwrap(), log_string );
+        assert_eq!(serde_json::to_string_pretty(&sub).unwrap(), log_string);
     }
 }
