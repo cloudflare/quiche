@@ -173,7 +173,7 @@ pub enum MOQTControlMessage {
         setup_parameters: Vec<MOQTSetupParameter>,
     },
 
-    SeverSetup {
+    ServerSetup {
         selected_version: u64,
         number_of_parameters: u64,
         setup_parameters: Vec<MOQTSetupParameter>,
