@@ -32,6 +32,7 @@ use super::RawInfo;
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum MOQTOwner {
+    Control,
     Local,
     Remote,
 }
