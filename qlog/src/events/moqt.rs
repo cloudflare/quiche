@@ -274,7 +274,7 @@ pub enum MOQTControlMessage {
         largest_group_id: Option<u64>,
         largest_object_id: Option<u64>,
         number_of_parameters: u64,
-        parameters: Vec<MOQTParameter>,
+        subscribe_parameters: Vec<MOQTParameter>,
     },
 
     SubscribeError {
