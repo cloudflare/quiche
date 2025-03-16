@@ -438,7 +438,7 @@ pub struct MOQTSubgroupHeaderCreated {
     pub stream_id: u64,
     pub track_alias: u64,
     pub group_id: u64,
-    pub object_id: u64,
+    pub subgroup_id: u64,
     pub publisher_priority: u8,
 }
 
@@ -448,7 +448,7 @@ pub struct MOQTSubgroupHeaderParsed {
     pub stream_id: u64,
     pub track_alias: u64,
     pub group_id: u64,
-    pub object_id: u64,
+    pub subgroup_id: u64,
     pub publisher_priority: u8,
 }
 
