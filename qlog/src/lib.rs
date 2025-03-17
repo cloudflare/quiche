@@ -599,14 +599,24 @@ impl Default for Configuration {
 }
 
 #[serde_with::skip_serializing_none]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+pub struct ReferenceTime {
+    pub clock_type: String,
+
+    // TODO: support RFC 3339 datetime fully rather than using strings
+    pub epoch: String,
+    pub wall_clock_time: Option<String>,
+}
+
+#[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
 pub struct CommonFields {
     pub group_id: Option<String>,
     pub protocol_type: Option<Vec<String>>,
 
-    pub reference_time: Option<f64>,
+    pub reference_time: Option<ReferenceTime>,
+    // TODO: support more rigid TimeFormat
     pub time_format: Option<String>,
-    // TODO: additionalUserSpecifiedProperty
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
