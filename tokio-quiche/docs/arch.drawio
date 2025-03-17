@@ -1,6 +1,6 @@
-<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" version="26.0.11" pages="2">
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" version="26.1.0" pages="2">
   <diagram name="Page-1" id="3qpx236MMJjKQpdtaQj8">
-    <mxGraphModel dx="2526" dy="644" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="2067" dy="1156" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -20,7 +20,7 @@
             <mxPoint x="25" y="20" as="offset" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="mWPUdoHqn-piwVSKCePV-4" value="QuickConnectionStream" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+        <mxCell id="mWPUdoHqn-piwVSKCePV-4" value="QuicConnectionStream" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
           <mxGeometry x="25" y="160" width="150" height="60" as="geometry" />
         </mxCell>
         <mxCell id="mWPUdoHqn-piwVSKCePV-5" value="InitialQuicConnection" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
@@ -38,7 +38,7 @@
         <mxCell id="mWPUdoHqn-piwVSKCePV-28" value="impl ApplicationOverQuic" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
           <mxGeometry x="220" y="310" width="160" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="pvk3wVF_-k6SXGWQYtcm-1" value="fn: IQC::start" style="swimlane;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+        <mxCell id="pvk3wVF_-k6SXGWQYtcm-1" value="fn: IQC::start" style="swimlane;whiteSpace=wrap;html=1;" parent="1" vertex="1">
           <mxGeometry x="-50" y="450" width="590" height="290" as="geometry" />
         </mxCell>
         <mxCell id="mWPUdoHqn-piwVSKCePV-14" value="Tokio Task: quic_handshake_worker" style="swimlane;whiteSpace=wrap;html=1;startSize=23;" parent="pvk3wVF_-k6SXGWQYtcm-1" vertex="1">
@@ -82,7 +82,7 @@
         <mxCell id="mWPUdoHqn-piwVSKCePV-31" value="AoQ" style="rounded=0;whiteSpace=wrap;html=1;" parent="mWPUdoHqn-piwVSKCePV-18" vertex="1">
           <mxGeometry x="190" y="52" width="40" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="GngBAlXJXLjJrXuEWOCi-1" value="" style="endArrow=classic;html=1;rounded=0;fontSize=12;startSize=8;endSize=8;edgeStyle=orthogonalEdgeStyle;startArrow=oval;startFill=1;" edge="1" parent="pvk3wVF_-k6SXGWQYtcm-1">
+        <mxCell id="GngBAlXJXLjJrXuEWOCi-1" value="" style="endArrow=classic;html=1;rounded=0;fontSize=12;startSize=8;endSize=8;edgeStyle=orthogonalEdgeStyle;startArrow=oval;startFill=1;" parent="pvk3wVF_-k6SXGWQYtcm-1" edge="1">
           <mxGeometry width="50" height="50" relative="1" as="geometry">
             <mxPoint x="13" y="46" as="sourcePoint" />
             <mxPoint x="30" y="130" as="targetPoint" />
