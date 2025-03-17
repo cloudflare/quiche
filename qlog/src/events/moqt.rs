@@ -170,13 +170,13 @@ pub enum MOQTControlMessage {
         number_of_supported_versions: u64,
         supported_versions: Vec<u64>,
         number_of_parameters: u64,
-        setup_parameters: Vec<MOQTSetupParameter>,
+        setup_parameters: Option<Vec<MOQTSetupParameter>>,
     },
 
     ServerSetup {
         selected_version: u64,
         number_of_parameters: u64,
-        setup_parameters: Vec<MOQTSetupParameter>,
+        setup_parameters: Option<Vec<MOQTSetupParameter>>,
     },
 
     Goaway {
@@ -195,7 +195,7 @@ pub enum MOQTControlMessage {
         start_object: Option<u64>,
         end_group: Option<u64>,
         number_of_parameters: u64,
-        subscribe_parameters: Vec<MOQTParameter>,
+        subscribe_parameters: Option<Vec<MOQTParameter>>,
     },
 
     SubscribeUpdate {
@@ -205,7 +205,7 @@ pub enum MOQTControlMessage {
         end_group: u64,
         subscriber_priority: u8,
         number_of_parameters: u64,
-        subscribe_parameters: Vec<MOQTParameter>,
+        subscribe_parameters: Option<Vec<MOQTParameter>>,
     },
 
     Unsubscribe {
@@ -226,7 +226,7 @@ pub enum MOQTControlMessage {
         joining_subscribe_id: Option<u64>,
         preceding_group_offset: Option<u64>,
         number_of_parameters: u64,
-        parameters: Vec<MOQTParameter>,
+        parameters: Option<Vec<MOQTParameter>>,
     },
 
     FetchCancel {
@@ -259,7 +259,7 @@ pub enum MOQTControlMessage {
     SubscribeAnnounces {
         track_namespace: Vec<MOQTStringOrBytes>,
         number_of_parameters: u64,
-        parameters: Vec<MOQTParameter>,
+        parameters: Option<Vec<MOQTParameter>>,
     },
 
     UnsubscribeAnnounces {
@@ -274,7 +274,7 @@ pub enum MOQTControlMessage {
         largest_group_id: Option<u64>,
         largest_object_id: Option<u64>,
         number_of_parameters: u64,
-        subscribe_parameters: Vec<MOQTParameter>,
+        subscribe_parameters: Option<Vec<MOQTParameter>>,
     },
 
     SubscribeError {
@@ -292,7 +292,7 @@ pub enum MOQTControlMessage {
         largest_group_id: Option<u64>,
         largest_object_id: Option<u64>,
         number_of_parameters: u64,
-        parameters: Vec<MOQTParameter>,
+        parameters: Option<Vec<MOQTParameter>>,
     },
 
     FetchError {
@@ -321,7 +321,7 @@ pub enum MOQTControlMessage {
     Announce {
         track_namespace: Vec<MOQTStringOrBytes>,
         number_of_parameters: u64,
-        parameters: Vec<MOQTParameter>,
+        parameters: Option<Vec<MOQTParameter>>,
     },
 
     Unannounce {
@@ -554,12 +554,12 @@ mod tests {
             start_object: Some(0),
             end_group: Some(3),
             number_of_parameters: 2,
-            subscribe_parameters: vec![
+            subscribe_parameters: Some(vec![
                 MOQTParameter::AuthorizationInfo {
                     value: "letmein".to_string(),
                 },
                 MOQTParameter::DeliveryTimeout { value: 1000 },
-            ],
+            ]),
         };
 
         let log_string = r#"{
