@@ -1044,7 +1044,14 @@ fn log_ssl_error() {
         ERR_error_string_n(e, err.as_mut_ptr() as *mut c_char, err.len());
     }
 
-    trace!("{}", std::str::from_utf8(&err).unwrap());
+    let cstr = ffi::CStr::from_bytes_until_nul(&err)
+        .expect("ERR_error_string_n should write a null terminated string");
+
+    trace!(
+        "{}",
+        cstr.to_str()
+            .expect("ERR_error_string_n should create a valid UTF-8 message")
+    );
 }
 
 extern "C" {
