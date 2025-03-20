@@ -355,14 +355,13 @@ where
             }
 
             #[cfg(not(feature = "gcongestion"))]
-            let max_send_size = tune_max_send_size(
-                segment_size,
-                qconn.send_quantum(),
-                send_buf.len(),
-            );
+            let max_send_size = qconn.send_quantum();
 
             #[cfg(feature = "gcongestion")]
             let max_send_size = usize::MAX;
+
+            let max_send_size =
+                tune_max_send_size(segment_size, max_send_size, send_buf.len());
 
             // If segment_size is known, update the maximum of
             // GSO sender buffer size to the multiple of
