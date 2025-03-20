@@ -643,16 +643,15 @@ pub fn decode_pkt_num(largest_pn: u64, truncated_pn: u64, pn_len: usize) -> u64 
 }
 
 pub fn decrypt_pkt<'a>(
-    b: &'a mut octets::OctetsMut, pn: u64, pn_len: usize, payload_len: usize,
+    b: &'a mut octets::OctetsMut, pn: u64, pn_len: usize, len_field: usize,
     aead: &crypto::Open,
 ) -> Result<octets::Octets<'a>> {
     let payload_offset = b.off();
 
     let (header, mut payload) = b.split_at(payload_offset)?;
 
-    let payload_len = payload_len
-        .checked_sub(pn_len)
-        .ok_or(Error::InvalidPacket)?;
+    let payload_len =
+        len_field.checked_sub(pn_len).ok_or(Error::InvalidPacket)?;
 
     let mut ciphertext = payload.peek_bytes_mut(payload_len)?;
 
