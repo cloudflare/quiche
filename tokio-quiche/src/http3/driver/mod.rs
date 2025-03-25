@@ -46,13 +46,12 @@ use futures::FutureExt;
 use futures_util::stream::FuturesUnordered;
 use quiche::h3;
 use tokio::select;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::mpsc::{
-    self,
-};
+use tokio::task::coop::unconstrained;
 use tokio_stream::StreamExt;
 use tokio_util::sync::PollSender;
 
@@ -1040,7 +1039,9 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
         }
 
         // Also optimistically check for any ready streams
-        while let Some(Some(ready)) = self.waiting_streams.next().now_or_never() {
+        while let Some(Some(ready)) =
+            unconstrained(self.waiting_streams.next()).now_or_never()
+        {
             self.upstream_ready(qconn, ready)?;
         }
 
