@@ -231,6 +231,8 @@ pub trait RecoveryOps {
     fn send_quantum(&self) -> usize;
 
     fn get_next_release_time(&self) -> ReleaseDecision;
+
+    fn use_get_next_release_time(&self) -> bool;
 }
 
 impl Recovery {
@@ -556,23 +558,34 @@ mod tests {
     use smallvec::smallvec;
     use std::str::FromStr;
 
+    fn recovery_for_alg(algo: CongestionControlAlgorithm) -> Recovery {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(algo);
+        Recovery::new(&cfg)
+    }
+
     #[test]
     fn lookup_cc_algo_ok() {
         let algo = CongestionControlAlgorithm::from_str("reno").unwrap();
         assert_eq!(algo, CongestionControlAlgorithm::Reno);
+        assert!(!recovery_for_alg(algo).use_get_next_release_time());
 
         let algo = CongestionControlAlgorithm::from_str("cubic").unwrap();
         assert_eq!(algo, CongestionControlAlgorithm::CUBIC);
+        assert!(!recovery_for_alg(algo).use_get_next_release_time());
 
         let algo = CongestionControlAlgorithm::from_str("bbr").unwrap();
         assert_eq!(algo, CongestionControlAlgorithm::BBR);
+        assert!(!recovery_for_alg(algo).use_get_next_release_time());
 
         let algo = CongestionControlAlgorithm::from_str("bbr2").unwrap();
         assert_eq!(algo, CongestionControlAlgorithm::BBR2);
+        assert!(!recovery_for_alg(algo).use_get_next_release_time());
 
         let algo =
             CongestionControlAlgorithm::from_str("bbr2_gcongestion").unwrap();
         assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
+        assert!(recovery_for_alg(algo).use_get_next_release_time());
     }
 
     #[test]
