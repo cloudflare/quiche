@@ -30,11 +30,11 @@ use std::ops::DerefMut;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::recovery::congestion::Congestion;
-use crate::recovery::rtt::RttStats;
-use crate::recovery::Acked;
-use crate::recovery::RecoveryConfig;
-use crate::recovery::Sent;
+use super::Congestion;
+use super::rtt::RttStats;
+use super::Acked;
+use super::RecoveryConfig;
+use super::Sent;
 use crate::CongestionControlAlgorithm;
 
 pub(crate) struct TestSender {

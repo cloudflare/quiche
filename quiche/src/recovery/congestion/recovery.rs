@@ -31,11 +31,16 @@ use std::time::Instant;
 
 use std::collections::VecDeque;
 
+use crate::recovery::HandshakeStatus;
+use super::RecoveryConfig;
+use super::Sent;
+
 use crate::packet::Epoch;
 use crate::ranges::RangeSet;
-use crate::Config;
-use crate::CongestionControlAlgorithm;
 use crate::Result;
+
+#[cfg(feature = "qlog")]
+use crate::recovery::QlogMetrics;
 
 use crate::frame;
 use crate::packet;
@@ -44,30 +49,11 @@ use crate::ranges;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
-use smallvec::SmallVec;
-
-use self::congestion::pacer;
-use self::congestion::Congestion;
-use self::rtt::RttStats;
-
-// Loss Recovery
-const INITIAL_PACKET_THRESHOLD: u64 = 3;
-
-const MAX_PACKET_THRESHOLD: u64 = 20;
-
-const INITIAL_TIME_THRESHOLD: f64 = 9.0 / 8.0;
-
-const GRANULARITY: Duration = Duration::from_millis(1);
-
-const MAX_PTO_PROBES_COUNT: usize = 2;
-
-const MINIMUM_WINDOW_PACKETS: usize = 2;
-
-const LOSS_REDUCTION_FACTOR: f64 = 0.5;
-
-// How many non ACK eliciting packets we send before including a PING to solicit
-// an ACK.
-pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
+use super::pacer;
+use super::Congestion;
+use crate::recovery::LossDetectionTimer;
+use crate::recovery::rtt::RttStats;
+use crate::recovery::{INITIAL_PACKET_THRESHOLD, MAX_PACKET_THRESHOLD, INITIAL_TIME_THRESHOLD, GRANULARITY, MAX_PTO_PROBES_COUNT, MAX_OUTSTANDING_NON_ACK_ELICITING};
 
 #[derive(Default)]
 struct RecoveryEpoch {
@@ -304,20 +290,6 @@ impl RecoveryEpoch {
     }
 }
 
-#[derive(Default)]
-struct LossDetectionTimer {
-    time: Option<Instant>,
-}
-
-impl LossDetectionTimer {
-    fn update(&mut self, timeout: Instant) {
-        self.time = Some(timeout);
-    }
-
-    fn clear(&mut self) {
-        self.time = None;
-    }
-}
 pub struct Recovery {
     epochs: [RecoveryEpoch; packet::Epoch::count()],
 
@@ -333,13 +305,13 @@ pub struct Recovery {
 
     time_thresh: f64,
 
-    bytes_in_flight: usize,
+    pub bytes_in_flight: usize,
 
     bytes_sent: usize,
 
     pub bytes_lost: u64,
 
-    max_datagram_size: usize,
+    pub max_datagram_size: usize,
 
     #[cfg(feature = "qlog")]
     qlog_metrics: QlogMetrics,
@@ -347,41 +319,15 @@ pub struct Recovery {
     /// How many non-ack-eliciting packets have been sent.
     outstanding_non_ack_eliciting: usize,
 
-    congestion: Congestion,
+    pub congestion: Congestion,
 
     /// A resusable list of acks.
     newly_acked: Vec<Acked>,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub struct RecoveryConfig {
-    pub max_send_udp_payload_size: usize,
-    pub max_ack_delay: Duration,
-    pub cc_algorithm: CongestionControlAlgorithm,
-    pub hystart: bool,
-    pub pacing: bool,
-    pub max_pacing_rate: Option<u64>,
-    pub initial_congestion_window_packets: usize,
-}
-
-impl RecoveryConfig {
-    pub fn from_config(config: &Config) -> Self {
-        Self {
-            max_send_udp_payload_size: config.max_send_udp_payload_size,
-            max_ack_delay: Duration::ZERO,
-            cc_algorithm: config.cc_algorithm,
-            hystart: config.hystart,
-            pacing: config.pacing,
-            max_pacing_rate: config.max_pacing_rate,
-            initial_congestion_window_packets: config
-                .initial_congestion_window_packets,
-        }
-    }
-}
-
 impl Recovery {
     pub fn new_with_config(recovery_config: &RecoveryConfig) -> Self {
-        Recovery {
+        Self {
             epochs: Default::default(),
 
             loss_timer: Default::default(),
@@ -416,7 +362,7 @@ impl Recovery {
     }
 
     #[cfg(test)]
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &crate::Config) -> Self {
         Self::new_with_config(&RecoveryConfig::from_config(config))
     }
 
@@ -986,59 +932,6 @@ impl std::fmt::Debug for Recovery {
 }
 
 #[derive(Clone)]
-pub struct Sent {
-    pub pkt_num: u64,
-
-    pub frames: SmallVec<[frame::Frame; 1]>,
-
-    pub time_sent: Instant,
-
-    pub time_acked: Option<Instant>,
-
-    pub time_lost: Option<Instant>,
-
-    pub size: usize,
-
-    pub ack_eliciting: bool,
-
-    pub in_flight: bool,
-
-    pub delivered: usize,
-
-    pub delivered_time: Instant,
-
-    pub first_sent_time: Instant,
-
-    pub is_app_limited: bool,
-
-    pub tx_in_flight: usize,
-
-    pub lost: u64,
-
-    pub has_data: bool,
-
-    pub pmtud: bool,
-}
-
-impl std::fmt::Debug for Sent {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "pkt_num={:?} ", self.pkt_num)?;
-        write!(f, "pkt_sent_time={:?} ", self.time_sent)?;
-        write!(f, "pkt_size={:?} ", self.size)?;
-        write!(f, "delivered={:?} ", self.delivered)?;
-        write!(f, "delivered_time={:?} ", self.delivered_time)?;
-        write!(f, "first_sent_time={:?} ", self.first_sent_time)?;
-        write!(f, "is_app_limited={} ", self.is_app_limited)?;
-        write!(f, "tx_in_flight={} ", self.tx_in_flight)?;
-        write!(f, "lost={} ", self.lost)?;
-        write!(f, "has_data={} ", self.has_data)?;
-        write!(f, "pmtud={}", self.pmtud)?;
-
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
 pub struct Acked {
     pub pkt_num: u64,
 
@@ -1057,146 +950,13 @@ pub struct Acked {
     pub is_app_limited: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct HandshakeStatus {
-    pub has_handshake_keys: bool,
-
-    pub peer_verified_address: bool,
-
-    pub completed: bool,
-}
-
-#[cfg(test)]
-impl Default for HandshakeStatus {
-    fn default() -> HandshakeStatus {
-        HandshakeStatus {
-            has_handshake_keys: true,
-
-            peer_verified_address: true,
-
-            completed: true,
-        }
-    }
-}
-
-// We don't need to log all qlog metrics every time there is a recovery event.
-// Instead, we can log only the MetricsUpdated event data fields that we care
-// about, only when they change. To support this, the QLogMetrics structure
-// keeps a running picture of the fields.
-#[derive(Default)]
-#[cfg(feature = "qlog")]
-struct QlogMetrics {
-    min_rtt: Duration,
-    smoothed_rtt: Duration,
-    latest_rtt: Duration,
-    rttvar: Duration,
-    cwnd: u64,
-    bytes_in_flight: u64,
-    ssthresh: u64,
-    pacing_rate: u64,
-}
-
-#[cfg(feature = "qlog")]
-impl QlogMetrics {
-    // Make a qlog event if the latest instance of QlogMetrics is different.
-    //
-    // This function diffs each of the fields. A qlog MetricsUpdated event is
-    // only generated if at least one field is different. Where fields are
-    // different, the qlog event contains the latest value.
-    fn maybe_update(&mut self, latest: Self) -> Option<EventData> {
-        let mut emit_event = false;
-
-        let new_min_rtt = if self.min_rtt != latest.min_rtt {
-            self.min_rtt = latest.min_rtt;
-            emit_event = true;
-            Some(latest.min_rtt.as_secs_f32() * 1000.0)
-        } else {
-            None
-        };
-
-        let new_smoothed_rtt = if self.smoothed_rtt != latest.smoothed_rtt {
-            self.smoothed_rtt = latest.smoothed_rtt;
-            emit_event = true;
-            Some(latest.smoothed_rtt.as_secs_f32() * 1000.0)
-        } else {
-            None
-        };
-
-        let new_latest_rtt = if self.latest_rtt != latest.latest_rtt {
-            self.latest_rtt = latest.latest_rtt;
-            emit_event = true;
-            Some(latest.latest_rtt.as_secs_f32() * 1000.0)
-        } else {
-            None
-        };
-
-        let new_rttvar = if self.rttvar != latest.rttvar {
-            self.rttvar = latest.rttvar;
-            emit_event = true;
-            Some(latest.rttvar.as_secs_f32() * 1000.0)
-        } else {
-            None
-        };
-
-        let new_cwnd = if self.cwnd != latest.cwnd {
-            self.cwnd = latest.cwnd;
-            emit_event = true;
-            Some(latest.cwnd)
-        } else {
-            None
-        };
-
-        let new_bytes_in_flight =
-            if self.bytes_in_flight != latest.bytes_in_flight {
-                self.bytes_in_flight = latest.bytes_in_flight;
-                emit_event = true;
-                Some(latest.bytes_in_flight)
-            } else {
-                None
-            };
-
-        let new_ssthresh = if self.ssthresh != latest.ssthresh {
-            self.ssthresh = latest.ssthresh;
-            emit_event = true;
-            Some(latest.ssthresh)
-        } else {
-            None
-        };
-
-        let new_pacing_rate = if self.pacing_rate != latest.pacing_rate {
-            self.pacing_rate = latest.pacing_rate;
-            emit_event = true;
-            Some(latest.pacing_rate)
-        } else {
-            None
-        };
-
-        if emit_event {
-            // QVis can't use all these fields and they can be large.
-            return Some(EventData::MetricsUpdated(
-                qlog::events::quic::MetricsUpdated {
-                    min_rtt: new_min_rtt,
-                    smoothed_rtt: new_smoothed_rtt,
-                    latest_rtt: new_latest_rtt,
-                    rtt_variance: new_rttvar,
-                    congestion_window: new_cwnd,
-                    bytes_in_flight: new_bytes_in_flight,
-                    ssthresh: new_ssthresh,
-                    pacing_rate: new_pacing_rate,
-                    ..Default::default()
-                },
-            ));
-        }
-
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use smallvec::smallvec;
     use std::str::FromStr;
+    use crate::recovery::congestion::PACING_MULTIPLIER;
+    use crate::CongestionControlAlgorithm;
 
     #[test]
     fn lookup_cc_algo_ok() {
@@ -1991,7 +1751,7 @@ mod tests {
         // We pace this outgoing packet. as all conditions for pacing
         // are passed.
         let pacing_rate =
-            (r.cwnd() as f64 * congestion::PACING_MULTIPLIER / 0.05) as u64;
+            (r.cwnd() as f64 * PACING_MULTIPLIER / 0.05) as u64;
         assert_eq!(r.congestion.pacer.rate(), pacing_rate);
 
         assert_eq!(
@@ -2150,6 +1910,3 @@ mod tests {
         assert_eq!(r.congestion.lost_count, 0);
     }
 }
-
-pub mod congestion;
-mod rtt;
