@@ -30,7 +30,7 @@
 //! <https://tools.ietf.org/html/draft-cardwell-iccrg-bbr-congestion-control-00>
 
 use crate::minmax::Minmax;
-use crate::recovery::*;
+use super::*;
 
 use std::time::Duration;
 
@@ -351,20 +351,22 @@ fn debug_fmt(r: &Congestion, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 mod tests {
     use super::*;
 
-    use crate::recovery;
-
-    use self::congestion::test_sender::TestSender;
+    use crate::recovery::congestion::test_sender::TestSender;
+    use crate::packet;
+    use crate::recovery::HandshakeStatus;
+    use crate::ranges;
+    use crate::recovery::congestion::recovery::Recovery;
 
     use smallvec::smallvec;
 
     fn test_sender() -> TestSender {
-        TestSender::new(recovery::CongestionControlAlgorithm::BBR, false)
+        TestSender::new(CongestionControlAlgorithm::BBR, false)
     }
 
     #[test]
     fn bbr_init() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR);
 
         let r = Recovery::new(&cfg);
 
@@ -410,7 +412,7 @@ mod tests {
     #[test]
     fn bbr_congestion_event() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR);
 
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
@@ -475,7 +477,7 @@ mod tests {
     #[test]
     fn bbr_drain() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR);
 
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
@@ -596,7 +598,7 @@ mod tests {
     #[test]
     fn bbr_probe_bw() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR);
 
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
@@ -663,7 +665,7 @@ mod tests {
     #[test]
     fn bbr_probe_rtt() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR);
 
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();

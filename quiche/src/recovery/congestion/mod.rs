@@ -24,11 +24,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::str::FromStr;
 use std::time::Instant;
 
-use super::rtt::RttStats;
-use super::Acked;
+use crate::recovery::CongestionControlAlgorithm;
+use crate::recovery::rtt;
+use crate::recovery::rtt::RttStats;
+use self::recovery::Acked;
 use super::RecoveryConfig;
 use super::Sent;
 
@@ -55,7 +56,7 @@ pub struct Congestion {
     // BBR state.
     bbr_state: bbr::State,
 
-    // BBRv2 state.
+    // BBR2 state.
     bbr2_state: bbr2::State,
 
     pub(crate) congestion_window: usize,
@@ -246,41 +247,6 @@ impl Congestion {
     }
 }
 
-/// Available congestion control algorithms.
-///
-/// This enum provides currently available list of congestion control
-/// algorithms.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(C)]
-pub enum CongestionControlAlgorithm {
-    /// Reno congestion control algorithm. `reno` in a string form.
-    Reno  = 0,
-    /// CUBIC congestion control algorithm (default). `cubic` in a string form.
-    CUBIC = 1,
-    /// BBR congestion control algorithm. `bbr` in a string form.
-    BBR   = 2,
-    /// BBRv2 congestion control algorithm. `bbr2` in a string form.
-    BBR2  = 3,
-}
-
-impl FromStr for CongestionControlAlgorithm {
-    type Err = crate::Error;
-
-    /// Converts a string to `CongestionControlAlgorithm`.
-    ///
-    /// If `name` is not valid, `Error::CongestionControl` is returned.
-    fn from_str(name: &str) -> std::result::Result<Self, Self::Err> {
-        match name {
-            "reno" => Ok(CongestionControlAlgorithm::Reno),
-            "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
-            "bbr" => Ok(CongestionControlAlgorithm::BBR),
-            "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
-
-            _ => Err(crate::Error::CongestionControl),
-        }
-    }
-}
-
 pub(crate) struct CongestionControlOps {
     pub on_init: fn(r: &mut Congestion),
 
@@ -338,6 +304,7 @@ mod hystart;
 pub(crate) mod pacer;
 mod prr;
 mod reno;
+pub(crate) mod recovery;
 
 #[cfg(test)]
 mod test_sender;

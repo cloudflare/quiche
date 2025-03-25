@@ -36,14 +36,14 @@ use std::cmp;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::recovery;
-use crate::recovery::rtt::RttStats;
-use crate::recovery::Acked;
-use crate::recovery::Sent;
+use super::rtt::RttStats;
+use super::Acked;
+use super::Sent;
 
 use super::reno;
 use super::Congestion;
 use super::CongestionControlOps;
+use crate::recovery::MINIMUM_WINDOW_PACKETS;
 
 pub(crate) static CUBIC: CongestionControlOps = CongestionControlOps {
     on_init,
@@ -350,7 +350,7 @@ fn congestion_event(
         r.ssthresh = (r.congestion_window as f64 * BETA_CUBIC) as usize;
         r.ssthresh = cmp::max(
             r.ssthresh,
-            r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
+            r.max_datagram_size * MINIMUM_WINDOW_PACKETS,
         );
         r.congestion_window = r.ssthresh;
 
@@ -423,14 +423,14 @@ mod tests {
 
     use crate::recovery::congestion::hystart;
     use crate::recovery::congestion::test_sender::TestSender;
-    use crate::recovery::Recovery;
+    use crate::recovery::congestion::recovery::Recovery;
 
     fn test_sender() -> TestSender {
-        TestSender::new(recovery::CongestionControlAlgorithm::CUBIC, false)
+        TestSender::new(CongestionControlAlgorithm::CUBIC, false)
     }
 
     fn hystart_test_sender() -> TestSender {
-        TestSender::new(recovery::CongestionControlAlgorithm::CUBIC, true)
+        TestSender::new(CongestionControlAlgorithm::CUBIC, true)
     }
 
     #[test]

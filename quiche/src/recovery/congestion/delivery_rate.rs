@@ -32,8 +32,8 @@
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::recovery::Acked;
-use crate::recovery::Sent;
+use super::Acked;
+use super::Sent;
 
 #[derive(Debug)]
 pub struct Rate {
@@ -214,7 +214,11 @@ struct RateSample {
 mod tests {
     use super::*;
 
-    use crate::recovery::*;
+    use crate::packet;
+    use crate::ranges;
+    use crate::recovery::HandshakeStatus;
+    use crate::recovery::congestion::recovery::Recovery;
+    use crate::Config;
 
     use smallvec::smallvec;
 

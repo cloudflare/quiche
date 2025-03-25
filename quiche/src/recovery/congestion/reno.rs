@@ -31,14 +31,13 @@
 use std::cmp;
 use std::time::Instant;
 
-use crate::recovery;
-
-use crate::recovery::rtt::RttStats;
-use crate::recovery::Acked;
-use crate::recovery::Sent;
+use super::rtt::RttStats;
+use super::Acked;
+use super::Sent;
 
 use super::Congestion;
 use super::CongestionControlOps;
+use crate::recovery::{LOSS_REDUCTION_FACTOR, MINIMUM_WINDOW_PACKETS};
 
 pub(crate) static RENO: CongestionControlOps = CongestionControlOps {
     on_init,
@@ -117,16 +116,16 @@ fn congestion_event(
         r.congestion_recovery_start_time = Some(now);
 
         r.congestion_window = (r.congestion_window as f64 *
-            recovery::LOSS_REDUCTION_FACTOR)
+            LOSS_REDUCTION_FACTOR)
             as usize;
 
         r.congestion_window = cmp::max(
             r.congestion_window,
-            r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
+            r.max_datagram_size * MINIMUM_WINDOW_PACKETS,
         );
 
         r.bytes_acked_ca = (r.congestion_window as f64 *
-            recovery::LOSS_REDUCTION_FACTOR) as usize;
+            LOSS_REDUCTION_FACTOR) as usize;
 
         r.ssthresh = r.congestion_window;
 
@@ -152,21 +151,23 @@ fn debug_fmt(_r: &Congestion, _f: &mut std::fmt::Formatter) -> std::fmt::Result 
 
 #[cfg(test)]
 mod tests {
+    use crate::CongestionControlAlgorithm;
+
     use super::*;
 
     use crate::recovery::congestion::test_sender::TestSender;
-    use crate::recovery::Recovery;
+    use crate::recovery::congestion::recovery::Recovery;
 
     use std::time::Duration;
 
     fn test_sender() -> TestSender {
-        TestSender::new(recovery::CongestionControlAlgorithm::Reno, false)
+        TestSender::new(CongestionControlAlgorithm::Reno, false)
     }
 
     #[test]
     fn reno_init() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::Reno);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
 
         let r = Recovery::new(&cfg);
 
@@ -240,7 +241,7 @@ mod tests {
 
         // After congestion event, cwnd will be reduced.
         let cur_cwnd =
-            (prev_cwnd as f64 * recovery::LOSS_REDUCTION_FACTOR) as usize;
+            (prev_cwnd as f64 * LOSS_REDUCTION_FACTOR) as usize;
         assert_eq!(sender.congestion_window, cur_cwnd);
 
         let rtt = Duration::from_millis(100);

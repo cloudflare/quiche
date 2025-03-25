@@ -30,7 +30,7 @@
 //! <https://tools.ietf.org/html/draft-cardwell-iccrg-bbr-congestion-control-02>
 
 use crate::minmax::Minmax;
-use crate::recovery::*;
+use super::*;
 
 use std::time::Duration;
 use std::time::Instant;
@@ -663,12 +663,16 @@ mod tests {
 
     use smallvec::smallvec;
 
-    use crate::recovery;
+    use crate::packet;
+    use crate::ranges;
+    use crate::recovery::HandshakeStatus;
+    use crate::recovery::congestion::recovery::Recovery;
+    use crate::CongestionControlAlgorithm;
 
     #[test]
     fn bbr_init() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR2);
 
         let r = Recovery::new(&cfg);
 
@@ -687,7 +691,7 @@ mod tests {
     #[test]
     fn bbr2_startup() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR2);
 
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
@@ -730,16 +734,17 @@ mod tests {
         let mut acked = ranges::RangeSet::default();
         acked.insert(0..5);
 
-        assert!(r
-            .on_ack_received(
+        assert_eq!(
+            r.on_ack_received(
                 &acked,
                 25,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
-            )
-            .is_ok());
+            ),
+            Ok((0, 0, 5 * mss))
+        );
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::Startup);
         assert_eq!(r.cwnd(), cwnd_prev + mss * 5);
@@ -754,7 +759,7 @@ mod tests {
     #[test]
     fn bbr2_congestion_event() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR2);
 
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
@@ -798,16 +803,17 @@ mod tests {
         acked.insert(4..5);
 
         // 2 acked, 2 x MSS lost.
-        assert!(r
-            .on_ack_received(
+        assert_eq!(
+            r.on_ack_received(
                 &acked,
                 25,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
-            )
-            .is_ok());
+            ),
+            Ok((2, 2 * mss, mss))
+                );
 
         assert!(r.congestion.bbr2_state.in_recovery);
 
@@ -822,7 +828,7 @@ mod tests {
     #[test]
     fn bbr2_probe_bw() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR2);
 
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
@@ -868,16 +874,16 @@ mod tests {
             let mut acked = ranges::RangeSet::default();
             acked.insert(0..pn);
 
-            assert!(r
-                .on_ack_received(
+            assert_eq!(
+                r.on_ack_received(
                     &acked,
                     25,
                     packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
                     "",
-                )
-                .is_ok());
+                ),
+                Ok((0, 0, mss)));
         }
 
         // Stop at right before filled_pipe=true.
@@ -921,16 +927,16 @@ mod tests {
         // in Drain state.
         acked.insert(0..pn - 4);
 
-        assert!(r
-            .on_ack_received(
+        assert_eq!(
+            r.on_ack_received(
                 &acked,
                 25,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
-            )
-            .is_ok());
+            ),
+            Ok((0, 0, mss)));
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::Drain);
         assert!(r.congestion.bbr2_state.filled_pipe);
@@ -940,7 +946,7 @@ mod tests {
     #[test]
     fn bbr2_probe_rtt() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR2);
 
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
@@ -987,16 +993,16 @@ mod tests {
             let mut acked = ranges::RangeSet::default();
             acked.insert(0..pn);
 
-            assert!(r
-                .on_ack_received(
+            assert_eq!(
+                r.on_ack_received(
                     &acked,
                     25,
                     packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
                     "",
-                )
-                .is_ok());
+                ),
+                Ok((0, 0, mss)));
         }
 
         // Now we are in ProbeBW state.
@@ -1045,16 +1051,16 @@ mod tests {
         let mut acked = ranges::RangeSet::default();
         acked.insert(0..pn);
 
-        assert!(r
-            .on_ack_received(
+        assert_eq!(
+            r.on_ack_received(
                 &acked,
                 25,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
                 "",
-            )
-            .is_ok());
+            ),
+            Ok((0, 0, mss)));
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::ProbeRTT);
         assert_eq!(r.congestion.bbr2_state.pacing_gain, 1.0);
