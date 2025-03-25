@@ -35,6 +35,11 @@ use crate::settings::ConnectionParams;
 use crate::settings::TlsCertificatePaths;
 use crate::socket::SocketCapabilities;
 
+/// Whether `--cfg capture_keylogs` was set at build time. We keep supporting
+/// the `capture_keylogs` feature for backward compatibility.
+const KEYLOGFILE_ENABLED: bool =
+    cfg!(capture_keylogs) || cfg!(feature = "capture_keylogs");
+
 /// Internal representation of the combined configuration for a QUIC connection.
 pub(crate) struct Config {
     pub quiche_config: quiche::Config,
@@ -65,12 +70,12 @@ impl Config {
             Some(f) => Some(Cow::Borrowed(f.as_ref())),
             None => std::env::var_os("SSLKEYLOGFILE").map(Cow::from),
         };
-        let keylog_file = keylog_path.and_then(|path| if cfg!(feature = "capture_keylogs") {
+        let keylog_file = keylog_path.and_then(|path| if KEYLOGFILE_ENABLED {
                 File::options().create(true).append(true).open(path)
                     .inspect_err(|e| log::warn!("failed to open SSLKEYLOGFILE"; "error" => e))
                     .ok()
             } else {
-                log::warn!("SSLKEYLOGFILE is set, but `capture_keylogs` feature is disabled. No keys will be logged.");
+                log::warn!("SSLKEYLOGFILE is set, but `--cfg capture_keylogs` was not enabled. No keys will be logged.");
                 None
             });
 
