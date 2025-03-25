@@ -28,7 +28,12 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+mod drain;
+mod mode;
 mod network_model;
+mod probe_bw;
+mod probe_rtt;
+mod startup;
 
 use std::time::Duration;
 use std::time::Instant;
