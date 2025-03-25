@@ -37,7 +37,8 @@ use super::Sent;
 
 use super::Congestion;
 use super::CongestionControlOps;
-use crate::recovery::{LOSS_REDUCTION_FACTOR, MINIMUM_WINDOW_PACKETS};
+use crate::recovery::LOSS_REDUCTION_FACTOR;
+use crate::recovery::MINIMUM_WINDOW_PACKETS;
 
 pub(crate) static RENO: CongestionControlOps = CongestionControlOps {
     on_init,
@@ -115,17 +116,16 @@ fn congestion_event(
     if !r.in_congestion_recovery(time_sent) {
         r.congestion_recovery_start_time = Some(now);
 
-        r.congestion_window = (r.congestion_window as f64 *
-            LOSS_REDUCTION_FACTOR)
-            as usize;
+        r.congestion_window =
+            (r.congestion_window as f64 * LOSS_REDUCTION_FACTOR) as usize;
 
         r.congestion_window = cmp::max(
             r.congestion_window,
             r.max_datagram_size * MINIMUM_WINDOW_PACKETS,
         );
 
-        r.bytes_acked_ca = (r.congestion_window as f64 *
-            LOSS_REDUCTION_FACTOR) as usize;
+        r.bytes_acked_ca =
+            (r.congestion_window as f64 * LOSS_REDUCTION_FACTOR) as usize;
 
         r.ssthresh = r.congestion_window;
 
@@ -155,8 +155,8 @@ mod tests {
 
     use super::*;
 
-    use crate::recovery::congestion::test_sender::TestSender;
     use crate::recovery::congestion::recovery::Recovery;
+    use crate::recovery::congestion::test_sender::TestSender;
 
     use std::time::Duration;
 
@@ -240,8 +240,7 @@ mod tests {
         sender.lose_n_packets(1, size, None);
 
         // After congestion event, cwnd will be reduced.
-        let cur_cwnd =
-            (prev_cwnd as f64 * LOSS_REDUCTION_FACTOR) as usize;
+        let cur_cwnd = (prev_cwnd as f64 * LOSS_REDUCTION_FACTOR) as usize;
         assert_eq!(sender.congestion_window, cur_cwnd);
 
         let rtt = Duration::from_millis(100);

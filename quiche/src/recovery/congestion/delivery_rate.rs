@@ -216,8 +216,8 @@ mod tests {
 
     use crate::packet;
     use crate::ranges;
-    use crate::recovery::HandshakeStatus;
     use crate::recovery::congestion::recovery::Recovery;
+    use crate::recovery::HandshakeStatus;
     use crate::Config;
 
     use smallvec::smallvec;

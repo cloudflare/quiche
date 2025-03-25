@@ -26,12 +26,12 @@
 
 use std::time::Instant;
 
-use crate::recovery::CongestionControlAlgorithm;
-use crate::recovery::rtt;
-use crate::recovery::rtt::RttStats;
 use self::recovery::Acked;
 use super::RecoveryConfig;
 use super::Sent;
+use crate::recovery::rtt;
+use crate::recovery::rtt::RttStats;
+use crate::recovery::CongestionControlAlgorithm;
 
 pub const PACING_MULTIPLIER: f64 = 1.25;
 pub struct Congestion {
@@ -303,8 +303,8 @@ mod delivery_rate;
 mod hystart;
 pub(crate) mod pacer;
 mod prr;
-mod reno;
 pub(crate) mod recovery;
+mod reno;
 
 #[cfg(test)]
 mod test_sender;

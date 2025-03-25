@@ -348,10 +348,8 @@ fn congestion_event(
         }
 
         r.ssthresh = (r.congestion_window as f64 * BETA_CUBIC) as usize;
-        r.ssthresh = cmp::max(
-            r.ssthresh,
-            r.max_datagram_size * MINIMUM_WINDOW_PACKETS,
-        );
+        r.ssthresh =
+            cmp::max(r.ssthresh, r.max_datagram_size * MINIMUM_WINDOW_PACKETS);
         r.congestion_window = r.ssthresh;
 
         r.cubic_state.k = if r.cubic_state.w_max < r.congestion_window as f64 {
@@ -422,8 +420,8 @@ mod tests {
     use crate::CongestionControlAlgorithm;
 
     use crate::recovery::congestion::hystart;
-    use crate::recovery::congestion::test_sender::TestSender;
     use crate::recovery::congestion::recovery::Recovery;
+    use crate::recovery::congestion::test_sender::TestSender;
 
     fn test_sender() -> TestSender {
         TestSender::new(CongestionControlAlgorithm::CUBIC, false)

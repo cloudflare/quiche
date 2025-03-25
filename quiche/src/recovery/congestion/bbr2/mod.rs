@@ -29,8 +29,8 @@
 //! This implementation is based on the following draft:
 //! <https://tools.ietf.org/html/draft-cardwell-iccrg-bbr-congestion-control-02>
 
-use crate::minmax::Minmax;
 use super::*;
+use crate::minmax::Minmax;
 
 use std::time::Duration;
 use std::time::Instant;
@@ -665,8 +665,8 @@ mod tests {
 
     use crate::packet;
     use crate::ranges;
-    use crate::recovery::HandshakeStatus;
     use crate::recovery::congestion::recovery::Recovery;
+    use crate::recovery::HandshakeStatus;
     use crate::CongestionControlAlgorithm;
 
     #[test]
@@ -813,7 +813,7 @@ mod tests {
                 "",
             ),
             Ok((2, 2 * mss, mss))
-                );
+        );
 
         assert!(r.congestion.bbr2_state.in_recovery);
 
@@ -883,7 +883,8 @@ mod tests {
                     now,
                     "",
                 ),
-                Ok((0, 0, mss)));
+                Ok((0, 0, mss))
+            );
         }
 
         // Stop at right before filled_pipe=true.
@@ -936,7 +937,8 @@ mod tests {
                 now,
                 "",
             ),
-            Ok((0, 0, mss)));
+            Ok((0, 0, mss))
+        );
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::Drain);
         assert!(r.congestion.bbr2_state.filled_pipe);
@@ -1002,7 +1004,8 @@ mod tests {
                     now,
                     "",
                 ),
-                Ok((0, 0, mss)));
+                Ok((0, 0, mss))
+            );
         }
 
         // Now we are in ProbeBW state.
@@ -1060,7 +1063,8 @@ mod tests {
                 now,
                 "",
             ),
-            Ok((0, 0, mss)));
+            Ok((0, 0, mss))
+        );
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::ProbeRTT);
         assert_eq!(r.congestion.bbr2_state.pacing_gain, 1.0);

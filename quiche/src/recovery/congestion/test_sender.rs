@@ -30,9 +30,9 @@ use std::ops::DerefMut;
 use std::time::Duration;
 use std::time::Instant;
 
-use super::Congestion;
 use super::rtt::RttStats;
 use super::Acked;
+use super::Congestion;
 use super::RecoveryConfig;
 use super::Sent;
 use crate::CongestionControlAlgorithm;
