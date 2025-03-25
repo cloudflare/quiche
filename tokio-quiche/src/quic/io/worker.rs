@@ -305,7 +305,13 @@ where
         };
 
         #[cfg(feature = "gcongestion")]
-        let next_release = {
+        let use_get_next_release_time = true;
+
+        #[cfg(not(feature = "gcongestion"))]
+        let use_get_next_release_time =
+            qconn.use_get_next_release_time().unwrap_or(false);
+
+        let next_release = if use_get_next_release_time {
             let next_release = qconn
                 .get_next_release_time()
                 .filter(|_| self.cfg.pacing_offload);
@@ -324,6 +330,8 @@ where
             }
 
             next_release
+        } else {
+            None
         };
 
         let buffer_write_outcome = loop {
@@ -355,11 +363,15 @@ where
             }
 
             #[cfg(not(feature = "gcongestion"))]
-            let max_send_size = tune_max_send_size(
-                segment_size,
-                qconn.send_quantum(),
-                send_buf.len(),
-            );
+            let max_send_size = if !use_get_next_release_time {
+                tune_max_send_size(
+                    segment_size,
+                    qconn.send_quantum(),
+                    send_buf.len(),
+                )
+            } else {
+                usize::MAX
+            };
 
             #[cfg(feature = "gcongestion")]
             let max_send_size = usize::MAX;
@@ -387,44 +399,47 @@ where
                 _ => (),
             }
 
-            #[cfg(feature = "gcongestion")]
-            // If the release time of next packet is different, or it can't be
-            // part of a burst, start the next batch
-            if let Some(next_release) = next_release {
-                match qconn.get_next_release_time() {
-                    Some(release)
-                        if release.can_burst() ||
-                            release.time_eq(&next_release, now) => {},
-                    _ => break outcome,
+            if use_get_next_release_time {
+                // If the release time of next packet is different, or it can't be
+                // part of a burst, start the next batch
+                if let Some(next_release) = next_release {
+                    match qconn.get_next_release_time() {
+                        Some(release)
+                            if release.can_burst() ||
+                                release.time_eq(&next_release, now) => {},
+                        _ => break outcome,
+                    }
                 }
             }
         };
 
-        #[cfg(not(feature = "gcongestion"))]
-        let tx_time = send_info.filter(|_| self.cfg.pacing_offload).map(|v| v.at);
-
-        #[cfg(feature = "gcongestion")]
-        let tx_time = next_release
-            .filter(|_| self.cfg.pacing_offload)
-            .and_then(|v| v.time(now));
+        let tx_time = if use_get_next_release_time {
+            next_release
+                .filter(|_| self.cfg.pacing_offload)
+                .and_then(|v| v.time(now))
+        } else {
+            send_info.filter(|_| self.cfg.pacing_offload).map(|v| v.at)
+        };
 
         self.write_state.conn_established = qconn.is_established();
         self.write_state.tx_time = tx_time;
         self.write_state.segment_size =
             segment_size.unwrap_or(self.write_state.bytes_written);
 
-        #[cfg(not(feature = "gcongestion"))]
-        if let Some(time) = tx_time {
-            const DEFAULT_MAX_INTO_FUTURE: Duration = Duration::from_millis(1);
-            if time
-                .checked_duration_since(now)
-                .map(|d| d > DEFAULT_MAX_INTO_FUTURE)
-                .unwrap_or(false)
-            {
-                self.write_state.next_release_time =
-                    Some(now + DEFAULT_MAX_INTO_FUTURE.mul_f32(0.8));
-                self.write_state.has_pending_data = false;
-                return Ok(0);
+        if !use_get_next_release_time {
+            if let Some(time) = tx_time {
+                const DEFAULT_MAX_INTO_FUTURE: Duration =
+                    Duration::from_millis(1);
+                if time
+                    .checked_duration_since(now)
+                    .map(|d| d > DEFAULT_MAX_INTO_FUTURE)
+                    .unwrap_or(false)
+                {
+                    self.write_state.next_release_time =
+                        Some(now + DEFAULT_MAX_INTO_FUTURE.mul_f32(0.8));
+                    self.write_state.has_pending_data = false;
+                    return Ok(0);
+                }
             }
         }
 

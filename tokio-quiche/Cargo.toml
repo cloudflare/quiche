@@ -51,9 +51,9 @@ futures = { workspace = true }
 futures-util = { workspace = true }
 ipnetwork = { workspace = true }
 log = { workspace = true }
-octets = { version = "0.3.0" }
+octets = { workspace = true }
 pin-project = { workspace = true }
-quiche = { version = "0.23", features = ["boringssl-boring-crate", "qlog"] }
+quiche = { workspace = true, features = ["boringssl-boring-crate", "qlog"] }
 quiche-mallard = { version = "0.21", features = [
   "boringssl-boring-crate",
   "qlog",

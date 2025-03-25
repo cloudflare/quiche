@@ -945,6 +945,10 @@ impl RecoveryApi for LegacyRecovery {
         }
     }
 
+    fn use_get_next_release_time(&self) -> bool {
+        false
+    }
+
     fn lost_count(&self) -> usize {
         self.congestion.lost_count
     }
