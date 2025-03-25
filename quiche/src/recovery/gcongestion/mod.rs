@@ -28,6 +28,7 @@ pub mod bandwidth;
 mod bbr;
 mod bbr2;
 pub mod pacer;
+mod recovery;
 
 use std::fmt::Debug;
 use std::time::Instant;

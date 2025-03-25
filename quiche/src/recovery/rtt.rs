@@ -28,6 +28,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::minmax::Minmax;
+use crate::recovery::GRANULARITY;
 
 pub(crate) const INITIAL_RTT: Duration = Duration::from_millis(333);
 
@@ -113,7 +114,23 @@ impl RttStats {
         self.smoothed_rtt
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn latest_rtt(&self) -> Duration {
+        self.latest_rtt
+    }
+
+    pub(crate) fn rttvar(&self) -> Duration {
+        self.rttvar
+    }
+
     pub(crate) fn min_rtt(&self) -> Option<Duration> {
         self.min_rtt.ne(&Duration::ZERO).then_some(*self.min_rtt)
+    }
+
+    pub(crate) fn loss_delay(&self, time_thresh: f64) -> Duration {
+        self.latest_rtt
+            .max(self.smoothed_rtt)
+            .mul_f64(time_thresh)
+            .max(GRANULARITY)
     }
 }

@@ -365,7 +365,7 @@ struct QlogMetrics {
     rttvar: Duration,
     cwnd: u64,
     bytes_in_flight: u64,
-    ssthresh: u64,
+    ssthresh: Option<u64>,
     pacing_rate: u64,
 }
 
@@ -431,7 +431,7 @@ impl QlogMetrics {
         let new_ssthresh = if self.ssthresh != latest.ssthresh {
             self.ssthresh = latest.ssthresh;
             emit_event = true;
-            Some(latest.ssthresh)
+            latest.ssthresh
         } else {
             None
         };
