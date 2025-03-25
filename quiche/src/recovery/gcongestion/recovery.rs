@@ -374,23 +374,22 @@ pub struct GRecovery {
 }
 
 impl GRecovery {
-    pub fn new(recovery_config: &RecoveryConfig) -> Self {
+    pub fn new(recovery_config: &RecoveryConfig) -> Option<Self> {
         let cc = match recovery_config.cc_algorithm {
-            CongestionControlAlgorithm::BBR => Congestion::bbr(
+            CongestionControlAlgorithm::BbrGcongestion => Congestion::bbr(
                 INITIAL_WINDOW_PACKETS,
                 MAX_WINDOW_PACKETS,
                 recovery_config.max_send_udp_payload_size,
             ),
-            CongestionControlAlgorithm::BBR2 => Congestion::bbrv2(
+            CongestionControlAlgorithm::Bbr2Gcongestion => Congestion::bbrv2(
                 INITIAL_WINDOW_PACKETS,
                 MAX_WINDOW_PACKETS,
                 recovery_config.max_send_udp_payload_size,
             ),
-            _ =>
-                panic!("Unknown cc algorithm {:?}", recovery_config.cc_algorithm),
+            _ => return None,
         };
 
-        Self {
+        Some(Self {
             epochs: Default::default(),
             rtt_stats: RttStats::new(recovery_config.max_ack_delay),
             loss_timer: Default::default(),
@@ -423,7 +422,7 @@ impl GRecovery {
 
             newly_acked: Vec::new(),
             lost_reuse: Vec::new(),
-        }
+        })
     }
 
     fn detect_and_remove_lost_packets(

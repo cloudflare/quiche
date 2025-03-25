@@ -243,8 +243,9 @@ pub trait RecoveryApi {
 
 impl Recovery {
     pub fn new_with_config(recovery_config: &RecoveryConfig) -> Self {
-        if false {
-            Recovery::from(GRecovery::new(recovery_config))
+        let grecovery = GRecovery::new(recovery_config);
+        if let Some(grecovery) = grecovery {
+            Recovery::from(grecovery)
         } else {
             Recovery::from(LegacyRecovery::new_with_config(recovery_config))
         }
@@ -264,13 +265,19 @@ impl Recovery {
 #[repr(C)]
 pub enum CongestionControlAlgorithm {
     /// Reno congestion control algorithm. `reno` in a string form.
-    Reno  = 0,
+    Reno            = 0,
     /// CUBIC congestion control algorithm (default). `cubic` in a string form.
-    CUBIC = 1,
+    CUBIC           = 1,
     /// BBR congestion control algorithm. `bbr` in a string form.
-    BBR   = 2,
+    BBR             = 2,
     /// BBRv2 congestion control algorithm. `bbr2` in a string form.
-    BBR2  = 3,
+    BBR2            = 3,
+    /// BBRv1 congestion control algorithm implementation from gcongestion
+    /// branch. `bbr_gcongestion` in a string form.
+    BbrGcongestion  = 4,
+    /// BBRv2 congestion control algorithm implementation from gcongestion
+    /// branch. `bbr2_gcongestion` in a string form.
+    Bbr2Gcongestion = 5,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -285,6 +292,8 @@ impl FromStr for CongestionControlAlgorithm {
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
             "bbr" => Ok(CongestionControlAlgorithm::BBR),
             "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
+            "bbr_gcongestion" => Ok(CongestionControlAlgorithm::BbrGcongestion),
+            "bbr2_gcongestion" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
 
             _ => Err(crate::Error::CongestionControl),
         }
@@ -563,6 +572,23 @@ mod tests {
     fn lookup_cc_algo_ok() {
         let algo = CongestionControlAlgorithm::from_str("reno").unwrap();
         assert_eq!(algo, CongestionControlAlgorithm::Reno);
+
+        let algo = CongestionControlAlgorithm::from_str("cubic").unwrap();
+        assert_eq!(algo, CongestionControlAlgorithm::CUBIC);
+
+        let algo = CongestionControlAlgorithm::from_str("bbr").unwrap();
+        assert_eq!(algo, CongestionControlAlgorithm::BBR);
+
+        let algo = CongestionControlAlgorithm::from_str("bbr2").unwrap();
+        assert_eq!(algo, CongestionControlAlgorithm::BBR2);
+
+        let algo =
+            CongestionControlAlgorithm::from_str("bbr_gcongestion").unwrap();
+        assert_eq!(algo, CongestionControlAlgorithm::BbrGcongestion);
+
+        let algo =
+            CongestionControlAlgorithm::from_str("bbr2_gcongestion").unwrap();
+        assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
     }
 
     #[test]
