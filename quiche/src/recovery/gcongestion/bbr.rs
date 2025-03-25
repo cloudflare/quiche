@@ -35,4 +35,3 @@ pub use bandwidth_sampler::BandwidthSampler;
 pub use bandwidth_sampler::SendTimeState;
 
 use super::Acked;
-use super::Lost;
