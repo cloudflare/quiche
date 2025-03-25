@@ -78,6 +78,7 @@ sfv = { version = "0.9", optional = true }
 slab = "0.4"
 smallvec = { workspace = true, features = ["union"] }
 enum_dispatch = "0.3"
+ring = { workspace = true }
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.59", features = [
@@ -87,7 +88,6 @@ windows-sys = { version = "0.59", features = [
 
 [dev-dependencies]
 mio = { workspace = true, features = ["net", "os-poll"] }
-ring = { workspace = true }
 url = { workspace = true }
 
 [lib]
