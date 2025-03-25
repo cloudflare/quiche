@@ -39,6 +39,7 @@ use qlog::events::EventData;
 use smallvec::SmallVec;
 
 mod congestion;
+mod gcongestion;
 mod rtt;
 
 use self::congestion::recovery::LegacyRecovery;
