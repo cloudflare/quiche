@@ -417,8 +417,11 @@ use std::str::FromStr;
 
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::time::Duration;
 
 use smallvec::SmallVec;
+
+use crate::recovery::ReleaseDecision;
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
@@ -799,6 +802,7 @@ pub struct Config {
     hystart: bool,
 
     pacing: bool,
+    /// Send rate limit in Mbps
     max_pacing_rate: Option<u64>,
 
     dgram_recv_max_queue_len: usize,
@@ -4867,6 +4871,40 @@ impl Connection {
         }
 
         Ok((pkt_type, written))
+    }
+
+    /// Get the desired send time for the next packet
+    #[inline]
+    pub fn get_next_release_time(&self) -> Option<ReleaseDecision> {
+        Some(
+            self.paths
+                .get_active()
+                .ok()?
+                .recovery
+                .get_next_release_time(),
+        )
+    }
+
+    /// Get the desired send time for the next packet
+    #[inline]
+    pub fn use_get_next_release_time(&self) -> Option<bool> {
+        Some(
+            self.paths
+                .get_active()
+                .ok()?
+                .recovery
+                .use_get_next_release_time(),
+        )
+    }
+
+    /// The maximum pacing into the future, equals 1/8 of the smoothed rtt, but
+    /// not greater than 5ms
+    pub fn max_release_into_future(&self) -> time::Duration {
+        self.paths
+            .get_active()
+            .map(|p| p.recovery.rtt().mul_f64(0.125))
+            .unwrap_or(time::Duration::from_millis(1))
+            .min(Duration::from_millis(5))
     }
 
     /// Returns the size of the send quantum, in bytes.
