@@ -38,6 +38,7 @@ use std::task::Context;
 use std::task::Poll;
 use tokio::io::ReadBuf;
 use tokio::net::UdpSocket;
+use tokio::task::coop::unconstrained;
 
 #[cfg(unix)]
 use std::os::fd::AsFd;
@@ -224,14 +225,17 @@ pub trait DatagramSocketSendExt: DatagramSocketSend {
     }
 
     fn try_send(&self, buf: &[u8]) -> io::Result<usize> {
-        match poll_fn(|cx| self.poll_send(cx, buf)).now_or_never() {
+        match unconstrained(poll_fn(|cx| self.poll_send(cx, buf))).now_or_never()
+        {
             Some(result) => result,
             None => Err(io::ErrorKind::WouldBlock.into()),
         }
     }
 
     fn try_send_many(&self, bufs: &[ReadBuf<'_>]) -> io::Result<usize> {
-        match poll_fn(|cx| self.poll_send_many(cx, bufs)).now_or_never() {
+        match unconstrained(poll_fn(|cx| self.poll_send_many(cx, bufs)))
+            .now_or_never()
+        {
             Some(result) => result,
             None => Err(io::ErrorKind::WouldBlock.into()),
         }
