@@ -917,7 +917,7 @@ impl RecoveryApi for LegacyRecovery {
             rttvar: self.rtt_stats.rttvar,
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight as u64,
-            ssthresh: self.congestion.ssthresh as u64,
+            ssthresh: Some(self.congestion.ssthresh as u64),
             pacing_rate: self.congestion.pacer.rate(),
         };
 

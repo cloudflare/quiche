@@ -43,6 +43,7 @@ mod gcongestion;
 mod rtt;
 
 use self::congestion::recovery::LegacyRecovery;
+use self::gcongestion::GRecovery;
 
 // Loss Recovery
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
@@ -58,6 +59,11 @@ const MAX_PTO_PROBES_COUNT: usize = 2;
 const MINIMUM_WINDOW_PACKETS: usize = 2;
 
 const LOSS_REDUCTION_FACTOR: f64 = 0.5;
+
+// Congestion Control
+const INITIAL_WINDOW_PACKETS: usize = 10;
+
+const MAX_WINDOW_PACKETS: usize = 20_000;
 
 // How many non ACK eliciting packets we send before including a PING to solicit
 // an ACK.
@@ -125,6 +131,7 @@ impl RecoveryConfig {
 #[derive(Debug)]
 pub(crate) enum Recovery {
     Legacy(LegacyRecovery),
+    GCongestion(GRecovery),
 }
 
 #[enum_dispatch::enum_dispatch]
@@ -236,7 +243,11 @@ pub trait RecoveryApi {
 
 impl Recovery {
     pub fn new_with_config(recovery_config: &RecoveryConfig) -> Self {
-        Recovery::from(LegacyRecovery::new_with_config(recovery_config))
+        if false {
+            Recovery::from(GRecovery::new(recovery_config))
+        } else {
+            Recovery::from(LegacyRecovery::new_with_config(recovery_config))
+        }
     }
 
     #[cfg(test)]
@@ -368,7 +379,7 @@ struct QlogMetrics {
     rttvar: Duration,
     cwnd: u64,
     bytes_in_flight: u64,
-    ssthresh: u64,
+    ssthresh: Option<u64>,
     pacing_rate: u64,
 }
 
@@ -434,7 +445,7 @@ impl QlogMetrics {
         let new_ssthresh = if self.ssthresh != latest.ssthresh {
             self.ssthresh = latest.ssthresh;
             emit_event = true;
-            Some(latest.ssthresh)
+            latest.ssthresh
         } else {
             None
         };
