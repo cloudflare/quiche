@@ -31,5 +31,7 @@
 mod bandwidth_sampler;
 mod windowed_filter;
 
+pub use bandwidth_sampler::SendTimeState;
+
 use super::Acked;
 use super::Lost;
