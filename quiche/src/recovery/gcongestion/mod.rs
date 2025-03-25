@@ -54,6 +54,7 @@ pub struct Acked {
 #[derive(Debug)]
 pub(crate) enum Congestion {
     BBR(bbr::BBR),
+    BBRv2(bbr2::BBRv2),
 }
 
 impl Congestion {
@@ -65,6 +66,18 @@ impl Congestion {
             initial_tcp_congestion_window,
             max_congestion_window,
             max_segment_size,
+        ))
+    }
+
+    pub(super) fn bbrv2(
+        initial_tcp_congestion_window: usize, max_congestion_window: usize,
+        max_segment_size: usize,
+    ) -> Self {
+        Congestion::BBRv2(bbr2::BBRv2::new(
+            initial_tcp_congestion_window,
+            max_congestion_window,
+            max_segment_size,
+            INITIAL_RTT,
         ))
     }
 }
