@@ -31,9 +31,9 @@ use std::time::Instant;
 
 use std::collections::VecDeque;
 
-use crate::recovery::HandshakeStatus;
 use super::RecoveryConfig;
 use super::Sent;
+use crate::recovery::HandshakeStatus;
 
 use crate::packet::Epoch;
 use crate::ranges::RangeSet;
@@ -51,9 +51,14 @@ use qlog::events::EventData;
 
 use super::pacer;
 use super::Congestion;
-use crate::recovery::LossDetectionTimer;
 use crate::recovery::rtt::RttStats;
-use crate::recovery::{INITIAL_PACKET_THRESHOLD, MAX_PACKET_THRESHOLD, INITIAL_TIME_THRESHOLD, GRANULARITY, MAX_PTO_PROBES_COUNT, MAX_OUTSTANDING_NON_ACK_ELICITING};
+use crate::recovery::LossDetectionTimer;
+use crate::recovery::GRANULARITY;
+use crate::recovery::INITIAL_PACKET_THRESHOLD;
+use crate::recovery::INITIAL_TIME_THRESHOLD;
+use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
+use crate::recovery::MAX_PACKET_THRESHOLD;
+use crate::recovery::MAX_PTO_PROBES_COUNT;
 
 #[derive(Default)]
 struct RecoveryEpoch {
@@ -953,10 +958,10 @@ pub struct Acked {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smallvec::smallvec;
-    use std::str::FromStr;
     use crate::recovery::congestion::PACING_MULTIPLIER;
     use crate::CongestionControlAlgorithm;
+    use smallvec::smallvec;
+    use std::str::FromStr;
 
     #[test]
     fn lookup_cc_algo_ok() {
@@ -1750,8 +1755,7 @@ mod tests {
 
         // We pace this outgoing packet. as all conditions for pacing
         // are passed.
-        let pacing_rate =
-            (r.cwnd() as f64 * PACING_MULTIPLIER / 0.05) as u64;
+        let pacing_rate = (r.cwnd() as f64 * PACING_MULTIPLIER / 0.05) as u64;
         assert_eq!(r.congestion.pacer.rate(), pacing_rate);
 
         assert_eq!(

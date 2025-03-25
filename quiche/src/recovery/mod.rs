@@ -36,8 +36,8 @@ use qlog::events::EventData;
 
 use smallvec::SmallVec;
 
-mod rtt;
 mod congestion;
+mod rtt;
 
 pub use self::congestion::recovery::Recovery;
 
@@ -340,4 +340,3 @@ impl QlogMetrics {
         None
     }
 }
-
