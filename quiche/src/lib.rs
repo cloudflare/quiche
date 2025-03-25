@@ -7177,7 +7177,7 @@ impl Connection {
                             handshake_status,
                             now,
                             &self.trace_id,
-                        )?;
+                        );
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
@@ -18017,6 +18017,7 @@ pub use crate::path::PathStats;
 pub use crate::path::SocketAddrIter;
 
 pub use crate::recovery::CongestionControlAlgorithm;
+use crate::recovery::RecoveryOps;
 
 pub use crate::stream::StreamIter;
 
