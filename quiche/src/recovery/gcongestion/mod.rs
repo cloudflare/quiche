@@ -26,6 +26,7 @@
 
 pub mod bandwidth;
 mod bbr;
+mod bbr2;
 
 use std::fmt::Debug;
 use std::time::Instant;
