@@ -49,12 +49,28 @@ pub struct Acked {
     pub(super) size: usize,
 }
 
+#[enum_dispatch::enum_dispatch(CongestionControl)]
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum Congestion {
-    BBR,
-    BBRv2,
+    BBRv2(bbr2::BBRv2),
 }
 
+impl Congestion {
+    pub(super) fn bbrv2(
+        initial_tcp_congestion_window: usize, max_congestion_window: usize,
+        max_segment_size: usize,
+    ) -> Self {
+        Congestion::BBRv2(bbr2::BBRv2::new(
+            initial_tcp_congestion_window,
+            max_congestion_window,
+            max_segment_size,
+            INITIAL_RTT,
+        ))
+    }
+}
+
+#[enum_dispatch::enum_dispatch]
 pub(super) trait CongestionControl: Debug {
     /// Returns the size of the current congestion window in bytes. Note, this
     /// is not the *available* window. Some send algorithms may not use a
