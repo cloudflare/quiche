@@ -155,8 +155,9 @@ mod tests {
 
     use super::*;
 
-    use crate::recovery::congestion::recovery::Recovery;
+    use crate::recovery::congestion::recovery::LegacyRecovery;
     use crate::recovery::congestion::test_sender::TestSender;
+    use crate::recovery::RecoveryApi;
 
     use std::time::Duration;
 
@@ -169,7 +170,7 @@ mod tests {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
 
-        let r = Recovery::new(&cfg);
+        let r = LegacyRecovery::new(&cfg);
 
         assert!(r.cwnd() > 0);
         assert_eq!(r.bytes_in_flight, 0);

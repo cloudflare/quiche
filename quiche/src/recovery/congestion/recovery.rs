@@ -33,11 +33,12 @@ use std::collections::VecDeque;
 
 use super::RecoveryConfig;
 use super::Sent;
+
 use crate::recovery::HandshakeStatus;
+use crate::recovery::RecoveryApi;
 
 use crate::packet::Epoch;
 use crate::ranges::RangeSet;
-use crate::Result;
 
 #[cfg(feature = "qlog")]
 use crate::recovery::QlogMetrics;
@@ -295,7 +296,7 @@ impl RecoveryEpoch {
     }
 }
 
-pub struct Recovery {
+pub struct LegacyRecovery {
     pub epochs: [RecoveryEpoch; packet::Epoch::count()],
 
     loss_timer: LossDetectionTimer,
@@ -330,7 +331,7 @@ pub struct Recovery {
     newly_acked: Vec<Acked>,
 }
 
-impl Recovery {
+impl LegacyRecovery {
     pub fn new_with_config(recovery_config: &RecoveryConfig) -> Self {
         Self {
             epochs: Default::default(),
@@ -501,52 +502,48 @@ impl Recovery {
 
         (loss.lost_packets, loss.lost_bytes)
     }
+}
 
+impl RecoveryApi for LegacyRecovery {
     /// Returns whether or not we should elicit an ACK even if we wouldn't
     /// otherwise have constructed an ACK eliciting packet.
-    pub fn should_elicit_ack(&self, epoch: packet::Epoch) -> bool {
+    fn should_elicit_ack(&self, epoch: packet::Epoch) -> bool {
         self.epochs[epoch].loss_probes > 0 ||
             self.outstanding_non_ack_eliciting >=
                 MAX_OUTSTANDING_NON_ACK_ELICITING
     }
 
-    pub fn get_acked_frames(
-        &mut self, epoch: packet::Epoch,
-    ) -> impl Iterator<Item = frame::Frame> + '_ {
-        self.epochs[epoch].acked_frames.drain(..)
+    fn get_acked_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
+        std::mem::take(&mut self.epochs[epoch].acked_frames)
     }
 
-    pub fn get_lost_frames(
-        &mut self, epoch: packet::Epoch,
-    ) -> impl Iterator<Item = frame::Frame> + '_ {
-        self.epochs[epoch].lost_frames.drain(..)
+    fn get_lost_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
+        std::mem::take(&mut self.epochs[epoch].lost_frames)
     }
 
-    pub fn get_largest_acked_on_epoch(
-        &self, epoch: packet::Epoch,
-    ) -> Option<u64> {
+    fn get_largest_acked_on_epoch(&self, epoch: packet::Epoch) -> Option<u64> {
         self.epochs[epoch].largest_acked_packet
     }
 
-    pub fn has_lost_frames(&self, epoch: packet::Epoch) -> bool {
+    fn has_lost_frames(&self, epoch: packet::Epoch) -> bool {
         !self.epochs[epoch].lost_frames.is_empty()
     }
 
-    pub fn loss_probes(&self, epoch: packet::Epoch) -> usize {
+    fn loss_probes(&self, epoch: packet::Epoch) -> usize {
         self.epochs[epoch].loss_probes
     }
 
     #[cfg(test)]
-    pub fn inc_loss_probes(&mut self, epoch: packet::Epoch) {
+    fn inc_loss_probes(&mut self, epoch: packet::Epoch) {
         self.epochs[epoch].loss_probes += 1;
     }
 
-    pub fn ping_sent(&mut self, epoch: packet::Epoch) {
+    fn ping_sent(&mut self, epoch: packet::Epoch) {
         self.epochs[epoch].loss_probes =
             self.epochs[epoch].loss_probes.saturating_sub(1);
     }
 
-    pub fn on_packet_sent(
+    fn on_packet_sent(
         &mut self, mut pkt: Sent, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     ) {
@@ -588,16 +585,16 @@ impl Recovery {
         trace!("{} {:?}", trace_id, self);
     }
 
-    pub fn get_packet_send_time(&self) -> Instant {
+    fn get_packet_send_time(&self) -> Instant {
         self.congestion.get_packet_send_time()
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn on_ack_received(
+    fn on_ack_received(
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
         epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
         trace_id: &str,
-    ) -> Result<(usize, usize, usize)> {
+    ) -> (usize, usize, usize) {
         let largest_acked = ranges.last().unwrap();
 
         // Update the largest acked packet.
@@ -634,7 +631,7 @@ impl Recovery {
         }
 
         if self.newly_acked.is_empty() {
-            return Ok((0, 0, 0));
+            return (0, 0, 0);
         }
 
         // Check if largest packet is newly acked.
@@ -670,10 +667,10 @@ impl Recovery {
         self.epochs[epoch]
             .drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
 
-        Ok((loss.0, loss.1, acked_bytes))
+        (loss.0, loss.1, acked_bytes)
     }
 
-    pub fn on_loss_detection_timeout(
+    fn on_loss_detection_timeout(
         &mut self, handshake_status: HandshakeStatus, now: Instant,
         trace_id: &str,
     ) -> (usize, usize) {
@@ -740,7 +737,7 @@ impl Recovery {
         (0, 0)
     }
 
-    pub fn on_pkt_num_space_discarded(
+    fn on_pkt_num_space_discarded(
         &mut self, epoch: packet::Epoch, handshake_status: HandshakeStatus,
         now: Instant,
     ) {
@@ -768,22 +765,22 @@ impl Recovery {
         self.set_loss_detection_timer(handshake_status, now);
     }
 
-    pub fn on_path_change(
+    fn on_path_change(
         &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
     ) -> (usize, usize) {
         // Time threshold loss detection.
         self.detect_lost_packets(epoch, now, trace_id)
     }
 
-    pub fn loss_detection_timer(&self) -> Option<Instant> {
+    fn loss_detection_timer(&self) -> Option<Instant> {
         self.loss_timer.time
     }
 
-    pub fn cwnd(&self) -> usize {
+    fn cwnd(&self) -> usize {
         self.congestion.congestion_window()
     }
 
-    pub fn cwnd_available(&self) -> usize {
+    fn cwnd_available(&self) -> usize {
         // Ignore cwnd when sending probe packets.
         if self.epochs.iter().any(|e| e.loss_probes > 0) {
             return usize::MAX;
@@ -794,33 +791,31 @@ impl Recovery {
             self.congestion.prr.snd_cnt
     }
 
-    pub fn rtt(&self) -> Duration {
+    fn rtt(&self) -> Duration {
         self.rtt_stats.rtt()
     }
 
-    pub fn min_rtt(&self) -> Option<Duration> {
+    fn min_rtt(&self) -> Option<Duration> {
         self.rtt_stats.min_rtt()
     }
 
-    pub fn rttvar(&self) -> Duration {
+    fn rttvar(&self) -> Duration {
         self.rtt_stats.rttvar
     }
 
-    pub fn pto(&self) -> Duration {
+    fn pto(&self) -> Duration {
         self.rtt() + cmp::max(self.rtt_stats.rttvar * 4, GRANULARITY)
     }
 
-    pub fn delivery_rate(&self) -> u64 {
+    fn delivery_rate(&self) -> u64 {
         self.congestion.delivery_rate()
     }
 
-    pub fn max_datagram_size(&self) -> usize {
+    fn max_datagram_size(&self) -> usize {
         self.max_datagram_size
     }
 
-    pub fn pmtud_update_max_datagram_size(
-        &mut self, new_max_datagram_size: usize,
-    ) {
+    fn pmtud_update_max_datagram_size(&mut self, new_max_datagram_size: usize) {
         // Congestion Window is updated only when it's not updated already.
         // Update cwnd if it hasn't been updated yet.
         if self.cwnd() ==
@@ -842,31 +837,35 @@ impl Recovery {
         self.max_datagram_size = new_max_datagram_size;
     }
 
-    pub fn update_max_datagram_size(&mut self, new_max_datagram_size: usize) {
+    fn update_max_datagram_size(&mut self, new_max_datagram_size: usize) {
         self.pmtud_update_max_datagram_size(
             self.max_datagram_size.min(new_max_datagram_size),
         )
     }
 
-    pub fn update_app_limited(&mut self, v: bool) {
-        self.congestion.app_limited = v;
+    fn on_app_limited(&mut self) {
+        // TODO
     }
 
     #[cfg(test)]
-    pub fn app_limited(&self) -> bool {
+    fn app_limited(&self) -> bool {
         self.congestion.app_limited
     }
 
-    pub fn delivery_rate_update_app_limited(&mut self, v: bool) {
+    fn update_app_limited(&mut self, v: bool) {
+        self.congestion.app_limited = v;
+    }
+
+    fn delivery_rate_update_app_limited(&mut self, v: bool) {
         self.congestion.delivery_rate.update_app_limited(v);
     }
 
-    pub fn update_max_ack_delay(&mut self, max_ack_delay: Duration) {
+    fn update_max_ack_delay(&mut self, max_ack_delay: Duration) {
         self.rtt_stats.max_ack_delay = max_ack_delay;
     }
 
     #[cfg(feature = "qlog")]
-    pub fn maybe_qlog(&mut self) -> Option<EventData> {
+    fn maybe_qlog(&mut self) -> Option<EventData> {
         let qlog_metrics = QlogMetrics {
             min_rtt: *self.rtt_stats.min_rtt,
             smoothed_rtt: self.rtt(),
@@ -881,16 +880,20 @@ impl Recovery {
         self.qlog_metrics.maybe_update(qlog_metrics)
     }
 
-    pub fn send_quantum(&self) -> usize {
+    fn send_quantum(&self) -> usize {
         self.congestion.send_quantum()
     }
 
-    pub fn lost_count(&self) -> usize {
+    fn lost_count(&self) -> usize {
         self.congestion.lost_count
+    }
+
+    fn bytes_lost(&self) -> u64 {
+        self.bytes_lost
     }
 }
 
-impl std::fmt::Debug for Recovery {
+impl std::fmt::Debug for LegacyRecovery {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self.loss_timer.time {
             Some(v) => {

@@ -353,9 +353,10 @@ mod tests {
 
     use crate::packet;
     use crate::ranges;
-    use crate::recovery::congestion::recovery::Recovery;
+    use crate::recovery::congestion::recovery::LegacyRecovery;
     use crate::recovery::congestion::test_sender::TestSender;
     use crate::recovery::HandshakeStatus;
+    use crate::recovery::RecoveryApi;
 
     use smallvec::smallvec;
 
@@ -368,7 +369,7 @@ mod tests {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR);
 
-        let r = Recovery::new(&cfg);
+        let r = LegacyRecovery::new(&cfg);
 
         assert_eq!(
             r.cwnd(),
@@ -414,7 +415,7 @@ mod tests {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR);
 
-        let mut r = Recovery::new(&cfg);
+        let mut r = LegacyRecovery::new(&cfg);
         let now = Instant::now();
         let mss = r.max_datagram_size;
 
@@ -465,7 +466,7 @@ mod tests {
                 now,
                 "",
             ),
-            Ok((2, 2 * mss, mss)),
+            (2, 2 * mss, mss),
         );
 
         // Sent: 0, 1, 2, 3, 4, Acked 4.
@@ -479,7 +480,7 @@ mod tests {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR);
 
-        let mut r = Recovery::new(&cfg);
+        let mut r = LegacyRecovery::new(&cfg);
         let now = Instant::now();
         let mss = r.max_datagram_size;
 
@@ -532,7 +533,7 @@ mod tests {
                     now,
                     "",
                 ),
-                Ok((0, 0, mss)),
+                (0, 0, mss),
             );
         }
 
@@ -586,7 +587,7 @@ mod tests {
                 now,
                 "",
             ),
-            Ok((0, 0, mss)),
+            (0, 0, mss),
         );
 
         // Now we are in Drain state.
@@ -600,7 +601,7 @@ mod tests {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR);
 
-        let mut r = Recovery::new(&cfg);
+        let mut r = LegacyRecovery::new(&cfg);
         let now = Instant::now();
         let mss = r.max_datagram_size;
 
@@ -650,7 +651,7 @@ mod tests {
                     now,
                     "",
                 ),
-                Ok((0, 0, mss)),
+                (0, 0, mss),
             );
         }
 
@@ -667,7 +668,7 @@ mod tests {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR);
 
-        let mut r = Recovery::new(&cfg);
+        let mut r = LegacyRecovery::new(&cfg);
         let now = Instant::now();
         let mss = r.max_datagram_size;
 
@@ -721,7 +722,7 @@ mod tests {
                     now,
                     "",
                 ),
-                Ok((0, 0, mss)),
+                (0, 0, mss),
             );
         }
 
@@ -777,7 +778,7 @@ mod tests {
                 now,
                 "",
             ),
-            Ok((0, 0, mss)),
+            (0, 0, mss),
         );
 
         assert_eq!(r.congestion.bbr_state.state, BBRStateMachine::ProbeRTT);

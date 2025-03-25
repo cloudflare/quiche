@@ -216,8 +216,9 @@ mod tests {
 
     use crate::packet;
     use crate::ranges;
-    use crate::recovery::congestion::recovery::Recovery;
+    use crate::recovery::congestion::recovery::LegacyRecovery;
     use crate::recovery::HandshakeStatus;
+    use crate::recovery::RecoveryApi;
     use crate::Config;
 
     use smallvec::smallvec;
@@ -225,7 +226,7 @@ mod tests {
     #[test]
     fn rate_check() {
         let config = Config::new(0xbabababa).unwrap();
-        let mut r = Recovery::new(&config);
+        let mut r = LegacyRecovery::new(&config);
 
         let now = Instant::now();
         let mss = r.max_datagram_size();
@@ -292,7 +293,7 @@ mod tests {
     #[test]
     fn app_limited_cwnd_full() {
         let config = Config::new(0xbabababa).unwrap();
-        let mut r = Recovery::new(&config);
+        let mut r = LegacyRecovery::new(&config);
 
         let now = Instant::now();
         let mss = r.max_datagram_size();
@@ -334,7 +335,7 @@ mod tests {
     #[test]
     fn app_limited_check() {
         let config = Config::new(0xbabababa).unwrap();
-        let mut r = Recovery::new(&config);
+        let mut r = LegacyRecovery::new(&config);
 
         let now = Instant::now();
         let mss = r.max_datagram_size();
@@ -384,7 +385,7 @@ mod tests {
                 now,
                 "",
             ),
-            Ok((0, 0, mss * 5)),
+            (0, 0, mss * 5),
         );
 
         assert!(r.app_limited());

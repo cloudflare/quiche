@@ -40,6 +40,7 @@ use crate::Result;
 use crate::pmtud;
 use crate::recovery;
 use crate::recovery::HandshakeStatus;
+use crate::recovery::RecoveryApi;
 
 /// The different states of the path validation.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -499,7 +500,7 @@ impl Path {
             cwnd: self.recovery.cwnd(),
             sent_bytes: self.sent_bytes,
             recv_bytes: self.recv_bytes,
-            lost_bytes: self.recovery.bytes_lost,
+            lost_bytes: self.recovery.bytes_lost(),
             stream_retrans_bytes: self.stream_retrans_bytes,
             pmtu: self.recovery.max_datagram_size(),
             delivery_rate: self.recovery.delivery_rate(),
