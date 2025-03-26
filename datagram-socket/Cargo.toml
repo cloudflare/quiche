@@ -13,7 +13,7 @@ buffer-pool = { workspace = true }
 futures-util = { workspace = true }
 libc = { workspace = true }
 smallvec = { workspace = true }
-tokio = { workspace = true, features = ["net"] }
+tokio = { workspace = true, features = ["net", "rt"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
