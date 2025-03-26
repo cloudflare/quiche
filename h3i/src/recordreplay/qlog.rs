@@ -26,6 +26,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::quiche;
 use qlog::events::h3::H3FrameCreated;
 use qlog::events::h3::H3Owner;
 use qlog::events::h3::H3StreamTypeSet;
@@ -39,7 +40,6 @@ use qlog::events::EventData;
 use qlog::events::ExData;
 use qlog::events::JsonEvent;
 use qlog::events::RawInfo;
-use quiche;
 use quiche::h3::frame::Frame;
 use quiche::h3::NameValue;
 

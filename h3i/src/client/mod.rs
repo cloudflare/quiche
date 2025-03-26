@@ -30,12 +30,13 @@
 //! as series of [Action]s, and capturing the results in a
 //! [ConnectionSummary].
 
+#[cfg(feature = "async")]
+pub mod async_client;
 pub mod connection_summary;
 pub mod sync_client;
 
 use connection_summary::*;
 use qlog::events::h3::HttpHeader;
-use quiche::ConnectionError;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -58,14 +59,13 @@ use qlog::events::EventData;
 use qlog::streamer::QlogStreamer;
 use serde::Serialize;
 
+use crate::quiche;
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error;
 use quiche::h3::NameValue;
 use quiche::Connection;
+use quiche::ConnectionError;
 use quiche::Result;
-use quiche::{
-    self,
-};
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 const QUIC_VERSION: u32 = 1;
@@ -161,7 +161,7 @@ fn handle_qlog(
 }
 
 #[derive(Debug, Serialize)]
-/// Represents different errors that can occur when [sync_client] runs.
+/// Represents different errors that can occur when the h3i client runs.
 pub enum ClientError {
     /// An error during the QUIC handshake.
     HandshakeFail,

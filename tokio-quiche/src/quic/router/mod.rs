@@ -816,9 +816,9 @@ mod tests {
             error_code: h3i::quiche::WireErrorCode::NoError as _,
             reason: Vec::new(),
         };
-        let actions = [Action::ConnectionClose { error: conn_close }];
+        let actions = vec![Action::ConnectionClose { error: conn_close }];
 
-        let _ = h3i::client::sync_client::connect(h3i_config, &actions, None);
+        let _ = h3i::client::sync_client::connect(h3i_config, actions, None);
     }
 
     #[tokio::test]

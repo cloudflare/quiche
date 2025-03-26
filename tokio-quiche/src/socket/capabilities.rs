@@ -304,7 +304,10 @@ pub struct SocketCapabilities {
     pub(crate) has_txtime: bool,
 
     /// Indicates if the socket has `SO_TIMESTAMPNS` enabled.
-    #[expect(dead_code)]
+    #[cfg_attr(
+        not(all(target_os = "linux", feature = "perf-quic-listener-metrics")),
+        expect(dead_code)
+    )]
     pub(crate) has_rxtime: bool,
 
     /// Indicates if the socket has `UDP_GRO` enabled.

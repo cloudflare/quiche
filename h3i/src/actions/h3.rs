@@ -33,7 +33,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use quiche;
+use crate::quiche;
 use quiche::h3::frame::Frame;
 use quiche::h3::Header;
 use quiche::ConnectionError;
