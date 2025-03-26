@@ -21,9 +21,9 @@ inquire = "0.6.2"
 log = { workspace = true, features = ["std"] }
 mio = { workspace = true, features = ["net", "os-poll"] }
 multimap = "0.10"
-octets = { workspace = true }
-qlog = { workspace = true }
-quiche = { workspace = true, features = ["internal", "qlog"] }
+octets = { version = "0.3.0" }
+qlog = { version = "0.15" }
+quiche = { version = "0.23", features = ["internal", "qlog"] }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
