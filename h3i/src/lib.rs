@@ -115,7 +115,7 @@
 //!    // This example doesn't use close trigger frames, since we manually close the connection upon
 //!    // receiving a HEADERS frame on stream 0.
 //!    let close_trigger_frames = None;
-//!    let summary = sync_client::connect(config, &actions, close_trigger_frames);
+//!    let summary = sync_client::connect(config, actions, close_trigger_frames);
 //!
 //!    println!(
 //!        "=== received connection summary! ===\n\n{}",
@@ -157,13 +157,16 @@ use qlog::events::quic::PacketSent;
 use qlog::events::quic::PacketType;
 use qlog::events::quic::QuicFrame;
 use qlog::events::EventData;
-pub use quiche;
 use quiche::h3::qpack::encode_int;
 use quiche::h3::qpack::encode_str;
 use quiche::h3::qpack::LITERAL;
 use quiche::h3::NameValue;
-
 use smallvec::SmallVec;
+
+#[cfg(not(feature = "async"))]
+pub use quiche;
+#[cfg(feature = "async")]
+pub use tokio_quiche::quiche;
 
 /// The ID for an HTTP/3 control stream type.
 ///

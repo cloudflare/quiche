@@ -26,6 +26,7 @@
 
 //! Stateful parsing of QUIC streams into HTTP/3 frames.
 
+use crate::quiche;
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error as H3Error;
 use quiche::h3::Result;

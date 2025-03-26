@@ -87,7 +87,7 @@ impl Client for SyncClient {
 ///
 /// Returns a [ConnectionSummary] on success, [ClientError] on failure.
 pub fn connect(
-    args: Config, actions: &[Action],
+    args: Config, actions: Vec<Action>,
     close_trigger_frames: Option<CloseTriggerFrames>,
 ) -> std::result::Result<ConnectionSummary, ClientError> {
     let mut buf = [0; 65535];
