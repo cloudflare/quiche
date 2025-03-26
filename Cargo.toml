@@ -60,7 +60,7 @@ slog-stdlog = { version = "4.1.1" }
 smallvec = { version = "1.10", default-features = false }
 task-killswitch = { version = "0.1.0", path = "./task-killswitch" }
 thiserror = { version = "1" }
-tokio = { version = "1.29", default-features = false }
+tokio = { version = "1.44", default-features = false }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.13" }
 triomphe = { version = "0.1" }
