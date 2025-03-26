@@ -29,11 +29,15 @@ gcongestion = ["dep:quiche-mallard"]
 # Use quiche-mallard with zero-copy send calls.
 zero-copy = ["gcongestion"]
 
-# Enable SSLKEYLOGFILE capturing for QUIC connections.
+# Deprecated: use `--cfg capture_keylogs` instead.
 capture_keylogs = []
 
 # Enable scheduling & poll duration histograms for tokio tasks.
 tokio-task-metrics = []
+
+[lints.rust]
+# capture_keylogs: enable SSLKEYLOGFILE capturing for QUIC connections.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(capture_keylogs)'] }
 
 [dependencies]
 boring = { workspace = true }
