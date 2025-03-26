@@ -513,7 +513,7 @@ impl ReleaseTime {
 }
 
 impl ReleaseDecision {
-    pub(crate) const EQUAL_THRESHOLD: Duration = Duration::from_micros(35);
+    pub(crate) const EQUAL_THRESHOLD: Duration = Duration::from_micros(50);
 
     /// Get the [`Instant`] the next packet should be released. It will never be
     /// in the past.
