@@ -30,7 +30,7 @@ use std::time::Instant;
 
 use foundations::telemetry::metrics::Counter;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
 mod linux_imports {
     pub(super) use nix::sys::socket::sendmsg;
     pub(super) use nix::sys::socket::ControlMessage;
@@ -42,7 +42,7 @@ mod linux_imports {
     pub(super) use tokio::io::Interest;
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
 use self::linux_imports::*;
 
 // Maximum number of packets can be sent in UDP GSO.
@@ -73,14 +73,14 @@ pub(crate) fn tune_max_send_size(
 // https://wiki.cfdata.org/pages/viewpage.action?pageId=436188159
 pub(crate) const UDP_MAX_GSO_PACKET_SIZE: usize = 65507;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum PktInfo {
     V4(libc::in_pktinfo),
     V6(libc::in6_pktinfo),
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
 impl PktInfo {
     fn make_cmsg(&'_ self) -> ControlMessage<'_> {
         match self {
