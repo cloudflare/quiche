@@ -62,7 +62,7 @@ use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
 
 #[derive(Default)]
-pub struct RecoveryEpoch {
+struct RecoveryEpoch {
     /// The time the most recent ack-eliciting packet was sent.
     time_of_last_ack_eliciting_packet: Option<Instant>,
 
@@ -76,10 +76,10 @@ pub struct RecoveryEpoch {
 
     /// An association of packet numbers in a packet number space to information
     /// about them.
-    pub sent_packets: VecDeque<Sent>,
+    sent_packets: VecDeque<Sent>,
 
-    pub loss_probes: usize,
-    pub in_flight_count: usize,
+    loss_probes: usize,
+    in_flight_count: usize,
 
     acked_frames: Vec<frame::Frame>,
     lost_frames: Vec<frame::Frame>,
@@ -297,17 +297,17 @@ impl RecoveryEpoch {
 }
 
 pub struct LegacyRecovery {
-    pub epochs: [RecoveryEpoch; packet::Epoch::count()],
+    epochs: [RecoveryEpoch; packet::Epoch::count()],
 
     loss_timer: LossDetectionTimer,
 
-    pub pto_count: u32,
+    pto_count: u32,
 
-    pub rtt_stats: RttStats,
+    rtt_stats: RttStats,
 
-    pub lost_spurious_count: usize,
+    lost_spurious_count: usize,
 
-    pub pkt_thresh: u64,
+    pkt_thresh: u64,
 
     time_thresh: f64,
 
@@ -315,7 +315,7 @@ pub struct LegacyRecovery {
 
     bytes_sent: usize,
 
-    pub bytes_lost: u64,
+    bytes_lost: u64,
 
     pub max_datagram_size: usize,
 
@@ -463,7 +463,7 @@ impl LegacyRecovery {
         }
     }
 
-    pub fn detect_lost_packets(
+    fn detect_lost_packets(
         &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
     ) -> (usize, usize) {
         let loss_delay = cmp::max(self.rtt_stats.latest_rtt, self.rtt())
@@ -845,6 +845,48 @@ impl RecoveryApi for LegacyRecovery {
 
     fn on_app_limited(&mut self) {
         // TODO
+    }
+
+    #[cfg(test)]
+    fn sent_packets_len(&self, epoch: packet::Epoch) -> usize {
+        self.epochs[epoch].sent_packets.len()
+    }
+
+    #[cfg(test)]
+    fn in_flight_count(&self, epoch: packet::Epoch) -> usize {
+        self.epochs[epoch].in_flight_count
+    }
+
+    #[cfg(test)]
+    fn bytes_in_flight(&self) -> usize {
+        self.bytes_in_flight
+    }
+
+    #[cfg(test)]
+    fn pacing_rate(&self) -> u64 {
+        self.congestion.pacer.rate()
+    }
+
+    #[cfg(test)]
+    fn pto_count(&self) -> u32 {
+        self.pto_count
+    }
+
+    #[cfg(test)]
+    fn pkt_thresh(&self) -> u64 {
+        self.pkt_thresh
+    }
+
+    #[cfg(test)]
+    fn lost_spurious_count(&self) -> usize {
+        self.lost_spurious_count
+    }
+
+    #[cfg(test)]
+    fn detect_lost_packets_for_test(
+        &mut self, epoch: packet::Epoch, now: Instant,
+    ) -> (usize, usize) {
+        self.detect_lost_packets(epoch, now, "")
     }
 
     #[cfg(test)]
