@@ -64,7 +64,6 @@ use std::sync::Arc;
 use std::task::ready;
 use std::task::Context;
 use std::task::Poll;
-use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
 use task_killswitch::spawn_with_killswitch;
@@ -227,8 +226,8 @@ where
 
         let hdr = Header::from_slice(&mut incoming.buf, MAX_CONN_ID_LEN)
             .map_err(|e| match e {
-                quiche::Error::BufferTooShort =>
-                    labels::QuicInvalidInitialPacketError::SmallPacket.into(),
+                quiche::Error::BufferTooShort | quiche::Error::InvalidPacket =>
+                    labels::QuicInvalidInitialPacketError::FailedToParse.into(),
                 e => io::Error::other(e),
             })?;
 
@@ -680,14 +679,12 @@ where
                             }
                         }
 
-                        // TODO(lblocher): remove logging and pass error to
-                        // self.accept_sink after trial
-                        // phase to determine verbosity.
                         if matches!(
                             err_type,
                             labels::QuicInvalidInitialPacketError::Unexpected
                         ) {
-                            log_unexpected_initial_error(&e);
+                            // don't block packet routing on errors
+                            let _ = self.accept_sink.try_send(Err(e));
                         }
                     }
                 },
@@ -730,70 +727,6 @@ fn initial_packet_error_type(
             labels::QuicInvalidInitialPacketError::Unexpected,
             Clone::clone,
         )
-}
-
-// TODO(lblocher): remove after trial phase
-/// Use a token bucket to log QUIC initials `Unexpected` errors, but not too
-/// quic(k)ly, so that we can get an idea of the verbosity and types of errors
-/// we see.
-///
-/// This token bucket gets additional tokens once per minute, and is allowed to
-/// have up to 20 tokens in reserve to burst above its normal rate limits if
-/// logging is slower than the maximum normal rate.
-///
-/// Some cp4 Kibana investigation shows log rates between 200 lines per minute
-/// down to just 1 line in 24h. Hence, we choose a conservative rate of up to 3
-/// lines per minute to strike a balance between added log load and useful
-/// results. Based on existing metrics, we expect these types of errors to be
-/// very rare.
-///
-/// The max burst threshold will allow us to potentially burst a bit above if we
-/// get a sudden spike of these logs, but not for too long, and only if we
-/// already aren't logging too much.
-fn log_unexpected_initial_error(e: &io::Error) {
-    use foundations::telemetry::log;
-    use std::cmp::min;
-    use std::sync::atomic::AtomicU64;
-    use std::sync::atomic::Ordering;
-    use std::sync::Once;
-
-    const TOKEN_BUCKET_MAX_BURST: u64 = 20;
-    const TOKEN_BUCKET_RESET_PERIOD: Duration = Duration::from_secs(60);
-    const TOKENS_PER_PERIOD: u64 = 3;
-
-    // give a full burst initially, just so we can see things better on startup
-    static LOG_COUNT: AtomicU64 = AtomicU64::new(TOKEN_BUCKET_MAX_BURST);
-    static FILLER_INIT: Once = Once::new();
-
-    async fn bucket_filler() {
-        // by default missed tick behavior is burst
-        let mut interval = tokio::time::interval(TOKEN_BUCKET_RESET_PERIOD);
-        loop {
-            interval.tick().await;
-
-            // Skip update if v == TOKEN_BUCKET_MAX_BURST by returning None
-            let _ = LOG_COUNT.fetch_update(
-                Ordering::AcqRel,
-                Ordering::Relaxed,
-                |v| {
-                    (v < TOKEN_BUCKET_MAX_BURST).then_some(min(
-                        v + TOKENS_PER_PERIOD,
-                        TOKEN_BUCKET_MAX_BURST,
-                    ))
-                },
-            );
-        }
-    }
-    FILLER_INIT.call_once(|| _ = tokio::spawn(bucket_filler()));
-
-    let token_acquired = LOG_COUNT
-        .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |v| {
-            (v > 0).then_some(v - 1)
-        })
-        .is_ok();
-    if token_acquired {
-        log::warn!("failed to process QUIC initial packet"; "error" => e);
-    }
 }
 
 /// An [`InitialPacketHandler`] handles unknown quic initials and processes
