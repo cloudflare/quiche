@@ -32,8 +32,8 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use crate::quiche;
 use multimap::MultiMap;
-use quiche;
 
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Header;

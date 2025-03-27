@@ -14,6 +14,9 @@ readme = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
 
+[features]
+async = ["dep:tokio-quiche", "dep:async-trait", "dep:buffer-pool", "dep:tokio"]
+
 [dependencies]
 clap = "3"
 env_logger = { workspace = true }
@@ -23,10 +26,16 @@ mio = { workspace = true, features = ["net", "os-poll"] }
 multimap = "0.10"
 octets = { version = "0.3.0" }
 qlog = { version = "0.15" }
-quiche = { version = "0.23", features = ["internal", "qlog"] }
+quiche = { workspace = true, features = ["internal", "qlog"] }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["macros", "std"] }
 smallvec = { workspace = true }
 url = { workspace = true }
+
+# Async dependencies
+async-trait = { version = "0.1.61" , optional = true}
+buffer-pool = { workspace = true,  optional = true }
+tokio = { version = "1.29", features = ["full", "test-util"], optional = true }
+tokio-quiche = { workspace = true, features = ["capture_keylogs", "quiche_internal"], optional = true }

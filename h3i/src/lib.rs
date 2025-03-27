@@ -157,11 +157,17 @@ use qlog::events::quic::PacketSent;
 use qlog::events::quic::PacketType;
 use qlog::events::quic::QuicFrame;
 use qlog::events::EventData;
-pub use quiche;
 use quiche::h3::qpack::encode_int;
 use quiche::h3::qpack::encode_str;
 use quiche::h3::qpack::LITERAL;
 use quiche::h3::NameValue;
+
+// TODO(evanrittenhouse): is there an easier way to use this considering TQ
+// requires quiche dependencies?
+#[cfg(not(feature = "async"))]
+pub use quiche;
+#[cfg(feature = "async")]
+pub use tokio_quiche::quiche;
 
 use smallvec::SmallVec;
 
