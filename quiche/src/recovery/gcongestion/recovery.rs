@@ -205,7 +205,6 @@ impl RecoveryEpoch {
                             newly_acked.push(Acked {
                                 pkt_num: *pkt_num,
                                 time_sent,
-                                size: sent_bytes,
                             });
 
                             self.acked_frames.extend(frames);

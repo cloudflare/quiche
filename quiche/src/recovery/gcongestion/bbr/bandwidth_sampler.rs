@@ -884,13 +884,11 @@ mod bandwidth_sampler_tests {
         }
 
         fn make_acked_packet(&self, pkt_num: u64) -> Acked {
-            let size = self.get_packet_size(pkt_num);
             let time_sent = self.get_packet_time(pkt_num);
 
             Acked {
                 pkt_num,
                 time_sent,
-                size,
             }
         }
 
@@ -953,8 +951,10 @@ mod bandwidth_sampler_tests {
             let acked = acked
                 .into_iter()
                 .map(|pkt| {
+                    let acked_size = self.get_packet_size(*pkt);
+                    self.bytes_in_flight -= acked_size;
+
                     let acked = self.make_acked_packet(*pkt);
-                    self.bytes_in_flight -= acked.size;
                     acked
                 })
                 .collect::<Vec<_>>();
@@ -1468,7 +1468,6 @@ mod bandwidth_sampler_tests {
         let acked = Acked {
             pkt_num: 1,
             time_sent: test_sender.clock,
-            size: REGULAR_PACKET_SIZE,
         };
         test_sender.advance_time(Duration::from_millis(10));
         let sample = test_sender.sampler.on_congestion_event(

@@ -49,7 +49,6 @@ pub struct Lost {
 pub struct Acked {
     pub(super) pkt_num: u64,
     pub(super) time_sent: Instant,
-    pub(super) size: usize,
 }
 
 #[enum_dispatch::enum_dispatch(CongestionControl)]
