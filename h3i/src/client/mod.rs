@@ -38,6 +38,7 @@ use qlog::events::h3::HttpHeader;
 use quiche::ConnectionError;
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::net::SocketAddr;
 use std::time::Instant;
 
@@ -58,92 +59,13 @@ use qlog::events::EventData;
 use qlog::streamer::QlogStreamer;
 use serde::Serialize;
 
+use crate::quiche;
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error;
 use quiche::h3::NameValue;
-use quiche::Connection;
-use quiche::Result;
-use quiche::{
-    self,
-};
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 const QUIC_VERSION: u32 = 1;
-
-pub fn build_quiche_connection(
-    args: Config, peer_addr: SocketAddr, local_addr: SocketAddr,
-) -> Result<Connection> {
-    // We'll only connect to one server.
-    let connect_url = if !args.omit_sni {
-        args.host_port.split(':').next()
-    } else {
-        None
-    };
-
-    // Create the configuration for the QUIC connection.
-    let mut config = quiche::Config::new(QUIC_VERSION).unwrap();
-
-    config.verify_peer(args.verify_peer);
-    config.set_application_protos(&[b"h3"]).unwrap();
-    config.set_max_idle_timeout(args.idle_timeout);
-    config.set_max_recv_udp_payload_size(MAX_DATAGRAM_SIZE);
-    config.set_max_send_udp_payload_size(MAX_DATAGRAM_SIZE);
-    config.set_initial_max_data(10_000_000);
-    config
-        .set_initial_max_stream_data_bidi_local(args.max_stream_data_bidi_local);
-    config.set_initial_max_stream_data_bidi_remote(
-        args.max_stream_data_bidi_remote,
-    );
-    config.set_initial_max_stream_data_uni(args.max_stream_data_uni);
-    config.set_initial_max_streams_bidi(args.max_streams_bidi);
-    config.set_initial_max_streams_uni(args.max_streams_uni);
-    config.set_disable_active_migration(true);
-    config.set_active_connection_id_limit(0);
-
-    config.set_max_connection_window(args.max_window);
-    config.set_max_stream_window(args.max_stream_window);
-
-    let mut keylog = None;
-
-    if let Some(keylog_path) = std::env::var_os("SSLKEYLOGFILE") {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(keylog_path)
-            .unwrap();
-
-        keylog = Some(file);
-
-        config.log_keys();
-    }
-
-    config.grease(false);
-
-    // Generate a random source connection ID for the connection.
-    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut scid);
-
-    let scid = quiche::ConnectionId::from_ref(&scid);
-
-    // Create a QUIC connection and initiate handshake.
-    let mut conn =
-        quiche::connect(connect_url, &scid, local_addr, peer_addr, &mut config)?;
-
-    if let Some(keylog) = &mut keylog {
-        if let Ok(keylog) = keylog.try_clone() {
-            conn.set_keylog(Box::new(keylog));
-        }
-    }
-
-    log::info!(
-        "connecting to {:} from {:} with scid {:?}",
-        peer_addr,
-        local_addr,
-        scid,
-    );
-
-    Ok(conn)
-}
 
 fn handle_qlog(
     qlog_streamer: Option<&mut QlogStreamer>, qlog_frame: Http3Frame,
@@ -572,4 +494,52 @@ fn handle_response_frame<C: Client>(
     if let Some(to_push) = push_to_responses {
         responded_streams.push(to_push);
     }
+}
+
+pub struct ParsedArgs {
+    local_addr: SocketAddr,
+    peer_addr: SocketAddr,
+    connect_url: Option<String>,
+}
+
+pub fn parse_args(args: &Config) -> ParsedArgs {
+    // We'll only connect to one server.
+    let connect_url = if !args.omit_sni {
+        args.host_port.split(':').next()
+    } else {
+        None
+    };
+
+    let (peer_addr, bind_addr) = resolve_socket_addrs(&args);
+
+    ParsedArgs {
+        peer_addr,
+        local_addr: bind_addr,
+        connect_url: connect_url.map(str::to_string),
+    }
+}
+
+fn resolve_socket_addrs(args: &Config) -> (SocketAddr, SocketAddr) {
+    // Resolve server address.
+    let peer_addr = if let Some(addr) = &args.connect_to {
+        addr.parse().expect("--connect-to is expected to be a string containing an IPv4 or IPv6 address with a port. E.g. 192.0.2.0:443")
+    } else {
+        let x = format!("https://{}", args.host_port);
+        *url::Url::parse(&x)
+            .unwrap()
+            .socket_addrs(|| None)
+            .unwrap()
+            .first()
+            .unwrap()
+    };
+
+    // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
+    // server address. This is needed on macOS and BSD variants that don't
+    // support binding to IN6ADDR_ANY for both v4 and v6.
+    let bind_addr = match peer_addr {
+        std::net::SocketAddr::V4(_) => format!("0.0.0.0:{}", args.source_port),
+        std::net::SocketAddr::V6(_) => format!("[::]:{}", args.source_port),
+    };
+
+    (peer_addr, bind_addr.parse().unwrap())
 }
