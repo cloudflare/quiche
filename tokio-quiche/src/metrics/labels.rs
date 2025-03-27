@@ -104,7 +104,7 @@ impl From<&BoxError> for HandshakeError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum QuicInvalidInitialPacketError {
     TokenValidationFail,
-    SmallPacket,
+    FailedToParse,
     WrongType(quiche::Type),
     AcceptQueueOverflow,
     Unexpected,
@@ -113,7 +113,7 @@ pub enum QuicInvalidInitialPacketError {
 impl std::fmt::Display for QuicInvalidInitialPacketError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::SmallPacket => f.write_str("small packet"),
+            Self::FailedToParse => f.write_str("failed to parse packet"),
             Self::TokenValidationFail => f.write_str("token validation fail"),
             Self::WrongType(ty) => write!(f, "wrong type: {ty:?}"),
             Self::AcceptQueueOverflow => f.write_str("accept queue overflow"),
