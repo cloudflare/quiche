@@ -29,6 +29,7 @@
 
 use buffer_pool::ConsumeBuffer;
 use buffer_pool::Pooled;
+use log;
 use quiche::PathStats;
 use quiche::Stats;
 use std::future::Future;
@@ -41,14 +42,10 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::time::sleep_until;
 use tokio::time::Instant;
-
-use log;
-
 use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::metrics::Metrics;
 use tokio_quiche::quic::HandshakeInfo;
 use tokio_quiche::quic::QuicheConnection;
-use tokio_quiche::quiche;
 use tokio_quiche::settings::Hooks;
 use tokio_quiche::settings::QuicSettings;
 use tokio_quiche::socket::Socket;
@@ -60,14 +57,17 @@ use crate::actions::h3::Action;
 use crate::actions::h3::WaitType;
 use crate::actions::h3::WaitingFor;
 use crate::client::execute_action;
+use crate::client::parse_args;
 use crate::client::parse_streams;
 use crate::client::ClientError;
 use crate::client::CloseTriggerFrames;
 use crate::client::ConnectionSummary;
+use crate::client::ParsedArgs;
 use crate::client::StreamMap;
 use crate::client::MAX_DATAGRAM_SIZE;
 use crate::config::Config as H3iConfig;
 use crate::frame::H3iFrame;
+use crate::quiche;
 
 use super::Client;
 use super::ConnectionCloseDetails;
@@ -78,56 +78,15 @@ pub async fn connect(
     args: &H3iConfig, frame_actions: Vec<Action>,
     close_trigger_frames: Option<CloseTriggerFrames>,
 ) -> std::result::Result<BuildingConnectionSummary, ClientError> {
-    let mut quic_settings = QuicSettings::default();
-    quic_settings.verify_peer = args.verify_peer;
-    quic_settings.max_idle_timeout =
-        Some(Duration::from_millis(args.idle_timeout));
-    quic_settings.max_recv_udp_payload_size = MAX_DATAGRAM_SIZE;
-    quic_settings.max_send_udp_payload_size = MAX_DATAGRAM_SIZE;
-    quic_settings.initial_max_data = 10_000_000;
-    quic_settings.initial_max_stream_data_bidi_local =
-        args.max_stream_data_bidi_local;
-    quic_settings.initial_max_stream_data_bidi_remote =
-        args.max_stream_data_bidi_remote;
-    quic_settings.initial_max_stream_data_uni = args.max_stream_data_uni;
-    quic_settings.initial_max_streams_bidi = args.max_streams_bidi;
-    quic_settings.initial_max_streams_uni = args.max_streams_uni;
-    quic_settings.disable_active_migration = true;
-    quic_settings.grease = false;
-    quic_settings.capture_quiche_logs = true;
-    quic_settings.keylog_file = std::env::var_os("SSLKEYLOGFILE")
-        .and_then(|os_str| os_str.into_string().ok());
-
+    let quic_settings = create_config(args);
     let connection_params =
         ConnectionParams::new_client(quic_settings, None, Hooks::default());
 
-    let connect_url = if !args.omit_sni {
-        args.host_port.split(':').next()
-    } else {
-        None
-    };
-
-    // Resolve server address.
-    let peer_addr = if let Some(addr) = &args.connect_to {
-        addr.parse().expect("--connect-to is expected to be a string containing an IPv4 or IPv6 address with a port. E.g. 192.0.2.0:443")
-    } else {
-        // If connect_to wasn't provided, host_port must've been
-        let x = format!("https://{}", args.host_port);
-        *url::Url::parse(&x)
-            .unwrap()
-            .socket_addrs(|| None)
-            .unwrap()
-            .first()
-            .unwrap()
-    };
-
-    // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
-    // server address. This is needed on macOS and BSD variants that don't
-    // support binding to IN6ADDR_ANY for both v4 and v6.
-    let bind_addr = match peer_addr {
-        std::net::SocketAddr::V4(_) => format!("0.0.0.0:{}", args.source_port),
-        std::net::SocketAddr::V6(_) => format!("[::]:{}", args.source_port),
-    };
+    let ParsedArgs {
+        connect_url,
+        bind_addr,
+        peer_addr,
+    } = parse_args(args);
 
     let socket = tokio::net::UdpSocket::bind(bind_addr).await.unwrap();
     socket.connect(peer_addr).await.unwrap();
@@ -151,6 +110,35 @@ pub async fn connect(
         Ok(_) => Ok(conn_summary_fut),
         Err(_) => Err(ClientError::HandshakeFail),
     }
+}
+
+fn create_config(args: &H3iConfig) -> QuicSettings {
+    let mut quic_settings = QuicSettings::default();
+
+    quic_settings.verify_peer = args.verify_peer;
+    quic_settings.max_idle_timeout =
+        Some(Duration::from_millis(args.idle_timeout));
+    quic_settings.max_recv_udp_payload_size = MAX_DATAGRAM_SIZE;
+    quic_settings.max_send_udp_payload_size = MAX_DATAGRAM_SIZE;
+    quic_settings.initial_max_data = 10_000_000;
+    quic_settings.initial_max_stream_data_bidi_local =
+        args.max_stream_data_bidi_local;
+    quic_settings.initial_max_stream_data_bidi_remote =
+        args.max_stream_data_bidi_remote;
+    quic_settings.initial_max_stream_data_uni = args.max_stream_data_uni;
+    quic_settings.initial_max_streams_bidi = args.max_streams_bidi;
+    quic_settings.initial_max_streams_uni = args.max_streams_uni;
+    quic_settings.disable_active_migration = true;
+    quic_settings.active_connection_id_limit = 0;
+    quic_settings.max_connection_window = args.max_window;
+    quic_settings.max_stream_window = args.max_stream_window;
+    quic_settings.grease = false;
+
+    quic_settings.capture_quiche_logs = true;
+    quic_settings.keylog_file = std::env::var_os("SSLKEYLOGFILE")
+        .and_then(|os_str| os_str.into_string().ok());
+
+    quic_settings
 }
 
 /// The [`Future`] used to build a [`ConnectionSummary`].
@@ -233,7 +221,6 @@ pub struct H3iDriver {
     actions_executed: usize,
     next_fire_time: Instant,
     waiting_for_responses: WaitingFor,
-
     record_tx: mpsc::UnboundedSender<ConnectionRecord>,
     stream_parsers: StreamParserMap,
     close_trigger_seen_rx: oneshot::Receiver<()>,
