@@ -30,10 +30,12 @@ use crate::actions::h3::Action;
 use crate::actions::h3::WaitType;
 use crate::actions::h3::WaitingFor;
 use crate::client::execute_action;
+use crate::client::parse_args;
 use crate::client::parse_streams;
 use crate::client::ClientError;
 use crate::client::CloseTriggerFrames;
 use crate::client::ConnectionSummary;
+use crate::client::ParsedArgs;
 use crate::client::StreamMap;
 use crate::client::MAX_DATAGRAM_SIZE;
 use crate::config::Config as H3iConfig;
@@ -71,35 +73,13 @@ pub async fn connect(
     let connection_params =
         ConnectionParams::new_client(quic_settings, None, Hooks::default());
 
-    let connect_url = if !args.omit_sni {
-        args.host_port.split(':').next()
-    } else {
-        None
-    };
+    let ParsedArgs {
+        connect_url,
+        local_addr,
+        peer_addr,
+    } = parse_args(&args);
 
-    // Resolve server address.
-    let peer_addr = if let Some(addr) = &args.connect_to {
-        addr.parse().expect("--connect-to is expected to be a string containing an IPv4 or IPv6 address with a port. E.g. 192.0.2.0:443")
-    } else {
-        // If connect_to wasn't provided, host_port must've been
-        let x = format!("https://{}", args.host_port);
-        *url::Url::parse(&x)
-            .unwrap()
-            .socket_addrs(|| None)
-            .unwrap()
-            .first()
-            .unwrap()
-    };
-
-    // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
-    // server address. This is needed on macOS and BSD variants that don't
-    // support binding to IN6ADDR_ANY for both v4 and v6.
-    let bind_addr = match peer_addr {
-        std::net::SocketAddr::V4(_) => format!("0.0.0.0:{}", args.source_port),
-        std::net::SocketAddr::V6(_) => format!("[::]:{}", args.source_port),
-    };
-
-    let socket = tokio::net::UdpSocket::bind(bind_addr).await.unwrap();
+    let socket = tokio::net::UdpSocket::bind(local_addr).await.unwrap();
     socket.connect(peer_addr).await.unwrap();
 
     log::info!(
