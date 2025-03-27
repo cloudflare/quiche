@@ -40,6 +40,8 @@ use qlog::reader::QlogSeqReader;
 
 use clap::App;
 use clap::Arg;
+#[cfg(feature = "async")]
+use tokio_quiche::BoxError;
 
 fn main() -> Result<(), ClientError> {
     let mut log_builder = env_logger::builder();
@@ -63,6 +65,9 @@ fn main() -> Result<(), ClientError> {
         None => prompt_frames(&config),
     };
 
+    // !!! TODO !!! put the `(a)sync_client` call behind the feature gate, error handling should be
+    // fine
+    #[cfg(not(feature = "async"))]
     match sync_client(config, &actions) {
         Ok(summary) => {
             log::debug!(
@@ -71,10 +76,19 @@ fn main() -> Result<(), ClientError> {
                     .unwrap_or_else(|e| e.to_string())
             );
         },
-
         Err(e) => {
             log::error!("error: {:?}", e);
         },
+    }
+
+    #[cfg(feature = "async")]
+    {
+        let summary = async_client(config, actions).unwrap();
+        log::debug!(
+            "received connection summary: {}",
+            serde_json::to_string_pretty(&summary)
+                .unwrap_or_else(|e| e.to_string())
+        );
     }
 
     Ok(())
@@ -295,6 +309,28 @@ fn config_from_clap() -> std::result::Result<Config, String> {
     })
 }
 
+#[cfg(feature = "async")]
+fn async_client(
+    config: Config, frame_actions: Vec<Action>,
+) -> Result<ConnectionSummary, BoxError> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(Box::new)?;
+
+    Ok(rt.block_on(async {
+        h3i::client::async_client::connect(
+            config.library_config,
+            frame_actions,
+            None,
+        )
+        .await
+        .unwrap()
+        .await
+    }))
+}
+
+#[cfg(not(feature = "async"))]
 fn sync_client(
     config: Config, actions: &[Action],
 ) -> Result<ConnectionSummary, ClientError> {

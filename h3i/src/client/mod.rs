@@ -30,6 +30,8 @@
 //! as series of [Action]s, and capturing the results in a
 //! [ConnectionSummary].
 
+#[cfg(feature = "async")]
+pub mod async_client;
 pub mod connection_summary;
 pub mod sync_client;
 
@@ -83,7 +85,7 @@ fn handle_qlog(
 }
 
 #[derive(Debug, Serialize)]
-/// Represents different errors that can occur when [sync_client] runs.
+/// Represents different errors that can occur when h3i runs.
 pub enum ClientError {
     /// An error during the QUIC handshake.
     HandshakeFail,

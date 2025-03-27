@@ -26,7 +26,6 @@
 
 //! Summarizes events that occurred during a connection.
 
-use quiche;
 use quiche::Connection;
 use quiche::ConnectionError;
 use quiche::PathStats;
@@ -446,9 +445,8 @@ impl Serialize for ConnectionCloseDetails {
     }
 }
 
-// Only applicable to async client
-#[doc(hidden)]
 /// A record that will be inserted into the [ConnectionSummary].
+#[derive(Debug)]
 pub enum ConnectionRecord {
     StreamedFrame { stream_id: u64, frame: H3iFrame },
     ConnectionStats(Stats),
