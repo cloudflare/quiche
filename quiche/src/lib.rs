@@ -4656,6 +4656,13 @@ impl Connection {
             path.recovery.ping_sent(epoch);
         }
 
+        if !has_data &&
+            !dgram_emitted &&
+            cwnd_available > frame::MAX_STREAM_OVERHEAD
+        {
+            path.recovery.on_app_limited();
+        }
+
         if frames.is_empty() {
             // When we reach this point we are not able to write more, so set
             // app_limited to false.

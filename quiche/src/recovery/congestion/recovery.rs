@@ -885,6 +885,11 @@ impl RecoveryOps for LegacyRecovery {
         self.detect_lost_packets(epoch, now, "")
     }
 
+    fn on_app_limited(&mut self) {
+        // Not implemented for legacy recovery, update_app_limited and
+        // delivery_rate_update_app_limited used instead.
+    }
+
     #[cfg(test)]
     fn app_limited(&self) -> bool {
         self.congestion.app_limited
