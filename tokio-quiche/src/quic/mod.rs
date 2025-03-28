@@ -93,7 +93,6 @@ use crate::metrics::Metrics;
 use crate::settings::Config;
 use crate::socket::QuicListener;
 use crate::socket::Socket;
-use crate::socket::SocketCapabilities;
 use crate::ClientH3Controller;
 use crate::ClientH3Driver;
 use crate::ConnectionParams;
@@ -164,6 +163,9 @@ where
     S: TryInto<Socket<Tx, Rx>>,
     S::Error: std::error::Error + Send + Sync + 'static,
 {
+    // Don't apply_max_capabilities(): some NICs don't support GSO
+    let socket: Socket<Tx, Rx> = socket.try_into()?;
+
     let (h3_driver, h3_controller) =
         ClientH3Driver::new(Http3Settings::default());
     let mut params = ConnectionParams::default();
@@ -186,29 +188,16 @@ where
 /// tokio-quiche currently only supports one client connection per socket.
 /// Sharing a socket among multiple connections will lead to lost packets as
 /// both connections try to read from the shared socket.
-pub async fn connect_with_config<Tx, Rx, S, App>(
-    socket: S, host: Option<&str>, params: &ConnectionParams<'_>, app: App,
+pub async fn connect_with_config<Tx, Rx, App>(
+    socket: Socket<Tx, Rx>, host: Option<&str>, params: &ConnectionParams<'_>,
+    app: App,
 ) -> QuicResult<QuicConnection>
 where
     Tx: DatagramSocketSend + Send + 'static,
     Rx: DatagramSocketRecv + Unpin + 'static,
-    S: TryInto<Socket<Tx, Rx>>,
-    S::Error: std::error::Error + Send + Sync + 'static,
     App: ApplicationOverQuic,
 {
-    let socket: Socket<Tx, Rx> = socket.try_into()?;
-
-    #[cfg_attr(not(target_os = "linux"), expect(unused_mut))]
-    let mut caps = SocketCapabilities::default();
-    #[cfg(target_os = "linux")]
-    if let Some(s) = socket.as_udp_socket() {
-        caps = SocketCapabilities::apply_all_and_get_compatibility(
-            s,
-            params.settings.max_send_udp_payload_size,
-        );
-    }
-
-    let mut client_config = Config::new(params, caps)?;
+    let mut client_config = Config::new(params, socket.capabilities)?;
     let scid = SimpleConnectionIdGenerator.new_connection_id(0);
 
     #[cfg(feature = "zero-copy")]
