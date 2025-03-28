@@ -693,7 +693,27 @@ pub struct ExData<'a> {
 
     pub trace_id: &'a str,
 
+    pub recovery_config: crate::recovery::RecoveryConfig,
+
     pub is_server: bool,
+}
+
+impl<'a> ExData<'a> {
+    fn from_ssl_ptr(ptr: *const SSL) -> Option<&'a mut Self> {
+        get_ex_data_from_ptr::<ExData>(ptr, *QUICHE_EX_DATA_INDEX)
+    }
+
+    #[cfg(feature = "boringssl-boring-crate")]
+    pub fn from_ssl_ref(ssl: &mut boring::ssl::SslRef) -> Option<&mut Self> {
+        use boring::ex_data::Index;
+
+        // SAFETY: the QUICHE_EX_DATA_INDEX index is guaranteed to be created,
+        // and the associated data is always `ExData`.
+        let idx: Index<boring::ssl::Ssl, ExData> =
+            unsafe { Index::from_raw(*QUICHE_EX_DATA_INDEX) };
+
+        ssl.ex_data_mut(idx)
+    }
 }
 
 fn get_ex_data_from_ptr<'a, T>(ptr: *const SSL, idx: c_int) -> Option<&'a mut T> {
@@ -720,8 +740,7 @@ extern "C" fn set_read_secret(
     ssl: *mut SSL, level: crypto::Level, cipher: *const SSL_CIPHER,
     secret: *const u8, secret_len: usize,
 ) -> c_int {
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return 0,
@@ -771,8 +790,7 @@ extern "C" fn set_write_secret(
     ssl: *mut SSL, level: crypto::Level, cipher: *const SSL_CIPHER,
     secret: *const u8, secret_len: usize,
 ) -> c_int {
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return 0,
@@ -816,8 +834,7 @@ extern "C" fn set_write_secret(
 extern "C" fn add_handshake_data(
     ssl: *mut SSL, level: crypto::Level, data: *const u8, len: usize,
 ) -> c_int {
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return 0,
@@ -859,8 +876,7 @@ extern "C" fn flush_flight(_ssl: *mut SSL) -> c_int {
 extern "C" fn send_alert(
     ssl: *mut SSL, level: crypto::Level, alert: u8,
 ) -> c_int {
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return 0,
@@ -884,8 +900,7 @@ extern "C" fn send_alert(
 }
 
 extern "C" fn keylog(ssl: *const SSL, line: *const c_char) {
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return,
@@ -918,8 +933,7 @@ extern "C" fn select_alpn(
     // not do that, so we need to explicitly respond with
     // SSL_TLSEXT_ERR_ALERT_FATAL in case it is needed.
     // TLS_ERROR is redefined for each vendor.
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return TLS_ERROR,
@@ -964,8 +978,7 @@ extern "C" fn select_alpn(
 }
 
 extern "C" fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return 0,
