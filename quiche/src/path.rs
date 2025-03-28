@@ -481,6 +481,12 @@ impl Path {
         (lost_packets, lost_bytes)
     }
 
+    pub fn reinit_recovery(
+        &mut self, recovery_config: &recovery::RecoveryConfig,
+    ) {
+        self.recovery = recovery::Recovery::new_with_config(recovery_config)
+    }
+
     pub fn stats(&self) -> PathStats {
         PathStats {
             local_addr: self.local_addr,

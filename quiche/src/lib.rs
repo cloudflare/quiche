@@ -1237,6 +1237,13 @@ impl Config {
         self.local_transport_params.disable_active_migration = v;
     }
 
+    /// Sets the congestion control algorithm used.
+    ///
+    /// The default value is `CongestionControlAlgorithm::CUBIC`.
+    pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
+        self.cc_algorithm = algo;
+    }
+
     /// Sets the congestion control algorithm used by string.
     ///
     /// The default value is `cubic`. On error `Error::CongestionControl`
@@ -1260,13 +1267,6 @@ impl Config {
     /// The default value is 10.
     pub fn set_initial_congestion_window_packets(&mut self, packets: usize) {
         self.initial_congestion_window_packets = packets;
-    }
-
-    /// Sets the congestion control algorithm used.
-    ///
-    /// The default value is `CongestionControlAlgorithm::CUBIC`.
-    pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
-        self.cc_algorithm = algo;
     }
 
     /// Configures whether to enable HyStart++.
@@ -2245,6 +2245,150 @@ impl Connection {
         self.local_transport_params.max_idle_timeout = v;
 
         self.encode_transport_params()
+    }
+
+    /// Sets the congestion control algorithm used.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_cc_algorithm()`].
+    ///
+    /// [`Config::set_cc_algorithm()`]: struct.Config.html#method.set_cc_algorithm
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_cc_algorithm_in_handshake(
+        ssl: &mut boring::ssl::SslRef, algo: CongestionControlAlgorithm,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.cc_algorithm = algo;
+
+        Ok(())
+    }
+
+    /// Sets the congestion control algorithm used by string.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_cc_algorithm_name()`].
+    ///
+    /// [`Config::set_cc_algorithm_name()`]: struct.Config.html#method.set_cc_algorithm_name
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_cc_algorithm_name_in_handshake(
+        ssl: &mut boring::ssl::SslRef, name: &str,
+    ) -> Result<()> {
+        let cc_algo = CongestionControlAlgorithm::from_str(name)?;
+        Self::set_cc_algorithm_in_handshake(ssl, cc_algo)
+    }
+
+    /// Sets initial congestion window size in terms of packet count.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_initial_congestion_window_packets()`].
+    ///
+    /// [`Config::set_initial_congestion_window_packets()`]: struct.Config.html#method.set_initial_congestion_window_packets
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_initial_congestion_window_packets_in_handshake(
+        ssl: &mut boring::ssl::SslRef, packets: usize,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.initial_congestion_window_packets = packets;
+
+        Ok(())
+    }
+
+    /// Configures whether to enable HyStart++.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::enable_hystart()`].
+    ///
+    /// [`Config::enable_hystart()`]: struct.Config.html#method.enable_hystart
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_hystart_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: bool,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.hystart = v;
+
+        Ok(())
+    }
+
+    /// Configures whether to enable pacing.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::enable_pacing()`].
+    ///
+    /// [`Config::enable_pacing()`]: struct.Config.html#method.enable_pacing
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_pacing_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: bool,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.pacing = v;
+
+        Ok(())
+    }
+
+    /// Sets the max value for pacing rate.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_max_pacing_rate()`].
+    ///
+    /// [`Config::set_max_pacing_rate()`]: struct.Config.html#method.set_max_pacing_rate
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_max_pacing_rate_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: Option<u64>,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.max_pacing_rate = v;
+
+        Ok(())
+    }
+
+    /// Sets the maximum outgoing UDP payload size.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_max_send_udp_payload_size()`].
+    ///
+    /// [`Config::set_max_send_udp_payload_size()`]: struct.Config.html#method.set_max_send_udp_payload_size
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_max_send_udp_payload_size_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: usize,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.max_send_udp_payload_size = v;
+
+        Ok(())
     }
 
     /// Processes QUIC packets received from the peer.
@@ -6785,6 +6929,8 @@ impl Connection {
 
             trace_id: &self.trace_id,
 
+            recovery_config: self.recovery_config,
+
             is_server: self.is_server,
         };
 
@@ -6796,6 +6942,17 @@ impl Connection {
             Ok(_) => (),
 
             Err(Error::Done) => {
+                // Apply in-handshake configuration from callbacks before any
+                // packet has been sent.
+                if self.sent_count == 0 &&
+                    ex_data.recovery_config != self.recovery_config
+                {
+                    if let Ok(path) = self.paths.get_active_mut() {
+                        self.recovery_config = ex_data.recovery_config;
+                        path.reinit_recovery(&self.recovery_config);
+                    }
+                }
+
                 // Try to parse transport parameters as soon as the first flight
                 // of handshake data is processed.
                 //
@@ -15598,7 +15755,7 @@ mod tests {
     #[cfg(feature = "boringssl-boring-crate")]
     #[test]
     fn user_provided_boring_ctx() -> Result<()> {
-        // Manually construct boring ssl ctx for server
+        // Manually construct `SSlContextBuilder` for the server.
         let mut server_tls_ctx_builder =
             boring::ssl::SslContextBuilder::new(boring::ssl::SslMethod::tls())
                 .unwrap();
@@ -15633,32 +15790,89 @@ mod tests {
             config.set_ack_delay_exponent(8);
         }
 
-        let mut client_scid = [0; 16];
-        rand::rand_bytes(&mut client_scid[..]);
-        let client_scid = ConnectionId::from_ref(&client_scid);
-        let client_addr = "127.0.0.1:1234".parse().unwrap();
+        let mut pipe = testing::Pipe::with_client_and_server_config(
+            &mut client_config,
+            &mut server_config,
+        )?;
 
-        let mut server_scid = [0; 16];
-        rand::rand_bytes(&mut server_scid[..]);
-        let server_scid = ConnectionId::from_ref(&server_scid);
-        let server_addr = "127.0.0.1:4321".parse().unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
 
-        let mut pipe = testing::Pipe {
-            client: connect(
-                Some("quic.tech"),
-                &client_scid,
-                client_addr,
-                server_addr,
-                &mut client_config,
-            )?,
-            server: accept(
-                &server_scid,
-                None,
-                server_addr,
-                client_addr,
-                &mut server_config,
-            )?,
-        };
+        Ok(())
+    }
+
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[test]
+    fn in_handshake_config() -> Result<()> {
+        let mut buf = [0; 65535];
+
+        const CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 30;
+
+        // Manually construct `SSlContextBuilder` for the server.
+        let mut server_tls_ctx_builder =
+            boring::ssl::SslContextBuilder::new(boring::ssl::SslMethod::tls())
+                .unwrap();
+        server_tls_ctx_builder
+            .set_certificate_chain_file("examples/cert.crt")
+            .unwrap();
+        server_tls_ctx_builder
+            .set_private_key_file(
+                "examples/cert.key",
+                boring::ssl::SslFiletype::PEM,
+            )
+            .unwrap();
+        server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
+            Connection::set_initial_congestion_window_packets_in_handshake(
+                hello.ssl_mut(),
+                CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS,
+            )
+            .unwrap();
+
+            Ok(())
+        });
+
+        let mut server_config = Config::with_boring_ssl_ctx_builder(
+            crate::PROTOCOL_VERSION,
+            server_tls_ctx_builder,
+        )?;
+
+        let mut client_config = Config::new(crate::PROTOCOL_VERSION)?;
+        client_config.load_cert_chain_from_pem_file("examples/cert.crt")?;
+        client_config.load_priv_key_from_pem_file("examples/cert.key")?;
+
+        for config in [&mut client_config, &mut server_config] {
+            config.set_application_protos(&[b"proto1", b"proto2"])?;
+            config.set_initial_max_data(1000000);
+            config.set_initial_max_stream_data_bidi_local(15);
+            config.set_initial_max_stream_data_bidi_remote(15);
+            config.set_initial_max_stream_data_uni(10);
+            config.set_initial_max_streams_bidi(3);
+            config.set_initial_max_streams_uni(3);
+            config.set_max_idle_timeout(180_000);
+            config.verify_peer(false);
+            config.set_ack_delay_exponent(8);
+        }
+
+        let mut pipe = testing::Pipe::with_client_and_server_config(
+            &mut client_config,
+            &mut server_config,
+        )?;
+
+        // Client sends initial flight.
+        let (len, _) = pipe.client.send(&mut buf).unwrap();
+
+        assert_eq!(pipe.server.tx_cap, 0);
+
+        // Server receives client's initial flight and updates its config.
+        pipe.server_recv(&mut buf[..len]).unwrap();
+
+        assert_eq!(
+            pipe.server.tx_cap,
+            CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200
+        );
+
+        // Server sends initial flight.
+        let (len, _) = pipe.server.send(&mut buf).unwrap();
+        pipe.client_recv(&mut buf[..len]).unwrap();
 
         assert_eq!(pipe.handshake(), Ok(()));
 
