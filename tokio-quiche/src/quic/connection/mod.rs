@@ -107,6 +107,16 @@ impl AsSocketStats for QuicConnectionStats {
                 .as_ref()
                 .map(|p| p.rtt.as_micros() as i64)
                 .unwrap_or_default(),
+            min_rtt_us: self
+                .path_stats
+                .as_ref()
+                .and_then(|p| p.min_rtt.map(|x| x.as_micros() as i64))
+                .unwrap_or_default(),
+            rtt_var_us: self
+                .path_stats
+                .as_ref()
+                .map(|p| p.rttvar.as_micros() as i64)
+                .unwrap_or_default(),
             cwnd: self
                 .path_stats
                 .as_ref()
@@ -120,6 +130,13 @@ impl AsSocketStats for QuicConnectionStats {
             bytes_recvd: self.stats.recv_bytes,
             bytes_lost: self.stats.lost_bytes,
             bytes_retrans: self.stats.stream_retrans_bytes,
+            bytes_unsent: 0, /* not implemented yet, kept for compatibility
+                              * with TCP */
+            delivery_rate: self
+                .path_stats
+                .as_ref()
+                .map(|p| p.delivery_rate)
+                .unwrap_or_default(),
         }
     }
 }
