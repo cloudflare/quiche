@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["KeyType","KeyUpdateOrRetiredTrigger"],"struct":["KeyDiscarded","KeyUpdated"]};
