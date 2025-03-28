@@ -187,6 +187,8 @@ pub trait RecoveryOps {
 
     fn update_max_datagram_size(&mut self, new_max_datagram_size: usize);
 
+    fn on_app_limited(&mut self);
+
     #[cfg(test)]
     fn app_limited(&self) -> bool;
 
