@@ -550,6 +550,8 @@ impl ReleaseDecision {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use crate::packet;
     use crate::ranges;
@@ -596,10 +598,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn loss_on_pto() {
+    #[rstest]
+    fn loss_on_pto(
+        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        cc_algorithm_name: &str,
+    ) {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
 
@@ -852,10 +857,13 @@ mod tests {
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
     }
 
-    #[test]
-    fn loss_on_timer() {
+    #[rstest]
+    fn loss_on_timer(
+        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        cc_algorithm_name: &str,
+    ) {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
 
@@ -1027,10 +1035,13 @@ mod tests {
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
     }
 
-    #[test]
-    fn loss_on_reordering() {
+    #[rstest]
+    fn loss_on_reordering(
+        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        cc_algorithm_name: &str,
+    ) {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
 
@@ -1214,10 +1225,10 @@ mod tests {
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
     }
 
-    #[test]
-    fn pacing() {
+    #[rstest]
+    fn pacing(#[values("reno", "cubic", "bbr", "bbr2")] cc_algorithm_name: &str) {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(CongestionControlAlgorithm::CUBIC);
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
 
@@ -1282,8 +1293,12 @@ mod tests {
         assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(r.rtt(), Duration::from_millis(50));
 
-        // 1 MSS increased.
-        assert_eq!(r.cwnd(), 12000 + 1200);
+        assert_eq!(r.cwnd(), match cc_algorithm_name {
+            "bbr" => 24000,
+            "bbr2" => 24000,
+            // cubic and reno: 1 MSS increased.
+            _ => 12000 + 1200,
+        });
 
         // Send out second packet.
         let p = Sent {
@@ -1383,7 +1398,36 @@ mod tests {
 
         // We pace this outgoing packet. as all conditions for pacing
         // are passed.
-        let pacing_rate = (r.cwnd() as f64 * PACING_MULTIPLIER / 0.05) as u64;
+        let pacing_rate = match cc_algorithm_name {
+            "bbr" => {
+                // Constants from congestion/bbr/mod.rs
+                let cwnd_gain = 2.0;
+                let startup_pacing_gain = 2.89;
+                // Adjust for cwnd_gain.  BW estimate was made before the CWND
+                // increase.
+                let bw = r.cwnd() as f64 /
+                    cwnd_gain /
+                    Duration::from_millis(50).as_secs_f64();
+                (bw * startup_pacing_gain) as u64
+            },
+            "bbr2" => {
+                // Constants from congestion/bbr2/mod.rs
+                let cwnd_gain = 2.0;
+                let startup_pacing_gain = 2.77;
+                let pacing_margin_percent = 0.01;
+                // Adjust for cwnd_gain.  BW estimate was made before the CWND
+                // increase.
+                let bw = r.cwnd() as f64 /
+                    cwnd_gain /
+                    Duration::from_millis(50).as_secs_f64();
+                (bw * startup_pacing_gain * (1.0 - pacing_margin_percent)) as u64
+            },
+            _ => {
+                let bw =
+                    r.cwnd() as f64 / Duration::from_millis(50).as_secs_f64();
+                (bw * PACING_MULTIPLIER) as u64
+            },
+        };
         assert_eq!(r.pacing_rate(), pacing_rate);
 
         assert_eq!(
@@ -1392,12 +1436,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn pmtud_loss_on_timer() {
+    #[rstest]
+    fn pmtud_loss_on_timer(
+        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        cc_algorithm_name: &str,
+    ) {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
+        assert_eq!(r.cwnd(), 12000);
 
         let mut now = Instant::now();
 
@@ -1527,7 +1575,11 @@ mod tests {
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.in_flight_count(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
-        assert_eq!(r.cwnd(), 12000);
+        assert_eq!(r.cwnd(), match cc_algorithm_name {
+            "bbr" => 14000,
+            "bbr2" => 14000,
+            _ => 12000,
+        });
 
         assert_eq!(r.lost_count(), 0);
 
