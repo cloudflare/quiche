@@ -44,6 +44,8 @@ pub trait AsSocketStats {
 pub struct SocketStats {
     pub pmtu: u16,
     pub rtt_us: i64,
+    pub min_rtt_us: i64,
+    pub rtt_var_us: i64,
     pub cwnd: u64,
     pub packets_sent: u64,
     pub packets_recvd: u64,
@@ -53,6 +55,8 @@ pub struct SocketStats {
     pub bytes_recvd: u64,
     pub bytes_lost: u64,
     pub bytes_retrans: u64,
+    pub bytes_unsent: u64,
+    pub delivery_rate: u64,
 }
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
