@@ -31,6 +31,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 
+use super::SocketCapabilities;
+
 /// A connected datagram socket with separate `send` and `recv` halves.
 ///
 /// [`Socket`] abstracts over both real UDP-based connections and in-process
@@ -48,6 +50,12 @@ pub struct Socket<Tx, Rx> {
     pub local_addr: SocketAddr,
     /// The address of the remote endpoint.
     pub peer_addr: SocketAddr,
+    /// The [`SocketCapabilities`] to use for this socket.
+    ///
+    /// By default, [`Socket`]s are constructed with all capabilities
+    /// disabled. On Linux, you can use `apply_max_capabilities()` to (try
+    /// to) enable all supported capabilities.
+    pub capabilities: SocketCapabilities,
 }
 
 /// A type-erased variant of [`Socket`] with boxed `Tx` and `Rx` halves.
@@ -73,6 +81,7 @@ impl<Tx, Rx> Socket<Tx, Rx> {
             recv,
             local_addr,
             peer_addr,
+            capabilities: SocketCapabilities::default(),
         })
     }
 }
@@ -96,6 +105,24 @@ where
         let send = self.send.as_udp_socket()?;
         let recv = self.recv.as_udp_socket()?;
         (send.as_raw_fd() == recv.as_raw_fd()).then_some(send)
+    }
+
+    /// Tries to enable all sockopts supported by the crate for this socket.
+    ///
+    /// This does nothing unless `send` and `recv` refer to the same UDP socket
+    /// FD. See `SocketCapabilities::apply_all_and_get_compatibility` for
+    /// details.
+    #[cfg(target_os = "linux")]
+    pub fn apply_max_capabilities(&mut self, max_send_udp_payload_size: usize) {
+        let Some(socket) = self.as_udp_socket() else {
+            return;
+        };
+
+        let capabilities = SocketCapabilities::apply_all_and_get_compatibility(
+            socket,
+            max_send_udp_payload_size,
+        );
+        self.capabilities = capabilities;
     }
 }
 
