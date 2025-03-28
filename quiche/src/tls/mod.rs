@@ -358,7 +358,7 @@ pub struct Handshake {
 impl Handshake {
     // Note: some vendor-specific methods are implemented by each vendor's
     // submodule (openssl-quictls / boringssl).
-    #[cfg(feature = "ffi")]
+    #[cfg(any(feature = "ffi", feature = "boringssl-boring-crate"))]
     pub unsafe fn from_ptr(ssl: *mut c_void) -> Handshake {
         Handshake::new(ssl as *mut SSL)
     }
@@ -452,12 +452,19 @@ impl Handshake {
         })
     }
 
-    pub fn set_quic_transport_params(&mut self, buf: &[u8]) -> Result<()> {
+    pub fn set_quic_transport_params(
+        &mut self, params: &crate::TransportParams, is_server: bool,
+    ) -> Result<()> {
+        let mut raw_params = [0; 128];
+
+        let raw_params =
+            crate::TransportParams::encode(params, is_server, &mut raw_params)?;
+
         let rc = unsafe {
             SSL_set_quic_transport_params(
                 self.as_mut_ptr(),
-                buf.as_ptr(),
-                buf.len(),
+                raw_params.as_ptr(),
+                raw_params.len(),
             )
         };
         self.map_result_ssl(rc)
@@ -692,6 +699,8 @@ pub struct ExData<'a> {
     pub keylog: Option<&'a mut Box<dyn std::io::Write + Send + Sync>>,
 
     pub trace_id: &'a str,
+
+    pub local_transport_params: crate::TransportParams,
 
     pub recovery_config: crate::recovery::RecoveryConfig,
 

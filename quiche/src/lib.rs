@@ -2552,6 +2552,81 @@ impl<F: BufFactory> Connection<F> {
         Ok(())
     }
 
+    /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_max_idle_timeout()`].
+    ///
+    /// [`Config::set_max_idle_timeout()`]: struct.Config.html#method.set_max_idle_timeout
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_max_idle_timeout_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: u64,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.local_transport_params.max_idle_timeout = v;
+
+        Self::set_transport_parameters_in_hanshake(
+            ex_data.local_transport_params.clone(),
+            ex_data.is_server,
+            ssl,
+        )
+    }
+
+    /// Sets the `initial_max_streams_bidi` transport parameter.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_initial_max_streams_bidi()`].
+    ///
+    /// [`Config::set_initial_max_streams_bidi()`]: struct.Config.html#method.set_initial_max_streams_bidi
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_initial_max_streams_bidi_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: u64,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.local_transport_params.initial_max_streams_bidi = v;
+
+        Self::set_transport_parameters_in_hanshake(
+            ex_data.local_transport_params.clone(),
+            ex_data.is_server,
+            ssl,
+        )
+    }
+
+    #[cfg(feature = "boringssl-boring-crate")]
+    fn set_transport_parameters_in_hanshake(
+        params: TransportParams, is_server: bool, ssl: &mut boring::ssl::SslRef,
+    ) -> Result<()> {
+        use foreign_types_shared::ForeignTypeRef;
+
+        // In order to apply the new parameter to the TLS state before TPs are
+        // written into a TLS message, we need to re-encode all TPs immediately.
+        //
+        // Since we don't have direct access to the main `Connection` object, we
+        // need to re-create the `Handshake` state from the `SslRef`.
+        //
+        // SAFETY: the `Handshake` object must not be drop()ed, otherwise it
+        // would free the underlying BoringSSL structure.
+        let mut handshake =
+            unsafe { tls::Handshake::from_ptr(ssl.as_ptr() as _) };
+        handshake.set_quic_transport_params(&params, is_server)?;
+
+        // Avoid running `drop(handshake)` as that would free the underlying
+        // handshake state.
+        std::mem::forget(handshake);
+
+        Ok(())
+    }
+
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
@@ -7063,17 +7138,10 @@ impl<F: BufFactory> Connection<F> {
     }
 
     fn encode_transport_params(&mut self) -> Result<()> {
-        let mut raw_params = [0; 128];
-
-        let raw_params = TransportParams::encode(
+        self.handshake.set_quic_transport_params(
             &self.local_transport_params,
             self.is_server,
-            &mut raw_params,
-        )?;
-
-        self.handshake.set_quic_transport_params(raw_params)?;
-
-        Ok(())
+        )
     }
 
     fn parse_peer_transport_params(
@@ -7190,6 +7258,8 @@ impl<F: BufFactory> Connection<F> {
 
             trace_id: &self.trace_id,
 
+            local_transport_params: self.local_transport_params.clone(),
+
             recovery_config: self.recovery_config,
 
             tx_cap_factor: self.tx_cap_factor,
@@ -7226,6 +7296,19 @@ impl<F: BufFactory> Connection<F> {
                             discover,
                             self.recovery_config.max_send_udp_payload_size,
                         );
+                    }
+
+                    if ex_data.local_transport_params !=
+                        self.local_transport_params
+                    {
+                        self.streams.set_max_streams_bidi(
+                            ex_data
+                                .local_transport_params
+                                .initial_max_streams_bidi,
+                        );
+
+                        self.local_transport_params =
+                            ex_data.local_transport_params;
                     }
                 }
 
@@ -16547,6 +16630,8 @@ mod tests {
         let mut buf = [0; 65535];
 
         const CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 30;
+        const CUSTOM_INITIAL_MAX_STREAMS_BIDI: u64 = 30;
+        const CUSTOM_MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(3);
 
         // Manually construct `SslContextBuilder` for the server so we can modify
         // CWND during the handshake.
@@ -16566,6 +16651,18 @@ mod tests {
             <Connection>::set_initial_congestion_window_packets_in_handshake(
                 hello.ssl_mut(),
                 CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS,
+            )
+            .unwrap();
+
+            <Connection>::set_max_idle_timeout_in_handshake(
+                hello.ssl_mut(),
+                CUSTOM_MAX_IDLE_TIMEOUT.as_millis() as u64,
+            )
+            .unwrap();
+
+            <Connection>::set_initial_max_streams_bidi_in_handshake(
+                hello.ssl_mut(),
+                CUSTOM_INITIAL_MAX_STREAMS_BIDI,
             )
             .unwrap();
 
@@ -16616,9 +16713,19 @@ mod tests {
             CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200
         );
 
+        assert_eq!(pipe.server.idle_timeout(), Some(CUSTOM_MAX_IDLE_TIMEOUT));
+
         // Server sends initial flight.
         let (len, _) = pipe.server.send(&mut buf).unwrap();
         pipe.client_recv(&mut buf[..len]).unwrap();
+
+        // Ensure the client received the new transport parameters.
+        assert_eq!(pipe.client.idle_timeout(), Some(CUSTOM_MAX_IDLE_TIMEOUT));
+
+        assert_eq!(
+            pipe.client.peer_streams_left_bidi(),
+            CUSTOM_INITIAL_MAX_STREAMS_BIDI
+        );
 
         assert_eq!(pipe.handshake(), Ok(()));
 
