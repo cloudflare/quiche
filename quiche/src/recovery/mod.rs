@@ -353,14 +353,15 @@ pub struct Recovery {
     newly_acked: Vec<Acked>,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct RecoveryConfig {
-    max_send_udp_payload_size: usize,
+    pub max_send_udp_payload_size: usize,
     pub max_ack_delay: Duration,
-    cc_algorithm: CongestionControlAlgorithm,
-    hystart: bool,
-    pacing: bool,
-    max_pacing_rate: Option<u64>,
-    initial_congestion_window_packets: usize,
+    pub cc_algorithm: CongestionControlAlgorithm,
+    pub hystart: bool,
+    pub pacing: bool,
+    pub max_pacing_rate: Option<u64>,
+    pub initial_congestion_window_packets: usize,
 }
 
 impl RecoveryConfig {
