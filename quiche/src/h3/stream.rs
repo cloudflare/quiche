@@ -476,6 +476,8 @@ impl Stream {
                 // The stream is not readable anymore, so re-arm the Data event.
                 if e == crate::Error::Done {
                     self.reset_data_event();
+                } else if e == crate::Error::InvalidFrame {
+                    return Err(Error::FrameError);
                 }
 
                 return Err(e.into());

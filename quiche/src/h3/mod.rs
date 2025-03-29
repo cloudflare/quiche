@@ -3409,6 +3409,7 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    use crate::h3::Error::FrameError;
     use super::*;
 
     use super::testing::*;
@@ -7179,6 +7180,28 @@ mod tests {
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
         assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Tests that sending a truncated frame causes an error.
+    fn truncated_frame() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let mut d = [42; 128];
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+
+        let frame_type = b.put_varint(frame::HEADERS_FRAME_TYPE_ID).unwrap();
+        s.pipe.client.stream_send(0, frame_type, false).unwrap();
+
+        let frame_len = b.put_varint(500).unwrap();
+        s.pipe.client.stream_send(0, frame_len, false).unwrap();
+
+        s.pipe.client.stream_send(0, b"", true).unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.server.poll(&mut s.pipe.server), Err(FrameError));
     }
 }
 

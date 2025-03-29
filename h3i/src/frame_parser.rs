@@ -629,7 +629,7 @@ mod tests {
         });
 
         let res = parser.try_parse_frame(&mut s.pipe.server);
-        assert_eq!(res, Err(H3Error::TransportError(quiche::Error::Done)));
+        assert_eq!(res, Err(H3Error::TransportError(quiche::Error::InvalidFrame)));
         assert_eq!(parser.ty, Some(0));
         assert_eq!(parser.curr_state, FrameState::Len);
     }

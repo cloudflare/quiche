@@ -4801,6 +4801,9 @@ impl Connection {
             .ok_or(Error::InvalidStreamState(stream_id))?;
 
         if !stream.is_readable() {
+            if stream.recv.is_fin() {
+                return Err(Error::InvalidFrame);
+            }
             return Err(Error::Done);
         }
 
