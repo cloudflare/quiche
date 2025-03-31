@@ -886,10 +886,7 @@ mod bandwidth_sampler_tests {
         fn make_acked_packet(&self, pkt_num: u64) -> Acked {
             let time_sent = self.get_packet_time(pkt_num);
 
-            Acked {
-                pkt_num,
-                time_sent,
-            }
+            Acked { pkt_num, time_sent }
         }
 
         fn make_lost_packet(&self, pkt_num: u64) -> Lost {
