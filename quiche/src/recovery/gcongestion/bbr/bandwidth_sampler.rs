@@ -691,10 +691,7 @@ impl BandwidthSampler {
         &mut self, ack_time: Instant, packet_number: u64,
     ) -> Option<BandwidthSample> {
         self.last_acked_packet = packet_number;
-        let sent_packet = match self.connection_state_map.take(packet_number) {
-            None => return None,
-            Some(state) => state,
-        };
+        let sent_packet = self.connection_state_map.take(packet_number)?;
 
         self.total_bytes_acked += sent_packet.size;
         self.total_bytes_sent_at_last_acked_packet =
