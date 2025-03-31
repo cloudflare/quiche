@@ -371,6 +371,137 @@ impl Recovery {
         Self::new_with_config(&RecoveryConfig::from_config(config))
     }
 
+    fn loss_time_and_space(&self) -> (Option<Instant>, packet::Epoch) {
+        let mut epoch = packet::Epoch::Initial;
+        let mut time = self.epochs[epoch].loss_time;
+
+        // Iterate over all packet number spaces starting from Handshake.
+        for e in [packet::Epoch::Handshake, packet::Epoch::Application] {
+            let new_time = self.epochs[e].loss_time;
+            if time.is_none() || new_time < time {
+                time = new_time;
+                epoch = e;
+            }
+        }
+
+        (time, epoch)
+    }
+
+    fn pto_time_and_space(
+        &self, handshake_status: HandshakeStatus, now: Instant,
+    ) -> (Option<Instant>, packet::Epoch) {
+        let mut duration = self.pto() * 2_u32.pow(self.pto_count);
+
+        // Arm PTO from now when there are no inflight packets.
+        if self.bytes_in_flight == 0 {
+            if handshake_status.has_handshake_keys {
+                return (Some(now + duration), packet::Epoch::Handshake);
+            } else {
+                return (Some(now + duration), packet::Epoch::Initial);
+            }
+        }
+
+        let mut pto_timeout = None;
+        let mut pto_space = packet::Epoch::Initial;
+
+        // Iterate over all packet number spaces.
+        for e in [
+            packet::Epoch::Initial,
+            packet::Epoch::Handshake,
+            packet::Epoch::Application,
+        ] {
+            let epoch = &self.epochs[e];
+            if epoch.in_flight_count == 0 {
+                continue;
+            }
+
+            if e == packet::Epoch::Application {
+                // Skip Application Data until handshake completes.
+                if !handshake_status.completed {
+                    return (pto_timeout, pto_space);
+                }
+
+                // Include max_ack_delay and backoff for Application Data.
+                duration +=
+                    self.rtt_stats.max_ack_delay * 2_u32.pow(self.pto_count);
+            }
+
+            let new_time = epoch
+                .time_of_last_ack_eliciting_packet
+                .map(|t| t + duration);
+
+            if pto_timeout.is_none() || new_time < pto_timeout {
+                pto_timeout = new_time;
+                pto_space = e;
+            }
+        }
+
+        (pto_timeout, pto_space)
+    }
+
+    fn set_loss_detection_timer(
+        &mut self, handshake_status: HandshakeStatus, now: Instant,
+    ) {
+        let (earliest_loss_time, _) = self.loss_time_and_space();
+
+        if let Some(to) = earliest_loss_time {
+            // Time threshold loss detection.
+            self.loss_timer.update(to);
+            return;
+        }
+
+        if self.bytes_in_flight == 0 && handshake_status.peer_verified_address {
+            self.loss_timer.clear();
+            return;
+        }
+
+        // PTO timer.
+        if let (Some(timeout), _) = self.pto_time_and_space(handshake_status, now)
+        {
+            self.loss_timer.update(timeout);
+        }
+    }
+
+    pub fn detect_lost_packets(
+        &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
+    ) -> (usize, usize) {
+        let loss_delay = cmp::max(self.rtt_stats.latest_rtt, self.rtt())
+            .mul_f64(self.time_thresh);
+
+        let loss = self.epochs[epoch].detect_lost_packets(
+            loss_delay,
+            self.pkt_thresh,
+            now,
+            trace_id,
+            epoch,
+        );
+
+        if let Some(pkt) = loss.largest_lost_pkt {
+            if !self.congestion.in_congestion_recovery(pkt.time_sent) {
+                (self.congestion.cc_ops.checkpoint)(&mut self.congestion);
+            }
+
+            (self.congestion.cc_ops.congestion_event)(
+                &mut self.congestion,
+                self.bytes_in_flight,
+                loss.lost_bytes,
+                &pkt,
+                now,
+            );
+
+            self.bytes_in_flight -= loss.lost_bytes;
+        };
+
+        self.bytes_in_flight -= loss.pmtud_lost_bytes;
+
+        self.epochs[epoch]
+            .drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
+
+        self.congestion.lost_count += loss.lost_packets;
+
+        (loss.lost_packets, loss.lost_bytes)
+    }
+
     /// Returns whether or not we should elicit an ACK even if we wouldn't
     /// otherwise have constructed an ACK eliciting packet.
     pub fn should_elicit_ack(&self, epoch: packet::Epoch) -> bool {
@@ -715,137 +846,6 @@ impl Recovery {
         self.pmtud_update_max_datagram_size(
             self.max_datagram_size.min(new_max_datagram_size),
         )
-    }
-
-    fn loss_time_and_space(&self) -> (Option<Instant>, packet::Epoch) {
-        let mut epoch = packet::Epoch::Initial;
-        let mut time = self.epochs[epoch].loss_time;
-
-        // Iterate over all packet number spaces starting from Handshake.
-        for e in [packet::Epoch::Handshake, packet::Epoch::Application] {
-            let new_time = self.epochs[e].loss_time;
-            if time.is_none() || new_time < time {
-                time = new_time;
-                epoch = e;
-            }
-        }
-
-        (time, epoch)
-    }
-
-    fn pto_time_and_space(
-        &self, handshake_status: HandshakeStatus, now: Instant,
-    ) -> (Option<Instant>, packet::Epoch) {
-        let mut duration = self.pto() * 2_u32.pow(self.pto_count);
-
-        // Arm PTO from now when there are no inflight packets.
-        if self.bytes_in_flight == 0 {
-            if handshake_status.has_handshake_keys {
-                return (Some(now + duration), packet::Epoch::Handshake);
-            } else {
-                return (Some(now + duration), packet::Epoch::Initial);
-            }
-        }
-
-        let mut pto_timeout = None;
-        let mut pto_space = packet::Epoch::Initial;
-
-        // Iterate over all packet number spaces.
-        for e in [
-            packet::Epoch::Initial,
-            packet::Epoch::Handshake,
-            packet::Epoch::Application,
-        ] {
-            let epoch = &self.epochs[e];
-            if epoch.in_flight_count == 0 {
-                continue;
-            }
-
-            if e == packet::Epoch::Application {
-                // Skip Application Data until handshake completes.
-                if !handshake_status.completed {
-                    return (pto_timeout, pto_space);
-                }
-
-                // Include max_ack_delay and backoff for Application Data.
-                duration +=
-                    self.rtt_stats.max_ack_delay * 2_u32.pow(self.pto_count);
-            }
-
-            let new_time = epoch
-                .time_of_last_ack_eliciting_packet
-                .map(|t| t + duration);
-
-            if pto_timeout.is_none() || new_time < pto_timeout {
-                pto_timeout = new_time;
-                pto_space = e;
-            }
-        }
-
-        (pto_timeout, pto_space)
-    }
-
-    fn set_loss_detection_timer(
-        &mut self, handshake_status: HandshakeStatus, now: Instant,
-    ) {
-        let (earliest_loss_time, _) = self.loss_time_and_space();
-
-        if let Some(to) = earliest_loss_time {
-            // Time threshold loss detection.
-            self.loss_timer.update(to);
-            return;
-        }
-
-        if self.bytes_in_flight == 0 && handshake_status.peer_verified_address {
-            self.loss_timer.clear();
-            return;
-        }
-
-        // PTO timer.
-        if let (Some(timeout), _) = self.pto_time_and_space(handshake_status, now)
-        {
-            self.loss_timer.update(timeout);
-        }
-    }
-
-    pub fn detect_lost_packets(
-        &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
-    ) -> (usize, usize) {
-        let loss_delay = cmp::max(self.rtt_stats.latest_rtt, self.rtt())
-            .mul_f64(self.time_thresh);
-
-        let loss = self.epochs[epoch].detect_lost_packets(
-            loss_delay,
-            self.pkt_thresh,
-            now,
-            trace_id,
-            epoch,
-        );
-
-        if let Some(pkt) = loss.largest_lost_pkt {
-            if !self.congestion.in_congestion_recovery(pkt.time_sent) {
-                (self.congestion.cc_ops.checkpoint)(&mut self.congestion);
-            }
-
-            (self.congestion.cc_ops.congestion_event)(
-                &mut self.congestion,
-                self.bytes_in_flight,
-                loss.lost_bytes,
-                &pkt,
-                now,
-            );
-
-            self.bytes_in_flight -= loss.lost_bytes;
-        };
-
-        self.bytes_in_flight -= loss.pmtud_lost_bytes;
-
-        self.epochs[epoch]
-            .drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
-
-        self.congestion.lost_count += loss.lost_packets;
-
-        (loss.lost_packets, loss.lost_bytes)
     }
 
     pub fn update_app_limited(&mut self, v: bool) {
