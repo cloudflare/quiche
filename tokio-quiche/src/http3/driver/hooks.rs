@@ -75,7 +75,8 @@ pub trait DriverHooks: Sized + Send + 'static {
         headers: InboundHeaders,
     ) -> H3ConnectionResult<()>;
 
-    /// Processes any command received from the [H3Controller]. May use
+    /// Processes any command received from the
+    /// [`H3Controller`](super::H3Controller). May use
     /// `H3Driver::handle_core_command` to handle regular [`H3Command`]s.
     fn conn_command(
         driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,

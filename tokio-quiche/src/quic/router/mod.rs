@@ -123,8 +123,9 @@ pub enum ConnectionMapCommand {
 /// [rh]: datagram_socket::DatagramSocketRecv
 ///
 /// When a packet (or batch of packets) is received, the router will either
-/// route those packets to an established [`QuicConnection`] or have a them
-/// handled by a `InitialPacketHandler` which either acts as a quic listener or
+/// route those packets to an established
+/// [`QuicConnection`](super::QuicConnection) or have a them handled by a
+/// `InitialPacketHandler` which either acts as a quic listener or
 /// quic connector, a server or client respectively.
 ///
 /// If you only have a single connection, or if you need more control over the
@@ -272,7 +273,8 @@ where
         }
     }
 
-    /// Creates a new [`QuicConnection`] and spawns an associated io worker.
+    /// Creates a new [`QuicConnection`](super::QuicConnection) and spawns an
+    /// associated io worker.
     fn spawn_new_connection(
         &mut self, new_connection: NewConnection, local_addr: SocketAddr,
         peer_addr: SocketAddr,
@@ -371,8 +373,8 @@ where
     M: Metrics,
     I: InitialPacketHandler,
 {
-    /// [`poll_recv_from`] should be used if the underlying system or socket
-    /// does not support rx_time nor GRO.
+    /// [`InboundPacketRouter::poll_recv_from`] should be used if the underlying
+    /// system or socket does not support rx_time nor GRO.
     fn poll_recv_from(
         &mut self, cx: &mut Context<'_>,
     ) -> Poll<io::Result<PollRecvData>> {
@@ -592,7 +594,8 @@ fn instant_to_system(ts: Instant) -> SystemTime {
 }
 
 /// Determine if we should store the destination address for a packet, based on
-/// an address parsed from a [`ControlMessageOwned`].
+/// an address parsed from a
+/// [`ControlMessageOwned`](nix::sys::socket::ControlMessageOwned).
 ///
 /// This is to prevent overriding the destination address if the packet was
 /// originally addressed to `local`, as that would cause us to incorrectly
@@ -731,12 +734,12 @@ fn initial_packet_error_type(
 
 /// An [`InitialPacketHandler`] handles unknown quic initials and processes
 /// them; generally accepting new connections (acting as a server), or
-/// establishing a connection to a server (acting as a client). A [`QuicRouter`]
-/// holds an instance of this trait and routes [`Incoming`] packets to it when
-/// it receives initials.
+/// establishing a connection to a server (acting as a client). An
+/// [`InboundPacketRouter`] holds an instance of this trait and routes
+/// [`Incoming`] packets to it when it receives initials.
 ///
 /// The handler produces [`quiche::Connection`]s which are then turned into
-/// [`QuicConnection`], IoWorker pair.
+/// [`QuicConnection`](super::QuicConnection), IoWorker pair.
 pub trait InitialPacketHandler {
     fn update(&mut self, _ctx: &mut Context<'_>) -> io::Result<()> {
         Ok(())
