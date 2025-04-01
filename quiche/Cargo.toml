@@ -1,6 +1,6 @@
 [package]
 name = "quiche"
-version = "0.23.4"
+version = "0.23.5"
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
 description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
 build = "src/build.rs"
