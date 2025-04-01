@@ -49,7 +49,7 @@ struct SendReserve<'a, F: BufFactory> {
     fin: bool,
 }
 
-impl<'a, F: BufFactory> SendReserve<'a, F> {
+impl<F: BufFactory> SendReserve<'_, F> {
     fn append_buf(&mut self, buf: F::Buf) -> Result<()> {
         let len = buf.as_ref().len();
         let inner = &mut self.inner;
@@ -73,7 +73,7 @@ impl<'a, F: BufFactory> SendReserve<'a, F> {
     }
 }
 
-impl<'a, F: BufFactory> Drop for SendReserve<'a, F> {
+impl<F: BufFactory> Drop for SendReserve<'_, F> {
     fn drop(&mut self) {
         assert_eq!(self.reserved, 0)
     }
