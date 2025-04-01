@@ -42,6 +42,10 @@ openssl = ["pkg-config"]
 # Generate pkg-config metadata file for libquiche.
 pkg-config-meta = []
 
+# Replaces quiche's original congestion control
+# implementation with one adapted from google/quiche.
+gcongestion = []
+
 # Equivalent to "--cfg fuzzing", but can also be checked in build.rs.
 fuzzing = []
 

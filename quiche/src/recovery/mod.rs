@@ -286,9 +286,11 @@ impl FromStr for CongestionControlAlgorithm {
             "reno" => Ok(CongestionControlAlgorithm::Reno),
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
             "bbr" => Ok(CongestionControlAlgorithm::BBR),
+            #[cfg(not(feature = "gcongestion"))]
             "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
+            #[cfg(feature = "gcongestion")]
+            "bbr2" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
             "bbr2_gcongestion" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
-
             _ => Err(crate::Error::CongestionControl),
         }
     }
@@ -583,8 +585,16 @@ mod tests {
         assert!(!recovery_for_alg(algo).gcongestion_enabled());
 
         let algo = CongestionControlAlgorithm::from_str("bbr2").unwrap();
-        assert_eq!(algo, CongestionControlAlgorithm::BBR2);
-        assert!(!recovery_for_alg(algo).gcongestion_enabled());
+        #[cfg(not(feature = "gcongestion"))]
+        {
+            assert_eq!(algo, CongestionControlAlgorithm::BBR2);
+            assert!(!recovery_for_alg(algo).gcongestion_enabled());
+        }
+        #[cfg(feature = "gcongestion")]
+        {
+            assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
+            assert!(recovery_for_alg(algo).gcongestion_enabled());
+        }
 
         let algo =
             CongestionControlAlgorithm::from_str("bbr2_gcongestion").unwrap();
