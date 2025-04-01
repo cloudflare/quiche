@@ -48,7 +48,7 @@ use crate::quic::QuicheConnection;
 
 /// A [`ClientConnector`] manages client-initiated [`quiche::Connection`]s. When
 /// a connection is established, this struct returns the connection to the
-/// [`super::QuicRouter`] for futher processing.
+/// [`InboundPacketRouter`](super::InboundPacketRouter) for further processing.
 pub(crate) struct ClientConnector<Tx> {
     socket_tx: MaybeConnectedSocket<Arc<Tx>>,
     connection: ConnectionState,
@@ -61,7 +61,8 @@ enum ConnectionState {
     Queued(QuicheConnection),
     /// It's currently in a QUIC handshake
     Pending(PendingConnection),
-    /// It's been returned to the [`QuicRouter`](super::QuicRouter).
+    /// It's been returned to the
+    /// [`InboundPacketRouter`](super::InboundPacketRouter).
     Returned,
 }
 
@@ -220,8 +221,8 @@ where
         self.set_connection_to_pending(pending.conn)
     }
 
-    /// [`update`] handles expired pending connections and checks starts the
-    /// inner connection if not started yet.
+    /// [`ClientConnector::update`] handles expired pending connections and
+    /// checks starts the inner connection if not started yet.
     fn update(&mut self, cx: &mut Context) -> io::Result<()> {
         while let Poll::Ready(Some(expired)) = self.timeout_queue.poll_expired(cx)
         {
@@ -256,7 +257,8 @@ where
 /// Repeatedly send packets until quiche reports that it's done.
 ///
 /// This does not have to be efficent, since once a connection is established
-/// the [`crate::io_worker::IoWorker`] will take over sending and receiving.
+/// the [`crate::quic::io::worker::IoWorker`] will take over sending and
+/// receiving.
 fn simple_conn_send<Tx: DatagramSocketSend + Send + Sync + 'static>(
     socket_tx: &MaybeConnectedSocket<Arc<Tx>>, conn: &mut QuicheConnection,
 ) -> io::Result<()> {
