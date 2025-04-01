@@ -150,8 +150,8 @@ enabled.
 
 - `rpk`: Support for raw public keys (RPK) in QUIC handshakes (via [boring]).
 - `gcongestion`: Replace quiche's original congestion control implementation with one
-   adapted from google/quiche (via quiche-mallard).
-- `zero-copy`: Use zero-copy sends with quiche-mallard (implies `gcongestion`).
+   adapted from google/quiche.
+- `zero-copy`: Use zero-copy sends with quiche (implies `gcongestion`).
 - `perf-quic-listener-metrics`: Extra telemetry for QUIC handshake durations,
   including protocol overhead and network delays.
 - `tokio-task-metrics`: Scheduling & poll duration histograms for tokio tasks.
