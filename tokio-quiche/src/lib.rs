@@ -82,9 +82,8 @@
 //! - `rpk`: Support for raw public keys (RPK) in QUIC handshakes (via
 //!   [boring]).
 //! - `gcongestion`: Replace quiche's original congestion control implementation
-//!   with one adapted from google/quiche (via quiche-mallard).
-//! - `zero-copy`: Use zero-copy sends with quiche-mallard (implies
-//!   `gcongestion`).
+//!   with one adapted from google/quiche.
+//! - `zero-copy`: Use zero-copy sends with quiche (implies `gcongestion`).
 //! - `perf-quic-listener-metrics`: Extra telemetry for QUIC handshake
 //!   durations, including protocol overhead and network delays.
 //! - `tokio-task-metrics`: Scheduling & poll duration histograms for tokio
@@ -96,10 +95,7 @@
 //! - `--cfg capture_keylogs`: Optional `SSLKEYLOGFILE` capturing for QUIC
 //!   connections.
 
-#[cfg(not(feature = "gcongestion"))]
 pub extern crate quiche;
-#[cfg(feature = "gcongestion")]
-pub extern crate quiche_mallard as quiche;
 
 pub mod buf_factory;
 pub mod http3;

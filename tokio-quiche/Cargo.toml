@@ -12,8 +12,8 @@ readme = "README.md"
 
 [features]
 # Forwarded quiche features for re-exports
-fuzzing = ["quiche/fuzzing", "quiche-mallard?/fuzzing"]
-quiche_internal = ["quiche/internal", "quiche-mallard?/internal"]
+fuzzing = ["quiche/fuzzing"]
+quiche_internal = ["quiche/internal"]
 
 # Enable extra timing instrumentation for QUIC handshakes, including protocol
 # overhead and network delays.
@@ -22,11 +22,10 @@ perf-quic-listener-metrics = []
 # Enable raw public key (RPK) support for QUIC handshakes.
 rpk = ["boring/rpk"]
 
-# Use the quiche-mallard fork in place of upstream quiche.
-# quiche-mallard replaces quiche's original congestion control
+# Replaces quiche's original congestion control
 # implementation with one adapted from google/quiche.
-gcongestion = ["dep:quiche-mallard"]
-# Use quiche-mallard with zero-copy send calls.
+gcongestion = ["quiche/gcongestion"]
+# Use quiche with zero-copy send calls.
 zero-copy = ["gcongestion"]
 
 # Deprecated: use `--cfg capture_keylogs` instead.
@@ -51,13 +50,9 @@ futures = { workspace = true }
 futures-util = { workspace = true }
 ipnetwork = { workspace = true }
 log = { workspace = true }
-octets = { version = "0.3.0" }
+octets = { workspace = true }
 pin-project = { workspace = true }
-quiche = { version = "0.24.0", features = ["boringssl-boring-crate", "qlog"] }
-quiche-mallard = { version = "0.21", features = [
-  "boringssl-boring-crate",
-  "qlog",
-], optional = true }
+quiche = { workspace = true, features = ["boringssl-boring-crate", "qlog"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_with = { workspace = true }
 slog-scope = { workspace = true }

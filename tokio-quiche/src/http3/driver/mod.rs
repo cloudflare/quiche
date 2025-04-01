@@ -554,20 +554,11 @@ impl<H: DriverHooks> H3Driver<H> {
 
         match event {
             // Requests/responses are exclusively handled by hooks.
-            #[cfg(not(feature = "gcongestion"))]
             h3::Event::Headers { list, more_frames } =>
                 H::headers_received(self, qconn, InboundHeaders {
                     stream_id,
                     headers: list,
                     has_body: more_frames,
-                }),
-
-            #[cfg(feature = "gcongestion")]
-            h3::Event::Headers { list, has_body } =>
-                H::headers_received(self, qconn, InboundHeaders {
-                    stream_id,
-                    headers: list,
-                    has_body,
                 }),
 
             h3::Event::Data => self.process_h3_data(qconn, stream_id),
@@ -633,7 +624,6 @@ impl<H: DriverHooks> H3Driver<H> {
 
         match frame {
             // Initial headers were already sent, send additional headers now.
-            #[cfg(not(feature = "gcongestion"))]
             OutboundFrame::Headers(headers) if ctx.initial_headers_sent => conn
                 .send_additional_headers(qconn, stream_id, headers, false, false),
 
