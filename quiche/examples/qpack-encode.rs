@@ -81,7 +81,7 @@ fn main() {
         }
 
         let name = line.split('\t').next().unwrap();
-        let value = line.split('\t').last().unwrap();
+        let value = line.split('\t').next_back().unwrap();
 
         headers.push(h3::Header::new(name.as_bytes(), value.as_bytes()));
     }

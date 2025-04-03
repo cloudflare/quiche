@@ -562,7 +562,7 @@ pub fn pkt_num_len(pn: u64, largest_acked: u64) -> usize {
     // computes ceil of num_unacked.log2()
     let min_bits = u64::BITS - num_unacked.leading_zeros();
     // get the num len in bytes
-    ((min_bits + 7) / 8) as usize
+    min_bits.div_ceil(8) as usize
 }
 
 pub fn decrypt_hdr(

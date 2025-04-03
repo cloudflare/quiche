@@ -792,10 +792,6 @@ fn set_txtime_sockopt(sock: &mio::net::UdpSocket) -> io::Result<()> {
 #[cfg(not(target_os = "linux"))]
 fn set_txtime_sockopt(_: &mio::net::UdpSocket) -> io::Result<()> {
     use std::io::Error;
-    use std::io::ErrorKind;
 
-    Err(Error::new(
-        ErrorKind::Other,
-        "Not supported on this platform",
-    ))
+    Err(Error::other("Not supported on this platform"))
 }
