@@ -279,6 +279,7 @@ impl MaxAckHeightTracker {
         }
     }
 
+    #[allow(dead_code)]
     fn reset(&mut self, new_height: usize, new_time: usize) {
         self.max_ack_height_filter.reset(
             ExtraAckedEvent {
@@ -488,6 +489,7 @@ impl BandwidthSampler {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn is_app_limited(&self) -> bool {
         self.is_app_limited
     }
@@ -803,6 +805,7 @@ impl BandwidthSampler {
         self.total_bytes_lost
     }
 
+    #[allow(dead_code)]
     pub(crate) fn reset_max_ack_height_tracker(
         &mut self, new_height: usize, new_time: usize,
     ) {

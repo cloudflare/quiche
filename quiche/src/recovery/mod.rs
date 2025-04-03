@@ -39,6 +39,7 @@ use qlog::events::EventData;
 use smallvec::SmallVec;
 
 use self::congestion::recovery::LegacyRecovery;
+use self::gcongestion::GRecovery;
 
 // Loss Recovery
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
@@ -122,6 +123,7 @@ impl RecoveryConfig {
 #[derive(Debug)]
 pub(crate) enum Recovery {
     Legacy(LegacyRecovery),
+    GCongestion(GRecovery),
 }
 
 #[enum_dispatch::enum_dispatch]
@@ -233,7 +235,12 @@ pub trait RecoveryOps {
 
 impl Recovery {
     pub fn new_with_config(recovery_config: &RecoveryConfig) -> Self {
-        Recovery::from(LegacyRecovery::new_with_config(recovery_config))
+        let grecovery = GRecovery::new(recovery_config);
+        if let Some(grecovery) = grecovery {
+            Recovery::from(grecovery)
+        } else {
+            Recovery::from(LegacyRecovery::new_with_config(recovery_config))
+        }
     }
 
     #[cfg(test)]
@@ -250,13 +257,16 @@ impl Recovery {
 #[repr(C)]
 pub enum CongestionControlAlgorithm {
     /// Reno congestion control algorithm. `reno` in a string form.
-    Reno  = 0,
+    Reno            = 0,
     /// CUBIC congestion control algorithm (default). `cubic` in a string form.
-    CUBIC = 1,
+    CUBIC           = 1,
     /// BBR congestion control algorithm. `bbr` in a string form.
-    BBR   = 2,
+    BBR             = 2,
     /// BBRv2 congestion control algorithm. `bbr2` in a string form.
-    BBR2  = 3,
+    BBR2            = 3,
+    /// BBRv2 congestion control algorithm implementation from gcongestion
+    /// branch. `bbr2_gcongestion` in a string form.
+    Bbr2Gcongestion = 4,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -271,6 +281,7 @@ impl FromStr for CongestionControlAlgorithm {
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
             "bbr" => Ok(CongestionControlAlgorithm::BBR),
             "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
+            "bbr2_gcongestion" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
 
             _ => Err(crate::Error::CongestionControl),
         }
@@ -549,6 +560,19 @@ mod tests {
     fn lookup_cc_algo_ok() {
         let algo = CongestionControlAlgorithm::from_str("reno").unwrap();
         assert_eq!(algo, CongestionControlAlgorithm::Reno);
+
+        let algo = CongestionControlAlgorithm::from_str("cubic").unwrap();
+        assert_eq!(algo, CongestionControlAlgorithm::CUBIC);
+
+        let algo = CongestionControlAlgorithm::from_str("bbr").unwrap();
+        assert_eq!(algo, CongestionControlAlgorithm::BBR);
+
+        let algo = CongestionControlAlgorithm::from_str("bbr2").unwrap();
+        assert_eq!(algo, CongestionControlAlgorithm::BBR2);
+
+        let algo =
+            CongestionControlAlgorithm::from_str("bbr2_gcongestion").unwrap();
+        assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
     }
 
     #[test]
@@ -1510,6 +1534,5 @@ mod tests {
 }
 
 mod congestion;
-#[allow(dead_code)]
 mod gcongestion;
 mod rtt;
