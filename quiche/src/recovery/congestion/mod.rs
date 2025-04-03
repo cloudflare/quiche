@@ -56,7 +56,7 @@ pub struct Congestion {
     // BBR state.
     bbr_state: bbr::State,
 
-    // BBR2 state.
+    // BBRv2 state.
     bbr2_state: bbr2::State,
 
     pub(crate) congestion_window: usize,

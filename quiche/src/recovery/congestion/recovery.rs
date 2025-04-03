@@ -892,23 +892,7 @@ impl Recovery {
 
 impl std::fmt::Debug for Recovery {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self.loss_timer.time {
-            Some(v) => {
-                let now = Instant::now();
-
-                if v > now {
-                    let d = v.duration_since(now);
-                    write!(f, "timer={d:?} ")?;
-                } else {
-                    write!(f, "timer=exp ")?;
-                }
-            },
-
-            None => {
-                write!(f, "timer=none ")?;
-            },
-        };
-
+        write!(f, "timer={:?} ", self.loss_timer)?;
         write!(f, "latest_rtt={:?} ", self.rtt_stats.latest_rtt)?;
         write!(f, "srtt={:?} ", self.rtt_stats.smoothed_rtt)?;
         write!(f, "min_rtt={:?} ", *self.rtt_stats.min_rtt)?;

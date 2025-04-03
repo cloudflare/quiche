@@ -36,9 +36,6 @@ use qlog::events::EventData;
 
 use smallvec::SmallVec;
 
-mod congestion;
-mod rtt;
-
 pub use self::congestion::recovery::Recovery;
 
 // Loss Recovery
@@ -82,12 +79,12 @@ impl std::fmt::Debug for LossDetectionTimer {
                 let now = Instant::now();
                 if v > now {
                     let d = v.duration_since(now);
-                    write!(f, "timer={d:?} ")
+                    write!(f, "{d:?}")
                 } else {
-                    write!(f, "timer=exp ")
+                    write!(f, "exp")
                 }
             },
-            None => write!(f, "timer=none "),
+            None => write!(f, "none"),
         }
     }
 }
@@ -1302,3 +1299,6 @@ mod tests {
         assert_eq!(r.congestion.lost_count, 0);
     }
 }
+
+mod congestion;
+mod rtt;
