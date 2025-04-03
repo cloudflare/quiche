@@ -168,3 +168,185 @@ impl std::fmt::Debug for Bandwidth {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constructors() {
+        // Internal representation is bits per second.
+        assert_eq!(Bandwidth::from_bytes_per_second(100).bits_per_second, 800);
+        assert_eq!(
+            Bandwidth::from_bytes_per_second(100).to_bits_per_second(),
+            800
+        );
+
+        // kbits == 1000 bits
+        assert_eq!(
+            Bandwidth::from_kbits_per_second(100).bits_per_second,
+            100_000
+        );
+
+        // mbits == 1000,000 bits
+        assert_eq!(
+            Bandwidth::from_mbits_per_second(100).bits_per_second,
+            100_000_000
+        );
+
+        assert_eq!(Bandwidth::infinite().bits_per_second, u64::MAX);
+        assert_eq!(Bandwidth::zero().bits_per_second, 0);
+    }
+
+    #[test]
+    fn arithmetic_ops() {
+        let bw_1k = Bandwidth::from_kbits_per_second(1);
+        let bw_5k = Bandwidth::from_kbits_per_second(5);
+        let bw_6k = Bandwidth::from_kbits_per_second(6);
+
+        // Addition
+        assert_eq!(bw_1k + bw_5k, bw_6k);
+
+        // Subtraction
+        assert_eq!(bw_6k - bw_5k, Some(bw_1k));
+        assert_eq!(bw_6k - bw_6k, Some(Bandwidth::zero()));
+
+        // Negative bw is not defined.
+        assert_eq!(bw_1k - bw_5k, None);
+
+        // Multiplication by scalars
+        assert_eq!(bw_1k * 6.0f64, bw_6k);
+        assert_eq!(bw_1k * 6.0f32, bw_6k);
+        assert_eq!(bw_5k * 0.0, Bandwidth::zero());
+        assert_eq!(bw_5k * 1.0, bw_5k);
+
+        // Multiplication saturates on overflow and underflow.
+        assert_eq!(Bandwidth::infinite() * -1.0, Bandwidth::zero());
+        assert_eq!((Bandwidth::infinite() * 2.0f64).bits_per_second, u64::MAX);
+
+        // Multiplication rounds up.
+        assert_eq!(
+            (Bandwidth::infinite() * 0.5f64).bits_per_second,
+            u64::MAX / 2 + 1
+        );
+    }
+
+    #[test]
+    fn from_bytes_and_time_delta() {
+        assert_eq!(
+            Bandwidth::from_bytes_and_time_delta(10, Duration::from_millis(1000))
+                .bits_per_second,
+            80
+        );
+        assert_eq!(
+            Bandwidth::from_bytes_and_time_delta(10, Duration::from_millis(100))
+                .bits_per_second,
+            800
+        );
+        assert_eq!(
+            Bandwidth::from_bytes_and_time_delta(
+                100,
+                Duration::from_millis(1000)
+            )
+            .bits_per_second,
+            800
+        );
+    }
+
+    #[test]
+    fn transfer_time() {
+        let one_kbit_sec = Bandwidth::from_kbits_per_second(1);
+        assert_eq!(one_kbit_sec.transfer_time(0), Duration::ZERO);
+        assert_eq!(one_kbit_sec.transfer_time(100), Duration::from_millis(800));
+    }
+
+    #[test]
+    fn to_bytes_per_period() {
+        let one_kbit_sec = Bandwidth::from_kbits_per_second(1);
+        assert_eq!(
+            one_kbit_sec.to_bytes_per_period(Duration::from_millis(10_000)),
+            1250
+        );
+        assert_eq!(
+            one_kbit_sec.to_bytes_per_period(Duration::from_millis(1000)),
+            125
+        );
+        assert_eq!(
+            one_kbit_sec.to_bytes_per_period(Duration::from_millis(100)),
+            12
+        );
+        assert_eq!(
+            one_kbit_sec.to_bytes_per_period(Duration::from_millis(10)),
+            1
+        );
+        assert_eq!(
+            one_kbit_sec.to_bytes_per_period(Duration::from_millis(1)),
+            0
+        );
+
+        // Mul<Duration> implementation.
+        assert_eq!(one_kbit_sec * Duration::from_millis(10_000), 1250);
+    }
+
+    #[test]
+    fn debug() {
+        assert_eq!(
+            format!("{:?}", Bandwidth { bits_per_second: 1 }),
+            "0.00 Kbps"
+        );
+        assert_eq!(
+            format!("{:?}", Bandwidth {
+                bits_per_second: 12
+            }),
+            "0.01 Kbps"
+        );
+        assert_eq!(
+            format!("{:?}", Bandwidth {
+                bits_per_second: 123
+            }),
+            "0.12 Kbps"
+        );
+        assert_eq!(
+            format!("{:?}", Bandwidth {
+                bits_per_second: 1234
+            }),
+            "1.23 Kbps"
+        );
+        assert_eq!(
+            format!("{:?}", Bandwidth {
+                bits_per_second: 12345
+            }),
+            "12.35 Kbps"
+        );
+        assert_eq!(
+            format!("{:?}", Bandwidth {
+                bits_per_second: 123456
+            }),
+            "123.46 Kbps"
+        );
+        assert_eq!(
+            format!("{:?}", Bandwidth {
+                bits_per_second: 1234567
+            }),
+            "1.23 Mbps"
+        );
+        assert_eq!(
+            format!("{:?}", Bandwidth {
+                bits_per_second: 12345678
+            }),
+            "12.35 Mbps"
+        );
+        assert_eq!(
+            format!("{:?}", Bandwidth {
+                bits_per_second: 123456789
+            }),
+            "123.46 Mbps"
+        );
+        assert_eq!(
+            format!("{:?}", Bandwidth {
+                bits_per_second: 1234567890
+            }),
+            "1.23 Gbps"
+        );
+    }
+}
