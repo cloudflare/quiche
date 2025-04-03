@@ -156,3 +156,65 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update() {
+        let mut filter = WindowedFilter::<usize, usize, usize>::new(5);
+        assert_eq!(filter.get_best(), None);
+        assert_eq!(filter.get_second_best(), None);
+        assert_eq!(filter.get_third_best(), None);
+
+        filter.update(100, 1);
+        assert_eq!(filter.get_best(), Some(100));
+        assert_eq!(filter.get_second_best(), Some(100));
+        assert_eq!(filter.get_third_best(), Some(100));
+
+        filter.update(102, 2);
+        filter.update(104, 2);
+        filter.update(105, 2);
+        filter.update(103, 2);
+        filter.update(101, 2);
+        assert_eq!(filter.get_best(), Some(105));
+        assert_eq!(filter.get_second_best(), Some(105));
+        assert_eq!(filter.get_third_best(), Some(105));
+
+        filter.update(110, 3);
+        assert_eq!(filter.get_best(), Some(110));
+        assert_eq!(filter.get_second_best(), Some(110));
+        assert_eq!(filter.get_third_best(), Some(110));
+
+        filter.update(105, 4);
+        assert_eq!(filter.get_best(), Some(110));
+        assert_eq!(filter.get_second_best(), Some(110));
+        assert_eq!(filter.get_third_best(), Some(110));
+
+        filter.update(105, 5);
+        assert_eq!(filter.get_best(), Some(110));
+        assert_eq!(filter.get_second_best(), Some(105));
+        assert_eq!(filter.get_third_best(), Some(105));
+
+        filter.update(105, 6);
+        assert_eq!(filter.get_best(), Some(110));
+        assert_eq!(filter.get_second_best(), Some(105));
+        assert_eq!(filter.get_third_best(), Some(105));
+
+        filter.update(100, 7);
+        assert_eq!(filter.get_best(), Some(110));
+        assert_eq!(filter.get_second_best(), Some(105));
+        assert_eq!(filter.get_third_best(), Some(105));
+
+        filter.update(100, 8);
+        assert_eq!(filter.get_best(), Some(110));
+        assert_eq!(filter.get_second_best(), Some(105));
+        assert_eq!(filter.get_third_best(), Some(100));
+
+        filter.update(100, 9);
+        assert_eq!(filter.get_best(), Some(105));
+        assert_eq!(filter.get_second_best(), Some(100));
+        assert_eq!(filter.get_third_best(), Some(100));
+    }
+}
