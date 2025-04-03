@@ -285,7 +285,7 @@ fn simple_conn_send<Tx: DatagramSocketSend + Send + Sync + 'static>(
             Err(quiche::Error::Done) => break Ok(()),
             Err(error) => {
                 log::error!("error writing packets to quiche's internal buffer"; "scid" => ?scid, "error" => error.to_string());
-                break Err(std::io::Error::new(std::io::ErrorKind::Other, error));
+                break Err(std::io::Error::other(error));
             },
         }
     }

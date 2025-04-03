@@ -2637,7 +2637,7 @@ impl Connection {
 
             // Ignore version negotiation if the version already selected is
             // listed.
-            if versions.iter().any(|&v| v == self.version) {
+            if versions.contains(&self.version) {
                 return Err(Error::Done);
             }
 

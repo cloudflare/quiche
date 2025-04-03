@@ -54,10 +54,7 @@ impl<'a> QlogSeqReader<'a> {
         Self::read_record(reader.as_mut());
 
         let header = Self::read_record(reader.as_mut()).ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "error reading file header bytes",
-            )
+            std::io::Error::other("error reading file header bytes")
         })?;
 
         let res: Result<QlogSeq, serde_json::Error> =
