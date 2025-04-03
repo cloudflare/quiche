@@ -187,6 +187,8 @@ pub trait RecoveryOps {
 
     fn update_max_datagram_size(&mut self, new_max_datagram_size: usize);
 
+    fn on_app_limited(&mut self);
+
     #[cfg(test)]
     fn app_limited(&self) -> bool;
 
@@ -225,6 +227,8 @@ pub trait RecoveryOps {
     #[cfg(feature = "qlog")]
     fn maybe_qlog(&mut self) -> Option<EventData>;
     fn send_quantum(&self) -> usize;
+
+    fn get_next_release_time(&self) -> ReleaseDecision;
 }
 
 impl Recovery {
@@ -458,6 +462,76 @@ impl QlogMetrics {
         }
 
         None
+    }
+}
+
+/// When the pacer thinks is a good time to release the next packet
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseTime {
+    Immediate,
+    At(Instant),
+}
+
+/// When the next packet should be release and if it can be part of a burst
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReleaseDecision {
+    time: ReleaseTime,
+    allow_burst: bool,
+}
+
+impl ReleaseTime {
+    /// Add the specific delay to the current time
+    #[allow(dead_code)]
+    fn inc(&mut self, delay: Duration) {
+        match self {
+            ReleaseTime::Immediate => {},
+            ReleaseTime::At(time) => *time += delay,
+        }
+    }
+
+    /// Set the time to the later of two times
+    #[allow(dead_code)]
+    fn set_max(&mut self, other: Instant) {
+        match self {
+            ReleaseTime::Immediate => *self = ReleaseTime::At(other),
+            ReleaseTime::At(time) => *self = ReleaseTime::At(other.max(*time)),
+        }
+    }
+}
+
+impl ReleaseDecision {
+    pub(crate) const EQUAL_THRESHOLD: Duration = Duration::from_micros(35);
+
+    /// Get the [`Instant`] the next packet should be released. It will never be
+    /// in the past.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn time(&self, now: Instant) -> Option<Instant> {
+        match self.time {
+            ReleaseTime::Immediate => None,
+            ReleaseTime::At(other) => other.gt(&now).then_some(other),
+        }
+    }
+
+    /// Can this packet be appended to a previous burst
+    #[allow(dead_code)]
+    #[inline]
+    pub fn can_burst(&self) -> bool {
+        self.allow_burst
+    }
+
+    /// Check if the two packets can be released at the same time
+    #[allow(dead_code)]
+    #[inline]
+    pub fn time_eq(&self, other: &Self, now: Instant) -> bool {
+        let delta = match (self.time(now), other.time(now)) {
+            (None, None) => Duration::ZERO,
+            (Some(t), None) | (None, Some(t)) => t.duration_since(now),
+            (Some(t1), Some(t2)) if t1 < t2 => t2.duration_since(t1),
+            (Some(t1), Some(t2)) => t1.duration_since(t2),
+        };
+
+        delta <= Self::EQUAL_THRESHOLD
     }
 }
 

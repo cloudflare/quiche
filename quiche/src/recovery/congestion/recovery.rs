@@ -54,6 +54,8 @@ use super::pacer;
 use super::Congestion;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::LossDetectionTimer;
+use crate::recovery::ReleaseDecision;
+use crate::recovery::ReleaseTime;
 use crate::recovery::GRANULARITY;
 use crate::recovery::INITIAL_PACKET_THRESHOLD;
 use crate::recovery::INITIAL_TIME_THRESHOLD;
@@ -885,6 +887,11 @@ impl RecoveryOps for LegacyRecovery {
         self.detect_lost_packets(epoch, now, "")
     }
 
+    fn on_app_limited(&mut self) {
+        // Not implemented for legacy recovery, update_app_limited and
+        // delivery_rate_update_app_limited used instead.
+    }
+
     #[cfg(test)]
     fn app_limited(&self) -> bool {
         self.congestion.app_limited
@@ -920,6 +927,23 @@ impl RecoveryOps for LegacyRecovery {
 
     fn send_quantum(&self) -> usize {
         self.congestion.send_quantum()
+    }
+
+    // TODO tests
+    fn get_next_release_time(&self) -> ReleaseDecision {
+        let now = Instant::now();
+        let next_send_time = self.congestion.get_packet_send_time();
+        if next_send_time > now {
+            ReleaseDecision {
+                time: ReleaseTime::At(next_send_time),
+                allow_burst: false,
+            }
+        } else {
+            ReleaseDecision {
+                time: ReleaseTime::Immediate,
+                allow_burst: false,
+            }
+        }
     }
 
     fn lost_count(&self) -> usize {
