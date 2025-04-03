@@ -24,9 +24,11 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::cmp;
+
 use super::*;
 use crate::rand;
-use crate::recovery;
+use crate::recovery::MINIMUM_WINDOW_PACKETS;
 
 /// 1.2Mbps in bytes/sec
 const PACING_RATE_1_2MBPS: u64 = 1200 * 1000 / 8;
@@ -167,7 +169,7 @@ fn bbr_modulate_cwnd_for_recovery(r: &mut Congestion, bytes_in_flight: usize) {
         r.congestion_window = r
             .congestion_window
             .saturating_sub(lost_bytes)
-            .max(r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS);
+            .max(r.max_datagram_size * MINIMUM_WINDOW_PACKETS);
     }
 
     if r.bbr_state.packet_conservation {

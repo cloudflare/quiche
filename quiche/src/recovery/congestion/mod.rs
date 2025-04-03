@@ -24,13 +24,14 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::str::FromStr;
 use std::time::Instant;
 
-use super::rtt::RttStats;
-use super::Acked;
+use self::recovery::Acked;
 use super::RecoveryConfig;
 use super::Sent;
+use crate::recovery::rtt;
+use crate::recovery::rtt::RttStats;
+use crate::recovery::CongestionControlAlgorithm;
 
 pub const PACING_MULTIPLIER: f64 = 1.25;
 pub struct Congestion {
@@ -246,41 +247,6 @@ impl Congestion {
     }
 }
 
-/// Available congestion control algorithms.
-///
-/// This enum provides currently available list of congestion control
-/// algorithms.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(C)]
-pub enum CongestionControlAlgorithm {
-    /// Reno congestion control algorithm. `reno` in a string form.
-    Reno  = 0,
-    /// CUBIC congestion control algorithm (default). `cubic` in a string form.
-    CUBIC = 1,
-    /// BBR congestion control algorithm. `bbr` in a string form.
-    BBR   = 2,
-    /// BBRv2 congestion control algorithm. `bbr2` in a string form.
-    BBR2  = 3,
-}
-
-impl FromStr for CongestionControlAlgorithm {
-    type Err = crate::Error;
-
-    /// Converts a string to `CongestionControlAlgorithm`.
-    ///
-    /// If `name` is not valid, `Error::CongestionControl` is returned.
-    fn from_str(name: &str) -> std::result::Result<Self, Self::Err> {
-        match name {
-            "reno" => Ok(CongestionControlAlgorithm::Reno),
-            "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
-            "bbr" => Ok(CongestionControlAlgorithm::BBR),
-            "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
-
-            _ => Err(crate::Error::CongestionControl),
-        }
-    }
-}
-
 pub(crate) struct CongestionControlOps {
     pub on_init: fn(r: &mut Congestion),
 
@@ -337,6 +303,7 @@ mod delivery_rate;
 mod hystart;
 pub(crate) mod pacer;
 mod prr;
+pub(crate) mod recovery;
 mod reno;
 
 #[cfg(test)]
