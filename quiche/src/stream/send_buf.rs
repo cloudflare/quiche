@@ -28,12 +28,11 @@ use std::cmp;
 
 use std::collections::VecDeque;
 
+use crate::range_buf::RangeBuf;
 use crate::Error;
 use crate::Result;
 
 use crate::ranges;
-
-use super::RangeBuf;
 
 #[cfg(test)]
 const SEND_BUFFER_SIZE: usize = 5;
