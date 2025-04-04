@@ -70,7 +70,7 @@ pub trait BufSplit {
     /// buffer must containt the remaining bytes.
     fn split_at(&mut self, at: usize) -> Self;
 
-    /// Try to append a prefix to the buffer, return true if succeeded.
+    /// Try to prepend a prefix to the buffer, return true if succeeded.
     fn try_add_prefix(&mut self, _prefix: &[u8]) -> bool {
         false
     }
