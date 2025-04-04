@@ -305,23 +305,22 @@ where
         };
 
         #[cfg(feature = "gcongestion")]
-        let use_get_next_release_time = true;
+        let gcongestion_enabled = true;
 
         #[cfg(not(feature = "gcongestion"))]
-        let use_get_next_release_time =
-            qconn.use_get_next_release_time().unwrap_or(false);
+        let gcongestion_enabled = qconn.gcongestion_enabled().unwrap_or(false);
 
-        let next_release = if use_get_next_release_time {
-            let next_release = qconn
+        let initial_release_decision = if gcongestion_enabled {
+            let initial_release_decision = qconn
                 .get_next_release_time()
                 .filter(|_| self.cfg.pacing_offload);
 
-            if let Some(next_release) =
-                next_release.as_ref().and_then(|v| v.time(now))
+            if let Some(future_release_time) =
+                initial_release_decision.as_ref().and_then(|v| v.time(now))
             {
                 let max_into_fut = qconn.max_release_into_future();
 
-                if next_release.duration_since(now) >= max_into_fut {
+                if future_release_time.duration_since(now) >= max_into_fut {
                     self.write_state.next_release_time =
                         Some(now + max_into_fut.mul_f32(0.8));
                     self.write_state.has_pending_data = false;
@@ -329,7 +328,7 @@ where
                 }
             }
 
-            next_release
+            initial_release_decision
         } else {
             None
         };
@@ -363,7 +362,8 @@ where
             }
 
             #[cfg(not(feature = "gcongestion"))]
-            let max_send_size = if !use_get_next_release_time {
+            let max_send_size = if !gcongestion_enabled {
+                // Only call qconn.send_quantum when !gcongestion_enabled.
                 tune_max_send_size(
                     segment_size,
                     qconn.send_quantum(),
@@ -399,23 +399,27 @@ where
                 _ => (),
             }
 
-            if use_get_next_release_time {
+            if gcongestion_enabled {
                 // If the release time of next packet is different, or it can't be
                 // part of a burst, start the next batch
-                if let Some(next_release) = next_release {
+                if let Some(initial_release_decision) = initial_release_decision {
                     match qconn.get_next_release_time() {
                         Some(release)
                             if release.can_burst() ||
-                                release.time_eq(&next_release, now) => {},
+                                release.time_eq(
+                                    &initial_release_decision,
+                                    now,
+                                ) => {},
                         _ => break outcome,
                     }
                 }
             }
         };
 
-        let tx_time = if use_get_next_release_time {
-            next_release
+        let tx_time = if gcongestion_enabled {
+            initial_release_decision
                 .filter(|_| self.cfg.pacing_offload)
+                // Return the time from the release decision if release_decision.time > now, else None.
                 .and_then(|v| v.time(now))
         } else {
             send_info.filter(|_| self.cfg.pacing_offload).map(|v| v.at)
@@ -426,7 +430,7 @@ where
         self.write_state.segment_size =
             segment_size.unwrap_or(self.write_state.bytes_written);
 
-        if !use_get_next_release_time {
+        if !gcongestion_enabled {
             if let Some(time) = tx_time {
                 const DEFAULT_MAX_INTO_FUTURE: Duration =
                     Duration::from_millis(1);
