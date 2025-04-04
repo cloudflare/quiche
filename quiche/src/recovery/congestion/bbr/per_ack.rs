@@ -258,11 +258,26 @@ fn bbr_check_drain(r: &mut Congestion, bytes_in_flight: usize, now: Instant) {
     }
 
     if r.bbr_state.state == BBRStateMachine::Drain &&
-        bytes_in_flight <= bbr_inflight(r, 1.0)
+        bbr_bytes_in_net(r, bytes_in_flight, now) <= bbr_inflight(r, 1.0)
     {
         // we estimate queue is drained
         bbr_enter_probe_bw(r, now);
     }
+}
+
+fn bbr_bytes_in_net(r: &Congestion, in_flight: usize, now: Instant) -> usize {
+    let edt = r.pacer.next_time().max(now);
+    let interval = edt.saturating_duration_since(now);
+    let interval_delivered = interval.as_secs_f64() * r.bbr_state.btlbw as f64;
+
+    let mut in_flight_at_edt = in_flight;
+
+    // pacing_gain > 1.0
+    if (r.bbr_state.pacing_gain - 1.0).abs() > f64::EPSILON {
+        in_flight_at_edt += r.send_quantum;
+    }
+
+    in_flight_at_edt.saturating_sub(interval_delivered as usize)
 }
 
 // 4.3.4.3.  Gain Cycling Algorithm
@@ -305,9 +320,11 @@ fn bbr_is_next_cycle_phase(r: &mut Congestion, now: Instant) -> bool {
     let bbr = &mut r.bbr_state;
     let lost_bytes = bbr.newly_lost_bytes;
     let pacing_gain = bbr.pacing_gain;
-    let prior_in_flight = bbr.prior_bytes_in_flight;
 
     let is_full_length = (now - bbr.cycle_stamp) > bbr.rtprop;
+
+    let prior_in_flight = bbr.prior_bytes_in_flight;
+    let prior_in_flight = bbr_bytes_in_net(r, prior_in_flight, now);
 
     // pacing_gain == 1.0
     if (pacing_gain - 1.0).abs() < f64::EPSILON {
