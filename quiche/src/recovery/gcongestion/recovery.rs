@@ -950,7 +950,7 @@ impl RecoveryOps for GRecovery {
         self.pacer.get_next_release_time()
     }
 
-    fn use_get_next_release_time(&self) -> bool {
+    fn gcongestion_enabled(&self) -> bool {
         true
     }
 

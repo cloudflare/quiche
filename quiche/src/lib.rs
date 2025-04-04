@@ -4887,14 +4887,8 @@ impl Connection {
 
     /// Get the desired send time for the next packet
     #[inline]
-    pub fn use_get_next_release_time(&self) -> Option<bool> {
-        Some(
-            self.paths
-                .get_active()
-                .ok()?
-                .recovery
-                .use_get_next_release_time(),
-        )
+    pub fn gcongestion_enabled(&self) -> Option<bool> {
+        Some(self.paths.get_active().ok()?.recovery.gcongestion_enabled())
     }
 
     /// The maximum pacing into the future, equals 1/8 of the smoothed rtt, but

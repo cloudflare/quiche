@@ -946,7 +946,7 @@ impl RecoveryOps for LegacyRecovery {
         }
     }
 
-    fn use_get_next_release_time(&self) -> bool {
+    fn gcongestion_enabled(&self) -> bool {
         false
     }
 
