@@ -39,6 +39,7 @@ fn main() {
             stream_id: STREAM_ID,
             fin_stream: false,
             headers,
+            literal_headers: false,
             frame: Frame::Headers { header_block },
         },
         Action::SendFrame {
