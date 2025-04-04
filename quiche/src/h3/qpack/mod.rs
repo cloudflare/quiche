@@ -26,10 +26,13 @@
 
 //! HTTP/3 header compression (QPACK).
 
-const INDEXED: u8 = 0b1000_0000;
-const INDEXED_WITH_POST_BASE: u8 = 0b0001_0000;
-const LITERAL: u8 = 0b0010_0000;
-const LITERAL_WITH_NAME_REF: u8 = 0b0100_0000;
+pub use encoder::encode_int;
+pub use encoder::encode_str;
+
+pub const INDEXED: u8 = 0b1000_0000;
+pub const INDEXED_WITH_POST_BASE: u8 = 0b0001_0000;
+pub const LITERAL: u8 = 0b0010_0000;
+pub const LITERAL_WITH_NAME_REF: u8 = 0b0100_0000;
 
 /// A specialized [`Result`] type for quiche QPACK operations.
 ///

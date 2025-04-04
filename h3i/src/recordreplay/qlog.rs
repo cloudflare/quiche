@@ -50,6 +50,7 @@ use smallvec::smallvec;
 use crate::actions::h3::Action;
 use crate::actions::h3::WaitType;
 use crate::encode_header_block;
+use crate::encode_header_block_literal;
 use crate::fake_packet_sent;
 use crate::HTTP3_CONTROL_STREAM_TYPE_ID;
 use crate::HTTP3_PUSH_STREAM_TYPE_ID;
@@ -108,6 +109,7 @@ impl From<&Action> for QlogEvents {
                 stream_id,
                 fin_stream,
                 headers,
+                literal_headers,
                 ..
             } => {
                 let qlog_headers = headers
@@ -132,6 +134,10 @@ impl From<&Action> for QlogEvents {
 
                 if *fin_stream {
                     ex.insert("fin_stream".to_string(), json!(true));
+                }
+
+                if *literal_headers {
+                    ex.insert("literal_headers".to_string(), json!(true));
                 }
 
                 vec![QlogEvent::Event {
@@ -504,11 +510,24 @@ impl From<H3FrameCreatedEx> for Action {
                     .iter()
                     .map(|h| map_header(h, host_override))
                     .collect();
-                let header_block = encode_header_block(&hdrs).unwrap();
+
+                let literal_headers = value
+                    .ex_data
+                    .get("literal_headers")
+                    .unwrap_or(&serde_json::Value::Null)
+                    .as_bool()
+                    .unwrap_or_default();
+
+                let header_block = if literal_headers {
+                    encode_header_block_literal(&hdrs).unwrap()
+                } else {
+                    encode_header_block(&hdrs).unwrap()
+                };
 
                 Action::SendHeadersFrame {
                     stream_id,
                     fin_stream,
+                    literal_headers,
                     headers: hdrs,
                     frame: Frame::Headers { header_block },
                 }
@@ -583,6 +602,7 @@ fn parse_ex_data(ex_data: &ExData) -> bool {
 mod tests {
     use crate::actions::h3::StreamEvent;
     use crate::actions::h3::StreamEventType;
+    use crate::encode_header_block_literal;
     use std::time::Duration;
 
     use super::*;
@@ -682,6 +702,7 @@ mod tests {
         let expected = Action::SendHeadersFrame {
             stream_id: 0,
             fin_stream: true,
+            literal_headers: false,
             headers,
             frame,
         };
@@ -707,6 +728,34 @@ mod tests {
         let expected = Action::SendHeadersFrame {
             stream_id: 0,
             fin_stream: true,
+            literal_headers: false,
+            headers,
+            frame,
+        };
+
+        assert_eq!(actions.0[0], expected);
+    }
+
+    #[test]
+    fn deser_http_headers_literal_to_action() {
+        let serialized = r#"{"time":0.074725,"name":"http:frame_created","data":{"stream_id":0,"frame":{"frame_type":"headers","headers":[{"name":":method","value":"GET"},{"name":":authority","value":"bla.com"},{"name":":path","value":"/"},{"name":":scheme","value":"https"},{"name":"Foo","value":"bar"}]}},"fin_stream":true,"literal_headers":true}"#;
+        let deserialized = serde_json::from_str::<Event>(serialized).unwrap();
+        let actions = actions_from_qlog(deserialized, None);
+        assert!(actions.0.len() == 1);
+
+        let headers = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":authority", b"bla.com"),
+            Header::new(b":path", b"/"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b"Foo", b"bar"),
+        ];
+        let header_block = encode_header_block_literal(&headers).unwrap();
+        let frame = Frame::Headers { header_block };
+        let expected = Action::SendHeadersFrame {
+            stream_id: 0,
+            fin_stream: true,
+            literal_headers: true,
             headers,
             frame,
         };
