@@ -4784,6 +4784,12 @@ impl Connection {
             aead,
         )?;
 
+        let sent_pkt_has_data = if path.recovery.gcongestion_enabled() {
+            has_data || dgram_emitted
+        } else {
+            has_data
+        };
+
         let sent_pkt = recovery::Sent {
             pkt_num: pn,
             frames,
@@ -4799,7 +4805,7 @@ impl Connection {
             is_app_limited: false,
             tx_in_flight: 0,
             lost: 0,
-            has_data: has_data | dgram_emitted,
+            has_data: sent_pkt_has_data,
             pmtud: pmtud_probe,
         };
 
