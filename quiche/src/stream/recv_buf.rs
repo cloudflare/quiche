@@ -35,7 +35,8 @@ use crate::Result;
 
 use crate::flowcontrol;
 
-use super::RangeBuf;
+use crate::range_buf::RangeBuf;
+
 use super::DEFAULT_STREAM_WINDOW;
 
 /// Receive-side stream buffer.

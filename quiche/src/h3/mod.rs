@@ -3475,7 +3475,7 @@ mod tests {
 
         let frames = [crate::frame::Frame::Stream {
             stream_id: 6,
-            data: crate::stream::RangeBuf::from(b"aaaaa", 0, true),
+            data: crate::range_buf::RangeBuf::from(b"aaaaa", 0, true),
         }];
 
         assert_eq!(
