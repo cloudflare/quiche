@@ -933,7 +933,9 @@ pub struct Stats {
     pub qpack_decoder_stream_recv_bytes: u64,
 }
 
-fn close_conn_critical_stream(conn: &mut super::Connection) -> Result<()> {
+fn close_conn_critical_stream<F: BufFactory>(
+    conn: &mut super::Connection<F>,
+) -> Result<()> {
     conn.close(
         true,
         Error::ClosedCriticalStream.to_wire(),
@@ -943,8 +945,8 @@ fn close_conn_critical_stream(conn: &mut super::Connection) -> Result<()> {
     Err(Error::ClosedCriticalStream)
 }
 
-fn close_conn_if_critical_stream_finished(
-    conn: &mut super::Connection, stream_id: u64,
+fn close_conn_if_critical_stream_finished<F: BufFactory>(
+    conn: &mut super::Connection<F>, stream_id: u64,
 ) -> Result<()> {
     if conn.stream_finished(stream_id) {
         close_conn_critical_stream(conn)?;
@@ -1296,9 +1298,9 @@ impl Connection {
     /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
     /// [Section 4.1 of RFC 9114]:
     ///     https://www.rfc-editor.org/rfc/rfc9114.html#section-4.1.
-    pub fn send_additional_headers<T: NameValue>(
-        &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
-        is_trailer_section: bool, fin: bool,
+    pub fn send_additional_headers<T: NameValue, F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        headers: &[T], is_trailer_section: bool, fin: bool,
     ) -> Result<()> {
         // Clients can only send trailer headers.
         if !self.is_server && !is_trailer_section {
