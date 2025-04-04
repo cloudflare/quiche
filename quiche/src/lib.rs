@@ -15916,7 +15916,7 @@ mod tests {
             )
             .unwrap();
         server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
-            Connection::set_initial_congestion_window_packets_in_handshake(
+            <Connection>::set_initial_congestion_window_packets_in_handshake(
                 hello.ssl_mut(),
                 CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS,
             )
