@@ -108,6 +108,7 @@ pub fn connect(
                     e
                 ))
             })?;
+        config.verify_peer(true);
     } else {
         config.verify_peer(!args.no_verify);
     }
