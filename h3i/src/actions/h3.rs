@@ -42,6 +42,7 @@ use serde::Serialize;
 use serde_with::serde_as;
 
 use crate::encode_header_block;
+use crate::encode_header_block_literal;
 
 /// An action which the HTTP/3 client should take.
 ///
@@ -196,6 +197,23 @@ pub fn send_headers_frame(
     stream_id: u64, fin_stream: bool, headers: Vec<Header>,
 ) -> Action {
     let header_block = encode_header_block(&headers).unwrap();
+
+    Action::SendHeadersFrame {
+        stream_id,
+        fin_stream,
+        headers,
+        frame: Frame::Headers { header_block },
+    }
+}
+
+/// Convenience to convert between header-related data and a
+/// [Action::SendHeadersFrame]. Unlike [`send_headers_frame`],
+/// this version encodes the headers literally as they are provided,
+/// not converting the header names to lower-case.
+pub fn send_headers_frame_literal(
+    stream_id: u64, fin_stream: bool, headers: Vec<Header>,
+) -> Action {
+    let header_block = encode_header_block_literal(&headers).unwrap();
 
     Action::SendHeadersFrame {
         stream_id,
