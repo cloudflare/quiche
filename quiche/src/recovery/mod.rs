@@ -249,6 +249,10 @@ impl Recovery {
     pub fn new(config: &crate::Config) -> Self {
         Self::new_with_config(&RecoveryConfig::from_config(config))
     }
+
+    pub fn get_sent_packets(&self, epoch: packet::Epoch) -> impl Iterator<Item = &Sent> {
+      self.epochs[epoch].sent_packets.iter()
+    }
 }
 
 /// Available congestion control algorithms.
