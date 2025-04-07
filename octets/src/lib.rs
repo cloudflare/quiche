@@ -52,6 +52,14 @@ impl std::error::Error for BufferTooShortError {
     }
 }
 
+/// Helper macro that asserts at compile time. It requires that
+/// `cond` is a const expression.
+macro_rules! static_assert {
+    ($cond:expr) => {{
+        const _: () = assert!($cond);
+    }};
+}
+
 macro_rules! peek_u {
     ($b:expr, $ty:ty, $len:expr) => {{
         let len = $len;
@@ -61,6 +69,7 @@ macro_rules! peek_u {
             return Err(BufferTooShortError);
         }
 
+        static_assert!($len <= mem::size_of::<$ty>());
         let mut out: $ty = 0;
         unsafe {
             let dst = &mut out as *mut $ty as *mut u8;
@@ -95,6 +104,7 @@ macro_rules! put_u {
 
         let dst = &mut $b.buf[$b.off..($b.off + len)];
 
+        static_assert!($len <= mem::size_of::<$ty>());
         unsafe {
             let src = &<$ty>::to_be(v) as *const $ty as *const u8;
             let off = (mem::size_of::<$ty>() - len) as isize;
@@ -688,6 +698,25 @@ pub const fn varint_parse_len(first: u8) -> usize {
         2 => 4,
         3 => 8,
         _ => unreachable!(),
+    }
+}
+
+/// The functions in this mod test the compile time assertions in the
+/// `put_u` and `peek_u` macros. If you compile this crate with
+/// `--cfg test_invalid_len_compilation_fail`, e.g., by using
+/// `cargo rustc  -- --cfg test_invalid_len_compilation_fail`
+/// You will get two compiler errors
+#[cfg(test_invalid_len_compilation_fail)]
+pub mod fails_to_compile {
+    use super::*;
+    pub fn peek_invalid_fails_to_compile(b: &mut Octets) -> Result<u8> {
+        peek_u!(b, u8, 2)
+    }
+
+    pub fn put_invalid_fails_to_compile<'a>(
+        b: &'a mut OctetsMut, v: u8,
+    ) -> Result<&'a mut [u8]> {
+        put_u!(b, u8, v, 2)
     }
 }
 
