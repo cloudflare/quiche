@@ -170,6 +170,33 @@ pub struct QuicSettings {
     /// Defaults to 1024 connections.
     #[serde(default = "QuicSettings::default_listen_backlog")]
     pub listen_backlog: usize,
+
+    /// Whether or not to verify the peer's certificate.
+    ///
+    /// Defaults to `false`, meaning no peer verification is performed. Note
+    /// that clients should usually set this value to `true` - see
+    /// [`verify_peer()`] for more.
+    ///
+    /// [`verify_peer()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.verify_peer
+    pub verify_peer: bool,
+
+    /// The maximum size of the receiver connection flow control window.
+    ///
+    /// Defaults to 24MB.
+    #[serde(default = "QuicSettings::default_max_connection_window")]
+    pub max_connection_window: u64,
+
+    /// The maximum size of the receiveer stream flow control window.
+    ///
+    /// Defaults to 16MB.
+    #[serde(default = "QuicSettings::default_max_stream_window")]
+    pub max_stream_window: u64,
+
+    /// Configures whether to send GREASE values.
+    ///
+    /// Defaults to true.
+    #[serde(default = "QuicSettings::default_grease")]
+    pub grease: bool,
 }
 
 impl QuicSettings {
@@ -243,6 +270,21 @@ impl QuicSettings {
         // This means this backlog size limits the queueing latency to
         // ~15s.
         1024
+    }
+
+    #[inline]
+    fn default_max_connection_window() -> u64 {
+        24 * 1024 * 1024
+    }
+
+    #[inline]
+    fn default_max_stream_window() -> u64 {
+        16 * 1024 * 1024
+    }
+
+    #[inline]
+    fn default_grease() -> bool {
+        true
     }
 }
 
