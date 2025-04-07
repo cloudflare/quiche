@@ -960,14 +960,17 @@ impl Config {
 
     /// Configures whether to verify the peer's certificate.
     ///
-    /// The default value is `true` for client connections, and `false` for
-    /// server ones.
+    /// This should usually be `true` for client-side connections and `false`
+    /// for server-side ones.
     ///
-    /// Note that on the server-side, enabling verification of the peer will
-    /// trigger a certificate request and make authentication errors fatal, but
-    /// will still allow anonymous clients (i.e. clients that don't present a
-    /// certificate at all). Servers can check whether a client presented a
-    /// certificate by calling [`peer_cert()`] if they need to.
+    /// Note that by default, no verification is performed.
+    ///
+    /// Also note that on the server-side, enabling verification of the peer
+    /// will trigger a certificate request and make authentication errors
+    /// fatal, but will still allow anonymous clients (i.e. clients that
+    /// don't present a certificate at all). Servers can check whether a
+    /// client presented a certificate by calling [`peer_cert()`] if they
+    /// need to.
     ///
     /// [`peer_cert()`]: struct.Connection.html#method.peer_cert
     pub fn verify_peer(&mut self, verify: bool) {
