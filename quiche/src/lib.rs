@@ -3665,7 +3665,7 @@ impl Connection {
             from: send_path.local_addr(),
             to: send_path.peer_addr(),
 
-            at: send_path.recovery.get_packet_send_time(),
+            at: send_path.recovery.get_packet_send_time(now),
         };
 
         Ok((done, info))

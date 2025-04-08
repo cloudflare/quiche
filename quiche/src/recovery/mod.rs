@@ -152,7 +152,7 @@ pub trait RecoveryOps {
         &mut self, pkt: Sent, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     );
-    fn get_packet_send_time(&self) -> Instant;
+    fn get_packet_send_time(&self, now: Instant) -> Instant;
 
     fn on_ack_received(
         &mut self, ranges: &RangeSet, ack_delay: u64, epoch: packet::Epoch,
@@ -1260,7 +1260,7 @@ mod tests {
 
         // First packet will be sent out immediately.
         assert_eq!(r.pacing_rate(), 0);
-        assert_eq!(r.get_packet_send_time(), now);
+        assert_eq!(r.get_packet_send_time(now), now);
 
         // Wait 50ms for ACK.
         now += Duration::from_millis(50);
@@ -1319,7 +1319,7 @@ mod tests {
         assert_eq!(r.bytes_in_flight(), 6000);
 
         // Pacing is not done during initial phase of connection.
-        assert_eq!(r.get_packet_send_time(), now);
+        assert_eq!(r.get_packet_send_time(now), now);
 
         // Send the third packet out.
         let p = Sent {
@@ -1389,7 +1389,7 @@ mod tests {
         assert_eq!(r.pacing_rate(), pacing_rate);
 
         assert_eq!(
-            r.get_packet_send_time(),
+            r.get_packet_send_time(now),
             now + Duration::from_secs_f64(12000.0 / pacing_rate as f64)
         );
     }
