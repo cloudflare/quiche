@@ -377,9 +377,10 @@ pub struct GRecovery {
 }
 
 impl GRecovery {
-    pub fn new(recovery_config: &RecoveryConfig) -> Option<Self> {
+    pub fn new(recovery_config: &RecoveryConfig, now: Instant) -> Option<Self> {
         let cc = match recovery_config.cc_algorithm {
             CongestionControlAlgorithm::Bbr2Gcongestion => Congestion::bbrv2(
+                now,
                 INITIAL_WINDOW_PACKETS,
                 MAX_WINDOW_PACKETS,
                 recovery_config.max_send_udp_payload_size,

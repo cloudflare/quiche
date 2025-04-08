@@ -187,11 +187,12 @@ pub(super) struct BBRv2NetworkModel {
 }
 
 impl BBRv2NetworkModel {
-    pub(super) fn new(params: &Params) -> Self {
+    pub(super) fn new(now: Instant, params: &Params) -> Self {
         BBRv2NetworkModel {
             min_bytes_in_flight_in_round: usize::MAX,
             inflight_hi_limited_in_round: false,
             bandwidth_sampler: BandwidthSampler::new(
+                now,
                 params.initial_max_ack_height_filter_window,
                 params.overestimate_avoidance,
             ),
@@ -202,7 +203,7 @@ impl BBRv2NetworkModel {
             },
             min_rtt_filter: MinRttFilter {
                 min_rtt: INITIAL_RTT,
-                min_rtt_timestamp: Instant::now(),
+                min_rtt_timestamp: now,
             },
             max_bandwidth_filter: MaxBandwidthFilter {
                 max_bandwidth: [Bandwidth::zero(), Bandwidth::zero()],

@@ -461,7 +461,7 @@ impl RecentAckPoints {
 
 impl BandwidthSampler {
     pub(crate) fn new(
-        max_height_tracker_window_length: usize, overestimate_avoidance: bool,
+        now: Instant, max_height_tracker_window_length: usize, overestimate_avoidance: bool,
     ) -> Self {
         BandwidthSampler {
             total_bytes_sent: 0,
@@ -469,8 +469,8 @@ impl BandwidthSampler {
             total_bytes_lost: 0,
             total_bytes_neutered: 0,
             total_bytes_sent_at_last_acked_packet: 0,
-            last_acked_packet_sent_time: Instant::now(),
-            last_acked_packet_ack_time: Instant::now(),
+            last_acked_packet_sent_time: now,
+            last_acked_packet_ack_time: now,
             is_app_limited: true,
             connection_state_map: ConnectionStateMap::default(),
             max_ack_height_tracker: MaxAckHeightTracker::new(
@@ -856,12 +856,13 @@ mod bandwidth_sampler_tests {
 
     impl TestSender {
         fn new(overestimate_avoidance: bool) -> Self {
-            let sampler = BandwidthSampler::new(0, overestimate_avoidance);
+            let now = Instant::now();
+            let sampler = BandwidthSampler::new(now, 0, overestimate_avoidance);
             TestSender {
                 sampler_app_limited_at_start: sampler.is_app_limited(),
                 sampler,
                 bytes_in_flight: 0,
-                clock: Instant::now(),
+                clock: now,
                 max_bandwidth: Bandwidth::zero(),
                 est_bandwidth_upper_bound: Bandwidth::infinite(),
                 round_trip_count: 0,

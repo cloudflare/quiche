@@ -237,11 +237,13 @@ pub trait RecoveryOps {
 
 impl Recovery {
     pub fn new_with_config(recovery_config: &RecoveryConfig) -> Self {
-        let grecovery = GRecovery::new(recovery_config);
+        let now = Instant::now();
+
+        let grecovery = GRecovery::new(recovery_config, now);
         if let Some(grecovery) = grecovery {
             Recovery::from(grecovery)
         } else {
-            Recovery::from(LegacyRecovery::new_with_config(recovery_config))
+            Recovery::from(LegacyRecovery::new_with_config(recovery_config, now))
         }
     }
 

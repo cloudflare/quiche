@@ -334,9 +334,7 @@ pub struct LegacyRecovery {
 }
 
 impl LegacyRecovery {
-    pub fn new_with_config(recovery_config: &RecoveryConfig) -> Self {
-        let now = Instant::now();
-
+    pub fn new_with_config(recovery_config: &RecoveryConfig, now: Instant) -> Self {
         Self {
             epochs: Default::default(),
 
@@ -373,7 +371,7 @@ impl LegacyRecovery {
 
     #[cfg(test)]
     pub fn new(config: &crate::Config) -> Self {
-        Self::new_with_config(&RecoveryConfig::from_config(config))
+        Self::new_with_config(&RecoveryConfig::from_config(config), Instant::now())
     }
 
     fn loss_time_and_space(&self) -> (Option<Instant>, packet::Epoch) {

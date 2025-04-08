@@ -60,10 +60,11 @@ pub(crate) enum Congestion {
 
 impl Congestion {
     pub(super) fn bbrv2(
-        initial_tcp_congestion_window: usize, max_congestion_window: usize,
+        now: Instant, initial_tcp_congestion_window: usize, max_congestion_window: usize,
         max_segment_size: usize,
     ) -> Self {
         Congestion::BBRv2(bbr2::BBRv2::new(
+            now,
             initial_tcp_congestion_window,
             max_congestion_window,
             max_segment_size,

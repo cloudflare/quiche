@@ -340,14 +340,14 @@ impl BBRv2CongestionEvent {
 
 impl BBRv2 {
     pub fn new(
-        initial_congestion_window: usize, max_congestion_window: usize,
+        now: Instant, initial_congestion_window: usize, max_congestion_window: usize,
         max_segment_size: usize, smoothed_rtt: Duration,
     ) -> Self {
         let cwnd = initial_congestion_window * max_segment_size;
         let params = DEFAULT_PARAMS;
 
         BBRv2 {
-            mode: Mode::startup(BBRv2NetworkModel::new(&params)),
+            mode: Mode::startup(BBRv2NetworkModel::new(now, &params)),
             cwnd,
             pacing_rate: Bandwidth::from_bytes_and_time_delta(cwnd, smoothed_rtt) *
                 2.885,
