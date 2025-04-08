@@ -50,7 +50,6 @@ use crate::ranges;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
-use super::pacer;
 use super::Congestion;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::LossDetectionTimer;
@@ -829,16 +828,7 @@ impl RecoveryOps for LegacyRecovery {
                 self.congestion.initial_congestion_window_packets;
         }
 
-        // TODO
-        let now = Instant::now();
-        self.congestion.pacer = pacer::Pacer::new(
-            now,
-            self.congestion.pacer.enabled(),
-            self.cwnd(),
-            0,
-            new_max_datagram_size,
-            self.congestion.pacer.max_pacing_rate(),
-        );
+        self.congestion.pacer.update_max_datagram_size(self.cwnd(), new_max_datagram_size);
 
         self.max_datagram_size = new_max_datagram_size;
     }

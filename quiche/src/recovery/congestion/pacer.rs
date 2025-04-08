@@ -121,9 +121,16 @@ impl Pacer {
         self.rate
     }
 
-    /// Returns max pacing rate.
-    pub fn max_pacing_rate(&self) -> Option<u64> {
-        self.max_pacing_rate
+    /// Updates the max_datagram_size and associated capacity.
+    pub fn update_max_datagram_size(&mut self, capacity: usize, max_datagram_size: usize) {
+        let capacity: usize = capacity / max_datagram_size * max_datagram_size;
+
+        if self.capacity != capacity {
+            self.reset(self.last_update);
+        }
+
+        self.capacity = capacity;
+        self.max_datagram_size = max_datagram_size;
     }
 
     /// Updates the bucket capacity or pacing_rate.
